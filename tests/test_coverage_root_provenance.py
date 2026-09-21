@@ -205,6 +205,60 @@ def test_root_alias_owner_and_bare_roles_reach_both_consumers(tmp):
                 prefix + f'os.chdir({expression})\nsubprocess.run(c)\n') == []
 
 
+# Other-scope bindings and Path names unread by owners leave module ROOT alone.
+_PERMITTED_BINDINGS = (
+    ('owner', 'ROOT', 'local_store', 'def unused():\n    ROOT = other\n'),
+    ('constructor', 'ROOT', 'local_store',
+     'def unused():\n    ROOT = other\n'),
+) + tuple(('owner', 'Path', name, binding) for name, binding in (
+    ('parameter', 'def unused(Path):\n    pass\n'),
+    ('vararg', 'def unused(*Path):\n    pass\n'),
+    ('kwarg', 'def unused(**Path):\n    pass\n'),
+    ('local_store', 'def unused():\n    Path = other\n'),
+    ('comprehension', '[Path for Path in items]\n'),
+    ('module_store', 'Path = other\n'),
+    ('module_annotation', 'Path: object\n'),
+    ('global_store', 'def unused():\n    global Path\n    Path = other\n'),
+))
+_DERIVATIONS = {
+    'owner': 'import _util\nROOT = _util.ROOT\n',
+    'constructor': 'from pathlib import Path\n' + _DERIVATION,
+}
+
+
+def _permitted_transitions():
+    for derivation, name, form, binding in _PERMITTED_BINDINGS:
+        prefix = 'import os\nimport subprocess\n'
+        accepted = prefix + _DERIVATIONS[derivation] + binding
+        refused = (prefix + _DERIVATIONS[
+            derivation if name == 'ROOT' else 'constructor']
+            + f'{name} = other\n')
+        for expression in ('ROOT', 'str(ROOT)'):
+            for consumer in ('cwd', 'chdir'):
+                launch = (f'subprocess.run(c, cwd={expression})\n'
+                          if consumer == 'cwd' else
+                          f'os.chdir({expression})\nsubprocess.run(c)\n')
+                key = f'{derivation}/{name}/{form}/{expression}/{consumer}'
+                yield key, accepted + launch, refused + launch
+
+
+def _assert_permitted_transitions(name, consumer):
+    for key, accepted, refused in _permitted_transitions():
+        if key.split('/')[1] != name or not key.endswith('/' + consumer):
+            continue
+        assert _synthetic_violations(accepted) == [], key
+        violations = _synthetic_violations(refused)
+        assert len(violations) == 1, (key, violations)
+        assert 'declares no env=' in violations[0], (key, violations)
+
+
+def test_permitted_root_transitions_keep_refusing_twins(tmp):
+    del tmp
+    for name in ('ROOT', 'Path'):
+        for consumer in ('cwd', 'chdir'):
+            _assert_permitted_transitions(name, consumer)
+
+
 _INVOKE = 'import test_coverage_root_provenance as root_suite; '
 _ROUTING = (
     "    return _routed_bindings(shadows, destinations)\n",
@@ -411,6 +465,26 @@ _ROOT_PROVENANCE_MUTATIONS += (
      'import test_coverage_scope_bindings as scope; '
      'scope.test_chdir_keeps_aggregate_binding_refusals(None)'),
 )
+
+
+_ROOT_PROVENANCE_MUTATIONS += tuple(
+    (f'permitted {name} transitions through {consumer}', 'scopes',
+     (("                if target in self.root_scope_nodes}\n",
+       "                }\n") if name == 'ROOT' else
+      ("            and '_util' not in names\n",
+       "            and not {'Path', 'Path()', '_util'} & names\n"),),
+     _INVOKE + f'root_suite._assert_permitted_transitions('
+     f'{name!r}, {consumer!r})')
+    for name in ('ROOT', 'Path') for consumer in ('cwd', 'chdir'))
+_ROOT_PROVENANCE_MUTATIONS += tuple(
+    (f'permitted transitions retain refusing twins through {consumer}',
+     'scopes', (("    if any(isinstance(part, ast.Name) "
+                 "and part.id in shadowed_names\n"
+                 "           for part in ast.walk(node)):\n"
+                 "        return False\n", ''),),
+     _INVOKE + f'root_suite._assert_permitted_transitions('
+     f"'ROOT', {consumer!r})")
+    for consumer in ('cwd', 'chdir'))
 
 
 if __name__ == '__main__':
