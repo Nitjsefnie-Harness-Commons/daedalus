@@ -51,7 +51,7 @@ def test_upload_list_screenshot_delete(tmp):
         assert names == {'note.txt', stored.name}, names
         entry = next(e for e in body if e['filename'] == 'note.txt')
         assert entry['id'] == 'up1' and entry['size'] == len(text)
-        assert entry['path'] == f'{TOK}/up1/note.txt'
+        assert entry['path'] == 'up1/note.txt'
         assert isinstance(entry['mtime'], int)
 
         # Listing filtered by id.
