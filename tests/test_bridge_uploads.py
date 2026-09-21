@@ -437,10 +437,15 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
         for name, payload in (('capture-a.png', PNG + b'-A'),
                               ('capture-b.png', PNG + b'-B')):
             named = urllib.parse.urlencode(
-                {'token': TOK, 'path': f'{TOK}/_ss/{name}'})
+                {'token': TOK, 'path': f'_ss/{name}'})
             status, served = _util.get(f'{base}/screenshot?{named}')
             assert status == 200 and served == payload, (
                 name, status, served[:32])
+        # The token-led form a stored result can still carry keeps working.
+        legacy = urllib.parse.urlencode(
+            {'token': TOK, 'path': f'{TOK}/_ss/capture-a.png'})
+        status, served = _util.get(f'{base}/screenshot?{legacy}')
+        assert status == 200 and served == PNG + b'-A', (status, served[:32])
         # The token-led form a stored result can still carry keeps working.
         legacy = urllib.parse.urlencode(
             {'token': TOK, 'path': f'{TOK}/_ss/capture-a.png'})
@@ -629,6 +634,37 @@ def test_an_upload_path_serves_that_file_to_a_header_credential(tmp):
         # Without a path the same route still lists.
         status, body = _util.get_json(base + f'/upload?token={TOK}&id=dl')
         assert status == 200 and len(body) == 3, (status, body)
+
+
+def test_the_credential_stays_inside_the_bridge(tmp):
+    """The filing scenario, end to end against the real handler.
+
+    POST /upload answers and logs the token-free relative path, and a
+    result body is stored without the token that authenticated it — the
+    slot file and the delivery copy alike. Before the fix the bridge's
+    stdout capture and every stored result were copies of the credential.
+    """
+    served = []
+    with _util.bridge(tmp, env=BRIDGE_ENV, output=served) as (base, docroot):
+        status, body = _util.post_json(base + '/upload', {
+            'token': TOK, 'id': 'shot',
+            'data': base64.b64encode(PNG).decode()})
+        assert status == 200, (status, body)
+        assert body['path'].startswith('shot/'), body
+        result = {'token': TOK, 'tabId': 't1', 'id': 'x', 'result': '1',
+                  'error': None, 'ts': 1, '_did': 'cred-e2e-1'}
+        status, body = _util.post_json(base + '/result', result)
+        assert status == 200 and body == {'ok': True}, (status, body)
+
+        res_dir = Path(docroot) / 'results'
+        stored = json.loads(
+            (res_dir / f'{TOK}_t1.json').read_text(encoding='utf-8'))
+        delivery = json.loads(
+            (res_dir / 'deliveries' / f'{TOK}_t1' / 'cred-e2e-1.json')
+            .read_text(encoding='utf-8'))
+        assert 'token' not in stored, stored
+        assert 'token' not in delivery, delivery
+        assert not [line for line in served if TOK in line], served
 
 
 def main():
