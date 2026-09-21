@@ -168,12 +168,12 @@ def _is_relative_literal(value):
     return all(not path.anchor and '..' not in path.parts for path in paths)
 
 
-def _is_repository_root_binding(value):
+def _is_repository_root_binding(value, owners=frozenset()):
     """Whether a module assignment derives the checkout root."""
     if (isinstance(value, ast.Attribute) and value.attr == 'ROOT'
             and isinstance(value.value, ast.Name)
             and value.value.id == '_util'):
-        return True
+        return '_util' in owners
     if (not isinstance(value, ast.Subscript)
             or not isinstance(value.slice, ast.Constant)
             or value.slice.value != 1):
@@ -196,8 +196,28 @@ def _is_repository_root_binding(value):
             and constructor.args[0].id == '__file__')
 
 
+def _root_assignments(tree):
+    values = []
+    for node in memo_nodes(tree):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == 'ROOT'
+               for target in targets):
+            values.append(value)
+    return values
+
+
 def _unprovable_names(tree):
-    return _import_rebound_names(tree) & _PROOF_NAMES
+    names = _import_rebound_names(tree) & _PROOF_NAMES
+    if not _root_assignments(tree) and not any(
+            isinstance(node, ast.ImportFrom) and 'ROOT' in _bound_names(node)
+            for node in memo_nodes(tree)):
+        names.add('ROOT')
+    return names
 
 
 def _shadowed_names(tree):
@@ -221,22 +241,11 @@ def _shadowed_names(tree):
                  and node.name)
     names.update(node.rest for node in walked
                  if isinstance(node, ast.MatchMapping) and node.rest)
-    root_values = []
-    for node in walked:
-        if isinstance(node, ast.Assign):
-            targets, value = node.targets, node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        else:
-            continue
-        if any(isinstance(target, ast.Name) and target.id == 'ROOT'
-               for target in targets):
-            root_values.append(value)
     names.update(_unprovable_names(tree))
-    if _rebound_by_import('_util', _import_rebound_names(tree)):
-        names.add('_util')
+    root_values = _root_assignments(tree)
+    owners = root_owner_names(tree)
     if (root_values and not {'Path', '_util'} & names
-            and all(_is_repository_root_binding(value)
+            and all(_is_repository_root_binding(value, owners)
                     for value in root_values)):
         names.discard('ROOT')
     return names
