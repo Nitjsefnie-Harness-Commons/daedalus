@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""The shared runner refuses a test whose body it did not run.
-
-Calling an `async def` test only creates a coroutine, so a runner that
-looked no further printed PASS over a body that never executed. The
-runner refuses that shape, and a returned awaitable, rather than
-awaiting it.
-"""
+"""The shared runner refuses a test whose body it did not run."""
 import asyncio
 import contextlib
 import gc
@@ -44,7 +38,6 @@ if __name__ == '__main__':
 
 
 def _run(tests):
-    """Run `tests` through the runner: (exit code, stdout, warnings)."""
     out = io.StringIO()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
@@ -119,7 +112,7 @@ def test_a_returned_awaitable_object_is_refused(tmp):
     assert not _never_awaited(messages), messages
 
 
-def test_a_returned_async_generator_is_refused_and_closed(tmp):
+def test_a_returned_async_generator_is_refused(tmp):
     del tmp
 
     async def body():
