@@ -448,6 +448,22 @@ def test_token_guard_refuses_multiline_console_calls(tmp):
     _check_token_sources(tmp, multiline_cases())
 
 
+def test_token_log_offender_anchors_and_eof_bounds(tmp):
+    del tmp
+
+    def offenders(source):
+        return _token_log_offenders(source, token_mask(source).text)
+
+    assert offenders('const ready = true;\nconsole.log(\nconfig.token);') == [
+        (2, 'console.log(')]
+    # A read may end at the last character of an unclosed call (issue 889).
+    assert offenders('console.log(config.token') == [
+        (1, 'console.log(config.token')]
+    assert offenders('console.log(config.token;') == [
+        (1, 'console.log(config.token;')]
+    assert not offenders('console.log(config.toke')
+
+
 def test_extension_ships_no_default_server(tmp):
     src = (ROOT / 'extension' / 'background.js').read_text(encoding='utf-8')
     # The constant exists and is empty: an unconfigured install must not dial

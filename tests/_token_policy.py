@@ -28,7 +28,12 @@ def _console_arguments(mask):
         call = re.match(r'\s*(?:\?\.\s*)?\(', mask[end:])
         if call:
             start = end + call.end() - 1
-            yield anchor, (start + 1, js_bracket_end(mask, start) - 1)
+            stop = js_bracket_end(mask, start)
+            # A matched closer sits one before the bound; an unbalanced
+            # scan bounds at past-the-end and keeps it.
+            if mask[stop - 1] in ')]}':
+                stop -= 1
+            yield anchor, (start + 1, stop)
         elif wrapper:
             yield anchor, None
         elif tag:
