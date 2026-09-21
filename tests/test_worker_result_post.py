@@ -191,6 +191,28 @@ def test_413_gets_a_substitute_result_in_one_more_post(tmp):
     assert seen['errors'] == [], seen
 
 
+def test_a_refused_substitute_is_logged_once(tmp):
+    """A substitute that is refused for another reason still names itself."""
+    del tmp
+    seen = _post({'status': 413}, {'status': 503})
+    assert len(seen['requests']) == 2, seen
+    assert seen['timerDelays'] == [], seen
+    assert len(seen['errors']) == 1, seen
+    line = seen['errors'][0]
+    for name in ('503', 'cmd-result-post'):
+        assert name in line, line
+
+
+def test_a_dead_substitute_network_error_is_logged_once(tmp):
+    """A substitute that cannot reach the bridge names that too."""
+    del tmp
+    seen = _post({'status': 413}, {'networkError': 'substitute down'})
+    assert len(seen['requests']) == 2, seen
+    assert seen['errors'] == [
+        '[Daedalus] Substitute result POST failed: Error: substitute down',
+    ], seen
+
+
 def test_5xx_exhaustion_names_the_last_status(tmp):
     """Three refused attempts give up out loud, naming the last status."""
     del tmp
