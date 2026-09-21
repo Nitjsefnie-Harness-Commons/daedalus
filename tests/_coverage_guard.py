@@ -24,9 +24,8 @@ from _coverage_bindings import (
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
-    _evaluation_scopes, _is_root_spelling, _name_is_unbound, _scope_bindings,
-    _scope_shadows, _shadowed_names, _visible_scope_shadows,
-    root_owner_names)
+    _ScopeFacts, _evaluation_scopes, _is_root_spelling, _name_is_unbound,
+    _scope_bindings, _scope_shadows, _shadowed_names, _visible_scope_shadows)
 
 _DECLARATION = 'child_coverage'
 _MUTATING_METHODS = frozenset({
@@ -58,11 +57,12 @@ class _ModuleFacts:
     """The syntactic facts one module's launches are judged against."""
 
     def __init__(self, tree):
-        self.shadowed_names = _shadowed_names(tree)
-        self.root_owners = root_owner_names(tree)
-        self.scoped_nodes, self.scope_parents = _evaluation_scopes(tree)
+        scope_facts = _ScopeFacts(tree)
+        self.shadowed_names = _shadowed_names(tree, scope_facts)
+        self.root_owners = scope_facts.root_owners
+        self.scoped_nodes, self.scope_parents = scope_facts.layout
         layout = self.scoped_nodes, self.scope_parents
-        self.scope_shadows = _scope_shadows(tree, layout)
+        self.scope_shadows = _scope_shadows(tree, layout, scope_facts)
         self.module_shadows = set(self.scope_shadows[tree])
         if 'ROOT' not in self.shadowed_names:
             self.module_shadows.discard('ROOT')

@@ -53,7 +53,7 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("        return '_util' in owners\n", "        return True\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('an unbound ROOT is unprovable', 'scopes',
-     (("    if not _root_assignments(tree) and not root_imported:\n"
+     (("    if not facts.root_assignments and not root_imported:\n"
        "        names.add('ROOT')\n", ""),), _ROOT_PROVENANCE_INVOKE),
     ('owner imports never prove constructors or builtins', 'scopes',
      (("    if isinstance(node, ast.Import):\n        return False\n",

@@ -541,7 +541,7 @@ def _mutation_specs():
         "            if module not in gone}\n",
     )
     rebinding_shadows = (
-        "    owners = root_owner_names(tree)\n",
+        "    owners = facts.root_owners\n",
         "    owners = {'_util'}\n",
     )
     binding_aliasing = (

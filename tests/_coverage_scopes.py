@@ -6,6 +6,7 @@ Split out of tests/_coverage_guard.py: these answer "what does this name
 mean here", which is a different question from "is this launch safe".
 """
 import ast
+from functools import cached_property
 from pathlib import PurePosixPath, PureWindowsPath
 
 from _coverage_memo import nodes as memo_nodes
@@ -22,6 +23,39 @@ _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
 
 _COMPREHENSION_SCOPES = (
     ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+class _ScopeFacts:
+    """Share derivations within one analysis; never cache a mutable tree.
+
+    Previously each consumer recomputed these whole-module products.
+    Keeping this object local to the analysis also releases parent maps
+    that hold the root, without adding a process-wide invalidation rule.
+    """
+
+    def __init__(self, tree, layout=None):
+        self.tree = tree
+        self.layout = layout or _evaluation_scopes(tree)
+
+    @cached_property
+    def imports(self):
+        return _import_rebound_names(self.tree)
+
+    @cached_property
+    def root_assignments(self):
+        return _root_assignments(self.tree)
+
+    @cached_property
+    def root_owners(self):
+        return root_owner_names(self.tree, self.imports)
+
+    @cached_property
+    def destinations(self):
+        return _binding_destinations(*self.layout)[1]
+
+    @cached_property
+    def unprovable(self):
+        return _unprovable_names(self.tree, self.layout, self)
 
 
 def _chain(node):
@@ -115,7 +149,7 @@ def _rebound_by_import(name, rebound):
     return name in rebound or _ALL_NAMES in rebound
 
 
-def root_owner_names(tree):
+def root_owner_names(tree, imports=None):
     """Import-bound names of a root module reached only by attribute reads."""
     modules = {}
     for node in memo_nodes(tree):
@@ -143,7 +177,8 @@ def root_owner_names(tree):
     gone = {modules[name] for name in retired if name in modules}
     # A mutation retires the module every alias shares; an import rebinding
     # retires only the name it rebinds.
-    rebound, _, _ = _import_rebound_names(tree)
+    rebound, _, _ = imports if imports is not None else (
+        _import_rebound_names(tree))
     return {name for name, module in modules.items()
             if module not in gone and not _rebound_by_import(name, rebound)}
 
@@ -238,21 +273,23 @@ def _other_root_bindings(tree, assignments):
     return False
 
 
-def _unprovable_names(tree, layout=None):
-    _, proof_shadows, root_imported = _import_rebound_names(tree)
-    scoped, parents = layout or _evaluation_scopes(tree)
+def _unprovable_names(tree, layout=None, facts=None):
+    facts = facts or _ScopeFacts(tree, layout)
+    _, proof_shadows, root_imported = facts.imports
+    scoped, parents = facts.layout
     imports = {scope: set() for scope in parents}
     for node, scope in scoped:
         imports[scope].update(proof_shadows.get(node, ()))
-    _, destinations = _binding_destinations(scoped, parents)
+    destinations = facts.destinations
     names = _routed_bindings(imports, destinations)[tree]
-    if not _root_assignments(tree) and not root_imported:
+    if not facts.root_assignments and not root_imported:
         names.add('ROOT')
     return names, proof_shadows
 
 
-def _shadowed_names(tree):
+def _shadowed_names(tree, facts=None):
     """Names whose source value is replaced somewhere in the module."""
+    facts = facts or _ScopeFacts(tree)
     walked = memo_nodes(tree)
     names = {node.id for node in walked
              if isinstance(node, ast.Name)
@@ -272,10 +309,10 @@ def _shadowed_names(tree):
                  and node.name)
     names.update(node.rest for node in walked
                  if isinstance(node, ast.MatchMapping) and node.rest)
-    unprovable, _ = _unprovable_names(tree)
+    unprovable, _ = facts.unprovable
     names.update(unprovable)
-    root_values = _root_assignments(tree)
-    owners = root_owner_names(tree)
+    root_values = facts.root_assignments
+    owners = facts.root_owners
     if (root_values
             and not _other_root_bindings(tree, root_values)
             and not {'Path', 'Path()', '_util'} & names
@@ -402,7 +439,7 @@ def _evaluation_scopes(tree, type_scopes=False):
     return tuple(scoped), parents
 
 
-def _scope_shadows(tree, layout=None):
+def _scope_shadows(tree, layout=None, facts=None):
     """Shadowed names per scope, attributed to the scope that binds them.
 
     A name bound inside one function cannot reach another's expressions, so
@@ -415,9 +452,10 @@ def _scope_shadows(tree, layout=None):
     attribution drifts — a parameter this function stops attributing resolves
     from an outer binding instead of being out of scope.
     """
-    scoped, parents = layout or _evaluation_scopes(tree)
+    facts = facts or _ScopeFacts(tree, layout)
+    scoped, parents = facts.layout
     shadows = {scope: set() for scope in parents}
-    unprovable, imports = _unprovable_names(tree, (scoped, parents))
+    unprovable, imports = facts.unprovable
     for node, scope in scoped:
         shadows[scope].update(imports.get(node, ()))
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -440,7 +478,7 @@ def _scope_shadows(tree, layout=None):
     # A star import is a SyntaxError inside a function, so module-wide
     # is its real scope.
     shadows[tree].update(unprovable)
-    _, destinations = _binding_destinations(scoped, parents)
+    destinations = facts.destinations
     return _routed_bindings(shadows, destinations)
 
 
