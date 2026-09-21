@@ -10,6 +10,7 @@ content under one path is a different key, and one analysis walks the
 module tree once.
 """
 import ast
+import cProfile
 import gc
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _coverage_guard  # noqa: E402
 import _coverage_memo  # noqa: E402
+import _coverage_scopes  # noqa: E402
 import _util  # noqa: E402
 
 # A launch that inherits its cwd and never chdirs is provably safe, so a
@@ -205,6 +207,33 @@ def test_the_node_cache_does_not_outlive_the_trees_it_walked(tmp):
     # Process-global state: a later control here that parks a module tree
     # at module scope would leave an entry and fail this spuriously.
     assert len(_coverage_memo._BELOW) == 0, list(_coverage_memo._BELOW)
+
+
+def test_module_products_are_shared_only_within_one_analysis(tmp):
+    del tmp
+    tree = ast.parse(_KEEP.format(note='shared module products'))
+    profile = cProfile.Profile()
+    profile.runcall(_coverage_guard._ModuleFacts, tree)
+    calls = {entry.code: entry.callcount for entry in profile.getstats()}
+    expected = {
+        '_evaluation_scopes': 2, '_binding_destinations': 2,
+        '_import_rebound_names': 1, '_root_assignments': 1,
+        'root_owner_names': 1, '_parents': 1, '_unprovable_names': 1,
+    }
+    for name, count in expected.items():
+        actual = calls.get(getattr(_coverage_scopes, name).__code__, 0)
+        assert actual == count, (name, actual, count)
+
+
+def test_a_later_analysis_recomputes_changed_import_fields(tmp):
+    del tmp
+    tree = ast.parse('import _util\nimport helpers as other\n')
+    before = _coverage_guard._ModuleFacts(tree)
+    assert before.root_owners == {'_util'}, before.root_owners
+    tree.body[1].names[0].asname = '_util'
+    after = _coverage_guard._ModuleFacts(tree)
+    assert after.root_owners == set(), after.root_owners
+    assert before.root_owners == {'_util'}, before.root_owners
 
 
 if __name__ == '__main__':
