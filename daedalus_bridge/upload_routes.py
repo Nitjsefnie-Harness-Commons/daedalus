@@ -159,7 +159,7 @@ def list_uploads(upload_dir, token, params):
                 'filename': entry.name,
                 'size': info.st_size,
                 'mtime': int(info.st_mtime),
-                'path': f'{token}/{id_name}/{entry.name}',
+                'path': f'{id_name}/{entry.name}',
             })
     except ValueError:
         return 400, {'error': 'invalid path component'}
