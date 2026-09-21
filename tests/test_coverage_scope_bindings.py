@@ -57,7 +57,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
        "        return alias.name in _ROOT_MODULES\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('proof shadows distinguish calls from owner attributes', 'scopes',
-     (("                              if bound in {'Path', 'str', 'ROOT'} else bound)"
+     (("                              if bound in {'Path', 'str', 'ROOT'} "
+       "else bound)"
        "\n", "                              if False else bound)\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('str calls consult their import proof shadow', 'scopes',
@@ -627,6 +628,21 @@ def test_owner_derivation_does_not_depend_on_path(tmp):
     source = source.replace('_util.ROOT',
                             'Path(__file__).resolve().parents[1]')
     assert _synthetic_violations(source) == _rebound_owner(5, 'ROOT')
+
+
+def test_chdir_keeps_aggregate_binding_refusals(tmp):
+    del tmp
+    prefix = 'import os\nimport subprocess\nfrom _repo import ROOT\n'
+    for binding in ('def unused(str):\n    pass\n',
+                    '[str for str in items]\n',
+                    'def unused():\n    str = other\n'):
+        source = prefix + binding + 'os.chdir(str(ROOT))\n'
+        line = source.count('\n')
+        expected = [f'tests/synthetic.py:{line + 1}: subprocess.run '
+                    f'os.chdir at line {line} may have moved the cwd '
+                    'declares no env=']
+        assert _synthetic_violations(source + 'subprocess.run(c)\n') == (
+            expected), binding
 
 
 if __name__ == '__main__':

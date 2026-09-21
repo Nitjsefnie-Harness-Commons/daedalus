@@ -213,7 +213,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
     ('global shadows reach explicit cwd', 'scopes', (_ROUTING,),
      _INVOKE + 'root_suite.test_declared_bindings_reach_explicit_cwd(None)'),
     ('global shadows reach chdir', 'scopes', (_ROUTING,),
-     _INVOKE + 'root_suite.test_declared_bindings_reach_chdir(None)'),
+     _INVOKE + 'root_suite.test_declared_bindings_reach_chdir(None); '
+     "root_suite._assert_declared_destination('global', 1)"),
     ('global import shadows reach root assignments', 'scopes',
      (("    names = _routed_bindings(imports, destinations)[tree]\n",
        "    names = imports[tree]\n"),),
@@ -274,7 +275,8 @@ _SITE_MUTANTS = {
     'match-rest': ("    if isinstance(node, ast.MatchMapping):\n"
                    "        return {node.rest} if node.rest else set()\n", ''),
     'unaccepted-assignment': (
-        "            and all(_is_repository_root_binding(value, owners, names)\n"
+        "            and all(_is_repository_root_binding(value, owners, "
+        "names)\n"
         "                    for value in root_values.values())):\n",
         "            ):\n"),
 }
@@ -397,6 +399,17 @@ _ROOT_PROVENANCE_MUTATIONS += (
        "            and not {'Path', 'Path()', '_util'} & names\n"),),
      'import test_coverage_scope_bindings as scope; '
      'scope.test_owner_derivation_does_not_depend_on_path(None)'),
+)
+
+
+_ROOT_PROVENANCE_MUTATIONS += (
+    ('chdir keeps aggregate shadows beside scoped imports', 'guard',
+     (("                                   node.args[0], self.shadowed_names\n"
+       "                                   | _visible_scope_shadows(\n",
+       "                                   node.args[0], "
+       "_visible_scope_shadows(\n"),),
+     'import test_coverage_scope_bindings as scope; '
+     'scope.test_chdir_keeps_aggregate_binding_refusals(None)'),
 )
 
 

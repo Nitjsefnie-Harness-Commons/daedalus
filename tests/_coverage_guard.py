@@ -116,7 +116,8 @@ class _ModuleFacts:
                 if is_chdir:
                     is_root = (bool(node.args)
                                and _is_root_spelling(
-                                   node.args[0], _visible_scope_shadows(
+                                   node.args[0], self.shadowed_names
+                                   | _visible_scope_shadows(
                                        scopes[node], self.scope_shadows,
                                        self.scope_parents),
                                    self.root_owners))
