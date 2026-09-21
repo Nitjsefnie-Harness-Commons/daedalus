@@ -347,9 +347,8 @@ def test_windows_preserves_only_completed_cpython_reader_buffers(tmp):
 
 
 def test_windows_cancelled_reader_is_not_rendered_as_empty(tmp):
-    # A cancelled reader recovered nothing, so its stream must not read as
-    # "the child produced nothing"; a completed reader with no output still
-    # renders as empty in the same record.
+    # The cancelled stream recovered nothing, so the record must distinguish
+    # it from a child that said nothing; the completed-empty stdout stays ''.
     del tmp
     failure, events, _ = _controlled_run(
         'win32', (1103, [_timeout(None, None), _timeout(None, None)], {
