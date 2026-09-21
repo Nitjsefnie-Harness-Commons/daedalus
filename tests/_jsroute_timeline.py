@@ -204,17 +204,23 @@ class InvocationReplay:
             execution = call['order']
         active_sources = (sender_sources if sender_sources is not None
                           else {})
-        if call['returned'] is not None:
-            # A getter call: its body runs first with no arguments, then
-            # the arguments and the callable it returned.
-            stages = (dict(call, returned=None, args=[], argument_calls=[]),
-                      dict(call, returned=None, body=call['returned']))
-            results = [self.run(stage, inherited, seen, inherited_optional,
+        if call['returned'] is None:
+            return self._replay(call, inherited, seen, inherited_optional,
                                 limits, active_sources, execution)
-                       for stage in stages]
-            return ReplayResult(*(
-                [item for result in results for item in result[field]]
-                for field in range(3)))
+        # A getter call: its body runs first with no arguments, then the
+        # arguments and the callable it returned.
+        stages = (dict(call, returned=None, args=[], argument_calls=[]),
+                  dict(call, returned=None, body=call['returned']))
+        results = [self._replay(stage, inherited, seen, inherited_optional,
+                                limits, active_sources, execution)
+                   for stage in stages]
+        return ReplayResult(*(
+            [item for result in results for item in result[field]]
+            for field in range(3)))
+
+    def _replay(self, call, inherited, seen, inherited_optional, limits,
+                active_sources, execution):
+        call_start = call['start']
         writes = []
         calls = []
         unknowns = []
