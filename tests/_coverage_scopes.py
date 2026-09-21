@@ -14,7 +14,7 @@ from _coverage_memo import nodes as memo_nodes
 _ROOT_MODULES = frozenset({'_util', 'test_dashboard_behaviour'})
 _ALL_NAMES = '*'
 _CANONICAL_MEMBERS = {'Path': ('pathlib', 'Path')}
-_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})
+_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})
 
 
 _REFLECTIVE_READS = frozenset({'getattr', 'hasattr'})
@@ -83,21 +83,32 @@ def _import_bound_name(node, alias):
 
 def _canonical_import(node, alias, bound):
     if isinstance(node, ast.Import):
-        return alias.name in _ROOT_MODULES
+        return False
+    if bound == 'ROOT':
+        return alias.name == 'ROOT' and alias.asname is None
     return (not node.level
             and (node.module, alias.name) == _CANONICAL_MEMBERS.get(bound))
 
 
 def _import_rebound_names(tree):
-    """Names an import binds to anything but their canonical source."""
-    rebound = set()
+    """Owner retirements and proof shadows, from one import enumeration."""
+    rebound, proof_shadows = set(), {}
+    root_imported = False
     for node in memo_nodes(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 bound = _import_bound_name(node, alias)
-                if not _canonical_import(node, alias, bound):
+                if not (isinstance(node, ast.Import)
+                        and alias.name in _ROOT_MODULES):
                     rebound.add(bound)
-    return rebound
+                canonical = _canonical_import(node, alias, bound)
+                if not canonical and bound in _PROOF_NAMES:
+                    shadow = (f'{bound}()'
+                              if bound in {'Path', 'str'} else bound)
+                    proof_shadows.setdefault(node, set()).add(shadow)
+                if canonical and bound == 'ROOT':
+                    root_imported = True
+    return rebound, proof_shadows, root_imported
 
 
 def _rebound_by_import(name, rebound):
@@ -132,7 +143,7 @@ def root_owner_names(tree):
     gone = {modules[name] for name in retired if name in modules}
     # A mutation retires the module every alias shares; an import rebinding
     # retires only the name it rebinds.
-    rebound = _import_rebound_names(tree)
+    rebound, _, _ = _import_rebound_names(tree)
     return {name for name, module in modules.items()
             if module not in gone and not _rebound_by_import(name, rebound)}
 
@@ -155,7 +166,8 @@ def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
             and _is_relative_literal(node.right.value)):
         return _is_root_spelling(node.left, shadowed_names, owners)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'str' and len(node.args) == 1
+            and node.func.id == 'str' and 'str()' not in shadowed_names
+            and len(node.args) == 1
             and not node.keywords):
         return _is_root_spelling(node.args[0], shadowed_names, owners)
     return False
@@ -213,10 +225,9 @@ def _root_assignments(tree):
 
 
 def _unprovable_names(tree):
-    names = _import_rebound_names(tree) & _PROOF_NAMES
-    if not _root_assignments(tree) and not any(
-            isinstance(node, ast.ImportFrom) and 'ROOT' in _bound_names(node)
-            for node in memo_nodes(tree)):
+    _, proof_shadows, root_imported = _import_rebound_names(tree)
+    names = set().union(*proof_shadows.values())
+    if not _root_assignments(tree) and not root_imported:
         names.add('ROOT')
     return names
 
@@ -242,10 +253,12 @@ def _shadowed_names(tree):
                  and node.name)
     names.update(node.rest for node in walked
                  if isinstance(node, ast.MatchMapping) and node.rest)
-    names.update(_unprovable_names(tree))
+    unprovable = _unprovable_names(tree)
+    names.update(unprovable)
     root_values = _root_assignments(tree)
     owners = root_owner_names(tree)
-    if (root_values and not {'Path', '_util'} & names
+    if (root_values and 'ROOT' not in unprovable
+            and not {'Path', 'Path()', '_util'} & names
             and all(_is_repository_root_binding(value, owners)
                     for value in root_values)):
         names.discard('ROOT')
