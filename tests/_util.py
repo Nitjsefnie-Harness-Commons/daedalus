@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from _completion import run_to_completion
 from _teardown import settle
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -637,7 +638,7 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
             d = os.path.join(tmp, t.__name__)
             os.makedirs(d, exist_ok=True)
             try:
-                t(d)
+                run_to_completion(t, d)
                 print(f'  PASS  {t.__name__}')
             except Skipped as e:
                 skipped.append(t.__name__)
