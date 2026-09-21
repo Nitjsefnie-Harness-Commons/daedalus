@@ -585,6 +585,15 @@ def test_root_assignment_does_not_erase_other_binding_sites(tmp):
     assert _synthetic_violations(source) == _rebound_owner(5, 'ROOT')
 
 
+def test_type_parameter_is_not_the_module_root(tmp):
+    del tmp
+    if sys.version_info < (3, 12):
+        return
+    source = ('import subprocess\nfrom _repo import ROOT\n'
+              'def go[ROOT]():\n    subprocess.run(c, cwd=ROOT)\n')
+    assert _synthetic_violations(source) == _rebound_owner(4, 'ROOT')
+
+
 if __name__ == '__main__':
     import _util
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
