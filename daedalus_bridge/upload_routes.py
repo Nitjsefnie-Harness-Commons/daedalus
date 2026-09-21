@@ -233,12 +233,8 @@ def store_upload(upload_dir, body):
     # so POST /upload and GET /uploads disagreed about the same
     # file and a client could not feed one to the other.
     #
-    # Relative to the token directory, dropping only the token
-    # component: the answer's path is what the extension forwards
-    # into the result envelope it posts, and what the [UPLOAD] log
-    # line prints, so neither carries the credential. This is also
-    # the form GET /upload?path= accepts and both client sanitizers
-    # leave unchanged.
+    # Relative to the token directory: the extension forwards this
+    # path into the result it posts, and the [UPLOAD] log prints it.
     rel = dest.relative_to(dest.parent.parent).as_posix()
     print(f'[UPLOAD] {rel} ({size} bytes)', flush=True)
     return 200, {'ok': True, 'path': rel, 'size': size}
