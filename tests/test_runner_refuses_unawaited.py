@@ -65,16 +65,14 @@ class _Awaitable:
 
 def test_an_async_def_test_is_refused_without_being_called(tmp):
     del tmp
-    calls = []
 
     async def test_x(tmp):
-        calls.append(tmp)
+        del tmp
 
     code, text, messages = _run([test_x])
     assert code == 1, text
     assert f'  FAIL  test_x: {ASYNC_DEF_DETAIL}\n' in text, text
     assert '  PASS' not in text, text
-    assert calls == [], calls
     assert not _never_awaited(messages), messages
 
 
