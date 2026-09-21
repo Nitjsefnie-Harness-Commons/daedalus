@@ -41,9 +41,9 @@ def _initialize_body(padding=0):
 def _drive_undeclared_post(body_chunks, max_body_size):
     """Drive BearerAuth with a POST that declares no Content-Length.
 
-    Returns (status, payload, inner, pulled): the response status, the
-    response payload, the body the inner app assembled, and the number of
-    body bytes the middleware pulled from the ASGI receive channel.
+    Returns a dict of the response status and payload, the body the inner
+    app assembled (inner), and the body bytes the middleware pulled from
+    the ASGI receive channel (pulled).
     """
     auth = _auth_module()
     pulled = [0]
