@@ -9,6 +9,7 @@ still answer 200.
 """
 import base64
 import os
+import re
 import subprocess
 import sys
 import time
@@ -97,7 +98,7 @@ def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
             paths.append(payload['path'])
     assert paths[0] != paths[1], paths
     for rel, data in zip(paths, (b'FIRST', b'SECOND')):
-        assert rel.endswith('.png'), rel
+        assert re.fullmatch(r'tok/id1/\d{13}_\d{6}\.png', rel), rel
         assert (Path(tmp) / rel).is_file(), rel
         assert (Path(tmp) / rel).read_bytes() == data, rel
 
@@ -110,7 +111,7 @@ def test_store_upload_publishes_through_a_temp_sibling(tmp):
     calls = []
 
     def recorder(src, dst):
-        calls.append((Path(src), Path(dst)))
+        calls.append((Path(src), Path(dst), Path(dst).exists()))
         real(src, dst)
     for upload_id, extra in (('shot', {}), ('named', {'filename': 'a.bin'})):
         calls.clear()
@@ -121,13 +122,92 @@ def test_store_upload_publishes_through_a_temp_sibling(tmp):
             status, payload = routes.store_upload(Path(tmp), body)
         assert status == 200, (status, payload)
         published = Path(tmp) / payload['path']
-        assert calls == [
-            (published.with_name(f'.{published.name}.tmp'), published)
-        ], (upload_id, calls, published)
+        assert len(calls) == 1, (upload_id, calls)
+        src, dst, dst_existed = calls[0]
+        assert dst == published and not dst_existed, (upload_id, calls)
+        assert src.parent == published.parent, (upload_id, src)
+        assert re.fullmatch(
+            rf'\.{re.escape(published.name)}\.\d+\.tmp', src.name), src
         assert published.read_bytes() == b'DATA', published
         leftovers = [p for p in published.parent.iterdir()
                      if p.name.endswith('.tmp')]
         assert not leftovers, leftovers
+
+
+def test_store_upload_same_filename_interleaved_writes_publish_whole(tmp):
+    """Two stores of one `filename` whose writes interleave each publish
+    their own complete bytes: a shared temp let the first replace publish
+    the other writer's bytes under its own answer."""
+    routes = _load('fixture_upload_routes_interleave')
+    real_write = routes.atomic_file.write_bytes_retrying
+    real_replace = routes.atomic_file.replace_atomically
+
+    def body(data):
+        return {'token': 'tok', 'id': 'id1', 'filename': 'a.bin',
+                'data': base64.b64encode(data).decode('ascii')}
+    started, inner, deferred = [], [], []
+
+    def write_then_interleave(path, data):
+        real_write(path, data)
+        if not started:
+            started.append(True)
+            inner.append(routes.store_upload(Path(tmp), body(b'B')))
+
+    def defer_the_inner_replace(src, dst):
+        if not deferred:
+            deferred.append((src, dst))
+            return
+        real_replace(src, dst)
+    published = Path(tmp) / 'tok' / 'id1' / 'a.bin'
+    with mock.patch.object(routes.atomic_file, 'write_bytes_retrying',
+                           write_then_interleave), \
+            mock.patch.object(routes.atomic_file, 'replace_atomically',
+                              defer_the_inner_replace):
+        outer = routes.store_upload(Path(tmp), body(b'A' * 10))
+        assert outer == (
+            200, {'ok': True, 'path': 'tok/id1/a.bin', 'size': 10}), outer
+        assert inner == [
+            (200, {'ok': True, 'path': 'tok/id1/a.bin', 'size': 1})], inner
+        assert published.read_bytes() == b'A' * 10, published.read_bytes()
+        real_replace(*deferred[0])
+    assert published.read_bytes() == b'B', published.read_bytes()
+    leftovers = [p for p in published.parent.iterdir()
+                 if p.name.endswith('.tmp')]
+    assert not leftovers, leftovers
+
+
+def test_store_upload_answers_500_and_leaves_no_temp_when_publish_fails(tmp):
+    routes = _load('fixture_upload_routes_publish_fails')
+
+    def refuse(src, dst):
+        raise OSError('injected publish failure')
+    body = {'token': 'tok', 'id': 'id1', 'format': 'png',
+            'data': base64.b64encode(b'DATA').decode('ascii')}
+    with mock.patch.object(routes.atomic_file, 'replace_atomically', refuse):
+        status, payload = routes.store_upload(Path(tmp), body)
+    assert (status, payload) == (
+        500, {'error': 'upload storage failure'}), (status, payload)
+    leftovers = list((Path(tmp) / 'tok' / 'id1').iterdir())
+    assert not leftovers, leftovers
+
+
+def test_named_file_refuses_a_temp_name(tmp):
+    routes = _load('fixture_upload_routes_named_file_tmp')
+    _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
+    status, payload = routes.named_file(
+        Path(tmp), 'tok', 'id1/.abc.png.tmp')
+    assert (status, payload) == (
+        400, {'error': 'invalid path component'}), (status, payload)
+
+
+def test_delete_upload_refuses_a_temp_name(tmp):
+    routes = _load('fixture_upload_routes_delete_tmp')
+    temp = _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
+    status, payload = routes.delete_upload(
+        Path(tmp), {'token': 'tok', 'id': 'id1', 'filename': '.abc.png.tmp'})
+    assert (status, payload) == (
+        400, {'error': 'invalid path component'}), (status, payload)
+    assert temp.exists(), 'an in-progress temp was unlinked'
 
 
 def test_store_upload_refuses_a_caller_name_ending_in_tmp(tmp):

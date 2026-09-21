@@ -38,6 +38,11 @@ def screenshot_mime(fmt):
     return mime_map.get(fmt, 'application/octet-stream')
 
 
+def _reserved_name(name):
+    """Whether `name` is the store's own in-progress reservation."""
+    return name.endswith('.tmp')
+
+
 def stored_uploads(token_dir, upload_id):
     """Every stored file, newest id first and by name within an id.
 
@@ -61,7 +66,7 @@ def stored_uploads(token_dir, upload_id):
         try:
             with os.scandir(id_dir) as entries:
                 files = [entry for entry in entries if entry.is_file()
-                         and not entry.name.endswith('.tmp')]
+                         and not _reserved_name(entry.name)]
         except (FileNotFoundError, NotADirectoryError):
             continue
         files.sort(key=lambda entry: entry.name)
@@ -160,7 +165,7 @@ def store_upload(upload_dir, body):
             return 400, {'error': 'invalid path component'}
     # `.tmp` is the store's own reservation below, and the listing skips
     # it; an accepted upload must never be hidden by that skip.
-    if filename.endswith('.tmp'):
+    if _reserved_name(filename):
         return 400, {'error': 'invalid path component'}
     try:
         raw = base64.b64decode(data_b64, validate=True)
@@ -176,9 +181,10 @@ def store_upload(upload_dir, body):
                 dest_dir, f'{ts:013d}_{next(_name_counter):06d}.{fmt}')
     except ValueError:
         return 400, {'error': 'invalid path component'}
-    # A sibling temp published by one replace, as command_queue does, so
-    # a reader never sees a partially written file at the final name.
-    tmp = dest.with_name(f'.{dest.name}.tmp')
+    # A sibling temp, unique per write, published by one replace as
+    # command_queue does, so a reader never sees a partially written file
+    # at the final name and two writers of one name never share a temp.
+    tmp = dest.with_name(f'.{dest.name}.{next(_name_counter)}.tmp')
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         atomic_file.write_bytes_retrying(tmp, raw)
@@ -214,6 +220,8 @@ def delete_upload(upload_dir, body):
     for val in (upload_id, filename):
         if path_safety.unsafe_component(val):
             return 400, {'error': 'invalid path component'}
+    if _reserved_name(filename):
+        return 400, {'error': 'invalid path component'}
     # A filename names a file inside an id, so without one it matches
     # neither the file branch nor the id branch below and used to reach the
     # branch that removes the token's whole namespace: naming one file
@@ -292,6 +300,8 @@ def named_file(upload_dir, token, named):
     if len(parts) != 2 or not all(parts):
         return 400, {'error': 'path must be <id>/<file>'}
     if any(path_safety.unsafe_component(part) for part in parts):
+        return 400, {'error': 'invalid path component'}
+    if _reserved_name(parts[1]):
         return 400, {'error': 'invalid path component'}
     return _stored_file(upload_dir, token, parts, 'file not found')
 
