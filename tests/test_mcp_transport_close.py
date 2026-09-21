@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Closing the MCP transport's cached clients for the running loop.
-
-The record is read when the close call returns, so a first failure that
-propagated before every client closed shows the clean one still open.
-"""
+"""Closing the MCP transport's cached clients for the running loop."""
 import asyncio
 import importlib.util
 import sys
@@ -89,8 +85,7 @@ def test_closing_reports_the_first_client_close_failure_after_closing_all(
 
 
 def test_closing_reports_a_cancelled_client_close(tmp):
-    """gather marks a close that raised CancelledError as cancelled and
-    hands back a fresh CancelledError, which is not an Exception."""
+    """gather hands back a fresh CancelledError, which is no Exception."""
     del tmp
     transport = _transport()
     closed, raised, entry_kept, urls = _close_registered_clients(
