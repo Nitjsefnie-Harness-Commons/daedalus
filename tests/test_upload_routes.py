@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
@@ -81,6 +82,82 @@ def test_store_upload_writes_a_timestamped_screenshot(tmp):
     assert rel.startswith('tok/id1/') and rel.endswith('.png'), rel
     assert payload['size'] == 7, payload
     assert (Path(tmp) / rel).read_bytes() == b'PNGDATA'
+
+
+def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
+    """Two unnamed captures in one millisecond must not share a file."""
+    routes = _load('fixture_upload_routes_same_ms')
+    paths = []
+    with mock.patch.object(routes.time, 'time', return_value=1700000000.5):
+        for data in (b'FIRST', b'SECOND'):
+            body = {'token': 'tok', 'id': 'id1', 'format': 'png',
+                    'data': base64.b64encode(data).decode('ascii')}
+            status, payload = routes.store_upload(Path(tmp), body)
+            assert status == 200, (status, payload)
+            paths.append(payload['path'])
+    assert paths[0] != paths[1], paths
+    for rel, data in zip(paths, (b'FIRST', b'SECOND')):
+        assert rel.endswith('.png'), rel
+        assert (Path(tmp) / rel).is_file(), rel
+        assert (Path(tmp) / rel).read_bytes() == data, rel
+
+
+def test_store_upload_publishes_through_a_temp_sibling(tmp):
+    """The bytes land in `.<final>.tmp` and are published by one replace,
+    for the unnamed and the `filename` forms alike."""
+    routes = _load('fixture_upload_routes_temp_sibling')
+    real = routes.atomic_file.replace_atomically
+    calls = []
+
+    def recorder(src, dst):
+        calls.append((Path(src), Path(dst)))
+        real(src, dst)
+    for upload_id, extra in (('shot', {}), ('named', {'filename': 'a.bin'})):
+        calls.clear()
+        body = {'token': 'tok', 'id': upload_id, 'format': 'png',
+                'data': base64.b64encode(b'DATA').decode('ascii'), **extra}
+        with mock.patch.object(
+                routes.atomic_file, 'replace_atomically', recorder):
+            status, payload = routes.store_upload(Path(tmp), body)
+        assert status == 200, (status, payload)
+        published = Path(tmp) / payload['path']
+        assert calls == [
+            (published.with_name(f'.{published.name}.tmp'), published)
+        ], (upload_id, calls, published)
+        assert published.read_bytes() == b'DATA', published
+        leftovers = [p for p in published.parent.iterdir()
+                     if p.name.endswith('.tmp')]
+        assert not leftovers, leftovers
+
+
+def test_store_upload_refuses_a_caller_name_ending_in_tmp(tmp):
+    """`.tmp` is the store's reservation; an accepted upload must never be
+    hidden from the listing by it."""
+    routes = _load('fixture_upload_routes_tmp_name')
+    body = {'token': 'tok', 'id': 'id1', 'filename': 'x.tmp',
+            'data': base64.b64encode(b'x').decode('ascii')}
+    status, payload = routes.store_upload(Path(tmp), body)
+    assert (status, payload) == (
+        400, {'error': 'invalid path component'}), (status, payload)
+    assert not (Path(tmp) / 'tok').exists(), 'something was written'
+
+
+def test_listing_skips_an_in_progress_temp_sibling(tmp):
+    routes = _load('fixture_upload_routes_skip_tmp')
+    real = _store(tmp, 'tok', 'id1', 'abc.png', b'done')
+    temp = _store(tmp, 'tok', 'id1', '.abc.png.tmp', b'part')
+    now = time.time()
+    os.utime(real, (now - 100, now - 100))
+    os.utime(temp, (now, now))
+    status, payload = routes.list_uploads(Path(tmp), 'tok', {})
+    assert status == 200, (status, payload)
+    assert [item['filename'] for item in payload] == ['abc.png'], payload
+    status, payload = routes.list_uploads(
+        Path(tmp), 'tok', {'limit': ['10']})
+    assert status == 200, (status, payload)
+    assert payload['total'] == 1, payload
+    answer = routes.latest_screenshot(Path(tmp), 'tok', {})
+    assert answer.path == real, answer
 
 
 def test_store_upload_refuses_a_non_string_format(tmp):
