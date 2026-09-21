@@ -25,14 +25,15 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("    if _ALL_NAMES in shadowed_names:\n        return False\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('a rebound proof name is unprovable', 'scopes',
-     (("    names = _import_rebound_names(tree) & _PROOF_NAMES\n",
+     (("    names = set().union(*proof_shadows.values())\n",
        "    names = set()\n"),), _ROOT_PROVENANCE_INVOKE),
     ('Path is independently a proof name', 'scopes',
-     (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({'str', _ALL_NAMES})\n"),), _ROOT_PROVENANCE_INVOKE),
+     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
+       "_PROOF_NAMES = frozenset({'str', 'ROOT', _ALL_NAMES})\n"),),
+     _ROOT_PROVENANCE_INVOKE),
     ('str is independently a proof name', 'scopes',
-     (("_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({'Path', _ALL_NAMES})\n"),),
+     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
+       "_PROOF_NAMES = frozenset({'Path', 'ROOT', _ALL_NAMES})\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('a canonical import is exact', 'scopes',
      (("            and (node.module, alias.name) == "
@@ -46,17 +47,51 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("    shadows[tree].update(_unprovable_names(tree))\n", ""),),
      _ROOT_PROVENANCE_INVOKE),
     ('module shadows carry the unprovable names', 'scopes',
-     (("    names.update(_unprovable_names(tree))\n", ""),),
+     (("    names.update(unprovable)\n", ""),),
      _ROOT_PROVENANCE_INVOKE),
     ('the _util.ROOT arm needs an owner', 'scopes',
      (("        return '_util' in owners\n", "        return True\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('an unbound ROOT is unprovable', 'scopes',
-     (("    if not _root_assignments(tree) and not any(\n"
-       "            isinstance(node, ast.ImportFrom) "
-       "and 'ROOT' in _bound_names(node)\n"
-       "            for node in memo_nodes(tree)):\n"
+     (("    if not _root_assignments(tree) and not root_imported:\n"
        "        names.add('ROOT')\n", ""),), _ROOT_PROVENANCE_INVOKE),
+    ('owner imports never prove constructors or builtins', 'scopes',
+     (("    if isinstance(node, ast.Import):\n        return False\n",
+       "    if isinstance(node, ast.Import):\n"
+       "        return alias.name in _ROOT_MODULES\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('proof shadows distinguish calls from owner attributes', 'scopes',
+     (("                              if bound in {'Path', 'str'} else bound)"
+       "\n", "                              if False else bound)\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('str calls consult their import proof shadow', 'scopes',
+     (("            and node.func.id == 'str' "
+       "and 'str()' not in shadowed_names\n",
+       "            and node.func.id == 'str'\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('Path assignments consult their import proof shadow', 'scopes',
+     (("            and not {'Path', 'Path()', '_util'} & names\n",
+       "            and not {'Path', '_util'} & names\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('a constructor import retires an owner', 'scopes',
+     (("                        and alias.name in _ROOT_MODULES):\n",
+       "                        and alias.name in _ROOT_MODULES) "
+       "and not _canonical_import(node, alias, bound):\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('ROOT is independently a proof name', 'scopes',
+     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
+       "_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('ROOT provenance requires the literal member', 'scopes',
+     (("        return alias.name == 'ROOT' and alias.asname is None\n",
+       "        return True\n"),), _ROOT_PROVENANCE_INVOKE),
+    ('ROOT provenance excludes even a same-name alias', 'scopes',
+     (("        return alias.name == 'ROOT' and alias.asname is None\n",
+       "        return alias.name == 'ROOT'\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('an assignment cannot erase a ROOT import shadow', 'scopes',
+     (("    if (root_values and 'ROOT' not in unprovable\n",
+       "    if (root_values\n"),), _ROOT_PROVENANCE_INVOKE),
 )
 
 
@@ -279,9 +314,73 @@ subprocess.run(['python3', 'child.py'], cwd=behaviour.ROOT)
     )
 
 
+def _owner_role_cases():
+    for module in ('_util', 'test_dashboard_behaviour'):
+        for binding, line in (
+                (f'import {module} as Path', 4),
+                (f'from pathlib import Path\nimport {module} as Path', 5)):
+            source = ('import subprocess\n' + binding + '\n'
+                      'ROOT = Path(__file__).resolve().parents[1]\n'
+                      'subprocess.run(c, cwd=ROOT)\n')
+            yield binding, source, _rebound_owner(line, 'ROOT')
+        yield module + ' as str', (
+            'import subprocess\nfrom _repo import ROOT\n'
+            f'import {module} as str\n'
+            'subprocess.run(c, cwd=str(ROOT))\n'
+        ), _rebound_owner(4, 'str(ROOT)')
+        for alias in ('Path', 'str'):
+            yield module + ' retains owner role as ' + alias, (
+                f'import subprocess\nimport {module} as {alias}\n'
+                f'subprocess.run(c, cwd={alias}.ROOT)\n'
+            ), []
+        yield module + ' owner replaced by constructor', (
+            f'import subprocess\nimport {module} as Path\n'
+            'from pathlib import Path\n'
+            'subprocess.run(c, cwd=Path.ROOT)\n'
+        ), _rebound_owner(4, 'Path.ROOT')
+
+
+def _root_import_shadow_cases():
+    for binding in ('import helpers as ROOT',
+                    'from helpers import other as ROOT',
+                    'from helpers import ROOT as ROOT',
+                    'import _util as ROOT',
+                    'from helpers import *', 'ROOT = replacement'):
+        yield binding, ('import subprocess\nfrom _repo import ROOT\n'
+                        + binding + '\nsubprocess.run(c, cwd=ROOT)\n'
+                        ), _rebound_owner(4, 'ROOT')
+    yield 'an aliased member is not ROOT provenance', (
+        'import subprocess\nfrom helpers import other as ROOT\n'
+        'subprocess.run(c, cwd=ROOT)\n'
+    ), _rebound_owner(3, 'ROOT')
+    yield 'an import shadows an accepted ROOT assignment', (
+        'import subprocess\nfrom pathlib import Path\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'import helpers as ROOT\nsubprocess.run(c, cwd=ROOT)\n'
+    ), _rebound_owner(5, 'ROOT')
+    yield 'a literal ROOT from any module stays provable', (
+        'import subprocess\nfrom helpers import ROOT\n'
+        'subprocess.run(c, cwd=ROOT)\n'
+    ), []
+
+
+def test_root_import_provenance_excludes_other_bindings(tmp):
+    del tmp
+    for name, source, expected in _root_import_shadow_cases():
+        assert _synthetic_violations(source) == expected, name
+
+
+def test_owner_and_proof_import_roles_are_distinct(tmp):
+    del tmp
+    for name, source, expected in _owner_role_cases():
+        assert _synthetic_violations(source) == expected, name
+
+
 def test_import_bindings_do_not_rebind_root_spellings(tmp):
     del tmp
-    for name, source, expected in _root_provenance_cases():
+    for name, source, expected in (
+            *_root_provenance_cases(), *_owner_role_cases(),
+            *_root_import_shadow_cases()):
         assert _synthetic_violations(source) == expected, name
 
 
