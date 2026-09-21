@@ -353,15 +353,29 @@ def test_a_refused_connect_is_reported_by_its_reason_alone(tmp):
     assert 'urlopen error' not in r.stderr, r.stderr
 
 
+WAIT_FAILURES = 3
+WAIT_TIMEOUT = 30
+WAIT_RESULT = {'id': 'c', 'deliveryId': 'd', 'resultGeneration': 7,
+               'result': 'x'}
+
 _RAISING_URLOPEN = """
-import builtins, sys, urllib.error, urllib.request
+import builtins, json, sys, urllib.error, urllib.request
 from daedalus_cli import transport
 family, where, entry = sys.argv[1:4]
 exc = getattr(builtins, family)
 attempts = []
+peeks = 0
+FAILURES = %(failures)d
+TIMEOUT = %(timeout)d
+RESULT = %(result)s
+CONSUMED = {'consumed': True,
+            'resultGeneration': RESULT['resultGeneration']}
 
 
 class Response:
+    def __init__(self, body=None):
+        self.body = body
+
     def __enter__(self):
         return self
 
@@ -369,14 +383,22 @@ class Response:
         return False
 
     def read(self):
-        raise exc(f'{family} from {where}')
+        if self.body is None:
+            raise exc(f'{family} from {where}')
+        return self.body
 
     def close(self):
         pass
 
 
 def urlopen(req, timeout=None):
+    global peeks
     attempts.append(req.full_url)
+    if 'consume=1' in req.full_url:
+        return Response(json.dumps(CONSUMED).encode())
+    peeks += 1
+    if peeks > FAILURES:
+        return Response(json.dumps(RESULT).encode())
     if where == 'open':
         raise exc(f'{family} from open')
     if where == 'error':
@@ -387,15 +409,27 @@ def urlopen(req, timeout=None):
 
 urllib.request.urlopen = urlopen
 if entry == 'wait':
-    out = transport.wait_for_result('c', 't', 'd', 0.2, interval=0)
-    print('WAIT', out, len(attempts))
+    out = transport.wait_for_result('c', 't', 'd', TIMEOUT, interval=0)
+    print('WAIT', json.dumps({'out': out, 'attempts': len(attempts)}))
 else:
     transport.api('GET', '/tabs')
 """
 
+_RAISING_URLOPEN %= {
+    'failures': WAIT_FAILURES,
+    'timeout': WAIT_TIMEOUT,
+    'result': repr(WAIT_RESULT),
+}
+
 
 def _check_transport_family(family):
-    """`family` from urlopen, the body read and an HTTPError's body read."""
+    """`family` from urlopen, the body read and an HTTPError's body read.
+
+    The wait pin is causal, not wall-clock: the child's WAIT_TIMEOUT is
+    far past any scheduler stall, WAIT_FAILURES failed peeks must be
+    survived, and the peek that lands must be consumed — attempts is
+    failures + 2, exactly (issue 893).
+    """
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read', 'error'):
         r = _run([sys.executable, '-c', _RAISING_URLOPEN, family, where,
@@ -408,9 +442,11 @@ def _check_transport_family(family):
                   'wait'], env)
         assert r.returncode == 0, (where, r.returncode, r.stderr)
         assert 'Traceback' not in r.stderr, (where, r.stderr)
-        verdict, outcome, attempts = r.stdout.strip().split()
-        assert (verdict, outcome) == ('WAIT', 'None'), (where, r.stdout)
-        assert int(attempts) >= 1, (where, r.stdout)
+        verdict, payload = r.stdout.strip().split(' ', 1)
+        assert verdict == 'WAIT', (where, r.stdout)
+        report = json.loads(payload)
+        assert report['out'] == WAIT_RESULT, (where, r.stdout)
+        assert report['attempts'] == WAIT_FAILURES + 2, (where, r.stdout)
 
 
 def test_a_connection_reset_is_a_connection_failure_on_every_entry(tmp):
