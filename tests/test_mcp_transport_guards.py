@@ -419,9 +419,9 @@ def test_poll_admits_a_read_just_inside_the_deadline(tmp):
 def test_poll_rejects_a_read_exactly_at_the_deadline(tmp):
     """A read equal to the deadline no longer admits a poll.
 
-    The entry check is strict, so the clock stepping exactly onto the
-    deadline ends the wait with nothing polled; an inclusive check
-    would take the mismatched reply's peek.
+    The clock steps exactly onto the deadline, where both loop reads
+    see it: either the entry check or the post-sleep spent check ends
+    the wait with nothing polled.
     """
     del tmp
     transport = _transport()
@@ -548,9 +548,8 @@ def test_poll_hands_over_a_success_just_inside_the_deadline(tmp):
 def test_poll_lets_the_consume_ride_the_ordinary_client_timeout(tmp):
     """The consume carries no remaining-time budget of its own.
 
-    The consume is what claims the result: cutting it off at the
-    deadline would leave a result nobody takes. It stays bounded by the
-    ordinary client timeout, the same convention as the CLI waiter.
+    It is what claims the result, so it stays bounded by the ordinary
+    client timeout, the CLI waiter's convention.
     """
     del tmp
     transport = _transport()
@@ -655,9 +654,8 @@ def test_poll_reports_timeout_when_a_real_front_end_cuts_every_peek(tmp):
     expected = 'raised TimeoutError: no result within 0.001s'
     assert result == expected, (result, expected)
     assert raised == 'RemoteProtocolError', raised
-    # A peek whose remaining budget expires can die before it reaches
-    # the server, so the count of visible peeks is not exact; that none
-    # of them is a consume is.
+    # A peek whose budget expires can die before it reaches the server,
+    # so the visible count is inexact; that none is a consume is exact.
     gets = [path for verb, path in seen if verb == 'GET']
     assert gets[-1] == '/result', seen
     assert all(path == '/result?delivery=d1' for path in gets[:-1]), seen
