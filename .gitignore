@@ -215,6 +215,7 @@
 !/scripts/
 !/scripts/ci/
 !/scripts/ci/accepted_speed_changes.json
+!/scripts/ci/aggregate_gate.py
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/classify_changes.py
 !/scripts/ci/compare_durations.py
@@ -333,6 +334,7 @@
 !/tests/_yamlread.py
 !/tests/_yamlscalar.py
 !/tests/_yamlsteps.py
+!/tests/test_aggregate_gate.py
 !/tests/test_aggregate_needs.py
 !/tests/test_atomic_file.py
 !/tests/test_bash_resolver_scan.py
