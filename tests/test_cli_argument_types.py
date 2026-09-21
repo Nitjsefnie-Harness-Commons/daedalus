@@ -116,6 +116,8 @@ def test_well_formed_values_parse_to_their_typed_values(tmp):
     assert args.params == {'a': 1}, args
     args = accepted(['cdp', 'Page.enable'])
     assert args.params is None, args
+    args = accepted(['cdp', 'Page.enable', '--chrome-tab', '0'])
+    assert args.chrome_tab == 0, args
 
 
 def test_expires_keeps_floats_whole_domain(tmp):
