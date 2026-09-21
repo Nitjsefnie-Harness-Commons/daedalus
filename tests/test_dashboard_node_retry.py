@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
+from test_dashboard_behaviour import (  # noqa: E402
+    _controlled_run, _result, _timeout)
 
 
 def _harness(source, bounded_steps=0, module=False):
@@ -214,7 +216,7 @@ def test_windows_declined_retry_is_named_in_the_verdict(tmp):
         (1102, [behaviour._result(0, 'wrong retry')]))
     assert failure.startswith(
         'dashboard node outer timeout after 1 attempt\n'
-        'retry declined: the post-kill drain did not complete '
+        "retry declined: the first child's reader cleanup did not finish "
         '(drain outcome: timed out)\n'), failure
     assert 'attempt 1:' in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
@@ -230,7 +232,7 @@ def test_windows_declined_retry_names_a_drain_that_raised(tmp):
         'win32', (1201, [behaviour._timeout(), raise_drain]),
         (1202, [behaviour._result(0, 'wrong retry')]))
     expected = (
-        'retry declined: the post-kill drain did not complete '
+        "retry declined: the first child's reader cleanup did not finish "
         '(drain outcome: raised RuntimeError: drain reader gone)\n')
     assert expected in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
@@ -309,6 +311,69 @@ def test_last_attempt_decline_does_not_name_a_retry_left_to_decline(tmp):
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'retry declined' not in failure, failure
     assert [event[0] for event in events].count('popen') == 2, events
+
+
+def test_windows_preserves_only_completed_cpython_reader_buffers(tmp):
+    # Cleanup settles, so the gate retries; the second attempt also times
+    # out so the verdict carries both records for the buffer assertions.
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (1001, [
+            _timeout(None, b'early error\n'), _timeout(None, None)], {
+                'wait_succeeds': True,
+                'reader_buffers': {
+                    'stdout': 'prefix middle end',
+                    'stderr': '[phase] buffered phase\nbuffered error',
+                }}), (1009, [_timeout(), _result(-9, 'second attempt')]))
+    launches = [event[0] for event in events].count('popen')
+    assert launches == 2, (failure, events)
+    assert "stdout: 'prefix middle end'" in failure, failure
+    assert failure.count('prefix middle end') == 1, failure
+    assert "stderr: 'early error\\n[phase] buffered phase\\n" \
+        "buffered error'" in failure
+    assert 'last phase: buffered phase' in failure, failure
+
+    sibling, events, _ = _controlled_run(
+        'win32', (1002, [_timeout(None, None), _timeout(None, None)], {
+            'wait_succeeds': True,
+            'reader_buffers': {'stdout': 'completed sibling'},
+            'stuck_reader': 'stderr',
+        }))
+    assert ("stdout: 'completed sibling'; "
+            "stderr: '<unrecoverable: reader cancelled after the drain "
+            "timed out>'") in sibling, sibling
+    assert ('buffer-read', 'stderr') not in events, events
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_cancelled_reader_is_not_rendered_as_empty(tmp):
+    # A cancelled reader recovered nothing, so its stream must not read as
+    # "the child produced nothing"; a completed reader with no output still
+    # renders as empty in the same record.
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (1103, [_timeout(None, None), _timeout(None, None)], {
+            'wait_succeeds': False,
+            'reader_buffers': {'stdout': ''}}))
+    assert ('buffer-read', 'stderr') in events, events
+    assert ("stdout: ''; "
+            "stderr: '<unrecoverable: reader cancelled after the drain "
+            "timed out>'") in failure, failure
+    assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_independent_output_sources_keep_repeated_boundary(tmp):
+    # Both readers complete with recorded buffers so the pin stays about the
+    # merge boundary; the cleanup settles and the retry runs.
+    del tmp
+    failure, events, _ = _controlled_run('win32', (1003, [
+        _timeout(b'leftX'), _timeout(None, None)], {
+            'wait_succeeds': True,
+            'reader_buffers': {'stdout': 'Xright', 'stderr': ''}}), (1009, [
+                _timeout(), _result(-9, 'second attempt')]))
+    launches = [event[0] for event in events].count('popen')
+    assert launches == 2, (failure, events)
+    assert "stdout: 'leftXXright'; stderr: ''" in failure, failure
 
 
 def main():

@@ -622,59 +622,29 @@ def test_windows_does_not_retry_when_child_cleanup_cannot_finish(_tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
-def test_windows_does_not_retry_after_timed_out_drain_is_reaped(_tmp):
-    failure, events, _ = _controlled_run(
+def test_windows_retries_when_timed_out_drain_is_reaped(_tmp):
+    # The first child was fully cleaned up, so the "second child beside an
+    # uncleaned first one" rationale for declining no longer holds and the
+    # platform's one transient-stall retry must still be available.
+    result, events, diagnostic = _controlled_run(
         'win32', (801, [_timeout(), _timeout('partial', 'error')],
                   {'wait_succeeds': True}),
-        (802, [_result(0, 'wrong retry')]))
-    assert isinstance(failure, str), failure
-    assert 'drain outcome: timed out' in failure, failure
-    assert "stdout: 'partial'; stderr: 'error'" in failure, failure
-    assert [event[0] for event in events].count('popen') == 1, events
+        (802, [_result(0, 'recovered')]))
+    assert [event[0] for event in events].count('popen') == 2, (result, events)
     assert [event[0] for event in events].count('wait') == 1, events
-
-
-def test_windows_preserves_only_completed_cpython_reader_buffers(_tmp):
-    failure, _, _ = _controlled_run(
-        'win32', (1001, [
-            _timeout(None, b'early error\n'), _timeout(None, None)], {
-                'wait_succeeds': True,
-                'reader_buffers': {
-                    'stdout': 'prefix middle end',
-                    'stderr': '[phase] buffered phase\nbuffered error',
-                }}))
-    assert "stdout: 'prefix middle end'" in failure, failure
-    assert failure.count('prefix middle end') == 1, failure
-    assert "stderr: 'early error\\n[phase] buffered phase\\n" \
-        "buffered error'" in failure
-    assert 'last phase: buffered phase' in failure, failure
-
-    sibling, events, _ = _controlled_run(
-        'win32', (1002, [_timeout(None, None), _timeout(None, None)], {
-            'wait_succeeds': True,
-            'reader_buffers': {'stdout': 'completed sibling'},
-            'stuck_reader': 'stderr',
-        }))
-    assert "stdout: 'completed sibling'; stderr: ''" in sibling, sibling
-    assert ('buffer-read', 'stderr') not in events, events
-    assert [event[0] for event in events].count('popen') == 1, events
-
-
-def test_independent_output_sources_keep_repeated_boundary(_tmp):
-    failure, _, _ = _controlled_run('win32', (1003, [
-        _timeout(b'leftX'), _timeout(None, None)], {
-            'wait_succeeds': True,
-            'reader_buffers': {'stdout': 'Xright'}}))
-    assert "stdout: 'leftXXright'; stderr: ''" in failure, failure
+    assert result.stdout == 'recovered', result
+    assert 'recovered' in diagnostic and 'drain timed out' in diagnostic, (
+        diagnostic)
 
 
 def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
-    failure, events, _ = _controlled_run(
+    # Cleanup settling now enables the retry instead of declining it, so the
+    # ordering pin rides on the retried run and the second launch waits for it.
+    result, events, _ = _controlled_run(
         'win32', (901, [_timeout(), _timeout('partial', 'error')],
                   {'wait_succeeds': True, 'held_readers': True}),
-        (902, [_result(0, 'wrong retry')]))
-    assert failure.startswith('dashboard node outer timeout after 1 attempt')
-    assert 'drain outcome: timed out' in failure, failure
+        (902, [_result(0, 'recovered')]))
+    assert [event[0] for event in events].count('popen') == 2, (result, events)
     steps = [event[:2] for event in events]
     required = [
         ('kill', 901), ('reader-cancel', 'stdout'),
@@ -686,7 +656,7 @@ def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
     budgets = [event[2] for event in events
                if event[0] in ('reader-join', 'wait')]
     assert budgets[0] > budgets[1] > budgets[2] >= 0, budgets
-    assert [event[0] for event in events].count('popen') == 1, events
+    assert result.stdout == 'recovered', result
 
 
 def main():
