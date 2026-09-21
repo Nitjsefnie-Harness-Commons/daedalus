@@ -16,6 +16,9 @@ _POST_RESULT_HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
 const [backgroundPath, scenario] = process.argv.slice(1);
+// backgroundPath is never read as a script here; it is the free identifier
+// import_scripts_stub resolves 'worker/config.js' through (its directory).
+// Renaming it crashes every test in this file.
 const messageListeners = [];
 const requests = [];
 const errors = [];
@@ -45,6 +48,8 @@ const chrome = {
 };
 
 async function bridgeFetch(target, init = {}) {
+  // The plan clamps: a request past its end is served the last entry again,
+  // so a one-row plan drives every retry attempt of one scenario.
   const entry = scenario.plan[
     Math.min(requests.length, scenario.plan.length - 1)];
   requests.push({
@@ -211,6 +216,40 @@ def test_a_dead_substitute_network_error_is_logged_once(tmp):
     assert seen['errors'] == [
         '[Daedalus] Substitute result POST failed: Error: substitute down',
     ], seen
+
+
+def test_413_on_the_last_attempt_after_5xx_still_substitutes(tmp):
+    """A late 413 gets its substitute once the 5xx retries are spent."""
+    del tmp
+    seen = _post(
+        {'status': 503}, {'status': 502}, {'status': 413}, {'status': 200},
+        did='delivery-413-late', tab_id='7',
+        result='late oversized é body', extra={'world': 'page:example.com'})
+    assert len(seen['requests']) == 4, seen
+    assert seen['timerDelays'] == [300, 600], seen
+    assert seen['errors'] == [], seen
+    refused = seen['requests'][2]
+    substitute = seen['requests'][3]['payload']
+    assert seen['requests'][3]['url'] == refused['url'], seen
+    for key in ('token', 'tabId', 'id', 'world', '_did'):
+        assert substitute[key] == refused['payload'][key], (key, seen)
+    assert substitute['result'] is None, seen
+    assert substitute['error'] == {
+        'message': 'result too large',
+        'size': len(refused['body'].encode('utf-8')),
+    }, seen
+    assert substitute['ts'] >= refused['payload']['ts'], seen
+
+
+def test_network_error_after_5xx_logs_exactly_once(tmp):
+    """The catch's status reset keeps the give-up log from doubling."""
+    del tmp
+    seen = _post(
+        {'status': 503}, {'status': 503}, {'networkError': 'relay down'})
+    assert len(seen['requests']) == 3, seen
+    assert seen['timerDelays'] == [300, 600, 900], seen
+    assert seen['errors'] == [
+        '[Daedalus] Result POST failed: Error: relay down'], seen
 
 
 def test_5xx_exhaustion_names_the_last_status(tmp):
