@@ -293,6 +293,29 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
     assert f'! -s {generated.group(1)}' in workflow, workflow
 
 
+def test_an_audit_run_validates_the_threshold_document(tmp):
+    """A threshold-only push still meets the validation that reads the file.
+
+    tests.yml and codeql.yml ignore pushes that touch only
+    .github/ci-thresholds.json, so a ratchet commit does not re-run the
+    expensive gates; the price was that a malformed hand edit pushed alone
+    to main waited for the next unrelated push to be told it was invalid.
+    audit.yml's push trigger is unfiltered, so the validation itself runs
+    there, on every audit run.
+    """
+    del tmp
+    workflow = (ROOT / '.github' / 'workflows' / 'audit.yml').read_text(
+        encoding='utf-8')
+    command = 'python3 scripts/ci/thresholds.py --check'
+    validating = []
+    for name in _job_names(workflow):
+        job = complete_job_mapping(workflow, name)
+        for step in job.get('steps', []):
+            if step.get('run', '').splitlines() == [command]:
+                validating.append(name)
+    assert validating == ['thresholds'], validating
+
+
 def _pinned_actions():
     used = {}
     pattern = re.compile(
