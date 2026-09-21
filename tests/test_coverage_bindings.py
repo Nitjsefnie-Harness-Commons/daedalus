@@ -634,9 +634,11 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     bindings_target = root / 'tests' / '_coverage_bindings.py'
     scopes_target = root / 'tests' / '_coverage_scopes.py'
     bash_target = root / 'tests' / '_bash_resolver_scan.py'
+    guard_target = root / 'tests' / '_coverage_guard.py'
     for name, target_name, replacements, invocation in _mutation_specs():
         target = (bindings_target if target_name == 'bindings'
                   else scopes_target if target_name == 'scopes'
+                  else guard_target if target_name == 'guard'
                   else bash_target)
         original = target.read_bytes()
         crlf = b'\r\n' in original

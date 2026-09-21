@@ -166,10 +166,10 @@ def _is_root_spelling(node, shadowed_names=frozenset(), owners=frozenset()):
             and _is_relative_literal(node.right.value)):
         return _is_root_spelling(node.left, shadowed_names, owners)
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'str' and 'str()' not in shadowed_names
-            and len(node.args) == 1
+            and node.func.id == 'str' and len(node.args) == 1
             and not node.keywords):
-        return _is_root_spelling(node.args[0], shadowed_names, owners)
+        return ('str()' not in shadowed_names
+                and _is_root_spelling(node.args[0], shadowed_names, owners))
     return False
 
 
@@ -224,12 +224,14 @@ def _root_assignments(tree):
     return values
 
 
-def _unprovable_names(tree):
+def _unprovable_names(tree, layout=None):
     _, proof_shadows, root_imported = _import_rebound_names(tree)
-    names = set().union(*proof_shadows.values())
+    scoped, _ = layout or _evaluation_scopes(tree)
+    names = set().union(*(proof_shadows.get(node, set())
+                          for node, scope in scoped if scope is tree))
     if not _root_assignments(tree) and not root_imported:
         names.add('ROOT')
-    return names
+    return names, proof_shadows
 
 
 def _shadowed_names(tree):
@@ -253,7 +255,7 @@ def _shadowed_names(tree):
                  and node.name)
     names.update(node.rest for node in walked
                  if isinstance(node, ast.MatchMapping) and node.rest)
-    unprovable = _unprovable_names(tree)
+    unprovable, _ = _unprovable_names(tree)
     names.update(unprovable)
     root_values = _root_assignments(tree)
     owners = root_owner_names(tree)
@@ -397,7 +399,9 @@ def _scope_shadows(tree, layout=None):
     """
     scoped, parents = layout or _evaluation_scopes(tree)
     shadows = {scope: set() for scope in parents}
+    unprovable, imports = _unprovable_names(tree, (scoped, parents))
     for node, scope in scoped:
+        shadows[scope].update(imports.get(node, ()))
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.ClassDef)):
             shadows[scope].add(node.name)
@@ -415,8 +419,9 @@ def _scope_shadows(tree, layout=None):
             shadows[scope].add(node.name)
         elif isinstance(node, ast.MatchMapping) and node.rest:
             shadows[scope].add(node.rest)
-    # Import-derived facts are module-wide, like owner retirement.
-    shadows[tree].update(_unprovable_names(tree))
+    # A star import is a SyntaxError inside a function, so module-wide
+    # is its real scope.
+    shadows[tree].update(unprovable)
     return shadows
 
 
