@@ -100,6 +100,31 @@ def test_segment_status_reports_an_html_body_as_a_connection_failure(tmp):
         assert r.stdout == '', r.stdout
 
 
+def test_segment_status_survives_a_200_cut_off_mid_body(tmp):
+    """A declared length the body does not keep is no answer, not a crash."""
+    del tmp
+    with html_front_end(body=b'<html><body>', declared=400) as base:
+        r = run_cli(['segment-status', 'somejob'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert 'Connection failed' in r.stderr, r.stderr
+        assert 'Traceback' not in r.stderr, r.stderr
+        assert r.stdout == '', r.stdout
+
+
+def test_segment_status_survives_a_200_whose_json_is_not_an_object(tmp):
+    """`[1,2]` parses as JSON and then is not the object the sig is read
+    from; that is still a front end's answer, not the bridge's."""
+    del tmp
+    with html_front_end(body=b'[1,2]') as base:
+        r = run_cli(['segment-status', 'somejob'],
+                    cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK))
+        assert r.returncode != 0, (r.returncode, r.stdout)
+        assert 'Connection failed' in r.stderr, r.stderr
+        assert 'Traceback' not in r.stderr, r.stderr
+        assert r.stdout == '', r.stdout
+
+
 def test_an_error_result_reports_on_stderr_with_stdout_left_for_data(tmp):
     """stdout carries only result data; the ERROR diagnostic is stderr's."""
     del tmp

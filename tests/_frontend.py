@@ -89,11 +89,14 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
 
     A captive portal, a sign-in wall or a proxy error page arrives as a
     complete HTML response with a success or proxy status — never as the
-    JSON the bridge would have written.
+    JSON the bridge would have written. `declared` overrides the advertised
+    Content-Length: a promise the body does not keep, the shape of a front
+    end cut off mid-answer.
     """
 
     status = 200
     body = b'<html><body>sign in to this network</body></html>'
+    declared = None
 
     def _answer(self):
         declared = self.headers.get('Content-Length')
@@ -101,7 +104,9 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
             self.rfile.read(int(declared))
         self.send_response(self.status)
         self.send_header('Content-Type', 'text/html')
-        self.send_header('Content-Length', str(len(self.body)))
+        self.send_header('Content-Length',
+                         str(len(self.body) if self.declared is None
+                             else self.declared))
         self.end_headers()
         self.wfile.write(self.body)
 
@@ -115,9 +120,10 @@ class HtmlFrontEndHandler(http.server.BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def html_front_end(status=200, body=HtmlFrontEndHandler.body):
+def html_front_end(status=200, body=HtmlFrontEndHandler.body, declared=None):
     HtmlFrontEndHandler.status = status
     HtmlFrontEndHandler.body = body
+    HtmlFrontEndHandler.declared = declared
     server = http.server.ThreadingHTTPServer(
         ('127.0.0.1', 0), HtmlFrontEndHandler)
     thread = threading.Thread(target=server.serve_forever)
