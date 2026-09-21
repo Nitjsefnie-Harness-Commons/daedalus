@@ -5,7 +5,6 @@ looked no further printed PASS over a body that never executed. The
 runner refuses rather than awaits: it has no event loop policy of its
 own, and a test that wants one says so with `asyncio.run` in a plain def.
 """
-import contextlib
 import inspect
 
 
@@ -18,9 +17,6 @@ def run_to_completion(test, tmp):
     result = test(tmp)
     if inspect.iscoroutine(result):
         result.close()
-    elif inspect.isasyncgen(result):
-        with contextlib.suppress(StopIteration):
-            result.aclose().send(None)
     if inspect.isawaitable(result) or inspect.isasyncgen(result):
         raise AssertionError(
             'returned an awaitable the runner does not await: '
