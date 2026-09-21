@@ -65,10 +65,21 @@ GETTER_CASES = [
      _LET + _ARROW(_PRO) + "void obj.p" + _TAIL, False),
     *_both('optional-getter-call', _ARROW, 'obj?.p()'),
     *_both('computed-getter-call', _ARROW, "obj['p']()"),
+    ('getter-returns-awaiting-arrow-demotion',
+     _LET + _PRO + "\n" + _ARROW("await 0; " + _DEM).replace(
+         'return () =>', 'return async () =>') + "obj.p()" + _TAIL, True),
+    ('getter-returns-awaiting-arrow-promotion',
+     _LET + _ARROW("await 0; " + _PRO).replace(
+         'return () =>', 'return async () =>') + "obj.p()" + _TAIL,
+     (False, True)),
     ('getter-returns-global-or-demoter',
      _LET + _PRO + "\nfunction dem() { " + _DEM + " }\n"
      "const obj = { get p() { return globalThis.mystery || dem; } };\n"
      "obj.p()" + _TAIL, (False, True)),
+    ('getter-returns-global-or-promoter',
+     _LET + "function pro() { " + _PRO + " }\n"
+     "const obj = { get p() { return globalThis.mystery || pro; } };\n"
+     "obj.p()" + _TAIL, True),
     ('getter-returns-global-or-inert',
      _LET + _PRO + "\n"
      "const obj = { get p() { return globalThis.mystery || ordinary; } };"
@@ -81,6 +92,18 @@ GETTER_CASES = [
      _LET + _PRO + "\nconst choose = false;\n"
      "const obj = { get p() { return choose ? (() => { " + _DEM
      + " }) : ordinary; } };\nobj.p()" + _TAIL, True),
+    ('getter-returns-chosen-promoter',
+     _LET + "const choose = true;\n"
+     "const obj = { get p() { return choose ? (() => { " + _PRO
+     + " }) : ordinary; } };\nobj.p()" + _TAIL, True),
+    ('getter-returns-branch-demoter',
+     _LET + _PRO + "\nconst choose = true;\n"
+     "const obj = { get p() { if (choose) { return () => { " + _DEM
+     + " }; } return ordinary; } };\nobj.p()" + _TAIL, (False, True)),
+    ('getter-returns-branch-promoter',
+     _LET + "const choose = true;\n"
+     "const obj = { get p() { if (choose) { return () => { " + _PRO
+     + " }; } return ordinary; } };\nobj.p()" + _TAIL, True),
     ('generator-method-demotion-stays-reported',
      _LET + _PRO + "\n" + _method('*p()')(_DEM) + "obj.p()" + _TAIL, True),
     ('generator-method-promotion-never-runs',
