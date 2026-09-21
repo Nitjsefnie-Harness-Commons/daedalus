@@ -87,6 +87,31 @@ def test_accept_writes_both_slots_and_the_delivery_file(tmp):
     assert isinstance(token_slot['roundtrip_ms'], int)
 
 
+def test_accept_stores_the_result_without_the_credential(tmp):
+    """The stored body is not a copy of the control credential.
+
+    The body arrives carrying `token` because that is how the caller
+    authenticated, so storing it verbatim made every slot and delivery file
+    under results/ a copy of the credential. PUT /command strips `token`
+    from what it stores, and POST /result now does the same; the dashboard
+    event never carried it.
+    """
+    routes = _load('fixture_result_routes_cred')
+    token, did = 'credtok', 'cred-1'
+    status, payload = routes.accept_result(
+        RES_DIR, tmp, token,
+        {'token': token, 'tabId': '1', 'id': 'cmd-1', 'value': 'hi',
+         '_did': did},
+        DELIVERY_CAP)
+    assert (status, payload) == (200, {'ok': True})
+    for path in (_slot(token), _slot(token, '1'),
+                 _delivery(token, '1', did)):
+        stored = _read(path)
+        assert 'token' not in stored, (path, stored)
+        assert stored['value'] == 'hi', (path, stored)
+    assert _events(tmp, token)[0]['type'] == 'result'
+
+
 def test_accept_answers_duplicate_for_a_repeated_delivery_id(tmp):
     routes = _load('fixture_result_routes_duplicate')
     token, did = 'duptok', 'dup-1'
