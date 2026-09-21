@@ -315,6 +315,23 @@ def test_a_read_short_of_the_declared_length_is_refused(_tmp):
     assert exact.status is None, exact.status
 
 
+def test_a_body_one_byte_short_of_its_declaration_is_refused(_tmp):
+    """The comparison is exact: one missing byte is still a shortfall."""
+    stub = _Stub(headers=[('Content-Length', '10')],
+                 body=b'0123456789'[:9])
+    assert stub._read_body(10) is None
+    assert stub.status == 400, stub.status
+    assert json.loads(stub.wfile.getvalue()) == {
+        'error': 'request body shorter than Content-Length'}
+
+
+def test_a_zero_length_declaration_passes_through(_tmp):
+    """Content-Length: 0 is a complete read: b'' handed over, no refusal."""
+    empty = _Stub(headers=[('Content-Length', '0')])
+    assert empty._read_body(0) == b''
+    assert empty.status is None, empty.status
+
+
 def test_the_body_read_deadline_still_answers_before_the_shortfall(_tmp):
     """The 408 path is untouched: a body that stops mid-flight times out."""
     stalled = _Stub(headers=[('Content-Length', '10')])
