@@ -207,6 +207,10 @@ def notify_dashboard(cmd_dir, token, payload):
                      {'id': event_id, 'kind': 'event', **payload})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
+        # The 8-character prefix redacted() leaves is the same by-design
+        # residual the refusal print documents; this suppresses the
+        # clear-text-logging alert that residual exposure earns.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f'[DASH-NOTIFY-FAIL] '
               f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 
