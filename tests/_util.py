@@ -7,7 +7,6 @@ POSIX-only assumption here would surface as a test failure rather than as the
 platform difference it actually is.
 """
 import contextlib
-import http.client
 import importlib.util
 import json
 import os
@@ -20,8 +19,6 @@ import threading
 import time
 import traceback
 import typing
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from _completion import run_to_completion
@@ -471,6 +468,7 @@ def bridge(tmp, env=None, output=None, proc_out=None):
     child dying is the only thing such a wait can give up on.
     """
     global _bridge_started
+    import urllib.error
 
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
@@ -537,6 +535,10 @@ def request(url, method='GET', body=None, headers=None, timeout=10):
     suites assert is precisely that the bridge REFUSES something, and a helper
     that raised on 400 would make those assertions awkward enough to skip.
     """
+    # AST-only mutation children import this helper without using HTTP.
+    import urllib.error
+    import urllib.request
+
     data = None
     hdrs = dict(headers or {})
     if body is not None:
@@ -566,6 +568,8 @@ def post_json(url, body, **kw):
 
 def header_stream(base, target, headers):
     """Open a stream whose credential travels in headers, not the target."""
+    import http.client
+
     port = int(base.rsplit(':', 1)[1])
     conn = http.client.HTTPConnection('127.0.0.1', port, timeout=30)
     conn.putrequest('GET', target)
