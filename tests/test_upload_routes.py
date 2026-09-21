@@ -332,7 +332,6 @@ def test_store_upload_writes_a_timestamped_screenshot(tmp):
 
 
 def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
-    """Two unnamed captures in one millisecond must not share a file."""
     routes = _load('fixture_upload_routes_same_ms')
     for clock in (1700000000.5, 1.5):
         paths = []
@@ -351,8 +350,6 @@ def test_store_upload_names_same_millisecond_captures_distinctly(tmp):
 
 
 def test_store_upload_publishes_through_a_temp_sibling(tmp):
-    """The bytes land in `.<final>.tmp` and are published by one replace,
-    for the unnamed and the `filename` forms alike."""
     routes = _load('fixture_upload_routes_temp_sibling')
     real = routes.atomic_file.replace_atomically
     calls = []

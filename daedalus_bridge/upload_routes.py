@@ -71,7 +71,7 @@ def stored_uploads(token_dir, upload_id):
                     continue
                 mtime = os.stat(entry.path).st_mtime
             except OSError:
-                # A concurrent delete can remove an id before sorting.
+                # Deletion can race with sorting.
                 continue
             dated_dirs.append((pathlib.Path(entry.path), mtime))
         dated_dirs.sort(key=lambda item: item[1], reverse=True)
@@ -81,14 +81,14 @@ def stored_uploads(token_dir, upload_id):
             with os.scandir(id_dir) as entries:
                 files = list(entries)
         except OSError:
-            # A concurrent delete can remove the id being scanned.
+            # Deletion can race with scanning.
             continue
         files.sort(key=lambda entry: entry.name)
         for entry in files:
             try:
                 is_file = entry.is_file()
             except OSError:
-                # A concurrent delete can make an entry's type check fail.
+                # Deletion can race with the type check.
                 continue
             if is_file and not _reserved_name(entry.name):
                 yield id_dir.name, entry
@@ -125,7 +125,7 @@ def list_uploads(upload_dir, token, params):
     try:
         token_exists = token_dir.is_dir()
     except OSError:
-        # A concurrent delete can make the token's directory stat fail.
+        # Deletion can race with the directory check.
         token_exists = False
     if not token_exists:
         if paged:
@@ -151,7 +151,7 @@ def list_uploads(upload_dir, token, params):
             try:
                 info = os.stat(entry.path)
             except OSError:
-                # A concurrent delete can remove a page entry.
+                # Deletion can race with pagination.
                 continue
             results.append({
                 'id': id_name,
@@ -192,8 +192,7 @@ def store_upload(upload_dir, body):
     for val in (token, upload_id, filename):
         if path_safety.unsafe_component(val):
             return 400, {'error': 'invalid path component'}
-    # `.tmp` is the store's own reservation below, and the listing skips
-    # it; an accepted upload must never be hidden by that skip.
+    # The listing hides `.tmp`; accepted uploads must remain visible.
     if _reserved_name(filename):
         return 400, {'error': 'invalid path component'}
     try:
@@ -210,9 +209,7 @@ def store_upload(upload_dir, body):
                 dest_dir, f'{ts:013d}_{next(_name_counter):06d}.{fmt}')
     except ValueError:
         return 400, {'error': 'invalid path component'}
-    # A sibling temp, unique per write, published by one replace as
-    # command_queue does, so a reader never sees a partially written file
-    # at the final name and two writers of one name never share a temp.
+    # Same-named writers must not share a temp.
     tmp = dest.with_name(f'.{dest.name}.{next(_name_counter)}.tmp')
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +219,7 @@ def store_upload(upload_dir, body):
         try:
             tmp.unlink()
         except OSError:
-            # Best effort; the 500 below is the answer that matters.
+            # Cleanup failure must not mask the storage failure.
             pass
         return 500, {'error': 'upload storage failure'}
     size = len(raw)
@@ -376,7 +373,7 @@ def latest_screenshot(upload_dir, token, params):
         search_dirs = ([token_dir / upload_id] if upload_id
                        else sorted(token_dir.iterdir()))
     except OSError:
-        # A concurrent delete can remove the token directory before its scan.
+        # Deletion can race with the token scan.
         return 404, {'error': 'no uploads'}
     latest = None
     latest_mtime = 0
@@ -386,14 +383,14 @@ def latest_screenshot(upload_dir, token, params):
                 continue
             files = list(d.iterdir())
         except OSError:
-            # A concurrent delete can remove an id between check and scan.
+            # Deletion can race with the id scan.
             continue
         for f in files:
             if _format_of(f) in SCREENSHOT_TYPES:
                 try:
                     mtime = f.stat().st_mtime
                 except OSError:
-                    # A concurrent delete can remove a screenshot candidate.
+                    # Deletion can race with screenshot selection.
                     continue
                 if latest is None or mtime > latest_mtime:
                     latest = f
