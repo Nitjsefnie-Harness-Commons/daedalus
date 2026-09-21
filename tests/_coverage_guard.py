@@ -104,6 +104,7 @@ class _ModuleFacts:
                     if alias.name in _CHDIR:
                         self.chdir_callables.add(bound)
         self._propagate_aliases(tree)
+        scopes = dict(self.scoped_nodes)
         for node in walked:
             if isinstance(node, ast.Call):
                 function = node.func
@@ -115,7 +116,9 @@ class _ModuleFacts:
                 if is_chdir:
                     is_root = (bool(node.args)
                                and _is_root_spelling(
-                                   node.args[0], self.shadowed_names,
+                                   node.args[0], _visible_scope_shadows(
+                                       scopes[node], self.scope_shadows,
+                                       self.scope_parents),
                                    self.root_owners))
                     self.chdir_calls.append((node.lineno, is_root))
         self._collect_bindings(tree.body)
