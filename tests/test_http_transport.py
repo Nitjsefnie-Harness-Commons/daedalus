@@ -165,6 +165,29 @@ def test_send_file_sizes_from_the_open_descriptor(tmp):
         len(stub.wfile.getvalue())), stub.headers_sent
 
 
+def test_send_file_keeps_opened_bytes_when_the_path_is_replaced(tmp):
+    path = Path(tmp) / 'shot.png'
+    original = b'original image'
+    path.write_bytes(original)
+    replacement = Path(tmp) / 'replacement.png'
+    replacement.write_bytes(b'new')
+    stub = _Stub()
+    real_open = open
+
+    def open_then_replace(*args, **kwargs):
+        handle = real_open(*args, **kwargs)
+        replacement.replace(path)
+        return handle
+
+    with mock.patch.object(transport, 'open', open_then_replace, create=True):
+        stub.answer(transport.FileAnswer(path, 'image/png'))
+    assert path.read_bytes() == b'new'
+    assert stub.status == 200, stub.status
+    assert stub.wfile.getvalue() == original, stub.wfile.getvalue()
+    assert stub.headers_sent['Content-Length'] == str(len(original)), (
+        stub.headers_sent)
+
+
 def test_answer_writes_a_bytes_answer_with_extra_headers(_tmp):
     stub = _Stub()
     stub.answer(transport.BytesAnswer(

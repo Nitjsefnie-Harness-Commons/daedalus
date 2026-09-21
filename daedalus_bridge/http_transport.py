@@ -437,7 +437,7 @@ class RequestMixin(BaseHTTPRequestHandler):
         try:
             fh = open(path, 'rb')
         except OSError:
-            # A concurrent delete can remove the selected file before open.
+            # Deletion can race with opening the selected file.
             self._json(404, {'error': 'file not found'})
             return
         with fh:

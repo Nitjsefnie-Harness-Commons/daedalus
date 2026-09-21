@@ -503,7 +503,7 @@ def test_result_upload_delete_filesystem_errors_are_answered(tmp):
         'def _fail_storage_write(path, data):\n'
         '    if path.parent.name == "results":\n'
         '        raise OSError("injected result write failure")\n'
-        '    if path.name.startswith((".fault.bin.", "fault.bin")):\n'
+        '    if path.name.startswith(".fault.bin."):\n'
         '        raise OSError("injected upload write failure")\n'
         '    return _real_write_bytes(path, data)\n'
         'pathlib.Path.write_bytes = _fail_storage_write\n'
