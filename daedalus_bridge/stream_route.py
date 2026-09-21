@@ -90,15 +90,17 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
             if tab == 'dashboard':
                 delivered += stream_service.drain_queue(
                     targets.queue, None, killed_event,
-                    command_ttl=command_ttl, frame_writer=writer)
+                    command_ttl=command_ttl, frame_writer=writer,
+                    secret=token)
             elif tab == 'extension':
                 # Typed commands addressed to the extension itself
                 delivered += stream_service.drain_queue(
                     targets.queue, None, killed_event,
-                    command_ttl=command_ttl, frame_writer=writer)
+                    command_ttl=command_ttl, frame_writer=writer,
+                    secret=token)
                 delivered += stream_service.drain_legacy_file(
                     targets.legacy, None, command_ttl=command_ttl,
-                    frame_writer=writer)
+                    frame_writer=writer, secret=token)
                 # Per-tab eval queues for every other tab (tag chromeTab so
                 # bg can route)
                 prefix = f'{token}_'
@@ -111,11 +113,12 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
                         continue
                     delivered += stream_service.drain_queue(
                         entry, sub, killed_event, command_ttl=command_ttl,
-                        frame_writer=writer)
+                        frame_writer=writer, secret=token)
                 # Broadcast queue + legacy per-tab raw-file drops
                 delivered += stream_service.drain_queue(
                     targets.broadcast_queue, None, killed_event,
-                    command_ttl=command_ttl, frame_writer=writer)
+                    command_ttl=command_ttl, frame_writer=writer,
+                    secret=token)
                 delivered += stream_service.drain_legacy_ext(
                     cmd_dir, token, killed_event, frame_writer=writer,
                     extension_legacy_name=targets.legacy_name,
@@ -123,20 +126,22 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
             else:  # specific-tab stream (rare — clients use tab=extension)
                 delivered += stream_service.drain_queue(
                     targets.queue, None, killed_event,
-                    command_ttl=command_ttl, frame_writer=writer)
+                    command_ttl=command_ttl, frame_writer=writer,
+                    secret=token)
                 if tab:
                     delivered += stream_service.drain_queue(
                         targets.broadcast_queue, None, killed_event,
-                        command_ttl=command_ttl, frame_writer=writer)
+                        command_ttl=command_ttl, frame_writer=writer,
+                        secret=token)
                     delivered += stream_service.drain_legacy_file(
                         targets.legacy, None, command_ttl=command_ttl,
-                        frame_writer=writer)
+                        frame_writer=writer, secret=token)
             # Broadcast legacy raw-file — skip for dashboard so it doesn't
             # steal commands
             if tab != 'dashboard':
                 delivered += stream_service.drain_legacy_file(
                     targets.broadcast_legacy, None, command_ttl=command_ttl,
-                    frame_writer=writer)
+                    frame_writer=writer, secret=token)
 
             now = _now()
             if now - last_ka >= keepalive:

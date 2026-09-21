@@ -446,11 +446,6 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
             {'token': TOK, 'path': f'{TOK}/_ss/capture-a.png'})
         status, served = _util.get(f'{base}/screenshot?{legacy}')
         assert status == 200 and served == PNG + b'-A', (status, served[:32])
-        # The token-led form a stored result can still carry keeps working.
-        legacy = urllib.parse.urlencode(
-            {'token': TOK, 'path': f'{TOK}/_ss/capture-a.png'})
-        status, served = _util.get(f'{base}/screenshot?{legacy}')
-        assert status == 200 and served == PNG + b'-A', (status, served[:32])
 
 
 def test_a_screenshot_path_cannot_leave_its_own_token(tmp):
