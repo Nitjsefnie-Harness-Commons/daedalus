@@ -39,9 +39,9 @@ async def _read_post_body(request, max_body_size):
     A declared body was already measured by the early refusal before any
     read, so by the time it reaches here request.body() is bounded. An
     undeclared body has no such early check, so the stream is the bound:
-    the read stops at the first chunk that crosses the limit, one byte past
-    the limit is the most the middleware ever pulls, and the same 413 the
-    declared path answers before reading is answered here mid-stream. No
+    the read stops at the first chunk that crosses the limit; no chunk
+    after it is read, and nothing beyond the limit is retained. The same
+    413 the declared path answers before reading is answered mid-stream. No
     refused-body drain runs on this path, because a drain would pull into
     a stream of unknown total size; the connection is left for the ASGI
     server to close. The joined body is cached on the request the way
