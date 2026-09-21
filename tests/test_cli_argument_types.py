@@ -5,6 +5,7 @@
 A type that stops refusing fails here rather than by the comment above
 its raise.
 """
+import math
 import sys
 from pathlib import Path
 
@@ -127,7 +128,7 @@ def test_expires_keeps_floats_whole_domain(tmp):
     args = accepted([*SET_COOKIE, '--expires', 'inf'])
     assert args.expires == float('inf'), args
     args = accepted([*SET_COOKIE, '--expires', 'nan'])
-    assert args.expires != args.expires, args
+    assert math.isnan(args.expires), args
     args = accepted([*SET_COOKIE, '--expires', '-3'])
     assert args.expires == -3.0, args
 
