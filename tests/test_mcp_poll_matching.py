@@ -205,8 +205,6 @@ def test_poll_rejects_an_empty_delivery_expectation(tmp):
     assert result == expected, (result, expected)
 
 
-
-
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='mcppollmatching_')
