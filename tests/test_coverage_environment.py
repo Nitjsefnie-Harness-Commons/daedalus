@@ -52,6 +52,7 @@ def test_a_launch_with_a_provable_cwd_is_safe(tmp):
 import subprocess
 import _util
 import test_dashboard_behaviour as behaviour
+from _repo import ROOT
 subprocess.run(['python3', 'child.py'])
 subprocess.run(['python3', 'a.py'], cwd=ROOT)
 subprocess.run(['python3', 'b.py'], cwd=str(ROOT))

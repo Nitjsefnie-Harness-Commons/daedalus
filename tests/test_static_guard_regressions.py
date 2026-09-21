@@ -166,6 +166,7 @@ for launcher in ([{'sp': subprocess}],)[0][0].values():
     assert _coverage_suite._synthetic_violations(
         """import os
 import subprocess
+from _repo import ROOT
 os.chdir(tmp)
 {'sp': subprocess}['sp'].run(['python3', 'child.py'], cwd=ROOT)
 """) == []
@@ -207,6 +208,7 @@ def test_nonlauncher_binding_controls_stay_clean(tmp):
     del tmp
     assert _coverage_suite._synthetic_violations(
         """import subprocess
+from _repo import ROOT
 match subprocess:
     case None:
         pass
