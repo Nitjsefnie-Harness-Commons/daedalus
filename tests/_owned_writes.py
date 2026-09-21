@@ -1,4 +1,5 @@
 """Copy the test tree; the root must lie outside the checkout."""
+import shutil
 from pathlib import Path
 
 from _repo import ROOT
@@ -19,3 +20,12 @@ def copy_test_tree(root):
     bridge.mkdir(parents=True, exist_ok=True)
     (bridge / 'parent_watch.py').write_bytes(
         (ROOT / 'daedalus_bridge' / 'parent_watch.py').read_bytes())
+
+
+def clear_bytecode(root):
+    root = Path(root).resolve()
+    if root == ROOT or root.is_relative_to(ROOT):
+        raise ValueError(
+            f'clear_bytecode root lies inside the checkout: {root}')
+    for cache in root.rglob('__pycache__'):
+        shutil.rmtree(cache)

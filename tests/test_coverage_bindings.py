@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _coverage_guard import _synthetic_violations  # noqa: E402
 
 
@@ -403,7 +402,8 @@ def _binding_snippets():
 
 def _mutation_specs():
     # Fresh mutation children need assertion helpers, not runner fixtures.
-    from test_bash_resolver_scan import _BASH_MUTATION_SPECS
+    from test_bash_resolver_scan import (
+        _BASH_MUTATION_SPECS, _CACHE_MUTATIONS)
     from test_coverage_root_provenance import (
         _ROOT_PROVENANCE_MUTATIONS as _DESTINATION_MUTATIONS)
     from test_coverage_scope_bindings import (
@@ -622,13 +622,14 @@ def _mutation_specs():
         ('MatchMapping global', 'scopes', (match_rest_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
     ) + _BASH_MUTATION_SPECS + _ROOT_PROVENANCE_MUTATIONS \
-        + _DESTINATION_MUTATIONS
+        + _DESTINATION_MUTATIONS + _CACHE_MUTATIONS
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     import os
     import subprocess
-    from _owned_writes import copy_test_tree
+    from _util import child_coverage
+    from _owned_writes import clear_bytecode, copy_test_tree
 
     root = Path(tmp) / 'repository'
     copy_test_tree(root)
@@ -636,10 +637,16 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     scopes_target = root / 'tests' / '_coverage_scopes.py'
     bash_target = root / 'tests' / '_bash_resolver_scan.py'
     guard_target = root / 'tests' / '_coverage_guard.py'
+    runner_target = root / 'tests' / 'test_coverage_bindings.py'
+    owned_target = root / 'tests' / '_owned_writes.py'
+    calls_target = root / 'tests' / '_control_calls.py'
     for name, target_name, replacements, invocation in _mutation_specs():
         target = (bindings_target if target_name == 'bindings'
                   else scopes_target if target_name == 'scopes'
                   else guard_target if target_name == 'guard'
+                  else runner_target if target_name == 'runner'
+                  else owned_target if target_name == 'owned'
+                  else calls_target if target_name == 'calls'
                   else bash_target)
         original = target.read_bytes()
         crlf = b'\r\n' in original
@@ -656,13 +663,14 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
                 "import test_coverage_bindings as suite\n"
                 "assert sys.dont_write_bytecode, "
                 "'cached bytecode writes enabled without -B'\n"
+                "assert sys.flags.no_site, 'site initialization enabled'\n"
                 f"print({_FRESH_SOURCE_MARKER!r})\n"
                 f"{invocation}\n")
+            clear_bytecode(root)
             result = subprocess.run(
-                [sys.executable, '-B', '-c', program], cwd=root,
-                env=_util.child_coverage('scrub', {
-                    name: os.environ[name] for name in dict(os.environ)
-                    if name != 'PYTHONDONTWRITEBYTECODE'}),
+                [sys.executable, '-B', '-S', '-c', program], cwd=root,
+                env=child_coverage('scrub', {
+                    **os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}),
                 capture_output=True,
                 text=True, timeout=30)
         finally:
@@ -683,4 +691,5 @@ def test_controls_never_write_inside_the_repository(tmp):
 
 
 if __name__ == '__main__':
+    import _util
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))

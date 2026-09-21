@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused real-tree regressions for the static guard suites."""
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,8 @@ from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings)
 from _owned_writes import copy_test_tree  # noqa: E402
 import test_coverage_bindings as _coverage_suite  # noqa: E402
+from test_coverage_bindings import (  # noqa: E402
+    test_each_new_binding_and_match_arm_is_mutation_sensitive as _run_mutants)
 
 
 def _real_module_copy(tmp, relative):
@@ -48,6 +51,136 @@ def test_mutation_gate_accepts_crlf_copied_helpers(tmp):
     assert result.returncode == 0, result.stderr
     assert [bindings.read_bytes(), scopes.read_bytes(),
             bash.read_bytes()] == crlf_sources
+
+
+def _cache_collision_sequence(tmp, seed):
+    from unittest.mock import patch
+
+    ordinary = next(spec for spec in _coverage_suite._mutation_specs()
+                    if spec[0] == 'MatchAs scope')
+    needle = ordinary[2][0][0]
+    replacement = needle.replace('ast.MatchAs', 'ast.MatchOr')
+    assert replacement != needle and len(replacement) == len(needle)
+    harmless = ('Scope and repository-root facts',
+                'scope and repository-root facts')
+    specs = (('caught same-size mutant', 'scopes',
+              ((needle, replacement),), ordinary[3]),
+             ('stale bytecode cache control: tests/_coverage_scopes.py',
+              'scopes', (harmless,), ordinary[3]))
+    records = []
+    real_run = subprocess.run
+    target = Path(tmp) / 'repository/tests/_coverage_scopes.py'
+
+    def seed_cache(root):
+        cache = root / 'nested/deeper/__pycache__'
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / 'sentinel.pyc').write_bytes(b'preexisting cache')
+
+    def copy(root):
+        copy_test_tree(root)
+        if seed:
+            seed_cache(root)
+
+    def run(*args, **kwargs):
+        root = Path(kwargs['cwd'])
+        source = target.read_text()
+        assert (replacement if not records else harmless[1]) in source
+        # Force the legal same-size, same-second schedule without retries.
+        os.utime(target, (1800000000, 1800000000))
+        before = list(root.rglob('__pycache__'))
+        assert not (seed and before), f'stale bytecode cache: {target}'
+        result = real_run(
+            *args, env=_util.child_coverage('scrub', kwargs.pop('env')),
+            **kwargs)
+        after = list(root.rglob('__pycache__'))
+        records.append((result, before, after, target.stat().st_size))
+        if seed:
+            seed_cache(root)
+        return result
+
+    rejection = None
+    with patch.object(_coverage_suite, '_mutation_specs',
+                      return_value=specs), \
+            patch('_owned_writes.copy_test_tree', side_effect=copy), \
+            patch('subprocess.run', side_effect=run):
+        try:
+            _run_mutants(tmp)
+        except AssertionError as error:
+            rejection = str(error)
+    assert len(records) == 2, (rejection, records)
+    assert rejection is not None, f'stale bytecode cache: {target}'
+    assert specs[1][0] in rejection, rejection
+    assert records[0][0].returncode != 0, records[0][0].stderr
+    assert 'AssertionError' in records[0][0].stderr
+    assert records[1][0].returncode == 0, records[1][0].stderr
+    assert records[0][3] == records[1][3]
+    assert all(not before for _, before, _, _ in records), (
+        f'stale bytecode cache not cleared: {target}', records)
+    assert all(not after for _, _, after, _ in records), (
+        f'nested child wrote stale bytecode cache: {target}', records)
+    original = Path(__file__).parent / '_coverage_scopes.py'
+    assert target.read_bytes() == original.read_bytes()
+
+
+def test_mutation_gate_rejects_a_cached_equivalent_edit(tmp):
+    _cache_collision_sequence(tmp, False)
+
+
+def test_mutation_gate_clears_caches_before_every_child(tmp):
+    _cache_collision_sequence(tmp, True)
+
+
+def test_mutation_gate_refuses_site_initialization(tmp):
+    from unittest.mock import patch
+
+    spec = ('site control', 'scopes',
+            (('Scope and repository-root facts',
+              'scope and repository-root facts'),), 'assert False')
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        return real_run(
+            [arg for arg in command if arg != '-S'],
+            env=_util.child_coverage('scrub', kwargs.pop('env')), **kwargs)
+
+    rejection = None
+    with patch.object(_coverage_suite, '_mutation_specs',
+                      return_value=(spec,)), \
+            patch('subprocess.run', side_effect=run):
+        try:
+            _run_mutants(tmp)
+        except AssertionError as error:
+            rejection = str(error)
+    assert rejection and 'site initialization enabled' in rejection, rejection
+
+
+def test_bytecode_cleanup_refuses_checkout_paths(tmp):
+    from unittest.mock import patch
+    import _owned_writes as owned
+    from _control_writes import control_write_violations
+
+    checkout = Path(tmp) / 'checkout'
+    cache = checkout / 'child/__pycache__'
+    cache.mkdir(parents=True)
+    (cache / 'keep.pyc').write_bytes(b'untouched')
+    with patch.object(owned, 'ROOT', checkout):
+        for root in (checkout, checkout / 'child'):
+            try:
+                owned.clear_bytecode(root)
+            except ValueError as error:
+                assert 'inside the checkout' in str(error)
+            else:
+                raise AssertionError('checkout cache removal was allowed')
+    assert (cache / 'keep.pyc').read_bytes() == b'untouched'
+    for path, allowed in (('tmp', True), ('ROOT', False)):
+        source = ('from _owned_writes import clear_bytecode\n'
+                  'from _util import child_coverage\n'
+                  'from _repo import ROOT\ndef test_control(tmp):\n'
+                  "    env = child_coverage('scrub')\n"
+                  f'    clear_bytecode({path})\n')
+        control = Path(tmp) / 'test_control.py'
+        control.write_text(source)
+        assert bool(control_write_violations(control, tmp)) is not allowed
 
 
 def test_subscripted_dict_carriers_refuse_hidden_launchers(tmp):
