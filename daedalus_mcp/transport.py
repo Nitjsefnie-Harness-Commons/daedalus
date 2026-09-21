@@ -156,6 +156,10 @@ class BridgeSession:
         """
         return time.monotonic()
 
+    async def pause(self, seconds: float) -> None:
+        """The ramp's blocking step, injectable beside the clock."""
+        await asyncio.sleep(seconds)
+
     async def poll_result(self, tab: str, timeout: float,
                           interval: float = 0.5,
                           expect_id: str | None = None,
@@ -185,7 +189,7 @@ class BridgeSession:
             remaining = deadline - self.monotonic()
             if remaining <= 0:
                 break
-            await asyncio.sleep(min(wait, remaining))
+            await self.pause(min(wait, remaining))
             wait = min(wait * 2, interval)
             remaining = deadline - self.monotonic()
             if remaining <= 0:
