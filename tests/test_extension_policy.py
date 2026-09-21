@@ -338,7 +338,8 @@ def _check_token_sources(tmp, cases):
     target.parent.mkdir(exist_ok=True)
     failures = []
     for refused, source in cases:
-        target.write_text(source, encoding='utf-8')
+        target.write_bytes(source.encode('utf-8'))
+        assert target.read_bytes() == source.encode('utf-8')
         with (patch.object(_util, 'ROOT', root),
               patch(__name__ + '.worker_source_paths', return_value=[])):
             try:
