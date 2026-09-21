@@ -58,20 +58,40 @@ def stored_uploads(token_dir, upload_id):
     if upload_id:
         id_dirs = [path_safety.under(token_dir, upload_id)]
     else:
-        with os.scandir(token_dir) as entries:
-            dirs = [entry for entry in entries if entry.is_dir()]
-        dirs.sort(key=lambda entry: os.stat(entry.path).st_mtime, reverse=True)
-        id_dirs = [pathlib.Path(entry.path) for entry in dirs]
+        try:
+            with os.scandir(token_dir) as entries:
+                dirs = list(entries)
+        except OSError:
+            # The token directory can disappear after the route's check.
+            return
+        dated_dirs = []
+        for entry in dirs:
+            try:
+                if not entry.is_dir():
+                    continue
+                mtime = os.stat(entry.path).st_mtime
+            except OSError:
+                # A concurrent delete can remove an id before sorting.
+                continue
+            dated_dirs.append((pathlib.Path(entry.path), mtime))
+        dated_dirs.sort(key=lambda item: item[1], reverse=True)
+        id_dirs = [path for path, _mtime in dated_dirs]
     for id_dir in id_dirs:
         try:
             with os.scandir(id_dir) as entries:
-                files = [entry for entry in entries if entry.is_file()
-                         and not _reserved_name(entry.name)]
-        except (FileNotFoundError, NotADirectoryError):
+                files = list(entries)
+        except OSError:
+            # A concurrent delete can remove the id being scanned.
             continue
         files.sort(key=lambda entry: entry.name)
         for entry in files:
-            yield id_dir.name, entry
+            try:
+                is_file = entry.is_file()
+            except OSError:
+                # A concurrent delete can make an entry's type check fail.
+                continue
+            if is_file and not _reserved_name(entry.name):
+                yield id_dir.name, entry
 
 
 def list_uploads(upload_dir, token, params):
@@ -102,7 +122,12 @@ def list_uploads(upload_dir, token, params):
         token_dir = path_safety.under(upload_dir, token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
-    if not token_dir.is_dir():
+    try:
+        token_exists = token_dir.is_dir()
+    except OSError:
+        # A concurrent delete can make the token's directory stat fail.
+        token_exists = False
+    if not token_exists:
         if paged:
             return 200, {'items': [], 'total': 0,
                          'limit': lim, 'offset': off}
@@ -123,7 +148,11 @@ def list_uploads(upload_dir, token, params):
             total += 1
             if window is not None and index not in window:
                 continue
-            info = os.stat(entry.path)
+            try:
+                info = os.stat(entry.path)
+            except OSError:
+                # A concurrent delete can remove a page entry.
+                continue
             results.append({
                 'id': id_name,
                 'filename': entry.name,
@@ -341,18 +370,34 @@ def latest_screenshot(upload_dir, token, params):
         token_dir = path_safety.under(upload_dir, token)
     except ValueError:
         return 400, {'error': 'invalid path component'}
-    if not token_dir.is_dir():
+    try:
+        if not token_dir.is_dir():
+            return 404, {'error': 'no uploads'}
+        search_dirs = ([token_dir / upload_id] if upload_id
+                       else sorted(token_dir.iterdir()))
+    except OSError:
+        # A concurrent delete can remove the token directory before its scan.
         return 404, {'error': 'no uploads'}
-    search_dirs = ([token_dir / upload_id] if upload_id
-                   else sorted(token_dir.iterdir()))
     latest = None
+    latest_mtime = 0
     for d in search_dirs:
-        if not d.is_dir():
+        try:
+            if not d.is_dir():
+                continue
+            files = list(d.iterdir())
+        except OSError:
+            # A concurrent delete can remove an id between check and scan.
             continue
-        for f in d.iterdir():
+        for f in files:
             if _format_of(f) in SCREENSHOT_TYPES:
-                if not latest or f.stat().st_mtime > latest.stat().st_mtime:
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    # A concurrent delete can remove a screenshot candidate.
+                    continue
+                if latest is None or mtime > latest_mtime:
                     latest = f
+                    latest_mtime = mtime
     if not latest:
         return 404, {'error': 'no screenshot'}
     return FileAnswer(latest, screenshot_mime(_format_of(latest)))

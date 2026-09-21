@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _noglibc  # noqa: E402
@@ -113,6 +114,55 @@ def test_answer_streams_a_file_answer_with_its_mime(tmp):
     assert stub.headers_sent['Content-Type'] == 'image/png'
     assert stub.headers_sent['Content-Length'] == str(path.stat().st_size)
     assert stub.wfile.getvalue() == path.read_bytes()
+
+
+def test_send_file_answers_404_when_the_file_vanished(tmp):
+    stub = _Stub()
+    statuses = []
+    real_response = stub.send_response
+
+    def record_response(code):
+        statuses.append(code)
+        real_response(code)
+
+    with mock.patch.object(stub, 'send_response', record_response):
+        stub.answer(transport.FileAnswer(Path(tmp) / 'gone.png', 'image/png'))
+    assert statuses == [404], statuses
+    assert stub.headers_sent['Content-Type'] == 'application/json'
+    assert json.loads(stub.wfile.getvalue()) == {'error': 'file not found'}
+
+
+def test_send_file_sizes_from_the_open_descriptor(tmp):
+    path = Path(tmp) / 'shot.png'
+    path.write_bytes(b'old')
+    stub = _Stub()
+    order = []
+    real_open = open
+    real_response = stub.send_response
+    real_fstat = os.fstat
+
+    def record_open(*args, **kwargs):
+        order.append('open')
+        path.write_bytes(b'new image bytes')
+        return real_open(*args, **kwargs)
+
+    def record_fstat(fd):
+        order.append('fstat')
+        return real_fstat(fd)
+
+    def record_response(code):
+        order.append('response')
+        real_response(code)
+
+    with mock.patch.object(transport, 'open', record_open, create=True), \
+            mock.patch.object(os, 'fstat', record_fstat), \
+            mock.patch.object(stub, 'send_response', record_response):
+        stub.answer(transport.FileAnswer(path, 'image/png'))
+    assert order == ['open', 'fstat', 'response'], order
+    assert stub.status == 200, stub.status
+    assert stub.wfile.getvalue() == b'new image bytes'
+    assert stub.headers_sent['Content-Length'] == str(
+        len(stub.wfile.getvalue())), stub.headers_sent
 
 
 def test_answer_writes_a_bytes_answer_with_extra_headers(_tmp):
