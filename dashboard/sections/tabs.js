@@ -24,19 +24,35 @@ export function mount(container, bus) {
 
   let tabs = [];
   let filter = '';
+  const rowEls = new Map();
+  let tbodyEl = null;
 
   filterEl.addEventListener('input', () => { filter = filterEl.value.toLowerCase(); render(); });
 
-  async function load() {
+  async function fetchTabs() {
     const token = getToken();
-    if (!token) { host.innerHTML = '<div class="dim italic small">no token (§12 Settings)</div>'; return; }
+    if (!token) {
+      host.innerHTML = '<div class="dim italic small">no token (§12 Settings)</div>';
+      tbodyEl = null;
+      return false;
+    }
     try {
       tabs = await api.get('/tabs');
-      render();
+      return true;
     } catch (e) {
       host.innerHTML = '';
       host.appendChild(h('pre', { class: 'pane err' }, errMsg(e)));
+      tbodyEl = null;
+      return false;
     }
+  }
+
+  async function load() {
+    if (await fetchTabs()) render();
+  }
+
+  async function refresh() {
+    if (await fetchTabs()) patch();
   }
 
   function visible(t) {
@@ -44,14 +60,21 @@ export function mount(container, bus) {
     return ((t.url || '').toLowerCase().includes(filter) || (t.title || '').toLowerCase().includes(filter));
   }
 
+  function setCounter(rows) {
+    document.querySelector('#s01 [data-sub]').textContent = `${rows.length}/${tabs.length} tabs`;
+  }
+
   function render() {
+    rowEls.clear();
     clear(host);
     const rows = tabs.filter(visible).sort((a, b) => (a.age || 0) - (b.age || 0));
-    document.querySelector('#s01 [data-sub]').textContent = `${rows.length}/${tabs.length} tabs`;
+    setCounter(rows);
     if (rows.length === 0) {
       host.appendChild(h('div', { class: 'dim italic small' }, tabs.length ? 'no tabs match filter.' : 'no tabs registered. is the extension connected?'));
+      tbodyEl = null;
       return;
     }
+    const body = h('tbody', {}, rows.map((t) => renderRow(t)));
     const table = h('table', { class: 't' },
       h('thead', {}, h('tr', {},
         h('th', { style: { width: '82px' } }, 'tab id'),
@@ -60,18 +83,51 @@ export function mount(container, bus) {
         h('th', {}, 'url'),
         h('th', { style: { width: '280px', textAlign: 'right' } }, 'actions'),
       )),
-      h('tbody', {}, rows.map(renderRow)),
+      body,
     );
     host.appendChild(table);
+    tbodyEl = body;
+  }
+
+  // An event-driven refresh reconciles rows instead of rebuilding the table:
+  // a row whose tab only aged stays the same element (its age cell is
+  // rewritten in place, even under an open editor), a row whose title or url
+  // changed is replaced — ending any editor or armed confirm aimed at stale
+  // data — and a row whose tab is gone leaves with its interaction.
+  function patch() {
+    const rows = tabs.filter(visible);
+    setCounter(rows);
+    if (!tbodyEl || rows.length === 0) { render(); return; }
+    const seen = new Set();
+    for (const t of rows) {
+      seen.add(String(t.tabId));
+      const rec = rowEls.get(String(t.tabId));
+      if (!rec) {
+        tbodyEl.appendChild(renderRow(t));
+      } else if ((t.title || '') !== (rec.tab.title || '')
+        || (t.url || '') !== (rec.tab.url || '')) {
+        rec.tr.replaceWith(renderRow(t));
+      } else {
+        rec.tab = t;
+        rec.ageCell.textContent = fmtAge(t.age);
+      }
+    }
+    for (const [id, rec] of [...rowEls]) {
+      if (!seen.has(id)) {
+        rec.tr.remove();
+        rowEls.delete(id);
+      }
+    }
   }
 
   function renderRow(t) {
     const id = t.tabId;
     const originalUrlText = truncate(t.url || '', 80);
     const urlCell = h('td', { class: 'url' }, originalUrlText);
-    return h('tr', { data: { tid: id } },
+    const ageCell = h('td', { class: 'num' }, fmtAge(t.age));
+    const tr = h('tr', { data: { tid: id } },
       h('td', { class: 'mono' }, id),
-      h('td', { class: 'num' }, fmtAge(t.age)),
+      ageCell,
       h('td', { class: 'mono' }, truncate(t.title || '', 60)),
       urlCell,
       h('td', { style: { textAlign: 'right' } },
@@ -82,6 +138,17 @@ export function mount(container, bus) {
         h('button', { class: 'ghost sm danger', onclick: armedAction(() => close(id)) }, 'close'),
       ),
     );
+    rowEls.set(String(id), { tr, ageCell, tab: t });
+    return tr;
+  }
+
+  // A burst of events coalesces into one listing fetch, whose render shows
+  // the final listing.
+  let refreshQueued = false;
+  function scheduleRefresh() {
+    if (refreshQueued) return;
+    refreshQueued = true;
+    setTimeout(() => { refreshQueued = false; refresh(); }, 100);
   }
 
   async function focus(tabId) {
@@ -133,9 +200,9 @@ export function mount(container, bus) {
   bus.on((ev) => {
     if (ev.__internal) return;
     if (ev.type === 'tabs-synced' || ev.type === 'tab-updated' || ev.type === 'tab-unregistered') {
-      load();
+      scheduleRefresh();
     }
   });
   // Periodic refresh for age column.
-  setInterval(load, 15000);
+  setInterval(refresh, 15000);
 }
