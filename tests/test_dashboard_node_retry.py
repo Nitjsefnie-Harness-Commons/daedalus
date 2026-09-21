@@ -8,7 +8,6 @@ from unittest.mock import Mock, call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
-import test_dashboard_behaviour as behaviour  # noqa: E402
 from test_dashboard_behaviour import (  # noqa: E402
     _controlled_run, _result, _timeout)
 
@@ -208,12 +207,29 @@ def test_windows_retry_escalates_inner_and_outer_timeout_budgets(tmp):
     assert 'const _dashnodeStepTimeoutMs = 10000;' in programs[1]
 
 
+def test_non_windows_declines_even_when_close_and_reap_settle(tmp):
+    # The isolating control for the retry gate's platform limb: only Windows
+    # may retry on a cleanup recovery, so a POSIX close and reap that settle
+    # after a timed-out drain still declines.
+    del tmp
+    failure, events, _ = _controlled_run(
+        'linux', (2201, [_timeout(), _timeout('partial', 'error')],
+                  {'wait_succeeds': True}),
+        (2202, [_result(0, 'wrong retry')]))
+    launches = [event[0] for event in events].count('popen')
+    assert launches == 1, (failure, events)
+    assert failure.startswith(
+        'dashboard node outer timeout after 1 attempt\n'
+        'retry declined: the post-kill drain did not complete '
+        '(drain outcome: timed out)\n'), failure
+
+
 def test_windows_declined_retry_is_named_in_the_verdict(tmp):
     del tmp
-    failure, events, _ = behaviour._controlled_run(
-        'win32', (1101, [behaviour._timeout(),
-                         behaviour._timeout('partial', 'error')]),
-        (1102, [behaviour._result(0, 'wrong retry')]))
+    failure, events, _ = _controlled_run(
+        'win32', (1101, [_timeout(),
+                         _timeout('partial', 'error')]),
+        (1102, [_result(0, 'wrong retry')]))
     assert failure.startswith(
         'dashboard node outer timeout after 1 attempt\n'
         "retry declined: the first child's reader cleanup did not finish "
@@ -228,9 +244,9 @@ def test_windows_declined_retry_names_a_drain_that_raised(tmp):
     def raise_drain(_process):
         raise RuntimeError('drain reader gone')
 
-    failure, events, _ = behaviour._controlled_run(
-        'win32', (1201, [behaviour._timeout(), raise_drain]),
-        (1202, [behaviour._result(0, 'wrong retry')]))
+    failure, events, _ = _controlled_run(
+        'win32', (1201, [_timeout(), raise_drain]),
+        (1202, [_result(0, 'wrong retry')]))
     expected = (
         "retry declined: the first child's reader cleanup did not finish "
         '(drain outcome: raised RuntimeError: drain reader gone)\n')
@@ -238,11 +254,27 @@ def test_windows_declined_retry_names_a_drain_that_raised(tmp):
     assert [event[0] for event in events].count('popen') == 1, events
 
 
+def test_windows_retries_when_drain_raised_but_cleanup_settled(tmp):
+    # The gate's other win32 limb: a drain that raises mid-read with a
+    # cleanup that settles takes the platform's one transient-stall retry.
+    del tmp
+
+    def raise_drain(_process):
+        raise RuntimeError('drain reader gone')
+
+    result, events, _ = _controlled_run(
+        'win32', (2301, [_timeout(), raise_drain], {'wait_succeeds': True}),
+        (2302, [_result(0, 'recovered')]))
+    launches = [event[0] for event in events].count('popen')
+    assert launches == 2, (result, events)
+    assert result.stdout == 'recovered', result
+
+
 def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
     del tmp
-    failure, events, _ = behaviour._controlled_run(
-        'linux', (1301, [behaviour._timeout(), behaviour._result(-9)]),
-        (1302, [behaviour._timeout(), behaviour._result(-9)]))
+    failure, events, _ = _controlled_run(
+        'linux', (1301, [_timeout(), _result(-9)]),
+        (1302, [_timeout(), _result(-9)]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'attempt 1:' in failure and 'pid: 1301' in failure, failure
@@ -252,9 +284,9 @@ def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
 
 def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
     del tmp
-    failure, events, _ = behaviour._controlled_run(
-        'win32', (1401, [behaviour._timeout(), behaviour._result(-9, 'one')]),
-        (1402, [behaviour._timeout(), behaviour._result(-9, 'two')]))
+    failure, events, _ = _controlled_run(
+        'win32', (1401, [_timeout(), _result(-9, 'one')]),
+        (1402, [_timeout(), _result(-9, 'two')]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'retry declined' not in failure, failure
@@ -263,10 +295,10 @@ def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
 
 def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
     del tmp
-    result, events, diagnostic = behaviour._controlled_run(
-        'linux', (1501, [behaviour._timeout(),
-                         behaviour._result(-9, 'first', 'error')]),
-        (1502, [behaviour._result(0, 'second success', 'second stderr')]))
+    result, events, diagnostic = _controlled_run(
+        'linux', (1501, [_timeout(),
+                         _result(-9, 'first', 'error')]),
+        (1502, [_result(0, 'second success', 'second stderr')]))
     assert [event[:2] for event in events] == [
         ('popen', 1501), ('communicate', 1501), ('kill', 1501),
         ('communicate', 1501), ('popen', 1502), ('communicate', 1502)], events
@@ -280,8 +312,8 @@ def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
 def test_clean_run_writes_no_recovery_diagnostic(tmp):
     """A first-attempt success never announces that a retry recovered."""
     del tmp
-    result, events, diagnostic = behaviour._controlled_run(
-        'linux', (1701, [behaviour._result(0, 'ok')]))
+    result, events, diagnostic = _controlled_run(
+        'linux', (1701, [_result(0, 'ok')]))
     assert diagnostic == '', diagnostic
     assert result.stdout == 'ok', result
     assert [event[:2] for event in events] == [
@@ -290,10 +322,10 @@ def test_clean_run_writes_no_recovery_diagnostic(tmp):
 
 def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
     del tmp
-    failure, events, _ = behaviour._controlled_run(
-        'linux', (1601, [behaviour._timeout(), behaviour._timeout(
+    failure, events, _ = _controlled_run(
+        'linux', (1601, [_timeout(), _timeout(
             'partial', 'error')]),
-        (1602, [behaviour._result(0, 'wrong retry')]))
+        (1602, [_result(0, 'wrong retry')]))
     assert failure.startswith(
         'dashboard node outer timeout after 1 attempt\n'
         'retry declined: the post-kill drain did not complete '
@@ -304,9 +336,9 @@ def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
 
 def test_last_attempt_decline_does_not_name_a_retry_left_to_decline(tmp):
     del tmp
-    failure, events, _ = behaviour._controlled_run(
-        'linux', (2101, [behaviour._timeout(), behaviour._result(-9)]),
-        (2102, [behaviour._timeout(), behaviour._timeout('partial', 'err')]))
+    failure, events, _ = _controlled_run(
+        'linux', (2101, [_timeout(), _result(-9)]),
+        (2102, [_timeout(), _timeout('partial', 'err')]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'retry declined' not in failure, failure
@@ -359,6 +391,22 @@ def test_windows_cancelled_reader_is_not_rendered_as_empty(tmp):
             "stderr: '<unrecoverable: reader cancelled after the drain "
             "timed out>'") in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
+
+
+def test_windows_cancelled_reader_with_recovered_buffer_keeps_bytes(tmp):
+    # CancelSynchronousIo can land after the read already reached EOF, so a
+    # cancelled reader may still hand over its buffer; the recovered bytes
+    # win over the marker.
+    del tmp
+    failure, events, _ = _controlled_run(
+        'win32', (2401, [_timeout(None, None), _timeout(None, None)], {
+            'wait_succeeds': False,
+            'late_buffers': {'stdout': 'late recovered'}}))
+    launches = [event[0] for event in events].count('popen')
+    assert launches == 1, (failure, events)
+    assert ("stdout: 'late recovered'; "
+            "stderr: '<unrecoverable: reader cancelled after the drain "
+            "timed out>'") in failure, failure
 
 
 def test_independent_output_sources_keep_repeated_boundary(tmp):
