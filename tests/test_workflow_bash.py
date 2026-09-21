@@ -7,7 +7,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-import _wfgraph  # noqa: E402
 
 _COVERAGE_ENV = _util.child_coverage('scrub')
 
@@ -151,14 +150,14 @@ def test_non_windows_candidates_keep_path_order(tmp):
 
 
 def test_workflow_shell_caller_uses_shared_bash_helper(tmp):
-    """The workflow graph must not bypass the shared resolver."""
-    del tmp
+    """The workflow shell caller must not bypass the shared resolver."""
+    import test_coverage_comment_workflow as comment_suite
     calls = []
     original = _util.workflow_bash
     try:
         _util.workflow_bash = lambda: calls.append(True) or sys.executable
-        result = _wfgraph._run_script(
-            "print('caller-used', end='')", {}, through_bash=True)
+        result = comment_suite._run_shell_block(
+            tmp, "print('caller-used', end='')", _COVERAGE_ENV)
     finally:
         _util.workflow_bash = original
     assert result.returncode == 0, (result.stdout, result.stderr)
