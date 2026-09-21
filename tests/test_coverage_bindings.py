@@ -503,22 +503,17 @@ def _mutation_specs():
         "        if isinstance(node, ast.Lambda):\n",
     )
     match_as_names = (
-        "    names.update(node.name for node in walked\n"
-        "                 if isinstance(node, ast.MatchAs)\n"
-        "                 and node.name)\n",
-        "",
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
+        "ast.MatchStar)):\n",
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchStar)):\n",
     )
     match_star_names = (
-        "    names.update(node.name for node in walked\n"
-        "                 if isinstance(node, ast.MatchStar)\n"
-        "                 and node.name)\n",
-        "",
+        match_as_names[0],
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs)):\n",
     )
     match_rest_names = (
-        "    names.update(node.rest for node in walked\n"
-        "                 if isinstance(node, ast.MatchMapping) "
-        "and node.rest)\n",
-        "",
+        "    if isinstance(node, ast.MatchMapping):\n"
+        "        return {node.rest} if node.rest else set()\n", "",
     )
     import_bindings = (
         "    if isinstance(node, (ast.Import, ast.ImportFrom)):\n"

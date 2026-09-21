@@ -57,21 +57,13 @@ class _ScopeFacts:
     def destinations(self):
         return self.bindings[1]
 
-    @cached_property
+    @property
     def binding_layout(self):
-        # Only type syntax separates these layouts. Reuse the ordinary
-        # walk instead of repeating it with type_scopes=True everywhere.
-        alias = getattr(ast, 'TypeAlias', ())
-        if any(isinstance(node, alias) or getattr(node, 'type_params', ())
-               for node in memo_nodes(self.tree)):
-            return _evaluation_scopes(self.tree, type_scopes=True)
         return self.layout
 
-    @cached_property
+    @property
     def binding_products(self):
-        if self.binding_layout is self.layout:
-            return self.bindings
-        return _binding_destinations(*self.binding_layout)
+        return self.bindings
 
     @cached_property
     def unprovable(self):
@@ -310,25 +302,9 @@ def _unprovable_names(tree, layout=None, facts=None):
 def _shadowed_names(tree, facts=None):
     """Names whose source value is replaced somewhere in the module."""
     facts = facts or _ScopeFacts(tree)
-    walked = memo_nodes(tree)
-    names = {node.id for node in walked
-             if isinstance(node, ast.Name)
-             and isinstance(node.ctx, (ast.Store, ast.Del))}
-    names.update(node.arg for node in walked
-                 if isinstance(node, ast.arg))
-    names.update(node.name for node in walked
-                 if isinstance(node, (ast.FunctionDef,
-                                      ast.AsyncFunctionDef, ast.ClassDef)))
-    names.update(node.name for node in walked
-                 if isinstance(node, ast.ExceptHandler) and node.name)
-    names.update(node.name for node in walked
-                 if isinstance(node, ast.MatchAs)
-                 and node.name)
-    names.update(node.name for node in walked
-                 if isinstance(node, ast.MatchStar)
-                 and node.name)
-    names.update(node.rest for node in walked
-                 if isinstance(node, ast.MatchMapping) and node.rest)
+    names = set().union(*(_bound_names(node) for node in memo_nodes(tree)
+                          if not isinstance(node, (ast.Import,
+                                                   ast.ImportFrom))))
     unprovable, _ = facts.unprovable
     names.update(unprovable)
     root_values = facts.root_assignments
@@ -342,14 +318,6 @@ def _shadowed_names(tree, facts=None):
     return names
 
 
-def _parameter_names(arguments):
-    """The names a def's or a lambda's parameter list binds in its scope."""
-    return ({argument.arg for argument in
-             (arguments.posonlyargs + arguments.args + arguments.kwonlyargs)}
-            | {extra.arg for extra in (arguments.vararg, arguments.kwarg)
-               if extra is not None})
-
-
 def _containing_binding_scope(scope, parents):
     """Nearest scope outside any nested comprehension scopes."""
     while isinstance(scope, _COMPREHENSION_SCOPES):
@@ -357,7 +325,7 @@ def _containing_binding_scope(scope, parents):
     return scope
 
 
-def _evaluation_scopes(tree, type_scopes=False):
+def _evaluation_scopes(tree, type_scopes=True):
     """Nodes with their evaluation or binding scope, plus scope parents."""
     scoped = []
     parents = {tree: None}
@@ -367,12 +335,13 @@ def _evaluation_scopes(tree, type_scopes=False):
             return parents[scope]
         return scope
 
-    def visit_arguments(arguments, scope):
+    def visit_arguments(arguments, scope, binding_scope):
         variadic = [value for value in (arguments.vararg, arguments.kwarg)
                     if value is not None]
         named = (arguments.posonlyargs + arguments.args
                  + arguments.kwonlyargs)
         for argument in named + variadic:
+            scoped.append((argument, binding_scope))
             if argument.annotation is not None:
                 visit(argument.annotation, scope)
 
@@ -398,7 +367,7 @@ def _evaluation_scopes(tree, type_scopes=False):
             parents[node] = enclosing(annotation)
             for decorator in node.decorator_list:
                 visit(decorator, scope)
-            visit_arguments(node.args, annotation)
+            visit_arguments(node.args, annotation, node)
             for value in (*node.args.defaults, *node.args.kw_defaults):
                 if value is not None:
                     visit(value, scope)
@@ -425,7 +394,7 @@ def _evaluation_scopes(tree, type_scopes=False):
             return
         if isinstance(node, ast.Lambda):
             parents[node] = enclosing(scope)
-            visit_arguments(node.args, scope)
+            visit_arguments(node.args, scope, node)
             for value in (*node.args.defaults, *node.args.kw_defaults):
                 if value is not None:
                     visit(value, scope)
@@ -478,23 +447,8 @@ def _scope_shadows(tree, layout=None, facts=None):
     unprovable, imports = facts.unprovable
     for node, scope in scoped:
         shadows[scope].update(imports.get(node, ()))
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
-            shadows[scope].add(node.name)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.Lambda)):
-            shadows[node].update(_parameter_names(node.args))
-        if (isinstance(node, ast.Name)
-                and isinstance(node.ctx, (ast.Store, ast.Del))):
-            shadows[scope].add(node.id)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            shadows[scope].add(node.name)
-        elif isinstance(node, ast.MatchAs) and node.name:
-            shadows[scope].add(node.name)
-        elif isinstance(node, ast.MatchStar) and node.name:
-            shadows[scope].add(node.name)
-        elif isinstance(node, ast.MatchMapping) and node.rest:
-            shadows[scope].add(node.rest)
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            shadows[scope].update(_bound_names(node))
     # A star import is a SyntaxError inside a function, so module-wide
     # is its real scope.
     shadows[tree].update(unprovable)
@@ -531,8 +485,6 @@ def _binding_destinations(scoped, parents):
     nonlocal_names = {scope: set() for scope in parents}
     for node, scope in scoped:
         local[scope].update(_bound_names(node))
-        if isinstance(node, _FUNCTION_SCOPES):
-            local[node].update(_parameter_names(node.args))
         if isinstance(node, ast.Global):
             global_names[scope].update(node.names)
         elif isinstance(node, ast.Nonlocal):

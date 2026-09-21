@@ -79,16 +79,18 @@ _WALRUS_INVOKE = (
     'test_comprehension_walrus_binds_in_containing_scope(None)')
 _BASH_MUTATION_SPECS = (
     ('MatchAs scope', 'scopes', ((
-        "        elif isinstance(node, ast.MatchAs) and node.name:\n"
-        "            shadows[scope].add(node.name)\n", ""),),
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
+        "ast.MatchStar)):\n",
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchStar)):\n"),),
      _MATCH_INVOKE),
     ('MatchStar scope', 'scopes', ((
-        "        elif isinstance(node, ast.MatchStar) and node.name:\n"
-        "            shadows[scope].add(node.name)\n", ""),),
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
+        "ast.MatchStar)):\n",
+        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs)):\n"),),
      _MATCH_INVOKE),
     ('MatchMapping scope', 'scopes', ((
-        "        elif isinstance(node, ast.MatchMapping) and node.rest:\n"
-        "            shadows[scope].add(node.rest)\n", ""),),
+        "    if isinstance(node, ast.MatchMapping):\n"
+        "        return {node.rest} if node.rest else set()\n", ""),),
      _MATCH_INVOKE),
     ('Bash walrus binding', 'bash', ((
         "    elif isinstance(node, ast.NamedExpr):\n"

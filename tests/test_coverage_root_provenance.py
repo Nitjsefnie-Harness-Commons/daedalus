@@ -148,6 +148,24 @@ def test_only_accepted_root_bindings_discard_the_shadow(tmp):
             source + 'import os\nos.chdir(ROOT)\nsubprocess.run(c)\n') == []
 
 
+def test_type_parameters_shadow_each_root_proof_role(tmp):
+    del tmp
+    if not hasattr(ast, 'TypeVar'):
+        return
+    for parameter in ('ROOT', 'str', '_util', '*ROOT', '**ROOT'):
+        name = parameter.lstrip('*')
+        expression = {'ROOT': 'ROOT', 'str': 'str(ROOT)',
+                      '_util': '_util.ROOT'}[name]
+        prefix = (_PRELUDE + 'import _util\n'
+                  + f'def go[{parameter}]():\n')
+        for chdir in (False, True):
+            _assert_launch(prefix, '    ', expression, chdir)
+        source = prefix + '    pass\n'
+        assert name in _shadowed_names(ast.parse(source)), parameter
+        assert _synthetic_violations(
+            source + f'subprocess.run(c, cwd={expression})\n') == []
+
+
 _INVOKE = 'import test_coverage_root_provenance as root_suite; '
 _ROUTING = (
     "    return _routed_bindings(shadows, destinations)\n",
@@ -253,6 +271,43 @@ _ROOT_PROVENANCE_MUTATIONS += tuple(
          _INVOKE + 'root_suite.test_every_root_binding_site_'
          'must_be_accepted(None)'),
 )
+
+
+_ROOT_PROVENANCE_MUTATIONS += ((
+    ('type parameters enter the shared shadow census', 'scopes',
+     (("                         *_TYPE_PARAMETERS)):\n",
+       "                         )):\n"),),
+     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
+     'proof_role(None)'),
+    ('root proofs use annotation scopes', 'scopes',
+     (("def _evaluation_scopes(tree, type_scopes=True):\n",
+       "def _evaluation_scopes(tree, type_scopes=False):\n"),),
+     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
+     'proof_role(None)'),
+    ('parameters enter their binding scope', 'scopes',
+     (("            scoped.append((argument, binding_scope))\n", ''),),
+     _INVOKE + 'root_suite.test_import_markers_reach_the_'
+     'declared_destination(None); '
+     'import test_coverage_name_bindings as names; '
+     'names.test_every_grammar_binding_removes_only_its_builtin_'
+     'exemption(None)'),
+) if hasattr(ast, 'TypeVar') else ())
+
+_ROOT_PROVENANCE_MUTATIONS += ((
+    ('scoped shadows read the binding census', 'scopes',
+     (("            shadows[scope].update(_bound_names(node))\n",
+       "            pass\n"),),
+     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
+     'proof_role(None)'),
+    ('aggregate shadows read the binding census', 'scopes',
+     (("    names = set().union(*(_bound_names(node) "
+       "for node in memo_nodes(tree)\n"
+       "                          if not isinstance(node, (ast.Import,\n"
+       "                                                   ast.ImportFrom))))"
+       "\n", "    names = set()\n"),),
+     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
+     'proof_role(None)'),
+) if hasattr(ast, 'TypeVar') else ())
 
 
 if __name__ == '__main__':
