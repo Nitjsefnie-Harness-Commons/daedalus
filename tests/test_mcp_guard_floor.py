@@ -329,6 +329,17 @@ def test_module_level_sync_test_citations_are_accepted(_tmp):
     assert citation not in missing, missing
 
 
+def test_module_level_sync_helper_citations_are_reported_missing(_tmp):
+    """A helper the runner never collects pins nothing, whatever its kind."""
+    suite = Path(_tmp) / 'tests' / 'test_probe.py'
+    suite.parent.mkdir()
+    suite.write_text('def _helper():\n    pass\n', encoding='utf-8')
+    citation = 'tests/test_probe.py::_helper'
+    missing = _mcp_guard_floor.missing_citations(
+        [('m', 'f', 'c', citation)], _tmp)
+    assert citation in missing, missing
+
+
 def test_a_module_level_helper_citation_is_reported_missing(_tmp):
     """A helper the runner never collects pins nothing (issue 864)."""
     del _tmp
