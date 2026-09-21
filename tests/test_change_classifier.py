@@ -23,7 +23,7 @@ from _workflows import (  # noqa: E402
 from _yamlread import YAMLReadError, job_mapping  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _wfgraph import (  # noqa: E402
-    _actionlint_runs, _job_condition_runs,
+    _actionlint_runs,
     _job_if_expression, _job_needs, _job_output_step_ids, _job_section,
     _job_names_with_outputs, _job_step_ids, _matrix_job_running,
     _tests_yml)

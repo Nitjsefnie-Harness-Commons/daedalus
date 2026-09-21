@@ -13,13 +13,9 @@ import _util  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
 
-# The two resolver call sites, each as (module, the spelling the site
-# carries, the bypass to plant, and the launch that would run it).
+# The one resolver call site, as (module, the spelling the site carries,
+# the bypass to plant, and the launch that would run it).
 _SITES = (
-    ('tests/_wfgraph.py',
-     '        bash = _util.workflow_bash()',
-     "        bash = 'bash'",
-     '        return subprocess.run([bash'),
     ('tests/test_coverage_comment_workflow.py',
      '        [_util.workflow_bash(),',
      "        ['bash',",
@@ -535,18 +531,19 @@ def test_a_two_module_tree_catches_the_later_site_bypass(tmp):
     `_test_modules` sorts: facts shared across the sweep would come from
     the earlier, clean module and never reach the bypass's text.
     """
-    root = _derived_tree(tmp, [site[0] for site in _SITES])
-    expected = _plant(_SITES[1], root)
+    root = _derived_tree(tmp, ('tests/_util.py', _SITES[0][0]))
+    expected = _plant(_SITES[0], root)
     violations = _bash_resolver_scan._tree_violations(root)
     assert any(v.startswith(expected) for v in violations), violations
 
 
 def test_a_derived_tree_tracks_a_comprehension_walrus(tmp):
-    root = _derived_tree(tmp, ('tests/_wfgraph.py',))
-    relative = 'tests/_wfgraph.py'
+    root = _derived_tree(
+        tmp, ('tests/test_coverage_comment_workflow.py',))
+    relative = 'tests/test_coverage_comment_workflow.py'
     target = root / relative
     source = target.read_text(encoding='utf-8')
-    anchor = 'def _tests_yml():'
+    anchor = 'def _run_shell_block(workdir, script, env):'
     snippet = ("[(program := 'bash') for item in values]\n"
                "subprocess.run([program], cwd=tmp)\n")
     assert source.count(anchor) == 1
