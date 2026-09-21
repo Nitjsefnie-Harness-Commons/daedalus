@@ -405,6 +405,32 @@ def test_a_short_json_body_is_refused_before_parsing(tmp):
         assert (status, slot) == (200, {'pending': True}), (status, slot)
 
 
+def test_a_shortfall_after_a_complete_json_text_is_refused(tmp):
+    """A declaration one byte past a COMPLETE document is still a shortfall.
+
+    The truncation pin above cuts inside invalid JSON, where the parse
+    refusal was already answering. Here every byte of a complete, valid
+    document arrives and only the declaration exceeds it — the received
+    bytes parse as exactly the request the route then acts on, so the
+    length comparison is the only thing standing between the shortfall
+    and a result stored for a body the client never finished declaring.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        body = json.dumps(
+            {'token': TOK, 'id': 'complete-prefix',
+             'result': {'n': 1}}).encode()
+        resp = raw_request(
+            base,
+            b'POST /result HTTP/1.0\r\nHost: x\r\n'
+            b'Content-Type: application/json\r\n'
+            b'Content-Length: ' + str(len(body) + 1).encode() + b'\r\n\r\n'
+            + body)
+        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
+        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+        status, slot = _util.get_json(base + '/result?token=' + TOK)
+        assert (status, slot) == (200, {'pending': True}), (status, slot)
+
+
 def _settled(socks, timeout, grace=1.0):
     """`socks` split into the closed, the answered and the still-held.
 
