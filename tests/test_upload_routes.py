@@ -38,7 +38,7 @@ def test_list_uploads_answers_a_bare_array_without_paging(tmp):
     _store(tmp, 'tok', 'id1', 'a.png', b'abc')
     status, payload = routes.list_uploads(Path(tmp), 'tok', {})
     assert status == 200, (status, payload)
-    assert [item['path'] for item in payload] == ['tok/id1/a.png'], payload
+    assert [item['path'] for item in payload] == ['id1/a.png'], payload
     assert payload[0]['size'] == 3, payload
 
 
