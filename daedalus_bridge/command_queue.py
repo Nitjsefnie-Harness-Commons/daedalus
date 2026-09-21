@@ -207,7 +207,8 @@ def notify_dashboard(cmd_dir, token, payload):
                      {'id': event_id, 'kind': 'event', **payload})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
-        print(f'[DASH-NOTIFY-FAIL] {log_safe(e)}', flush=True)
+        print(f'[DASH-NOTIFY-FAIL] '
+              f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 
 
 # ─── Command queue (directory-per-target, FIFO) ───
