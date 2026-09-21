@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import yaml  # noqa: E402
+from _repo import ROOT  # noqa: E402
 from _wfgraph import (  # noqa: E402
     _job_needs, _job_output_mapping, _matrix_job_running, _tests_yml)
 from _wfjobs import jobs_mapping, load, workflow_files  # noqa: E402
@@ -251,9 +252,10 @@ def _real(tmp, source, name='tests.yml'):
         return handle.read()
 
 
-def _replaced(old, new):
-    """Return tests.yml with one real block swapped for a rewrite of it."""
-    workflow = _tests_yml()
+def _replaced(old, new, name='tests.yml'):
+    """Return a shipped workflow with one real block swapped for a rewrite."""
+    workflow = _tests_yml() if name == 'tests.yml' else (
+        ROOT / '.github' / 'workflows' / name).read_text(encoding='utf-8')
     assert old in workflow, old
     mutated = workflow.replace(old, new, 1)
     assert mutated != workflow
@@ -377,12 +379,8 @@ def test_a_trigger_key_with_nothing_under_it_reads_as_none(tmp):
     assert decoded['on']['pull_request'] is None
 
 
-def test_every_shipped_workflow_decodes_with_its_bare_triggers_as_none(tmp):
-    """The sweep the issue was filed against: no shipped file is refused."""
-    del tmp
-    paths = workflow_files()
-    names = {path.name for path in paths}
-    assert SHIPPED_WITH_BARE_TRIGGERS <= names, sorted(names)
+def _bare_trigger_sweep(paths):
+    """Count the `None` values, each a filterless top-level trigger."""
     compared = 0
     files_with_none = set()
     for path in paths:
@@ -391,13 +389,30 @@ def test_every_shipped_workflow_decodes_with_its_bare_triggers_as_none(tmp):
         oracle = yaml.safe_load(source)
         for position in _none_paths(oracle):
             assert _at(decoded, position) is None, (path.name, position)
-            assert position[0] == 'on', (path.name, position)
-            assert position[1] in ('pull_request', 'workflow_dispatch'), (
+            assert position[0] == 'on' and len(position) == 2, (
                 path.name, position)
             compared += 1
             files_with_none.add(path.name)
+    return compared, files_with_none
+
+
+def test_every_shipped_workflow_decodes_with_its_bare_triggers_as_none(tmp):
+    """The sweep the issue was filed against: no shipped file is refused."""
+    del tmp
+    paths = workflow_files()
+    names = {path.name for path in paths}
+    assert SHIPPED_WITH_BARE_TRIGGERS <= names, sorted(names)
+    compared, files_with_none = _bare_trigger_sweep(paths)
     assert compared >= len(SHIPPED_WITH_BARE_TRIGGERS), compared
     assert files_with_none >= SHIPPED_WITH_BARE_TRIGGERS, files_with_none
+
+
+def test_the_sweep_admits_any_bare_trigger_not_only_the_shipped_two(tmp):
+    """The sweep pins the shape of a bare trigger, not the shipped names."""
+    _real(tmp, _replaced('on:\n', 'on:\n  push:\n', 'claim.yml'), 'claim.yml')
+    compared, files_with_none = _bare_trigger_sweep([Path(tmp) / 'claim.yml'])
+    assert compared == 1, compared
+    assert files_with_none == {'claim.yml'}, files_with_none
 
 
 def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
