@@ -249,6 +249,7 @@
 !/tests/_cli_parse.py
 !/tests/_cmdqueue.py
 !/tests/_cmdqueue_faults.py
+!/tests/_completion.py
 !/tests/_control_calls.py
 !/tests/_control_writes.py
 !/tests/_coverage_bindings.py
@@ -446,6 +447,7 @@
 !/tests/test_result_routes.py
 !/tests/test_result_store.py
 !/tests/test_run_tests.py
+!/tests/test_runner_refuses_unawaited.py
 !/tests/test_screenshot_quality.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
