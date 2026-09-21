@@ -1,6 +1,6 @@
 /* exported config, loadConfig, configured, _executionContext, postResult */
 /* global DEFAULT_SERVER, _loadSeenDids, stopStream, startStream */
-/* global bridgeHeaders, TextEncoder */
+/* global bridgeHeaders */
 
 let config = { token: '', serverUrl: DEFAULT_SERVER };
 
