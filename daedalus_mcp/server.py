@@ -149,6 +149,12 @@ startup_error = ''
 _bound = threading.Event()
 
 
+# The bridge's listener makes the same Windows exclusion, and a bare
+# SO_REUSEADDR here would let a second front end share a live port the same
+# way. Read once so the decision is one patchable name.
+WIN32 = sys.platform == 'win32'
+
+
 def _serve():
     global bound_port, startup_error
     try:
@@ -184,7 +190,11 @@ def _serve():
         config = uvicorn.Config(
             app, host='127.0.0.1', port=MCP_PORT, log_level='warning')
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if WIN32:
+            sock.setsockopt(
+                socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('127.0.0.1', MCP_PORT))
         bound_port = sock.getsockname()[1]
         _bound.set()
