@@ -1,6 +1,6 @@
 /* exported config, loadConfig, configured, _executionContext, postResult */
 /* global DEFAULT_SERVER, _loadSeenDids, stopStream, startStream */
-/* global bridgeHeaders */
+/* global bridgeHeaders, TextEncoder */
 
 let config = { token: '', serverUrl: DEFAULT_SERVER };
 
@@ -82,20 +82,79 @@ async function postResult(execution, result, error, tabId, extra = {}) {
   // result POST would make the caller time out on work that actually
   // succeeded.
   const body = JSON.stringify(payload);
+  let lastStatus = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
+    let resp = null;
     try {
-      const resp = await fetch(execution.resultRoute.serverUrl + '/result', {
+      resp = await fetch(execution.resultRoute.serverUrl + '/result', {
         method: 'POST',
         headers: bridgeHeaders(execution.resultRoute.token),
         body,
       });
-      if (resp.ok) return;
-      // Non-OK (e.g. 5xx during a restart): retry unless it's a client error.
-      if (resp.status < 500) return;
     } catch (e) {
+      // A last network error names itself below; an earlier one stays silent
+      // and only spends its retry.
+      lastStatus = 0;
       if (attempt === 2) console.error('[Daedalus] Result POST failed:', e);
     }
+    if (resp) {
+      if (resp.ok) return;
+      lastStatus = resp.status;
+      // A 413 is the one client error the worker can fix: the refused body is
+      // its own doing, so a small terminal error result goes out in its place.
+      // Any other 4xx is a credential, routing or shape problem no retry can
+      // fix, so it is named once and given up.
+      if (resp.status === 413) {
+        await _postResultTooLarge(execution, payload, body);
+        return;
+      }
+      if (resp.status < 500) {
+        console.error('[Daedalus] Result POST for command ' + execution.id
+          + (execution.deliveryId
+            ? ' (delivery ' + execution.deliveryId + ')'
+            : '')
+          + ' refused: HTTP ' + resp.status);
+        return;
+      }
+    }
     await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+  }
+  // Exhausting the 5xx retries is the same give-up the 4xx returns were, and
+  // it names itself the same way. A last network error already logged itself
+  // in the catch above, which is why lastStatus was reset there.
+  if (lastStatus) {
+    console.error('[Daedalus] Result POST for command ' + execution.id
+      + ' gave up after 3 attempts: HTTP ' + lastStatus);
+  }
+}
+
+// The one 4xx the worker can fix: the oversized body is the worker's own
+// doing, so the caller gets a small terminal error result naming the refusal
+// instead of timing out on a result that was refused unread. One POST, never
+// retried and never recursive: whatever becomes of the substitute, it is
+// logged and done.
+async function _postResultTooLarge(execution, refused, body) {
+  const substitute = {
+    ...refused,
+    result: null,
+    ts: Date.now(),
+    error: {
+      message: 'result too large',
+      size: new TextEncoder().encode(body).length,
+    },
+  };
+  try {
+    const resp = await fetch(execution.resultRoute.serverUrl + '/result', {
+      method: 'POST',
+      headers: bridgeHeaders(execution.resultRoute.token),
+      body: JSON.stringify(substitute),
+    });
+    if (!resp.ok) {
+      console.error('[Daedalus] Substitute result POST for command '
+        + execution.id + ' refused: HTTP ' + resp.status);
+    }
+  } catch (e) {
+    console.error('[Daedalus] Substitute result POST failed:', e);
   }
 }
 
