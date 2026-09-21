@@ -177,8 +177,11 @@ def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
         mod = _util.load(_util.ROOT / 'server.py', 'server_exclusive_live')
     server = mod.ThreadingHTTPServer(('127.0.0.1', 0), mod.Handler)
     try:
-        assert server.socket.getsockopt(
-            socket.SOL_SOCKET, socket.SO_REUSEADDR) == 1
+        observed = server.socket.getsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR)
+        assert observed == 1, (
+            sys.platform, observed, socket.SO_REUSEADDR,
+            socket.SOL_SOCKET, server.allow_reuse_address)
     finally:
         server.server_close()
 
@@ -210,8 +213,27 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     sock = handed[0]
     assert mod.bound_port == sock.getsockname()[1]
     assert mod.bound_port > 0
-    assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) == 1
+    observed = sock.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)
+    assert observed == 1, (
+        sys.platform, observed, socket.SO_REUSEADDR, socket.SOL_SOCKET)
     sock.close()
+
+
+def test_the_armed_platform_value_matches_the_host(tmp):
+    """The platform reads must arm on Windows and stay off elsewhere.
+
+    Every other test here overwrites the platform name, so a corrupted
+    read — an inverted comparison, a hoisted False — would pass this whole
+    suite on Linux while silently reintroducing the defect on Windows.
+    This pin loads both modules fresh and holds each read against the
+    host, which is what bites on the Windows legs.
+    """
+    _need_deps()
+    bridge = _load_server(Path(tmp) / 'armed-bridge')
+    mcp = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59980)
+    expected = sys.platform == 'win32'
+    assert bridge.WIN32 == expected, (bridge.WIN32, sys.platform)
+    assert mcp.WIN32 == expected, (mcp.WIN32, sys.platform)
 
 
 def main():
