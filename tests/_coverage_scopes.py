@@ -210,7 +210,7 @@ def _is_repository_root_binding(value, owners=frozenset()):
 
 
 def _root_assignments(tree):
-    values = []
+    values = {}
     for node in memo_nodes(tree):
         if isinstance(node, ast.Assign):
             targets, value = node.targets, node.value
@@ -218,10 +218,24 @@ def _root_assignments(tree):
             targets, value = [node.target], node.value
         else:
             continue
-        if any(isinstance(target, ast.Name) and target.id == 'ROOT'
-               for target in targets):
-            values.append(value)
+        values.update((target, value) for target in targets
+                      if isinstance(target, ast.Name) and target.id == 'ROOT')
     return values
+
+
+def _other_root_bindings(tree, assignments):
+    for node in memo_nodes(tree):
+        if not _bound_names(node) & {'ROOT', _ALL_NAMES}:
+            continue
+        if node in assignments:
+            continue
+        if isinstance(node, ast.ImportFrom) and all(
+                _import_bound_name(node, alias) not in {'ROOT', _ALL_NAMES}
+                or _canonical_import(node, alias, 'ROOT')
+                for alias in node.names):
+            continue
+        return True
+    return False
 
 
 def _unprovable_names(tree, layout=None):
@@ -262,10 +276,11 @@ def _shadowed_names(tree):
     names.update(unprovable)
     root_values = _root_assignments(tree)
     owners = root_owner_names(tree)
-    if (root_values and 'ROOT' not in unprovable
+    if (root_values
+            and not _other_root_bindings(tree, root_values)
             and not {'Path', 'Path()', '_util'} & names
             and all(_is_repository_root_binding(value, owners)
-                    for value in root_values)):
+                    for value in root_values.values())):
         names.discard('ROOT')
     return names
 
@@ -438,6 +453,8 @@ def _bound_names(node):
     if (isinstance(node, ast.Name)
             and isinstance(node.ctx, (ast.Store, ast.Del))):
         return {node.id}
+    if isinstance(node, ast.arg):
+        return {node.arg}
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                          *_TYPE_PARAMETERS)):
         return {node.name}
