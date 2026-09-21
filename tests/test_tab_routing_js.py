@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _jsroute_factory_cases import FACTORY_CASES  # noqa: E402
+from _jsroute_getter_arg_cases import GETTER_ARG_CASES  # noqa: E402
 from _jsroute_getter_cases import GETTER_CASES  # noqa: E402
 from _jsroute_harness import (paired as _paired,  # noqa: E402
                               runtime_and_guard as _runtime_and_guard)
@@ -629,6 +630,15 @@ def test_getter_returned_callables_match_runtime(tmp):
     observed = [(label, *_runtime_and_guard(source, path))
                 for label, source, _ in GETTER_CASES]
     expected = _paired(GETTER_CASES)
+    assert observed == expected, [
+        row for row in observed if row not in expected]
+
+
+def test_getter_argument_callables_match_runtime(tmp):
+    path = Path(tmp) / 'getter-arg.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _ in GETTER_ARG_CASES]
+    expected = _paired(GETTER_ARG_CASES)
     assert observed == expected, [
         row for row in observed if row not in expected]
 

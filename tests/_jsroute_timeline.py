@@ -370,6 +370,12 @@ class InvocationReplay:
                     source_binding, inherited, limits)
             else:
                 value = (direct,) if direct is not None else ()
+            if not value and not source['rest']:
+                # Nothing to replay and no alias: the parameter holds a
+                # value the walk cannot follow, so its invocations report.
+                # A rest binding is a container the member walk resolves,
+                # not an unfollowable callable.
+                self.carries.add(target)
             overrides[target] = value
             sender_sources[target] = sender_sources.get(
                 source_binding, {
