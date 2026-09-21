@@ -38,23 +38,40 @@ def _initialize_body(padding=0):
     return json.dumps(body).encode() + b' ' * padding
 
 
-def test_undeclared_oversized_body_is_refused_after_read(tmp):
-    del tmp
+def _drive_undeclared_post(body_chunks, max_body_size):
+    """Drive BearerAuth with a POST that declares no Content-Length.
+
+    Returns (status, payload, inner, pulled): the response status, the
+    response payload, the body the inner app assembled, and the number of
+    body bytes the middleware pulled from the ASGI receive channel.
+    """
     auth = _auth_module()
+    pulled = [0]
+    inner = []
+    messages = [
+        {'type': 'http.request', 'body': chunk,
+         'more_body': index < len(body_chunks) - 1}
+        for index, chunk in enumerate(body_chunks)]
     outbound = []
-    inbound = [{
-        'type': 'http.request',
-        'body': b'x' * 16,
-        'more_body': False,
-    }]
 
     async def receive():
-        return inbound.pop(0)
+        message = messages.pop(0)
+        pulled[0] += len(message['body'])
+        return message
 
     async def send(message):
         outbound.append(message)
 
-    async def accepted(_scope, _receive, send_response):
+    async def inner_app(_scope, read_body, send_response):
+        seen = []
+        while True:
+            message = await read_body()
+            if message['type'] != 'http.request':
+                break
+            seen.append(message.get('body', b''))
+            if not message.get('more_body', False):
+                break
+        inner.append(b''.join(seen))
         await send_response({
             'type': 'http.response.start',
             'status': 204,
@@ -82,22 +99,70 @@ def test_undeclared_oversized_body_is_refused_after_read(tmp):
         'client': ('127.0.0.1', 12345),
         'server': ('127.0.0.1', 8086),
     }
-    middleware = auth.BearerAuth(accepted, max_body_size=8)
+    middleware = auth.BearerAuth(inner_app, max_body_size=max_body_size)
     asyncio.run(middleware(scope, receive, send))
 
     start = next(
         message for message in outbound
         if message['type'] == 'http.response.start')
-    body = b''.join(
+    payload = b''.join(
         message.get('body', b'') for message in outbound
         if message['type'] == 'http.response.body')
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        payload = f'non-JSON body: {body!r}'
-    actual = (start['status'], payload)
-    expected = (413, {'error': 'request body too large'})
-    assert actual == expected, (actual, expected)
+    return {
+        'status': start['status'],
+        'payload': payload,
+        'inner': inner,
+        'pulled': pulled[0],
+    }
+
+
+def test_oversized_chunked_body_is_refused_inside_the_read(tmp):
+    """An undeclared body is bounded while received, not after buffering.
+
+    The pulled-bytes bound is the assertion that separates this from the
+    old behavior, which read every chunk before comparing the total against
+    the limit.
+    """
+    del tmp
+    result = _drive_undeclared_post([b'x'] * 64, max_body_size=16)
+    payload = json.loads(result['payload'])
+    assert result['status'] == 413, (result['status'], payload)
+    assert payload == {'error': 'request body too large'}, payload
+    assert result['pulled'] <= 17, result['pulled']
+    assert result['inner'] == [], result['inner']
+
+
+def test_chunked_body_at_the_limit_reaches_the_inner_app(tmp):
+    del tmp
+    body = b'0123456789abcdef'
+    result = _drive_undeclared_post(
+        [body[0:5], body[5:10], body[10:16]], max_body_size=16)
+    assert result['status'] == 204, result['status']
+    assert result['inner'] == [body], result['inner']
+
+
+def test_chunked_body_one_past_the_limit_is_refused(tmp):
+    del tmp
+    result = _drive_undeclared_post(
+        [b'a' * 8, b'b' * 9], max_body_size=16)
+    payload = json.loads(result['payload'])
+    assert result['status'] == 413, (result['status'], payload)
+    assert payload == {'error': 'request body too large'}, payload
+    assert result['inner'] == [], result['inner']
+
+
+def test_chunked_duplicate_job_carrier_still_answers_duplicate_job(tmp):
+    del tmp
+    raw = (
+        '{"jsonrpc": "2.0", "id": 7, "method": "segment_job", '
+        '"params": {"name": "segment_job", "arguments": '
+        '{"job": "first", "job": "second"}}}').encode()
+    result = _drive_undeclared_post(
+        [raw[0:40], raw[40:80], raw[80:]], max_body_size=256)
+    payload = json.loads(result['payload'])
+    assert result['status'] == 400, (result['status'], payload)
+    assert payload == {'error': 'duplicate job'}, payload
+    assert result['inner'] == [], result['inner']
 
 
 def test_top_level_json_scalar_has_no_job_carrier(tmp):
