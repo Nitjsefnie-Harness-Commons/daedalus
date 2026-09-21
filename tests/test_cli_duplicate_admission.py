@@ -99,5 +99,26 @@ def test_a_retried_exec_announces_and_reuses_the_live_delivery(tmp):
         assert 'Hello Title' in out, out
 
 
+def test_a_no_wait_retry_names_what_it_did_not_wait_on(tmp):
+    """A --no-result retry announces the coalescing without a wait claim."""
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        argv = ['exec', 'same-id', 'document.title', '--no-result']
+        first = run_cli(argv, env)
+        assert first.returncode == 0, (
+            first.returncode, first.stdout, first.stderr)
+        assert 'already queued' not in first.stdout, first.stdout
+        qdir = Path(docroot) / 'commands' / TOK
+        published = sorted(qdir.glob('*.json'))
+        assert len(published) == 1, published
+
+        second = run_cli(argv, env)
+        assert second.returncode == 0, (
+            second.returncode, second.stdout, second.stderr)
+        assert 'already queued' in second.stdout, second.stdout
+        assert 'not waiting' in second.stdout, second.stdout
+        assert 'waiting on that delivery' not in second.stdout, second.stdout
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

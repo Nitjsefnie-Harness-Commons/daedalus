@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Fault controls for test-side command queue readers."""
+import asyncio
 import contextlib
 import json
 import math
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _drain  # noqa: E402
 import _util  # noqa: E402
 import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
@@ -23,27 +28,6 @@ from _cmdqueue_faults import (  # noqa: E402
 import _overlap  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
-
-
-@contextlib.contextmanager
-def _redirect_stale_answer(queue, stale, stale_command):
-    """Redirect a stale result so the current producer can finish."""
-    original = _util.post_json
-
-    def redirected(url, body, **kwargs):
-        if (url.endswith('/result') and body.get('id') == stale_command['id']
-                and body.get('_did') == stale_command['_did']):
-            current = _cmdqueue.wait_for_command(
-                queue, timeout=1, ignored_names={stale.name})
-            assert current is not None, 'the current command never appeared'
-            body = dict(body, id=current['id'], _did=current['_did'])
-        return original(url, body, **kwargs)
-
-    _util.post_json = redirected
-    try:
-        yield
-    finally:
-        _util.post_json = original
 
 
 def test_a_transient_read_refusal_returns_the_queued_command(tmp):
@@ -273,54 +257,108 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
     assert queued['type'] == 'reload', queued
 
 
-def test_the_cli_answer_helper_ignores_a_refused_leftover(tmp):
+def test_a_refused_leftover_coalesces_the_identical_cli_retry(tmp):
     bridge_env = {'DAEDALUS_TOKEN': test_cli.TOK, 'TOKEN': ''}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         env = test_cli.cli_env(DAEDALUS_URL=base,
                                DAEDALUS_TOKEN=test_cli.TOK)
-        # The real helper preserves exact payload and delivery-id shape;
-        # constructed leftovers repeatedly let reader changes evade it.
-        first_code, first_out, first_err, stale_command = (
-            test_cli._answer_one_ext_command(
-                base, docroot, ['ext-reload'], {}, env))
-        assert first_code == 0, (first_code, first_out, first_err)
-        files = _bridge.queue_files(
-            docroot, f'{test_cli.TOK}_extension')
+        # The unanswered first run leaves a live leftover carrying the exact
+        # payload the retry sends; constructed leftovers repeatedly let
+        # reader changes evade the real sender's shape.
+        first = test_cli.run_cli(['ext-reload'], env)
+        assert first.returncode != 0, (first.returncode, first.stdout)
+        files = _bridge.queue_files(docroot, f'{test_cli.TOK}_extension')
         assert len(files) == 1, files
         stale = files[0]
+        leftover = json.loads(stale.read_text(encoding='utf-8'))
         queue = stale.parent
-        with _redirect_stale_answer(queue, stale, stale_command):
-            with _refuse_path_operation(stale, 'unlink', 1000) as calls:
-                code, out, err, queued = test_cli._answer_one_ext_command(
-                    base, docroot, ['ext-reload'], {}, env)
+        with _refuse_path_operation(stale, 'unlink', 1000) as calls:
+            assert _cmdqueue.clear_command_queue(queue) == {stale.name}
+            # The identical retry coalesces onto the live leftover instead
+            # of enqueueing a second delivery, and completes through that
+            # delivery's result: the waiter polls delivery=<leftover did>,
+            # so a second delivery could never satisfy it.
+            proc = subprocess.Popen(
+                test_cli.CLI + ['ext-reload'], cwd=str(_util.ROOT),
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8')
+            try:
+                status, _ = _util.post_json(base + '/result', {
+                    'token': test_cli.TOK, 'tabId': 'extension',
+                    'id': leftover['id'], 'result': {},
+                    'error': None, 'ts': 1, '_did': leftover['_did']})
+                assert status == 200, status
+                out, err = proc.communicate(timeout=60)
+            finally:
+                _drain.kill_and_drain(proc)
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
-    assert code == 0, (code, out, err)
-    assert queued['_did'] != stale_command['_did'], queued
-    assert queued['type'] == 'reload', (queue, queued)
+    assert proc.returncode == 0, (proc.returncode, out, err)
+    survivors = _bridge.queue_files(docroot, f'{test_cli.TOK}_extension')
+    assert [path.name for path in survivors] == [stale.name], survivors
 
 
-def test_the_mcp_answer_helper_ignores_a_refused_leftover(tmp):
+def test_a_refused_leftover_coalesces_the_identical_mcp_retry(tmp):
     test_mcp_server._need_deps()
     bridge_env = {'DAEDALUS_TOKEN': test_mcp_server.TOK, 'TOKEN': '',
                   'DAEDALUS_MCP_PORT': '0'}
     with _util.bridge(tmp, env=bridge_env) as (base, docroot):
         mod = test_mcp_server._load_mcp(base)
-        # The real helper preserves exact payload and delivery-id shape;
-        # constructed leftovers repeatedly let reader changes evade it.
-        _first_value, stale_command = test_mcp_server._answer_mcp_command(
-            base, docroot, mod, mod.ext_reload, {})
+        qdir = Path(docroot) / 'commands' / f'{test_mcp_server.TOK}_extension'
+
+        def first_call():
+            # The token is a ContextVar, and a thread starts with a fresh
+            # context (see _answer_mcp_command).
+            mod._token.set(test_mcp_server.TOK)
+            try:
+                box1['error'] = asyncio.run(mod.ext_reload())
+            except Exception as exc:
+                box1['error'] = exc
+
+        box1 = {}
+        first = threading.Thread(target=first_call)
+        first.start()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not list(qdir.glob('*.json')):
+            time.sleep(0.02)
         files = _bridge.queue_files(
             docroot, f'{test_mcp_server.TOK}_extension')
         assert len(files) == 1, files
+        first.join(30)
+        assert isinstance(box1['error'], TimeoutError), box1
         stale = files[0]
+        leftover = json.loads(stale.read_text(encoding='utf-8'))
         queue = stale.parent
-        with _redirect_stale_answer(queue, stale, stale_command):
-            with _refuse_path_operation(stale, 'unlink', 1000) as calls:
-                _value, queued = test_mcp_server._answer_mcp_command(
-                    base, docroot, mod, mod.ext_reload, {})
+        with _refuse_path_operation(stale, 'unlink', 1000) as calls:
+            assert _cmdqueue.clear_command_queue(queue) == {stale.name}
+            # The identical retry coalesces onto the live leftover: the
+            # tool's poll pins expect_delivery to the leftover's did, so
+            # only a coalesced PUT can be satisfied by the answer below.
+            box = {}
+
+            def retry():
+                # The token is a ContextVar, and a thread starts with a
+                # fresh context (see _answer_mcp_command).
+                mod._token.set(test_mcp_server.TOK)
+                try:
+                    box['value'] = asyncio.run(mod.ext_reload())
+                except Exception as exc:
+                    box['error'] = exc
+
+            worker = threading.Thread(target=retry)
+            worker.start()
+            try:
+                status, _ = _util.post_json(base + '/result', {
+                    'token': test_mcp_server.TOK, 'tabId': 'extension',
+                    'id': leftover['id'], 'result': 'reloaded',
+                    'error': None, 'ts': 1, '_did': leftover['_did']})
+                assert status == 200, status
+            finally:
+                worker.join(30)
     assert calls[0] == _cmdqueue.UNLINK_ATTEMPTS, calls
-    assert queued['_did'] != stale_command['_did'], queued
-    assert queued['type'] == 'reload', (queue, queued)
+    assert 'error' not in box, box
+    survivors = _bridge.queue_files(
+        docroot, f'{test_mcp_server.TOK}_extension')
+    assert [path.name for path in survivors] == [stale.name], survivors
 
 
 def test_a_transient_read_refusal_returns_every_queued_command(tmp):
