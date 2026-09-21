@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Declaration destinations and binding-site controls for root proofs."""
+"""ROOT proofs must survive unrelated bindings."""
 import ast
 import sys
 from pathlib import Path
