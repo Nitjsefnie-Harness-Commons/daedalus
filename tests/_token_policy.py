@@ -29,8 +29,9 @@ def _console_arguments(mask):
         if call:
             start = end + call.end() - 1
             stop = js_bracket_end(mask, start)
-            # A matched closer sits one before the bound; an unbalanced
-            # scan bounds at past-the-end and keeps it.
+            # A matched closer sits one before the bound. A bare tail keeps
+            # the past-the-end bound; a closer character there shortens the
+            # bound by one, keeping closer-terminated shapes refused.
             if mask[stop - 1] in ')]}':
                 stop -= 1
             yield anchor, (start + 1, stop)
@@ -90,21 +91,21 @@ def _refuses_argument_reads(text, mask, start, end):
     return False
 
 
-def _logs_bridge_token(line, mask):
+def _logs_bridge_token(source, mask):
     if '\\' in mask or re.search(r'}\s*/', mask):
         return True
-    line = line.encode('utf-8').decode('latin1')
+    source = source.encode('utf-8').decode('latin1')
     for _, bounds in _console_arguments(mask):
         if bounds is None:
             return True
-        if _refuses_argument_reads(line, mask, *bounds):
+        if _refuses_argument_reads(source, mask, *bounds):
             return True
     return False
 
 
 def _token_log_offenders(source, mask):
-    """(line number, line text) per console sink this source may log the
-    whole token through."""
+    """(line number, line text) per console sink or tagged template this
+    source may log the whole token through."""
     encoded = source.encode('utf-8').decode('latin1')
     lines = source.split('\n')
     offenders = []

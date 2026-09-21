@@ -465,6 +465,8 @@ def test_token_log_offender_anchors_and_eof_bounds(tmp):
     # A tail ending in a closer keeps the shorter bound (issue 889).
     assert offenders("console.log(config['token']") == [
         (1, "console.log(config['token']")]
+    assert offenders("console.log(config['tabId']") == [
+        (1, "console.log(config['tabId']")]
 
 
 def test_extension_ships_no_default_server(tmp):
