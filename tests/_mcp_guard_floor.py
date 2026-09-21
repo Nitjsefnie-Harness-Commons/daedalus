@@ -451,7 +451,8 @@ def missing_citations(table, root):
     """The citation and stated-gap defects a table spells.
 
     A citation is data: its suite is parsed with `ast` and the named test
-    function must be defined at module level there under the `test_`
+    function must be a plain `def` — the runner refuses an async one —
+    defined at module level there under the `test_`
     prefix the runner's `_util.collect` selects on, so a helper it never
     runs pins nothing; a suite path that names no file is absent the same
     way. A None citation is a stated gap, and the
@@ -474,8 +475,7 @@ def missing_citations(table, root):
             missing.append(cited)
             continue
         defined = {node.name for node in tree.body
-                   if isinstance(node, (ast.FunctionDef,
-                                        ast.AsyncFunctionDef))
+                   if isinstance(node, ast.FunctionDef)
                    and node.name.startswith('test_')}
         if name not in defined:
             missing.append(cited)
