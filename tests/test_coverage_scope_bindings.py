@@ -25,7 +25,9 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("    if _ALL_NAMES in shadowed_names:\n        return False\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('a rebound proof name is unprovable', 'scopes',
-     (("    names = set().union(*proof_shadows.values())\n",
+     (("    names = set().union(*(proof_shadows.get(node, set())\n"
+       "                          for node, scope in scoped "
+       "if scope is tree))\n",
        "    names = set()\n"),), _ROOT_PROVENANCE_INVOKE),
     ('Path is independently a proof name', 'scopes',
      (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
@@ -44,7 +46,7 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("    return (not node.level\n", "    return (True\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('scope shadows carry the unprovable names', 'scopes',
-     (("    shadows[tree].update(_unprovable_names(tree))\n", ""),),
+     (("    shadows[tree].update(unprovable)\n", ""),),
      _ROOT_PROVENANCE_INVOKE),
     ('module shadows carry the unprovable names', 'scopes',
      (("    names.update(unprovable)\n", ""),),
@@ -65,9 +67,11 @@ _ROOT_PROVENANCE_MUTATIONS = (
        "\n", "                              if False else bound)\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('str calls consult their import proof shadow', 'scopes',
-     (("            and node.func.id == 'str' "
-       "and 'str()' not in shadowed_names\n",
-       "            and node.func.id == 'str'\n"),),
+     (("        return ('str()' not in shadowed_names\n"
+       "                and _is_root_spelling(node.args[0], "
+       "shadowed_names, owners))\n",
+       "        return _is_root_spelling(node.args[0], "
+       "shadowed_names, owners)\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('Path assignments consult their import proof shadow', 'scopes',
      (("            and not {'Path', 'Path()', '_util'} & names\n",
@@ -77,6 +81,10 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("                        and alias.name in _ROOT_MODULES):\n",
        "                        and alias.name in _ROOT_MODULES) "
        "and not _canonical_import(node, alias, bound):\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('a literal ROOT import establishes provenance', 'scopes',
+     (("                if canonical and bound == 'ROOT':\n"
+       "                    root_imported = True\n", ""),),
      _ROOT_PROVENANCE_INVOKE),
     ('ROOT is independently a proof name', 'scopes',
      (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
@@ -89,6 +97,23 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("        return alias.name == 'ROOT' and alias.asname is None\n",
        "        return alias.name == 'ROOT'\n"),),
      _ROOT_PROVENANCE_INVOKE),
+    ('local imports do not taint module proofs', 'scopes',
+     (("                          for node, scope in scoped "
+       "if scope is tree))\n",
+       "                          for node, scope in scoped))\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('chdir sees local import shadows', 'guard',
+     (("                                       scopes[node], "
+       "self.scope_shadows,\n",
+       "                                       tree, self.scope_shadows,\n"
+       ),), _ROOT_PROVENANCE_INVOKE),
+    ('imports shadow their containing scope', 'scopes',
+     (("        shadows[scope].update(imports.get(node, ()))\n",
+       "        shadows[tree].update(imports.get(node, ()))\n"),),
+     _ROOT_PROVENANCE_INVOKE),
+    ('local imports still shadow local launches', 'scopes',
+     (("        shadows[scope].update(imports.get(node, ()))\n",
+       ""),), _ROOT_PROVENANCE_INVOKE),
     ('an assignment cannot erase a ROOT import shadow', 'scopes',
      (("    if (root_values and 'ROOT' not in unprovable\n",
        "    if (root_values\n"),), _ROOT_PROVENANCE_INVOKE),
@@ -364,6 +389,58 @@ def _root_import_shadow_cases():
     ), []
 
 
+def _proof_import_scope_cases():
+    for binding in ('from helpers import str', 'import helpers as str'):
+        yield binding + ' stays in its function', (
+            'import subprocess\nfrom _repo import ROOT\n'
+            f'def bind():\n    {binding}\n'
+            '    subprocess.run(c, cwd=str(ROOT))\n'
+            '    def inner():\n        subprocess.run(c, cwd=str(ROOT))\n'
+            'def sibling():\n    subprocess.run(c, cwd=str(ROOT))\n'
+            'subprocess.run(c, cwd=str(ROOT))\n'
+        ), _rebound_owner(5, 'str(ROOT)') + _rebound_owner(7, 'str(ROOT)')
+        yield binding + ' at module reaches every scope', (
+            'import subprocess\nfrom _repo import ROOT\n'
+            f'{binding}\nsubprocess.run(c, cwd=str(ROOT))\n'
+            'def outer():\n    subprocess.run(c, cwd=str(ROOT))\n'
+            '    def inner():\n        subprocess.run(c, cwd=str(ROOT))\n'
+            'def sibling():\n    subprocess.run(c, cwd=str(ROOT))\n'
+        ), (_rebound_owner(4, 'str(ROOT)')
+            + _rebound_owner(6, 'str(ROOT)')
+            + _rebound_owner(8, 'str(ROOT)')
+            + _rebound_owner(10, 'str(ROOT)'))
+    yield 'a local Path import leaves the module derivation alone', (
+        'import subprocess\nfrom pathlib import Path\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'def bind():\n    from helpers import Path\n'
+        'subprocess.run(c, cwd=ROOT)\n'
+    ), []
+    yield 'a local str import leaves module chdir alone', (
+        'import os\nimport subprocess\nfrom _repo import ROOT\n'
+        'def bind():\n    from helpers import str\n'
+        'os.chdir(str(ROOT))\nsubprocess.run(c)\n'
+    ), []
+    yield 'a local str import shadows local chdir', (
+        'import os\nimport subprocess\nfrom _repo import ROOT\n'
+        'def bind():\n    from helpers import str\n'
+        '    os.chdir(str(ROOT))\n    subprocess.run(c)\n'
+    ), ['tests/synthetic.py:7: subprocess.run os.chdir at line 6 '
+        'may have moved the cwd declares no env=']
+    yield 'a local ROOT import shadow leaves other scopes alone', (
+        'import subprocess\nfrom _repo import ROOT\n'
+        'def bind():\n    import helpers as ROOT\n'
+        '    subprocess.run(c, cwd=ROOT)\n'
+        'def sibling():\n    subprocess.run(c, cwd=ROOT)\n'
+        'subprocess.run(c, cwd=ROOT)\n'
+    ), _rebound_owner(5, 'ROOT')
+
+
+def test_proof_imports_shadow_only_their_own_scope_chain(tmp):
+    del tmp
+    for name, source, expected in _proof_import_scope_cases():
+        assert _synthetic_violations(source) == expected, name
+
+
 def test_root_import_provenance_excludes_other_bindings(tmp):
     del tmp
     for name, source, expected in _root_import_shadow_cases():
@@ -380,7 +457,7 @@ def test_import_bindings_do_not_rebind_root_spellings(tmp):
     del tmp
     for name, source, expected in (
             *_root_provenance_cases(), *_owner_role_cases(),
-            *_root_import_shadow_cases()):
+            *_root_import_shadow_cases(), *_proof_import_scope_cases()):
         assert _synthetic_violations(source) == expected, name
 
 
