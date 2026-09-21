@@ -4,12 +4,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
-from _control_writes import control_write_violations  # noqa: E402
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
-from _owned_writes import copy_test_tree  # noqa: E402
-from _repo import ROOT  # noqa: E402
 
 
 _IMPORT_LAUNCH = "dict(['python3', 'child.py'], cwd=tmp)"
@@ -496,6 +492,8 @@ def test_variadic_parameter_annotations_are_judged(tmp):
 
 
 def _planted_violations(tmp, snippet, offset):
+    from _owned_writes import copy_test_tree
+
     root = Path(tmp) / 'repository'
     copy_test_tree(root)
     # The write guard requires a literal path here, not a module constant.
@@ -542,6 +540,9 @@ def test_a_real_module_reserved_member_alias_is_judged(tmp):
 
 
 def test_controls_never_write_inside_the_repository(tmp):
+    from _control_writes import control_write_violations
+    from _repo import ROOT
+
     del tmp
     violations = control_write_violations(Path(__file__), ROOT)
     assert not violations, '\n'.join(violations)
@@ -585,4 +586,5 @@ def test_root_assignment_does_not_erase_other_binding_sites(tmp):
 
 
 if __name__ == '__main__':
+    import _util
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
