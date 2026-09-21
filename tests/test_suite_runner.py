@@ -164,9 +164,8 @@ def _runner_tree(tmp, suites, under='.', runner_encoding=None,
     (root / 'tests').mkdir(parents=True)
     (root / 'daedalus_bridge').mkdir()
     shutil.copy2(ROOT / 'run_tests.py', root / 'run_tests.py')
-    shutil.copy2(ROOT / 'tests' / '_util.py', root / 'tests' / '_util.py')
-    shutil.copy2(ROOT / 'tests' / '_teardown.py',
-                 root / 'tests' / '_teardown.py')
+    for helper in ('_util.py', '_completion.py', '_teardown.py'):
+        shutil.copy2(ROOT / 'tests' / helper, root / 'tests' / helper)
     shutil.copy2(ROOT / 'daedalus_bridge' / 'parent_watch.py',
                  root / 'daedalus_bridge' / 'parent_watch.py')
     for name, source in suites.items():
