@@ -440,8 +440,9 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
 
 
 def test_malformed_controls_and_destinations_fail_closed(tmp):
+    from _wffixtures import _refuses  # noqa: PLC0415
     from test_workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_write_reason, _refuses)
+        _cache_write_reason)
 
     _refuses(
         _cache_write_reason,
@@ -495,8 +496,9 @@ def test_direct_cache_markers_are_token_bounded(tmp):
 
 
 def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
+    from _wffixtures import _refuses  # noqa: PLC0415
     from test_workflow_cache_boundary import (  # noqa: PLC0415
-        _direct_cache_run, _refuses)
+        _direct_cache_run)
 
     for run in (
             'docker buildx build --cache-to type=${TYPE} .',
@@ -507,9 +509,10 @@ def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
 
 
 def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
+    from _wffixtures import _refuses  # noqa: PLC0415
     from test_workflow_cache_boundary import (  # noqa: PLC0415
         _assert_writer_inventory, _cache_writing_jobs, _insert_wheel_step,
-        _real_step, _refuses)
+        _real_step)
     from _wfgraph import _tests_yml  # noqa: PLC0415
 
     workflow = _tests_yml()
@@ -540,8 +543,9 @@ def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
 
 
 def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
+    from _wffixtures import _refuses  # noqa: PLC0415
     from test_workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_writing_jobs, _insert_wheel_step, _real_step, _refuses)
+        _cache_writing_jobs, _insert_wheel_step, _real_step)
     from _wfgraph import _tests_yml  # noqa: PLC0415
 
     workflow = _tests_yml()
@@ -557,8 +561,9 @@ def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
 
 
 def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
+    from _wffixtures import _refuses  # noqa: PLC0415
     from test_workflow_cache_boundary import (  # noqa: PLC0415
-        _assert_writer_inventory, _refuses)
+        _assert_writer_inventory)
     from _wfgraph import _tests_yml  # noqa: PLC0415
 
     workflow = _tests_yml()
@@ -568,7 +573,7 @@ def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
     without_opt_out = workflow.replace(line, '', 1)
     message = _refuses(_assert_writer_inventory, without_opt_out)
     assert message == (
-        "unrecorded cache-writing jobs: ['eslint']; "
+        "AssertionError: unrecorded cache-writing jobs: ['eslint']; "
         "recorded cache-writing jobs gone quiet: []")
 
 
