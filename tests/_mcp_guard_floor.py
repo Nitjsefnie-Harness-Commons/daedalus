@@ -642,6 +642,21 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'quality < 1 or quality > 100',
      'tests/test_screenshot_quality.py::'
      'test_screenshot_refuses_a_quality_outside_one_to_hundred'),
+    ('daedalus_cli.transport', 'chrome_tab_id',
+     "raise argparse.ArgumentTypeError(f'{value!r} is not an integer') "
+     'from None',
+     'tests/test_cli_argument_types.py::'
+     'test_a_malformed_chrome_tab_id_is_refused_at_parse_time'),
+    ('daedalus_cli.transport', 'expiration_timestamp',
+     "raise argparse.ArgumentTypeError(f'{value!r} is not a number') "
+     'from None',
+     'tests/test_cli_argument_types.py::'
+     'test_a_malformed_expires_is_refused_at_parse_time'),
+    ('daedalus_cli.transport', 'json_params',
+     'raise argparse.ArgumentTypeError('
+     "f'{value!r} is not valid JSON: {error}') from None",
+     'tests/test_cli_argument_types.py::'
+     'test_malformed_params_are_refused_at_parse_time'),
     # The URLError site is met by a refused connect; the HTTPException site by
     # a cut-off read; the HTTPError-body site by a cut-off error read.
     ('daedalus_cli.transport', '_exchange',
@@ -655,4 +670,9 @@ GUARDS_OFF_THE_TOOL_SURFACE = {
      'raise ConnectionFailed(failure) from failure',
      'tests/test_cli_waits.py::'
      'test_a_truncated_error_answer_is_a_connection_failure'),
+    # The html-body site is the api() paths' answer of a captive front end.
+    ('daedalus_cli.transport', '_json_body',
+     'raise ConnectionFailed(error) from error',
+     'tests/test_cli_error_reporting.py::'
+     'test_a_200_with_an_html_body_is_a_connection_failure'),
 }
