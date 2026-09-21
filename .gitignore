@@ -359,6 +359,7 @@
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
 !/tests/test_cli_argument_types.py
+!/tests/test_cli_duplicate_admission.py
 !/tests/test_cli_error_reporting.py
 !/tests/test_cli_result_wait.py
 !/tests/test_cli_segment_origins.py
@@ -367,6 +368,7 @@
 !/tests/test_cmdqueue.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
+!/tests/test_command_admission.py
 !/tests/test_command_queue.py
 !/tests/test_command_queue_aliased.py
 !/tests/test_command_queue_unit.py
