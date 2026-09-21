@@ -239,7 +239,7 @@ def test_binding_consumers_do_not_mutate_shared_products(tmp):
     assert module.scope_parents is not module.binding_parents
 
 
-def test_type_syntax_keeps_distinct_binding_derivations(tmp):
+def test_type_syntax_shares_annotation_scope_derivations(tmp):
     del tmp
     if not hasattr(ast, 'TypeAlias'):
         return
@@ -252,8 +252,8 @@ def test_type_syntax_keeps_distinct_binding_derivations(tmp):
         calls = {entry.code: entry.callcount for entry in profile.getstats()}
         for name in ('_evaluation_scopes', '_binding_destinations'):
             actual = calls[getattr(_coverage_scopes, name).__code__]
-            assert actual == 2, (source, name, actual)
-        assert facts.binding_layout is not facts.layout, source
+            assert actual == 1, (source, name, actual)
+        assert facts.binding_layout is facts.layout, source
 
 
 def test_a_later_analysis_recomputes_changed_import_fields(tmp):
