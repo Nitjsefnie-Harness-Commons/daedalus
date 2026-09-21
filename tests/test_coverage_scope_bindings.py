@@ -85,11 +85,13 @@ _ROOT_PROVENANCE_MUTATIONS = (
        "_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('ROOT provenance requires the literal member', 'scopes',
-     (("        return alias.name == 'ROOT' and alias.asname is None\n",
+     (("        return (alias.name == 'ROOT'\n"
+       "                and alias.asname in (None, alias.name))\n",
        "        return True\n"),), _ROOT_PROVENANCE_INVOKE),
-    ('ROOT provenance excludes even a same-name alias', 'scopes',
-     (("        return alias.name == 'ROOT' and alias.asname is None\n",
-       "        return alias.name == 'ROOT'\n"),),
+    ('ROOT provenance allows a same-name alias', 'scopes',
+     (("        return (alias.name == 'ROOT'\n"
+       "                and alias.asname in (None, alias.name))\n",
+       "        return alias.name == 'ROOT' and alias.asname is None\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('local imports do not taint module proofs', 'scopes',
      (("    names = _routed_bindings(imports, destinations)[tree]\n",
@@ -362,7 +364,6 @@ def _owner_role_cases():
 def _root_import_shadow_cases():
     for binding in ('import helpers as ROOT',
                     'from helpers import other as ROOT',
-                    'from helpers import ROOT as ROOT',
                     'import _util as ROOT',
                     'from helpers import *', 'ROOT = replacement'):
         yield binding, ('import subprocess\nfrom _repo import ROOT\n'
@@ -377,6 +378,10 @@ def _root_import_shadow_cases():
         'ROOT = Path(__file__).resolve().parents[1]\n'
         'import helpers as ROOT\nsubprocess.run(c, cwd=ROOT)\n'
     ), _rebound_owner(5, 'ROOT')
+    yield 'a same-name alias stays literal', (
+        'import subprocess\nfrom helpers import ROOT as ROOT\n'
+        'subprocess.run(c, cwd=ROOT)\n'
+    ), []
     yield 'a literal ROOT from any module stays provable', (
         'import subprocess\nfrom helpers import ROOT\n'
         'subprocess.run(c, cwd=ROOT)\n'

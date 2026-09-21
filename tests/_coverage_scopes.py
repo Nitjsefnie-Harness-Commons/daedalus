@@ -142,7 +142,8 @@ def _canonical_import(node, alias, bound):
     if isinstance(node, ast.Import):
         return False
     if bound == 'ROOT':
-        return alias.name == 'ROOT' and alias.asname is None
+        return (alias.name == 'ROOT'
+                and alias.asname in (None, alias.name))
     return (not node.level
             and (node.module, alias.name) == _CANONICAL_MEMBERS.get(bound))
 
