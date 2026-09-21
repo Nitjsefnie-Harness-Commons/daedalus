@@ -73,6 +73,11 @@ globalThis.clearTimeout = (id) => {
   }
   realClearTimeout(id);
 };
+const intervals = [];
+globalThis.setInterval = (callback) => {
+  intervals.push(callback);
+  return intervals.length;
+};
 const pause = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms));
 const until = async (check) => {
   while (!check()) await pause(10);
@@ -120,10 +125,11 @@ function emit(type) {
   for (const fn of listeners) fn({ type });
 }
 const findRow = (tid) => container.all().find(
-  (el) => el.tag === 'tr' && el.dataset.tid === tid) || null;
+  (el) => el.tag === 'tr' && String(el.dataset.tid) === String(tid)) || null;
 const rowOrder = () => container.all()
-  .filter((el) => el.tag === 'tr' && el.dataset.tid)
-  .map((el) => el.dataset.tid);
+  .filter((el) => el.tag === 'tr' && el.dataset.tid !== undefined
+    && el.dataset.tid !== null && el.dataset.tid !== '')
+  .map((el) => String(el.dataset.tid));
 const cellText = (tr, at) => tr.children[at].textContent;
 const urlInputOf = (tr) => tr.children[3].children.find(
   (el) => el.tag === 'input') || null;
@@ -166,6 +172,11 @@ phase('dashboard call started');
 _TWO_TAB_LISTING = r"""
 listing = [tab('11', 'first', 'https://a.example.com/x', 5),
            tab('22', 'second', 'https://b.example.com/y', 3)];
+"""
+
+_NUMERIC_TAB_LISTING = r"""
+listing = [tab('11', 'first', 'https://a.example.com/x', 5),
+           tab(22, 'second', 'https://b.example.com/y', 3)];
 """
 
 _THREE_TAB_LISTING = r"""
@@ -517,6 +528,115 @@ def test_a_reverted_url_change_shows_the_restored_value(_tmp):
     assert seen['restoredUrl'] == 'https://a.example.com/x', seen
     assert seen['restoredTr'] is True, seen
     assert seen['bSameTr'] is True, seen
+    assert seen['totalFetches'] == 2, seen
+
+
+_INTERVAL_RECONCILES = r"""
+openEditor('11');
+armClose('11');
+const before = rowSnapshot('11');
+const bBefore = rowSnapshot('22');
+if (!before.editing) throw new Error('editor did not open');
+if (before.closeLabel !== 'sure?') throw new Error('close did not arm');
+listing = [tab('11', 'first', 'https://a.example.com/x', 1),
+           tab(22, 'second', 'https://b.example.com/y', 9)];
+intervals[0]();
+await until(() => tabsFetches >= 2);
+await pause(25);
+const after = rowSnapshot('11');
+const bAfter = rowSnapshot('22');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  aSameTr: after.tr === before.tr,
+  editorStill: after.editing,
+  confirmStill: after.closeLabel,
+  aAge: after.age,
+  bSameTr: bAfter.tr === bBefore.tr,
+  bAge: bAfter.age,
+  orderTids: rowOrder(),
+  totalFetches: tabsFetches - 1,
+}));
+phase('dashboard harness finished');
+"""
+
+_FAILED_FETCH_RECOVERS = r"""
+const realFetch = globalThis.fetch;
+let failTabs = false;
+globalThis.fetch = async (target, init) => {
+  if (target === '/tabs' && failTabs) throw new Error('bridge down');
+  return realFetch(target, init);
+};
+failTabs = true;
+emit('tab-updated');
+await until(() => container.all().some(
+  (el) => el.className === 'pane err'));
+failTabs = false;
+emit('tab-updated');
+await until(() => tabsFetches >= 2);
+await pause(25);
+const hasError = container.all().some((el) => el.className === 'pane err');
+const aBack = findRow('11');
+const bBack = findRow('22');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  rowBack: !!aBack && !!bBack,
+  errorPaneGone: !hasError,
+  totalFetches: tabsFetches - 1,
+}));
+phase('dashboard harness finished');
+"""
+
+_EMPTY_LISTING_RECOVERS = r"""
+const bBefore = rowSnapshot('22');
+listing = [];
+emit('tab-updated');
+await until(() => tabsFetches >= 2);
+await pause(25);
+const noticeDuring = container.all().some(
+  (el) => el.className === 'dim italic small'
+    && el.textContent.includes('no tabs registered'));
+listing = [tab('11', 'first', 'https://a.example.com/x', 5),
+           tab('22', 'second', 'https://b.example.com/y', 3)];
+emit('tab-updated');
+await until(() => tabsFetches >= 3);
+await pause(25);
+const noticeAfter = container.all().some(
+  (el) => el.className === 'dim italic small');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  noticeDuring,
+  rowBack: !!findRow('11') && !!findRow('22'),
+  noticeGone: !noticeAfter,
+  totalFetches: tabsFetches - 1,
+}));
+phase('dashboard harness finished');
+"""
+
+
+def test_the_parked_interval_reconciles_instead_of_rebuilding(_tmp):
+    seen = _run(_harness(_INTERVAL_RECONCILES, _NUMERIC_TAB_LISTING))
+    assert seen['aSameTr'] is True, seen
+    assert seen['editorStill'] is True, seen
+    assert seen['confirmStill'] == 'sure?', seen
+    assert seen['aAge'] == '1s', seen
+    assert seen['bSameTr'] is True, seen
+    assert seen['bAge'] == '9s', seen
+    assert seen['orderTids'] == ['22', '11'], seen
+    assert seen['totalFetches'] == 1, seen
+
+
+def test_a_transient_fetch_failure_recovers_the_table(_tmp):
+    seen = _run(_harness(_FAILED_FETCH_RECOVERS))
+    assert seen['rowBack'] is True, seen
+    assert seen['errorPaneGone'] is True, seen
+    assert seen['totalFetches'] == 1, seen
+
+
+def test_an_empty_listing_interlude_recovers_the_table(_tmp):
+    seen = _run(_harness(_EMPTY_LISTING_RECOVERS))
+    assert seen['noticeDuring'] is True, seen
+    assert seen['rowBack'] is True, seen
+    assert seen['noticeGone'] is True, seen
     assert seen['totalFetches'] == 2, seen
 
 
