@@ -1,4 +1,5 @@
 """Commands that move bytes: screenshots, uploads and segment jobs."""
+import http.client
 import json
 import sys
 import time
@@ -37,9 +38,11 @@ def do_segment_status(args):
         sys.exit(f'HTTP {e.code}: {_http_error_detail(e)}')
     except urllib.error.URLError as e:
         sys.exit(f'Connection failed: {e.reason}')
-    except ValueError as e:
-        # A 200 whose body is the front end's HTML page, not the bridge's
-        # JSON: no answer arrived, and it exits like a refused connection.
+    except (OSError, http.client.HTTPException, ValueError, TypeError) as e:
+        # The 200 never became the bridge's JSON object: an HTML page, a
+        # body cut off before its declared length, or a JSON value that is
+        # not an object. No answer arrived, and it exits like a refused
+        # connection.
         sys.exit(f'Connection failed: {e}')
     res = api('GET', _query_path('/segment-status', {'job': args.job}),
               headers={SEGMENT_SIG_HEADER: sig})
