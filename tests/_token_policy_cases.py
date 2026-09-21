@@ -120,6 +120,39 @@ def boundary_cases():
     return rows
 
 
+def multiline_cases():
+    """Each row wraps a console sink call across two or more lines."""
+    rows = [
+        (True, 'console.log(\nconfig.token);'),
+        (True, "console.log(\nconfig['token']);"),
+        (True, 'console.log(config.token,\n    \'ready\');'),
+        (True, 'console.log(config.token\n);'),
+        (True, 'console.log(config.\ntoken);'),
+        (True, "console.log(config[\n'token']\n);"),
+        (True, "console.log(config['to' +\n'ken']);"),
+        (False, 'console.log(config.token.slice(\n0, 8\n));'),
+        (True, 'console.log(config.token.slice(\n0, 9\n));'),
+        (True, 'console.log(/* c\n*/ config.token);'),
+        (True, 'console.log`raw ${\nconfig.token\n} raw`;'),
+        (False, 'console.log(a,\nb); const t = config.token;'),
+        (False, 'console.log(\nconfig.tabId);'),
+        (True, 'console\n.log(config.token);'),
+    ]
+    rows.extend([
+        (True, 'console.log(\r\nconfig.token);'),
+        (False, 'console.log(config.token.slice(\r\n0, 8\r\n));'),
+    ])
+    rows.extend([
+        (True, 'console.log?.(\nconfig.token);'),
+        (True, '(console.log)(\nconfig.token);'),
+        (True, 'console.log.call(console,\nconfig.token);'),
+        (True, 'console.log.apply(console,\n[config.token]);'),
+        (True, "console.log('ready',\nconfig.token);"),
+        (False, "console.log('a',\n'b',\nconfig.tabId);"),
+    ])
+    return rows
+
+
 def lexical_context_cases():
     rows = []
     for source in ("const x = [... /'/.source];",
