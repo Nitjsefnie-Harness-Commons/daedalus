@@ -120,8 +120,7 @@ _WORK_SCRIPTS = (
 
 
 def test_a_run_step_carrying_no_script_is_refused_not_classified(tmp):
-    """A bare ``run:`` decodes to ``None``; the pin names it rather than
-    reading it as a wait or as work."""
+    """A bare ``run:`` is named, never read as a wait or as work."""
     del tmp
     source = 'jobs:\n  hollow:\n    steps:\n      - run:\n'
     try:

@@ -228,8 +228,7 @@ def _decode_complete_value(
             lines, index + 1, item_end, indent - 1, f'{owner} {key}')
     child = _reader._first_child(lines, index + 1, end, indent)
     if child is None:
-        # `key:` alone is YAML's null, as `yaml.safe_load` reads it; only
-        # a quoted empty scalar reads as `''`.
+        # `key:` alone is YAML's null; only a quoted empty scalar is `''`.
         return None
     child_indent = _reader._indent(lines[child])
     text, _ended = lines[child]
