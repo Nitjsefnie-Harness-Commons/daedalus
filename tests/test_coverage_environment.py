@@ -84,6 +84,7 @@ def test_a_local_rebinding_leaves_another_scope_alone(tmp):
     del tmp
     assert _synthetic_violations(
         """import subprocess
+from _repo import ROOT
 def unrelated(tmp):
     ROOT = tmp
     return ROOT
