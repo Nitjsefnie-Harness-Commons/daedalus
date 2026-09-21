@@ -226,9 +226,12 @@ def _root_assignments(tree):
 
 def _unprovable_names(tree, layout=None):
     _, proof_shadows, root_imported = _import_rebound_names(tree)
-    scoped, _ = layout or _evaluation_scopes(tree)
-    names = set().union(*(proof_shadows.get(node, set())
-                          for node, scope in scoped if scope is tree))
+    scoped, parents = layout or _evaluation_scopes(tree)
+    imports = {scope: set() for scope in parents}
+    for node, scope in scoped:
+        imports[scope].update(proof_shadows.get(node, ()))
+    _, destinations = _binding_destinations(scoped, parents)
+    names = _routed_bindings(imports, destinations)[tree]
     if not _root_assignments(tree) and not root_imported:
         names.add('ROOT')
     return names, proof_shadows
@@ -422,7 +425,8 @@ def _scope_shadows(tree, layout=None):
     # A star import is a SyntaxError inside a function, so module-wide
     # is its real scope.
     shadows[tree].update(unprovable)
-    return shadows
+    _, destinations = _binding_destinations(scoped, parents)
+    return _routed_bindings(shadows, destinations)
 
 
 _FUNCTION_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
@@ -446,12 +450,7 @@ def _bound_names(node):
     return set()
 
 
-def _scope_bindings(scoped, parents):
-    """All grammar-bound names, independent of the rebinding product.
-
-    Declarations bind their destination even without an assignment:
-    uncertainty cannot prove a builtin. Star imports bind every name.
-    """
+def _binding_destinations(scoped, parents):
     local = {scope: set() for scope in parents}
     global_names = {scope: set() for scope in parents}
     nonlocal_names = {scope: set() for scope in parents}
@@ -464,10 +463,9 @@ def _scope_bindings(scoped, parents):
         elif isinstance(node, ast.Nonlocal):
             nonlocal_names[scope].update(node.names)
     module = next(scope for scope, parent in parents.items() if parent is None)
-    bindings = {scope: names - global_names[scope] - nonlocal_names[scope]
-                for scope, names in local.items()}
+    destinations = {scope: dict.fromkeys(names, module)
+                    for scope, names in global_names.items()}
     for scope in parents:
-        bindings[module].update(global_names[scope])
         for name in nonlocal_names[scope]:
             target = parents[scope]
             while target is not None:
@@ -478,8 +476,29 @@ def _scope_bindings(scoped, parents):
                              or _ALL_NAMES in local[target])):
                     break
                 target = parents[target]
-            bindings[module if target is None else target].add(name)
-    return bindings
+            destinations[scope][name] = module if target is None else target
+    return local, destinations
+
+
+def _routed_bindings(local, destinations):
+    routed = {scope: set() for scope in local}
+    for scope, names in local.items():
+        for name in names:
+            target = destinations[scope].get(name.removesuffix('()'), scope)
+            routed[target].add(name)
+    return routed
+
+
+def _scope_bindings(scoped, parents):
+    """All grammar-bound names, independent of the rebinding product.
+
+    Declarations bind their destination even without an assignment:
+    uncertainty cannot prove a builtin. Star imports bind every name.
+    """
+    local, destinations = _binding_destinations(scoped, parents)
+    for scope, declared in destinations.items():
+        local[scope].update(declared)
+    return _routed_bindings(local, destinations)
 
 
 def _name_is_unbound(name, scope, bindings, parents):

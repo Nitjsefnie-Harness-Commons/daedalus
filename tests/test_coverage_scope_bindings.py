@@ -25,9 +25,7 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("    if _ALL_NAMES in shadowed_names:\n        return False\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('a rebound proof name is unprovable', 'scopes',
-     (("    names = set().union(*(proof_shadows.get(node, set())\n"
-       "                          for node, scope in scoped "
-       "if scope is tree))\n",
+     (("    names = _routed_bindings(imports, destinations)[tree]\n",
        "    names = set()\n"),), _ROOT_PROVENANCE_INVOKE),
     ('Path is independently a proof name', 'scopes',
      (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
@@ -98,9 +96,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
        "        return alias.name == 'ROOT'\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('local imports do not taint module proofs', 'scopes',
-     (("                          for node, scope in scoped "
-       "if scope is tree))\n",
-       "                          for node, scope in scoped))\n"),),
+     (("    names = _routed_bindings(imports, destinations)[tree]\n",
+       "    names = set().union(*imports.values())\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('chdir sees local import shadows', 'guard',
      (("                                       scopes[node], "
@@ -566,6 +563,18 @@ def test_real_target_global_import_removes_the_exemption(tmp):
     _assert_planted(line, planted, restored,
                     'unresolved callee dict cwd=tmp declares no env=')
     assert restored == [], restored
+
+
+def test_declared_root_binding_destinations(tmp):
+    del tmp
+    prefix = ('import os\nimport subprocess\nfrom _repo import ROOT\n'
+              'def change():\n    global ROOT\n    ROOT = other\n')
+    assert _synthetic_violations(
+        prefix + 'subprocess.run(c, cwd=ROOT)\n') == _rebound_owner(7, 'ROOT')
+    assert _synthetic_violations(
+        prefix + 'os.chdir(ROOT)\nsubprocess.run(c)\n') == [
+            'tests/synthetic.py:8: subprocess.run os.chdir at line 7 '
+            'may have moved the cwd declares no env=']
 
 
 if __name__ == '__main__':
