@@ -43,7 +43,18 @@ class _ScopeFacts:
 
     @cached_property
     def root_assignments(self):
-        return _root_assignments(self.tree)
+        return {target: value for target, value in
+                _root_assignments(self.tree).items()
+                if target in self.root_scope_nodes}
+
+    @cached_property
+    def root_scope_nodes(self):
+        annotations = {node.target for node, _ in self.layout[0]
+                       if isinstance(node, ast.AnnAssign)
+                       and node.value is None}
+        return {node for node, scope in self.layout[0]
+                if self.destinations[scope].get('ROOT', scope) is self.tree
+                and node not in annotations}
 
     @cached_property
     def root_owners(self):
@@ -270,8 +281,8 @@ def _root_assignments(tree):
     return values
 
 
-def _other_root_bindings(tree, assignments):
-    for node in memo_nodes(tree):
+def _other_root_bindings(facts, assignments):
+    for node in facts.root_scope_nodes:
         if not _bound_names(node) & {'ROOT', _ALL_NAMES}:
             continue
         if node in assignments:
@@ -310,7 +321,7 @@ def _shadowed_names(tree, facts=None):
     root_values = facts.root_assignments
     owners = facts.root_owners
     if (root_values
-            and not _other_root_bindings(tree, root_values)
+            and not _other_root_bindings(facts, root_values)
             and not {'Path', 'Path()', '_util'} & names
             and all(_is_repository_root_binding(value, owners)
                     for value in root_values.values())):

@@ -108,7 +108,7 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("        shadows[scope].update(imports.get(node, ()))\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('an assignment cannot erase a ROOT import shadow', 'scopes',
-     (("            and not _other_root_bindings(tree, root_values)\n",
+     (("            and not _other_root_bindings(facts, root_values)\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
 )
 
@@ -592,6 +592,13 @@ def test_type_parameter_is_not_the_module_root(tmp):
     source = ('import subprocess\nfrom _repo import ROOT\n'
               'def go[ROOT]():\n    subprocess.run(c, cwd=ROOT)\n')
     assert _synthetic_violations(source) == _rebound_owner(4, 'ROOT')
+
+
+def test_local_root_parameter_keeps_the_module_derivation(tmp):
+    del tmp
+    source = ('import subprocess\nimport _util\nROOT = _util.ROOT\n'
+              'def f(ROOT):\n    pass\nsubprocess.run(c, cwd=ROOT)\n')
+    assert _synthetic_violations(source) == []
 
 
 if __name__ == '__main__':
