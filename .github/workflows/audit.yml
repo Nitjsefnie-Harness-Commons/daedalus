@@ -154,8 +154,7 @@ jobs:
           exit 1
 
   # tests.yml and codeql.yml skip pushes that touch only
-  # .github/ci-thresholds.json, so this unfiltered workflow is what
-  # validates the document a threshold-only push changes.
+  # .github/ci-thresholds.json; this unfiltered workflow validates it.
   thresholds:
     runs-on: ubuntu-latest
     timeout-minutes: 5
