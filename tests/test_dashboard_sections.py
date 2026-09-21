@@ -609,7 +609,9 @@ def _recent_captures(tmp, count, ids):
         os.utime(path, (stamp / 1000, stamp / 1000))
         os.utime(path.parent, (stamp / 1000, stamp / 1000))
         if index < count:
-            captures.append(path.relative_to(upload_dir).as_posix())
+            # The listing row's own shape: relative to the token directory.
+            captures.append(
+                path.relative_to(upload_dir / 'dashboard-token').as_posix())
     pages = {}
     for offset in range(0, count + 3, 200):
         status, page = routes.list_uploads(upload_dir, 'dashboard-token', {
