@@ -367,6 +367,7 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         name = None
         source = None
         form = None
+        target = None
         returned = None
         call_mode = None
         start = opening
