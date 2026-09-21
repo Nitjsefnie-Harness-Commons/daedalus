@@ -9,7 +9,7 @@ _TAIL = ";\npromote();\n"
 def _both(label, define, call='obj.p()'):
     """One getter shape in both directions.
 
-    `define` wraps the write its returned callable performs; the demotion
+    `define` wraps the write the call executes; the demotion
     row promotes first so the verdict rests on that write.
     """
     return [
@@ -58,6 +58,19 @@ GETTER_CASES = [
            _DEM, _PRO, 'obj.p()', True),
     _order('getter-body-promotes-then-return-demotes',
            _PRO, _DEM, 'obj.p()', False),
+    *_both('getter-body-with-inert-return', lambda write: (
+        "const obj = { get p() { " + write
+        + " return () => {}; } };\n")),
+    ('getter-returned-callable-sends-argument-promotion',
+     _LET + _literal('(s) =>')("s('focus-tab', { tab: chromeTab });")
+     + "obj.p(extCmd)" + _TAIL, True),
+    ('getter-returned-callable-sends-argument-demotion',
+     _LET + _literal('(s) =>')("s('focus-tab', { tab: chromeTab });")
+     + "obj.p(ordinary)" + _TAIL, False),
+    ('getter-body-promotes-then-argument-demotes',
+     _LET + "const obj = { get p() { " + _PRO
+     + " return () => {}; } };\nobj.p((() => { " + _DEM + " })())"
+     + _TAIL, False),
     _order('getter-read-runs-body-not-return',
            _PRO, _DEM, 'void obj.p', True),
     _order('getter-read-skips-returned-promotion',
