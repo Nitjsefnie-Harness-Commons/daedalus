@@ -139,7 +139,7 @@ def test_the_windows_bridge_arm_excludes_the_port(tmp):
     address = ('127.0.0.1', 64738)
     server = _bridge_instance(mod, created, address)
     server.server_bind()
-    assert server.allow_reuse_address is False
+    assert not server.allow_reuse_address
     assert server.socket.events == _exclusive_events() + [
         ('bind', address)], server.socket.events
     assert server.server_address == address
@@ -225,21 +225,28 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     sock.close()
 
 
-def test_the_armed_platform_value_matches_the_host(tmp):
-    """The platform reads must arm on Windows and stay off elsewhere.
+def test_the_armed_bridge_platform_value_matches_the_host(tmp):
+    """The bridge's platform read must arm on Windows and stay off elsewhere.
 
     Every other test here overwrites the platform name, so a corrupted
     read — an inverted comparison, a hoisted False — would pass this whole
     suite on Linux while silently reintroducing the defect on Windows.
-    This pin loads both modules fresh and holds each read against the
-    host, which is what bites on the Windows legs.
+    This pin loads the module fresh and holds the read against the host,
+    which is what bites on the Windows legs. It needs no MCP dependencies,
+    so it stands on its own.
     """
-    _need_deps()
-    bridge = _load_server(Path(tmp) / 'armed-bridge')
-    mcp = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59980)
+    mod = _load_server(Path(tmp) / 'armed-bridge')
     expected = sys.platform == 'win32'
-    assert bridge.WIN32 == expected, (bridge.WIN32, sys.platform)
-    assert mcp.WIN32 == expected, (mcp.WIN32, sys.platform)
+    assert mod.WIN32 == expected, (mod.WIN32, sys.platform)
+
+
+def test_the_armed_mcp_platform_value_matches_the_host(tmp):
+    """The front end's platform read, held to the host the same way."""
+    del tmp
+    _need_deps()
+    mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59980)
+    expected = sys.platform == 'win32'
+    assert mod.WIN32 == expected, (mod.WIN32, sys.platform)
 
 
 def main():
