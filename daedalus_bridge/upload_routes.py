@@ -5,13 +5,14 @@ return `(status, payload)` or a `FileAnswer`, and take the upload directory as
 a parameter rather than importing `config`.
 """
 import base64
+import itertools
 import os
 import pathlib
 import shutil
 import time
 
 from daedalus_bridge.route_answer import FileAnswer
-from daedalus_bridge import path_safety
+from daedalus_bridge import atomic_file, path_safety
 
 
 # One table for every place a screenshot format is decided: what /upload
@@ -25,6 +26,9 @@ SCREENSHOT_TYPES = {
     'jpg': 'image/jpeg',
     'webp': 'image/webp',
 }
+
+# One bridge process owns a data root, so a per-process counter suffices.
+_name_counter = itertools.count(1)
 
 
 def screenshot_mime(fmt):
@@ -56,7 +60,8 @@ def stored_uploads(token_dir, upload_id):
     for id_dir in id_dirs:
         try:
             with os.scandir(id_dir) as entries:
-                files = [entry for entry in entries if entry.is_file()]
+                files = [entry for entry in entries if entry.is_file()
+                         and not entry.name.endswith('.tmp')]
         except (FileNotFoundError, NotADirectoryError):
             continue
         files.sort(key=lambda entry: entry.name)
@@ -132,7 +137,7 @@ def list_uploads(upload_dir, token, params):
 def store_upload(upload_dir, body):
     """POST /upload — store binary data.
     Body: {token, id, data (base64), filename (optional)}.
-    Screenshots: omit filename, stored as <token>/<id>/<timestamp>.<format>
+    Screenshots: omit filename, stored as <token>/<id>/<ms>_<n>.<format>
     Generic: provide filename, stored as <token>/<id>/<filename>
     """
     token = body.get('token', '')
@@ -153,6 +158,10 @@ def store_upload(upload_dir, body):
     for val in (token, upload_id, filename):
         if path_safety.unsafe_component(val):
             return 400, {'error': 'invalid path component'}
+    # `.tmp` is the store's own reservation below, and the listing skips
+    # it; an accepted upload must never be hidden by that skip.
+    if filename.endswith('.tmp'):
+        return 400, {'error': 'invalid path component'}
     try:
         raw = base64.b64decode(data_b64, validate=True)
     except Exception:
@@ -163,13 +172,23 @@ def store_upload(upload_dir, body):
             dest = path_safety.under(dest_dir, filename)
         else:
             ts = int(time.time() * 1000)
-            dest = path_safety.under(dest_dir, f'{ts}.{fmt}')
+            dest = path_safety.under(
+                dest_dir, f'{ts:013d}_{next(_name_counter):06d}.{fmt}')
     except ValueError:
         return 400, {'error': 'invalid path component'}
+    # A sibling temp published by one replace, as command_queue does, so
+    # a reader never sees a partially written file at the final name.
+    tmp = dest.with_name(f'.{dest.name}.tmp')
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(raw)
+        atomic_file.write_bytes_retrying(tmp, raw)
+        atomic_file.replace_atomically(tmp, dest)
     except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            # Best effort; the 500 below is the answer that matters.
+            pass
         return 500, {'error': 'upload storage failure'}
     size = len(raw)
     del raw  # drop the decoded copy before responding
