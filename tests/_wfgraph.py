@@ -1,11 +1,4 @@
 """Structural readers for the job graph in tests.yml."""
-import contextlib
-import io
-import json
-import os
-import subprocess
-
-import _util
 from _ghexpr import ExpressionError, evaluate, evaluate_if, sole_context_path
 from _repo import ROOT
 from _yamlread import (
@@ -22,40 +15,6 @@ from _yamlsteps import complete_job_mapping
 def _tests_yml():
     return (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
-
-
-def _run_script(script, needs, through_bash=False):
-    """Run an extracted workflow script and capture its result."""
-    env = {**os.environ, 'NEEDS_JSON': json.dumps(needs)}
-    if through_bash:
-        bash = _util.workflow_bash()
-        return subprocess.run([bash, '-c', script], env=env,
-                              capture_output=True, text=True, timeout=60)
-    source = '\n'.join(script.splitlines()[1:-1])
-    stdout, stderr = io.StringIO(), io.StringIO()
-    code = 0
-    previous = os.environ.get('NEEDS_JSON')
-    os.environ['NEEDS_JSON'] = env['NEEDS_JSON']
-    try:
-        with contextlib.redirect_stdout(stdout):
-            with contextlib.redirect_stderr(stderr):
-                try:
-                    exec(source, {})  # pylint: disable=exec-used
-                except SystemExit as error:
-                    code = error.code or 0
-    finally:
-        if previous is None:
-            del os.environ['NEEDS_JSON']
-        else:
-            os.environ['NEEDS_JSON'] = previous
-    return subprocess.CompletedProcess(
-        [], code, stdout.getvalue(), stderr.getvalue())
-
-
-def aggregate_expected(results, allowed):
-    return all(
-        result in allowed[name]
-        for name, result in results.items())
 
 
 def _job_section(workflow, job):
@@ -277,25 +236,6 @@ def _job_if_expression(workflow, job):
     if source is None:
         return None
     return job_scalar(source, job, 'if')
-
-
-def _aggregate_script(workflow):
-    """The aggregate job's run block, dedented, ready for bash."""
-    section = '\n'.join(_job_section(workflow, 'aggregate'))
-    _, marker, after = section.partition('        run: |\n')
-    assert marker, 'aggregate has no run block shaped as this test expects'
-    lines = []
-    for line in after.splitlines():
-        if line.strip() and not line.startswith('          '):
-            break
-        lines.append(line[10:])
-    return '\n'.join(lines)
-
-
-def _run_aggregate(workflow, results, through_bash=False):
-    """Run the real aggregate script against one `needs` result mapping."""
-    needs = {name: {'result': result} for name, result in results.items()}
-    return _run_script(_aggregate_script(workflow), needs, through_bash)
 
 
 def _job_condition_runs(workflow, job, outputs=None, *, context=None):

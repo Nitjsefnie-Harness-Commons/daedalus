@@ -1818,37 +1818,31 @@ jobs:
       - coverage
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions: {}
+    # A job-level block replaces the workflow-level one rather than adding
+    # to it: contents read pays for the checkout, actions read is what lets
+    # GITHUB_TOKEN list this workflow's runs for the supersession check.
+    permissions:
+      contents: read  # the checkout
+      actions: read  # the workflow-run reads
 
     steps:
+      # actions/checkout v7.0.1
+      - uses: >-
+          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # Nothing here pushes, and a token left in .git/config
+          # is reusable by every later step in the job.
+          persist-credentials: false
+
+      # scripts/ci/aggregate_gate.py owns the verdict, including the
+      # superseded-cancel rule: a cancelled dependency whose run a strictly
+      # newer run of this workflow replaced gates nothing, while a
+      # deliberate cancel stays a failure.
       - name: Check dependency results
         env:
+          GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          # The classifier and unconditional static gates can never
-          # legitimately skip. A skip in this set is a failure wearing a
-          # skip's clothes, not the documentation-only shape or actionlint's
-          # path condition.
-          STRICT = {'changes', 'pycodestyle', 'pylint', 'pyright', 'eslint'}
-
-          needs = json.loads(os.environ['NEEDS_JSON'])
-          unsuccessful = [
-              f"{name}={details['result']}"
-              for name, details in needs.items()
-              if details['result']
-              not in ({'success'} if name in STRICT
-                      else {'success', 'skipped'})
-          ]
-          if unsuccessful:
-              print(
-                  'Dependencies not successful: ' + ', '.join(unsuccessful),
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-          print('All dependencies succeeded: ' + ', '.join(sorted(needs)))
-          PY
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          HEAD_BRANCH: ${{ github.head_branch }}
+        run: python3 scripts/ci/aggregate_gate.py
