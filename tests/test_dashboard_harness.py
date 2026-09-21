@@ -272,7 +272,13 @@ setInterval(() => {}, 10);
         'a retry=False failure reports its one attempt record')
     assert 'dashboard node outer timeout after' not in failure, (
         'a retry=False failure is not the retry-loop verdict')
-    assert 'drain timed out: yes' in failure, failure
+    if sys.platform.startswith('win'):
+        # On Windows the killed parent's inherited handles do not hold the
+        # pipes, so the drain completes there; observed on a windows-latest
+        # CI record (drain outcome: completed, drain took 0.000s).
+        assert 'drain outcome: completed' in failure, failure
+    else:
+        assert 'drain timed out: yes' in failure, failure
 
 
 def test_process_creation_delay_does_not_inflate_drain_time(tmp):
@@ -472,6 +478,10 @@ def test_accessibility_field_case_uses_the_shared_runner(tmp):
                 None)
         except SharedRunnerReached:
             pass  # The sentinel proves the shared boundary was reached.
+        except _util.Skipped:
+            _util.skip(
+                'issue 879: the field case this boundary witness calls'
+                ' is quarantined on this platform')
         else:
             raise AssertionError(
                 'accessibility field case bypassed run_dashboard_node')
