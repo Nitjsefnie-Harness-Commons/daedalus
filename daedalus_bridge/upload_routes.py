@@ -40,7 +40,7 @@ def screenshot_mime(fmt):
 
 def _reserved_name(name):
     """Whether `name` is the store's own in-progress reservation."""
-    return name.endswith('.tmp')
+    return name.casefold().endswith('.tmp')
 
 
 def stored_uploads(token_dir, upload_id):
@@ -380,6 +380,8 @@ def latest_screenshot(upload_dir, token, params):
     for d in search_dirs:
         try:
             if not d.is_dir():
+                if not token_dir.is_dir():
+                    return 404, {'error': 'no uploads'}
                 continue
             files = list(d.iterdir())
         except OSError:
