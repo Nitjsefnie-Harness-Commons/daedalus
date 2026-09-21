@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings, _scope_shadows, _shadowed_names)
@@ -257,4 +256,5 @@ _ROOT_PROVENANCE_MUTATIONS += tuple(
 
 
 if __name__ == '__main__':
+    import _util
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))

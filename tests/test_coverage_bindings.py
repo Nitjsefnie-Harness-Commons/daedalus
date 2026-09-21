@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 """Launcher bindings the coverage-environment guard cannot follow."""
-import os
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _control_writes import control_write_violations  # noqa: E402
 from _coverage_guard import _synthetic_violations  # noqa: E402
-from _owned_writes import copy_test_tree  # noqa: E402
-from _repo import ROOT  # noqa: E402
-from test_bash_resolver_scan import _BASH_MUTATION_SPECS  # noqa: E402
-from test_coverage_root_provenance import (  # noqa: E402
-    _ROOT_PROVENANCE_MUTATIONS as _DESTINATION_MUTATIONS)
-from test_coverage_scope_bindings import (  # noqa: E402
-    _ROOT_PROVENANCE_INVOKE, _ROOT_PROVENANCE_MUTATIONS)
 
 
 _BINDING_MESSAGE = (
@@ -412,6 +402,13 @@ def _binding_snippets():
 
 
 def _mutation_specs():
+    # Fresh mutation children need assertion helpers, not runner fixtures.
+    from test_bash_resolver_scan import _BASH_MUTATION_SPECS
+    from test_coverage_root_provenance import (
+        _ROOT_PROVENANCE_MUTATIONS as _DESTINATION_MUTATIONS)
+    from test_coverage_scope_bindings import (
+        _ROOT_PROVENANCE_INVOKE, _ROOT_PROVENANCE_MUTATIONS)
+
     assign = (
         "        if (len(node.targets) == 1 and "
         "isinstance(node.targets[0], ast.Name)\n"
@@ -634,6 +631,10 @@ def _mutation_specs():
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
+    import os
+    import subprocess
+    from _owned_writes import copy_test_tree
+
     root = Path(tmp) / 'repository'
     copy_test_tree(root)
     bindings_target = root / 'tests' / '_coverage_bindings.py'
@@ -678,6 +679,9 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
 
 
 def test_controls_never_write_inside_the_repository(tmp):
+    from _control_writes import control_write_violations
+    from _repo import ROOT
+
     del tmp
     violations = control_write_violations(Path(__file__), ROOT)
     assert not violations, '\n'.join(violations)
