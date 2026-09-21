@@ -307,11 +307,22 @@ def test_module_level_class_citations_are_reported_missing(_tmp):
     assert citation in missing, missing
 
 
-def test_module_level_async_function_citations_are_accepted(_tmp):
-    """An async test function is a valid citation target."""
+def test_module_level_async_function_citations_are_reported_missing(_tmp):
+    """The runner refuses an async test, so a citation to one pins nothing."""
     suite = Path(_tmp) / 'tests' / 'test_probe.py'
     suite.parent.mkdir()
     suite.write_text('async def test_probe():\n    pass\n', encoding='utf-8')
+    citation = 'tests/test_probe.py::test_probe'
+    missing = _mcp_guard_floor.missing_citations(
+        [('m', 'f', 'c', citation)], _tmp)
+    assert citation in missing, missing
+
+
+def test_module_level_sync_test_citations_are_accepted(_tmp):
+    """A plain def test function is a valid citation target."""
+    suite = Path(_tmp) / 'tests' / 'test_probe.py'
+    suite.parent.mkdir()
+    suite.write_text('def test_probe():\n    pass\n', encoding='utf-8')
     citation = 'tests/test_probe.py::test_probe'
     missing = _mcp_guard_floor.missing_citations(
         [('m', 'f', 'c', citation)], _tmp)
