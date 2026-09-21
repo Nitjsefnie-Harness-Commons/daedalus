@@ -259,6 +259,123 @@ def test_an_incomplete_body_never_holds_a_request_worker(tmp):
         assert status == 200 and body['ok'] is True, (status, body)
 
 
+_SHORT_ERROR = {'error': 'request body shorter than Content-Length'}
+
+
+def _short_segment(base, job, declared, sent):
+    """Mint `job` and POST /segment a body shorter than it declares.
+
+    The write side is half-closed after the partial send, so the bridge's
+    read returns at EOF instead of stalling to the request deadline — the
+    same shape the reported sighting drove by raw socket.
+    """
+    _, minted = _util.post_json(
+        base + '/segment-job', {'token': TOK, 'job': job})
+    sig = minted['sig']
+    resp = raw_request(
+        base,
+        (f'POST /segment?job={job}&seg=0&total=1&sig={sig} HTTP/1.0\r\n'
+         'Host: x\r\nContent-Type: application/octet-stream\r\n'
+         f'Content-Length: {declared}\r\n\r\n').encode() + sent)
+    return resp, sig
+
+
+def test_a_short_segment_body_is_answered_a_bad_request(tmp):
+    """A body that ends before its declared Content-Length is a 400.
+
+    The refusal is the transport's: a shortfall against the request's own
+    declaration is a client error, whatever the route would have done with
+    the bytes that did arrive.
+    """
+    job = 'tt-' + uuid.uuid4().hex[:12]
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        resp, _sig = _short_segment(base, job, 1000, b'0123456789')
+        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
+        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+
+
+def test_a_short_segment_body_publishes_nothing(tmp):
+    """No segment file and no temp file survive a refused short body."""
+    job = 'tt-' + uuid.uuid4().hex[:12]
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        _short_segment(base, job, 1000, b'0123456789')
+        seg_dir = Path(docroot) / 'segments' / job
+        assert sorted(path.name for path in seg_dir.iterdir()) == [], (
+            'the short body was published')
+
+
+def test_a_short_segment_body_is_not_reported_done(tmp):
+    """GET /segment-status reads the directory, and the directory is empty."""
+    job = 'tt-' + uuid.uuid4().hex[:12]
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        _resp, sig = _short_segment(base, job, 1000, b'0123456789')
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}&sig={sig}')
+        assert (status, payload) == (200, {'done': [], 'count': 0}), payload
+
+
+def test_a_short_segment_body_leaves_the_job_record_at_zero(tmp):
+    """The stored totals a refused short body leaves behind are the mint's."""
+    job = 'tt-' + uuid.uuid4().hex[:12]
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        _short_segment(base, job, 1000, b'0123456789')
+        record = json.loads(
+            (Path(docroot) / 'segments' / f'{job}.json').read_text(
+                encoding='utf-8'))
+        assert (record['stored_count'], record['stored_bytes']) == (0, 0), (
+            record)
+
+
+def test_a_complete_segment_body_still_stores(tmp):
+    """The refusal is the shortfall's: a full declaration still stores.
+
+    The control for the length check — the same raw route, same capability,
+    with every declared byte delivered — must keep its 200 and its file.
+    """
+    job = 'tt-' + uuid.uuid4().hex[:12]
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        _, minted = _util.post_json(
+            base + '/segment-job', {'token': TOK, 'job': job})
+        body = b'ab' * 500
+        resp = raw_request(
+            base,
+            (f'POST /segment?job={job}&seg=0&total=1'
+             f'&sig={minted["sig"]} HTTP/1.0\r\n'
+             'Host: x\r\nContent-Type: application/octet-stream\r\n'
+             f'Content-Length: {len(body)}\r\n\r\n').encode() + body)
+        assert resp.startswith(b'HTTP/1.0 200'), resp[:120]
+        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == {'ok': True}, resp
+        stored = Path(docroot) / 'segments' / job / '000000.ts'
+        assert stored.read_bytes() == body
+        status, payload = _util.get_json(
+            base + f'/segment-status?job={job}&sig={minted["sig"]}')
+        assert (status, payload) == (200, {'done': [0], 'count': 1}), payload
+
+
+def test_a_short_json_body_is_refused_before_parsing(tmp):
+    """The same shortfall through a JSON verb, with the slot left empty.
+
+    Truncation used to surface as the parse refusal, because the route
+    never learned the body had ended early — and a cut falling just after
+    a complete JSON text would have parsed a document the client never
+    sent. The length check answers first now, so the answer is the
+    shortfall's on every body verb.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        body = json.dumps(
+            {'token': TOK, 'id': 'short-body', 'result': {'n': 1}}).encode()
+        resp = raw_request(
+            base,
+            b'POST /result HTTP/1.0\r\nHost: x\r\n'
+            b'Content-Type: application/json\r\n'
+            b'Content-Length: ' + str(len(body)).encode() + b'\r\n\r\n'
+            + body[:8])
+        assert resp.startswith(b'HTTP/1.0 400'), resp[:120]
+        assert json.loads(resp.split(b'\r\n\r\n', 1)[1]) == _SHORT_ERROR, resp
+        status, slot = _util.get_json(base + '/result?token=' + TOK)
+        assert (status, slot) == (200, {'pending': True}), (status, slot)
+
+
 def _settled(socks, timeout, grace=1.0):
     """`socks` split into the closed, the answered and the still-held.
 
