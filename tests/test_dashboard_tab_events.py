@@ -153,7 +153,7 @@ const rowSnapshot = (tid) => {
 };
 """
 
-_IMPORT_AND_MOUNT = r"""
+_IMPORT_AND_MOUNT_HEAD = r"""
 phase('dashboard harness started');
 (async () => {
 phase('dashboard module import started');
@@ -163,8 +163,20 @@ const { mount } = await bounded(
 );
 phase('dashboard module imported');
 phase('dashboard call started');
+"""
+
+_TWO_TAB_LISTING = r"""
 listing = [tab('11', 'first', 'https://a.example.com/x', 5),
            tab('22', 'second', 'https://b.example.com/y', 3)];
+"""
+
+_THREE_TAB_LISTING = r"""
+listing = [tab('11', 'first', 'https://a.example.com/x', 5),
+           tab('22', 'second', 'https://b.example.com/y', 3),
+           tab('44', 'fourth', 'https://c.example.com/w', 7)];
+"""
+
+_MOUNT_AND_SETTLE = r"""
 mount(container, bus);
 await until(() => tabsFetches >= 1);
 await pause(25);
@@ -175,9 +187,10 @@ _CLOSE = r"""
 """
 
 
-def _harness(body):
+def _harness(body, listing=_TWO_TAB_LISTING):
     return _dashnode.DashboardNodeHarness(
-        _TABS_PREFIX + _IMPORT_AND_MOUNT + body + _CLOSE,
+        _TABS_PREFIX + _IMPORT_AND_MOUNT_HEAD + listing
+        + _MOUNT_AND_SETTLE + body + _CLOSE,
         bounded_steps=1, module=True,
         arguments=(ROOT / 'dashboard' / 'sections' / 'tabs.js',))
 
@@ -425,6 +438,88 @@ def test_the_section_counter_follows_the_listing(_tmp):
     seen = _run(_harness(_COUNTER_FOLLOWS_THE_LISTING))
     assert seen['counter'] == '3/3 tabs', seen
     assert seen['dShown'] is True, seen
+
+
+_TITLE_ONLY_REPLACES_INTERACTIVE_ROW = r"""
+openEditor('11');
+armClose('11');
+const before = rowSnapshot('11');
+const bBefore = rowSnapshot('22');
+const cBefore = rowSnapshot('44');
+if (!before.editing) throw new Error('editor did not open');
+if (before.closeLabel !== 'sure?') throw new Error('close did not arm');
+listing = [tab('11', 'RETITLED', 'https://a.example.com/x', 5),
+           tab('22', 'second', 'https://b.example.com/y', 3),
+           tab('44', 'FOURTH', 'https://c.example.com/w', 7)];
+emit('tab-updated');
+await until(() => tabsFetches >= 2);
+await pause(25);
+const after = rowSnapshot('11');
+const bAfter = rowSnapshot('22');
+const cAfter = rowSnapshot('44');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  aReplaced: after.tr !== before.tr,
+  editorGone: !after.editing,
+  closeFresh: after.closeLabel === 'close',
+  aTitle: after.title,
+  aUrl: after.url,
+  bSameTr: bAfter.tr === bBefore.tr,
+  cReplaced: cAfter.tr !== cBefore.tr,
+  cTitle: cAfter.title,
+  eventFetches: tabsFetches - 1,
+}));
+phase('dashboard harness finished');
+"""
+
+_CHANGE_THEN_REVERT_RESTORES = r"""
+const bBefore = rowSnapshot('22');
+listing = [tab('11', 'first', 'https://a.example.com/moved', 5),
+           tab('22', 'second', 'https://b.example.com/y', 3)];
+emit('tab-updated');
+await until(() => tabsFetches >= 2);
+await pause(25);
+const moved = rowSnapshot('11');
+listing = [tab('11', 'first', 'https://a.example.com/x', 5),
+           tab('22', 'second', 'https://b.example.com/y', 3)];
+emit('tab-updated');
+await until(() => tabsFetches >= 3);
+await pause(25);
+const restored = rowSnapshot('11');
+const bAfter = rowSnapshot('22');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify({
+  movedUrl: moved.url,
+  restoredUrl: restored.url,
+  restoredTr: restored.tr !== moved.tr,
+  bSameTr: bAfter.tr === bBefore.tr,
+  totalFetches: tabsFetches - 1,
+}));
+phase('dashboard harness finished');
+"""
+
+
+def test_a_title_only_change_replaces_the_interactive_row(_tmp):
+    seen = _run(_harness(
+        _TITLE_ONLY_REPLACES_INTERACTIVE_ROW, _THREE_TAB_LISTING))
+    assert seen['aReplaced'] is True, seen
+    assert seen['editorGone'] is True, seen
+    assert seen['closeFresh'] is True, seen
+    assert seen['aTitle'] == 'RETITLED', seen
+    assert seen['aUrl'] == 'https://a.example.com/x', seen
+    assert seen['bSameTr'] is True, seen
+    assert seen['cReplaced'] is True, seen
+    assert seen['cTitle'] == 'FOURTH', seen
+    assert seen['eventFetches'] == 1, seen
+
+
+def test_a_reverted_url_change_shows_the_restored_value(_tmp):
+    seen = _run(_harness(_CHANGE_THEN_REVERT_RESTORES))
+    assert seen['movedUrl'] == 'https://a.example.com/moved', seen
+    assert seen['restoredUrl'] == 'https://a.example.com/x', seen
+    assert seen['restoredTr'] is True, seen
+    assert seen['bSameTr'] is True, seen
+    assert seen['totalFetches'] == 2, seen
 
 
 def main():
