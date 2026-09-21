@@ -244,8 +244,6 @@ def test_the_result_wait_reports_a_timeout_when_every_peek_is_cut_off(tmp):
     assert 'Timeout (1s)' in r.stderr, r.stderr
     puts = [path for verb, path in seen if verb == 'PUT']
     assert puts == ['/command'], seen
-    peeks = [path for verb, path in seen if verb == 'GET']
-    assert len(peeks) >= 2, seen
 
 
 def test_a_truncated_answer_is_a_connection_failure_not_a_traceback(tmp):
@@ -311,8 +309,6 @@ def test_the_result_wait_reports_a_timeout_when_every_error_peek_is_cut(
     assert 'Timeout (1s)' in r.stderr, r.stderr
     puts = [path for verb, path in seen if verb == 'PUT']
     assert puts == ['/command'], seen
-    peeks = [path for verb, path in seen if verb == 'GET']
-    assert len(peeks) >= 2, seen
 
 
 def test_a_truncated_error_answer_is_a_connection_failure(tmp):

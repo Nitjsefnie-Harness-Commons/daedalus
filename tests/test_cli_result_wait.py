@@ -88,6 +88,31 @@ _BACKOFF_HARNESS = (
     '                  "result": result}, sort_keys=True))\n')
 
 
+_CUTOFF_HARNESS = (
+    'import json\n'
+    'from daedalus_cli import transport\n'
+    'class _Clock:\n'
+    '    def __init__(self):\n'
+    '        self.now = 1000.0\n'
+    '        self.sleeps = []\n'
+    '    def monotonic(self):\n'
+    '        return self.now\n'
+    '    def sleep(self, seconds):\n'
+    '        self.sleeps.append(seconds)\n'
+    '        self.now += seconds\n'
+    'transport.time = _Clock()\n'
+    'calls = []\n'
+    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
+    '    calls.append(path)\n'
+    '    raise transport.ConnectionFailed("cut off")\n'
+    'transport._request = fake_api\n'
+    'result = transport.wait_for_result(\n'
+    '    "c1", "extension", "d1", %s, interval=%s)\n'
+    'print(json.dumps({"sleeps": transport.time.sleeps,\n'
+    '                  "polls": len(calls),\n'
+    '                  "result": result}, sort_keys=True))\n')
+
+
 def _cli_env():
     """Environment with the durable token selected for the subprocess."""
     env = {name: value for name, value in os.environ.items()
@@ -174,6 +199,37 @@ def test_the_result_wait_backs_off_while_the_result_stays_pending(tmp):
         # requested record alone spends it exactly.
         assert abs(sum(sleeps) - timeout) < 1e-9, brief
         assert outcome['polls'] == len(sleeps) - 1, brief
+
+
+def test_the_result_wait_expires_on_the_ramp_when_every_peek_fails(tmp):
+    """Every peek failing still ends in None, on the ramp, exactly.
+
+    ConnectionFailed from _request is what a proxy cut produces at
+    transport level, whatever the HTTP shape of the cut. The virtual
+    clock records the sleeps the loop REQUESTS and advances by nothing
+    else, so the poll count and sleep list below are the ramp
+    arithmetic itself — a loaded runner cannot starve them, which is
+    the property the CLI-level pins could not have (issue 901).
+    """
+    del tmp
+    run = subprocess.run(
+        [sys.executable, '-c', _CUTOFF_HARNESS % (1.0, 0.5)],
+        cwd=str(_util.ROOT), env=_cli_env(), capture_output=True,
+        text=True, encoding='utf-8', timeout=10)
+    assert run.returncode == 0, (run.returncode, run.stdout, run.stderr)
+    outcome = json.loads(run.stdout)
+    sleeps = outcome['sleeps']
+    brief = {'polls': outcome['polls'], 'result': outcome['result'],
+             'sleeps': sleeps}
+    assert outcome['result'] is None, brief
+    # Five ramp laps fit in 1.0s (0.62 spent); the sixth is cut to the
+    # remainder, which spends the budget, so the loop expires before a
+    # sixth peek.
+    assert outcome['polls'] == 5, brief
+    assert sleeps[:5] == [0.02, 0.04, 0.08, 0.16, 0.32], brief
+    assert len(sleeps) == 6, brief
+    assert 0.32 < sleeps[-1] < 0.5, brief
+    assert abs(sum(sleeps) - 1.0) < 1e-9, brief
 
 
 if __name__ == '__main__':
