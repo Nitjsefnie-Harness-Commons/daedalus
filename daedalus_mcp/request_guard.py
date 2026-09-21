@@ -55,20 +55,19 @@ def early_refusal(request, max_body_size):
         return JSONResponse({'error': 'unauthorized'}, status_code=401)
     request_token.set(tok)
 
-    if request.method == 'POST':
-        declared = request.headers.get('content-length')
-        if declared is not None:
-            try:
-                length = int(declared)
-            except ValueError:
-                return JSONResponse(
-                    {'error': 'invalid Content-Length'}, status_code=400)
-            if length < 0:
-                return JSONResponse(
-                    {'error': 'invalid Content-Length'}, status_code=400)
-            if length > max_body_size:
-                return JSONResponse(
-                    {'error': 'request body too large'}, status_code=413)
+    declared = request.headers.get('content-length')
+    if declared is not None:
+        try:
+            length = int(declared)
+        except ValueError:
+            return JSONResponse(
+                {'error': 'invalid Content-Length'}, status_code=400)
+        if length < 0:
+            return JSONResponse(
+                {'error': 'invalid Content-Length'}, status_code=400)
+        if length > max_body_size:
+            return JSONResponse(
+                {'error': 'request body too large'}, status_code=413)
     return None
 
 

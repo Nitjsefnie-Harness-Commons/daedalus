@@ -20,25 +20,26 @@ class BearerAuth(BaseHTTPMiddleware):
             await request_guard.drain_refused_body(request)
             return refusal
 
-        if request.method == 'POST':
-            raw = await _read_post_body(request, self.max_body_size)
-            if raw is None:
-                return JSONResponse(
-                    {'error': 'request body too large'}, status_code=413)
-            duplicate = ambiguous_json_carrier(raw)
-            if duplicate is not None:
-                return JSONResponse(
-                    {'error': f'duplicate {duplicate}'}, status_code=400)
+        # Every body presented is measured, whatever the verb.
+        raw = await _read_body(request, self.max_body_size)
+        if raw is None:
+            return JSONResponse(
+                {'error': 'request body too large'}, status_code=413)
+        duplicate = ambiguous_json_carrier(raw)
+        if duplicate is not None:
+            return JSONResponse(
+                {'error': f'duplicate {duplicate}'}, status_code=400)
 
         return await call_next(request)
 
 
-async def _read_post_body(request, max_body_size):
-    """Read a POST body, refusing an undeclared one mid-read.
+async def _read_body(request, max_body_size):
+    """Read a request body, refusing an undeclared one mid-read.
 
-    A declared body was already measured by the early refusal before any
-    read, so by the time it reaches here request.body() is bounded. An
-    undeclared body has no such early check, so the stream is the bound:
+    Every body presented is measured, whatever the verb: a declared body
+    was already measured by the early refusal before any read, so by the
+    time it reaches here request.body() is bounded. An undeclared body
+    has no such early check, so the stream is the bound:
     the read stops at the first chunk that crosses the limit; no chunk
     after it is read, and nothing beyond the limit is retained. The same
     413 the declared path answers before reading is answered mid-stream. No
