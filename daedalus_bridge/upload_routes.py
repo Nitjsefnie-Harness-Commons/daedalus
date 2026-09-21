@@ -324,14 +324,11 @@ def named_file(upload_dir, token, named):
 
     The canonical credential carrier is the Authorization: Bearer header.
     The selector is relative to the namespace the credential established,
-    and it is those two components exactly. The listing's `path` begins
-    with the token, and a request target is what a proxy access log
-    records whether or not a link on a page carried it, so the route a
-    browser fetches every upload by does not take that form: handed the
-    listed path back, token-led or not, it answers 400 like any other
-    shape rather than teaching a client to put the credential in a query.
-    `named_upload` keeps the token-led form for the path a screenshot
-    result carries.
+    and it is those two components exactly — the form the listing's
+    `path` names. A request target is what a proxy access log records
+    whether or not a link on a page carried it, so a token-led selector
+    answers 400 like any other shape rather than teaching a client to
+    put the credential in a query.
     """
     parts = named.split('/')
     if len(parts) != 2 or not all(parts):
