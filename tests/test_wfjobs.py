@@ -420,6 +420,33 @@ def test_the_sweep_refuses_a_bare_value_that_is_not_a_trigger(tmp):
     assert str((path.name, position)) in message, (message, position)
 
 
+def test_the_sweep_refuses_a_nested_bare_value_under_on(tmp):
+    """A nested bare trigger filter is not a top-level trigger."""
+    source = _real(tmp, _replaced(
+        'on:\n  push:\n    tags: ["v*"]\n  workflow_dispatch:\n',
+        'on:\n  pull_request:\n    branches:\n', 'release.yml'),
+        'release.yml')
+    path = Path(tmp) / 'release.yml'
+    position = ('on', 'pull_request', 'branches')
+    oracle = yaml.safe_load(source)
+    assert _at(oracle, position) is None, (oracle, position)
+    message = _refuses(_bare_trigger_sweep, [path])
+    assert str((path.name, position)) in message, (message, position)
+
+
+def test_the_sweep_refuses_a_nested_bare_value_outside_on_and_jobs(tmp):
+    """A nested bare permission is not a top-level trigger."""
+    source = _real(tmp, _replaced(
+        'permissions:\n  contents: read\n',
+        'permissions:\n  contents:\n'))
+    path = Path(tmp) / 'tests.yml'
+    position = ('permissions', 'contents')
+    oracle = yaml.safe_load(source)
+    assert _at(oracle, position) is None, (oracle, position)
+    message = _refuses(_bare_trigger_sweep, [path])
+    assert str((path.name, position)) in message, (message, position)
+
+
 def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
     """Every position matches `yaml.safe_load`; `''` stays `''`."""
     compared = 0
