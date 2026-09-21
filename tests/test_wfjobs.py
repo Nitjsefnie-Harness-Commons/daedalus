@@ -411,6 +411,15 @@ def test_the_sweep_admits_any_bare_trigger_not_only_the_shipped_two(tmp):
     assert files_with_none == {'claim.yml'}, files_with_none
 
 
+def test_the_sweep_refuses_a_bare_value_that_is_not_a_trigger(tmp):
+    """A bare value outside `on` is not accepted as a trigger."""
+    _real(tmp, _replaced('permissions:\n  contents: read\n', 'permissions:\n'))
+    path = Path(tmp) / 'tests.yml'
+    position = ('permissions',)
+    message = _refuses(_bare_trigger_sweep, [path])
+    assert str((path.name, position)) in message, (message, position)
+
+
 def test_a_bare_empty_value_reads_as_none_in_every_position(tmp):
     """Every position matches `yaml.safe_load`; `''` stays `''`."""
     compared = 0
