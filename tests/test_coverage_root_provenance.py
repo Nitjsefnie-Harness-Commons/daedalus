@@ -123,6 +123,12 @@ def _assert_root_binding_site(form):
     prefix = (_PRELUDE + _DERIVATION if name == 'star-import'
               else _ROOT_PREFIX)
     source = prefix + binding
+    if name in {'comprehension', 'parameter', 'vararg', 'kwarg',
+                'uninitialized-annotation'}:
+        assert _synthetic_violations(
+            source + 'subprocess.run(c, cwd=ROOT)\n') == [], binding
+        assert 'ROOT' not in _shadowed_names(ast.parse(source)), binding
+        return
     _assert_launch(source, '', 'ROOT', False)
     _assert_launch(source, '', 'ROOT', True)
     assert 'ROOT' in _shadowed_names(ast.parse(source)), binding
@@ -164,6 +170,26 @@ def test_type_parameters_shadow_each_root_proof_role(tmp):
         assert name in _shadowed_names(ast.parse(source)), parameter
         assert _synthetic_violations(
             source + f'subprocess.run(c, cwd={expression})\n') == []
+
+
+def test_local_root_bindings_leave_the_module_root_alone(tmp):
+    del tmp
+    for binding in ('import helpers as ROOT', 'ROOT = other', 'ROOT: object'):
+        prefix = _ROOT_PREFIX + f'def f():\n    {binding}\n'
+        _assert_launch(prefix, '    ', 'ROOT', False)
+        _assert_launch(prefix, '    ', 'ROOT', True)
+        assert _synthetic_violations(
+            prefix + '    pass\nsubprocess.run(c, cwd=ROOT)\n') == []
+    prefix = (_ROOT_PREFIX + 'def change():\n    global ROOT\n'
+              '    ROOT = other\n')
+    _assert_launch(prefix, '', 'ROOT', False)
+    _assert_launch(prefix, '', 'ROOT', True)
+    prefix = (_ROOT_PREFIX + 'def outer():\n    ROOT = other\n'
+              '    def inner():\n        nonlocal ROOT\n'
+              '        ROOT = other\n')
+    _assert_launch(prefix, '        ', 'ROOT', False)
+    assert _synthetic_violations(
+        prefix + 'subprocess.run(c, cwd=ROOT)\n') == []
 
 
 _INVOKE = 'import test_coverage_root_provenance as root_suite; '
@@ -214,6 +240,10 @@ _PATTERN_BINDING = (
     "ast.MatchStar)):\n")
 _SITE_MUTANTS = {
     'name': (_NAME_BINDING, ''),
+    'scope': ("                if self.destinations[scope].get('ROOT', scope) "
+              "is self.tree\n", "                if True\n"),
+    'annotation': ("                and node not in annotations}\n",
+                   "                }\n"),
     'del': (_NAME_BINDING, _NAME_BINDING.replace(
         '(ast.Store, ast.Del)', 'ast.Store')),
     'parameter': ("    if isinstance(node, ast.arg):\n"
@@ -241,7 +271,9 @@ _SITE_MUTANTS.update(
         ('match-as', _PATTERN_BINDING, 'ast.MatchAs'),
         ('match-star', _PATTERN_BINDING, 'ast.MatchStar')))
 _SITE_KINDS = {
-    'vararg': 'parameter', 'kwarg': 'parameter',
+    'comprehension': 'scope', 'parameter': 'scope',
+    'vararg': 'scope', 'kwarg': 'scope',
+    'uninitialized-annotation': 'annotation',
     'from-alias': 'import', 'same-name-alias': 'import',
     'mixed-import': 'import',
 }
@@ -266,7 +298,7 @@ _ROOT_PROVENANCE_MUTATIONS += tuple(
          _INVOKE + 'root_suite.test_only_accepted_root_bindings_'
          'discard_the_shadow(None)'),
         ('ROOT census gates the assignment exemption', 'scopes',
-         (("            and not _other_root_bindings(tree, root_values)\n",
+         (("            and not _other_root_bindings(facts, root_values)\n",
            ''),),
          _INVOKE + 'root_suite.test_every_root_binding_site_'
          'must_be_accepted(None)'),
@@ -308,6 +340,19 @@ _ROOT_PROVENANCE_MUTATIONS += ((
      _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
      'proof_role(None)'),
 ) if hasattr(ast, 'TypeVar') else ())
+
+_ROOT_PROVENANCE_MUTATIONS += (
+    ('ROOT assignments use their destination scope', 'scopes',
+     (("                if target in self.root_scope_nodes}\n",
+       "                }\n"),),
+     _INVOKE + 'root_suite.test_local_root_bindings_leave_the_module_'
+     'root_alone(None)'),
+    ('ROOT census resolves global destinations', 'scopes',
+     (("                if self.destinations[scope].get('ROOT', scope) "
+       "is self.tree\n", "                if scope is self.tree\n"),),
+     _INVOKE + 'root_suite.test_local_root_bindings_leave_the_module_'
+     'root_alone(None)'),
+)
 
 
 if __name__ == '__main__':
