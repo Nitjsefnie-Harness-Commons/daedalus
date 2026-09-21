@@ -395,6 +395,9 @@ def urlopen(req, timeout=None):
     global peeks
     attempts.append(req.full_url)
     if 'consume=1' in req.full_url:
+        expected = f"expected={RESULT['resultGeneration']}"
+        if expected not in req.full_url:
+            raise AssertionError(f'unexpected consume: {req.full_url}')
         return Response(json.dumps(CONSUMED).encode())
     peeks += 1
     if peeks > FAILURES:
@@ -425,10 +428,13 @@ _RAISING_URLOPEN %= {
 def _check_transport_family(family):
     """`family` from urlopen, the body read and an HTTPError's body read.
 
-    The wait pin is causal, not wall-clock: the child's WAIT_TIMEOUT is
-    far past any scheduler stall, WAIT_FAILURES failed peeks must be
-    survived, and the peek that lands must be consumed — attempts is
-    failures + 2, exactly (issue 893).
+    The wait pin is causal, not a wall clock: WAIT_TIMEOUT leaves the
+    sub-second scheduler stalls that flaked the 0.2s budget no way to
+    expire the wait, WAIT_FAILURES failed peeks must be survived, and
+    the peek that lands must be consumed — attempts is failures + 2,
+    exactly (issue 893). The stub answers a consume only when its URL
+    names the peeked generation, so a transport that drops `expected`
+    from the consume fails here rather than passing.
     """
     env = cli_env(DAEDALUS_TOKEN=TOK)
     for where in ('open', 'read', 'error'):
