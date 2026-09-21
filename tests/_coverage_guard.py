@@ -24,7 +24,7 @@ from _coverage_bindings import (
     _unfollowable_launcher_bindings)
 from _coverage_memo import analysed, nodes as memo_nodes
 from _coverage_scopes import (
-    _ScopeFacts, _evaluation_scopes, _is_root_spelling, _name_is_unbound,
+    _ScopeFacts, _is_root_spelling, _name_is_unbound,
     _scope_bindings, _scope_shadows, _shadowed_names, _visible_scope_shadows)
 
 _DECLARATION = 'child_coverage'
@@ -67,11 +67,11 @@ class _ModuleFacts:
         if 'ROOT' not in self.shadowed_names:
             self.module_shadows.discard('ROOT')
         self.scope_shadows[tree] = self.module_shadows
-        binding_nodes, self.binding_parents = _evaluation_scopes(
-            tree, type_scopes=True)
+        binding_nodes, binding_parents = scope_facts.binding_layout
+        self.binding_parents = dict(binding_parents)
         self.binding_scopes = dict(binding_nodes)
-        self.scope_bindings = _scope_bindings(binding_nodes,
-                                              self.binding_parents)
+        self.scope_bindings = _scope_bindings(
+            binding_nodes, self.binding_parents, scope_facts.binding_products)
         self.subprocess_modules = set()
         self.launch_callables = set()
         self.declaration_modules = set()
