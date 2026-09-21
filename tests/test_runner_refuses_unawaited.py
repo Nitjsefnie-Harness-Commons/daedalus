@@ -16,9 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 ASYNC_DEF_DETAIL = (
-    'an async def test is not awaited by the runner; drive the '
-    'coroutine with asyncio.run inside a plain def test')
-RETURNED_DETAIL = 'returned an awaitable the runner does not await: '
+    'an async def or generator test is not awaited or iterated '
+    'by the runner; drive the coroutine with asyncio.run inside '
+    'a plain def test')
+RETURNED_DETAIL = ('returned an awaitable or generator '
+                   'the runner does not run: ')
 
 PROBE_SUITE = '''\
 import sys
@@ -78,6 +80,22 @@ def test_an_async_generator_test_is_refused_without_being_called(tmp):
     code, text, messages = _run([test_x])
     assert code == 1, text
     assert f'  FAIL  test_x: {ASYNC_DEF_DETAIL}\n' in text, text
+    assert '  PASS' not in text, text
+    assert not _never_awaited(messages), messages
+
+
+def test_a_generator_function_test_is_refused_without_being_called(tmp):
+    del tmp
+
+    def test_x(tmp):
+        raise AssertionError('this body executed')
+        yield  # pylint: disable=unreachable
+
+    code, text, messages = _run([test_x])
+    assert code == 1, text
+    assert f'  FAIL  test_x: {ASYNC_DEF_DETAIL}\n' in text, text
+    assert '  PASS' not in text, text
+    assert '\n0/1 passed' in text, text
     assert not _never_awaited(messages), messages
 
 
@@ -126,6 +144,20 @@ def test_a_returned_async_generator_is_refused(tmp):
     assert code == 1, text
     assert (f'  FAIL  test_x: {RETURNED_DETAIL}async_generator\n'
             in text), text
+    assert '\n0/1 passed' in text, text
+    assert not _never_awaited(messages), messages
+
+
+def test_a_returned_generator_is_refused(tmp):
+    del tmp
+
+    def test_x(tmp):
+        del tmp
+        return (x for x in ())
+
+    code, text, messages = _run([test_x])
+    assert code == 1, text
+    assert f'  FAIL  test_x: {RETURNED_DETAIL}generator\n' in text, text
     assert '\n0/1 passed' in text, text
     assert not _never_awaited(messages), messages
 
