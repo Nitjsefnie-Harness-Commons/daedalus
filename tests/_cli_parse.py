@@ -1,5 +1,4 @@
-"""Drive the real CLI parser and read argparse's verdict, for the suites
-that pin one option's type."""
+"""The real CLI parser's verdict on one argv."""
 import contextlib
 import io
 import sys
