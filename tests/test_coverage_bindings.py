@@ -12,6 +12,8 @@ from _coverage_guard import _synthetic_violations  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from test_bash_resolver_scan import _BASH_MUTATION_SPECS  # noqa: E402
+from test_coverage_scope_bindings import (  # noqa: E402
+    _ROOT_PROVENANCE_INVOKE, _ROOT_PROVENANCE_MUTATIONS)
 
 
 _BINDING_MESSAGE = (
@@ -27,10 +29,6 @@ _INLINE_INVOKE = (
 _SCOPE_BINDING_INVOKE = (
     'import test_coverage_scope_bindings as binding_suite; '
     'binding_suite.test_import_bindings_shadow_the_builtin_dict(None)')
-_ROOT_PROVENANCE_INVOKE = (
-    'import test_coverage_scope_bindings as binding_suite; '
-    'binding_suite.test_import_bindings_do_not_rebind_root_'
-    'spellings(None)')
 _ANNOTATION_INVOKE = (
     'import test_coverage_scope_bindings as binding_suite; '
     'binding_suite.test_variadic_parameter_annotations_are_judged(None)')
@@ -627,7 +625,7 @@ def _mutation_specs():
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
         ('MatchMapping global', 'scopes', (match_rest_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
-    ) + _BASH_MUTATION_SPECS
+    ) + _BASH_MUTATION_SPECS + _ROOT_PROVENANCE_MUTATIONS
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
