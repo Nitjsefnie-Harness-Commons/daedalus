@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsread import (blank_js_comments, js_bracket_end,  # noqa: E402
                      js_mask, js_object_entries, js_split_top_level)
-from _jsroute_keys import decode_string_literal  # noqa: E402
+from _token_policy import _logs_bridge_token  # noqa: E402
+from _token_mask import token_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
 
@@ -187,68 +188,6 @@ def test_every_registry_call_checks_its_http_status(tmp):
     assert 'console.error' in helper, helper
 
 
-def _console_arguments(mask):
-    member = re.compile(
-        r'(?<![\w$])console\s*(?:\??\.\s*[\w$]+|(?:\?\.\s*)?\[)')
-    for sink in member.finditer(mask):
-        end = sink.end()
-        if mask[end - 1] == '[':
-            # Every computed console member is a potential logging sink.
-            end = js_bracket_end(mask, end - 1)
-        grouped = re.match(r'\s*(?:\)\s*)*', mask[end:])
-        end += grouped.end()
-        wrapper = re.match(r'\??\.\s*([\w$]+)|(?:\?\.\s*)?\[', mask[end:])
-        if wrapper:
-            if wrapper.group(1) not in ('call', 'apply'):
-                yield None
-                continue
-            end += wrapper.end()
-        call = re.match(r'\s*(?:\?\.\s*)?\(', mask[end:])
-        if call:
-            start = end + call.end() - 1
-            yield start + 1, js_bracket_end(mask, start) - 1
-        elif wrapper:
-            yield None
-
-
-def _logs_bridge_token(line, mask):
-    # Identifier escapes are unsupported; a slash after a brace is ambiguous
-    # to js_mask (function expressions versus blocks). Neither certifies clean.
-    if '\\' in mask or re.search(r'}\s*/', mask):
-        return True
-    access = re.compile(
-        r'\.\s*([\w$]+)|(?<=[\w$)\]])\s*(?:\?\.\s*)?\[')
-    prefix = re.compile(
-        r'\s*\.\s*(?:substring|slice)\s*\(\s*0\s*,\s*[1-8]\s*\)')
-    for bounds in _console_arguments(mask):
-        if bounds is None:
-            return True
-        start, end = bounds
-        arguments = mask[start:end]
-        for match in access.finditer(arguments):
-            read_end = match.end()
-            if match.group(1) is not None and match.group(1) != 'token':
-                continue
-            if arguments[read_end - 1] == '[':
-                read_end = js_bracket_end(arguments, read_end - 1)
-                raw = line[start + match.end():start + read_end - 1]
-                raw = blank_js_comments(raw).strip()
-                # The shared decoder does not resolve legacy numeric escapes.
-                if re.search(r'\\[0-9\u2028\u2029]', raw):
-                    return True
-                key = decode_string_literal(raw)
-                if key is None:
-                    if re.fullmatch(r'[0-9]+', raw):
-                        continue
-                    return True
-                if key != 'token':
-                    continue
-            # A prefix exempts this read only, never a neighbouring read.
-            if not prefix.match(arguments, read_end):
-                return True
-    return False
-
-
 def test_the_extension_never_logs_the_bridge_token(tmp):
     """The token is a reusable browser-control credential, not a diagnostic.
 
@@ -272,14 +211,12 @@ def test_the_extension_never_logs_the_bridge_token(tmp):
         name = path.relative_to(_util.ROOT / 'extension').as_posix()
         if not path.is_file():
             continue
-        source = path.read_text(encoding='utf-8')
+        source = path.read_bytes().decode('utf-8')
         # Mask once to retain comment/template state across line boundaries;
         # call argument matching remains line-local (multiline is #848).
-        normalized = source.translate(dict.fromkeys(
-            map(ord, '\ufeff\u2028\u2029'), ' '))
-        lines = zip(source.split('\n'), js_mask(normalized).split('\n'))
-        for number, (line, mask) in enumerate(lines, 1):
-            if _logs_bridge_token(line, mask):
+        lines = token_mask(source).lines(source)
+        for number, (line, mask, unresolved) in enumerate(lines, 1):
+            if unresolved or _logs_bridge_token(line, mask):
                 offenders.append(f'{name}:{number}: {line.strip()}')
     assert not offenders, offenders
 
@@ -473,6 +410,28 @@ def test_token_guard_refuses_ambiguous_masking(tmp):
         (False, "console.log(/'/.source);"),
         (False, "const text = `function() {} / /'/`;"),
     ])
+
+
+def test_token_guard_grammar_sweep(tmp):
+    from _token_policy_cases import grammar_cases
+    _check_token_sources(tmp, [(refused, source)
+                               for _, _, refused, source
+                               in grammar_cases()])
+
+
+def test_token_guard_lexical_boundaries(tmp):
+    from _token_policy_cases import boundary_cases, lexical_context_cases
+    _check_token_sources(tmp, lexical_context_cases())
+    _check_token_sources(tmp, boundary_cases())
+    source = "/* é😀 */ console.log(config['token']);\n// fin\u2028"
+    masked = token_mask(source)
+    encoded = source.encode('utf-8')
+    assert len(masked.text) == len(encoded)
+    offset = encoded.index(b'console.log')
+    assert masked.text[offset:offset + 11] == 'console.log'
+    uncertain = token_mask("of / /'/;\n'closed';\nconsole.log(config.token)")
+    assert all(refused for _, _, refused in uncertain.lines(
+        "of / /'/;\n'closed';\nconsole.log(config.token)"))
 
 
 def test_extension_ships_no_default_server(tmp):
