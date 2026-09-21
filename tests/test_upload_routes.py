@@ -550,6 +550,32 @@ def test_store_upload_refuses_an_unsafe_component(tmp):
         400, {'error': 'invalid path component'}), (status, payload)
 
 
+def test_delete_upload_logs_the_token_free_relative_path(tmp):
+    """Each delete arm names its target inside the token directory only.
+
+    The whole-namespace arm has no relative path left to name, so it uses
+    the `[STREAM] CONNECT` convention: the credential's 8-character
+    prefix, without an ellipsis.
+    """
+    routes = _load('fixture_upload_routes_delete_log')
+    _store(tmp, 'tok-verify', 'shot', 'a.txt')
+    _store(tmp, 'tok-verify', 'other', 'b.txt')
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        assert routes.delete_upload(
+            Path(tmp), {'token': 'tok-verify', 'id': 'shot',
+                        'filename': 'a.txt'}) == (200, {'ok': True})
+        assert routes.delete_upload(
+            Path(tmp), {'token': 'tok-verify',
+                        'id': 'other'}) == (200, {'ok': True})
+        assert routes.delete_upload(
+            Path(tmp), {'token': 'tok-verify'}) == (200, {'ok': True})
+    assert output.getvalue() == (
+        '[DELETE] shot/a.txt\n'
+        '[DELETE] other/\n'
+        '[DELETE] token=tok-veri/\n'), output.getvalue()
+
+
 def test_delete_upload_refuses_a_filename_without_an_id(tmp):
     """A filename names a file inside an id, never the token namespace."""
     routes = _load('fixture_upload_routes_delete_filename')
