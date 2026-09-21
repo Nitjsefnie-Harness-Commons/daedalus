@@ -29,9 +29,9 @@ def test_upload_list_screenshot_delete(tmp):
         status, body = _util.post_json(base + '/upload', payload)
         assert status == 200, (status, body)
         assert body['ok'] is True and body['size'] == len(PNG)
-        assert (body['path'].startswith(f'{TOK}/up1/')
+        assert (body['path'].startswith('up1/')
                 and body['path'].endswith('.png'))
-        stored = Path(docroot) / 'uploads' / body['path']
+        stored = Path(docroot) / 'uploads' / TOK / body['path']
         assert stored.is_file() and stored.read_bytes() == PNG
 
         # Named-file form.
@@ -424,7 +424,7 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
                 'token': TOK, 'id': '_ss', 'filename': name,
                 'data': base64.b64encode(payload).decode()})
             assert status == 200, (status, body)
-            assert body['path'] == f'{TOK}/_ss/{name}', body
+            assert body['path'] == f'_ss/{name}', body
         # Order the two by mtime explicitly: which one an id fetch picks is
         # the whole point, and a same-millisecond tie would decide it by
         # directory order instead.
@@ -441,6 +441,11 @@ def test_a_screenshot_path_serves_the_file_that_result_named(tmp):
             status, served = _util.get(f'{base}/screenshot?{named}')
             assert status == 200 and served == payload, (
                 name, status, served[:32])
+        # The token-led form a stored result can still carry keeps working.
+        legacy = urllib.parse.urlencode(
+            {'token': TOK, 'path': f'{TOK}/_ss/capture-a.png'})
+        status, served = _util.get(f'{base}/screenshot?{legacy}')
+        assert status == 200 and served == PNG + b'-A', (status, served[:32])
 
 
 def test_a_screenshot_path_cannot_leave_its_own_token(tmp):
