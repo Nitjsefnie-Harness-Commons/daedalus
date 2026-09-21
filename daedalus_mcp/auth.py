@@ -44,8 +44,10 @@ async def _read_post_body(request, max_body_size):
     413 the declared path answers before reading is answered mid-stream. No
     refused-body drain runs on this path, because a drain would pull into
     a stream of unknown total size; the connection is left for the ASGI
-    server to close. The joined body is cached on the request the way
-    Request.body() caches it, which is what replays it to the inner app.
+    server to close. The manual request._body cache is load-bearing:
+    Starlette's _CachedRequest.wrapped_receive replays _body to the inner
+    app, while consuming request.stream() alone would hand the inner app
+    an empty body.
     """
     if request.headers.get('content-length') is not None:
         return await request.body()
