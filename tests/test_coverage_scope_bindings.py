@@ -112,8 +112,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
      (("        shadows[scope].update(imports.get(node, ()))\n",
        ""),), _ROOT_PROVENANCE_INVOKE),
     ('an assignment cannot erase a ROOT import shadow', 'scopes',
-     (("    if (root_values and 'ROOT' not in unprovable\n",
-       "    if (root_values\n"),), _ROOT_PROVENANCE_INVOKE),
+     (("            and not _other_root_bindings(tree, root_values)\n",
+       ""),), _ROOT_PROVENANCE_INVOKE),
 )
 
 
@@ -575,6 +575,13 @@ def test_declared_root_binding_destinations(tmp):
         prefix + 'os.chdir(ROOT)\nsubprocess.run(c)\n') == [
             'tests/synthetic.py:8: subprocess.run os.chdir at line 7 '
             'may have moved the cwd declares no env=']
+
+
+def test_root_assignment_does_not_erase_other_binding_sites(tmp):
+    del tmp
+    source = ('import subprocess\nimport _util\nROOT = _util.ROOT\n'
+              '(ROOT := other)\nsubprocess.run(c, cwd=ROOT)\n')
+    assert _synthetic_violations(source) == _rebound_owner(5, 'ROOT')
 
 
 if __name__ == '__main__':
