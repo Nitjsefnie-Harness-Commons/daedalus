@@ -353,18 +353,26 @@ class RequestMixin(BaseHTTPRequestHandler):
         return clen
 
     def _read_body(self, clen):
-        """Read one declared body, or None once a deadline answered it.
+        """Read one declared body, or None once this transport answered.
 
         Every verb that reads a body goes through here, so the deadline is
         stated once: a peer that declares a length and then stops sending is
         answered 408 and its worker released, rather than parked on the read
-        until the peer decides to close.
+        until the peer decides to close. A peer that closes its send side
+        early makes the read return at EOF with fewer bytes than declared,
+        which is refused 400 rather than handed to a route as the body the
+        request claimed.
         """
         try:
-            return self.rfile.read(clen)
+            raw = self.rfile.read(clen)
         except TimeoutError:
             self._json(408, {'error': 'request body timed out'})
             return None
+        if len(raw) != clen:
+            self._json(
+                400, {'error': 'request body shorter than Content-Length'})
+            return None
+        return raw
 
     def _load_json_object(self, clen):
         """Read one JSON body, answering 400 unless it is an object."""

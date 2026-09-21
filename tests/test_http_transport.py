@@ -289,6 +289,42 @@ def test_an_invalid_content_length_refusal_absorbs_the_declared_body(_tmp):
             declared, 'declared body left unread')
 
 
+class _RaisingBody:
+    """A body stream whose read hits the request deadline."""
+
+    def read(self, _n):
+        raise TimeoutError
+
+
+def test_a_read_short_of_the_declared_length_is_refused(_tmp):
+    """A body ending early at EOF is refused, not handed over short.
+
+    `rfile.read(clen)` returns whatever arrived when the peer half-closes
+    first; a route given those bytes would act on a body the request never
+    declared. The comparison is against the declaration the read was told.
+    """
+    short = _Stub(headers=[('Content-Length', '10')],
+                  body=b'0123456789'[:3])
+    assert short._read_body(10) is None
+    assert short.status == 400, short.status
+    assert json.loads(short.wfile.getvalue()) == {
+        'error': 'request body shorter than Content-Length'}
+
+    exact = _Stub(headers=[('Content-Length', '3')], body=b'abc')
+    assert exact._read_body(3) == b'abc'
+    assert exact.status is None, exact.status
+
+
+def test_the_body_read_deadline_still_answers_before_the_shortfall(_tmp):
+    """The 408 path is untouched: a body that stops mid-flight times out."""
+    stalled = _Stub(headers=[('Content-Length', '10')])
+    stalled.rfile = _RaisingBody()
+    assert stalled._read_body(10) is None
+    assert stalled.status == 408, stalled.status
+    assert json.loads(stalled.wfile.getvalue()) == {
+        'error': 'request body timed out'}
+
+
 def test_bridge_token_refuses_a_header_and_query_that_disagree(_tmp):
     stub = _Stub(headers=[('Authorization', 'Bearer headertoken')])
     assert stub._bridge_token({'token': ['querytoken']}) is None
