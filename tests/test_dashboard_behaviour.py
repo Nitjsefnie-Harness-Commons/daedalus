@@ -421,10 +421,12 @@ def test_no_dashboard_export_is_unreferenced(_tmp):
 
 class _ControlledReader:
     def __init__(self, name, native_id, events, *, finished=False,
-                 stuck=False):
+                 stuck=False, pending_buffer=None, install_buffer=None):
         self.name, self.native_id, self.events = name, native_id, events
         self.cancelled, self.finished = threading.Event(), threading.Event()
         self.stuck = stuck
+        self.pending_buffer = pending_buffer
+        self.install_buffer = install_buffer
         if finished:
             self.finished.set()
 
@@ -439,6 +441,8 @@ class _ControlledReader:
         self.events.append(('reader-join', self.name, timeout))
         if self.cancelled.is_set() and not self.stuck:
             self.finished.set()
+            if self.pending_buffer is not None:
+                self.install_buffer(self.pending_buffer)
 
 
 class _ControlledPipe:
@@ -462,24 +466,29 @@ class _LiveReaderBuffer:
 
 class _ControlledProcess:
     def __init__(self, pid, command, outcomes, events, *, wait_succeeds=False,
-                 held_readers=False, reader_buffers=None, stuck_reader=None):
+                 held_readers=False, reader_buffers=None, stuck_reader=None,
+                 late_buffers=None):
         self.pid, self.command = pid, command
         self.outcomes, self.events = list(outcomes), events
         self.wait_succeeds = wait_succeeds
         self.returncode = self.stdout = self.stderr = None
-        held_readers |= reader_buffers is not None
+        held_readers |= reader_buffers is not None or late_buffers is not None
         if held_readers:
             buffers = reader_buffers or {}
+            late = late_buffers or {}
 
             def reader(name, native_id):
                 return _ControlledReader(
                     name, native_id, events, finished=name in buffers,
-                    stuck=stuck_reader == name)
+                    stuck=stuck_reader == name,
+                    pending_buffer=late.get(name),
+                    install_buffer=lambda chunks, name=name: setattr(
+                        self, f'_{name}_buff', [chunks]))
             self.stdout_thread = reader('stdout', pid * 2)
             self.stderr_thread = reader('stderr', pid * 2 + 1)
             self.stdout = _ControlledPipe('stdout', self.stdout_thread, events)
             self.stderr = _ControlledPipe('stderr', self.stderr_thread, events)
-            if reader_buffers is not None:
+            if reader_buffers is not None or late_buffers is not None:
                 for name in ('stdout', 'stderr'):
                     value = ([buffers[name]] if name in buffers
                              else _LiveReaderBuffer(name, events))
