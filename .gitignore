@@ -494,6 +494,7 @@
 !/tests/test_time_tests.py
 !/tests/test_timing_selection.py
 !/tests/test_unresolved_routes.py
+!/tests/test_upload_races.py
 !/tests/test_upload_routes.py
 !/tests/test_version_contract.py
 !/tests/test_version_contract_dashboard_duplicates.py
