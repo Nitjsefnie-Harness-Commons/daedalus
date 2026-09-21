@@ -108,9 +108,8 @@ def same_path(left, right, attempts=None):
 def redacted(value, secret):
     """One rendered evidence string with the credential shortened.
 
-    Substring replacement, because the secret reaches the line inside
-    derived names (`<token>.json`, `<token>_<tab>`) and resolved absolute
-    paths, never only as a bare component.
+    Substring replacement: the secret reaches the line inside derived
+    names and resolved paths, never only as a bare component.
     """
     if not secret:
         return value

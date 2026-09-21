@@ -61,9 +61,8 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     except ValueError:
         return 400, {'error': 'invalid path component'}
     body.pop('deliveryId', None)
-    # PUT /command stores the command without the credential that carried
-    # it; the result body gets the same treatment, or every slot and
-    # delivery file under results/ is a copy of the control credential.
+    # PUT /command stores the command without its credential; the slots
+    # under results/ get the same treatment.
     body.pop('token', None)
     body['resultGeneration'] = uuid.uuid4().hex
     if did:
