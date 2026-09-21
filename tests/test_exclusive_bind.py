@@ -164,9 +164,7 @@ def test_the_posix_bridge_arm_keeps_the_reuse_path(tmp):
 
 
 def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
-    """A real listener proves the POSIX path reaches the real socket.
-
-    getsockopt on the bound socket is the only proof that survives the
+    """getsockopt on the bound socket is the only proof that survives the
     factory: the flag is applied by the standard library inside the bind
     the bridge overrides, so no call record of the override's own shows
     it. Darwin reports the flag as the option's bit value (4), Linux as
@@ -189,7 +187,6 @@ def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
 
 
 def test_the_windows_mcp_arm_excludes_the_port(tmp):
-    """The win32 front end sets the exclusive option and never reuse."""
     del tmp
     _need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59981)
@@ -204,9 +201,7 @@ def test_the_windows_mcp_arm_excludes_the_port(tmp):
 
 
 def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
-    """The non-win32 front end keeps the reuse flag on its real socket.
-
-    Darwin reports the flag as the option's bit value (4), Linux as 1;
+    """Darwin reports the flag as the option's bit value (4), Linux as 1;
     zero is unset on both.
     """
     del tmp
