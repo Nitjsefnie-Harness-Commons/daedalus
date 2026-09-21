@@ -389,28 +389,31 @@ def _close_process_pipes(process):
         process.stderr.close()
 
 
-def _finish_windows_pipe_readers(process, deadline):
+def _finish_windows_pipe_readers(process, deadline, cancelled):
     pairs = (
-        (process.stdout, getattr(process, 'stdout_thread', None)),
-        (process.stderr, getattr(process, 'stderr_thread', None)),
+        ('stdout', process.stdout,
+         getattr(process, 'stdout_thread', None)),
+        ('stderr', process.stderr,
+         getattr(process, 'stderr_thread', None)),
     )
     if any(stream is not None and thread is None
-           for stream, thread in pairs):
+           for _name, stream, thread in pairs):
         raise RuntimeError('dashboard process reader thread is missing')
-    threads = tuple(
-        thread for stream, thread in pairs
+    readers = tuple(
+        (name, thread) for name, stream, thread in pairs
         if stream is not None and thread is not None)
     failures = []
-    for thread in threads:
+    for name, thread in readers:
         if thread.is_alive():
             try:
                 _cancel_windows_synchronous_io(thread)
             except Exception as failure:  # pylint: disable=W0718
                 failures.append(failure)
-    for thread in threads:
+            else:
+                cancelled.add(name)
+    for _name, thread in readers:
         thread.join(max(0.0, deadline - time.monotonic()))
-    alive = tuple(thread for thread in threads if thread.is_alive())
-    if alive:
+    if any(thread.is_alive() for _name, thread in readers):
         raise RuntimeError('dashboard process reader cleanup timed out')
     _close_process_pipes(process)
     if failures:
@@ -426,6 +429,18 @@ def _settled_windows_output(process, name):
     if not chunks:
         return ''
     return chunks[0]
+
+
+# The record must not read a cancelled stream as a child that said nothing.
+_UNRECOVERABLE_OUTPUT = (
+    '<unrecoverable: reader cancelled after the drain timed out>')
+
+
+def _settled_stream(process, name, cancelled):
+    settled = _settled_windows_output(process, name)
+    if not settled and cancelled:
+        return _UNRECOVERABLE_OUTPUT
+    return settled
 
 
 def _format_timeout_attempt(record):
@@ -479,6 +494,8 @@ def _run_dashboard_node_once(
         child_cpu_at_timeout = _child_cpu_at_timeout(process)
         process.kill()
         cleanup_failure = None
+        cleanup_failed = False
+        cancelled = set()
         drain_started = time.monotonic()
         try:
             stdout, stderr = process.communicate(
@@ -501,23 +518,27 @@ def _run_dashboard_node_once(
             try:
                 if sys.platform == 'win32':
                     _finish_windows_pipe_readers(
-                        process, cleanup_deadline)
+                        process, cleanup_deadline, cancelled)
                 else:
                     _close_process_pipes(process)
             except Exception as settle_failure:  # pylint: disable=W0718
+                cleanup_failed = True
                 if cleanup_failure is None:
                     cleanup_failure = settle_failure
             try:
                 process.wait(timeout=max(
                     0.0, cleanup_deadline - time.monotonic()))
             except subprocess.TimeoutExpired as wait_failure:
+                cleanup_failed = True
                 if cleanup_failure is None:
                     cleanup_failure = wait_failure
             if sys.platform == 'win32':
                 stdout = _latest_output(
-                    _settled_windows_output(process, 'stdout'), stdout)
+                    _settled_stream(process, 'stdout',
+                                    'stdout' in cancelled), stdout)
                 stderr = _latest_output(
-                    _settled_windows_output(process, 'stderr'), stderr)
+                    _settled_stream(process, 'stderr',
+                                    'stderr' in cancelled), stderr)
         stdout = _output_text(stdout)
         stderr = _output_text(stderr)
         phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
@@ -538,8 +559,14 @@ def _run_dashboard_node_once(
             drain_duration_s=drain_duration,
             duration_s=time.monotonic() - started,
         )
+        # A retry must wait out a first child whose cleanup cannot finish;
+        # once the Windows reader cleanup settled, that objection is gone
+        # even though the drain timed out. Other platforms have no reader
+        # cleanup to recover through.
+        cleanup_completed = not cleanup_failed
         timeout_failure = _DashboardOuterTimeout(
-            record, retryable=drain_outcome == 'completed')
+            record, retryable=drain_outcome == 'completed' or (
+                sys.platform == 'win32' and cleanup_completed))
         raise timeout_failure from (cleanup_failure or failure)
     if process.returncode != 0:
         raise AssertionError((process.returncode, stdout, stderr))
@@ -567,9 +594,16 @@ def run_dashboard_node(
                 for record in timeout_records)
             note = ''
             if not failure.retryable and count < attempts:
-                note = (
-                    'retry declined: the post-kill drain did not complete '
-                    f'(drain outcome: {failure.record.drain_outcome})\n')
+                if sys.platform == 'win32':
+                    note = (
+                        "retry declined: the first child's reader cleanup "
+                        'did not finish '
+                        f'(drain outcome: {failure.record.drain_outcome})\n')
+                else:
+                    note = (
+                        'retry declined: the post-kill drain did not '
+                        'complete '
+                        f'(drain outcome: {failure.record.drain_outcome})\n')
             raise AssertionError(
                 f'dashboard node outer timeout after {count} {suffix}\n'
                 f'{note}{records}') from failure
