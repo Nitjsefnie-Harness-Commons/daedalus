@@ -55,6 +55,7 @@ def test_a_non_integer_timeout_is_refused(tmp):
 MALFORMED_TAB_SHAPES = (
     (['close-tab', 'x'], 'chrome_tabs'),
     (['focus-tab', 'x'], 'chrome_tab'),
+    (['cdp', 'Page.enable', '--chrome-tab', 'x'], '--chrome-tab'),
     (['ext-navigate', 'https://example.com/', '--chrome-tab', 'x'],
      '--chrome-tab'),
     (['ext-reload', '--chrome-tab', 'x'], '--chrome-tab'),
@@ -72,7 +73,7 @@ MALFORMED_TAB_SHAPES = (
 
 
 def test_a_malformed_chrome_tab_id_is_refused_at_parse_time(tmp):
-    """Every chrome-tab spelling refuses before the handler runs."""
+    """Malformed chrome-tab values refuse before the handler runs."""
     del tmp
     for argv, argument in MALFORMED_TAB_SHAPES:
         code, message = refused(argv)
