@@ -96,7 +96,7 @@ def do_cdp(args):
     cmd = {'id': '_cdp', 'type': 'cdp', 'method': args.method,
            'params': {} if args.params is None else args.params,
            'token': token(), 'tab': 'extension'}
-    if args.chrome_tab:
+    if args.chrome_tab is not None:
         cmd['tabId'] = args.chrome_tab
     if args.keep_session:
         cmd['keep_session'] = True

@@ -13,8 +13,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _drain  # noqa: E402
 import _util  # noqa: E402
 from _frontend import html_front_end  # noqa: E402
+from _queueread import queued_command  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
@@ -142,6 +144,29 @@ def test_an_error_result_reports_on_stderr_with_stdout_left_for_data(tmp):
     assert 'ERROR: boom' in err, err
     assert 'job9' in err, err
     assert out == '', out
+
+
+def test_cdp_sends_a_chrome_tab_zero_instead_of_dropping_it(tmp):
+    """Zero is the tab id the parser typed, not an absence.
+
+    The handler's truthy guard dropped it, so the command ran on the
+    extension's active tab instead of the tab the operator named. Real
+    Chrome tab ids are positive, so this pins the guard's shape rather
+    than a reachable browser state.
+    """
+    bridge_env = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+    with _util.bridge(tmp, env=bridge_env) as (base, docroot):
+        env = cli_env(DAEDALUS_URL=base, DAEDALUS_TOKEN=TOK)
+        proc = subprocess.Popen(
+            CLI + ['cdp', 'Page.enable', '--chrome-tab', '0'],
+            cwd=str(_util.ROOT), env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding='utf-8')
+        try:
+            qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
+            queued = queued_command(qdir, 'the cdp command')
+        finally:
+            _drain.kill_and_drain(proc)
+    assert queued.get('tabId') == 0, queued
 
 
 if __name__ == '__main__':
