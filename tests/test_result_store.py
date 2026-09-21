@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Unit contract for result slots and delivery-id retention."""
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -153,6 +155,38 @@ print('UNCONFIGURED ' + json.dumps({
 '''
 
 
+def test_the_alias_refusal_redacts_the_credential(tmp):
+    """The alias guard's own refusal print carries the secret too.
+
+    This is the one place a route's path refusal is printed without going
+    through `under`, so threading the credential into `under` alone would
+    still leave the token fully spelled in this line — in the derived
+    target component and in the resolved attempts alike.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_alias_secret')
+    root = Path(tmp) / 'results' / 'deliveries'
+    try:
+        (root / 'aliascredential_real').mkdir(parents=True)
+        (root / 'aliascredential_ext').symlink_to(
+            root / 'aliascredential_real', target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    output = io.StringIO()
+    refused = False
+    with contextlib.redirect_stdout(output):
+        try:
+            store.delivery_result_paths(
+                Path(tmp) / 'results', 'aliascredential', 'ext', '123_1')
+        except ValueError:
+            refused = True
+    assert refused, output.getvalue()
+    line = output.getvalue()
+    assert 'aliascredential' not in line, line
+    assert "parts=('aliascre…_ext',)" in line, line
+
+
 def test_result_store_owns_atomic_slots_and_delivery_dedup(tmp):
     root = Path(tmp) / 'result-store-root'
     slot = root / 'results' / 'unit.json'
@@ -230,7 +264,7 @@ def test_delivery_paths_use_the_retrying_parent_comparison(tmp):
     assert len(stable_lines) == 1, answer
     assert stable_lines[0].startswith('[PATH-REFUSAL] kind=alias '), answer
     assert f'root={str(delivery_root)!r}' in stable_lines[0], answer
-    assert "parts=('tok_extension',)" in stable_lines[0], answer
+    assert "parts=('tok…_extension',)" in stable_lines[0], answer
     stable_attempts = (
         (str(wrong_root), str(delivery_root)),
         (str(wrong_root), str(delivery_root)),

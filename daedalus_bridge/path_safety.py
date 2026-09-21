@@ -105,24 +105,47 @@ def same_path(left, right, attempts=None):
     return False
 
 
-def log_path_refusal(kind, root, parts, attempts):
-    """Emit the resolved evidence for one fail-closed path verdict."""
-    safe_parts = tuple(log_safe(part) for part in parts)
+def _redacted(value, secret):
+    """One rendered evidence string with the credential shortened.
+
+    Substring replacement, because the secret reaches the line inside
+    derived names (`<token>.json`, `<token>_<tab>`) and resolved absolute
+    paths, never only as a bare component.
+    """
+    if not secret:
+        return value
+    return value.replace(secret, secret[:8] + '…')
+
+
+def log_path_refusal(kind, root, parts, attempts, secret=''):
+    """Emit the resolved evidence for one fail-closed path verdict.
+
+    `secret` is a credential the caller knows can reach the evidence, and
+    every rendered string it appears in — the root, the parts and the
+    resolved attempts — is shortened to the prefix the stream connect line
+    already prints. Empty by default and byte-identical without it, so a
+    call site that carries no credential renders exactly as before.
+    """
+    safe_parts = tuple(
+        _redacted(log_safe(part), secret) for part in parts)
     safe_attempts = tuple(
-        (log_safe(left), log_safe(right)) for left, right in attempts)
+        (_redacted(log_safe(left), secret),
+         _redacted(log_safe(right), secret))
+        for left, right in attempts)
     print(
-        f'[PATH-REFUSAL] kind={kind} root={log_safe(root)!r} '
+        f'[PATH-REFUSAL] kind={kind} '
+        f'root={_redacted(log_safe(root), secret)!r} '
         f'parts={safe_parts!r} attempts={safe_attempts!r}',
         flush=True)
 
 
-def under(root, *parts):
+def under(root, *parts, secret=''):
     """Join `parts` under `root` and refuse a result that lands outside it.
 
     This asks a different question from `unsafe_component`. That one is a
     shape check on one string — does this component look dangerous. This one
-    is about the result: did the path I built end up where I meant. A
-    component blacklist cannot answer that, because a symlink inside the root
+    is on the result: did the path I built end up where I meant. A component
+    blacklist cannot answer that, because a symlink inside the root
     pointing out of it is made of components that are individually harmless,
     and neither can a caller that validated its parts and then joined them
     somewhere else.
@@ -134,6 +157,9 @@ def under(root, *parts):
     The path returned is the one that was checked, resolved. Returning the
     unresolved join would mean the check was performed on a different object
     from the one used, which is the gap the check exists to close.
+
+    `secret` threads the caller's credential into the refusal line, which
+    prints the parts and every resolved attempt.
 
     Raises ValueError, which is what the routes taking these values already
     answer 400 for.
@@ -148,7 +174,7 @@ def under(root, *parts):
             # The resolved path, not the normalized key: the key exists to
             # compare spellings, and the caller needs the filesystem's answer.
             return pathlib.Path(candidate)
-    log_path_refusal('containment', root, parts, attempts)
+    log_path_refusal('containment', root, parts, attempts, secret=secret)
     raise ValueError(f'path escapes its root: {parts!r}')
 
 
