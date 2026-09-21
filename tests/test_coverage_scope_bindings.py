@@ -68,8 +68,8 @@ _ROOT_PROVENANCE_MUTATIONS = (
        "shadowed_names, owners)\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('Path assignments consult their import proof shadow', 'scopes',
-     (("            and not {'Path', 'Path()', '_util'} & names\n",
-       "            and not {'Path', '_util'} & names\n"),),
+     (("    return (not {'Path', 'Path()'} & shadowed_names\n",
+       "    return (not {'Path'} & shadowed_names\n"),),
      _ROOT_PROVENANCE_INVOKE),
     ('a constructor import retires an owner', 'scopes',
      (("                        and alias.name in _ROOT_MODULES):\n",
@@ -611,6 +611,17 @@ def test_root_owner_alias_keeps_only_its_attribute_proof(tmp):
         assert _synthetic_violations(
             prefix + 'subprocess.run(c, cwd=ROOT)\n') == _rebound_owner(
                 3, 'ROOT')
+
+
+def test_owner_derivation_does_not_depend_on_path(tmp):
+    del tmp
+    source = ('import subprocess\nimport _util\n'
+              'from helpers import Path\n'
+              'ROOT = _util.ROOT\nsubprocess.run(c, cwd=ROOT)\n')
+    assert _synthetic_violations(source) == []
+    source = source.replace('_util.ROOT',
+                            'Path(__file__).resolve().parents[1]')
+    assert _synthetic_violations(source) == _rebound_owner(5, 'ROOT')
 
 
 if __name__ == '__main__':

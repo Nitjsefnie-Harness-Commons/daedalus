@@ -239,7 +239,7 @@ def _is_relative_literal(value):
     return all(not path.anchor and '..' not in path.parts for path in paths)
 
 
-def _is_repository_root_binding(value, owners=frozenset()):
+def _is_repository_root_binding(value, owners, shadowed_names):
     """Whether a module assignment derives the checkout root."""
     if (isinstance(value, ast.Attribute) and value.attr == 'ROOT'
             and isinstance(value.value, ast.Name)
@@ -259,7 +259,8 @@ def _is_repository_root_binding(value, owners=frozenset()):
             or resolved.func.attr != 'resolve'):
         return False
     constructor = resolved.func.value
-    return (isinstance(constructor, ast.Call)
+    return (not {'Path', 'Path()'} & shadowed_names
+            and isinstance(constructor, ast.Call)
             and isinstance(constructor.func, ast.Name)
             and constructor.func.id == 'Path'
             and len(constructor.args) == 1 and not constructor.keywords
@@ -322,8 +323,8 @@ def _shadowed_names(tree, facts=None):
     owners = facts.root_owners
     if (root_values
             and not _other_root_bindings(facts, root_values)
-            and not {'Path', 'Path()', '_util'} & names
-            and all(_is_repository_root_binding(value, owners)
+            and '_util' not in names
+            and all(_is_repository_root_binding(value, owners, names)
                     for value in root_values.values())):
         names.discard('ROOT')
     return names

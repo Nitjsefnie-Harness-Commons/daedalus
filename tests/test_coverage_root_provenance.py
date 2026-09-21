@@ -270,7 +270,7 @@ _SITE_MUTANTS = {
     'match-rest': ("    if isinstance(node, ast.MatchMapping):\n"
                    "        return {node.rest} if node.rest else set()\n", ''),
     'unaccepted-assignment': (
-        "            and all(_is_repository_root_binding(value, owners)\n"
+        "            and all(_is_repository_root_binding(value, owners, names)\n"
         "                    for value in root_values.values())):\n",
         "            ):\n"),
 }
@@ -384,6 +384,15 @@ _ROOT_PROVENANCE_MUTATIONS += (
        "        return True\n"),),
      _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
      'reach_both_consumers(None)'),
+)
+
+
+_ROOT_PROVENANCE_MUTATIONS += (
+    ('owner derivations ignore Path shadows', 'scopes',
+     (("            and '_util' not in names\n",
+       "            and not {'Path', 'Path()', '_util'} & names\n"),),
+     'import test_coverage_scope_bindings as scope; '
+     'scope.test_owner_derivation_does_not_depend_on_path(None)'),
 )
 
 
