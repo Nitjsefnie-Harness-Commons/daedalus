@@ -477,6 +477,7 @@ def test_a_launcher_bound_through_an_unfollowable_form_is_refused(tmp):
             binding, violations)
     assert _synthetic_violations(
         """import subprocess
+from _repo import ROOT
 launcher = subprocess
 launcher.run(['python3', 'child.py'], cwd=ROOT)
 """) == []
@@ -595,6 +596,7 @@ def test_a_positional_cwd_on_a_recognised_launcher_is_judged(tmp):
     ) == []
     assert _synthetic_violations(
         "import subprocess\n"
+        "from _repo import ROOT\n"
         "subprocess.Popen(['python3'], 0, None, None, None, None, None,\n"
         "                 False, False, ROOT)\n") == []
 
@@ -644,6 +646,7 @@ subprocess.run(['python3', 'child.py'])
     assert _synthetic_violations(
         """import os as filesystem
 import subprocess
+from _repo import ROOT
 filesystem.chdir(ROOT)
 subprocess.run(['python3', 'child.py'])
 """) == []

@@ -308,6 +308,7 @@ def test_match_captures_cannot_disguise_nonroot_chdir(tmp):
     for pattern in ('ROOT', '[*ROOT]', '{**ROOT}'):
         violations = _synthetic_violations(f"""import os
 import subprocess
+from _repo import ROOT
 match value:
     case {pattern}:
         pass
@@ -315,7 +316,7 @@ os.chdir(ROOT)
 subprocess.run(['python3', 'child.py'])
 """)
         assert len(violations) == 1, (pattern, violations)
-        assert 'os.chdir at line 6 may have moved the cwd' in violations[0]
+        assert 'os.chdir at line 7 may have moved the cwd' in violations[0]
 
 
 def _module_text(target):
@@ -538,9 +539,8 @@ def _mutation_specs():
         "            if module not in gone}\n",
     )
     rebinding_shadows = (
-        "    if _rebound_by_import('_util', _import_rebound_names(tree)):\n"
-        "        names.add('_util')\n",
-        "",
+        "    owners = root_owner_names(tree)\n",
+        "    owners = {'_util'}\n",
     )
     binding_aliasing = (
         "    return shadows\n\n\n_FUNCTION_SCOPES",
