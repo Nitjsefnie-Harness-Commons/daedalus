@@ -275,20 +275,20 @@ def delete_upload(upload_dir, body):
             if not target.is_file():
                 return 404, {'error': 'file not found'}
             target.unlink()
-            print(f'[DELETE] {token}/{upload_id}/{filename}', flush=True)
+            print(f'[DELETE] {upload_id}/{filename}', flush=True)
         elif upload_id:
             target = path_safety.under(
                 upload_dir, token, upload_id, secret=token)
             if not target.is_dir():
                 return 404, {'error': 'id not found'}
             shutil.rmtree(target)
-            print(f'[DELETE] {token}/{upload_id}/', flush=True)
+            print(f'[DELETE] {upload_id}/', flush=True)
         else:
             target = path_safety.under(upload_dir, token, secret=token)
             if not target.is_dir():
                 return 404, {'error': 'token not found'}
             shutil.rmtree(target)
-            print(f'[DELETE] {token}/', flush=True)
+            print(f'[DELETE] token={token[:8]}/', flush=True)
     except ValueError:
         return 400, {'error': 'invalid path component'}
     except OSError:
