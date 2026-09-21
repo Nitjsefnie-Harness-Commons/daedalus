@@ -7,13 +7,15 @@ the old SHA. The rule ci_wait.py settled ports here — a cancelled run
 with a strictly newer run of the same workflow gates nothing, while a
 deliberate cancel stays a failure.
 
-The supersession query reads `github.head_branch` — the pushed branch on
-`push`, the pull request's head branch on `pull_request` — where a newer
-run of the same workflow appears in both events. One known edge: a fork
-pull request reusing another pull request's branch name shares that
-branch's run population without sharing its concurrency group, so one
-run can be proven superseded by the other's newer run. Accepted: rare,
-and the newer run of that branch name was re-reporting anyway.
+The supersession query reads the head branch from
+`github.event.pull_request.head.ref || github.ref_name` — the pushed
+branch on `push`, the pull request's head branch on `pull_request` —
+where a newer run of the same workflow appears in both events. One
+known edge: a fork pull request reusing another pull request's branch
+name shares that branch's run population without sharing its
+concurrency group, so one run can be proven superseded by the other's
+newer run. Accepted: rare, and the newer run of that branch name was
+re-reporting anyway.
 """
 import json
 import os
