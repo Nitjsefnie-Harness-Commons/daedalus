@@ -39,6 +39,7 @@ DEPS = all(importlib.util.find_spec(name) is not None
 if DEPS:
     import logging
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
+    logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
 
 TOK, BRIDGE_ENV = _mcp_load.TOK, _mcp_load.BRIDGE_ENV
 _load_mcp = _mcp_load._load_mcp
@@ -154,15 +155,10 @@ def _mcp_payload(raw):
 def _open_mcp_session(port):
     """Initialize one live MCP session and return its transport id."""
     initialize = {
-        'jsonrpc': '2.0',
-        'id': 'initialize',
-        'method': 'initialize',
-        'params': {
-            'protocolVersion': '2024-11-05',
-            'capabilities': {},
-            'clientInfo': {'name': 'security-regression', 'version': '0'},
-        },
-    }
+        'jsonrpc': '2.0', 'id': 'initialize', 'method': 'initialize',
+        'params': {'protocolVersion': '2024-11-05', 'capabilities': {},
+                   'clientInfo': {'name': 'security-regression',
+                                  'version': '0'}}}
     status, session_id, raw = _mcp_request(port, initialize)
     assert status == 200 and session_id, (status, session_id, raw)
     status, _unused, raw = _mcp_request(
@@ -313,6 +309,10 @@ def test_transport_clients_are_isolated_by_event_loop(tmp):
     class MarkerHandler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
 
+        # pylint: disable-next=redefined-builtin
+        def log_message(self, format, *args):
+            del format, args
+
         def do_GET(self):  # pylint: disable=invalid-name
             body = b'{"marker":"keepalive"}'
             self.send_response(200)
@@ -377,8 +377,10 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
     fake_uvicorn.Server = FakeServer
     previous_uvicorn = sys.modules.get('uvicorn')
     sys.modules['uvicorn'] = fake_uvicorn
+    out = io.StringIO()
     try:
-        mod._serve()
+        with contextlib.redirect_stdout(out):
+            mod._serve()
     finally:
         mod.mcp.streamable_http_app = original_factory
         if previous_uvicorn is None:
@@ -387,6 +389,7 @@ def test_mcp_lifespan_closes_loop_clients(tmp):
             sys.modules['uvicorn'] = previous_uvicorn
 
     assert not mod.startup_error, mod.startup_error
+    assert f'127.0.0.1:{mod.bound_port}' in out.getvalue(), out.getvalue()
     app = app_box['value']
 
     async def drive_lifespan():
@@ -1103,10 +1106,7 @@ def test_bearer_middleware_requires_configured_token_on_live_mcp_port(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {
-        'DAEDALUS_TOKEN': TOK,
-        'TOKEN': '',
-    }
+    env = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
     with _bridge_with_live_mcp(tmp, env) as (_base, port):
         url = f'http://127.0.0.1:{port}/mcp'
         rpc = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}
@@ -1138,10 +1138,7 @@ def test_bearer_middleware_rejects_duplicate_authorization_headers(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {
-        'DAEDALUS_TOKEN': TOK,
-        'TOKEN': '',
-    }
+    env = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
     with _bridge_with_live_mcp(tmp, env) as (base, port):
         rpc = json.dumps({
             'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}
@@ -1408,10 +1405,7 @@ def test_bearer_middleware_fails_closed_without_configured_token(tmp):
     _need_deps()
     if importlib.util.find_spec('uvicorn') is None:
         _util.skip('uvicorn not installed — MCP thread cannot serve')
-    env = {
-        'DAEDALUS_TOKEN': '',
-        'TOKEN': '',
-    }
+    env = {'DAEDALUS_TOKEN': '', 'TOKEN': ''}
     with _bridge_with_live_mcp(tmp, env) as (_base, port):
         url = f'http://127.0.0.1:{port}/mcp'
         rpc = {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}}
@@ -1519,15 +1513,18 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         mod.mcp.streamable_http_app = crash
         return mod
 
+    captured = []
     _mcp_load._load_mcp_at_port = crashing_loader
     try:
         try:
-            _start_mcp_in_process('http://127.0.0.1:1')
+            _start_mcp_in_process('http://127.0.0.1:1', diagnostics=captured)
         except AssertionError as failure:
             assert 'serve crashed' in str(failure), failure
             assert 'address already in use' in str(failure), failure
         else:
             raise AssertionError('a crashed MCP listener started')
+        err_text = captured[0][1] if captured else ''
+        assert 'serve crashed: address already in use' in err_text, captured
     finally:
         _mcp_load._load_mcp_at_port = real_loader
 
