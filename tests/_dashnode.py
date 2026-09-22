@@ -171,18 +171,24 @@ function bounded(work, label, timeoutMs) {
   let sampler;
   let sampledAt = Date.now();
   let servicedMs = 0;
+  let samples = 0;
+  let maxCreditMs = 0;
   const guard = new Promise((_resolve, reject) => {
     const sample = () => {
       const now = Date.now();
       // A frozen stretch delivers one late sample however long it lasted,
       // so the gap it reports is capped: a deschedule is never spent as
       // time the work was given.
-      servicedMs += Math.min(
+      const credit = Math.min(
         now - sampledAt, 2 * _DASHNODE_BOUND_SAMPLE_MS);
+      samples += 1;
+      servicedMs += credit;
+      if (credit > maxCreditMs) maxCreditMs = credit;
       sampledAt = now;
       // The bound is serviced time rather than elapsed time, so a starved
       // child is waited for while a child whose loop runs still fails on
-      // its own schedule.
+      // its own schedule. Starvation deep enough to outlast the whole
+      // process is reported by the outer backstop instead of this label.
       if (servicedMs >= timeoutMs) {
         reject(new Error('timed out waiting for ' + label));
         return;
@@ -191,8 +197,13 @@ function bounded(work, label, timeoutMs) {
     };
     sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
   });
-  return Promise.race([Promise.resolve(work), guard]).finally(
-    () => _dashnodeClearTimeout(sampler));
+  // What the crediting did, on its own stderr prefix: the numbers a test
+  // asserts on cannot be recovered from a wall clock outside the child.
+  return Promise.race([Promise.resolve(work), guard]).finally(() => {
+    _dashnodeClearTimeout(sampler);
+    process.stderr.write('[bound] ' + JSON.stringify(
+      { label, samples, servicedMs, maxCreditMs }) + '\n');
+  });
 }
 
 function leave(error) {

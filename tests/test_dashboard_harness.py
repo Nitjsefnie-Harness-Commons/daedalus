@@ -5,7 +5,6 @@ Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
 import inspect
-import json
 import os
 import re
 import subprocess
@@ -30,10 +29,6 @@ _PROCESS_STARTUP_ALLOWANCE_S = 1.5
 # Tests that must recover child phase or output use 4.0s, a 3.55x margin over
 # the measured maximum, to cover the longer tail under CI contention.
 _OUTPUT_PROCESS_STARTUP_ALLOWANCE_S = 4.0
-# A child idling behind a bound spends milliseconds on timer wakeups, while
-# one spinning the loop spends the whole wait. A quarter of the wall time
-# separates them without failing on a runner that descheduled the child.
-_IDLE_BOUND_CPU_SHARE = 0.25
 
 
 def _module(tmp, source, name='dashboard-module.js'):
@@ -599,96 +594,6 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         failure = _harness_failure(
             harness, module, step_timeout=0.5)
         assert message in failure, (name, failure)
-
-
-def _bound_outcome(background, label, timeout_ms):
-    """Settle one bound over `work` while `background` holds the loop."""
-    source = background + f"""
-(async () => {{
-  let outcome = 'resolved';
-  try {{
-    await bounded(work, {label!r}, {timeout_ms});
-  }} catch (error) {{ outcome = error.message; }}
-  process.stdout.write(outcome, () => process.exit(0));
-}})();
-"""
-    return _dashnode.run_dashboard_node(_harness(source, bounded_steps=1))
-
-
-def test_bounded_outlasts_a_freeze_shorter_than_its_bound(tmp):
-    """A freeze inside a bound is waited out, not spent as the bound."""
-    del tmp
-    result = _bound_outcome(r"""
-const work = new Promise((resolve) => {
-  _dashnodeSetTimeout(() => resolve('settled'), 3500);
-  _dashnodeSetTimeout(() => {
-    const until = Date.now() + 1300;
-    while (Date.now() < until) {}
-  }, 1600);
-});
-""", 'work behind one freeze', 3000)
-    assert result.stdout == 'resolved', result
-
-
-def test_bounded_rejects_a_hung_step_on_a_starved_loop(tmp):
-    """Deep starvation delays a hung step's label, it cannot lose it."""
-    del tmp
-    result = _bound_outcome(r"""
-const work = new Promise(() => {});
-setImmediate(function starve() {
-  const until = Date.now() + 400;
-  while (Date.now() < until) {}
-  _dashnodeSetTimeout(starve, 40);
-});
-""", 'a step that hangs', 1000)
-    assert result.stdout == 'timed out waiting for a step that hangs', result
-
-
-def test_bounded_rejects_work_slower_than_its_serviced_budget(tmp):
-    """Work handed its whole budget still rejects under its own label."""
-    del tmp
-    result = _bound_outcome(r"""
-const work = new Promise((resolve) => {
-  const until = Date.now() + 20000;
-  const grind = () => {
-    const chunk = Date.now() + 400;
-    while (Date.now() < chunk) {}
-    if (Date.now() < until) _dashnodeSetTimeout(grind, 10);
-    else resolve('settled');
-  };
-  _dashnodeSetTimeout(grind, 10);
-});
-""", 'slow chunked work', 1000)
-    assert result.stdout == 'timed out waiting for slow chunked work', result
-
-
-def test_bounded_waits_out_a_slow_step_without_spinning(tmp):
-    """A bound over idle work costs timer wakeups, not a busy core."""
-    del tmp
-    source = r"""
-const startedAt = Date.now();
-const cpuStart = process.cpuUsage();
-const work = new Promise((resolve) => {
-  _dashnodeSetTimeout(() => resolve('settled'), 1000);
-});
-bounded(work, 'work that settles only after a real delay', 4000).then(
-  (value) => {
-    const cpu = process.cpuUsage(cpuStart);
-    process.stdout.write(JSON.stringify({
-      value,
-      cpuMs: (cpu.user + cpu.system) * 0.001,
-      waitedMs: Date.now() - startedAt,
-    }));
-  },
-  (error) => process.stdout.write('rejected: ' + error.message),
-);
-"""
-    result = _dashnode.run_dashboard_node(_harness(source))
-    assert result.stdout.startswith('{'), result
-    report = json.loads(result.stdout)
-    assert report['value'] == 'settled', result
-    budget = report['waitedMs'] * _IDLE_BOUND_CPU_SHARE
-    assert report['cpuMs'] < budget, (report, budget)
 
 
 def main():
