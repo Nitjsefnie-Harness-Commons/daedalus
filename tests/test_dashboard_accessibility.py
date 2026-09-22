@@ -380,10 +380,6 @@ def test_field_associates_every_label_with_its_control(tmp):
     needed — the shape and the behaviour — because a helper that quietly
     stopped emitting `for` would leave the scan perfectly green.
     """
-    if sys.platform.startswith('win'):
-        _util.skip(
-            'issue 879: Node children stall on loaded windows-latest'
-            ' runners; the case is starvation-sensitive on that platform')
     del tmp
     result = _dashnode.run_dashboard_node(_FIELD_HARNESS)
     seen = json.loads(result.stdout)
