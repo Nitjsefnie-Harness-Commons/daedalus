@@ -1523,7 +1523,7 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
             assert 'address already in use' in str(failure), failure
         else:
             raise AssertionError('a crashed MCP listener started')
-        err_text = captured[0][1] if captured else ''
+        err_text = captured[0][1]
         assert 'serve crashed: address already in use' in err_text, captured
     finally:
         _mcp_load._load_mcp_at_port = real_loader
