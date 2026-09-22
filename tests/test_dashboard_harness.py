@@ -580,13 +580,15 @@ def test_tab_sync_settle_is_bounded(tmp):
     assert 'outer backstop' not in failure, failure
 
 
-# A loop frozen in 800 ms chunks earns at most the 200 ms credit cap per
-# chunk, so a 500 ms bound needs about 2.4 s of wall time, well past the
-# 1.5 s backstop the test below gives the whole process.
+# A loop frozen in 2000 ms chunks earns at most the 200 ms credit cap per
+# chunk, so a 500 ms bound needs three chunks and about 6.1 s of wall time,
+# well past the 4.5 s backstop the test below gives the whole process. The
+# chunk is that long so each sample also lands past a wall-clock multiple of
+# the bound, where an elapsed ceiling kept beside the serviced one rejects.
 _DEEPLY_STARVED_STEP = r"""
 phase('deeply starved step started');
 _dashnodeSetTimeout(function starve() {
-  const until = Date.now() + 800;
+  const until = Date.now() + 2000;
   while (Date.now() < until) {}
   _dashnodeSetTimeout(starve, 5);
 }, 50);
@@ -612,8 +614,9 @@ def test_starvation_past_the_backstop_is_reported_by_the_backstop(tmp):
     del tmp
     failure = _harness_failure(
         _DEEPLY_STARVED_STEP, bounded_steps=1, retry=False,
-        step_timeout=0.5, process_grace=1)
-    assert 'outer backstop timed out after 1.5s' in failure, failure
+        step_timeout=0.5,
+        process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
+    assert 'outer backstop timed out after 4.5s' in failure, failure
     # The verdict also quotes the child's argv, and that carries the
     # prelude's own source, so a rejection and a bound record are looked
     # for in the quoted stderr rather than anywhere in the verdict.
