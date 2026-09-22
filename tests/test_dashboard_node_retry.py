@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Retry budgets at the dashboard Node process boundary."""
+"""Retry and bound budgets at the dashboard Node process boundary."""
+import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +12,12 @@ import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from test_dashboard_behaviour import (  # noqa: E402
     _controlled_run, _result, _timeout)
+
+
+# A child idling behind a bound spends milliseconds on timer wakeups, while
+# one spinning the loop spends the whole wait. A quarter of the wall time
+# separates them without failing on a runner that descheduled the child.
+_IDLE_BOUND_CPU_SHARE = 0.25
 
 
 def _harness(source, bounded_steps=0, module=False):
@@ -421,6 +429,190 @@ def test_independent_output_sources_keep_repeated_boundary(tmp):
     launches = [event[0] for event in events].count('popen')
     assert launches == 2, (failure, events)
     assert "stdout: 'leftXXright'; stderr: ''" in failure, failure
+
+
+# The bound credits one sample with the gap it measures, capped at twice
+# its 100 ms sampler interval. Both numbers are spelled out here instead of
+# being read back from the prelude, so moving either one fails this suite
+# rather than travelling into the expectation with it.
+_BOUND_SAMPLE_MS = 100
+_BOUND_CREDIT_CAP_MS = 200
+
+# Work that freezes the loop for 900 ms - past the credit cap and past a
+# sampler deadline - and settles 100 ms after the freeze ends, so the
+# sample the freeze delayed is taken instead of being cleared by a
+# settlement landing in the same event-loop turn.
+_FROZEN_WORK = r"""
+const work = new Promise((resolve) => {
+  _dashnodeSetTimeout(() => resolve('settled'), 1000);
+  _dashnodeSetTimeout(() => {
+    const until = Date.now() + 900;
+    while (Date.now() < until) {}
+  }, 0);
+});
+"""
+
+
+def _bound_outcome(background, label, timeout_ms):
+    """Settle one bound over `work` while `background` holds the loop.
+
+    The stderr write before the exit is a flush: pipe writes are
+    asynchronous on macOS, so the bound's own record has to complete
+    before `process.exit` drops whatever is still queued behind it.
+    """
+    source = background + f"""
+(async () => {{
+  let outcome = 'resolved';
+  try {{
+    await bounded(work, {label!r}, {timeout_ms});
+  }} catch (error) {{ outcome = error.message; }}
+  process.stderr.write('\\n', () => process.stdout.write(
+    outcome, () => process.exit(0)));
+}})();
+"""
+    return _dashnode.run_dashboard_node(_harness(source, bounded_steps=1))
+
+
+def _bound_record(result):
+    """The crediting record the one bound in a child wrote when it settled."""
+    records = re.findall(r'^\[bound\] (.+)$', result.stderr, re.MULTILINE)
+    assert len(records) == 1, (records, result.stderr)
+    return json.loads(records[0])
+
+
+def test_bounded_outlasts_a_freeze_shorter_than_its_bound(tmp):
+    """A freeze inside a bound is waited out, not spent as the bound."""
+    del tmp
+    result = _bound_outcome(r"""
+const work = new Promise((resolve) => {
+  _dashnodeSetTimeout(() => resolve('settled'), 3500);
+  _dashnodeSetTimeout(() => {
+    const until = Date.now() + 1300;
+    while (Date.now() < until) {}
+  }, 1600);
+});
+""", 'work behind one freeze', 3000)
+    assert result.stdout == 'resolved', result
+
+
+def test_bounded_keeps_a_hung_step_label_while_its_budget_is_spent(tmp):
+    """A hung step names itself while the loop still spends its budget.
+
+    The record is what makes that condition visible: every sample here
+    lands past the credit cap, so the loop is genuinely starved, and the
+    label survives only because the budget is spent anyway. Starvation
+    deep enough to stop the budget being spent before the process
+    backstop fires is reported by that backstop instead of by this label.
+    """
+    del tmp
+    result = _bound_outcome(r"""
+const work = new Promise(() => {});
+setImmediate(function starve() {
+  const until = Date.now() + 400;
+  while (Date.now() < until) {}
+  _dashnodeSetTimeout(starve, 40);
+});
+""", 'a step that hangs', 1000)
+    assert result.stdout == 'timed out waiting for a step that hangs', result
+    record = _bound_record(result)
+    assert record['maxCreditMs'] == _BOUND_CREDIT_CAP_MS, record
+    assert record['servicedMs'] >= 1000, record
+
+
+def test_bounded_rejects_work_slower_than_its_serviced_budget(tmp):
+    """Work handed its whole budget still rejects under its own label."""
+    del tmp
+    result = _bound_outcome(r"""
+const work = new Promise((resolve) => {
+  const until = Date.now() + 20000;
+  const grind = () => {
+    const chunk = Date.now() + 400;
+    while (Date.now() < chunk) {}
+    if (Date.now() < until) _dashnodeSetTimeout(grind, 10);
+    else resolve('settled');
+  };
+  _dashnodeSetTimeout(grind, 10);
+});
+""", 'slow chunked work', 1000)
+    assert result.stdout == 'timed out waiting for slow chunked work', result
+
+
+def test_bound_credits_a_frozen_sample_with_its_cap(tmp):
+    """A freeze is credited the cap, never the stretch it actually ran."""
+    del tmp
+    result = _bound_outcome(
+        _FROZEN_WORK, 'work behind a long freeze', 3000)
+    assert result.stdout == 'resolved', result
+    record = _bound_record(result)
+    assert record['samples'] >= 1, record
+    assert record['maxCreditMs'] == _BOUND_CREDIT_CAP_MS, record
+    assert record['servicedMs'] <= (
+        record['samples'] * _BOUND_CREDIT_CAP_MS), record
+
+
+def test_bound_spends_its_budget_in_sampler_sized_credits(tmp):
+    """An unfrozen loop's serviced total brackets its own sample count.
+
+    A timer cannot fire before its delay, so every credit an unfrozen
+    loop delivers is at least one sampler interval, and no credit is ever
+    more than the cap.
+    """
+    del tmp
+    result = _bound_outcome(
+        'const work = new Promise(() => {});\n',
+        'work nothing settles', 1000)
+    assert result.stdout == (
+        'timed out waiting for work nothing settles'), result
+    record = _bound_record(result)
+    samples, serviced = record['samples'], record['servicedMs']
+    assert serviced >= 1000, record
+    assert serviced >= samples * _BOUND_SAMPLE_MS, record
+    assert serviced <= samples * _BOUND_CREDIT_CAP_MS, record
+    assert record['maxCreditMs'] <= _BOUND_CREDIT_CAP_MS, record
+
+
+def test_bounded_outlasts_a_freeze_longer_than_its_bound(tmp):
+    """A freeze outrunning the whole bound is still not spent as it.
+
+    The bound is above twice the sampler interval on purpose. A freeze
+    delivers one late sample however long it lasted, and that sample
+    carries at most the cap of two intervals, so a bound at or below the
+    cap can be spent in full by the single sample the freeze delivers and
+    rejects instead of waiting the freeze out.
+    """
+    del tmp
+    result = _bound_outcome(
+        _FROZEN_WORK, 'work behind a freeze past its bound', 600)
+    assert result.stdout == 'resolved', result
+
+
+def test_bounded_waits_out_a_slow_step_without_spinning(tmp):
+    """A bound over idle work costs timer wakeups, not a busy core."""
+    del tmp
+    source = r"""
+const startedAt = Date.now();
+const cpuStart = process.cpuUsage();
+const work = new Promise((resolve) => {
+  _dashnodeSetTimeout(() => resolve('settled'), 1000);
+});
+bounded(work, 'work that settles only after a real delay', 4000).then(
+  (value) => {
+    const cpu = process.cpuUsage(cpuStart);
+    process.stdout.write(JSON.stringify({
+      value,
+      cpuMs: (cpu.user + cpu.system) * 0.001,
+      waitedMs: Date.now() - startedAt,
+    }));
+  },
+  (error) => process.stdout.write('rejected: ' + error.message),
+);
+"""
+    result = _dashnode.run_dashboard_node(_harness(source))
+    assert result.stdout.startswith('{'), result
+    report = json.loads(result.stdout)
+    assert report['value'] == 'settled', result
+    budget = report['waitedMs'] * _IDLE_BOUND_CPU_SHARE
+    assert report['cpuMs'] < budget, (report, budget)
 
 
 def main():
