@@ -90,7 +90,8 @@ def stored_signature(value, occupancy=True):
 
 
 def is_clean_container(value):
-    """Whether a container carries occupancy alone, no deferred item."""
+    """Whether a container carries occupancy alone, no deferred item.
+    Memoized by id: verdicts never change; anchors keep ids unique."""
     if not isinstance(value, DeferredContainer):
         return False
     clean = _CLEAN_CONTAINERS.get(id(value))
@@ -102,6 +103,7 @@ def is_clean_container(value):
 
 
 def value_signature(value):
+    """Memoized by id: results never change; anchors keep ids unique."""
     signature = _VALUE_SIGNATURES.get(id(value))
     if signature is not None:
         return signature
