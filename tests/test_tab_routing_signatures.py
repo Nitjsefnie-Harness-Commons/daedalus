@@ -5,10 +5,7 @@ Equality follows contents plus the container's program-point identity, so
 two objects built at one program point sign equal and two program points
 never merge, whatever their contents. Occupancy trims top-level None items
 only: nested containers, instance attributes and alternatives keep every
-item, so one join level cannot hide a None the other path lacks. The
-helpers the signing rests on are pinned too: `is_clean_container` sorts
-containers by their items and `value_signature` signs evaluated values
-through three arms.
+item, so one join level cannot hide a None the other path lacks.
 """
 import ast
 import sys
@@ -23,7 +20,6 @@ from _pyroute_values import (  # noqa: E402
 
 
 def _pair(left_items, right_items, length=2, kind='list'):
-    """Two containers of one program point with the given item dicts."""
     identity = object()
     return (DeferredContainer(left_items, length, kind, identity),
             DeferredContainer(right_items, length, kind, identity))
