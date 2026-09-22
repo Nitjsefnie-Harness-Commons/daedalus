@@ -437,6 +437,10 @@ def test_independent_output_sources_keep_repeated_boundary(tmp):
 # rather than travelling into the expectation with it.
 _BOUND_SAMPLE_MS = 100
 _BOUND_CREDIT_CAP_MS = 200
+# A sample is spaced by libuv's monotonic clock and credited from
+# `Date.now()`, and both truncate to whole milliseconds, so one credit can
+# read a millisecond short of the interval that produced it.
+_BOUND_CLOCK_SLACK_MS = 1
 
 # Work that freezes the loop for 900 ms - past the credit cap and past a
 # sampler deadline - and settles 100 ms after the freeze ends, so the
@@ -456,9 +460,10 @@ const work = new Promise((resolve) => {
 def _bound_outcome(background, label, timeout_ms):
     """Settle one bound over `work` while `background` holds the loop.
 
-    The stderr write before the exit is a flush: pipe writes are
-    asynchronous on macOS, so the bound's own record has to complete
-    before `process.exit` drops whatever is still queued behind it.
+    The newline written before the exit is a flush: one Writable runs
+    its write callbacks in write order, so the newline's callback fires
+    only once the bound's own record has been written, and `process.exit`
+    cannot drop it.
     """
     source = background + f"""
 (async () => {{
@@ -505,6 +510,7 @@ def test_bounded_keeps_a_hung_step_label_while_its_budget_is_spent(tmp):
     backstop fires is reported by that backstop instead of by this label.
     """
     del tmp
+    bound_ms = 1000
     result = _bound_outcome(r"""
 const work = new Promise(() => {});
 setImmediate(function starve() {
@@ -512,11 +518,19 @@ setImmediate(function starve() {
   while (Date.now() < until) {}
   _dashnodeSetTimeout(starve, 40);
 });
-""", 'a step that hangs', 1000)
+""", 'a step that hangs', bound_ms)
     assert result.stdout == 'timed out waiting for a step that hangs', result
     record = _bound_record(result)
+    samples, serviced = record['samples'], record['servicedMs']
     assert record['maxCreditMs'] == _BOUND_CREDIT_CAP_MS, record
-    assert record['servicedMs'] >= 1000, record
+    # Every gap here outruns the cap, so the total is the cap taken once
+    # per sample: a credit that stopped being the measured gap, or a
+    # sample counted without its credit, moves one side of this.
+    assert serviced == samples * _BOUND_CREDIT_CAP_MS, record
+    assert serviced >= bound_ms, record
+    # Rejection happens on the first crossing, so the last credit is the
+    # only one that can be spent past the bound.
+    assert serviced < bound_ms + _BOUND_CREDIT_CAP_MS, record
 
 
 def test_bounded_rejects_work_slower_than_its_serviced_budget(tmp):
@@ -554,19 +568,22 @@ def test_bound_spends_its_budget_in_sampler_sized_credits(tmp):
     """An unfrozen loop's serviced total brackets its own sample count.
 
     A timer cannot fire before its delay, so every credit an unfrozen
-    loop delivers is at least one sampler interval, and no credit is ever
-    more than the cap.
+    loop delivers is one sampler interval bar the clock slack, and no
+    credit is ever more than the cap.
     """
     del tmp
+    bound_ms = 1000
     result = _bound_outcome(
         'const work = new Promise(() => {});\n',
-        'work nothing settles', 1000)
+        'work nothing settles', bound_ms)
     assert result.stdout == (
         'timed out waiting for work nothing settles'), result
     record = _bound_record(result)
     samples, serviced = record['samples'], record['servicedMs']
-    assert serviced >= 1000, record
-    assert serviced >= samples * _BOUND_SAMPLE_MS, record
+    assert serviced >= bound_ms, record
+    assert serviced < bound_ms + _BOUND_CREDIT_CAP_MS, record
+    assert serviced >= samples * (
+        _BOUND_SAMPLE_MS - _BOUND_CLOCK_SLACK_MS), record
     assert serviced <= samples * _BOUND_CREDIT_CAP_MS, record
     assert record['maxCreditMs'] <= _BOUND_CREDIT_CAP_MS, record
 

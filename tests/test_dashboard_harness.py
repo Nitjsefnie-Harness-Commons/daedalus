@@ -580,6 +580,48 @@ def test_tab_sync_settle_is_bounded(tmp):
     assert 'outer backstop' not in failure, failure
 
 
+# A loop frozen in 800 ms chunks earns at most the 200 ms credit cap per
+# chunk, so a 500 ms bound needs about 2.4 s of wall time, well past the
+# 1.5 s backstop the test below gives the whole process.
+_DEEPLY_STARVED_STEP = r"""
+phase('deeply starved step started');
+_dashnodeSetTimeout(function starve() {
+  const until = Date.now() + 800;
+  while (Date.now() < until) {}
+  _dashnodeSetTimeout(starve, 5);
+}, 50);
+(async () => {
+  try {
+    await bounded(
+      new Promise(() => {}), 'a deeply starved step',
+      _dashnodeStepTimeoutMs);
+  } catch (error) { leave(error); }
+})();
+"""
+
+
+def test_starvation_past_the_backstop_is_reported_by_the_backstop(tmp):
+    """A bound too starved to spend its budget leaves the verdict outside.
+
+    The bound charges serviced loop time, so a child starved below that
+    rate never reaches its own rejection and is killed by the process
+    backstop, which keeps the child's last phase. The bound writes its
+    record only when it settles, so the absent record is what says the
+    label never fired.
+    """
+    del tmp
+    failure = _harness_failure(
+        _DEEPLY_STARVED_STEP, bounded_steps=1, retry=False,
+        step_timeout=0.5, process_grace=1)
+    assert 'outer backstop timed out after 1.5s' in failure, failure
+    # The verdict also quotes the child's argv, and that carries the
+    # prelude's own source, so a rejection and a bound record are looked
+    # for in the quoted stderr rather than anywhere in the verdict.
+    tail = ("last phase: deeply starved step started; stdout: ''; "
+            r"stderr: '[phase] deeply starved step started\n'")
+    assert tail in failure, failure
+
+
 def test_shipped_catch_tails_flush_through_leave(tmp):
     """Every asynchronous harness waits for a delayed failure write."""
     cases = (
