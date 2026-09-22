@@ -142,7 +142,8 @@ def test_the_scan_step_is_the_bare_gate(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     scan = steps[2]
-    assert scan['run'] == './gitleaks detect --redact --config .gitleaks.toml'
+    assert scan['run'] == (
+        './gitleaks detect --verbose --redact --config .gitleaks.toml')
     assert 'if' not in scan and 'continue-on-error' not in scan, scan
     assert '|| true' not in scan['run'], scan
 
