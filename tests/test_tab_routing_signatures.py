@@ -88,6 +88,16 @@ def test_value_signature_arms(tmp):
     assert value_signature('extension') == 'extension'
 
 
+def test_nested_none_items_survive_top_level_trimming(tmp):
+    nested_identity = object()
+    occupied = DeferredContainer({0: None, 1: 'x'}, 2, 'list',
+                                 nested_identity)
+    rebuilt = DeferredContainer({1: 'x'}, 2, 'list', nested_identity)
+    left, right = _pair({0: occupied}, {0: rebuilt}, length=1)
+    assert stored_signature(left, False) != stored_signature(right, False)
+    assert stored_signature(left, True) != stored_signature(right, True)
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='tabrouting_signatures_')
