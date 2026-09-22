@@ -29,6 +29,7 @@
 
 # ─── root ───
 !/.gitignore
+!/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
 !/CLAUDE.md
@@ -82,6 +83,7 @@
 !/.github/workflows/pr-gate.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
+!/.github/workflows/secrets.yml
 !/.github/workflows/tests.yml
 !/.github/workflows/version.yml
 
@@ -461,6 +463,7 @@
 !/tests/test_run_tests.py
 !/tests/test_runner_refuses_unawaited.py
 !/tests/test_screenshot_quality.py
+!/tests/test_secret_scan.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
 !/tests/test_segment_mint.py
