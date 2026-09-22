@@ -5,8 +5,12 @@ Equality follows contents plus the container's program-point identity, so
 two objects built at one program point sign equal and two program points
 never merge, whatever their contents. Occupancy trims top-level None items
 only: nested containers, instance attributes and alternatives keep every
-item, so one join level cannot hide a None the other path lacks.
+item, so one join level cannot hide a None the other path lacks. The
+helpers the signing rests on are pinned too: `is_clean_container` sorts
+containers by their items and `value_signature` signs evaluated values
+through three arms.
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -14,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute_values import (  # noqa: E402
     DeferredAlternatives, DeferredClass, DeferredContainer,
-    DeferredInstance, stored_signature)
+    DeferredGenerator, DeferredInstance, deferred_signature,
+    is_clean_container, stored_signature, value_signature)
 
 
 def _pair(left_items, right_items, length=2, kind='list'):
@@ -68,6 +73,23 @@ def test_plain_and_deferred_values_round_trip(tmp):
     assert stored_signature(None) == ('plain', None, None, None, None)
     assert stored_signature(marker) == (
         'deferred', id(marker), None, None, None)
+
+
+def test_is_clean_container_classifies_by_items(tmp):
+    clean, dirty = _pair({0: None, 1: None}, {0: 'x', 1: None})
+    assert is_clean_container('extension') is False
+    assert is_clean_container(clean) is True
+    assert is_clean_container(dirty) is False
+
+
+def test_value_signature_arms(tmp):
+    expression = ast.parse('(x for a in b)').body[0].value
+    generator = DeferredGenerator(expression, 3, True)
+    marker = DeferredClass({'m': None})
+    assert value_signature(generator) == (
+        'generator', expression.lineno, expression.col_offset, 3, True)
+    assert value_signature(marker) == deferred_signature(marker)
+    assert value_signature('extension') == 'extension'
 
 
 def main():
