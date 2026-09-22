@@ -601,37 +601,65 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         assert message in failure, (name, failure)
 
 
-def test_bounded_survives_an_event_loop_blocked_past_its_bound(tmp):
-    """A starved child still reports the work it was actually waiting on."""
-    del tmp
-    source = r"""
-let resolveWork;
-const work = new Promise((resolve) => { resolveWork = resolve; });
-bounded(work, 'work behind a blocked event loop', 100).then(
-  (value) => process.stdout.write('resolved: ' + value),
-  (error) => process.stdout.write('rejected: ' + error.message),
-);
-const until = Date.now() + 600;
-while (Date.now() < until) {}
-setImmediate(() => resolveWork('settled'));
+def _bound_outcome(background, label, timeout_ms):
+    """Settle one bound over `work` while `background` holds the loop."""
+    source = background + f"""
+(async () => {{
+  let outcome = 'resolved';
+  try {{
+    await bounded(work, {label!r}, {timeout_ms});
+  }} catch (error) {{ outcome = error.message; }}
+  process.stdout.write(outcome, () => process.exit(0));
+}})();
 """
-    result = _dashnode.run_dashboard_node(_harness(source))
-    assert result.stdout == 'resolved: settled', result
+    return _dashnode.run_dashboard_node(_harness(source, bounded_steps=1))
 
 
-def test_bounded_rejects_a_hung_step_while_the_loop_runs(tmp):
-    """A serviced loop still lets a never-settling step name its label."""
+def test_bounded_outlasts_a_freeze_shorter_than_its_bound(tmp):
+    """A freeze inside a bound is waited out, not spent as the bound."""
     del tmp
-    source = _HOST_REALM_KEEPALIVE + r"""
-bounded(new Promise(() => {}), 'a step nothing ever settles', 20)
-  .catch((error) => {
-    process.stdout.write(error.message);
-    process.exit(0);
-  });
-"""
-    result = _dashnode.run_dashboard_node(_harness(source))
-    assert result.stdout == (
-        'timed out waiting for a step nothing ever settles'), result
+    result = _bound_outcome(r"""
+const work = new Promise((resolve) => {
+  _dashnodeSetTimeout(() => resolve('settled'), 3500);
+  _dashnodeSetTimeout(() => {
+    const until = Date.now() + 1300;
+    while (Date.now() < until) {}
+  }, 1600);
+});
+""", 'work behind one freeze', 3000)
+    assert result.stdout == 'resolved', result
+
+
+def test_bounded_rejects_a_hung_step_on_a_starved_loop(tmp):
+    """Deep starvation delays a hung step's label, it cannot lose it."""
+    del tmp
+    result = _bound_outcome(r"""
+const work = new Promise(() => {});
+setImmediate(function starve() {
+  const until = Date.now() + 400;
+  while (Date.now() < until) {}
+  _dashnodeSetTimeout(starve, 40);
+});
+""", 'a step that hangs', 1000)
+    assert result.stdout == 'timed out waiting for a step that hangs', result
+
+
+def test_bounded_rejects_work_slower_than_its_serviced_budget(tmp):
+    """Work handed its whole budget still rejects under its own label."""
+    del tmp
+    result = _bound_outcome(r"""
+const work = new Promise((resolve) => {
+  const until = Date.now() + 20000;
+  const grind = () => {
+    const chunk = Date.now() + 400;
+    while (Date.now() < chunk) {}
+    if (Date.now() < until) _dashnodeSetTimeout(grind, 10);
+    else resolve('settled');
+  };
+  _dashnodeSetTimeout(grind, 10);
+});
+""", 'slow chunked work', 1000)
+    assert result.stdout == 'timed out waiting for slow chunked work', result
 
 
 def test_bounded_waits_out_a_slow_step_without_spinning(tmp):

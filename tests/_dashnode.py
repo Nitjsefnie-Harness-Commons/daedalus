@@ -166,48 +166,33 @@ function phase(label) {
 // sleep between wakeups, where a self-rescheduling immediate would hold it
 // out of its poll phase and spin a core for the whole bound.
 const _DASHNODE_BOUND_SAMPLE_MS = 100;
-// A starved child services almost none of those samples, so a bound whose
-// timer expired having seen less than this share of the samples a running
-// loop would have delivered is reporting the starvation rather than the
-// work it awaits, and re-arms instead of rejecting.
-const _DASHNODE_MIN_BOUND_SAMPLE_SHARE = 0.5;
-
-function boundSamplesNeeded(timeoutMs) {
-  const expected = timeoutMs / _DASHNODE_BOUND_SAMPLE_MS;
-  return Math.max(
-    1, Math.floor(expected * _DASHNODE_MIN_BOUND_SAMPLE_SHARE));
-}
 
 function bounded(work, label, timeoutMs) {
-  let timer;
   let sampler;
-  let samples = 0;
-  const needed = boundSamplesNeeded(timeoutMs);
-  const sample = () => {
-    samples += 1;
-    sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
-  };
+  let sampledAt = Date.now();
+  let servicedMs = 0;
   const guard = new Promise((_resolve, reject) => {
-    const arm = () => {
-      timer = _dashnodeSetTimeout(() => {
-        if (samples >= needed) {
-          reject(new Error('timed out waiting for ' + label));
-          return;
-        }
-        samples = 0;
-        arm();
-      }, timeoutMs);
+    const sample = () => {
+      const now = Date.now();
+      // A frozen stretch delivers one late sample however long it lasted,
+      // so the gap it reports is capped: a deschedule is never spent as
+      // time the work was given.
+      servicedMs += Math.min(
+        now - sampledAt, 2 * _DASHNODE_BOUND_SAMPLE_MS);
+      sampledAt = now;
+      // The bound is serviced time rather than elapsed time, so a starved
+      // child is waited for while a child whose loop runs still fails on
+      // its own schedule.
+      if (servicedMs >= timeoutMs) {
+        reject(new Error('timed out waiting for ' + label));
+        return;
+      }
+      sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
     };
-    arm();
+    sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
   });
-  // Armed after the guard, so an expiry they share goes to the guard
-  // first: a bound one interval long must not count the sample it
-  // ties with.
-  sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
-  return Promise.race([Promise.resolve(work), guard]).finally(() => {
-    _dashnodeClearTimeout(sampler);
-    _dashnodeClearTimeout(timer);
-  });
+  return Promise.race([Promise.resolve(work), guard]).finally(
+    () => _dashnodeClearTimeout(sampler));
 }
 
 function leave(error) {
@@ -292,10 +277,14 @@ def dashboard_child_timeout(bounded_steps,
     """How long to let a dashboard harness run before killing it.
 
     Every awaited step inside a harness is bounded and names what it was
-    waiting for. This backstop preserves the child's pipes and last phase,
-    but it still has to outlast the worst inner path — one full bound per
-    declared step, plus independent process grace. That lets the more specific
-    inner failure report first.
+    waiting for, and a bound rejects after at most one step timeout of
+    serviced event-loop time. A child whose loop is running therefore
+    reaches its own failure within one bound per declared step, and this
+    backstop's independent process grace on top lets that more specific
+    inner failure report first. A child starved of the CPU earns that
+    serviced time more slowly than the wall clock measured here, so deep
+    enough starvation is reported by this backstop instead, which preserves
+    the child's pipes and last phase.
     """
     return step_timeout * bounded_steps + process_grace
 
