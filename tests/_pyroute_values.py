@@ -58,7 +58,7 @@ def stored_signature(value, occupancy=True):
     attributes and values are never mutated after the value is built --
     every store, pop and clear rebuilds the container -- so one value
     always signs to the tuple cached for it."""
-    if type(value) is DeferredContainer:
+    if isinstance(value, DeferredContainer):
         key = (id(value), occupancy)
         signature = _STORED_SIGNATURES.get(key)
         if signature is None:
@@ -68,7 +68,7 @@ def stored_signature(value, occupancy=True):
             _STORED_SIGNATURES[key] = signature
             _STORED_ANCHORS.append(value)
         return signature
-    if type(value) is DeferredInstance:
+    if isinstance(value, DeferredInstance):
         signature = _STORED_SIGNATURES.get((id(value), True))
         if signature is None:
             signature = ('instance', identity_token(value), None, None,
@@ -76,7 +76,7 @@ def stored_signature(value, occupancy=True):
             _STORED_SIGNATURES[(id(value), True)] = signature
             _STORED_ANCHORS.append(value)
         return signature
-    if type(value) is DeferredAlternatives:
+    if isinstance(value, DeferredAlternatives):
         signature = _STORED_SIGNATURES.get((id(value), True))
         if signature is None:
             signature = ('alternatives', None, None, None, tuple(
@@ -91,7 +91,7 @@ def stored_signature(value, occupancy=True):
 
 def is_clean_container(value):
     """Whether a container carries occupancy alone, no deferred item."""
-    if type(value) is not DeferredContainer:
+    if not isinstance(value, DeferredContainer):
         return False
     clean = _CLEAN_CONTAINERS.get(id(value))
     if clean is None:
@@ -105,7 +105,7 @@ def value_signature(value):
     signature = _VALUE_SIGNATURES.get(id(value))
     if signature is not None:
         return signature
-    if type(value) is DeferredGenerator:
+    if isinstance(value, DeferredGenerator):
         signature = ('generator', value.expression.lineno,
                      value.expression.col_offset, value.remaining,
                      value.evaluate_zero)
