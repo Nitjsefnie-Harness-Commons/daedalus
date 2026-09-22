@@ -1,5 +1,7 @@
 """Shell settings must not override fixture-selected bridge URLs."""
+import contextlib
 import http.client
+import io
 import json
 import time
 
@@ -55,15 +57,31 @@ def _load_mcp_at_port(base_url, port, max_body_size=None):
     return _load_mcp(base_url, mcp_port=port, max_body_size=max_body_size)
 
 
-def _start_mcp_in_process(base, max_body_size=None):
-    mod = _load_mcp_at_port(base, 0, max_body_size=max_body_size)
-    _start_in_thread(mod)
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if mod._bound.wait(timeout=0.05):
-            port = mod.bound_port
-            _wait_for_mcp(port)
-            return mod, port
-        if mod.startup_error:
-            raise AssertionError(mod.startup_error)
-    raise AssertionError('MCP listener did not announce its port in 10s')
+def _start_mcp_in_process(base, max_body_size=None, diagnostics=None):
+    """Start the in-process listener with its [MCP] prints captured.
+
+    `diagnostics`, when given, receives the captured (stdout, stderr) texts.
+    Neither capture is raced: the banner precedes the listener's first
+    accepted request and the crash print precedes the serve thread's exit,
+    so the success wait and the crash join end the redirect only after the
+    print has flushed.
+    """
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        mod = _load_mcp_at_port(base, 0, max_body_size=max_body_size)
+        thread = _start_in_thread(mod)
+        deadline = time.time() + 10
+        try:
+            while time.time() < deadline:
+                if mod._bound.wait(timeout=0.05):
+                    port = mod.bound_port
+                    _wait_for_mcp(port)
+                    return mod, port
+                if mod.startup_error:
+                    thread.join()
+                    raise AssertionError(mod.startup_error)
+            raise AssertionError(
+                'MCP listener did not announce its port in 10s')
+        finally:
+            if diagnostics is not None:
+                diagnostics.append((out.getvalue(), err.getvalue()))
