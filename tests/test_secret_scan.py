@@ -75,8 +75,8 @@ def _toml_sections(text):
     return sections
 
 
-def _single_string_list(raw, owner):
-    """The one quoted item of a `['...']` TOML value."""
+def _single_list_item(raw, owner):
+    """The single quoted item of a `['...']` TOML value, as a string."""
     assert raw.startswith('[') and raw.endswith(']'), (owner, raw)
     inner = raw[1:-1].strip()
     assert inner and ',' not in inner, (owner, raw)
@@ -111,6 +111,13 @@ def test_permissions_are_exactly_read_only(tmp):
         f'unsafe decoded permissions: {permissions!r}')
 
 
+def test_the_workflow_declares_no_other_top_level_key(tmp):
+    del tmp
+    top = _decoded_workflow()
+    assert set(top) == {
+        'name', 'on', 'permissions', 'concurrency', 'jobs'}, sorted(top)
+
+
 def test_concurrency_is_keyed_on_the_ref_and_cancelling(tmp):
     del tmp
     concurrency = _decoded_workflow()['concurrency']
@@ -133,6 +140,7 @@ def test_the_binary_is_downloaded_from_github_and_digest_verified(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     download = steps[1]
+    assert set(download) == {'name', 'run'}, download
     assert download['run'].splitlines() == _download_command(), download
     url = _download_command()[0].split()[-1]
     assert url.startswith('https://github.com/'), url
@@ -142,6 +150,7 @@ def test_the_scan_step_is_the_bare_gate(tmp):
     del tmp
     steps = _decoded_workflow()['jobs']['gitleaks']['steps']
     scan = steps[2]
+    assert set(scan) == {'name', 'run'}, scan
     assert scan['run'] == (
         './gitleaks detect --verbose --redact --config .gitleaks.toml')
     assert 'if' not in scan and 'continue-on-error' not in scan, scan
@@ -182,9 +191,9 @@ def test_the_allowlist_admits_exactly_the_example_uuid(tmp):
     del tmp
     allowlist = _toml_sections(_read(CONFIG))[1][1]
     assert set(allowlist) == {'description', 'rules', 'regexes'}, allowlist
-    assert _single_string_list(allowlist['rules'], 'rules') == (
+    assert _single_list_item(allowlist['rules'], 'rules') == (
         'generic-api-key'), allowlist['rules']
-    pattern = _single_string_list(allowlist['regexes'], 'regexes')
+    pattern = _single_list_item(allowlist['regexes'], 'regexes')
     assert pattern == f'^{EXAMPLE_UUID}$', pattern
     assert re.fullmatch(pattern, EXAMPLE_UUID), pattern
     for rejected in (EXAMPLE_UUID.upper(), 'x' + EXAMPLE_UUID,
