@@ -16,6 +16,12 @@ _IDENTITY_TOKENS = {}
 _IDENTITY_ANCHORS = []
 _SIGNATURE_MEMO = {}
 _SIGNATURE_ANCHORS = []
+_STORED_SIGNATURES = {}
+_STORED_ANCHORS = []
+_VALUE_SIGNATURES = {}
+_VALUE_ANCHORS = []
+_CLEAN_CONTAINERS = {}
+_CLEAN_ANCHORS = []
 
 
 def identity_token(value):
@@ -46,33 +52,70 @@ def stored_signature(value, occupancy=True):
     off, the top-level container's None items are left out, so two paths
     that differ only in which clean keys they wrote can be joined; nested
     containers, instance attributes and alternatives keep occupancy on,
-    because the join intersects one level only."""
-    if isinstance(value, DeferredContainer):
-        return ('container', identity_token(value), value.length, value.kind,
-                _items_signature(value.items, occupancy))
-    if isinstance(value, DeferredInstance):
-        return ('instance', identity_token(value), None, None,
-                _items_signature(value.attributes, True))
-    if isinstance(value, DeferredAlternatives):
-        return ('alternatives', None, None, None, tuple(
-            stored_signature(item) for item in value.values))
-    if is_deferred_value(value):
+    because the join intersects one level only.
+
+    The three recursive kinds are memoized by object id: their items,
+    attributes and values are never mutated after the value is built --
+    every store, pop and clear rebuilds the container -- so one value
+    always signs to the tuple cached for it."""
+    if type(value) is DeferredContainer:
+        key = (id(value), occupancy)
+        signature = _STORED_SIGNATURES.get(key)
+        if signature is None:
+            signature = ('container', identity_token(value), value.length,
+                         value.kind,
+                         _items_signature(value.items, occupancy))
+            _STORED_SIGNATURES[key] = signature
+            _STORED_ANCHORS.append(value)
+        return signature
+    if type(value) is DeferredInstance:
+        signature = _STORED_SIGNATURES.get((id(value), True))
+        if signature is None:
+            signature = ('instance', identity_token(value), None, None,
+                         _items_signature(value.attributes, True))
+            _STORED_SIGNATURES[(id(value), True)] = signature
+            _STORED_ANCHORS.append(value)
+        return signature
+    if type(value) is DeferredAlternatives:
+        signature = _STORED_SIGNATURES.get((id(value), True))
+        if signature is None:
+            signature = ('alternatives', None, None, None, tuple(
+                stored_signature(item) for item in value.values))
+            _STORED_SIGNATURES[(id(value), True)] = signature
+            _STORED_ANCHORS.append(value)
+        return signature
+    if type(value) in _DEFERRED_TYPES:
         return ('deferred', id(value), None, None, None)
     return ('plain', value, None, None, None)
 
 
 def is_clean_container(value):
     """Whether a container carries occupancy alone, no deferred item."""
-    return isinstance(value, DeferredContainer) \
-        and all(item is None for item in value.items.values())
+    if type(value) is not DeferredContainer:
+        return False
+    clean = _CLEAN_CONTAINERS.get(id(value))
+    if clean is None:
+        clean = all(item is None for item in value.items.values())
+        _CLEAN_CONTAINERS[id(value)] = clean
+        _CLEAN_ANCHORS.append(value)
+    return clean
 
 
 def value_signature(value):
-    if isinstance(value, DeferredGenerator):
-        return ('generator', value.expression.lineno,
-                value.expression.col_offset, value.remaining,
-                value.evaluate_zero)
-    return deferred_signature(value) or value
+    signature = _VALUE_SIGNATURES.get(id(value))
+    if signature is not None:
+        return signature
+    if type(value) is DeferredGenerator:
+        signature = ('generator', value.expression.lineno,
+                     value.expression.col_offset, value.remaining,
+                     value.evaluate_zero)
+    elif type(value) in _DEFERRED_TYPES:
+        signature = deferred_signature(value) or value
+    else:
+        return value
+    _VALUE_SIGNATURES[id(value)] = signature
+    _VALUE_ANCHORS.append(value)
+    return signature
 
 
 def deferred_signature(value):
@@ -194,6 +237,7 @@ class DeferredInstance:
 DEFERRED_VALUES = (DeferredGenerator, DeferredCallable, DeferredClass,
                    DeferredAlternatives, DeferredContainer,
                    DeferredInstance)
+_DEFERRED_TYPES = frozenset(DEFERRED_VALUES)
 
 
 def is_deferred_value(value):
