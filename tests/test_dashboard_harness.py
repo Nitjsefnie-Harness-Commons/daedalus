@@ -483,10 +483,6 @@ def test_accessibility_field_case_uses_the_shared_runner(tmp):
                 None)
         except SharedRunnerReached:
             pass  # The sentinel proves the shared boundary was reached.
-        except _util.Skipped:
-            _util.skip(
-                'issue 879: the field case this boundary witness calls'
-                ' is quarantined on this platform')
         else:
             raise AssertionError(
                 'accessibility field case bypassed run_dashboard_node')

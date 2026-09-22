@@ -158,10 +158,6 @@ def test_an_active_tab_run_sends_no_tab_even_with_a_tab_selected(_tmp):
     targeting conditional. The repro mutation that drops the
     conditional (`const tabId = sel.value`) turns the empty-target
     assertion below into tab '11' and fails here."""
-    if sys.platform.startswith('win'):
-        _util.skip(
-            'issue 879: Node children stall on loaded windows-latest'
-            ' runners; the case is starvation-sensitive on that platform')
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['targeted'] == {'puts': 2, 'tab': '11'}, seen
