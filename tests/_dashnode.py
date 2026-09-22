@@ -162,36 +162,50 @@ function phase(label) {
   process.stderr.write('[phase] ' + label + '\n');
 }
 
-// A starved child runs no event-loop turn at all, so a bound that expires
-// before this many turns is reporting the starvation rather than the work it
-// awaits, and re-arms instead of rejecting.
-const _DASHNODE_MIN_BOUND_TURNS = 20;
+// A bound samples the event loop on this interval. A timer lets the loop
+// sleep between wakeups, where a self-rescheduling immediate would hold it
+// out of its poll phase and spin a core for the whole bound.
+const _DASHNODE_BOUND_SAMPLE_MS = 100;
+// A starved child services almost none of those samples, so a bound whose
+// timer expired having seen less than this share of the samples a running
+// loop would have delivered is reporting the starvation rather than the
+// work it awaits, and re-arms instead of rejecting.
+const _DASHNODE_MIN_BOUND_SAMPLE_SHARE = 0.5;
+
+function boundSamplesNeeded(timeoutMs) {
+  const expected = timeoutMs / _DASHNODE_BOUND_SAMPLE_MS;
+  return Math.max(
+    1, Math.floor(expected * _DASHNODE_MIN_BOUND_SAMPLE_SHARE));
+}
 
 function bounded(work, label, timeoutMs) {
   let timer;
-  let turns = 0;
-  let counting = true;
-  const countTurn = () => {
-    if (!counting) return;
-    turns += 1;
-    setImmediate(countTurn);
+  let sampler;
+  let samples = 0;
+  const needed = boundSamplesNeeded(timeoutMs);
+  const sample = () => {
+    samples += 1;
+    sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
   };
   const guard = new Promise((_resolve, reject) => {
     const arm = () => {
       timer = _dashnodeSetTimeout(() => {
-        if (turns >= _DASHNODE_MIN_BOUND_TURNS) {
+        if (samples >= needed) {
           reject(new Error('timed out waiting for ' + label));
           return;
         }
-        turns = 0;
+        samples = 0;
         arm();
       }, timeoutMs);
     };
     arm();
   });
-  setImmediate(countTurn);
+  // Armed after the guard, so an expiry they share goes to the guard
+  // first: a bound one interval long must not count the sample it
+  // ties with.
+  sampler = _dashnodeSetTimeout(sample, _DASHNODE_BOUND_SAMPLE_MS);
   return Promise.race([Promise.resolve(work), guard]).finally(() => {
-    counting = false;
+    _dashnodeClearTimeout(sampler);
     _dashnodeClearTimeout(timer);
   });
 }

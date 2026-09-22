@@ -5,6 +5,7 @@ Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
 import inspect
+import json
 import os
 import re
 import subprocess
@@ -29,6 +30,10 @@ _PROCESS_STARTUP_ALLOWANCE_S = 1.5
 # Tests that must recover child phase or output use 4.0s, a 3.55x margin over
 # the measured maximum, to cover the longer tail under CI contention.
 _OUTPUT_PROCESS_STARTUP_ALLOWANCE_S = 4.0
+# A child idling behind a bound spends milliseconds on timer wakeups, while
+# one spinning the loop spends the whole wait. A quarter of the wall time
+# separates them without failing on a runner that descheduled the child.
+_IDLE_BOUND_CPU_SHARE = 0.25
 
 
 def _module(tmp, source, name='dashboard-module.js'):
@@ -631,6 +636,35 @@ bounded(new Promise(() => {}), 'a step nothing ever settles', 20)
     result = _dashnode.run_dashboard_node(_harness(source))
     assert result.stdout == (
         'timed out waiting for a step nothing ever settles'), result
+
+
+def test_bounded_waits_out_a_slow_step_without_spinning(tmp):
+    """A bound over idle work costs timer wakeups, not a busy core."""
+    del tmp
+    source = r"""
+const startedAt = Date.now();
+const cpuStart = process.cpuUsage();
+const work = new Promise((resolve) => {
+  _dashnodeSetTimeout(() => resolve('settled'), 1000);
+});
+bounded(work, 'work that settles only after a real delay', 4000).then(
+  (value) => {
+    const cpu = process.cpuUsage(cpuStart);
+    process.stdout.write(JSON.stringify({
+      value,
+      cpuMs: (cpu.user + cpu.system) * 0.001,
+      waitedMs: Date.now() - startedAt,
+    }));
+  },
+  (error) => process.stdout.write('rejected: ' + error.message),
+);
+"""
+    result = _dashnode.run_dashboard_node(_harness(source))
+    assert result.stdout.startswith('{'), result
+    report = json.loads(result.stdout)
+    assert report['value'] == 'settled', result
+    budget = report['waitedMs'] * _IDLE_BOUND_CPU_SHARE
+    assert report['cpuMs'] < budget, (report, budget)
 
 
 def main():
