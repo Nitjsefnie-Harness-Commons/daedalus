@@ -36,7 +36,7 @@ def _decoded_workflow():
 
 
 def _download_command():
-    """The download step's expected shell lines, exactly."""
+    """The download step's expected shell lines."""
     return [
         'curl --connect-timeout 5 --max-time 120 -fsSLO '
         'https://github.com/gitleaks/gitleaks/releases/download/'
@@ -49,9 +49,9 @@ def _download_command():
 def _toml_sections(text):
     """The config's sections as [(header, {key: raw value})].
 
-    Comments and blank lines carry no decoded value and are skipped; a
-    duplicate key inside a section, a key outside any section, or a line
-    that is not `key = value` is refused rather than guessed at.
+    A duplicate key, a key outside any section, or a line that is not
+    `key = value` is refused rather than guessed at; comments and blank
+    lines carry no decoded value.
     """
     sections = []
     for line in text.splitlines():
