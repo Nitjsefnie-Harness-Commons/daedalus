@@ -162,14 +162,38 @@ function phase(label) {
   process.stderr.write('[phase] ' + label + '\n');
 }
 
+// A starved child runs no event-loop turn at all, so a bound that expires
+// before this many turns is reporting the starvation rather than the work it
+// awaits, and re-arms instead of rejecting.
+const _DASHNODE_MIN_BOUND_TURNS = 20;
+
 function bounded(work, label, timeoutMs) {
   let timer;
+  let turns = 0;
+  let counting = true;
+  const countTurn = () => {
+    if (!counting) return;
+    turns += 1;
+    setImmediate(countTurn);
+  };
   const guard = new Promise((_resolve, reject) => {
-    timer = _dashnodeSetTimeout(
-      () => reject(new Error('timed out waiting for ' + label)), timeoutMs);
+    const arm = () => {
+      timer = _dashnodeSetTimeout(() => {
+        if (turns >= _DASHNODE_MIN_BOUND_TURNS) {
+          reject(new Error('timed out waiting for ' + label));
+          return;
+        }
+        turns = 0;
+        arm();
+      }, timeoutMs);
+    };
+    arm();
   });
-  return Promise.race([Promise.resolve(work), guard])
-    .finally(() => _dashnodeClearTimeout(timer));
+  setImmediate(countTurn);
+  return Promise.race([Promise.resolve(work), guard]).finally(() => {
+    counting = false;
+    _dashnodeClearTimeout(timer);
+  });
 }
 
 function leave(error) {
