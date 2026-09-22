@@ -9,7 +9,9 @@ On Windows both listeners take SO_EXCLUSIVEADDRUSE instead; on every other
 platform the SO_REUSEADDR bind is kept byte-for-byte, because POSIX needs
 it for a quick restart through TIME_WAIT.
 """
+import contextlib
 import importlib.util
+import io
 import socket
 import sys
 import types
@@ -94,9 +96,12 @@ def _serve_with_fake_uvicorn(mod):
 
     The fake stands where uvicorn.Config and uvicorn.Server stand in the
     real _serve, and records the sockets it was handed instead of serving
-    them; the caller closes any real socket in that list.
+    them; the caller closes any real socket in that list. The bound-port
+    banner `_serve` prints is captured and returned beside `handed`, so the
+    suite's streams stay verdict-only.
     """
     handed = []
+    banner = io.StringIO()
     fake = types.ModuleType('uvicorn')
     fake.Config = lambda app, **settings: types.SimpleNamespace(
         app=app, settings=settings)
@@ -104,13 +109,14 @@ def _serve_with_fake_uvicorn(mod):
     previous = sys.modules.get('uvicorn')
     sys.modules['uvicorn'] = fake
     try:
-        mod._serve()
+        with contextlib.redirect_stdout(banner):
+            mod._serve()
     finally:
         if previous is None:
             sys.modules.pop('uvicorn', None)
         else:
             sys.modules['uvicorn'] = previous
-    return handed
+    return handed, banner.getvalue()
 
 
 def _load_server(tmp):
@@ -193,8 +199,9 @@ def test_the_windows_mcp_arm_excludes_the_port(tmp):
     created = []
     mod.socket = _StubSocketModule(created)
     mod.WIN32 = True
-    handed = _serve_with_fake_uvicorn(mod)
+    handed, banner = _serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
+    assert '[MCP] streamable-http on 127.0.0.1:59981' in banner, banner
     assert handed == [created[0]], (handed, created)
     assert created[0].events == _exclusive_events() + [
         ('bind', ('127.0.0.1', 59981))], created[0].events
@@ -208,8 +215,9 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     _need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     mod.WIN32 = False
-    handed = _serve_with_fake_uvicorn(mod)
+    handed, banner = _serve_with_fake_uvicorn(mod)
     assert not mod.startup_error, mod.startup_error
+    assert f'127.0.0.1:{mod.bound_port}' in banner, banner
     assert len(handed) == 1, handed
     sock = handed[0]
     assert mod.bound_port == sock.getsockname()[1]
