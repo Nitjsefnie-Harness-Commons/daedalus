@@ -600,6 +600,39 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         assert message in failure, (name, failure)
 
 
+def test_bounded_survives_an_event_loop_blocked_past_its_bound(tmp):
+    """A starved child still reports the work it was actually waiting on."""
+    del tmp
+    source = r"""
+let resolveWork;
+const work = new Promise((resolve) => { resolveWork = resolve; });
+bounded(work, 'work behind a blocked event loop', 100).then(
+  (value) => process.stdout.write('resolved: ' + value),
+  (error) => process.stdout.write('rejected: ' + error.message),
+);
+const until = Date.now() + 600;
+while (Date.now() < until) {}
+setImmediate(() => resolveWork('settled'));
+"""
+    result = _dashnode.run_dashboard_node(_harness(source))
+    assert result.stdout == 'resolved: settled', result
+
+
+def test_bounded_rejects_a_hung_step_while_the_loop_runs(tmp):
+    """A serviced loop still lets a never-settling step name its label."""
+    del tmp
+    source = _HOST_REALM_KEEPALIVE + r"""
+bounded(new Promise(() => {}), 'a step nothing ever settles', 20)
+  .catch((error) => {
+    process.stdout.write(error.message);
+    process.exit(0);
+  });
+"""
+    result = _dashnode.run_dashboard_node(_harness(source))
+    assert result.stdout == (
+        'timed out waiting for a step nothing ever settles'), result
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashharness_')
 
