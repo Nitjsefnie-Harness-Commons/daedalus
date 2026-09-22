@@ -1,8 +1,7 @@
 # The one literal in this repository's history that gitleaks 8.30.1 flags is
 # `123e4567-e89b-12d3-a456-426614174000` — the RFC 4122 section C.2 reserved
 # example UUID, used as a bridge-token fixture in the oversize-target tests.
-# It is documentation-reserved: no real secret equals it. The allowlist below
-# admits exactly that string and nothing else.
+# It is documentation-reserved: no real secret equals it.
 #
 # [extend] useDefault is the load-bearing line: an allowlist file that
 # replaces the default rules silently narrows the gate to nothing.
@@ -11,8 +10,6 @@ useDefault = true
 
 [[allowlists]]
 # Scoped to generic-api-key so it cannot silence another rule's finding.
-# A bump of gitleaks that reclassifies the fixture is what would clear the
-# entry — the description below says the same, for whoever reads the report.
 description = "the RFC 4122 section C.2 reserved example UUID, a bridge-token fixture in the oversize-target tests; a gitleaks bump that reclassifies it is what would clear this entry"
 rules = ['generic-api-key']
 regexes = ['^123e4567-e89b-12d3-a456-426614174000$']
