@@ -207,7 +207,10 @@ EXPECTED_STEP_MAPPINGS = (
              'RUN_ID': '${{ github.event.workflow_run.id }}'},
      'run': 'set -euo pipefail\n'
             '\n'
-            'exit_code=1\n'
+            "# The verdict becomes the publish step's check on the pull\n"
+            "# request's own head; a workflow_run job's failure check would\n"
+            '# land on main instead.\n'
+            "echo 'verdict=failure' >> \"$GITHUB_OUTPUT\"\n"
             "if ! gh api -H 'Cache-Control: no-cache' --paginate \\\n"
             '  "repos/$REPO/actions/runs/$RUN_ID/jobs" \\\n'
             "  --jq '.jobs[]' > jobs.json\n"
@@ -230,9 +233,9 @@ EXPECTED_STEP_MAPPINGS = (
             '  then\n'
             "    reason='a cancelled tests run'\n"
             '  fi\n'
+            '  echo \'verdict=\' >> "$GITHUB_OUTPUT"\n'
             '  echo \'skipped=true\' >> "$GITHUB_OUTPUT"\n'
             '  echo "not_measured_reason=$reason" >> "$GITHUB_OUTPUT"\n'
-            '  exit_code=0\n'
             'fi\n'
             '\n'
             "marker='<!-- daedalus-diff-coverage -->'\n"
@@ -279,8 +282,7 @@ EXPECTED_STEP_MAPPINGS = (
             '  fi\n'
             '}\n'
             'case "$existing" in\n'
-            "  '') echo 'no patch-coverage marker to update'; exit "
-            '"$exit_code" ;;\n'
+            "  '') echo 'no patch-coverage marker to update'; exit 0 ;;\n"
             '  *[!0-9]*)\n'
             '    echo "comment id is not only digits: $existing" >&2\n'
             '    exit 1\n'
@@ -294,7 +296,7 @@ EXPECTED_STEP_MAPPINGS = (
             '      -F body=@comment.md >/dev/null\n'
             '    echo "marked patch coverage as unavailable for '
             '$HEAD_SHA"\n'
-            '    exit "$exit_code"\n'
+            '    exit 0\n'
             '    ;;\n'
             'esac\n',
      'id': 'missing'},
