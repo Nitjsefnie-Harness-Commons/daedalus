@@ -4,6 +4,7 @@ import ast
 import operator
 
 from _pyroute_storage import replace_deferred_storage
+from _pyroute_containers import ordered_container
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -337,6 +338,47 @@ def _mapping_item_value(node, owner, state):
     return merge_yielded((*owner.items.values(), default))
 
 
+_DYNAMIC_BOUND = object()
+
+
+def _static_bound(node):
+    """A slice bound that is statically an integer, else the sentinel."""
+    if node is None:
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, int) \
+            and not isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(
+            node.operand, ast.Constant) \
+            and isinstance(node.operand.value, int) \
+            and not isinstance(node.operand.value, bool):
+        if isinstance(node.op, ast.USub):
+            return -node.operand.value
+        if isinstance(node.op, ast.UAdd):
+            return node.operand.value
+    return _DYNAMIC_BOUND
+
+
+def _static_slice(node):
+    """A python slice for a wholly static ast.Slice, else None."""
+    lower = _static_bound(node.lower)
+    upper = _static_bound(node.upper)
+    step = _static_bound(node.step)
+    if _DYNAMIC_BOUND in (lower, upper, step):
+        return None
+    return slice(lower, upper, step)
+
+
+def _unshadowed_single_arg(node, name, state):
+    """Whether node is an unshadowed call of the builtin `name` with a single
+    positional argument and no keywords."""
+    if not isinstance(node.func, ast.Name) or node.func.id != name:
+        return False
+    if name in state.builtin_globals | state.builtin_locals:
+        return False
+    return len(node.args) == 1 and not node.keywords
+
+
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
                              unprovable_sender):
     """A pop's removal is applied here, at evaluation, once per node per
@@ -382,6 +424,13 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 {DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
+        if isinstance(node.slice, ast.Slice):
+            bounds = _static_slice(node.slice)
+            if bounds is not None:
+                value = ordered_container(
+                    owner, 'list', lambda length: range(length)[bounds])
+                if value is not None:
+                    return value
         key = _literal_key(node.slice, state)
         # A dict read the guard cannot resolve has no position to name, so
         # every item is a candidate; every other owner keeps the lookup that
@@ -409,6 +458,12 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 and 'dict' not in state.builtin_globals \
                 and 'dict' not in state.builtin_locals:
             return _dict_call_value(node, state)
+        if _unshadowed_single_arg(node, 'reversed', state):
+            value = ordered_container(
+                _known_value(node.args[0], state), 'list',
+                lambda length: range(length - 1, -1, -1))
+            if value is not None:
+                return value
         if (isinstance(node.func, ast.Attribute)
                 and node.func.attr == 'setdefault'
                 and isinstance(node.func.value, ast.Name)):

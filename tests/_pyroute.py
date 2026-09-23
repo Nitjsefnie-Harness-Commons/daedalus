@@ -28,7 +28,6 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             bind_alias_target, bind_builtin_names, bound_names,
                             callable_state, clear_names, dedupe_states,
                             deferred_generator, definition_values,
-                            discard_state_dict,
                             dict_assignments as _dict_assignments,
                             evaluated_value, function_allowed_opaque,
                             is_extension_constant,
@@ -37,6 +36,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             rebound_names, record_exit, record_returns,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
+from _pyroute_targets import bind_with_target, materialized_order
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
@@ -361,6 +361,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     consumer, node.args, current)
                 if consumer in _EAGER_ITERABLE_CALLS:
                     for argument in node.args:
+                        ordered = materialized_order(
+                            consumer, argument, current)
+                        if ordered is not None:
+                            append_deferred(consumed_values, ordered)
+                            current, _ = consume_iterable(
+                                argument, current, exhaust=True)
+                            continue
                         current, yielded = consume_iterable(
                             argument, current, exhaust=True)
                         yielded = materialize_deferred(consumer, yielded, node)
@@ -602,19 +609,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             for item in statement.items:
                 entered = check_expression(item.context_expr, entered)
                 if item.optional_vars is None: continue
-                names = bound_names(item.optional_vars)
                 for state in entered:
-                    resolved = resolve_sender_name(
-                        item.context_expr, state.aliases)
-                    for name in names:
-                        discard_state_dict(state, name)
-                        state.aliases.pop(name, None)
-                        state.generators.pop(name, None)
-                        state.callables.pop(name, None)
-                        state.bound.add(name)
-                        bind_builtin_names(state, {name})
-                        if resolved is not None: state.aliases[name] = resolved
-                    sync_cells(state, names)
+                    bind_with_target(
+                        item, state, analyze_callable, violations)
             found, pairs = walk(statement.body, entered)
             violations.extend(found)
             continue
