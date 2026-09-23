@@ -99,3 +99,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# plant-937: comment-only line; this branch exists to exercise the coverage comment workflow
