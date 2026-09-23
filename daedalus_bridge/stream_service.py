@@ -11,11 +11,11 @@ from daedalus_bridge import path_safety
 
 
 # {stream id: {'key', 'tab', 'killed'}}. The registry is keyed by a
-# per-connection id rather than the replacement key: a stream that named no
-# tab once got no key at all, so it served commands and held a worker while
-# being invisible to health and replacement. `key` is what replacement
-# matches on and is None for a tabless stream, which has no identity another
-# connection can claim. `killed` set() means "die".
+# per-connection id rather than the replacement key, so a stream that named
+# no tab is still visible to health instead of serving commands while holding
+# a worker invisibly. `key` is what replacement matches on and is None for a
+# tabless stream, which has no identity another connection can claim. `killed`
+# set() means "die".
 _active_streams = {}
 _stream_ids = itertools.count(1)
 _stream_lock = threading.Lock()
@@ -151,8 +151,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                         f'queue:{qdir.name}/{name}',
                         f'q={qdir.name}/{name}', reason, secret=secret)
                 continue  # absent, or refused: never delivered or unlinked
-            # Read and decide with the descriptor open, then act with it
-            # closed: Windows cannot unlink a file it still holds open.
+            # Decide with the descriptor open; unlink only once it closes.
             with opened:
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
                 expired = age > command_ttl
@@ -162,10 +161,8 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                         parsed = json.loads(opened.read().decode('utf-8'))
                     except (OSError, json.JSONDecodeError, RecursionError,
                             ValueError):
-                        # A visible final name may still have an older
-                        # non-atomic writer. Leave it in place so that writer
-                        # does not finish a command into an unlinked inode;
-                        # the TTL sweep bounds the retries.
+                        # An older non-atomic writer may still hold it;
+                        # leave it in place, the TTL sweep bounds retries.
                         continue
                     # Readable JSON that is not a command object is dropped
                     # with the expired entries, once the descriptor is closed.
@@ -186,12 +183,12 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 data['chromeTab'] = chrome_tab
             frame_writer(data)  # BEFORE unlink
             # The claim excludes other consumers until this write and
-            # unlink finish. A file that will not unlink is redelivered
+            # unlink finish; a file that will not unlink is redelivered
             # on the next tick and deduplicated by its `_did`.
             try:
                 path.unlink()
             except OSError:
-                pass  # a redelivery is deduplicated by _did
+                pass
             record_delivery()
             count += 1
             print(
@@ -285,15 +282,14 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
                 data = json.loads(opened.read().decode('utf-8'))
             except (OSError, json.JSONDecodeError, RecursionError, ValueError):
-                # A visible final name may still have an older non-atomic
-                # publisher. Leave it in place and retry on the next scan.
+                # An older non-atomic publisher may still hold it; leave it
+                # in place and retry on the next scan.
                 return 0
             if not isinstance(data, dict):
                 return 0
             expired = age > command_ttl
         if expired:
-            # Removal waits until the descriptor above is closed: Windows
-            # cannot unlink a file it still holds open.
+            # Removal waits until the descriptor above is closed.
             try:
                 path.unlink()
             except OSError:
@@ -303,11 +299,11 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
             data['chromeTab'] = chrome_tab
         frame_writer(data)  # BEFORE unlink
         # The claim excludes other consumers until this write and unlink
-        # finish. A redelivery is deduplicated by the `_did` it carries.
+        # finish; a redelivery is deduplicated by the `_did` it carries.
         try:
             path.unlink()
         except OSError:
-            pass  # a redelivery is deduplicated by _did
+            pass
         record_delivery()
         print(
             f'[STREAM] DELIVERED '

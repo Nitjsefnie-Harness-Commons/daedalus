@@ -6,12 +6,6 @@ refusal rules, the refusal drains and response writing live here as
 stay free of the socket: each returns an answer — a `(status, payload)`
 pair, a `FileAnswer` or a `BytesAnswer` — and the handler writes it with
 `answer`.
-
-This is the only bridge module that reads `daedalus_bridge.config`,
-because it is transport rather than a route: a route takes its directories
-and limits as parameters. That is also why the answer types are defined in
-`route_answer` and only re-exported here — a route importing them from this
-one would inherit that requirement.
 """
 import ctypes, ctypes.util
 import hmac, json, os, shutil
@@ -86,9 +80,9 @@ class RequestMixin(BaseHTTPRequestHandler):
         """Parse the request target, answering 400 when it is malformed.
 
         An absolute-form target such as `GET http://[ HTTP/1.1` makes
-        urlparse raise ValueError; uncaught, that killed the request thread
-        and the client saw the connection close with zero response bytes.
-        Every verb that parses the target goes through here.
+        urlparse raise ValueError, which is answered 400 here rather than
+        escaping as a closed connection with no response bytes. Every verb
+        that parses the target goes through here.
         """
         try:
             return urlparse(self.path)
@@ -316,13 +310,10 @@ class RequestMixin(BaseHTTPRequestHandler):
         411 for no declaration at all (defaulting it to zero discarded the
         body the sender did send — on the raw segment route that stored an
         empty .ts and answered success, since those bytes are opaque rather
-        than JSON that has to parse), 400 for a value int() cannot parse (an
-        uncaught ValueError here used to kill the request thread, dropping
-        the connection with no answer), 400 for a negative value
-        (rfile.read(-1) reads to EOF, so a negative length is not a small
-        body — it is an unbounded one, and testing only
-        `clen > MAX_BODY_SIZE` let it straight through), and 413 for one over
-        MAX_BODY_SIZE.
+        than JSON that has to parse), 400 for a value int() cannot parse, 400
+        for a negative value (rfile.read(-1) reads to EOF, so a negative
+        length is not a small body but an unbounded one), and 413 for one
+        over MAX_BODY_SIZE.
 
         Every request this bridge answers carries a body, so nothing it
         serves loses a legitimate call to the 411.

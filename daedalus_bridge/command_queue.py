@@ -93,6 +93,12 @@ def open_command_candidate(path):
 
     No exception escapes: a failing open or stat is itself a refusal. A
     refused candidate is never removed here.
+
+    Both drains read and decide with this descriptor open, then act with it
+    closed, because Windows cannot unlink a file it still holds open. A
+    visible final name may still have an older, non-atomic writer, so a
+    caller whose parse fails must leave the file in place rather than unlink
+    a name that writer is still completing.
     """
     # O_NONBLOCK keeps a FIFO named like a command file from hanging the
     # drain on an open with no writer; it is a no-op for regular files and
