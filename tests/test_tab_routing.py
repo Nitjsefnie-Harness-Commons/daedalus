@@ -104,8 +104,7 @@ _SHADOW_ROUTES = [
      '    callee(value)\ninner(args)'),
     ('class-method', _ROUTED_CLASS, 'send = ext_cmd\nInner().run(args)'),
     ('generator', _ROUTED_GEN, 'gen = ((send := ext_cmd) for _ in [1])\n'
-     'callee(args)'),
-    ('payload', _ROUTED_CMD, _TAB + 'callee(args)')]
+     'callee(args)'), ('payload', _ROUTED_CMD, _TAB + 'callee(args)')]
 
 
 def test_generator_break_tracks_only_remaining_effects(tmp):
@@ -166,8 +165,7 @@ def test_generator_filter_short_circuit_skips_later_effects(tmp):
 
 
 def test_builtin_consumers_follow_python_scope_identity(tmp):
-    unbound = ('try:\n    list(gen)\nexcept UnboundLocalError:\n'
-               '    pass')
+    unbound = ('try:\n    list(gen)\nexcept UnboundLocalError:\n' '    pass')
     local_walrus = ('try:\n    sorted(gen, key=(sorted := ordinary))\n'
                     'except UnboundLocalError:\n    pass')
     directions = [('setting', 'ordinary', 'ext_cmd'),
@@ -224,8 +222,7 @@ def test_builtin_consumers_follow_python_scope_identity(tmp):
         later = ('list = ordinary\ndef later(args):\n    '
                  + flow.replace('\n', '\n    ')
                  + '\ndo_focus_tab(_args)\nlater(_args)')
-        counts = _tracked_focus_verdict(tmp, flow, plain, later,
-                                        counts=True)
+        counts = _tracked_focus_verdict(tmp, flow, plain, later, counts=True)
         assert counts == (expected_count, expected_count), (direction, counts)
 
 
@@ -320,11 +317,9 @@ def test_deferred_annotation_and_class_state_flow_matches_runtime(tmp):
 
 def test_callee_dict_state_ignores_callers_local_shadow(tmp):
     source = Path(tmp) / 'callee_dict.py'
-    template = ("cmd = {'type': '/focus', 'tab': 5}\n\n"
-                "def callee():\n"
+    template = ("cmd = {'type': '/focus', 'tab': 5}\n\n" "def callee():\n"
                 "    return ext_cmd(**cmd)\n\n"
-                "async def caller(chrome_tab, bridge):\n"
-                "<shadow>"
+                "async def caller(chrome_tab, bridge):\n" "<shadow>"
                 "    return callee()\n")
 
     def scan(shadow):
@@ -339,42 +334,27 @@ def test_callee_dict_state_ignores_callers_local_shadow(tmp):
 def test_callee_dict_reads_current_module_value_through_shadow(tmp):
     source = Path(tmp) / 'callee_rebind.py'
     source.write_text(
-        "cmd = {'type': '/focus', 'tab': 'extension'}\n"
-        "def callee():\n"
-        "    return ext_cmd(**cmd)\n"
-        "def caller():\n"
-        "    cmd = {'type': '/other'}\n"
-        "    return callee()\n"
-        "cmd = {'type': '/focus', 'tab': 5}\n"
-        "caller()\n"
-        "cmd = {'type': '/focus', 'tab': 'extension'}\n",
-        encoding='utf-8')
+        "cmd = {'type': '/focus', 'tab': 'extension'}\n" "def callee():\n"
+        "    return ext_cmd(**cmd)\n" "def caller():\n"
+        "    cmd = {'type': '/other'}\n" "    return callee()\n"
+        "cmd = {'type': '/focus', 'tab': 5}\n" "caller()\n"
+        "cmd = {'type': '/focus', 'tab': 'extension'}\n", encoding='utf-8')
     assert py_tab_routing_violations(source, source.name) == [
         f'{source.name}:7: `tab` in **cmd passed to ext_cmd']
     source.write_text(
-        "cmd = {'type': '/focus', 'tab': 5}\n"
-        "def callee():\n"
+        "cmd = {'type': '/focus', 'tab': 5}\n" "def callee():\n"
         "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
-        "    return ext_cmd(**cmd)\n"
-        "def caller():\n"
-        "    cmd = {'type': '/other'}\n"
-        "    return callee()\n"
-        "caller()\n",
+        "    return ext_cmd(**cmd)\n" "def caller():\n"
+        "    cmd = {'type': '/other'}\n" "    return callee()\n" "caller()\n",
         encoding='utf-8')
     assert not py_tab_routing_violations(source, source.name)
     source.write_text(
-        "def outer():\n"
-        "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
-        "    def callee():\n"
-        "        return ext_cmd(**cmd)\n"
-        "    def caller():\n"
-        "        cmd = {'type': '/other'}\n"
-        "        return callee()\n"
-        "    cmd = {'type': '/focus', 'tab': 5}\n"
-        "    caller()\n"
-        "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
-        "outer()\n",
-        encoding='utf-8')
+        "def outer():\n" "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "    def callee():\n" "        return ext_cmd(**cmd)\n"
+        "    def caller():\n" "        cmd = {'type': '/other'}\n"
+        "        return callee()\n" "    cmd = {'type': '/focus', 'tab': 5}\n"
+        "    caller()\n" "    cmd = {'type': '/focus', 'tab': 'extension'}\n"
+        "outer()\n", encoding='utf-8')
     assert py_tab_routing_violations(source, source.name) == [
         f'{source.name}:8: `tab` in **cmd passed to ext_cmd']
 
@@ -382,12 +362,10 @@ def test_callee_dict_reads_current_module_value_through_shadow(tmp):
 def test_callable_dict_state_requires_consensus(tmp):
     source = Path(tmp) / 'callable_consensus.py'
     source.write_text(
-        "def outer(flag):\n"
-        "    cmd = {'type': '/focus', 'tab': 5}\n"
+        "def outer(flag):\n" "    cmd = {'type': '/focus', 'tab': 5}\n"
         "    if flag:\n"
         "        cmd = {'type': '/focus', 'tab': 'extension'}\n"
-        "    return lambda unused=None: ext_cmd(**cmd)\n",
-        encoding='utf-8')
+        "    return lambda unused=None: ext_cmd(**cmd)\n", encoding='utf-8')
     assert py_tab_routing_violations(source, source.name) == [
         f'{source.name}:5: opaque **cmd passed to ext_cmd; '
         '`tab` cannot be verified']
@@ -401,10 +379,8 @@ def test_class_dicts_do_not_replace_method_global_state(tmp):
             f"cmd = {{'type': '/focus', 'tab': {module_tab!r}}}\n"
             "class Sender:\n"
             f"    cmd = {{'type': '/focus', 'tab': {class_tab!r}}}\n"
-            "    def run():\n"
-            "        return ext_cmd(**cmd)\n"
-            "Sender.run()\n",
-            encoding='utf-8')
+            "    def run():\n" "        return ext_cmd(**cmd)\n"
+            "Sender.run()\n", encoding='utf-8')
         return py_tab_routing_violations(source, source.name)
 
     actual = (scan(5, 'extension'), scan('extension', 5))
@@ -418,8 +394,7 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         "a = _ext_cmd\n    send = a", "send = getattr(b, 'ext_cmd')",
         "send = b.ext_cmd if flag else b.ext_cmd",
         "send = lambda *a, **k: b.ext_cmd(*a, **k)",
-        "send, other = b.ext_cmd, None",
-        "[send, other] = [b.ext_cmd, None]",
+        "send, other = b.ext_cmd, None", "[send, other] = [b.ext_cmd, None]",
         "([send], other) = ([b.ext_cmd], None)",
         "send, *other = b.ext_cmd, None",
         "send, other = wrap(b.ext_cmd)",
@@ -783,6 +758,31 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         assert not scan(lang, src), f'legitimate shape {i} flagged:\n{src}'
     for i, (label, src) in enumerate(disclosed_js_limits):
         assert not scan('js', src), f'disclosed limit {label!r} caught: {src}'
+
+
+_SELECTION_PRE = ('send = ordinary\ndef maker():\n    return lambda: send('
+                  '"_focus", "focus-tab", tab=args.chrome_tab)\n'
+                  'def relay(): return maker()\n')
+_SELECTIONS = [
+    ('tuple-select', 'x = (relay(), ext_cmd)[int(args.flag) - 1]',
+     'x()', True),
+    ('getattr-default', 'class H: pass\nh = H(); h.ext_cmd = ordinary; '
+     'h.fn = relay()\nx = getattr(h, "fn", h.ext_cmd)', 'x()', True),
+    ('getattr-direct', 'class H: pass\nh = H(); h.ext_cmd = relay()\n'
+     'x = getattr(h, "ext_cmd")', 'x()', True),
+    ('control-ordinary', 'x = relay()', 'ordinary()', False),
+    ('sighting-getattr-dict', 'class C: pass\nc = C(); c.box = '
+     '{"k": relay()}\nx = getattr(c, "box")', 'x["k"]()', True),
+    ('sighting-control-attr', 'class C: pass\nc = C(); c.box = '
+     '{"k": relay()}\nx = c.box', 'x["k"]()', True),
+]
+
+
+def test_selected_deferred_callables_stay_beside_their_senders(tmp):
+    cases = [(label, _SELECTION_PRE + store + '\nsend = ext_cmd\nreturn '
+              + invoke + '\n', '', '', expected)
+             for label, store, invoke, expected in _SELECTIONS]
+    _assert_focus_cases(tmp, cases)
 
 
 def main():
