@@ -3,7 +3,8 @@
 Nothing in TOOL_REFUSALS says which guard a case exists for, so deleting one
 used to assert nothing. This reads every raise the modules the composition
 can import spell and makes each site an obligation of the tools that reach
-it, keyed (dotted module, function, condition).
+it, keyed (dotted module, function, condition). The import closure that
+decides which modules those are lives beside it, in _mcp_import_closure.
 
 Its limits, so nobody reads more into it than it does. It witnesses raise
 sites that exist in the source; a guard deleted together with its declaration
@@ -24,6 +25,8 @@ import importlib.util
 import inspect
 from pathlib import Path
 import types
+
+from _mcp_import_closure import dotted_module
 
 
 GUARD_SHAPES = '''
@@ -96,14 +99,6 @@ def _unguarded_text(node):
     return ast.unparse(node)
 
 
-def _dotted(path, root):
-    """The module's name relative to the repository root: two modules that
-    share a stem are different modules, each keyed on its own."""
-    return '.'.join(
-        path.resolve().relative_to(Path(root).resolve()).with_suffix('')
-        .parts)
-
-
 def _module_guard_sites(path, root):
     """Every raise site one module spells, keyed by (file, line).
 
@@ -121,11 +116,11 @@ def _module_guard_sites(path, root):
     for node in raises:
         if node.lineno in by_line:
             raise AssertionError(
-                f'{_dotted(path, root)}:{node.lineno}: two raises share this '
-                'line; one raise per line, because a traceback names the '
-                'line and one witness cannot answer for both')
+                f'{dotted_module(path, root)}:{node.lineno}: two raises '
+                'share this line; one raise per line, because a traceback '
+                'names the line and one witness cannot answer for both')
         by_line[node.lineno] = node
-    module = _dotted(path, root)
+    module = dotted_module(path, root)
     sites = {}
     spelled = set()
     for node in raises:
@@ -158,142 +153,6 @@ def tool_guards(paths, root):
     for path in paths:
         sites.update(_module_guard_sites(Path(path), root))
     return sites
-
-
-def composition_scan_set(composition, root):
-    """The repo-local modules the composition's SOURCE FILE can import.
-
-    A static walk, not a runtime snapshot: every `import` and `from` at any
-    depth — function bodies, `try` blocks, dead branches — resolves to
-    files under the repository root or is provably elsewhere (stdlib, site
-    packages), and the walk iterates to a fixed point. A target the walk
-    cannot determine statically is unprovable and fails loudly, naming the
-    module and the import site: a walk that silently omitted what it cannot
-    resolve would be the next blind spot, not a closure.
-    """
-    root = Path(root).resolve()
-    composition = Path(composition).resolve()
-    seen = {composition}
-    pending = [composition]
-    while pending:
-        for target in _import_targets(pending.pop(), root):
-            if target not in seen:
-                seen.add(target)
-                pending.append(target)
-    return sorted(path for path in seen
-                  if 'tests' not in path.relative_to(root).parts)
-
-
-def _dynamic_callees(tree):
-    """The names one module's imports bind to the import-by-name operation.
-
-    `import importlib [as x]` and `import builtins [as x]` bind their module
-    aliases, `from importlib import import_module [as y]`, `from importlib
-    import __import__ [as z]` and `from builtins import __import__ [as z]`
-    bind their function names, and the builtin `__import__` is bound before
-    anything runs. Classification then resolves a call's callee through
-    this map instead of matching spellings.
-    """
-    bound = {'__import__': 'by name'}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in ('importlib', 'builtins'):
-                    bound[alias.asname or alias.name] = alias.name
-        elif isinstance(node, ast.ImportFrom):
-            if not node.level:
-                names = {'importlib': ('import_module', '__import__'),
-                         'builtins': ('__import__',)}.get(node.module, ())
-                for alias in node.names:
-                    if alias.name in names:
-                        bound[alias.asname or alias.name] = 'by name'
-    return bound
-
-
-def _is_dynamic_import(func, bound):
-    """A call to import_module or __import__, per the module's own bindings.
-
-    Loading a module by PATH — `spec_from_file_location`, `SourceFileLoader`
-    — is a different operation and stays outside this recognition.
-    """
-    if isinstance(func, ast.Name):
-        return bound.get(func.id) == 'by name'
-    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-        source = bound.get(func.value.id)
-        if source == 'importlib':
-            return func.attr in ('import_module', '__import__')
-        if source == 'builtins':
-            return func.attr == '__import__'
-    return False
-
-
-def _import_targets(path, root):
-    """The repo-local files one module's source can import.
-
-    Empty when nothing the module names lives under root — stdlib and
-    site-package targets are provably not this repository's. A dynamic
-    import whose argument is not a constant string is unprovable and raises,
-    naming the module and the import site; a constant resolves like an
-    import.
-    """
-    targets = set()
-    tree = ast.parse(path.read_text(encoding='utf-8'))
-    bound = _dynamic_callees(tree)
-    package = path.resolve().relative_to(Path(root).resolve()).parent.parts
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                targets |= _resolve_name(alias.name, (), root)
-        elif isinstance(node, ast.ImportFrom):
-            base = package[:max(len(package) + 1 - node.level, 0)] \
-                if node.level else ()
-            if node.module:
-                targets |= _resolve_name(node.module, base, root)
-            for alias in node.names:
-                if alias.name != '*':
-                    name = f'{node.module}.{alias.name}' if node.module \
-                        else alias.name
-                    targets |= _resolve_name(name, base, root)
-        elif isinstance(node, ast.Call) and _is_dynamic_import(
-                node.func, bound):
-            argument = node.args[0] if node.args else None
-            if isinstance(argument, ast.Constant) \
-                    and isinstance(argument.value, str) \
-                    and not argument.value.startswith('.'):
-                targets |= _resolve_name(argument.value, (), root)
-            else:
-                raise AssertionError(
-                    f'{_dotted(path, root)}:{node.lineno}: '
-                    'import_module/__import__ is called with a name this '
-                    'scan cannot read statically; import it normally or '
-                    'pass an absolute constant, because an import closure '
-                    'that silently skips a module it cannot resolve is not '
-                    'closed')
-    return targets
-
-
-def _resolve_name(name, base, root):
-    """One import target's repo-local files: the package `__init__` files
-    importing it executes, then the module file itself. Relative imports
-    arrive resolved against the importing module's package in `base`. Empty
-    when no prefix of the dotted name matches the repository, which is what
-    makes stdlib and site packages provably irrelevant."""
-    parts = (*base, *name.split('.'))
-    found = set()
-    probe = Path(root).resolve()
-    for index, part in enumerate(parts):
-        package = probe / part
-        if package.is_dir():
-            probe = package
-            init = package / '__init__.py'
-            if init.is_file():
-                found.add(init.resolve())
-            continue
-        module = probe / f'{part}.py'
-        if index == len(parts) - 1 and module.is_file():
-            found.add(module.resolve())
-        break
-    return found
 
 
 def nested_code_objects(code):

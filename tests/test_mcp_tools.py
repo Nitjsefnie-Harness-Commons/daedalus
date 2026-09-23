@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
 import _mcp_guard_floor  # noqa: E402
+import _mcp_import_closure  # noqa: E402
 import _mcp_tool_commands  # noqa: E402
 import _util  # noqa: E402
 
@@ -442,10 +443,9 @@ def test_every_registered_tool_command_is_pinned(_tmp):
                 f'{composition.bridge.calls}')
     refusals = _mcp_tool_commands.TOOL_REFUSALS
     assert refusals, 'no tool has a pinned refusal'
-    sites = _mcp_guard_floor.tool_guards(
-        _mcp_guard_floor.composition_scan_set(
-            _util.ROOT / 'daedalus_mcp' / 'server.py', _util.ROOT),
-        _util.ROOT)
+    scanned = _mcp_import_closure.composition_scan_set(
+        _util.ROOT / 'daedalus_mcp' / 'server.py', _util.ROOT)
+    sites = _mcp_guard_floor.tool_guards(scanned, _util.ROOT)
     assert sites, 'no raise site found in the modules the composition imports'
     reached = {
         name: _mcp_guard_floor.reachable_guards(
