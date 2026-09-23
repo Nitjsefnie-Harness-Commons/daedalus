@@ -180,10 +180,20 @@ jobs:
             echo "listing the jobs of run $RUN_ID failed" >&2
             exit 1
           fi
+          # A cancelled tests run ends its coverage job `cancelled` rather
+          # than `skipped`; both measured nothing, so both credit the run.
           if jq -se 'any(.[]; .name == "coverage" and
-            .conclusion == "skipped")' jobs.json >/dev/null
+            (.conclusion == "skipped" or .conclusion == "cancelled"))' \
+            jobs.json >/dev/null
           then
+            reason='a documentation-only change'
+            if jq -se 'any(.[]; .name == "coverage" and
+              .conclusion == "cancelled")' jobs.json >/dev/null
+            then
+              reason='a cancelled tests run'
+            fi
             echo 'skipped=true' >> "$GITHUB_OUTPUT"
+            echo "not_measured_reason=$reason" >> "$GITHUB_OUTPUT"
             exit_code=0
           fi
 
@@ -358,6 +368,8 @@ jobs:
             github.run_id }}
           STATUS: ${{ job.status }}
           JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
+          NOT_MEASURED_REASON: >-
+            ${{ steps.missing.outputs.not_measured_reason }}
         run: |
           set -euo pipefail
 
@@ -370,6 +382,11 @@ jobs:
           esac
 
           if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
+            if [ -z "${NOT_MEASURED_REASON:-}" ]; then
+              echo 'skipped=true reached the publish step without a ' \
+                'not_measured_reason output' >&2
+              exit 1
+            fi
             STATUS=neutral
           fi
 
@@ -415,8 +432,8 @@ jobs:
               -f details_url="$RUN_URL"
             )
             if [ "$STATUS" = neutral ]; then
-              local summary='Coverage was not measured for a '
-              summary+='documentation-only change.'
+              local summary='Coverage was not measured for '
+              summary+="$NOT_MEASURED_REASON."
               args+=( -f 'output[title]=Coverage not measured'
                 -f "output[summary]=$summary" )
             fi
