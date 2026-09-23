@@ -367,17 +367,17 @@ ABSENT_SCENARIOS = (
     ('docs-only', [{'name': 'test', 'conclusion': 'success'},
                    {'name': 'coverage', 'conclusion': 'skipped'}], 0,
      'neutral', 'a documentation-only change'),
-    ('no-coverage-job', [], 1, 'failure', None),
+    ('no-coverage-job', [], 0, 'failure', None),
     ('successful-coverage', [{'name': 'coverage', 'conclusion': 'success'}],
-     1, 'failure', None),
+     0, 'failure', None),
     ('failed-coverage', [{'name': 'coverage', 'conclusion': 'failure'}],
-     1, 'failure', None),
+     0, 'failure', None),
     ('cancelled-coverage', [{'name': 'coverage', 'conclusion': 'cancelled'}],
      0, 'neutral', 'a cancelled tests run'),
     ('cancelled-noncoverage', [{'name': 'test', 'conclusion': 'cancelled'}],
-     1, 'failure', None),
+     0, 'failure', None),
     ('other-skipped', [{'name': 'test', 'conclusion': 'skipped'}],
-     1, 'failure', None),
+     0, 'failure', None),
 )
 
 
@@ -424,7 +424,8 @@ def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
         status='failure' if missing.returncode else 'success',
         extra_env={'JOB_SKIPPED': outputs.get('skipped', ''),
                    'NOT_MEASURED_REASON': outputs.get(
-                       'not_measured_reason', '')})
+                       'not_measured_reason', ''),
+                   'VERDICT': outputs.get('verdict', '')})
     assert result.returncode == 0, (result.stdout, result.stderr)
     check = checks['checks'][0]
     assert check['conclusion'] == ('failure' if fail_jobs else conclusion), (
