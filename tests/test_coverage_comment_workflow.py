@@ -52,9 +52,8 @@ def _write_executable(path, content):
 
 
 def _step_outputs(path):
-    return dict(
-        line.split('=', 1)
-        for line in path.read_text(encoding='utf-8').splitlines())
+    return dict(line.split('=', 1) for line in path.read_text(
+        encoding='utf-8').splitlines())
 
 
 def _run_shell_block(workdir, script, env):
@@ -521,8 +520,7 @@ def test_a_failed_coverage_job_reports_failure_and_exits_clean(tmp):
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     outputs = _step_outputs(output)
     assert outputs.get('verdict') == 'failure', outputs
-    assert 'skipped' not in outputs, outputs
-    assert 'not_measured_reason' not in outputs, outputs
+    assert not {'skipped', 'not_measured_reason'} & set(outputs), outputs
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
