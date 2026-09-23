@@ -94,14 +94,16 @@ def sibling_member(receiver, key, position):
         frozenset(), {})
 
 
+_THIS_MEMBER = re.compile(r'this\s*\.\s*([\w$]+)')
+
+
 def _this_member(receiver, getter_body):
     """Sibling member a `this.<key>` return inside the getter names."""
     expression = receiver._returned_expression(getter_body)
     if expression is None:
         return None
     left, right = receiver._unwrap(expression)
-    found = re.fullmatch(r'this\s*\.\s*([\w$]+)',
-                         receiver.mask[left:right])
+    found = _THIS_MEMBER.fullmatch(receiver.mask[left:right])
     if found is None:
         return None
     return sibling_member(receiver, found.group(1), left)
@@ -132,28 +134,37 @@ def _member_callable(receiver, span):
     value = receiver.callable_value(span)
     if value['status'] == 'unprovable':
         left, right = receiver._unwrap(span)
-        found = re.fullmatch(r'this\s*\.\s*([\w$]+)',
-                             receiver.mask[left:right])
+        found = _THIS_MEMBER.fullmatch(receiver.mask[left:right])
         if found is not None:
             return sibling_member(receiver, found.group(1), left) or value
     return value
 
 
+_BIND_INERT = re.compile(
+    r'\s*(?:null|undefined|true|false'
+    r'|"(?:\\.|[^"\\])*"'
+    r"|'(?:\\.|[^'\\])*'"
+    r'|[\w$]+)\s*')
+
+
 def _bound_member(receiver, left, opening, close):
     """Callable a `<name>.bind(...)` result invokes: the name's own.
 
-    None when an argument could run code: bind's arguments evaluate
-    before the bound callable exists, so what they execute is the
-    call's own and the answer stays fail-closed. The raw argument text
-    is refused on any parenthesis, backtick or equals sign at all —
-    the class of running spellings is open-ended (tagged templates,
-    comma sequences, computed callees hide from any call grammar).
+    Resolve only when every argument is provably inert — null,
+    undefined, true or false, a string or numeric literal, or a bare
+    identifier read — and refuse everything else: bind's arguments
+    evaluate before the bound callable exists, so what they execute is
+    the call's own, and the class of running spellings is open-ended
+    (calls, tagged templates, comma sequences, computed callees,
+    constructor invocations with no argument list).
     """
     found = re.match(r'([\w$]+)\s*\.', receiver.mask[left:opening])
     if found is None:
         return None
-    if re.search(r'[`(=]', receiver.text[opening + 1:close - 1]):
-        return None
+    for span in receiver.split(receiver.mask, receiver.text,
+                               opening + 1, close - 1):
+        if not _BIND_INERT.fullmatch(receiver.text[span[0]:span[1]]):
+            return None
     owner = receiver.callable_value((left, left + found.end(1)))
     if owner['status'] != 'known':
         return None
@@ -184,9 +195,10 @@ def member_value(receiver, left, right, env=None):
 def chained_member(receiver, owner_end, key, position):
     """Target and chain head of the last key on a spelled member chain.
 
-    The call site asks only when the key's owner names no binding: the
-    hops between the head binding and the key are object-literal
-    members, which the receiver index reads one hop at a time.
+    Asked on every plain member call; it answers only when the key's
+    owner names no binding and the hops between the head binding and
+    the key are object-literal members, which the receiver index reads
+    one hop at a time.
     """
     hops = []
     cursor = owner_end
