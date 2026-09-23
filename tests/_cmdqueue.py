@@ -1,5 +1,6 @@
 """Shared helpers for test-side command queues."""
 import json
+import math
 import time
 
 
@@ -29,14 +30,13 @@ def clear_command_queue(directory):
 def _poll_queue_reads(directory, count, timeout, *, ignored_names=(),
                       producer_alive=None, retry_vanished,
                       check_deadline_before_read):
-    deadline = time.monotonic() + timeout
+    attempts = math.ceil(timeout / POLL_DELAY)
     ignored_names = set(ignored_names)
     saw_queue_file = False
     denied = None
-    while True:
-        if (check_deadline_before_read
-                and time.monotonic() >= deadline):
-            return None, denied
+    if check_deadline_before_read and attempts < 1:
+        return None, denied
+    for attempt in range(attempts):
         files = (sorted(queued for queued in directory.glob('*.json')
                         if queued.name not in ignored_names)
                  if directory.is_dir() else [])
@@ -55,10 +55,9 @@ def _poll_queue_reads(directory, count, timeout, *, ignored_names=(),
         if (not saw_queue_file and producer_alive is not None
                 and not producer_alive()):
             return None, denied
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None, denied
-        time.sleep(min(POLL_DELAY, remaining))
+        if attempt + 1 < attempts:
+            time.sleep(POLL_DELAY)
+    return None, denied
 
 
 def wait_for_command(directory, timeout, producer_alive=None,
