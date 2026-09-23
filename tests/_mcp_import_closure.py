@@ -105,49 +105,30 @@ def _is_dynamic_import(func, bound):
 
 
 def _yields_the_operation(value, bound):
-    """True when an expression can evaluate to the import-by-name operation.
+    """True when an expression's own subtree mentions the import-by-name
+    operation, so a store of it can hand the operation to a name this map
+    cannot follow.
 
-    Structural, not one level deep: a tracked name inside a conditional, a
-    boolean choice, a comparison, a container, a starred element, a
-    subscripted value or a comprehension can still reach the store, so each
-    of those wrappers is read into. Two shapes are read as NOT yielding it,
-    and both are readable to a specific other object: an attribute of a
-    known module that is not one of the operation's own (`importlib.util`),
-    and a call — a call evaluates to whatever its callee returns, not to
-    the callee. Those are the deliberate limits, and a name bound to a
-    call's result stays outside the property rather than refused, because
-    refusing every one of those would refuse ordinary code.
+    The property, not a list of the shapes that have been met: a tracked
+    name anywhere inside a lambda body, a yield, a conditional, a
+    comprehension or a subscript key is a mention, and a type nobody has
+    thought of is read the same way, because every other node is answered
+    by its own children. Two shapes are NOT mentions, both because each is
+    readable to a specific other object: a call — a call evaluates to
+    whatever its callee returns, not to the callee — and a known module's
+    attribute that is not one of the operation's own (`importlib.util`).
+    Those two are the property's limits, named here where a reader meets
+    them; a name bound to a call's result is followed by neither this map
+    nor these refusals.
     """
     if isinstance(value, ast.Name):
         return value.id in bound
     if isinstance(value, ast.Attribute):
         return _is_dynamic_import(value, bound)
-    if isinstance(value, ast.IfExp):
-        return _yields_the_operation(value.body, bound) \
-            or _yields_the_operation(value.orelse, bound)
-    if isinstance(value, ast.BoolOp):
-        return any(_yields_the_operation(item, bound) for item in value.values)
-    if isinstance(value, ast.Compare):
-        return any(_yields_the_operation(item, bound)
-                   for item in (value.left, *value.comparators))
-    if isinstance(value, ast.Starred):
-        return _yields_the_operation(value.value, bound)
-    if isinstance(value, ast.Subscript):
-        return _yields_the_operation(value.value, bound)
-    if isinstance(value, ast.NamedExpr):
-        return _yields_the_operation(value.value, bound)
-    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
-        return any(_yields_the_operation(item, bound) for item in value.elts)
-    if isinstance(value, ast.Dict):
-        return any(key is not None and _yields_the_operation(key, bound)
-                   for key in value.keys) \
-            or any(_yields_the_operation(item, bound) for item in value.values)
-    if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-        return _yields_the_operation(value.elt, bound)
-    if isinstance(value, ast.DictComp):
-        return _yields_the_operation(value.key, bound) \
-            or _yields_the_operation(value.value, bound)
-    return False
+    if isinstance(value, ast.Call):
+        return False
+    return any(_yields_the_operation(child, bound)
+               for child in ast.iter_child_nodes(value))
 
 
 def _store_leaves(target):
