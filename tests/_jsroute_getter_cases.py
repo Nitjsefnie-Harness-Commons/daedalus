@@ -244,4 +244,19 @@ GETTER_CASES = [
     ('getter-through-curried-return-uncalled-promotion',
      _LET + "const obj = { get p() { return () => () => { " + _PRO
      + " }; } };\n" + 'obj.p()' + _TAIL, False),
+    # Inside `with`, a bare name resolves through the object and the
+    # bind-time read runs its getter; an identifier the lexical walk
+    # cannot bind must refuse.
+    ('getter-bound-with-read-argument-promotion',
+     _LET + "function dem() { void 0; }\n"
+     "const holder = { get side() { " + _PRO + " } };\n"
+     "const obj = { get p() { with (holder) { "
+     "return dem.bind(side); } } };\n"
+     + 'obj.p()' + _TAIL, True),
+    ('getter-bound-with-read-argument-demotion',
+     _LET + "function dem() { void 0; }\n"
+     "const holder = { get side() { " + _DEM + " } };\n"
+     "const obj = { get p() { with (holder) { "
+     "return dem.bind(side); } } };\n"
+     + _PRO + '\n' + 'obj.p()' + _TAIL, (False, True)),
 ]
