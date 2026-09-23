@@ -134,13 +134,76 @@ def load(name):
 ''', 6, 'cannot follow')
 
 
+def test_a_lambda_delivery_alias_refuses_the_scan(_tmp):
+    """`get = lambda: importlib` hands the operation over on a later call.
+
+    The store's value is not a call and not a module; it is a callable that
+    returns one, and the call it is called with comes later, spelled on an
+    expression this walk has already passed.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    get = lambda: importlib
+    return get().import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_lambda_returning_the_operation_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    get = lambda: importlib.import_module
+    return get()(name)
+''', 6, 'cannot follow')
+
+
+def test_a_yield_delivery_alias_refuses_the_scan(_tmp):
+    """`loader = (yield importlib)` delivers on a later `send`.
+
+    Deferred delivery, not a call, and the spelling that resumes it is
+    written after the store the scan has already read.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    loader = (yield importlib)
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_key_position_mention_refuses_the_scan(_tmp):
+    """A tracked name used as a subscript key is refused, over-refusing.
+
+    The result of `table[importlib]` is a lookup, not the operation, so
+    this is the safe direction taken on purpose: the predicate reads one
+    rule over the whole subtree rather than a hand-picked set of children
+    per node type.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name, table):
+    loader = table[importlib]
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
     """The refusals are scoped to the import-by-name operation.
 
     A name rebound to an ordinary object, and a `getattr` for an ordinary
     attribute, are ordinary code; refusing them would refuse the closure's
     modules for writing Python. Every store form and every value shape the
-    walk now reads appears here bound to an ordinary value, because the
+    walk now reads appears here bound to an ordinary value — including the
+    deferred-delivery shapes and the two declared limits — because the
     structural fix is only safe while ordinary code stays silent: an
     over-broad classifier is caught by name in this one case.
     """
@@ -213,8 +276,17 @@ def shapes(handle, flag, table):
     renamed = table
     renamed = Holder
     submodules = importlib.util
+    loaded = load_ordinary(handle)
+    table['k'] = handle
     return (conditional, choice, compared, indexed, starred, listed, counted,
-            nested, joined, made, grown, renamed, submodules, rows_of(handle))
+            nested, joined, made, grown, renamed, submodules, loaded,
+            rows_of(handle))
+
+
+def load_ordinary(handle):
+    get = lambda: handle
+    produced = (yield handle)
+    return get(), produced
 
 
 def rows_of(handle):
@@ -226,6 +298,7 @@ def rows_of(handle):
     scanned = _mcp_import_closure.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
 
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
