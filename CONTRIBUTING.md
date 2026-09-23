@@ -226,9 +226,14 @@ Report defects in claim behaviour to
 Defects in this repository's wiring — the trigger, token scope or prefilter —
 belong in this repository's tracker.
 
-The body must be exactly the command after trimming, so "I'll `/claim` this
-one" is ignored, as are a closed issue, a pull request, a bot, and an issue
-somebody already holds. Re-read the issue afterwards and confirm your login is
+The body must be exactly the command after trimming — `/claim`, `/unclaim` or
+`/release`, each optionally followed by the issue number, with or without the
+`#` prefix, which must match the issue the comment is posted on. A decline is
+loud, not silent: "I'll `/claim` this one", a mismatched number, a closed
+issue, and a pull request each get an answer on the issue and fail the run,
+and an issue somebody already holds is answered with the holder named. The one
+silence is a bot's comment, refused without an answer so the action never
+answers its own kind. Re-read the issue afterwards and confirm your login is
 in `assignees`: a posted comment is not a claim.
 
 Release an issue you stop working, before the merge that closes it — the
