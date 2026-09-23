@@ -316,8 +316,8 @@ def _orchestration(run, step, steps):
          'failure'),
         ('stale-head', 'true', None, 'true', 'success', 'success'),
         ('cancellation', 'true', None, 'false', 'cancelled', 'cancelled'),
-        ('stood-down-closed-pr', 'true', 'false', 'false', 'success', None),
-        ('stood-down-no-artifact', None, 'false', 'false', 'success', None),
+        ('stood-down-closed-pr', 'true', 'false', '', 'success', None),
+        ('stood-down-no-artifact', None, 'false', '', 'success', None),
     )
     for label, present, pr_present, stale, status, publish in scenarios:
         pr_outputs = {'stale': stale}
@@ -401,6 +401,7 @@ ABSENT_SCENARIOS = (
       {'name': 'coverage', 'conclusion': 'skipped'}], 0,
      'failure', None),
     ('failed-run-empty-jobs', 'failure', [], 0, 'failure', None),
+    ('timed-out-run-empty-jobs', 'timed_out', [], 0, 'failure', None),
     ('failed-run-failed-coverage', 'failure',
      [{'name': 'coverage', 'conclusion': 'failure'}], 0, 'failure', None),
     ('failed-run-successful-coverage', 'failure',
