@@ -94,7 +94,8 @@ const work = new Promise(() => {});
 
 def _bound_source(work, call):
     """The shipped prelude's bound machinery, driven by one control."""
-    prelude = _overlap._BACKGROUND_OVERLAP_HARNESS.split(_ENTRY_IIFE)[0]
+    prelude = _overlap._BACKGROUND_OVERLAP_HARNESS.split(
+        _ENTRY_IIFE, maxsplit=1)[0]
     return prelude.replace('__IMPORT_SCRIPTS_STUB__', ';') + work + (
         _SETTLE_DRIVER % (call,))
 
