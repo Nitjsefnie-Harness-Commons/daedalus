@@ -343,22 +343,22 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
 ABSENT_SCENARIOS = (
     ('docs-only', [{'name': 'test', 'conclusion': 'success'},
                    {'name': 'coverage', 'conclusion': 'skipped'}], 0,
-     'neutral'),
-    ('no-coverage-job', [], 1, 'failure'),
+     'neutral', 'a documentation-only change'),
+    ('no-coverage-job', [], 1, 'failure', None),
     ('successful-coverage', [{'name': 'coverage', 'conclusion': 'success'}],
-     1, 'failure'),
+     1, 'failure', None),
     ('failed-coverage', [{'name': 'coverage', 'conclusion': 'failure'}],
-     1, 'failure'),
+     1, 'failure', None),
     ('cancelled-coverage', [{'name': 'coverage', 'conclusion': 'cancelled'}],
-     1, 'failure'),
+     0, 'neutral', 'a cancelled tests run'),
     ('other-skipped', [{'name': 'test', 'conclusion': 'skipped'}],
-     1, 'failure'),
+     1, 'failure', None),
 )
 
 
 def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
                      write_executable, scenario, prior, fail_jobs=False):
-    label, jobs, exit_code, conclusion = scenario
+    label, jobs, exit_code, conclusion, reason = scenario
     workdir = Path(tmp) / f'absent-{label}-{len(prior)}-{fail_jobs}'
     (workdir / 'bin').mkdir(parents=True)
     output = workdir / 'github-output'
@@ -391,18 +391,22 @@ def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
     else:
         assert any(args for args in call_list(calls)
                    if 'repos/owner/repo/actions/runs/123/jobs' in args)
-    skipped = 'skipped=true' in output.read_text(encoding='utf-8')
+    outputs = dict(
+        line.split('=', 1) for line in
+        output.read_text(encoding='utf-8').splitlines())
     result, checks, _calls, _script = run(
         label=workdir.name + '-publish',
         status='failure' if missing.returncode else 'success',
-        extra_env={'JOB_SKIPPED': 'true' if skipped else ''})
+        extra_env={'JOB_SKIPPED': outputs.get('skipped', ''),
+                   'NOT_MEASURED_REASON': outputs.get(
+                       'not_measured_reason', '')})
     assert result.returncode == 0, (result.stdout, result.stderr)
     check = checks['checks'][0]
     assert check['conclusion'] == ('failure' if fail_jobs else conclusion), (
         label, check)
-    if conclusion == 'neutral' and not fail_jobs:
+    if reason is not None and not fail_jobs:
         assert check['output[summary]'] == (
-            'Coverage was not measured for a documentation-only change.')
+            f'Coverage was not measured for {reason}.'), check
 
 
 def _absent_scenarios(tmp, run, workflow, extract_block, shell_runner,
