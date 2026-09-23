@@ -219,13 +219,24 @@ async function runEval(id, code) {
     objectId: 'pending-original',
     subtype: 'promise',
   };
+  // The settlement guard is bounded by serviced time, so the clock only
+  // moves when the sampler is fired: one fire credits one interval.
+  let clockMs = 0;
+  context._cdpNow = () => { clockMs += 100; return clockMs; };
   const pending = vm.runInContext('_cdpSettle(7, pendingRemote)', context);
   await delay();
-  const timer = timers.find((item) => item.active && item.ms === 10000);
+  const timer = timers.find((item) => item.active && item.ms === 100);
   const pendingHasTimeout = Boolean(timer);
   if (timer) {
-    timer.active = false;
-    timer.callback();
+    let rejected = false;
+    pending.catch(() => { rejected = true; });
+    for (let fired = 0; fired < 300 && !rejected; fired++) {
+      const sampler = timers.find((item) => item.active && item.ms === 100);
+      if (!sampler) break;
+      sampler.active = false;
+      sampler.callback();
+      await delay();
+    }
     try { await pending; } catch (_) {}
     await delay();
     await delay();
@@ -248,10 +259,12 @@ async function runEval(id, code) {
 def run_cdp_handle_lifecycle():
     node = shutil.which('node')
     assert node, 'node is required to execute the CDP lifecycle harness'
-    result = subprocess.run(
+    # The child is bounded internally by fire counts; a genuine deadlock
+    # surfaces as a hung job under the runner's own suite ceiling.
+    proc = subprocess.Popen(
         [node, '-e', _CDP_HANDLE_LIFECYCLE_HARNESS,
          str(EXTENSION_ROOT / 'background.js')],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate()
+    assert proc.returncode == 0, (proc.returncode, out, err)
+    return json.loads(out)
