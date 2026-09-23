@@ -86,6 +86,8 @@ def _mapping(workflow_reader):
                    '/actions/runs/${{ github.run_id }}',
         'STATUS': '${{ job.status }}',
         'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
+        'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
+                               'not_measured_reason }}',
     }, step
     script = step['run']
     assert "-f name='coverage comment'" in script, script
@@ -432,6 +434,8 @@ EXPECTED_PUBLICATION_STEP = {
                    '/actions/runs/${{ github.run_id }}',
         'STATUS': '${{ job.status }}',
         'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
+        'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
+                               'not_measured_reason }}',
     },
     'run': r'''set -euo pipefail
 
@@ -444,6 +448,11 @@ case "$STATUS" in
 esac
 
 if [ "$STATUS" = success ] && [ "${JOB_SKIPPED:-}" = true ]; then
+  if [ -z "${NOT_MEASURED_REASON:-}" ]; then
+    echo 'skipped=true reached the publish step without a ' \
+      'not_measured_reason output' >&2
+    exit 1
+  fi
   STATUS=neutral
 fi
 
@@ -489,8 +498,8 @@ write_check() {
     -f details_url="$RUN_URL"
   )
   if [ "$STATUS" = neutral ]; then
-    local summary='Coverage was not measured for a '
-    summary+='documentation-only change.'
+    local summary='Coverage was not measured for '
+    summary+="$NOT_MEASURED_REASON."
     args+=( -f 'output[title]=Coverage not measured'
       -f "output[summary]=$summary" )
   fi
