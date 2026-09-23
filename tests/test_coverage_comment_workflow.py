@@ -51,6 +51,12 @@ def _write_executable(path, content):
     path.chmod(0o755)
 
 
+def _step_outputs(path):
+    return dict(
+        line.split('=', 1)
+        for line in path.read_text(encoding='utf-8').splitlines())
+
+
 def _run_shell_block(workdir, script, env):
     """Run a workflow shell block with coverage disabled in its children."""
     return subprocess.run(
@@ -403,7 +409,7 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
-    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert len(recorded_writes(calls)) == 1, \
         calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
@@ -426,7 +432,7 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
     marked, state, calls, _output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=state,
         head_sha='B', current_head='B')
-    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert len(recorded_writes(calls)) == 1, \
         calls.read_text(encoding='utf-8')
     assert 'Patch coverage was not measured for commit B.' in \
@@ -468,9 +474,11 @@ def test_a_cancelled_coverage_job_credits_the_run_like_a_skipped_one(tmp):
     assert 'Patch coverage was not measured for commit B.' in \
         state[0]['body'], state
     assert '**100.0%**' not in state[0]['body'], state
-    outputs = output.read_text(encoding='utf-8')
-    assert 'skipped=true' in outputs, outputs
-    assert 'not_measured_reason=a cancelled tests run' in outputs, outputs
+    outputs = _step_outputs(output)
+    assert outputs.get('verdict') == '', outputs
+    assert outputs.get('skipped') == 'true', outputs
+    assert outputs.get('not_measured_reason') == 'a cancelled tests run', \
+        outputs
 
 
 def test_a_cancelled_coverage_job_without_a_marker_exits_zero(tmp):
@@ -481,9 +489,11 @@ def test_a_cancelled_coverage_job_without_a_marker_exits_zero(tmp):
         jobs=[{'name': 'coverage', 'conclusion': 'cancelled'}])
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
-    outputs = output.read_text(encoding='utf-8')
-    assert 'skipped=true' in outputs, outputs
-    assert 'not_measured_reason=a cancelled tests run' in outputs, outputs
+    outputs = _step_outputs(output)
+    assert outputs.get('verdict') == '', outputs
+    assert outputs.get('skipped') == 'true', outputs
+    assert outputs.get('not_measured_reason') == 'a cancelled tests run', \
+        outputs
 
 
 def test_a_skipped_coverage_job_keeps_the_documentation_only_reason(tmp):
@@ -494,21 +504,25 @@ def test_a_skipped_coverage_job_keeps_the_documentation_only_reason(tmp):
         jobs=[{'name': 'coverage', 'conclusion': 'skipped'}])
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
-    outputs = output.read_text(encoding='utf-8')
-    assert 'skipped=true' in outputs, outputs
-    assert 'not_measured_reason=a documentation-only change' in outputs, \
-        outputs
+    outputs = _step_outputs(output)
+    assert outputs.get('verdict') == '', outputs
+    assert outputs.get('skipped') == 'true', outputs
+    assert outputs.get('not_measured_reason') == \
+        'a documentation-only change', outputs
 
 
-def test_a_failed_coverage_job_with_no_marker_still_fails(tmp):
-    """Without skip or cancel credit an empty marker stays an error."""
+def test_a_failed_coverage_job_reports_failure_and_exits_clean(tmp):
+    """No credit leaves verdict=failure; the step itself exits clean."""
     marked, _state, calls, output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=[],
         head_sha='B', current_head='B',
         jobs=[{'name': 'coverage', 'conclusion': 'failure'}])
-    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
-    assert output.read_text(encoding='utf-8') == '', output
+    outputs = _step_outputs(output)
+    assert outputs.get('verdict') == 'failure', outputs
+    assert 'skipped' not in outputs, outputs
+    assert 'not_measured_reason' not in outputs, outputs
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
