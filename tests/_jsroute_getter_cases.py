@@ -259,4 +259,20 @@ GETTER_CASES = [
      "const obj = { get p() { with (holder) { "
      "return dem.bind(side); } } };\n"
      + _PRO + '\n' + 'obj.p()' + _TAIL, (False, True)),
+    # `side` is a globalThis accessor, not a lexical binding: the
+    # bind-time read runs it, and the lexical gate refuses the name,
+    # so the promoting spelling keeps its report and the demoting
+    # spelling stays fail-closed.
+    ('getter-bound-global-accessor-argument',
+     _LET + "Object.defineProperty(globalThis, 'side', "
+     "{ get() { " + _PRO + " } });\n"
+     "function dem() { void 0; }\n"
+     "const obj = { get p() { return dem.bind(side); } };\n"
+     + 'obj.p()' + _TAIL, True),
+    ('getter-bound-global-accessor-argument-demotion',
+     _LET + "Object.defineProperty(globalThis, 'side', "
+     "{ get() { " + _DEM + " } });\n"
+     "function dem() { void 0; }\n"
+     "const obj = { get p() { return dem.bind(side); } };\n"
+     + 'obj.p()' + _TAIL, (False, True)),
 ]
