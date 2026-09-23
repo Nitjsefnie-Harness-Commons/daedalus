@@ -90,17 +90,22 @@ def _dynamic_callees(tree):
 def _is_dynamic_import(func, bound):
     """A call to import_module or __import__, per the module's own bindings.
 
-    Loading a module by PATH — `spec_from_file_location`, `SourceFileLoader`
-    — is a different operation and stays outside this recognition.
+    An attribute names the operation by its own name, so one whose attribute
+    is not one of the operation's (`importlib.util`) is readable to a
+    specific other object and is not the operation; one whose attribute IS
+    the operation's is the operation exactly when its base mentions the
+    operation, and that base is read through the same property the store
+    side uses, so a non-`Name` base is a question with an answer rather
+    than a node the walk skips. Loading a module by PATH —
+    `spec_from_file_location`, `SourceFileLoader` — is a different
+    operation and stays outside this recognition.
     """
     if isinstance(func, ast.Name):
         return bound.get(func.id) == 'by name'
-    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-        source = bound.get(func.value.id)
-        if source == 'importlib':
-            return func.attr in DYNAMIC_ATTRIBUTES
-        if source == 'builtins':
-            return func.attr == '__import__'
+    if isinstance(func, ast.Attribute):
+        if func.attr not in DYNAMIC_ATTRIBUTES:
+            return False
+        return _yields_the_operation(func.value, bound)
     return False
 
 
@@ -111,15 +116,16 @@ def _yields_the_operation(value, bound):
 
     The property, not a list of the shapes that have been met: a tracked
     name anywhere inside a lambda body, a yield, a conditional, a
-    comprehension or a subscript key is a mention, and a type nobody has
-    thought of is read the same way, because every other node is answered
-    by its own children. Two shapes are NOT mentions, both because each is
-    readable to a specific other object: a call — a call evaluates to
-    whatever its callee returns, not to the callee — and a known module's
-    attribute that is not one of the operation's own (`importlib.util`).
-    Those two are the property's limits, named here where a reader meets
-    them; a name bound to a call's result is followed by neither this map
-    nor these refusals.
+    comprehension or a subscript key is a mention, and every type nobody
+    has thought of is read the same way, by its own children. Two early
+    returns do NOT answer by their own children, and each is accounted for.
+    An attribute is one: it is the operation exactly when its own name is
+    the operation's AND its base mentions the operation — a test that reads
+    the whole base however it is spelled, so `importlib.util` is not the
+    operation and `[importlib][0].import_module` is. The OTHER is the
+    property's single limit, a call: a call evaluates to whatever its
+    callee returns, not to the callee, so a name bound to a call's result
+    is followed by neither this map nor these refusals.
     """
     if isinstance(value, ast.Name):
         return value.id in bound
@@ -316,14 +322,15 @@ def _import_targets(path, root):
     naming the module and the import site; a constant resolves like an
     import. A spelling that hides the operation behind a name this map
     cannot follow — a store of any binding form, a `getattr` — raises too,
-    because a walk that skipped it would be the next blind spot. Two value
-    shapes stay outside the property on purpose, and are accepted rather
-    than skipped in silence: a call's result, and an attribute of a known
-    module that is not the operation (`importlib.util`). Both are readable
-    to a specific other object, and refusing every store of either would
-    refuse `mod = importlib.import_module('fcntl')` and every `x = f()[0]`
-    with it; a name holding a call's result is followed by neither the
-    operation map nor these refusals.
+    because a walk that skipped it would be the next blind spot. ONE value
+    shape stays outside the property on purpose, and is accepted rather
+    than skipped in silence: a call's result, which evaluates to whatever
+    its callee returns, so refusing every store of one would refuse
+    `mod = importlib.import_module('fcntl')` and every `x = f()` with it;
+    a name holding a call's result is followed by neither the operation map
+    nor these refusals. An attribute of a known module that is not the
+    operation (`importlib.util`) is not a limit but an answer: its own name
+    is not the operation's, so no base can make it one.
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))

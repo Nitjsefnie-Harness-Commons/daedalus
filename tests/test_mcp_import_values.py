@@ -35,6 +35,13 @@ def _refuses(_tmp, source, site, phrase):
         raise AssertionError('a computed import was silently skipped')
 
 
+def _scans_silently(_tmp, source):
+    """The scan returns normally: this spelling is a declared limit."""
+    _write_tree(Path(_tmp), {'composition.py': source})
+    return _mcp_import_closure.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+
+
 def test_a_conditional_alias_refuses_the_scan(_tmp):
     """`loader = importlib if flag else None` is an ordinary refactor.
 
@@ -178,6 +185,72 @@ def load(name):
 ''', 6, 'cannot follow')
 
 
+def test_an_attribute_over_a_comprehension_base_refuses_the_scan(_tmp):
+    """`loader = [importlib][0].import_module` is `importlib.import_module`.
+
+    The round's own comprehension case refuses `loader = [importlib][0]`;
+    adding the operation's own attribute turns the same tracked name into
+    the operation itself, and a base that is not a bare Name must be read
+    through its own children rather than skipped.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    loader = [importlib][0].import_module
+    return loader(name)
+''', 6, 'cannot follow')
+
+
+def test_an_attribute_over_a_subscript_key_base_refuses_the_scan(_tmp):
+    """A tracked name under a subscript, then the operation's attribute.
+
+    `table[importlib].import_module` reads the operation's own name off a
+    base the two-member match cannot see, so the base's children decide.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name, table):
+    loader = table[importlib].import_module
+    return loader(name)
+''', 6, 'cannot follow')
+
+
+def test_an_attribute_over_a_conditional_base_refuses_the_scan(_tmp):
+    """A tracked name in one arm of a conditional, under the attribute.
+
+    The base is not a bare Name, so the arm must descend into it; the
+    tracked name is in the `IfExp` and the store is refused.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name, flag):
+    loader = (importlib if flag else None).import_module
+    return loader(name)
+''', 6, 'cannot follow')
+
+
+def test_an_attribute_over_a_boolean_base_refuses_the_scan(_tmp):
+    """A tracked name in one value of a `BoolOp`, under the attribute.
+
+    Same mechanism as the conditional: the base is a `BoolOp`, not a Name,
+    and the tracked name sits in its children.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    loader = (0 or importlib).import_module
+    return loader(name)
+''', 6, 'cannot follow')
+
+
 def test_a_key_position_mention_refuses_the_scan(_tmp):
     """A tracked name used as a subscript key is refused, over-refusing.
 
@@ -194,6 +267,60 @@ def load(name, table):
     loader = table[importlib]
     return loader.import_module(name)
 ''', 6, 'cannot follow')
+
+
+def test_an_attribute_over_a_call_base_holds_at_the_call_limit(_tmp):
+    """`(lambda: importlib)().import_module` is the declared call limit.
+
+    The base is a call, and a call's result is followed by neither the map
+    nor these refusals; a name bound to it is the accepted residual, not a
+    new hole. Pinned here so the boundary is read off a real shape rather
+    than assumed, and so closing it later is a deliberate change.
+    """
+    scanned = _scans_silently(_tmp, '''
+import importlib
+
+
+def load(name):
+    loader = (lambda: importlib)().import_module
+    return loader(name)
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+def test_an_attribute_over_a_builtin_import_call_holds_at_the_call_limit(
+        _tmp):
+    """`__import__('importlib').import_module` is the same call limit.
+
+    The main walk reads the `__import__` call as a dynamic import of a
+    constant name, but the operation's own name reached on its RESULT is
+    the call limit again — a name bound to a call's result. Named here
+    because it needs no `importlib` import at all and so is the nearest
+    spelling to a real one.
+    """
+    scanned = _scans_silently(_tmp, '''
+def load(name):
+    loader = __import__('importlib').import_module
+    return loader(name)
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+def test_a_bare_call_over_a_wrapped_base_is_read_as_dynamic(_tmp):
+    """A dynamic-import call whose base is not a bare Name is resolved.
+
+    `[importlib][0].import_module(name)` is a dynamic import at runtime.
+    The main walk classifies a call's callee through the same base reading
+    the store side uses; when it only recognised a bare-Name base, the name
+    this call loaded was dropped from the scan set in silence.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    return [importlib][0].import_module(name)
+''', 6, 'cannot read statically')
 
 
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
@@ -280,13 +407,31 @@ def shapes(handle, flag, table):
     table['k'] = handle
     return (conditional, choice, compared, indexed, starred, listed, counted,
             nested, joined, made, grown, renamed, submodules, loaded,
-            rows_of(handle))
+            rows_of(handle), attribute_bases(handle, flag, table))
 
 
 def load_ordinary(handle):
     get = lambda: handle
     produced = (yield handle)
     return get(), produced
+
+
+def attribute_bases(handle, flag, table):
+    """The operation's own name read off a base that does not mention it.
+
+    Each of these is an ordinary attribute, because the walk reads the base
+    before it decides the node is the operation: `import_module` on a
+    subscript, a comprehension, a conditional, a boolean choice, a call's
+    result and a subscript key is still an ordinary attribute of an ordinary
+    object.
+    """
+    looked_up = table['k'].import_module
+    listed = [handle][0].__import__
+    chosen = (handle if flag else None).import_module
+    combined = (flag and handle).__import__
+    returned = load_ordinary(handle).import_module
+    keyed = table[handle].import_module
+    return (looked_up, listed, chosen, combined, returned, keyed)
 
 
 def rows_of(handle):
