@@ -323,6 +323,29 @@ def load(name):
 ''', 6, 'cannot read statically')
 
 
+def test_a_string_literal_naming_the_operation_is_the_declared_limit(_tmp):
+    """`sys.modules['importlib'].import_module` is a declared limit.
+
+    The walk tracks names, not strings, so an operation reached through a
+    string literal that NAMES it — `sys.modules['importlib']` or
+    `importlib.__dict__['import_module']` — is accepted, not refused. This
+    is a DISCLOSED limit, not a silent hole: the module's opening claim
+    names it, and this case pins that it is still accepted, so a future
+    change that starts refusing it is a deliberate one that reopens the
+    disclosure. The mechanism is not recognised here on purpose.
+    """
+    scanned = _scans_silently(_tmp, '''
+import sys
+
+
+def load(name):
+    loader = sys.modules['importlib'].import_module
+    other = __import__('importlib').__dict__['import_module']
+    return loader(name), other
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
     """The refusals are scoped to the import-by-name operation.
 

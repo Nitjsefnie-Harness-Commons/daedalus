@@ -3,10 +3,15 @@
 The refusal witness floor scans the modules the composition can import, so
 this walk is what makes that set closed: every `import` and `from` at any
 depth resolves to a repository file or is provably elsewhere, and a dynamic
-import is either read or refused by name and line. What it cannot follow is
-refused too — a spelling that hands the import-by-name operation to a name
-the map does not track would leave the closure quietly short of the modules
-that composition can reach.
+import is either read or refused by name and line. A spelling that hands
+the import-by-name operation to a NAME the map does not track is refused
+too. Two shapes it cannot follow are ACCEPTED rather than refused, and each
+is a declared limit, not a silent skip: a call's result, and the operation
+reached through a string literal that names it —
+`sys.modules['importlib'].import_module`,
+`importlib.__dict__['import_module']` — which nothing refuses, because the
+walk tracks names and not strings. Either would leave the closure quietly
+short of the modules that composition can reach.
 """
 import ast
 from pathlib import Path
