@@ -418,6 +418,31 @@ def load(loader=importlib, name=None):
 ''', 5, 'cannot follow')
 
 
+def test_a_parameter_default_refusal_is_one_line_naming_the_parameter(_tmp):
+    """The refusal names the parameter, not the whole definition.
+
+    Unparsing the enclosing `def` spanned several lines in the traceback; a
+    refusal a maintainer reads while chasing a closure gap should be one
+    line, and it should point at the offending parameter by name.
+    """
+    _write_tree(Path(_tmp), {'composition.py': '''
+import importlib
+
+
+def load(name, loader=importlib):
+    return loader.import_module(name)
+'''})
+    try:
+        _mcp_import_closure.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        message = str(raised)
+        assert '\n' not in message, message
+        assert 'parameter loader=importlib' in message, message
+    else:
+        raise AssertionError('a computed import was silently skipped')
+
+
 def test_an_except_target_alias_refuses_the_scan(_tmp):
     _refuses(_tmp, '''
 import importlib
