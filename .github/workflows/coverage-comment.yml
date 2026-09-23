@@ -125,7 +125,7 @@ jobs:
             fi
             numbers="$(sort -u pulls.txt)"
           fi
-          count="$(printf '%s\n' "$numbers" | awk 'NF' | wc -l)"
+          count="$(printf '%s\n' "$numbers" | awk 'NF' | wc -l | tr -d ' ')"
           if [ "$count" -eq 0 ]; then
             # A closed pull request's run has nowhere to comment and no
             # head worth a check; that is a real state, not an error.
