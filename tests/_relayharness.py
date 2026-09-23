@@ -539,100 +539,69 @@ run().then((result) => {
 """)
 
 
-def run_eval_relay_overlap(order):
+def _run_harness_child(*args):
+    """Run one overlap-harness child and parse its one JSON answer.
+
+    No wall bound here: the children bound themselves by attempt counts
+    (see waitFor in the harness above), so a genuine deadlock surfaces as a
+    hung job under the runner's own suite ceiling, which is the preferred
+    failure mode.
+    """
     node = shutil.which('node')
     assert node, 'node is required to execute the extension eval relay'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(ROOT / 'extension' / 'background.js'),
-         str(ROOT / 'extension' / 'content.js'),
-         str(ROOT / 'extension' / 'page.js'), json.dumps(order)],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    proc = subprocess.Popen(
+        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS, *args],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = proc.communicate()
+    assert proc.returncode == 0, (proc.returncode, out, err)
+    return json.loads(out)
+
+
+def run_eval_relay_overlap(order):
+    return _run_harness_child(
+        str(ROOT / 'extension' / 'background.js'),
+        str(ROOT / 'extension' / 'content.js'),
+        str(ROOT / 'extension' / 'page.js'), json.dumps(order))
 
 
 def run_eval_same_tab_preemption():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval path'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'preemption'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'preemption')
 
 
 def run_gm_abort():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the GM relay'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'gm-abort'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'gm-abort')
 
 
 def run_eval_relay_marker(hostname):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval path'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'marker', hostname],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'marker', hostname)
 
 
 def run_eval_after_cdp_fails_mid_flight():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval path'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'midflight', '', 'midflight'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'midflight', '', 'midflight')
 
 
 def run_eval_with_poisoned_page_globals(cdp_available):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval path'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'poisoned', '',
-         '1' if cdp_available else '0'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'poisoned', '',
+        '1' if cdp_available else '0')
 
 
 def run_main_world_injection_shapes():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval path'
-    result = subprocess.run(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'),
-         str(EXTENSION_ROOT / 'content.js'),
-         str(EXTENSION_ROOT / 'page.js'), '[]', 'injection-shapes'],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    return _run_harness_child(
+        str(EXTENSION_ROOT / 'background.js'),
+        str(EXTENSION_ROOT / 'content.js'),
+        str(EXTENSION_ROOT / 'page.js'), '[]', 'injection-shapes')
