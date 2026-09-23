@@ -112,14 +112,165 @@ def _yields_the_operation(value, bound):
     return _is_dynamic_import(value, bound)
 
 
-def _aliases_the_operation(node, bound):
-    """True when a statement binds the import-by-name operation to a plain
-    name, which the map cannot see and therefore cannot follow."""
-    value = node.value
-    if value is None or not _yields_the_operation(value, bound):
-        return False
-    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    return any(isinstance(target, ast.Name) for target in targets)
+def _store_leaves(target):
+    """Every name, attribute or subscript a store target binds."""
+    if isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _store_leaves(element)
+    elif isinstance(target, ast.Starred):
+        yield from _store_leaves(target.value)
+    else:
+        yield target
+
+
+class _BindingWalk(ast.NodeVisitor):
+    """Every place the module binds a name, and what each binding takes.
+
+    The binding grammar is not a list of statement kinds, so this reads
+    stores rather than statements: a walrus, an unpack, a `for` or `with`
+    target, a comprehension target, an `except ... as` name and a parameter
+    default all bind a name, and each is refused when it binds the
+    import-by-name operation to somewhere the map cannot see, or when it
+    overwrites a name the map tracks. Because a tracked name is never
+    allowed to be rebound, the map needs no rewriting to stay a fixed
+    point: the two refusals are what keep it one.
+    """
+
+    def __init__(self, bound, refuse):
+        self.bound = bound
+        self.refuse = refuse
+
+    def _alias(self, node):
+        self.refuse(
+            node, f'{ast.unparse(node)} binds the import-by-name operation to '
+            'a name this scan cannot follow')
+
+    def _rebind(self, node, name):
+        self.refuse(
+            node, f'{ast.unparse(node)} rebinds {name!r}, which this scan '
+            'maps to the import-by-name operation, to a value it cannot '
+            'follow')
+
+    def _leaf(self, node, target, values):
+        """One store, offered the values it can receive.
+
+        A target the pairing could not read is offered all of them: any one
+        of them may land in any one leaf, so the refusal cannot name which.
+        """
+        if any(value is not None and _yields_the_operation(value, self.bound)
+               for value in values):
+            self._alias(node)
+        elif isinstance(target, ast.Name) and target.id in self.bound:
+            self._rebind(node, target.id)
+
+    def _pooled(self, node, target, values):
+        for leaf in _store_leaves(target):
+            self._leaf(node, leaf, values)
+
+    def _paired(self, node, target, value):
+        """Bind a target from the one value it receives, unpacking a
+        sequence element-wise when both sides have the same shape."""
+        if isinstance(target, (ast.Tuple, ast.List)) \
+                and isinstance(value, (ast.Tuple, ast.List)):
+            if len(target.elts) == len(value.elts):
+                for element, item in zip(target.elts, value.elts):
+                    self._paired(node, element, item)
+                return
+            self._pooled(node, target, list(value.elts))
+            return
+        if isinstance(target, (ast.Tuple, ast.List, ast.Starred)):
+            self._pooled(node, target, [value])
+            return
+        self._leaf(node, target, [value])
+
+    def _each(self, node, target, expression):
+        """Bind a target from every value an expression can offer it."""
+        if isinstance(expression, (ast.Tuple, ast.List)):
+            for item in expression.elts:
+                self._paired(node, target, item)
+        else:
+            self._paired(node, target, expression)
+
+    def _defaults(self, node, defaults):
+        """A parameter default binds its parameter. A parameter with no
+        default is a fresh name, and one that shadows a tracked name leaves
+        the map's answer standing on the conservative side."""
+        for default in defaults:
+            if default is not None \
+                    and _yields_the_operation(default, self.bound):
+                self._alias(node)
+
+    def visit_Assign(self, node):
+        self.generic_visit(node)
+        for target in node.targets:
+            self._paired(node, target, node.value)
+
+    def visit_AugAssign(self, node):
+        self.generic_visit(node)
+        self._paired(node, node.target, node.value)
+
+    def visit_AnnAssign(self, node):
+        self.generic_visit(node)
+        if node.value is not None:
+            self._paired(node, node.target, node.value)
+
+    def visit_NamedExpr(self, node):
+        self.generic_visit(node)
+        self._paired(node, node.target, node.value)
+
+    def visit_For(self, node):
+        self.generic_visit(node)
+        self._each(node, node.target, node.iter)
+
+    visit_AsyncFor = visit_For
+
+    def _comprehension(self, node):
+        self.generic_visit(node)
+        # A generator node carries no line of its own, so the enclosing
+        # expression is what a refusal has to name.
+        for generator in node.generators:
+            self._each(node, generator.target, generator.iter)
+
+    visit_ListComp = _comprehension
+    visit_SetComp = _comprehension
+    visit_DictComp = _comprehension
+    visit_GeneratorExp = _comprehension
+
+    def visit_With(self, node):
+        self.generic_visit(node)
+        for item in node.items:
+            if item.optional_vars is not None:
+                self._paired(node, item.optional_vars, item.context_expr)
+
+    visit_AsyncWith = visit_With
+
+    def visit_ExceptHandler(self, node):
+        self.generic_visit(node)
+        if not node.name:
+            return
+        if node.type is not None \
+                and _yields_the_operation(node.type, self.bound):
+            self._alias(node)
+        elif node.name in self.bound:
+            self._rebind(node, node.name)
+
+    def visit_FunctionDef(self, node):
+        self.generic_visit(node)
+        self._defaults(node, node.args.defaults)
+        self._defaults(node, node.args.kw_defaults)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node):
+        self.generic_visit(node)
+        self._defaults(node, node.args.defaults)
+        self._defaults(node, node.args.kw_defaults)
+
+
+def _refused_bindings(tree, bound, refuse):
+    """Refuse every store that hides the import-by-name operation from the
+    map, whatever form the store takes."""
+    _BindingWalk(bound, refuse).visit(tree)
 
 
 def _looks_the_operation_up(node, bound):
@@ -145,15 +296,19 @@ def _import_targets(path, root):
     import whose argument is not a constant string is unprovable and raises,
     naming the module and the import site; a constant resolves like an
     import. A spelling that hides the operation behind a name this map
-    cannot follow — an assignment alias, a `getattr` — raises too, because
-    a walk that skipped it would be the next blind spot. What stays outside
-    the property: an operation reached through an object this map never
-    bound, such as a module a resolved constant import was stored under.
+    cannot follow — a store of any binding form, a `getattr` — raises too,
+    because a walk that skipped it would be the next blind spot. What stays
+    outside the property: an operation reached through an object this map
+    never bound, such as a module a resolved constant import was stored
+    under, or a name a value the resolver cannot read was assigned to.
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))
     bound = _dynamic_callees(tree)
     package = path.resolve().relative_to(Path(root).resolve()).parent.parts
+    _refused_bindings(
+        tree, bound,
+        lambda node, detail: _refuse(path, root, node, detail))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -179,11 +334,6 @@ def _import_targets(path, root):
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '
                         'this scan cannot read statically')
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)) \
-                and _aliases_the_operation(node, bound):
-            _refuse(path, root, node,
-                    f'{ast.unparse(node)} binds the import-by-name operation '
-                    'to a name this scan cannot follow')
         elif isinstance(node, ast.Call) and _looks_the_operation_up(
                 node, bound):
             _refuse(path, root, node,
