@@ -38,16 +38,18 @@ def _order(label, first, second, call, expected):
             expected)
 
 
-def _late(label, define, call):
+def _late(label, define, call, reported=False):
     """One getter spelling whose promotion the call follows, both ways.
 
     The defect row declares the callable before the routed promotion,
     so the write the call executes lands after it; the twin replaces
     that demotion with the routed send the guard must keep reporting.
+    `reported` pins a demoting spelling the guard stays fail-closed on.
     """
     return [
         (label + '-demotion',
-         _LET + define(_DEM) + '\n' + _PRO + '\n' + call + _TAIL, False),
+         _LET + define(_DEM) + '\n' + _PRO + '\n' + call + _TAIL,
+         reported),
         (label + '-promotion',
          _LET + define(_PRO) + call + _TAIL, True),
     ]
@@ -170,4 +172,31 @@ GETTER_CASES = [
         "function dem() { " + write + " }\n"
         "const obj = { get p() { return dem.bind(null); } };\n"),
         'obj.p()'),
+    *_late('getter-through-arrow-this', lambda write: (
+        "const obj = { m() { " + write + " }, "
+        "get p() { return () => this.m; } };\n"), 'obj.p()()'),
+    *_late('getter-through-curried-named', lambda write: (
+        "const obj = { get p() { return x => y => { " + write
+        + " }; } };\n"), 'obj.p()()'),
+    ('getter-bound-argument-demotion',
+     _LET + "function dem() { " + _DEM + " }\n"
+     "function side() { void 0; }\n"
+     "const obj = { get p() { return dem.bind(side()); } };\n"
+     + _PRO + '\n' + 'obj.p()' + _TAIL, (False, True)),
+    ('getter-bound-argument-promotion',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _PRO + " }\n"
+     "const obj = { get p() { return dem.bind(side()); } };\n"
+     + 'obj.p()' + _TAIL, True),
+    # The arrow's value is never invoked: the promotion inside `m`
+    # stays unrun, so the demoting spelling routes (the guard reports
+    # it) and the promoting spelling routes nothing (agreed).
+    ('getter-through-arrow-this-uncalled',
+     _LET + "const obj = { m() { " + _DEM + " }, "
+     "get p() { return () => this.m; } };\n" + _PRO + '\n'
+     + 'obj.p()' + _TAIL, True),
+    ('getter-through-arrow-this-uncalled-promotion',
+     _LET + "const obj = { m() { " + _PRO + " }, "
+     "get p() { return () => this.m; } };\n"
+     + 'obj.p()' + _TAIL, False),
 ]

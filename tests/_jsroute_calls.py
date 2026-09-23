@@ -2,7 +2,8 @@
 import re
 
 from _jsroute_keys import decode_string_literal, source_key
-from _jsroute_returns import chained_member, getter_value, invoked_body
+from _jsroute_returns import (chained_member, folded_return,
+                              getter_value, invoked_body)
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
@@ -511,8 +512,12 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                 chained = _returned_by(calls, before)
             if chained is not None:
                 # The callee is a prior getter call's result: what that
-                # call's getter returned is what this call invokes.
-                body = chained['returned']
+                # call's value chain bottoms out at is what this call
+                # invokes.
+                folded = folded_return(
+                    resolution['receivers'],
+                    _target('known', body=chained['returned']))
+                body = folded['body']
                 status = 'known' if body is not None else 'unprovable'
                 start = chained['start']
             else:
