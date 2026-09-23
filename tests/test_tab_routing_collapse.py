@@ -457,6 +457,64 @@ def test_pop_uses_resolved_receiver_identity(tmp):
     verdicts(tmp, cases)
 
 
+def test_materialized_container_destructuring(tmp):
+    """A materializer that yields a deferred container pairs with a tuple or
+    list target the way that container pairs when it is the right-hand side
+    itself, whatever expression produced it."""
+    shapes = [
+        ('list', 'x, y = list(pair())', 'x()', 'y()'),
+        ('tuple', 'x, y = tuple(pair())', 'x()', 'y()'),
+        ('list-target', '[x, y] = list(pair())', 'x()', 'y()'),
+        ('nested-list', 'x, y = list(list(pair()))', 'x()', 'y()'),
+        ('reversed', 'x, y = reversed(pair())', 'y()', 'x()'),
+        ('slice-reversed', 'x, y = pair()[::-1]', 'y()', 'x()'),
+        ('slice-open', 'x, y = pair()[:]', 'x()', 'y()'),
+        ('star', 'x, *rest = list(pair())', 'x()', 'rest[0]()'),
+    ]
+    cases = []
+    for label, store, bad, good in shapes:
+        source = body(store, bad)
+        cases.append((label + '-called', source, (1, 1)))
+        cases.append((label + '-other', body(store, good), (0, 0)))
+        cases.append((label + '-discarded', body(store, '0'), (0, 0)))
+        cases.append((label + '-clean', source.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    verdicts(tmp, cases)
+
+
+def test_materialized_container_controls(tmp):
+    """The materializer pairing must not move the controls that already
+    answered: the eager consumer's own index, a plain container, iter, and a
+    single-name target that subscripts the materialized container."""
+    cases = [
+        ('list-index', body('x = list(pair())', 'x[0]()'), (1, 1)),
+        ('plain-pair', body('x, y = pair()', 'x()'), (1, 1)),
+        ('iter', body('x, y = iter(pair())', 'x()'), (1, 1)),
+        ('list-index-clean', body('x = list(pair())', 'x[0]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
+def test_with_tuple_target_pairs_enter_result(tmp):
+    """`with ... as (x, y)` pairs the __enter__ result the way the
+    assignment binder pairs its right-hand side."""
+    store = ('class C:\n'
+             '    def __enter__(self): return pair()\n'
+             '    def __exit__(self, *a): pass\n'
+             'def ctx(): return C()\n'
+             'with ctx() as (x, y):\n'
+             '    pass\n')
+    called = body(store, 'x()')
+    cases = [
+        ('with-tuple-called', called, (1, 1)),
+        ('with-tuple-other', body(store, 'y()'), (0, 0)),
+        ('with-tuple-clean', called.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='collapse_')
 
