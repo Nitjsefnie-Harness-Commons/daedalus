@@ -49,6 +49,11 @@ function _cdpError(response) {
 }
 
 const _CDP_PROMISE_TIMEOUT_MS = 10000;
+const _CDP_SAMPLE_MS = 100;
+
+function _cdpNow() {
+  return Date.now();
+}
 
 async function _releaseCdpObjects(chromeTabId, ...values) {
   const objectIds = new Set();
@@ -70,6 +75,41 @@ async function _releaseCdpObjects(chromeTabId, ...values) {
   }
 }
 
+// Race one inspector settlement against a serviced bound: the sampler
+// re-arms every _CDP_SAMPLE_MS and credits each gap at one doubled
+// interval, so a worker the host starved is charged none of the wall time
+// it never ran in. `timedOut` flips only when the guard rejects on accrued
+// serviced time, and `onLateResponse` then receives the settlement the
+// abandoned promise eventually brings.
+function _raceCdpSettlement(work, onLateResponse) {
+  let sampledAtMs = _cdpNow();
+  let accruedMs = 0;
+  let timedOut = false;
+  let samplerId;
+  const guard = new Promise((_resolve, reject) => {
+    const sample = () => {
+      const nowMs = _cdpNow();
+      accruedMs += Math.min(nowMs - sampledAtMs, 2 * _CDP_SAMPLE_MS);
+      sampledAtMs = nowMs;
+      if (accruedMs >= _CDP_PROMISE_TIMEOUT_MS) {
+        timedOut = true;
+        reject(new Error(
+          `promise settlement timed out after ${
+            _CDP_PROMISE_TIMEOUT_MS} ms`));
+        return;
+      }
+      samplerId = setTimeout(sample, _CDP_SAMPLE_MS);
+    };
+    samplerId = setTimeout(sample, _CDP_SAMPLE_MS);
+  });
+  if (onLateResponse) {
+    work.then((lateResponse) => {
+      if (timedOut) onLateResponse(lateResponse);
+    }, () => {});
+  }
+  return Promise.race([work, guard]).finally(() => clearTimeout(samplerId));
+}
+
 // Read an inspector-held value by value and release every handle returned by
 // the protocol. This describes the CDP transport only: submitted source may
 // already have routed its value through page-controlled machinery.
@@ -81,34 +121,17 @@ async function _cdpSettle(chromeTabId, remote) {
       { objectId: remote.objectId,
         functionDeclaration: 'function () { return this; }' }];
   let response;
-  let timeoutId;
-  let timedOut = false;
   const responsePromise = chrome.debugger.sendCommand(
     { tabId: chromeTabId }, settle[0],
     { ...settle[1], returnByValue: true });
-  if (remote.subtype === 'promise') {
-    responsePromise.then((lateResponse) => {
-      if (timedOut) return _releaseCdpObjects(chromeTabId, lateResponse);
-      return undefined;
-    }, () => {});
-  }
   try {
     response = remote.subtype === 'promise'
-      ? await Promise.race([
-        responsePromise,
-        new Promise((_resolve, reject) => {
-          timeoutId = setTimeout(() => {
-            timedOut = true;
-            reject(new Error(
-              `promise settlement timed out after ${
-                _CDP_PROMISE_TIMEOUT_MS} ms`));
-          }, _CDP_PROMISE_TIMEOUT_MS);
-        }),
-      ])
+      ? await _raceCdpSettlement(responsePromise, (lateResponse) => {
+        _releaseCdpObjects(chromeTabId, lateResponse);
+      })
       : await responsePromise;
     return { value: response.result?.value, error: _cdpError(response) };
   } finally {
-    if (timeoutId) clearTimeout(timeoutId);
     await _releaseCdpObjects(chromeTabId, remote, response);
   }
 }
