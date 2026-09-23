@@ -16,6 +16,7 @@ from _workflows import _workflow_triggers  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     GH_ARTIFACT_STUB as _GH_ARTIFACT_STUB,
+    GH_CHECK_STUB as _GH_CHECK_STUB,
     GH_COMMENT_STUB as _GH_COMMENT_STUB,
 )
 from _yamlread import (  # noqa: E402
@@ -337,7 +338,7 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
 
 def _run_comment_block(tmp, block_name, *, state, current_head='B',
                        head_sha='B', pr_number='170', claimed='170',
-                       body='### Coverage\n'):
+                       body='### Coverage\n', jobs=None):
     """Run one commenter block with a recording GitHub double."""
     workdir = Path(tmp) / block_name.replace(' ', '-')
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
@@ -362,6 +363,7 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
         'GITHUB_OUTPUT': str(output),
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls),
+        'STUB_JOBS': json.dumps(jobs or []),
     }
     result = _run_shell_block(
         workdir, _run_block(_workflow(), block_name), env)
@@ -447,6 +449,121 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
         }}},
     }
     assert evaluate(condition, non_pull_request) is False, condition
+
+
+def test_a_cancelled_coverage_job_credits_the_run_like_a_skipped_one(tmp):
+    """A cancelled coverage job replaces a stale marker and exits 0."""
+    posted, state, calls, _output = _run_comment_block(
+        tmp, 'Post or update the pull request comment', state=[],
+        head_sha='A', current_head='A', body='**100.0%**')
+    assert posted.returncode == 0, (posted.stdout, posted.stderr)
+    assert len(recorded_writes(calls)) == 1, \
+        calls.read_text(encoding='utf-8')
+    marked, state, calls, output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=state,
+        head_sha='B', current_head='B',
+        jobs=[{'name': 'coverage', 'conclusion': 'cancelled'}])
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert len(recorded_writes(calls)) == 1, \
+        calls.read_text(encoding='utf-8')
+    assert 'Patch coverage was not measured for commit B.' in \
+        state[0]['body'], state
+    assert '**100.0%**' not in state[0]['body'], state
+    outputs = output.read_text(encoding='utf-8')
+    assert 'skipped=true' in outputs, outputs
+    assert 'not_measured_reason=a cancelled tests run' in outputs, outputs
+
+
+def test_a_cancelled_coverage_job_without_a_marker_exits_zero(tmp):
+    """Cancelled credit is success even when there is no marker yet."""
+    marked, _state, calls, output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=[],
+        head_sha='B', current_head='B',
+        jobs=[{'name': 'coverage', 'conclusion': 'cancelled'}])
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    outputs = output.read_text(encoding='utf-8')
+    assert 'skipped=true' in outputs, outputs
+    assert 'not_measured_reason=a cancelled tests run' in outputs, outputs
+
+
+def test_a_skipped_coverage_job_keeps_the_documentation_only_reason(tmp):
+    """A skipped coverage job still names a documentation-only change."""
+    marked, _state, calls, output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=[],
+        head_sha='B', current_head='B',
+        jobs=[{'name': 'coverage', 'conclusion': 'skipped'}])
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    outputs = output.read_text(encoding='utf-8')
+    assert 'skipped=true' in outputs, outputs
+    assert 'not_measured_reason=a documentation-only change' in outputs, \
+        outputs
+
+
+def test_a_failed_coverage_job_with_no_marker_still_fails(tmp):
+    """Without skip or cancel credit an empty marker stays an error."""
+    marked, _state, calls, output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=[],
+        head_sha='B', current_head='B',
+        jobs=[{'name': 'coverage', 'conclusion': 'failure'}])
+    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    assert output.read_text(encoding='utf-8') == '', output
+
+
+def _run_publish_check(tmp, label, *, status='success', job_skipped='',
+                       reason=''):
+    """Run the publish block with one neutral-mapping combination."""
+    workdir = Path(tmp) / label
+    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
+    _write_executable(workdir / 'bin' / 'gh', _GH_CHECK_STUB)
+    state_path = workdir / 'state.json'
+    state_path.write_text(json.dumps({'checks': []}), encoding='utf-8')
+    calls = workdir / 'calls.jsonl'
+    calls.write_text('', encoding='utf-8')
+    env = {
+        **os.environ,
+        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
+        'GH_TOKEN': 'stub', 'REPO': 'owner/repo', 'HEAD_SHA': 'a' * 40,
+        'RUN_URL': 'https://github.com/owner/repo/actions/runs/7',
+        'STATUS': status, 'JOB_SKIPPED': job_skipped,
+        'NOT_MEASURED_REASON': reason,
+        'STUB_STATE': str(state_path), 'STUB_CALLS': str(calls),
+    }
+    result = _run_shell_block(
+        workdir, _run_block(_workflow(), 'Publish coverage check'), env)
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    return result, state, calls
+
+
+def test_publish_builds_the_neutral_summary_from_the_reason_output(tmp):
+    """A neutral check names the reason coverage was not measured."""
+    cancelled, state, _calls = _run_publish_check(
+        tmp, 'cancelled-reason', job_skipped='true',
+        reason='a cancelled tests run')
+    assert cancelled.returncode == 0, (cancelled.stdout, cancelled.stderr)
+    check = state['checks'][0]
+    assert check['conclusion'] == 'neutral', check
+    assert check['output[summary]'] == (
+        'Coverage was not measured for a cancelled tests run.'), check
+    doc_only, state, _calls = _run_publish_check(
+        tmp, 'doc-only-reason', job_skipped='true',
+        reason='a documentation-only change')
+    assert doc_only.returncode == 0, (doc_only.stdout, doc_only.stderr)
+    check = state['checks'][0]
+    assert check['conclusion'] == 'neutral', check
+    assert check['output[summary]'] == (
+        'Coverage was not measured for a documentation-only change.'), check
+
+
+def test_publish_refuses_a_neutral_mapping_without_a_reason(tmp):
+    """skipped=true with no reason output fails loudly, posting nothing."""
+    unlabeled, state, calls = _run_publish_check(
+        tmp, 'missing-reason', job_skipped='true', reason='')
+    assert unlabeled.returncode != 0, (unlabeled.stdout, unlabeled.stderr)
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    assert state['checks'] == [], state
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):
