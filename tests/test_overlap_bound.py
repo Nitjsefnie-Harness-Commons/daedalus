@@ -22,10 +22,8 @@ from _overlap import _STEP_LINE  # noqa: E402
 _SAMPLE_MS = 100
 _CREDIT_CAP_MS = 2 * _SAMPLE_MS
 
-# The entry IIFE is the one statement that drives the whole cookie flow;
-# everything before it is the bound machinery under test. The newline
-# anchor is load-bearing: `await waitFor(async () => {` also matches a
-# bare opening brace pair mid-function.
+# The newline anchor is load-bearing: `await waitFor(async () => {` also
+# matches a bare opening brace pair mid-function.
 _ENTRY_IIFE = '\n(async () => {'
 
 _SETTLE_DRIVER = """

@@ -187,9 +187,8 @@ function step(label) {
 // stay independent, so the mirroring is kept by hand.
 const OVERLAP_SAMPLE_MS = 100;
 
-// One timebase for both bounds: now() credits the serviced gap since its
-// last call, capped at twice the sampler interval, so a starved child is
-// not charged the wall time it never ran in.
+// One timebase for both bounds. The cap keeps a starved child from being
+// charged the wall time it never ran in.
 const clock = {
   ms: 0,
   sampledAt: Date.now(),
