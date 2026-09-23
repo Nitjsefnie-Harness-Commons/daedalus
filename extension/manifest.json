@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Daedalus",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "minimum_chrome_version": "120",
   "description": "Remote browser control — eval bridge, screenshots, CDP, cookies",
   "permissions": [
