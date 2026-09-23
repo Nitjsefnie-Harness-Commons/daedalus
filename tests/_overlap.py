@@ -24,7 +24,7 @@ import _drain  # noqa: E402
 import _util  # noqa: E402
 # The kill-release floor stays reachable at the spelling the suite pins.
 # pylint: disable-next=unused-import
-from _clientstate import (  # noqa: E402
+from _clientstate import (  # noqa: E402,F401
     _KILLED_CLIENT_PIPE_RELEASE_S, assert_clients_exited, client_states)
 
 
@@ -325,9 +325,8 @@ function ownerPosted(owner) {
 
 _OVERLAP_INNER_WAIT_S = 15
 
-# Publication and healthy exits may move together: expiry on a killed
-# client's pipes means a broken drain, not a busy runner; the parameter only
-# forces it.
+# Publication and healthy exits may move together: expiry on a killed client's
+# pipes means a broken drain, not a busy runner; the parameter only forces it.
 _CLIENT_COMMAND_WAIT_S = 15
 _FAILED_CLIENT_GRACE_S = 1
 
@@ -431,8 +430,6 @@ def _drain_text(value):
     if isinstance(value, bytes):
         return value.decode('utf-8', 'replace')
     return value
-
-
 
 
 def _wait_for_client_commands(queue, count):
