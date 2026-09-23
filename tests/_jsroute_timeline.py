@@ -146,8 +146,8 @@ class InvocationReplay:
         self.body_scopes = {
             (scope['start'], scope['end']): index
             for index, scope in enumerate(scopes)}
-        # First await each body owns. A write past it runs in the
-        # continuation, unordered against the synchronous caller, so the
+        # First await each body owns. A write past it is written after
+        # the await, unordered against the synchronous caller, so the
         # replay cannot credit it: crediting one ordered a demotion the
         # runtime had not performed yet (issue 862's missed send).
         self.await_boundaries = self._await_boundaries()
@@ -276,10 +276,11 @@ class InvocationReplay:
             for start, kind, item in operations:
                 past = boundary is not None and start >= boundary
                 if past and kind == 'call':
-                    # The call runs after the await, so its ordering
+                    # The call is written after the await, so its ordering
                     # against the caller's synchronous send is unknown
                     # and replaying it would credit writes that may not
                     # have happened yet.
+                    item['deferred'] = True
                     unknowns.append(item)
                     continue
                 if kind == 'opaque' or past:

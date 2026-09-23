@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _jsroute import js_tab_routing_violations  # noqa: E402
 from _jsroute_harness import (paired as _paired,  # noqa: E402
                               runtime_and_guard as _runtime_and_guard)
 
@@ -50,6 +51,21 @@ def test_conditional_await_over_report_is_deliberate(tmp):
                 for label, source, _ in cases]
     expected = _paired(cases)
     assert observed == expected, observed
+
+
+def test_deferred_call_report_names_the_ordering(tmp):
+    head = ("let promote = ordinary;\n"
+            "promote = () => extCmd('focus-tab', { tab: chromeTab });\n")
+    source = (head + "function demote() { promote = () => ordinary; } "
+              "const f = async () => { await 0; demote(); }; "
+              "f(); promote();\n")
+    path = Path(tmp) / 'deferred-call.js'
+    path.write_text(source, encoding='utf-8')
+    found = js_tab_routing_violations(path, path.name)
+    ordering = [line for line in found if 'written after' in line]
+    assert len(ordering) == 1, found
+    assert 'await' in ordering[0], found
+    assert not any('cannot resolve' in line for line in found), found
 
 
 def main():
