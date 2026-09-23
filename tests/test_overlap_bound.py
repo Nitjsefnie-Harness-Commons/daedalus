@@ -92,6 +92,17 @@ _HUNG_WORK = """
 const work = new Promise(() => {});
 """
 
+# A config load frozen far past the doubled backstop, so the outer report
+# is the only surface left to carry the child's evidence.
+_FREEZING_CONFIG_WORKER = """
+async function loadConfig() {
+  const until = Date.now() + 30000;
+  while (Date.now() < until) {}
+}
+
+function dispatchCommand() {}
+"""
+
 
 def _bound_source(work, call):
     """The shipped prelude's bound machinery, driven by one control."""
@@ -211,6 +222,24 @@ def test_the_harness_wait_survives_a_starved_child(tmp):
         'owner': 'owner-a',
         'deliveryId': None,
     }], actual
+
+
+def test_a_frozen_child_reaches_the_outer_backstop(tmp):
+    """Starvation past every inner bound is the backstop's report to make.
+
+    Pins overlap_child_timeout's docstring claim that a child starved
+    deeply enough is reported by this backstop instead of an inner label,
+    and that the report preserves the child's pipes and last step: the
+    frozen step's label names itself and both captured streams are
+    embedded.
+    """
+    failure = _overlap._harness_failure(
+        _worker(tmp, _FREEZING_CONFIG_WORKER), inner_wait=0.5)
+    assert ('overlap harness outer backstop timed out after'
+            in failure), failure
+    assert 'last step: the worker to load its config' in failure, failure
+    assert '[step] the worker script to initialize' in failure, failure
+    assert "stdout: ''" in failure, failure
 
 
 def test_a_bound_record_cannot_enter_a_step_trace(tmp):
