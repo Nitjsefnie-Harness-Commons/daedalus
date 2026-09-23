@@ -3,14 +3,16 @@
 The refusal witness floor scans the modules the composition can import, so
 this walk is what makes that set closed: every `import` and `from` at any
 depth resolves to a repository file or is provably elsewhere, and a dynamic
-import is either read or refused by name and line. A spelling that hands
+import is either read or refused by name and line. A spelling that binds
 the import-by-name operation to a NAME the map does not track is refused
-too. Two shapes it cannot follow are ACCEPTED rather than refused, and each
-is a declared limit, not a silent skip: a call's result, and the operation
+too. Three shapes it cannot follow are ACCEPTED rather than refused, and
+each is a declared limit, not a silent skip: a call's result; the operation
 reached through a string literal that names it —
 `sys.modules['importlib'].import_module`,
 `importlib.__dict__['import_module']` — which nothing refuses, because the
-walk tracks names and not strings. Either would leave the closure quietly
+walk tracks names and not strings; and the operation delivered as a call
+ARGUMENT to a parameter (`use(importlib)`), because the walk does not
+follow a call's arguments. Any of them would leave the closure quietly
 short of the modules that composition can reach.
 """
 import ast
@@ -221,14 +223,36 @@ class _BindingWalk(ast.NodeVisitor):
         else:
             self._paired(node, target, expression)
 
-    def _defaults(self, node, defaults):
+    def _refuse_default(self, node, name, default):
+        """Refuse a default that hands the operation to its parameter.
+
+        The message names the offending parameter, not the whole
+        definition, so a maintainer reads one line in the traceback.
+        """
+        self.refuse(
+            node, f'parameter {name}={ast.unparse(default)} binds the '
+            'import-by-name operation to a name this scan cannot follow')
+
+    def _defaults(self, node, names, defaults):
         """A parameter default binds its parameter. A parameter with no
         default is a fresh name, and one that shadows a tracked name leaves
         the map's answer standing on the conservative side."""
-        for default in defaults:
+        for name, default in zip(names, defaults):
             if default is not None \
                     and _yields_the_operation(default, self.bound):
-                self._alias(node)
+                self._refuse_default(node, name, default)
+
+    def _positional_defaults(self, node):
+        args = node.args
+        positional = [arg.arg for arg in args.posonlyargs + args.args]
+        self._defaults(
+            node, positional[len(positional) - len(args.defaults):],
+            args.defaults)
+
+    def _keyword_defaults(self, node):
+        args = node.args
+        self._defaults(
+            node, [arg.arg for arg in args.kwonlyargs], args.kw_defaults)
 
     def visit_Assign(self, node):
         self.generic_visit(node)
@@ -286,15 +310,15 @@ class _BindingWalk(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
-        self._defaults(node, node.args.defaults)
-        self._defaults(node, node.args.kw_defaults)
+        self._positional_defaults(node)
+        self._keyword_defaults(node)
 
     visit_AsyncFunctionDef = visit_FunctionDef
 
     def visit_Lambda(self, node):
         self.generic_visit(node)
-        self._defaults(node, node.args.defaults)
-        self._defaults(node, node.args.kw_defaults)
+        self._positional_defaults(node)
+        self._keyword_defaults(node)
 
 
 def _refused_bindings(tree, bound, refuse):
@@ -327,15 +351,17 @@ def _import_targets(path, root):
     naming the module and the import site; a constant resolves like an
     import. A spelling that hides the operation behind a name this map
     cannot follow — a store of any binding form, a `getattr` — raises too,
-    because a walk that skipped it would be the next blind spot. ONE value
-    shape stays outside the property on purpose, and is accepted rather
-    than skipped in silence: a call's result, which evaluates to whatever
-    its callee returns, so refusing every store of one would refuse
-    `mod = importlib.import_module('fcntl')` and every `x = f()` with it;
-    a name holding a call's result is followed by neither the operation map
-    nor these refusals. An attribute of a known module that is not the
-    operation (`importlib.util`) is not a limit but an answer: its own name
-    is not the operation's, so no base can make it one.
+    because a walk that skipped it would be the next blind spot. A call's
+    result stays outside the property on purpose, and is accepted rather than
+    skipped in silence: a call evaluates to whatever its callee returns, so
+    refusing every store of one would refuse
+    `mod = importlib.import_module('fcntl')` and every `x = f()` with it; a
+    name holding a call's result is followed by neither the operation map nor
+    these refusals. The operation delivered as a call ARGUMENT to a parameter
+    (`use(importlib)`) is likewise accepted: the walk does not follow a call's
+    arguments. An attribute of a known module that is not the operation
+    (`importlib.util`) is not a limit but an answer: its own name is not the
+    operation's, so no base can make it one.
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))
