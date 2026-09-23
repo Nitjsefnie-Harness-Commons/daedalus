@@ -220,9 +220,8 @@ def mark_dirty(seg_dir_root, job):
     Returns whether it actually landed. A caller about to make this job's
     stored bytes disagree with its record — publishing a new segment, or
     about to overwrite the record itself — has to know that before it
-    goes ahead: swallowing this failure and proceeding anyway is the same
-    shape #203 was filed about, one layer further down, since a write
-    that then also fails leaves neither a marker nor a correct record.
+    goes ahead: proceeding after a swallowed failure leaves neither a
+    marker nor a correct record once the write also fails.
     """
     try:
         atomic_file.write_text_retrying(_dirty_path(seg_dir_root, job), '')
@@ -286,9 +285,8 @@ def log_timing(job, stored, marks):
     if not DEBUG_TIMING:
         return
     # Each mark is named for the phase that ENDS at it, so an interval is
-    # reported under what it did. Naming intervals after the mark they start
-    # from reads plausibly and is off by one, which is how a first pass here
-    # blamed the byte sum for the directory scans' cost.
+    # reported under what it did; naming intervals after the mark they start
+    # from would report them off by one.
     parts = [(name, (ts - marks[i][1]) * 1000)
              for i, (name, ts) in enumerate(marks[1:])]
     total_ms = (marks[-1][1] - marks[0][1]) * 1000

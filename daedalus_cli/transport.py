@@ -228,13 +228,13 @@ def _json_body(response):
 def _exchange(req, timeout, read):
     """Send one request and return read(response).
 
-    Only HTTPError and URLError used to be caught, and both are raised by
-    urlopen itself. A reset, a timeout or an IncompleteRead raised while
-    the body was being READ — after urlopen returned — escaped as a
-    traceback. Those come from the proxy in front of the bridge, not from
-    the bridge, and they are the same class of failure as a refused
-    connection: no answer arrived. HTTPError is a URLError and URLError is
-    an OSError, so the order of the clauses is the order of specificity.
+    HTTPError and URLError are raised by urlopen itself. A reset, a
+    timeout or an IncompleteRead raised while the body is being READ —
+    after urlopen returned — must be caught here too: those come from the
+    proxy in front of the bridge, not from the bridge, and they are the
+    same class of failure as a refused connection, no answer arrived.
+    HTTPError is a URLError and URLError is an OSError, so the order of
+    the clauses is the order of specificity.
     """
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -321,11 +321,9 @@ def wait_for_result(cmd_id, target_tab, delivery_id, timeout, interval=0.5):
     if delivery_id:
         params['delivery'] = delivery_id
     # One monotonic deadline for the whole wait, and every blocking step is
-    # capped by what is left of it. The loop used to check the clock only
-    # before each iteration and then give each HTTP call its own fixed 30s,
-    # so a single stalled poll ran far past the timeout the caller asked for
-    # — a 50ms wait returned after 320ms against one 300ms stall. Wall-clock
-    # time.time() also went backwards under an NTP step; monotonic does not.
+    # capped by what is left of it, so a single stalled poll cannot run past
+    # the timeout the caller asked for. Wall-clock time.time() also went
+    # backwards under an NTP step; monotonic does not.
     deadline = time.monotonic() + timeout
     wait = 0.02
     while True:

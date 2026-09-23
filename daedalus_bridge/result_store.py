@@ -46,15 +46,11 @@ def delivery_lock_for(target_key):
     puts two callers for the same target on two different locks, which is
     silently no serialization at all.
     """
-    # A path-like key is the exact mistake this function was written with, and
-    # it failed silently: two spellings of one directory chose two stripes and
-    # the serialization simply was not there. Refusing it makes that loud.
-    #
-    # A string spelling counts. The spelling that actually shipped was
-    # `\\?\C:\...\tok_tab`, a str, so a check that only refused path
-    # OBJECTS would not have caught the bug it was written for. No legitimate
-    # key can contain one of these characters: a key is `<token>_<tab>` and
-    # `unsafe_component` already rejects every one of them in either half.
+    # A path-like spelling is refused, str or object alike: two spellings of
+    # one directory would otherwise choose two stripes and serialize nothing.
+    # No legitimate key contains one of these characters — a key is
+    # `<token>_<tab>` and `unsafe_component` rejects every one of them in
+    # either half — so refusing them costs no real key.
     if not isinstance(target_key, str):
         raise TypeError('delivery stripe key must be the logical target')
     if any(char in path_safety.WINDOWS_INVALID_PATH_CHARS
