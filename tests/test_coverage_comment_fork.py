@@ -34,7 +34,8 @@ if '/commits/' in target:
     # The base repository associates no pull request with a fork's head
     # commit, so only the fork answers this query.
     if target.startswith('repos/' + os.environ['STUB_FORK_REPO'] + '/'):
-        print(os.environ['STUB_PR_NUMBER'])
+        for number in json.loads(os.environ['STUB_PR_NUMBERS']):
+            print(number)
 elif '/pulls/' in target:
     print(os.environ['CURRENT_HEAD'])
 """
@@ -47,7 +48,7 @@ def _endpoints(calls):
         for value in json.loads(line) if value.startswith('repos/')]
 
 
-def _run_resolve_block(tmp, event_numbers):
+def _run_resolve_block(tmp, event_numbers, found=None):
     """Run the Resolve block against a fork-aware recording double."""
     workdir = Path(tmp) / 'resolve'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
@@ -68,7 +69,8 @@ def _run_resolve_block(tmp, event_numbers):
         'GITHUB_OUTPUT': str(output),
         'STUB_CALLS': str(calls),
         'STUB_FORK_REPO': _FORK_REPO,
-        'STUB_PR_NUMBER': _PR_NUMBER,
+        'STUB_PR_NUMBERS': json.dumps(
+            [_PR_NUMBER] if found is None else found),
         'CURRENT_HEAD': _HEAD_SHA,
     }
     workflow = commenter._workflow()  # pylint: disable=protected-access
@@ -115,6 +117,52 @@ def test_a_same_repository_run_never_reaches_the_fallback(tmp):
     text = output.read_text(encoding='utf-8')
     assert f'number={_PR_NUMBER}' in text, text
     assert 'stale=false' in text, text
+
+
+def test_a_closed_pull_request_run_stands_down(tmp):
+    """A zero pull-request lookup stands down instead of failing."""
+    result, calls, output = _run_resolve_block(tmp, '[]', found=[])
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    text = output.read_text(encoding='utf-8')
+    assert text == 'present=false\n', text
+    endpoints = _endpoints(calls)
+    assert f'repos/{_FORK_REPO}/commits/{_HEAD_SHA}/pulls' in endpoints, \
+        endpoints
+    assert not any('/pulls/' in value for value in endpoints), endpoints
+
+    context = {
+        'steps': {
+            'artifact': {'outputs': {'present': 'true'}},
+            'pr': {'outputs': {'present': 'false'}},
+        },
+        'status': {'success': True, 'failure': False, 'cancelled': False},
+    }
+    for name in ('Mark missing patch coverage',
+                 'Download the comment artifact',
+                 'Post or update the pull request comment',
+                 'Publish coverage check'):
+        condition = commenter._step_condition(  # pylint: disable=W0212
+            commenter._workflow(), name)  # pylint: disable=W0212
+        assert evaluate_if(condition, context) is False, (name, condition)
+
+
+def test_an_ambiguous_fallback_stays_loud(tmp):
+    """Two pull requests from the fallback still fail the job."""
+    result, _calls, output = _run_resolve_block(
+        tmp, '[]', found=['170', '171'])
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'found 2' in result.stderr, result.stderr
+    assert output.read_text(encoding='utf-8') == '', output
+
+
+def test_an_ambiguous_event_list_stays_loud(tmp):
+    """Two pull requests named by the event still fail the job."""
+    result, calls, output = _run_resolve_block(tmp, '[170, 171]')
+    assert result.returncode != 0, (result.stdout, result.stderr)
+    assert 'found 2' in result.stderr, result.stderr
+    assert not any('/commits/' in value for value in _endpoints(calls)), \
+        _endpoints(calls)
+    assert output.read_text(encoding='utf-8') == '', output
 
 
 _MISSING_HEAD_SHA = 'b' * 40

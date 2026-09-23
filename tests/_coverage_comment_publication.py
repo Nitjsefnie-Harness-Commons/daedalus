@@ -77,7 +77,8 @@ def _mapping(workflow_reader):
     steps = step_mappings(workflow, 'comment')
     assert steps[-1]['name'] == 'Publish coverage check', steps
     step = steps[-1]
-    assert step['if'] == 'always()', step
+    publish_gate = "always() && steps.pr.outputs.present != 'false'"
+    assert step['if'] == publish_gate, step
     assert step['env'] == {
         'GH_TOKEN': '${{ github.token }}',
         'REPO': '${{ github.repository }}',
@@ -301,37 +302,53 @@ def _orchestration(run, step, steps):
         item['name']: item.get('if') for item in steps
         if item['name'] in ('Mark missing patch coverage',
                             'Download the comment artifact',
-                            'Post or update the pull request comment')
+                            'Post or update the pull request comment',
+                            'Publish coverage check')
     }
     scenarios = (
-        ('artifact-present-success', 'true', 'false', 'success', 'success'),
-        ('artifact-absent-failure', None, 'false', 'failure', 'failure'),
-        ('failure-before-resolution', None, '', 'failure', 'failure'),
-        ('failure-after-resolution', 'true', 'false', 'failure', 'failure'),
-        ('stale-head', 'true', 'true', 'success', 'success'),
-        ('cancellation', 'true', 'false', 'cancelled', 'cancelled'),
+        # label, artifact present, pr present, stale, status, publish
+        ('artifact-present-success', 'true', None, 'false', 'success',
+         'success'),
+        ('artifact-absent-failure', None, None, 'false', 'failure',
+         'failure'),
+        ('failure-before-resolution', None, None, '', 'failure', 'failure'),
+        ('failure-after-resolution', 'true', None, 'false', 'failure',
+         'failure'),
+        ('stale-head', 'true', None, 'true', 'success', 'success'),
+        ('cancellation', 'true', None, 'false', 'cancelled', 'cancelled'),
+        ('stood-down-closed-pr', 'true', 'false', 'false', 'success', None),
+        ('stood-down-no-artifact', None, 'false', 'false', 'success', None),
     )
-    for label, present, stale, status, publish in scenarios:
+    for label, present, pr_present, stale, status, publish in scenarios:
+        pr_outputs = {'stale': stale}
+        if pr_present is not None:
+            pr_outputs['present'] = pr_present
         context = {
             'steps': {
                 'artifact': {'outputs': {} if present is None else {
                     'present': present}},
-                'pr': {'outputs': {'stale': stale}},
+                'pr': {'outputs': pr_outputs},
             },
             'status': {name: status == name for name in (
                 'success', 'failure', 'cancelled')},
         }
-        assert evaluate_if(step['if'], context) is True, label
-        ready = status == 'success' and present == 'true' and stale != 'true'
-        missing = status == 'success' and present != 'true' and stale != 'true'
+        assert evaluate_if(step['if'], context) is (publish is not None), (
+            label, step['if'])
+        ready = (status == 'success' and present == 'true'
+                 and stale != 'true' and pr_present != 'false')
+        missing = (status == 'success' and present != 'true'
+                   and stale != 'true' and pr_present != 'false')
         expected = {
             'Mark missing patch coverage': missing,
             'Download the comment artifact': ready,
             'Post or update the pull request comment': ready,
+            'Publish coverage check': pr_present != 'false',
         }
         for name, condition in conditions.items():
             assert evaluate_if(condition, context) is expected[name], (
                 label, name, condition)
+        if publish is None:
+            continue
         result, state, _calls, _script = run(
             label='orchestration-' + label, status=publish)
         assert result.returncode == 0, (label, result.stdout, result.stderr)
@@ -365,26 +382,38 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
 
 
 ABSENT_SCENARIOS = (
-    ('docs-only', [{'name': 'test', 'conclusion': 'success'},
-                   {'name': 'coverage', 'conclusion': 'skipped'}], 0,
+    # (label, RUN_CONCLUSION, jobs, exit, check conclusion, reason):
+    # the run-conclusion-keyed credit truth table, end to end.
+    ('cancelled-run-cancelled-job', 'cancelled',
+     [{'name': 'coverage', 'conclusion': 'cancelled'}], 0,
+     'neutral', 'a cancelled tests run'),
+    ('cancelled-run-empty-jobs', 'cancelled', [], 0,
+     'neutral', 'a cancelled tests run'),
+    ('docs-only', 'success',
+     [{'name': 'test', 'conclusion': 'success'},
+      {'name': 'coverage', 'conclusion': 'skipped'}], 0,
      'neutral', 'a documentation-only change'),
-    ('no-coverage-job', [], 0, 'failure', None),
-    ('successful-coverage', [{'name': 'coverage', 'conclusion': 'success'}],
-     0, 'failure', None),
-    ('failed-coverage', [{'name': 'coverage', 'conclusion': 'failure'}],
-     0, 'failure', None),
-    ('cancelled-coverage', [{'name': 'coverage', 'conclusion': 'cancelled'}],
-     0, 'neutral', 'a cancelled tests run'),
-    ('cancelled-noncoverage', [{'name': 'test', 'conclusion': 'cancelled'}],
-     0, 'failure', None),
-    ('other-skipped', [{'name': 'test', 'conclusion': 'skipped'}],
-     0, 'failure', None),
+    ('docs-only-cancelled-job', 'success',
+     [{'name': 'coverage', 'conclusion': 'cancelled'}], 0,
+     'neutral', 'a cancelled tests run'),
+    ('failed-run-skipped-coverage', 'failure',
+     [{'name': 'test', 'conclusion': 'failure'},
+      {'name': 'coverage', 'conclusion': 'skipped'}], 0,
+     'failure', None),
+    ('failed-run-empty-jobs', 'failure', [], 0, 'failure', None),
+    ('success-run-failed-coverage', 'success',
+     [{'name': 'coverage', 'conclusion': 'failure'}], 0, 'failure', None),
+    ('success-run-empty-jobs', 'success', [], 0, 'failure', None),
+    ('docs-only-successful-coverage', 'success',
+     [{'name': 'coverage', 'conclusion': 'success'}], 0, 'failure', None),
+    ('docs-only-other-skipped', 'success',
+     [{'name': 'test', 'conclusion': 'skipped'}], 0, 'failure', None),
 )
 
 
 def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
                      write_executable, scenario, prior, fail_jobs=False):
-    label, jobs, exit_code, conclusion, reason = scenario
+    label, run_conclusion, jobs, exit_code, conclusion, reason = scenario
     workdir = Path(tmp) / f'absent-{label}-{len(prior)}-{fail_jobs}'
     (workdir / 'bin').mkdir(parents=True)
     output = workdir / 'github-output'
@@ -399,6 +428,7 @@ def _absent_scenario(tmp, run, workflow, extract_block, shell_runner,
         'HEAD_SHA': 'a' * 40, 'CURRENT_HEAD': 'a' * 40, 'PR_NUMBER': '170',
         'GITHUB_OUTPUT': str(output), 'STUB_STATE': str(state),
         'STUB_CALLS': str(calls), 'STUB_JOBS': json.dumps(jobs),
+        'RUN_CONCLUSION': run_conclusion,
         'STUB_RESPONSE': '{"total_count": 0, "artifacts": []}',
         'STUB_FAIL_JOBS': '1' if fail_jobs else '',
     }
@@ -450,7 +480,7 @@ def _absent_scenarios(tmp, run, workflow, extract_block, shell_runner,
 
 EXPECTED_PUBLICATION_STEP = {
     'name': 'Publish coverage check',
-    'if': 'always()',
+    'if': "always() && steps.pr.outputs.present != 'false'",
     'env': {
         'GH_TOKEN': '${{ github.token }}',
         'REPO': '${{ github.repository }}',

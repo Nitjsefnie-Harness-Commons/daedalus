@@ -162,6 +162,12 @@ EXPECTED_STEP_MAPPINGS = (
         '  numbers="$(sort -u pulls.txt)"\n'
         "fi\n"
         "count=\"$(printf '%s\\n' \"$numbers\" | awk 'NF' | wc -l)\"\n"
+        'if [ "$count" -eq 0 ]; then\n'
+        "  # A closed pull request's run has nowhere to comment and no\n"
+        '  # head worth a check; that is a real state, not an error.\n'
+        "  echo 'present=false' >> \"$GITHUB_OUTPUT\"\n"
+        "  exit 0\n"
+        "fi\n"
         'if [ "$count" -ne 1 ]; then\n'
         '  echo "expected one pull request for $HEAD_SHA, found $count" '
         ">&2\n"
@@ -199,12 +205,14 @@ EXPECTED_STEP_MAPPINGS = (
     },
     {'name': 'Mark missing patch coverage',
      'if': "steps.artifact.outputs.present != 'true' && "
-           "steps.pr.outputs.stale != 'true'",
+           "steps.pr.outputs.stale != 'true' && "
+           "steps.pr.outputs.present != 'false'",
      'env': {'GH_TOKEN': '${{ github.token }}',
              'REPO': '${{ github.repository }}',
              'HEAD_SHA': '${{ github.event.workflow_run.head_sha }}',
              'PR_NUMBER': '${{ steps.pr.outputs.number }}',
-             'RUN_ID': '${{ github.event.workflow_run.id }}'},
+             'RUN_ID': '${{ github.event.workflow_run.id }}',
+             'RUN_CONCLUSION': '${{ github.event.workflow_run.conclusion }}'},
      'run': 'set -euo pipefail\n'
             '\n'
             "# The verdict becomes the publish step's check on the pull\n"
@@ -218,27 +226,42 @@ EXPECTED_STEP_MAPPINGS = (
             '  echo "listing the jobs of run $RUN_ID failed" >&2\n'
             '  exit 1\n'
             'fi\n'
-            '# A cancelled tests run ends its coverage job `cancelled` '
-            'rather\n'
-            '# than `skipped`; both measured nothing, so both credit the '
-            'run.\n'
-            'if jq -se \'any(.[]; .name == "coverage" and\n'
-            '  (.conclusion == "skipped" or .conclusion == "cancelled"))\' '
-            '\\\n'
-            '  jobs.json >/dev/null\n'
-            'then\n'
-            "  reason='a documentation-only change'\n"
-            '  if jq -se \'any(.[]; .name == "coverage" and\n'
-            '    .conclusion == "cancelled")\' jobs.json >/dev/null\n'
-            '  then\n'
+            '# Credit is keyed on the run conclusion, not the coverage\n'
+            "# job's: a failed run that skipped coverage is a failure,\n"
+            '# not a documentation-only skip.\n'
+            'case "${RUN_CONCLUSION:-}" in\n'
+            '  cancelled)\n'
+            "    # A cancelled run's coverage job may be `cancelled` or\n"
+            "    # gate-skipped; the run's own conclusion is the authority.\n"
             "    reason='a cancelled tests run'\n"
-            '  fi\n'
-            '  {\n'
-            '    printf \'verdict=\\n\'\n'
-            '    printf \'skipped=true\\n\'\n'
-            '    printf \'not_measured_reason=%s\\n\' "$reason"\n'
-            '  } >> "$GITHUB_OUTPUT"\n'
-            'fi\n'
+            '    {\n'
+            "      printf 'verdict=\\n'\n"
+            "      printf 'skipped=true\\n'\n"
+            '      printf \'not_measured_reason=%s\\n\' "$reason"\n'
+            '    } >> "$GITHUB_OUTPUT"\n'
+            '    ;;\n'
+            '  success)\n'
+            '    # A skipped or cancelled coverage job under a successful\n'
+            '    # run is the documentation-only skip; neither measured.\n'
+            '    if jq -se \'any(.[]; .name == "coverage" and\n'
+            '      (.conclusion == "skipped" or .conclusion == "cancelled"))'
+            '\' \\\n'
+            '      jobs.json >/dev/null\n'
+            '    then\n'
+            "      reason='a documentation-only change'\n"
+            '      if jq -se \'any(.[]; .name == "coverage" and\n'
+            '        .conclusion == "cancelled")\' jobs.json >/dev/null\n'
+            '      then\n'
+            "        reason='a cancelled tests run'\n"
+            '      fi\n'
+            '      {\n'
+            "        printf 'verdict=\\n'\n"
+            "        printf 'skipped=true\\n'\n"
+            '        printf \'not_measured_reason=%s\\n\' "$reason"\n'
+            '      } >> "$GITHUB_OUTPUT"\n'
+            '    fi\n'
+            '    ;;\n'
+            'esac\n'
             '\n'
             "marker='<!-- daedalus-diff-coverage -->'\n"
             '{\n'
@@ -305,7 +328,8 @@ EXPECTED_STEP_MAPPINGS = (
     {
         "name": "Download the comment artifact",
         "if": "steps.artifact.outputs.present == 'true' && "
-        "steps.pr.outputs.stale != 'true'",
+        "steps.pr.outputs.stale != 'true' && "
+        "steps.pr.outputs.present != 'false'",
         "uses": (
             "actions/download-artifact@"
             "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
@@ -319,7 +343,8 @@ EXPECTED_STEP_MAPPINGS = (
     {
         "name": "Post or update the pull request comment",
         "if": "steps.artifact.outputs.present == 'true' && "
-        "steps.pr.outputs.stale != 'true'",
+        "steps.pr.outputs.stale != 'true' && "
+        "steps.pr.outputs.present != 'false'",
         "env": {
             "GH_TOKEN": "${{ github.token }}",
             "REPO": "${{ github.repository }}",
