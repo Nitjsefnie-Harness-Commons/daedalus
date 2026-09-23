@@ -491,6 +491,7 @@
 !/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
+!/tests/test_tab_routing_js_await.py
 !/tests/test_tab_routing_js_bodies.py
 !/tests/test_tab_routing_js_closure.py
 !/tests/test_tab_routing_js_heads.py
