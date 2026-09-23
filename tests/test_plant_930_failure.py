@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _util
+import _util  # noqa: E402
 
 
 def test_deliberate_failure():
