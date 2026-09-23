@@ -375,6 +375,8 @@ ABSENT_SCENARIOS = (
      1, 'failure', None),
     ('cancelled-coverage', [{'name': 'coverage', 'conclusion': 'cancelled'}],
      0, 'neutral', 'a cancelled tests run'),
+    ('cancelled-noncoverage', [{'name': 'test', 'conclusion': 'cancelled'}],
+     1, 'failure', None),
     ('other-skipped', [{'name': 'test', 'conclusion': 'skipped'}],
      1, 'failure', None),
 )
