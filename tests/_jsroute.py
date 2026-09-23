@@ -57,6 +57,10 @@ def js_tab_routing_violations(path, rel, work=None):
     Escaped objects, unresolved sender arguments, and unseen helper mutations
     are unprovable. Unseen parameter or import names stay unknown, and a
     simple alias to one inherits that silence.
+
+    A replayed body is bounded at the first await it owns: a write or call
+    written after it is unprovable at a synchronous call position, and
+    nested bodies bound themselves, not their enclosing scope.
     """
     text = path.read_text(encoding='utf-8')
     mask = js_mask(text)
@@ -598,9 +602,15 @@ def js_tab_routing_violations(path, rel, work=None):
         return resolve(start, end, named, 0)
 
     for call in reached_unknowns:
-        violations.append(
-            f'{rel}:{line_of(call["start"])}: an invocation target this '
-            'guard cannot resolve')
+        if call.get('deferred'):
+            violations.append(
+                f'{rel}:{line_of(call["start"])}: an invocation written '
+                "after the body's first await - its effect at a "
+                'synchronous call position is unprovable')
+        else:
+            violations.append(
+                f'{rel}:{line_of(call["start"])}: an invocation target this '
+                'guard cannot resolve')
 
     for call in invocations:
         call_name = call['name']
