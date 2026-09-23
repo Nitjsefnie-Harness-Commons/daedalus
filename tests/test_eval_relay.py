@@ -152,6 +152,9 @@ def test_cdp_eval_releases_every_remote_handle_in_held_sessions(tmp):
         'throw-result',
     ], actual
     assert actual['pendingHasTimeout'] is True, actual
+    # The settle path (the reject case) and the reject path (the pending
+    # case) must both tear their sampler down once the race resolves.
+    assert actual['armedSamplers'] == 0, actual
     assert actual['resultWorlds'] == ['cdp', 'cdp', 'cdp'], actual
 
 
