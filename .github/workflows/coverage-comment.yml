@@ -126,6 +126,12 @@ jobs:
             numbers="$(sort -u pulls.txt)"
           fi
           count="$(printf '%s\n' "$numbers" | awk 'NF' | wc -l)"
+          if [ "$count" -eq 0 ]; then
+            # A closed pull request's run has nowhere to comment and no
+            # head worth a check; that is a real state, not an error.
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$count" -ne 1 ]; then
             echo "expected one pull request for $HEAD_SHA, found $count" >&2
             printf '%s\n' "$numbers" >&2
@@ -163,12 +169,14 @@ jobs:
         if: >-
           steps.artifact.outputs.present != 'true'
           && steps.pr.outputs.stale != 'true'
+          && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
 
@@ -183,24 +191,41 @@ jobs:
             echo "listing the jobs of run $RUN_ID failed" >&2
             exit 1
           fi
-          # A cancelled tests run ends its coverage job `cancelled` rather
-          # than `skipped`; both measured nothing, so both credit the run.
-          if jq -se 'any(.[]; .name == "coverage" and
-            (.conclusion == "skipped" or .conclusion == "cancelled"))' \
-            jobs.json >/dev/null
-          then
-            reason='a documentation-only change'
-            if jq -se 'any(.[]; .name == "coverage" and
-              .conclusion == "cancelled")' jobs.json >/dev/null
-            then
+          # Credit is keyed on the run conclusion, not the coverage
+          # job's: a failed run that skipped coverage is a failure,
+          # not a documentation-only skip.
+          case "${RUN_CONCLUSION:-}" in
+            cancelled)
+              # A cancelled run's coverage job may be `cancelled` or
+              # gate-skipped; the run's own conclusion is the authority.
               reason='a cancelled tests run'
-            fi
-            {
-              printf 'verdict=\n'
-              printf 'skipped=true\n'
-              printf 'not_measured_reason=%s\n' "$reason"
-            } >> "$GITHUB_OUTPUT"
-          fi
+              {
+                printf 'verdict=\n'
+                printf 'skipped=true\n'
+                printf 'not_measured_reason=%s\n' "$reason"
+              } >> "$GITHUB_OUTPUT"
+              ;;
+            success)
+              # A skipped or cancelled coverage job under a successful
+              # run is the documentation-only skip; neither measured.
+              if jq -se 'any(.[]; .name == "coverage" and
+                (.conclusion == "skipped" or .conclusion == "cancelled"))' \
+                jobs.json >/dev/null
+              then
+                reason='a documentation-only change'
+                if jq -se 'any(.[]; .name == "coverage" and
+                  .conclusion == "cancelled")' jobs.json >/dev/null
+                then
+                  reason='a cancelled tests run'
+                fi
+                {
+                  printf 'verdict=\n'
+                  printf 'skipped=true\n'
+                  printf 'not_measured_reason=%s\n' "$reason"
+                } >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+          esac
 
           marker='<!-- daedalus-diff-coverage -->'
           {
@@ -260,6 +285,7 @@ jobs:
         if: >-
           steps.artifact.outputs.present == 'true'
           && steps.pr.outputs.stale != 'true'
+          && steps.pr.outputs.present != 'false'
         # actions/download-artifact v8.0.1
         uses: >-
           actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -272,6 +298,7 @@ jobs:
         if: >-
           steps.artifact.outputs.present == 'true'
           && steps.pr.outputs.stale != 'true'
+          && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -363,7 +390,8 @@ jobs:
           esac
 
       - name: Publish coverage check
-        if: always()
+        if: >-
+          always() && steps.pr.outputs.present != 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

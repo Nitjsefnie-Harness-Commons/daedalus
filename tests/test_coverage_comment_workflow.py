@@ -140,12 +140,15 @@ def _job_condition(workflow, job):
     return condition
 
 
-def _step_context(present, stale, run_state='success'):
+def _step_context(present, stale, run_state='success', pr_present=None):
     """Build condition values, omitting an unset artifact output."""
+    pr_outputs = {'stale': stale}
+    if pr_present is not None:
+        pr_outputs['present'] = pr_present
     return {
         'steps': {
             'artifact': {'outputs': {'present': present} if present else {}},
-            'pr': {'outputs': {'stale': stale}},
+            'pr': {'outputs': pr_outputs},
         },
         'status': {
             name: run_state == name
@@ -342,7 +345,8 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
 
 def _run_comment_block(tmp, block_name, *, state, current_head='B',
                        head_sha='B', pr_number='170', claimed='170',
-                       body='### Coverage\n', jobs=None):
+                       body='### Coverage\n', jobs=None,
+                       run_conclusion=None):
     """Run one commenter block with a recording GitHub double."""
     workdir = Path(tmp) / block_name.replace(' ', '-')
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
@@ -368,6 +372,7 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls),
         'STUB_JOBS': json.dumps(jobs or []),
+        'RUN_CONCLUSION': run_conclusion or '',
     }
     result = _run_shell_block(
         workdir, _run_block(_workflow(), block_name), env)
@@ -455,51 +460,28 @@ def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
     assert evaluate(condition, non_pull_request) is False, condition
 
 
-def test_a_cancelled_coverage_job_credits_the_run_like_a_skipped_one(tmp):
-    """A cancelled coverage job replaces a stale marker and exits 0."""
-    posted, state, calls, _output = _run_comment_block(
-        tmp, 'Post or update the pull request comment', state=[],
-        head_sha='A', current_head='A', body='**100.0%**')
-    assert posted.returncode == 0, (posted.stdout, posted.stderr)
-    assert len(recorded_writes(calls)) == 1, \
-        calls.read_text(encoding='utf-8')
-    marked, state, calls, output = _run_comment_block(
-        tmp, 'Mark missing patch coverage', state=state,
-        head_sha='B', current_head='B',
-        jobs=[{'name': 'coverage', 'conclusion': 'cancelled'}])
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert len(recorded_writes(calls)) == 1, \
-        calls.read_text(encoding='utf-8')
-    assert 'Patch coverage was not measured for commit B.' in \
-        state[0]['body'], state
-    assert '**100.0%**' not in state[0]['body'], state
-    outputs = _step_outputs(output)
-    assert outputs.get('verdict') == '', outputs
-    assert outputs.get('skipped') == 'true', outputs
-    assert outputs.get('not_measured_reason') == 'a cancelled tests run', \
-        outputs
-
-
-def test_a_cancelled_coverage_job_without_a_marker_exits_zero(tmp):
-    """Cancelled credit is success even when there is no marker yet."""
-    marked, _state, calls, output = _run_comment_block(
-        tmp, 'Mark missing patch coverage', state=[],
-        head_sha='B', current_head='B',
-        jobs=[{'name': 'coverage', 'conclusion': 'cancelled'}])
-    assert marked.returncode == 0, (marked.stdout, marked.stderr)
-    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
-    outputs = _step_outputs(output)
-    assert outputs.get('verdict') == '', outputs
-    assert outputs.get('skipped') == 'true', outputs
-    assert outputs.get('not_measured_reason') == 'a cancelled tests run', \
-        outputs
+def test_a_cancelled_run_credits_the_run_whatever_the_jobs_hold(tmp):
+    """The run's own conclusion credits a cancelled run, jobs aside."""
+    for jobs in ([], [{'name': 'coverage', 'conclusion': 'cancelled'}]):
+        marked, _state, calls, output = _run_comment_block(
+            tmp, 'Mark missing patch coverage', state=[],
+            head_sha='B', current_head='B', run_conclusion='cancelled',
+            jobs=jobs)
+        assert marked.returncode == 0, (marked.stdout, marked.stderr)
+        assert recorded_writes(calls) == [], calls.read_text(
+            encoding='utf-8')
+        outputs = _step_outputs(output)
+        assert outputs.get('verdict') == '', outputs
+        assert outputs.get('skipped') == 'true', outputs
+        assert outputs.get('not_measured_reason') == \
+            'a cancelled tests run', outputs
 
 
 def test_a_skipped_coverage_job_keeps_the_documentation_only_reason(tmp):
-    """A skipped coverage job still names a documentation-only change."""
+    """A successful run's skipped coverage names documentation-only."""
     marked, _state, calls, output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=[],
-        head_sha='B', current_head='B',
+        head_sha='B', current_head='B', run_conclusion='success',
         jobs=[{'name': 'coverage', 'conclusion': 'skipped'}])
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
@@ -510,11 +492,24 @@ def test_a_skipped_coverage_job_keeps_the_documentation_only_reason(tmp):
         'a documentation-only change', outputs
 
 
+def test_a_failed_run_with_a_skipped_coverage_job_takes_no_credit(tmp):
+    """A failed run's skipped coverage is a failure, not docs-only."""
+    marked, _state, calls, output = _run_comment_block(
+        tmp, 'Mark missing patch coverage', state=[],
+        head_sha='B', current_head='B', run_conclusion='failure',
+        jobs=[{'name': 'coverage', 'conclusion': 'skipped'}])
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
+    outputs = _step_outputs(output)
+    assert outputs.get('verdict') == 'failure', outputs
+    assert not {'skipped', 'not_measured_reason'} & set(outputs), outputs
+
+
 def test_a_failed_coverage_job_reports_failure_and_exits_clean(tmp):
     """No credit leaves verdict=failure; the step itself exits clean."""
     marked, _state, calls, output = _run_comment_block(
         tmp, 'Mark missing patch coverage', state=[],
-        head_sha='B', current_head='B',
+        head_sha='B', current_head='B', run_conclusion='success',
         jobs=[{'name': 'coverage', 'conclusion': 'failure'}])
     assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
@@ -575,6 +570,9 @@ def test_commenter_runs_every_completed_run_and_orders_stale_gate(
         expression = _step_condition(workflow, step_name)
         assert evaluate_if(expression, current) is True, expression
         assert evaluate_if(expression, stale) is False, expression
+        stood_down = _step_context('true', 'false', 'success', 'false')
+        assert evaluate_if(expression, stood_down) is False, (
+            step_name, expression)
         for run_state in ('failure', 'cancelled'):
             context = _step_context('true', 'false', run_state)
             assert evaluate_if(expression, context) is False, (
@@ -588,6 +586,8 @@ def test_missing_marker_step_owns_its_artifact_and_stale_conditions(tmp):
     assert evaluate_if(expression, _step_context(None, 'false')) is True
     assert evaluate_if(expression, _step_context('true', 'false')) is False
     assert evaluate_if(expression, _step_context(None, 'true')) is False
+    assert evaluate_if(
+        expression, _step_context(None, 'false', 'success', 'false')) is False
     for run_state in ('failure', 'cancelled'):
         context = _step_context(None, 'false', run_state)
         assert evaluate_if(expression, context) is False, (
