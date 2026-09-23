@@ -1620,6 +1620,16 @@ jobs:
         # test; any other regression, or an accepted test past its bound,
         # still fails this cell.
         run: |
+          # The head checkout's comparator may predate the --ratio-file
+          # option (added in 4d7202e). Only pass the flag when the head
+          # script supports it, so branches older than that commit are
+          # not broken by a workflow that is newer than the code.
+          if python3 head/scripts/ci/compare_durations.py --help \
+              2>/dev/null | grep -q -- '--ratio-file'; then
+            EXTRA_ARGS="--ratio-file reports/ratio.txt"
+          else
+            EXTRA_ARGS=""
+          fi
           # shellcheck disable=SC2046
           python3 head/scripts/ci/compare_durations.py \
             --base $(ls -d reports/base-*) \
@@ -1628,7 +1638,7 @@ jobs:
             --max-regression "$MAX_REGRESSION" \
             --base-label "$BASE_LABEL" \
             --require-measurements \
-            --ratio-file reports/ratio.txt \
+            $EXTRA_ARGS \
             --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Record the cell verdict
