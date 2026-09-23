@@ -291,6 +291,7 @@
 !/tests/_jsroute_timeline.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mcp_guard_floor.py
+!/tests/_mcp_import_closure.py
 !/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_transport_probes.py
@@ -429,6 +430,7 @@
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_guard_floor.py
+!/tests/test_mcp_import_closure.py
 !/tests/test_mcp_poll_matching.py
 !/tests/test_mcp_poll_pause.py
 !/tests/test_mcp_probe.py
