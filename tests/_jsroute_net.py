@@ -109,6 +109,14 @@ def unbound_containers(reader, calls, bound):
             continue
         if _pattern_target(mask, close):
             continue
+        if (mask[before:before + 1] == ':'
+                and reader.promotion.held(opening)
+                and not reader.promotion.tokens(opening, close)
+                & set(reader.receivers.senders)):
+            # A property value inside a watched literal is reached by
+            # the member reads the walks model, never produced bare; a
+            # value carrying a sender spelling itself stays netted.
+            continue
         if reader.holds_sender(opening, close):
             found.add(opening)
     for match in _NEW_OF.finditer(mask):

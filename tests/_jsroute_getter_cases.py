@@ -38,6 +38,21 @@ def _order(label, first, second, call, expected):
             expected)
 
 
+def _late(label, define, call):
+    """One getter spelling whose promotion the call follows, both ways.
+
+    The defect row declares the callable before the routed promotion,
+    so the write the call executes lands after it; the twin replaces
+    that demotion with the routed send the guard must keep reporting.
+    """
+    return [
+        (label + '-demotion',
+         _LET + define(_DEM) + '\n' + _PRO + '\n' + call + _TAIL, False),
+        (label + '-promotion',
+         _LET + define(_PRO) + call + _TAIL, True),
+    ]
+
+
 _ARROW = _literal('() =>')
 _ASYNC_ARROW = _literal('async () =>')
 
@@ -142,4 +157,17 @@ GETTER_CASES = [
     *_both('function-property', _method('p: function ()')),
     *_both('async-shorthand-method', _method('async p()')),
     *_both('arrow-property', _method('p: () =>')),
+    *_late('getter-through-nested-owner', lambda write: (
+        "const a = { b: { get p() { return () => { " + write
+        + " }; } } };\n"), 'a.b.p()'),
+    *_late('getter-through-this', lambda write: (
+        "const obj = { m() { " + write + " }, "
+        "get p() { return this.m; } };\n"), 'obj.p()'),
+    *_late('getter-through-curried-return', lambda write: (
+        "const obj = { get p() { return () => () => { " + write
+        + " }; } };\n"), 'obj.p()()'),
+    *_late('getter-through-bound-name', lambda write: (
+        "function dem() { " + write + " }\n"
+        "const obj = { get p() { return dem.bind(null); } };\n"),
+        'obj.p()'),
 ]
