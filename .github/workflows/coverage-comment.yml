@@ -195,9 +195,11 @@ jobs:
             then
               reason='a cancelled tests run'
             fi
-            echo 'verdict=' >> "$GITHUB_OUTPUT"
-            echo 'skipped=true' >> "$GITHUB_OUTPUT"
-            echo "not_measured_reason=$reason" >> "$GITHUB_OUTPUT"
+            {
+              printf 'verdict=\n'
+              printf 'skipped=true\n'
+              printf 'not_measured_reason=%s\n' "$reason"
+            } >> "$GITHUB_OUTPUT"
           fi
 
           marker='<!-- daedalus-diff-coverage -->'
