@@ -172,7 +172,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          exit_code=1
+          # The verdict becomes the publish step's check on the pull
+          # request's own head; a workflow_run job's failure check would
+          # land on main instead.
+          echo 'verdict=failure' >> "$GITHUB_OUTPUT"
           if ! gh api -H 'Cache-Control: no-cache' --paginate \
             "repos/$REPO/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[]' > jobs.json
@@ -192,9 +195,9 @@ jobs:
             then
               reason='a cancelled tests run'
             fi
+            echo 'verdict=' >> "$GITHUB_OUTPUT"
             echo 'skipped=true' >> "$GITHUB_OUTPUT"
             echo "not_measured_reason=$reason" >> "$GITHUB_OUTPUT"
-            exit_code=0
           fi
 
           marker='<!-- daedalus-diff-coverage -->'
@@ -235,7 +238,7 @@ jobs:
             fi
           }
           case "$existing" in
-            '') echo 'no patch-coverage marker to update'; exit "$exit_code" ;;
+            '') echo 'no patch-coverage marker to update'; exit 0 ;;
             *[!0-9]*)
               echo "comment id is not only digits: $existing" >&2
               exit 1
@@ -247,7 +250,7 @@ jobs:
               gh api -X PATCH "repos/$REPO/issues/comments/$existing" \
                 -F body=@comment.md >/dev/null
               echo "marked patch coverage as unavailable for $HEAD_SHA"
-              exit "$exit_code"
+              exit 0
               ;;
           esac
 
@@ -369,8 +372,11 @@ jobs:
           STATUS: ${{ job.status }}
           JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
           NOT_MEASURED_REASON: ${{ steps.missing.outputs.not_measured_reason }}
+          VERDICT: ${{ steps.missing.outputs.verdict }}
         run: |
           set -euo pipefail
+
+          STATUS="${VERDICT:-$STATUS}"
 
           case "$STATUS" in
             success|failure|cancelled) ;;

@@ -88,6 +88,7 @@ def _mapping(workflow_reader):
         'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
         'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
                                'not_measured_reason }}',
+        'VERDICT': '${{ steps.missing.outputs.verdict }}',
     }, step
     script = step['run']
     assert "-f name='coverage comment'" in script, script
@@ -460,8 +461,11 @@ EXPECTED_PUBLICATION_STEP = {
         'JOB_SKIPPED': '${{ steps.missing.outputs.skipped }}',
         'NOT_MEASURED_REASON': '${{ steps.missing.outputs.'
                                'not_measured_reason }}',
+        'VERDICT': '${{ steps.missing.outputs.verdict }}',
     },
     'run': r'''set -euo pipefail
+
+STATUS="${VERDICT:-$STATUS}"
 
 case "$STATUS" in
   success|failure|cancelled) ;;
