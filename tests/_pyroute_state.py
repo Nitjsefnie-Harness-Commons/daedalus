@@ -3,6 +3,7 @@ import ast
 import operator
 from dataclasses import dataclass, field
 
+from _pyroute_live import bind_alias_statement
 from _pyroute_mapping import (alias_target_pairs, apply_assignment_bindings,
                               store_deferred_target)
 from _pyroute_storage import join_clean_occupancy
@@ -496,8 +497,7 @@ def apply_alias_statement(node, state):
         bind_builtin_names(state, names)
         state.bound.update(names)
     if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
-        apply_assignment_bindings(
-            targets, node.value, state, bind_alias_target)
+        bind_alias_statement(node, state, bind_alias_target)
         return
     for name in names:
         aliases.pop(name, None)
@@ -526,8 +526,7 @@ def state_signature(state, occupancy=True):
                       sorted(state.evaluated.items()) if value is not None
                       and (occupancy or not is_clean_container(value)))
     return (tuple(payloads), tuple(sorted(state.aliases.items())),
-            generators, evaluated,
-            tuple(sorted(state.builtin_globals)),
+            generators, evaluated, tuple(sorted(state.builtin_globals)),
             tuple(sorted(state.builtin_locals)),
             tuple(sorted((name, stored_signature(value, occupancy))
                          for name, value in state.callables.items())),
