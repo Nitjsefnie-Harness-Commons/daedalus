@@ -71,8 +71,8 @@ def run_python(code, env, timeout=60):
 
 
 def _wait_for(predicate, timeout=15, what='condition'):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    left_ms = timeout * 1000 + 50
+    while (left_ms := left_ms - 50) > 0:
         if predicate():
             return
         time.sleep(0.05)
