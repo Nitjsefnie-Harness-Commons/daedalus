@@ -368,8 +368,7 @@ jobs:
             github.run_id }}
           STATUS: ${{ job.status }}
           JOB_SKIPPED: ${{ steps.missing.outputs.skipped }}
-          NOT_MEASURED_REASON: >-
-            ${{ steps.missing.outputs.not_measured_reason }}
+          NOT_MEASURED_REASON: ${{ steps.missing.outputs.not_measured_reason }}
         run: |
           set -euo pipefail
 

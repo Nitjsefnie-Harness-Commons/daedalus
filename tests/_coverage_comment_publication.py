@@ -276,7 +276,6 @@ def _hostile(run, tmp):
 
 
 def _neutral_reasons(run):
-    """The neutral summary is built from the not_measured_reason output."""
     for label, reason in (('reason-cancelled', 'a cancelled tests run'),
                           ('reason-doc-only', 'a documentation-only change')):
         result, state, calls, _script = run(
