@@ -19,7 +19,7 @@ import _util  # noqa: E402
 
 
 _SAMPLE_MS = 100
-_CREDIT_CAP_MS = 200
+_CREDIT_CAP_MS = 2 * _SAMPLE_MS
 
 # The entry IIFE is the one statement that drives the whole cookie flow;
 # everything before it is the bound machinery under test. The newline
