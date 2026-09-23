@@ -27,6 +27,8 @@ import _util  # noqa: E402
 from _clientstate import (  # noqa: E402,F401
     _KILLED_CLIENT_PIPE_RELEASE_S, assert_clients_exited, client_states)
 
+_STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
+
 
 _BACKGROUND_OVERLAP_HARNESS = r"""
 const fs = require('fs');
@@ -388,7 +390,7 @@ def run_background_overlap(background, commands, order, result_base='',
         except subprocess.TimeoutExpired as failure:
             drain_timed_out, out, err = _drain.kill_and_drain(process)
             stdout, stderr = _drain_text(out), _drain_text(err)
-            steps = re.findall(r'^\[step\] (.+)$', stderr, re.MULTILINE)
+            steps = _STEP_LINE.findall(stderr)
             last_step = steps[-1] if steps else 'none recorded'
             record = (f'attempt {attempt} (pid {process.pid}): last step: '
                       f'{last_step}; stdout: {stdout!r}; stderr: {stderr!r}; '
@@ -523,7 +525,7 @@ def _assert_step_trace(failure, labels):
     trace_start = failure.find(marker)
     trace_text = failure[trace_start:] if trace_start >= 0 else ''
     trace_text = trace_text.replace('\\n', '\n')
-    actual = re.findall(r'^\[step\] (.+)$', trace_text, re.MULTILINE)
+    actual = _STEP_LINE.findall(trace_text)
     position = 0
     for expected in labels:
         try:

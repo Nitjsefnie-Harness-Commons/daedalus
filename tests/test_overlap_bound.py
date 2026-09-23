@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
+from _overlap import _STEP_LINE  # noqa: E402
 
 
 _SAMPLE_MS = 100
@@ -218,7 +219,7 @@ def test_a_bound_record_cannot_enter_a_step_trace(tmp):
     result = _bound_run(_bound_source(
         _HUNG_WORK, "bounded(work, 'a step that never settles', 300)"))
     assert '[bound] ' in result.stderr, result.stderr
-    steps = re.findall(r'^\[step\] (.+)$', result.stderr, re.MULTILINE)
+    steps = _STEP_LINE.findall(result.stderr)
     assert steps == [], steps
 
 
