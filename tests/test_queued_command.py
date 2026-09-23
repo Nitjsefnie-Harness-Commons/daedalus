@@ -281,6 +281,34 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
         f'{violations}')
 
 
+def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
+    """The wait's budget is poll attempts, not elapsed time (issue 925).
+
+    A wall deadline spends the queue reader under a starved runner: the
+    reader polls `ceil(timeout / POLL_DELAY)` times, one POLL_DELAY sleep
+    between neighbours, and rejects at its attempt budget with the pinned
+    message whatever the wall clock did in between.
+    """
+    qdir = Path(tmp) / 'commands' / 'tok_extension'
+    qdir.mkdir(parents=True)
+    for timeout, attempts in ((0.2, 4),
+                              (2.5 * _queueread.POLL_DELAY, 3)):
+        failure = None
+        with _virtual_cmdqueue_clock() as (_clock, events, _origin):
+            try:
+                _queueread.queued_command(
+                    qdir, 'the never-filled queue', timeout=timeout)
+            except AssertionError as timeout_error:
+                failure = timeout_error
+        if failure is None:
+            raise AssertionError('the empty queue was not reported')
+        assert str(failure) == (
+            'timed out waiting for the never-filled queue'), failure
+        assert events == [
+            ('sleep', _queueread.POLL_DELAY)] * (attempts - 1), (
+            timeout, events)
+
+
 def test_a_queue_read_times_out_on_a_queue_that_never_fills(tmp):
     """A queue that never fills fails as a timeout naming what it wanted.
 
