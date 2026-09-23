@@ -141,29 +141,38 @@ def _member_callable(receiver, span):
 
 
 _BIND_INERT = re.compile(
-    r'\s*(?:null|undefined|true|false'
+    r'\s*(?:null|undefined|true|false|NaN|Infinity'
     r'|"(?:\\.|[^"\\])*"'
     r"|'(?:\\.|[^'\\])*'"
-    r'|[\w$]+)\s*')
+    r'|\d[\w$]*)\s*')
+_BIND_IDENTIFIER = re.compile(r'\s*([\w$]+)\s*')
 
 
 def _bound_member(receiver, left, opening, close):
     """Callable a `<name>.bind(...)` result invokes: the name's own.
 
-    Resolve only when every argument is provably inert — null,
-    undefined, true or false, a string or numeric literal, or a bare
-    identifier read — and refuse everything else: bind's arguments
-    evaluate before the bound callable exists, so what they execute is
-    the call's own, and the class of running spellings is open-ended
-    (calls, tagged templates, comma sequences, computed callees,
-    constructor invocations with no argument list).
+    Resolve only when every argument is provably inert — the keywords
+    null, undefined, true and false, NaN and Infinity, a string
+    literal, a digit-led numeric word, or a bare identifier the
+    lexical walk can bind — and refuse everything else: bind's
+    arguments evaluate before the bound callable exists, so what they
+    execute is the call's own, and the class of running spellings is
+    open-ended (calls, tagged templates, comma sequences, computed
+    callees, constructor invocations, with-scope reads a bare name
+    hides).
     """
     found = re.match(r'([\w$]+)\s*\.', receiver.mask[left:opening])
     if found is None:
         return None
     for span in receiver.split(receiver.mask, receiver.text,
                                opening + 1, close - 1):
-        if not _BIND_INERT.fullmatch(receiver.text[span[0]:span[1]]):
+        piece = receiver.text[span[0]:span[1]]
+        if _BIND_INERT.fullmatch(piece) is not None:
+            continue
+        identifier = _BIND_IDENTIFIER.fullmatch(piece)
+        if (identifier is None
+                or receiver.visible_binding(identifier.group(1), left)
+                is None):
             return None
     owner = receiver.callable_value((left, left + found.end(1)))
     if owner['status'] != 'known':
