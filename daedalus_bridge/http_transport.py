@@ -204,11 +204,11 @@ class RequestMixin(BaseHTTPRequestHandler):
         request has been answered.
 
         A body token cannot be checked without reading the body, which is the
-        cost this exists to avoid: a 24 MiB request with an invalid token was
-        received and parsed in full on its way to a 401, and every concurrent
-        worker could be made to do the same. The Bearer header is the carrier
-        that makes the decision reachable first. It is the same header, and
-        the same comparison, the MCP listener already requires.
+        cost this exists to avoid: the whole body would be received and parsed
+        on its way to a 401, and every concurrent worker could be made to do
+        the same. The Bearer header is the carrier that makes the decision
+        reachable first. It is the same header, and the same comparison, the
+        MCP listener already requires.
 
         The older body-token form still works below MAX_UNAUTHENTICATED_BODY,
         because a body that small is not the problem this is about.
