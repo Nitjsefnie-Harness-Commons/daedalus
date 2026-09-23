@@ -206,8 +206,8 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               ;;
             success)
-              # A skipped or cancelled coverage job under a successful
-              # run is the documentation-only skip; neither measured.
+              # A successful run's credit follows its coverage job's
+              # own conclusion: documentation-only, or a cancelled run.
               if jq -se 'any(.[]; .name == "coverage" and
                 (.conclusion == "skipped" or .conclusion == "cancelled"))' \
                 jobs.json >/dev/null
