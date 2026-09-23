@@ -241,8 +241,8 @@ EXPECTED_STEP_MAPPINGS = (
             '    } >> "$GITHUB_OUTPUT"\n'
             '    ;;\n'
             '  success)\n'
-            '    # A skipped or cancelled coverage job under a successful\n'
-            '    # run is the documentation-only skip; neither measured.\n'
+            "    # A successful run's credit follows its coverage job's\n"
+            '    # own conclusion: documentation-only, or a cancelled run.\n'
             '    if jq -se \'any(.[]; .name == "coverage" and\n'
             '      (.conclusion == "skipped" or .conclusion == "cancelled"))'
             '\' \\\n'
