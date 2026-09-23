@@ -364,8 +364,8 @@ closing from your own branch. `.github/workflows/claim.yml` assigns you when
 you comment, and the comment body must be **exactly** the claim command after
 trimming - `/claim`, `/unclaim` or `/release`, each optionally followed by the
 issue number, `#`-prefix optional, which must match the issue the comment is
-posted on; surrounding prose makes it a sentence, and a sentence is declined
-loudly, not ignored. Open, unassigned issues only, never a pull request.
+posted on; surrounding prose makes it a sentence, and a sentence is not a
+command. Open, unassigned issues only, never a pull request.
 `/unclaim` and `/release` are the same command under two names, under the same
 exact-match rule.
 
@@ -373,10 +373,11 @@ exact-match rule.
 `issue_comment`, so an immediate read returns empty `assignees` for a claim
 that is about to succeed. That empty read is a race, not evidence - never
 re-post on the strength of it. Check on your next natural touch of the issue.
-A declined claim - a closed issue, a pull request, an inexact body, or a
-mismatched number - answers on the issue and fails the run; the one silent
-case is a bot's comment, which the action refuses without answering so it
-never answers its own kind.
+A declined claim - a closed issue, a pull request, an inexact body carrying a
+command word, or a mismatched number - answers on the issue and fails the
+run; a body with no command word is skipped by the trigger filter before the
+action runs, and a bot's comment is refused without answering - the two
+silences that remain.
 
 **Declare an absorbed issue in the pull request body the moment it is
 absorbed.** A branch that takes on work filed under a second issue - a finding
