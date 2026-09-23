@@ -70,11 +70,11 @@ def function_body_at(mask, start):
         return ('block', body, js_bracket_end(mask, body))
     if mask[body:body + 1] == '(':
         # A concise body may be a function expression rather than a
-        # parenthesized value; evaluating it runs nothing, so the body
-        # an invocation reaches is the inner function's own.
+        # parenthesized value; the honest body is that expression, and
+        # only a call of its value reaches the inner function's own.
         inner = function_body_at(mask, body)
         if inner is not None:
-            return inner
+            return ('expr', body, inner[2])
         return ('expr', body + 1, js_bracket_end(mask, body) - 1)
     return ('expr', body, js_expression_end(mask, body))
 

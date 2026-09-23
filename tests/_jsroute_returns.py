@@ -22,7 +22,8 @@ def callable_return(receiver, left, right):
     if member_call is None:
         return None
     if member_call[1] == 'bind':
-        bound = _bound_member(receiver, left, member_call[2])
+        bound = _bound_member(
+            receiver, left, member_call[2], member_call[3])
         if bound is not None:
             return bound
     called = receiver.member(member_call[0], member_call[1], left)
@@ -48,7 +49,6 @@ def getter_value(receiver, value):
     returned = _returned_expression(receiver, value['body'], {})
     if returned['status'] == 'unprovable':
         returned = _this_member(receiver, value['body']) or returned
-    returned = _folded_return(receiver, returned)
     if returned['status'] == 'unprovable':
         returned['form'] = 'get'
     return returned
@@ -107,27 +107,50 @@ def _this_member(receiver, getter_body):
     return sibling_member(receiver, found.group(1), left)
 
 
-def _folded_return(receiver, value, seen=frozenset()):
-    """Callable a returned function-expression chain bottoms out at.
+def folded_return(receiver, value, seen=frozenset()):
+    """Callable a returned expression chain bottoms out at.
 
-    Evaluating a function expression runs nothing, so invoking the
-    getter's return reaches the innermost function's own body.
+    Evaluating a function expression runs nothing, so a call of the
+    chain's value reaches the innermost function's own body, and a
+    returned `this.<key>` read names the literal's own member.
     """
     while (value['status'] == 'known' and value['body'] is not None
            and value['body'][0] == 'expr'
-           and value['body'][1] not in seen
-           and function_body_at(receiver.mask, value['body'][1])
-           is not None):
+           and value['body'][1] not in seen):
         position = value['body'][1]
-        value = receiver.callable_value(value['body'][1:])
+        span = value['body'][1:]
+        if function_body_at(receiver.mask, position) is not None:
+            value = receiver.callable_value(span)
+        else:
+            value = _member_callable(receiver, span)
         seen = seen | {position}
     return value
 
 
-def _bound_member(receiver, left, opening):
-    """Callable a `<name>.bind(...)` result invokes: the name's own."""
+def _member_callable(receiver, span):
+    """Callable a returned member expression evaluates to."""
+    value = receiver.callable_value(span)
+    if value['status'] == 'unprovable':
+        left, right = receiver._unwrap(span)
+        found = re.fullmatch(r'this\s*\.\s*([\w$]+)',
+                             receiver.mask[left:right])
+        if found is not None:
+            return sibling_member(receiver, found.group(1), left) or value
+    return value
+
+
+def _bound_member(receiver, left, opening, close):
+    """Callable a `<name>.bind(...)` result invokes: the name's own.
+
+    None when an argument could run code: bind's arguments evaluate
+    before the bound callable exists, so what they execute is the
+    call's own and the answer stays fail-closed.
+    """
     found = re.match(r'([\w$]+)\s*\.', receiver.mask[left:opening])
     if found is None:
+        return None
+    arguments = receiver.mask[opening + 1:close - 1]
+    if re.search(r'[\w$]\s*\(|(?<![=!<>])=(?!=)', arguments) is not None:
         return None
     owner = receiver.callable_value((left, left + found.end(1)))
     if owner['status'] != 'known':
@@ -164,7 +187,6 @@ def chained_member(receiver, owner_end, key, position):
     members, which the receiver index reads one hop at a time.
     """
     hops = []
-    head_start = owner_end
     cursor = owner_end
     while True:
         pos = cursor - 1
@@ -188,7 +210,7 @@ def chained_member(receiver, owner_end, key, position):
     binding = receiver.visible_binding(hops[-1], position)
     if binding is None:
         return None
-    span, _created = receiver._latest_value(
+    span, _ = receiver._latest_value(
         receiver.values.get(binding), position)
     for hop in reversed(hops[:-1]):
         if span is None:
@@ -196,7 +218,7 @@ def chained_member(receiver, owner_end, key, position):
         left, right = receiver._unwrap(span)
         if receiver.mask[left:left + 1] != '{':
             return None
-        status, span, _form = receiver._property_span(
+        status, span, _ = receiver._property_span(
             (left, right), hop, position, frozenset(), {})
         if status != 'known':
             return None
