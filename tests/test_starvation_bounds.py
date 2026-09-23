@@ -9,6 +9,7 @@ that cap — and the test-side queue and CLI waits are bounded by poll
 attempts. Each control below was watched failing against the wall-clock
 code it replaces, for the defect's own reason.
 """
+import ast
 import json
 import shutil
 import subprocess
@@ -26,6 +27,10 @@ from _worker_sources import import_scripts_stub  # noqa: E402
 _SAMPLE_MS = 100
 _CREDIT_CAP_MS = 2 * _SAMPLE_MS
 _SETTLE_BUDGET_MS = 10000
+
+# Declared for the node child: _repo is not a recognized root owner, so the
+# launch's cwd does not prove itself and the environment audit requires this.
+_STARVE_ENV = _util.child_coverage('scrub')
 
 # The guard's serviced budget and the sampler interval live in cdp.js; the
 # numbers here only say what a control waits through.
@@ -238,7 +243,7 @@ def _starve_run(mode):
     result = subprocess.run(
         [node, '-e', _CDP_STARVE_HARNESS,
          str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=_repo.ROOT, capture_output=True, text=True,
+        cwd=_repo.ROOT, env=_STARVE_ENV, capture_output=True, text=True,
         timeout=_FREEZE_RUN_TIMEOUT_S)
     assert result.returncode == 0, (result.returncode, result.stderr)
     return json.loads(result.stdout)
@@ -300,6 +305,23 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
     assert outcome['outcome'] == (
         f'promise settlement timed out after {_SETTLE_BUDGET_MS} ms'), (
         outcome)
+
+
+def test_the_harness_children_run_without_a_wall_timeout(tmp):
+    """The Surface D runners launch their children with no timeout=.
+
+    A reintroduced wall backstop around an attempt-bounded child is the
+    starvation rejection this branch removes. The runner sources are
+    parsed and every keyword argument named `timeout` is refused — at a
+    launch and at a communicate alike.
+    """
+    del tmp
+    tests_dir = Path(__file__).resolve().parent
+    for name in ('_relayharness.py', '_cdpharness.py'):
+        tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
+        sites = [node.lineno for node in ast.walk(tree)
+                 if isinstance(node, ast.keyword) and node.arg == 'timeout']
+        assert not sites, (name, sites)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):

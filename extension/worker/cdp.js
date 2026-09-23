@@ -76,11 +76,11 @@ async function _releaseCdpObjects(chromeTabId, ...values) {
 }
 
 // Race one inspector settlement against a serviced bound: the sampler
-// re-arms every _CDP_SAMPLE_MS and credits each gap at one doubled
-// interval, so a worker the host starved is charged none of the wall time
-// it never ran in. `timedOut` flips only when the guard rejects on accrued
-// serviced time, and `onLateResponse` then receives the settlement the
-// abandoned promise eventually brings.
+// re-arms every _CDP_SAMPLE_MS, and a worker the host starved is charged
+// at most one doubled interval per gap — never the wall length of the
+// time it never ran in. `timedOut` flips only when the guard rejects on
+// accrued serviced time, and `onLateResponse` then receives the
+// settlement the abandoned promise eventually brings.
 function _raceCdpSettlement(work, onLateResponse) {
   let sampledAtMs = _cdpNow();
   let accruedMs = 0;
