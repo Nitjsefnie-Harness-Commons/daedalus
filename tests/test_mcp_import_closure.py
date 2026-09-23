@@ -304,6 +304,160 @@ def load(name):
 ''', 6, 'cannot follow')
 
 
+def test_a_walrus_alias_refuses_the_scan(_tmp):
+    """`(loader := importlib)` binds exactly what `loader = importlib` does.
+
+    An ordinary refactor to a walrus, with no evasion in it, used to leave
+    the call reading as an ordinary attribute on an ordinary local.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    (loader := importlib)
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_tuple_unpack_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    (loader,) = (importlib,)
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_list_unpack_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    [loader] = [importlib]
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_an_unpaired_unpack_alias_refuses_the_scan(_tmp):
+    """A shape the pairing cannot read still binds every value somewhere.
+
+    The starred target's arity is not knowable statically, so every leaf
+    is offered every value — refusing more rather than reading less.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    loader, rest = (importlib, 1, 2)
+    return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_for_target_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    for loader in (importlib,):
+        return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_a_with_target_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    with importlib as loader:
+        return loader.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_an_attribute_store_alias_refuses_the_scan(_tmp):
+    """`self.loader = importlib` hides the operation in an object, not a name.
+
+    A name store is what the map can reason about; an attribute store is
+    the same escape with no name to record.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+class Holder:
+    def bind(self):
+        self.loader = importlib
+        return self.loader.import_module('pkg.leaf')
+''', 7, 'cannot follow')
+
+
+def test_a_comprehension_target_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    return [loader.import_module(name) for loader in (importlib,)]
+''', 6, 'cannot follow')
+
+
+def test_a_parameter_default_alias_refuses_the_scan(_tmp):
+    """A default binds a name the map never saw either."""
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(loader=importlib, name=None):
+    return loader.import_module(name)
+''', 5, 'cannot follow')
+
+
+def test_an_except_target_alias_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    try:
+        raise ValueError()
+    except importlib as loader:
+        return loader.import_module(name)
+''', 8, 'cannot follow')
+
+
+def test_a_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
+    """A name the map tracks cannot be overwritten, whatever it is set to.
+
+    The map's answer for `importlib` cannot survive a store to that name,
+    and refusing the store is the only way the answer stays true.
+    """
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    importlib = object()
+    return importlib.import_module(name)
+''', 6, 'cannot follow')
+
+
+def test_an_unreadable_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name):
+    importlib = make_loader()
+    return importlib.import_module(name)
+''', 6, 'cannot follow')
+
+
 def test_a_getattr_of_the_operation_refuses_the_scan(_tmp):
     _refuses(_tmp, '''
 import importlib
@@ -330,9 +484,12 @@ def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
 
     A name rebound to an ordinary object, and a `getattr` for an ordinary
     attribute, are ordinary code; refusing them would refuse the closure's
-    modules for writing Python.
+    modules for writing Python. Every store form the walk now reads appears
+    here bound to an ordinary value, because the structural fix is only
+    safe while ordinary code stays silent.
     """
     _write_tree(Path(_tmp), {'composition.py': '''
+import contextlib
 import os
 
 
@@ -343,6 +500,23 @@ def flags():
 def reader(stream, name):
     stream = os.fdopen(0, 'rb')
     return getattr(stream, name, None)
+
+
+def ordinary(handle, table=()):
+    (first, second) = (handle, handle)
+    [third] = [handle]
+    first, *rest = (handle, 1, 2)
+    (found := handle)
+    for entry in (handle,):
+        first = entry
+    with contextlib.suppress(OSError):
+        second = handle
+    rows = [item for item in (handle,)]
+    try:
+        handle.read()
+    except OSError as failure:
+        return first, second, third, rest, found, rows, failure
+    return table
 '''})
     scanned = _mcp_import_closure.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
