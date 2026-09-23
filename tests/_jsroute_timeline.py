@@ -146,6 +146,11 @@ class InvocationReplay:
         self.body_scopes = {
             (scope['start'], scope['end']): index
             for index, scope in enumerate(scopes)}
+        # First await each body owns. A write past it runs in the
+        # continuation, unordered against the synchronous caller, so the
+        # replay cannot credit it: crediting one ordered a demotion the
+        # runtime had not performed yet (issue 862's missed send).
+        self.await_boundaries = self._await_boundaries()
         self.carries = set(carries)
         # Bindings whose invocations provably held a body other than the one
         # a send sits in: the record a dead-body verdict is read from.
@@ -267,8 +272,17 @@ class InvocationReplay:
             path_optional = inherited_optional or len(bodies) > 1
             operations = self.operations.get(function_scope, ())
             record_work(self.work, 'replay_operations', len(operations))
+            boundary = self.await_boundaries.get(function_scope)
             for start, kind, item in operations:
-                if kind == 'opaque':
+                past = boundary is not None and start >= boundary
+                if past and kind == 'call':
+                    # The call runs after the await, so its ordering
+                    # against the caller's synchronous send is unknown
+                    # and replaying it would credit writes that may not
+                    # have happened yet.
+                    unknowns.append(item)
+                    continue
+                if kind == 'opaque' or past:
                     target = self.visible_binding(item.group(1), start)
                     if target is None:
                         continue
@@ -284,7 +298,8 @@ class InvocationReplay:
                         active_sources[target] = source
                         if self.root_state is not None:
                             self.root_state[target] = ()
-                    writes.append((start, item, path_optional, kind, source))
+                    writes.append((start, item, path_optional, 'opaque',
+                                   source))
                     continue
                 if kind == 'bind':
                     applied = self._apply_assignment(
@@ -327,6 +342,17 @@ class InvocationReplay:
                 and body[:1] in (('block',), ('expr',))):
             return None
         return self._scope_for(body)
+
+    def _await_boundaries(self):
+        found = {}
+        for match in re.finditer(r'\bawait\b', self.mask):
+            position = match.start()
+            inner = max(
+                (index for index, scope in enumerate(self.scopes)
+                 if scope['start'] <= position < scope['end']),
+                key=lambda index: self.scopes[index]['start'])
+            found[inner] = min(found.get(inner, position), position)
+        return found
 
     def _scope_for(self, body):
         inset = body[0] == 'block'

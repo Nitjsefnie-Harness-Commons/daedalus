@@ -2,7 +2,7 @@
 import re
 
 from _jsroute_keys import decode_string_literal, source_key
-from _jsroute_returns import getter_call_body
+from _jsroute_returns import getter_value, invoked_body
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
@@ -505,8 +505,9 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
         else:
             continue
         if form == 'get' and status == 'known':
-            returned = getter_call_body(
-                resolution['receivers'], target, start)
+            returned = invoked_body(
+                resolution['receivers'],
+                getter_value(resolution['receivers'], target), start)
             if returned is None:
                 status = 'unprovable'
         args = split_top_level(
