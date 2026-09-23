@@ -144,13 +144,15 @@ def _bound_member(receiver, left, opening, close):
 
     None when an argument could run code: bind's arguments evaluate
     before the bound callable exists, so what they execute is the
-    call's own and the answer stays fail-closed.
+    call's own and the answer stays fail-closed. The raw argument text
+    is refused on any parenthesis, backtick or equals sign at all —
+    the class of running spellings is open-ended (tagged templates,
+    comma sequences, computed callees hide from any call grammar).
     """
     found = re.match(r'([\w$]+)\s*\.', receiver.mask[left:opening])
     if found is None:
         return None
-    arguments = receiver.mask[opening + 1:close - 1]
-    if re.search(r'[\w$]\s*\(|(?<![=!<>])=(?!=)', arguments) is not None:
+    if re.search(r'[`(=]', receiver.text[opening + 1:close - 1]):
         return None
     owner = receiver.callable_value((left, left + found.end(1)))
     if owner['status'] != 'known':
