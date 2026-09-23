@@ -218,6 +218,21 @@ GETTER_CASES = [
      "const obj = { side, "
      "get p() { return dem.bind(obj[k]()); } };\n"
      "const k = 'side';\n" + 'obj.p()' + _TAIL, True),
+    ('getter-bound-constructor-argument-promotion',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _PRO + " }\n"
+     "const obj = { get p() { return dem.bind(new side); } };\n"
+     + 'obj.p()' + _TAIL, True),
+    ('getter-bound-constructor-argument-demotion',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _DEM + " }\n"
+     "const obj = { get p() { return dem.bind(new side); } };\n"
+     + _PRO + '\n' + 'obj.p()' + _TAIL, (False, True)),
+    ('getter-bound-getter-read-argument',
+     _LET + "function dem() { void 0; }\n"
+     "const holder = { get side() { " + _PRO + " } };\n"
+     "const obj = { get p() { return dem.bind(holder.side); } };\n"
+     + 'obj.p()' + _TAIL, True),
     # The curried value is never invoked: the innermost body stays
     # unrun, so the demoting spelling routes (the guard reports it)
     # and the promoting spelling routes nothing (agreed). This pins
