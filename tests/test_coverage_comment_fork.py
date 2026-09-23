@@ -126,7 +126,7 @@ _PRIOR_MARKER = [{
 }]
 
 
-def _run_publication(tmp, status):
+def _run_publication(tmp, status, verdict=''):
     workdir = Path(tmp) / 'publish'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
     commenter._write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
@@ -142,6 +142,7 @@ def _run_publication(tmp, status):
         'HEAD_SHA': _MISSING_HEAD_SHA,
         'RUN_URL': 'https://github.com/owner/repo/actions/runs/7',
         'STATUS': status,
+        'VERDICT': verdict,
         'STUB_STATE': str(state),
         'STUB_CALLS': str(calls),
     }
@@ -177,28 +178,31 @@ def _run_missing_artifact_case(tmp, prior_comments):
         commenter._workflow(), 'Mark missing patch coverage')
     assert evaluate_if(condition, context) is True, condition
 
-    marked, comments, _calls, _output = commenter._run_comment_block(
+    marked, comments, _calls, output = commenter._run_comment_block(
         tmp, 'Mark missing patch coverage', state=prior_comments,
         head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA)
-    status = 'failure' if marked.returncode else 'success'
-    published, checks = _run_publication(tmp, status)
+    verdict = dict(
+        line.split('=', 1) for line in output.read_text(
+            encoding='utf-8').splitlines()).get('verdict', '')
+    published, checks = _run_publication(
+        tmp, 'success' if marked.returncode == 0 else 'failure', verdict)
     assert published.returncode == 0, (published.stdout, published.stderr)
     assert checks['checks'][0]['conclusion'] != 'success', checks
     return marked, comments, checks
 
 
-def test_missing_artifact_fails_named_check_without_prior_marker(tmp):
+def test_missing_artifact_reports_failure_without_prior_marker(tmp):
     marked, comments, checks = _run_missing_artifact_case(
         Path(tmp) / 'without-marker', [])
-    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert comments == [], comments
     assert checks['checks'][0]['conclusion'] == 'failure', checks
 
 
-def test_missing_artifact_fails_named_check_with_prior_marker(tmp):
+def test_missing_artifact_reports_failure_with_prior_marker(tmp):
     marked, comments, checks = _run_missing_artifact_case(
         Path(tmp) / 'with-marker', _PRIOR_MARKER)
-    assert marked.returncode != 0, (marked.stdout, marked.stderr)
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
     assert len(comments) == 1, comments
     assert 'not measured' in comments[0]['body'], comments
     assert checks['checks'][0]['conclusion'] == 'failure', checks
