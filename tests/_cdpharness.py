@@ -247,6 +247,11 @@ async function runEval(id, code) {
     evalTransports: submittedTransports.eval,
     hotfixTransports: submittedTransports.hotfix,
     pendingHasTimeout,
+    // Every race's sampler must be torn down once the race resolves, on
+    // the settle path and the reject path alike; a sampler left armed
+    // keeps rescheduling and delays the service worker's suspend.
+    armedSamplers: timers.filter((item) => item.active && item.ms === 100)
+      .length,
     resultWorlds: postedResults.map((item) => item.world),
   }));
 })().catch((error) => {
