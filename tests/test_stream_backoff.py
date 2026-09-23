@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The worker stream connector's retry backoff and auth-refusal stop.
+"""The worker stream connector's retry backoff, its auth-refusal stop,
+and the ledger-readiness gate that keeps the stream closed until the
+persisted dedup ledger has been read at boot.
 
 Each test loads the shipped worker modules in a Node VM with a stubbed
 chrome and drives the real boot path (loadConfig, then startStream)
@@ -34,7 +36,9 @@ const [backgroundPath, plan] = process.argv.slice(1);
 const messageListeners = [];
 const alarmListeners = [];
 const changeListeners = [];
+const connectListeners = [];
 const streamFetches = [];
+const resultPosts = [];
 const timeoutTimers = [];
 const intervalTimers = [];
 let nextTimerId = 0;
@@ -42,7 +46,17 @@ let clockNow = 0;
 const storageStore = {
   'daedalus-token': 'tok-1',
   'daedalus-server': 'https://bridge.example.com',
+  'daedalus-seen-dids': ['did-old'],
 };
+let ledgerHold = null;
+
+function openLedger() {
+  if (ledgerHold) {
+    ledgerHold.resolve({
+      'daedalus-seen-dids': copy(storageStore['daedalus-seen-dids']),
+    });
+  }
+}
 
 function copy(value) {
   return value === undefined ? undefined :
@@ -115,6 +129,37 @@ function streamResponse(answer) {
       },
     };
   }
+  if (answer === 'ledger-commands') {
+    const frame = (did) => 'event: command\ndata: '
+      + JSON.stringify({
+        id: did === 'did-old' ? 'cmd-old' : 'cmd-new',
+        type: 'no-such-type',
+        _did: did,
+      }) + '\n\n';
+    const chunks = [frame('did-old'), frame('did-new')];
+    let reads = 0;
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              if (reads < chunks.length) {
+                const value = chunks[reads];
+                reads += 1;
+                return {
+                  done: false,
+                  value: new TextEncoder().encode(value),
+                };
+              }
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      },
+    };
+  }
   if (answer === 'ok') {
     return {
       ok: true,
@@ -149,6 +194,11 @@ async function bridgeFetch(target, init = {}) {
   if (/\/(register|sync-tabs|unregister)$/.test(url)) {
     return response(200, { ok: true });
   }
+  if (url.endsWith('/result') && init.method === 'POST') {
+    const payload = JSON.parse(init.body);
+    resultPosts.push({ did: payload._did || null });
+    return response(200, { ok: true });
+  }
   return response(200, { ok: true });
 }
 
@@ -156,9 +206,19 @@ const chrome = {
   storage: {
     local: {
       get: async (keys) => {
+        const wanted = [].concat(keys);
+        if (plan.holdLedger && wanted.includes('daedalus-seen-dids')) {
+          return new Promise((resolve) => { ledgerHold = { resolve }; });
+        }
+        if (plan.failLedger && wanted.includes('daedalus-seen-dids')) {
+          throw new Error('ledger read failed');
+        }
         const out = {};
-        for (const key of [].concat(keys)) {
-          if (key in storageStore) out[key] = copy(storageStore[key]);
+        for (const key of wanted) {
+          if (key in storageStore
+            && !(plan.noLedger && key === 'daedalus-seen-dids')) {
+            out[key] = copy(storageStore[key]);
+          }
         }
         return out;
       },
@@ -191,6 +251,7 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 chrome.alarms.onAlarm = eventTarget(alarmListeners);
+chrome.runtime.onConnect = eventTarget(connectListeners);
 
 function scheduleTimeout(callback, ms) {
   const timer = { id: ++nextTimerId, callback, delay: ms };
@@ -354,6 +415,43 @@ async function run() {
       timer.callback();
     }
     outcome.delays = delays;
+  } else if (plan.scenario === 'ledger-window') {
+    if (plan.trigger === 'connect') {
+      for (const listener of connectListeners) {
+        listener({
+          name: 'keepalive',
+          onMessage: eventTarget(),
+          onDisconnect: eventTarget(),
+        });
+      }
+    }
+    if (plan.trigger === 'alarm') {
+      for (const listener of alarmListeners) {
+        listener({ name: 'daedalus-heartbeat' });
+      }
+    }
+    await settle();
+    outcome.windowFetches = streamFetches.length;
+    openLedger();
+    await waitFor(() => streamFetches.length >= 1, 'boot fetch');
+    await settle();
+    outcome.totalFetches = streamFetches.length;
+    if (plan.deliver === 'commands') {
+      await waitFor(() => resultPosts.length >= 1, 'dispatched result');
+      await settle();
+      outcome.dispatchedDids = resultPosts.map((item) => item.did);
+    }
+    if (plan.trigger === 'token-change') {
+      const before = streamFetches.length;
+      const change = {};
+      change[plan.field] = { oldValue: null, newValue: plan.value };
+      for (const listener of changeListeners) listener(change, 'local');
+      await waitFor(() => streamFetches.length > before, 'resumed fetch');
+      outcome.resumedAuth = streamFetches[before].auth;
+    }
+  } else if (plan.scenario === 'boot-ledger') {
+    await settle();
+    outcome.fetches = streamFetches.length;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   return outcome;
@@ -475,6 +573,70 @@ def test_a_connected_stream_reopens_the_stopped_pair(tmp):
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok', 503], outcome
     assert outcome['returnedAuth'] == 'Bearer ' + TOKEN, outcome
+
+
+def test_a_keepalive_connect_during_the_ledger_read_starts_no_stream(tmp):
+    """A keepalive port connect inside the ledger-read window must stay
+    idle: the stream it would open dispatches against an empty dedup
+    ledger, and boot then opens a second stream over it."""
+    del tmp
+    outcome = _run({'scenario': 'ledger-window', 'trigger': 'connect',
+                    'holdLedger': True, 'statuses': ['silent']})
+    assert outcome['windowFetches'] == 0, outcome
+    assert outcome['totalFetches'] == 1, outcome
+
+
+def test_a_heartbeat_alarm_during_the_ledger_read_starts_no_stream(tmp):
+    """The heartbeat alarm races boot the same way a port connect does."""
+    del tmp
+    outcome = _run({'scenario': 'ledger-window', 'trigger': 'alarm',
+                    'holdLedger': True, 'statuses': ['silent']})
+    assert outcome['windowFetches'] == 0, outcome
+    assert outcome['totalFetches'] == 1, outcome
+
+
+def test_boot_opens_the_stream_once_with_the_ledger_loaded(tmp):
+    """Boot's own start is the one the gate admits: one fetch, and the
+    ledger it read decides dedup — a persisted delivery id is skipped,
+    a fresh one dispatches."""
+    del tmp
+    outcome = _run({'scenario': 'ledger-window', 'holdLedger': True,
+                    'deliver': 'commands',
+                    'statuses': ['ledger-commands']})
+    assert outcome['windowFetches'] == 0, outcome
+    assert outcome['totalFetches'] == 1, outcome
+    assert outcome['dispatchedDids'] == ['did-new'], outcome
+
+
+def test_a_failed_ledger_read_still_opens_the_stream(tmp):
+    """The gate closes on an unread ledger, not a failed one: a rejected
+    read is tolerated (the in-memory ledger still dedups), and the
+    boot start must go through."""
+    del tmp
+    outcome = _run({'scenario': 'boot-ledger', 'failLedger': True,
+                    'statuses': ['silent']})
+    assert outcome['fetches'] == 1, outcome
+
+
+def test_a_worker_without_a_stored_ledger_still_opens_the_stream(tmp):
+    """A fresh install has no ledger row at all: the gate must still open
+    once the read has answered empty, and never lock the stream out."""
+    del tmp
+    outcome = _run({'scenario': 'boot-ledger', 'noLedger': True,
+                    'statuses': ['silent']})
+    assert outcome['fetches'] == 1, outcome
+
+
+def test_a_post_boot_token_change_still_reconnects_after_the_gate(tmp):
+    """Once the ledger read has completed, the healthy reconnect paths
+    are untouched: a token change still tears down and reopens."""
+    del tmp
+    outcome = _run({'scenario': 'ledger-window', 'trigger': 'token-change',
+                    'holdLedger': True, 'statuses': ['silent'],
+                    'field': 'daedalus-token', 'value': NEW_TOKEN})
+    assert outcome['windowFetches'] == 0, outcome
+    assert outcome['totalFetches'] == 1, outcome
+    assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
 
 
 def main():

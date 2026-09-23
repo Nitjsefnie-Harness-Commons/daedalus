@@ -41,22 +41,29 @@ const _seenDids = new Set();
 const _seenDidOrder = [];
 const _SEEN_DID_MAX = 1000;
 const _SEEN_DID_KEY = 'daedalus-seen-dids';
+// No stream opens before the dedup-ledger read has completed, so a
+// keepalive connect or a heartbeat alarm cannot outrun boot's loadConfig;
+// boot always starts the stream once the read is done. A failed read
+// still opens the gate.
+let _ledgerReady = false;
 
 async function _loadSeenDids() {
   try {
     const stored = await chrome.storage.local.get([_SEEN_DID_KEY]);
     const saved = stored[_SEEN_DID_KEY];
-    if (!Array.isArray(saved)) return;
-    for (const did of saved) {
-      if (typeof did === 'string' && !_seenDids.has(did)) {
-        _seenDids.add(did);
-        _seenDidOrder.push(did);
+    if (Array.isArray(saved)) {
+      for (const did of saved) {
+        if (typeof did === 'string' && !_seenDids.has(did)) {
+          _seenDids.add(did);
+          _seenDidOrder.push(did);
+        }
       }
     }
   } catch (e) {
     // A worker that cannot read the ledger still dedups what it sees itself.
     console.warn('[Daedalus] Could not read the delivery ledger:', e.message);
   }
+  _ledgerReady = true;
 }
 
 function _isDuplicateDelivery(did) {
@@ -105,6 +112,7 @@ function parseSSEChunk(text) {
 }
 
 async function startStream() {
+  if (!_ledgerReady) return;
   if (!config.token) return;
   // Without a bridge URL the stream URL is relative, so the fetch resolves
   // against the extension's own chrome-extension:// origin and the watchdog
