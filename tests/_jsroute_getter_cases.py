@@ -82,6 +82,17 @@ GETTER_CASES = [
     ('getter-returns-awaiting-arrow-demotion',
      _LET + _PRO + "\n" + _ASYNC_ARROW("await 0; " + _DEM) + "obj.p()"
      + _TAIL, True),
+    ('getter-returns-awaiting-arrow-await-last',
+     _LET + _PRO + "\n" + _ASYNC_ARROW(_DEM + " await 0;") + "obj.p()"
+     + _TAIL, False),
+    ('getter-returns-arrow-nested-await-before-write',
+     _LET + _PRO + "\n" + _ARROW(
+         "const inner = async () => { await 0; }; " + _DEM)
+     + "obj.p()" + _TAIL, False),
+    ('getter-returns-arrow-nested-await-after-write',
+     _LET + _PRO + "\n" + _ARROW(_DEM + " const q = async () => "
+                                 "{ await 0; };") + "obj.p()" + _TAIL,
+     False),
     ('getter-returns-awaiting-arrow-promotion',
      _LET + _ASYNC_ARROW("await 0; " + _PRO) + "obj.p()" + _TAIL,
      (False, True)),

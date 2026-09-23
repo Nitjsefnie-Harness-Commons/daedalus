@@ -3,8 +3,6 @@ import re
 
 from _jsroute_keys import class_accessor
 
-_AWAIT = re.compile(r'\bawait\b')
-
 
 def _target(status, binding=None, body=None, member=None, name=None,
             source=None, form=None):
@@ -148,18 +146,6 @@ def invoked_body(receiver, value, position):
     if value['body'] is not None:
         return value['body']
     return callable_body(receiver, value['binding'], position)
-
-
-def getter_call_body(receiver, getter, position):
-    """Body the callable a getter returns runs when called at `position`.
-
-    None when the return is unresolved or that body awaits, which the
-    replay cannot order.
-    """
-    body = invoked_body(receiver, getter_value(receiver, getter), position)
-    if body is None or _AWAIT.search(receiver.mask, body[1], body[2]):
-        return None
-    return body
 
 
 def _invoke_callable(receiver, value, args, position):
