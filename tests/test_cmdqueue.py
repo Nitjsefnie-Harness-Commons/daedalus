@@ -50,31 +50,32 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 
     def observed_wait(remove_queue):
         queue, queued = _queued_file(tmp)
-        with _virtual_cmdqueue_clock() as (clock, _, origin):
+        with _virtual_cmdqueue_clock() as (clock, events, _origin):
             with _vanish_during_read(queued, clock, remove_queue):
                 command = _cmdqueue.wait_for_command(
                     queue, timeout=timeout, producer_alive=lambda: False)
         assert command is None, command
         assert not remove_queue or not queue.exists(), queue
-        return queue, clock.monotonic(), origin
+        return events, queue
 
-    queue, observed_end, origin = observed_wait(False)
-    with _virtual_cmdqueue_clock() as (clock, _, base):
-        baseline = _cmdqueue.wait_for_command(queue, timeout=timeout)
-    base_end = clock.monotonic()
-    _queue, queue_end, queue_origin = observed_wait(True)
+    vanish_events, vanish_queue = observed_wait(False)
+    with _virtual_cmdqueue_clock() as (_clock, baseline_events, _base):
+        baseline = _cmdqueue.wait_for_command(
+            vanish_queue, timeout=timeout)
     assert baseline is None, baseline
-    # The wait must reach its deadline and must not sleep an unclamped
-    # polling delay past it. The tolerance is virtual-clock time, not wall
-    # time, so it is deterministic: it sits far above the float drift a wait
-    # that splits its final delay accumulates, and far below the shortfall an
-    # unclamped final sleep leaves.
-    tolerance = _cmdqueue.POLL_DELAY / 100
-    endpoints = ((observed_end, origin), (base_end, base),
-                 (queue_end, queue_origin))
-    for end, start in endpoints:
-        assert start + timeout <= end <= start + timeout + tolerance, (
-            'wait did not end within its deadline', end, start, timeout)
+    queue_events, _queue = observed_wait(True)
+    # The wait's budget is poll attempts: all three waits spend the same
+    # POLL_DELAY train, the observed loss costs exactly one read, and the
+    # queue loss is event-identical to the file loss.
+    sleep_train = [('sleep', _cmdqueue.POLL_DELAY)] * (
+        math.ceil(timeout / _cmdqueue.POLL_DELAY) - 1)
+    for events in (vanish_events, baseline_events, queue_events):
+        assert [event for event in events if event[0] == 'sleep'] == (
+            sleep_train), events
+    assert vanish_events[0][0] == 'read', vanish_events
+    assert vanish_events[1:] == baseline_events, (
+        vanish_events, baseline_events)
+    assert queue_events == vanish_events, (queue_events, vanish_events)
 
 
 def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
@@ -155,7 +156,7 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     # A whole-multiple timeout keeps a second read per pass inside the bound.
     timeout = 2 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock() as (clock, events, origin):
+    with _virtual_cmdqueue_clock() as (clock, events, _origin):
         with _refuse_path_operation(queued, 'open', 1000, clock=clock):
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)
@@ -177,26 +178,12 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     assert all(abs(duration - _cmdqueue.POLL_DELAY)
                <= math.ulp(_cmdqueue.POLL_DELAY)
                for duration in sleeps[:-1]), (sleeps, events)
-    # An exact multiple can make the final sleep equal the polling delay.
     assert sleeps[-1] <= _cmdqueue.POLL_DELAY, (sleeps, events)
-    deadline = origin + timeout
-    actual_end = clock.monotonic()
-    end = actual_end
-    if events and events[-1][0] == 'read':
-        # A final read may straddle the deadline after a decomposed delay;
-        # pin the scheduling endpoint after proving it was already in flight.
-        before_last_read = actual_end - events[-1][1]
-        assert before_last_read <= deadline <= actual_end, (
-            'final read did not straddle the deadline', actual_end, deadline,
-            events)
-        end = deadline
-    # A wait may take its deadline as origin + timeout or as that value's
-    # next representable successor; it must stop at whichever it chose.
-    assert deadline <= end <= math.nextafter(deadline, math.inf), (
-        end, origin, timeout, events)
-    elapsed = end - origin
-    assert abs(elapsed - timeout) <= math.ulp(deadline), (
-        elapsed, timeout, origin, events)
+    # The budget is attempts: every attempt reads once and refuses, and the
+    # wait ends on its last attempt's read rather than on a clock.
+    attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
+    assert kinds.count('read') == attempts, (timeout, attempts, events)
+    assert events[-1][0] == 'read', events
 
 
 def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
