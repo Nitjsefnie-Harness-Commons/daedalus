@@ -346,6 +346,32 @@ def load(name):
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
 
 
+def test_the_operation_delivered_as_a_call_argument_is_the_declared_limit(
+        _tmp):
+    """`use(importlib)` is a declared limit.
+
+    The walk binds a name from a STORE or a `getattr`, and reads a call's
+    callee, but it does not follow a call's ARGUMENTS. Passing the
+    operation — or a tracked name — into a parameter hands it to a name
+    the map cannot see, and nothing refuses it. A DISCLOSED limit, pinned
+    here so a future change that starts refusing it is a deliberate one
+    that reopens the disclosure. The mechanism is not recognised on
+    purpose.
+    """
+    scanned = _scans_silently(_tmp, '''
+import importlib
+
+
+def use(loader):
+    return loader.import_module
+
+
+use(importlib)
+use(importlib.import_module)
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
     """The refusals are scoped to the import-by-name operation.
 
