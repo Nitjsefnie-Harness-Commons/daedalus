@@ -16,7 +16,6 @@ from _workflows import _workflow_triggers  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     GH_ARTIFACT_STUB as _GH_ARTIFACT_STUB,
-    GH_CHECK_STUB as _GH_CHECK_STUB,
     GH_COMMENT_STUB as _GH_COMMENT_STUB,
 )
 from _yamlread import (  # noqa: E402
@@ -510,60 +509,6 @@ def test_a_failed_coverage_job_with_no_marker_still_fails(tmp):
     assert marked.returncode != 0, (marked.stdout, marked.stderr)
     assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
     assert output.read_text(encoding='utf-8') == '', output
-
-
-def _run_publish_check(tmp, label, *, status='success', job_skipped='',
-                       reason=''):
-    """Run the publish block with one neutral-mapping combination."""
-    workdir = Path(tmp) / label
-    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
-    _write_executable(workdir / 'bin' / 'gh', _GH_CHECK_STUB)
-    state_path = workdir / 'state.json'
-    state_path.write_text(json.dumps({'checks': []}), encoding='utf-8')
-    calls = workdir / 'calls.jsonl'
-    calls.write_text('', encoding='utf-8')
-    env = {
-        **os.environ,
-        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
-        'GH_TOKEN': 'stub', 'REPO': 'owner/repo', 'HEAD_SHA': 'a' * 40,
-        'RUN_URL': 'https://github.com/owner/repo/actions/runs/7',
-        'STATUS': status, 'JOB_SKIPPED': job_skipped,
-        'NOT_MEASURED_REASON': reason,
-        'STUB_STATE': str(state_path), 'STUB_CALLS': str(calls),
-    }
-    result = _run_shell_block(
-        workdir, _run_block(_workflow(), 'Publish coverage check'), env)
-    state = json.loads(state_path.read_text(encoding='utf-8'))
-    return result, state, calls
-
-
-def test_publish_builds_the_neutral_summary_from_the_reason_output(tmp):
-    """A neutral check names the reason coverage was not measured."""
-    cancelled, state, _calls = _run_publish_check(
-        tmp, 'cancelled-reason', job_skipped='true',
-        reason='a cancelled tests run')
-    assert cancelled.returncode == 0, (cancelled.stdout, cancelled.stderr)
-    check = state['checks'][0]
-    assert check['conclusion'] == 'neutral', check
-    assert check['output[summary]'] == (
-        'Coverage was not measured for a cancelled tests run.'), check
-    doc_only, state, _calls = _run_publish_check(
-        tmp, 'doc-only-reason', job_skipped='true',
-        reason='a documentation-only change')
-    assert doc_only.returncode == 0, (doc_only.stdout, doc_only.stderr)
-    check = state['checks'][0]
-    assert check['conclusion'] == 'neutral', check
-    assert check['output[summary]'] == (
-        'Coverage was not measured for a documentation-only change.'), check
-
-
-def test_publish_refuses_a_neutral_mapping_without_a_reason(tmp):
-    """skipped=true with no reason output fails loudly, posting nothing."""
-    unlabeled, state, calls = _run_publish_check(
-        tmp, 'missing-reason', job_skipped='true', reason='')
-    assert unlabeled.returncode != 0, (unlabeled.stdout, unlabeled.stderr)
-    assert recorded_writes(calls) == [], calls.read_text(encoding='utf-8')
-    assert state['checks'] == [], state
 
 
 def test_write_steps_revalidate_if_head_advances_after_resolution(tmp):

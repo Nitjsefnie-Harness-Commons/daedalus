@@ -275,6 +275,27 @@ def _hostile(run, tmp):
                for value in args), call_list(calls)
 
 
+def _neutral_reasons(run):
+    """The neutral summary is built from the not_measured_reason output."""
+    for label, reason in (('reason-cancelled', 'a cancelled tests run'),
+                          ('reason-doc-only', 'a documentation-only change')):
+        result, state, calls, _script = run(
+            label=label, extra_env={'JOB_SKIPPED': 'true',
+                                    'NOT_MEASURED_REASON': reason})
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        check = state['checks'][0]
+        assert check['conclusion'] == 'neutral', (label, check)
+        assert check['output[summary]'] == (
+            f'Coverage was not measured for {reason}.'), (label, check)
+        assert len(write_list(calls)) == 1, label
+    unlabeled, state, calls, _script = run(
+        label='reason-unlabeled',
+        extra_env={'JOB_SKIPPED': 'true', 'NOT_MEASURED_REASON': ''})
+    assert unlabeled.returncode != 0, (unlabeled.stdout, unlabeled.stderr)
+    assert write_list(calls) == [], calls.read_text(encoding='utf-8')
+    assert state['checks'] == [], state
+
+
 def _orchestration(run, step, steps):
     conditions = {
         item['name']: item.get('if') for item in steps
@@ -339,6 +360,7 @@ def publication_contract(tmp, workflow_reader, extract_block, shell_runner,
     for scenario in SCENARIOS:
         scenario(run)
     _hostile(run, tmp)
+    _neutral_reasons(run)
     _orchestration(run, step, steps)
 
 
