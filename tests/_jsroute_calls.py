@@ -2,7 +2,7 @@
 import re
 
 from _jsroute_keys import decode_string_literal, source_key
-from _jsroute_returns import getter_value, invoked_body
+from _jsroute_returns import chained_member, getter_value, invoked_body
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
@@ -305,6 +305,15 @@ def _target_fields(target):
             target['form'])
 
 
+def _returned_by(calls, order):
+    """The classified getter call closing at `order`, if resolved."""
+    for call in calls:
+        if (call['order'] == order and call['status'] == 'known'
+                and call['form'] == 'get'):
+            return call
+    return None
+
+
 def _chained_member(owner_end, key, pair_start, context):
     mask = context['mask']
     receiver_close = owner_end - 1
@@ -429,8 +438,14 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
                     if call_mode is None:
                         call_mode = name
                 else:
-                    target = resolution['receivers'].member(
-                        owner, name, start)
+                    chained = chained_member(
+                        resolution['receivers'], owner_end, name, start)
+                    if chained is None:
+                        target = resolution['receivers'].member(
+                            owner, name, start)
+                    else:
+                        target = chained[0]
+                        owner_start = chained[1]
                 (status, binding, body, member, name, source,
                  form) = _target_fields(target)
                 start = owner_start
@@ -491,17 +506,28 @@ def discover_invocations(mask, text, pairs, resolution, method_positions,
             while (mask[inner:inner + 1] == '('
                    and pair_end.get(inner) == inner_end):
                 inner, inner_end = _trim(mask, inner + 1, inner_end - 1)
-            body = body_at(mask, inner)
-            inner_name = mask[inner:inner_end]
-            if body is not None:
-                status = 'known'
-            elif re.fullmatch(r'[\w$]+', inner_name):
-                name = inner_name
-                binding = visible_binding(name, inner)
-                status = 'known' if binding is not None else 'irrelevant'
+            chained = None
+            if not re.fullmatch(r'[\w$]+', mask[inner:inner_end]):
+                chained = _returned_by(calls, before)
+            if chained is not None:
+                # The callee is a prior getter call's result: what that
+                # call's getter returned is what this call invokes.
+                body = chained['returned']
+                status = 'known' if body is not None else 'unprovable'
+                start = chained['start']
             else:
-                status = 'unprovable'
-            start = inner
+                body = body_at(mask, inner)
+                inner_name = mask[inner:inner_end]
+                if body is not None:
+                    status = 'known'
+                elif re.fullmatch(r'[\w$]+', inner_name):
+                    name = inner_name
+                    binding = visible_binding(name, inner)
+                    status = ('known' if binding is not None
+                              else 'irrelevant')
+                else:
+                    status = 'unprovable'
+                start = inner
         else:
             continue
         if form == 'get' and status == 'known':

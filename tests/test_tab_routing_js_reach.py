@@ -241,7 +241,9 @@ def test_demoting_reaches_keep_their_verdicts(tmp):
         ('method-destructured', False, True),
         ('nonleading-spread', False, True),
         ('this-method-literal', False, True),
-        ('this-getter-literal', False, True),
+        # Reading `this.hook` runs the demoting getter, so the demotion
+        # the send follows is real and the guard now agrees (issue 863).
+        ('this-getter-literal', False, False),
         ('this-private-static', False, True),
         ('class-constructor', False, True),
         ('derived-constructor-super', False, True),

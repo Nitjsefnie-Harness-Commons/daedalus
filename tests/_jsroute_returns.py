@@ -2,6 +2,7 @@
 import re
 
 from _jsroute_keys import class_accessor
+from _jsroute_source import function_body_at
 
 
 def _target(status, binding=None, body=None, member=None, name=None,
@@ -20,6 +21,10 @@ def callable_return(receiver, left, right):
     member_call = _simple_member_call(receiver, left, right)
     if member_call is None:
         return None
+    if member_call[1] == 'bind':
+        bound = _bound_member(receiver, left, member_call[2])
+        if bound is not None:
+            return bound
     called = receiver.member(member_call[0], member_call[1], left)
     args = receiver.split(
         receiver.mask, receiver.text, member_call[2] + 1,
@@ -42,8 +47,95 @@ def getter_value(receiver, value):
         return value
     returned = _returned_expression(receiver, value['body'], {})
     if returned['status'] == 'unprovable':
+        returned = _this_member(receiver, value['body']) or returned
+    returned = _folded_return(receiver, returned)
+    if returned['status'] == 'unprovable':
         returned['form'] = 'get'
     return returned
+
+
+def _enclosing_literal(receiver, position):
+    """Innermost object-literal `{` around `position`, or None.
+
+    Function bodies are stepped past and a brace in block position is
+    refused, so `this` names the literal the method sits in and any
+    other container fails closed.
+    """
+    depth = 0
+    for cursor in range(position - 1, -1, -1):
+        char = receiver.mask[cursor]
+        if char in ')]}':
+            depth += 1
+        elif char in '([{':
+            if depth == 0:
+                if char != '{':
+                    return None
+                body = ('block', cursor, receiver.pair_end.get(cursor))
+                if body[2] is not None and receiver._scope_for(
+                        body) is not None:
+                    continue
+                before = cursor - 1
+                while before >= 0 and receiver.mask[before].isspace():
+                    before -= 1
+                if before < 0 or receiver.mask[before] not in '=(,[:!':
+                    return None
+                return cursor
+            depth -= 1
+    return None
+
+
+def sibling_member(receiver, key, position):
+    """Member of the object literal whose scope holds `position`."""
+    opening = _enclosing_literal(receiver, position)
+    if opening is None:
+        return None
+    return receiver._member_from_span(
+        (opening, receiver.pair_end[opening]), key, position,
+        frozenset(), {})
+
+
+def _this_member(receiver, getter_body):
+    """Sibling member a `this.<key>` return inside the getter names."""
+    expression = receiver._returned_expression(getter_body)
+    if expression is None:
+        return None
+    left, right = receiver._unwrap(expression)
+    found = re.fullmatch(r'this\s*\.\s*([\w$]+)',
+                         receiver.mask[left:right])
+    if found is None:
+        return None
+    return sibling_member(receiver, found.group(1), left)
+
+
+def _folded_return(receiver, value, seen=frozenset()):
+    """Callable a returned function-expression chain bottoms out at.
+
+    Evaluating a function expression runs nothing, so invoking the
+    getter's return reaches the innermost function's own body.
+    """
+    while (value['status'] == 'known' and value['body'] is not None
+           and value['body'][0] == 'expr'
+           and value['body'][1] not in seen
+           and function_body_at(receiver.mask, value['body'][1])
+           is not None):
+        position = value['body'][1]
+        value = receiver.callable_value(value['body'][1:])
+        seen = seen | {position}
+    return value
+
+
+def _bound_member(receiver, left, opening):
+    """Callable a `<name>.bind(...)` result invokes: the name's own."""
+    found = re.match(r'([\w$]+)\s*\.', receiver.mask[left:opening])
+    if found is None:
+        return None
+    owner = receiver.callable_value((left, left + found.end(1)))
+    if owner['status'] != 'known':
+        return None
+    body = invoked_body(receiver, owner, left)
+    if body is None:
+        return None
+    return _target('known', body=body)
 
 
 def member_value(receiver, left, right, env=None):
@@ -62,6 +154,62 @@ def member_value(receiver, left, right, env=None):
         value = receiver._member_binding(
             value['binding'], key, left, frozenset(), env or {})
     return getter_value(receiver, value)
+
+
+def chained_member(receiver, owner_end, key, position):
+    """Target and chain head of the last key on a spelled member chain.
+
+    The call site asks only when the key's owner names no binding: the
+    hops between the head binding and the key are object-literal
+    members, which the receiver index reads one hop at a time.
+    """
+    hops = []
+    head_start = owner_end
+    cursor = owner_end
+    while True:
+        pos = cursor - 1
+        while pos >= 0 and receiver.mask[pos].isspace():
+            pos -= 1
+        end = pos + 1
+        stop = pos
+        while stop >= 0 and (receiver.mask[stop].isalnum()
+                             or receiver.mask[stop] in '_$'):
+            stop -= 1
+        name = receiver.mask[stop + 1:end]
+        if not re.fullmatch(r'[\w$]+', name):
+            return None
+        hops.append(name)
+        head_start = stop + 1
+        if stop < 0 or receiver.mask[stop] != '.':
+            break
+        cursor = stop
+    if len(hops) < 2:
+        return None
+    binding = receiver.visible_binding(hops[-1], position)
+    if binding is None:
+        return None
+    span, _created = receiver._latest_value(
+        receiver.values.get(binding), position)
+    for hop in reversed(hops[:-1]):
+        if span is None:
+            return None
+        left, right = receiver._unwrap(span)
+        if receiver.mask[left:left + 1] != '{':
+            return None
+        status, span, _form = receiver._property_span(
+            (left, right), hop, position, frozenset(), {})
+        if status != 'known':
+            return None
+    left, right = receiver._unwrap(span)
+    if receiver.mask[left:left + 1] != '{':
+        return None
+    status, value, form = receiver._property_span(
+        (left, right), key, position, frozenset(), {})
+    if status != 'known':
+        return None
+    if form != 'data':
+        return _target('known', body=value, form=form), head_start
+    return receiver.callable_value(value), head_start
 
 
 def _member_chain(receiver, left, right):

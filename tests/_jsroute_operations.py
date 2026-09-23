@@ -3,6 +3,7 @@ import re
 
 from _jsroute_calls import _NON_CALL_WORDS, _trim
 from _jsroute_keys import decode_string_literal
+from _jsroute_returns import sibling_member
 from _jsroute_source import record_work, word_before
 
 _WRITE_OPS = (r'(?:=(?!=|>)|[-+*/%&|^]=|\*\*=|<<=|>>>=|>>='
@@ -144,6 +145,15 @@ def discover_operations(mask, text, pairs, resolution, reader, calls,
         record_work(work, 'operation_prefix_bytes', len(word) + 1)
         return word == 'delete'
 
+    def read_target(owner, key, position):
+        """A this-read names its literal's member when one exists."""
+        target = receivers.member(owner, key, position, wanted='get')
+        if owner == 'this' and target['status'] == 'unprovable':
+            sibling = sibling_member(receivers, key, position)
+            if sibling is not None and sibling['status'] == 'known':
+                return sibling
+        return target
+
     def prove(position, end, target=None, read=False, carries=False):
         # Only a read hands a value out; a write the walk proved inert
         # produces nothing that can escape.
@@ -218,8 +228,8 @@ def discover_operations(mask, text, pairs, resolution, reader, calls,
             continue
         if unmodelled_use(mask, text, match.end()):
             continue
-        target = receivers.member(match.group(1), match.group(2),
-                                  match.start(), wanted='get')
+        target = read_target(match.group(1), match.group(2),
+                             match.start())
         record(match, target, 'get', key=match.group(2))
     for match in _DOT_WRITE.finditer(mask):
         if deleting(match.start()):
@@ -270,8 +280,9 @@ def discover_operations(mask, text, pairs, resolution, reader, calls,
                 key = None
             if isinstance(key, tuple):
                 key = receivers.computed_key(key)
-            target = receivers.member(owner, key, match.start(),
-                                      wanted=form_wanted)
+            target = (read_target(owner, key, match.start())
+                      if form_wanted == 'get' else receivers.member(
+                          owner, key, match.start(), wanted=form_wanted))
             if form_wanted == 'get' and unmodelled_use(
                     mask, text, match.end()):
                 continue
