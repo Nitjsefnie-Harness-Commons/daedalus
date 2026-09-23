@@ -199,4 +199,34 @@ GETTER_CASES = [
      _LET + "const obj = { m() { " + _PRO + " }, "
      "get p() { return () => this.m; } };\n"
      + 'obj.p()' + _TAIL, False),
+    # Bind arguments Node executes, spelled so no call syntax stands
+    # beside a name: the guard must keep reporting because what the
+    # argument runs is the call's own.
+    ('getter-bound-tagged-argument',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _PRO + " }\n"
+     "const obj = { get p() { return dem.bind(side`x`); } };\n"
+     + 'obj.p()' + _TAIL, True),
+    ('getter-bound-parenthesized-argument',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _PRO + " }\n"
+     "const obj = { get p() { return dem.bind((0, side)()); } };\n"
+     + 'obj.p()' + _TAIL, True),
+    ('getter-bound-computed-argument',
+     _LET + "function dem() { void 0; }\n"
+     "function side() { " + _PRO + " }\n"
+     "const obj = { side, "
+     "get p() { return dem.bind(obj[k]()); } };\n"
+     "const k = 'side';\n" + 'obj.p()' + _TAIL, True),
+    # The curried value is never invoked: the innermost body stays
+    # unrun, so the demoting spelling routes (the guard reports it)
+    # and the promoting spelling routes nothing (agreed). This pins
+    # the honest concise-body span: an over-folded reader credits the
+    # innermost body to the single call and both rows flip.
+    ('getter-through-curried-return-uncalled',
+     _LET + "const obj = { get p() { return () => () => { " + _DEM
+     + " }; } };\n" + _PRO + '\n' + 'obj.p()' + _TAIL, True),
+    ('getter-through-curried-return-uncalled-promotion',
+     _LET + "const obj = { get p() { return () => () => { " + _PRO
+     + " }; } };\n" + 'obj.p()' + _TAIL, False),
 ]
