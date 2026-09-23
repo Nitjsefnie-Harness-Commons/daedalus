@@ -141,9 +141,27 @@ def test_a_closed_pull_request_run_stands_down(tmp):
                  'Download the comment artifact',
                  'Post or update the pull request comment',
                  'Publish coverage check'):
-        condition = commenter._step_condition(  # pylint: disable=W0212
-            commenter._workflow(), name)  # pylint: disable=W0212
+        workflow = commenter._workflow()  # pylint: disable=protected-access
+        condition = commenter._step_condition(workflow, name)
         assert evaluate_if(condition, context) is False, (name, condition)
+
+
+def test_a_credited_run_patches_an_existing_marker(tmp):
+    """A credited run replaces the stale marker and keeps its outputs."""
+    marked, comments, _calls, output = commenter._run_comment_block(
+        tmp, 'Mark missing patch coverage', state=_PRIOR_MARKER,
+        head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA,
+        run_conclusion='cancelled')
+    assert marked.returncode == 0, (marked.stdout, marked.stderr)
+    assert len(comments) == 1, comments
+    assert 'not measured' in comments[0]['body'], comments
+    outputs = dict(
+        line.split('=', 1) for line in output.read_text(
+            encoding='utf-8').splitlines())
+    assert outputs.get('verdict') == '', outputs
+    assert outputs.get('skipped') == 'true', outputs
+    assert outputs.get('not_measured_reason') == 'a cancelled tests run', \
+        outputs
 
 
 def test_an_ambiguous_fallback_stays_loud(tmp):

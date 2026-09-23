@@ -421,8 +421,8 @@ def test_a_success_then_b_failure_replaces_the_marker(tmp):
     assert '**100.0%**' not in state[0]['body'], state
 
 
-def test_a_success_then_b_current_cancelled_replaces_the_marker(tmp):
-    """A current cancelled run marks the old percentage unavailable."""
+def test_a_current_run_replaces_the_marker_and_gates_the_job(tmp):
+    """A current run replaces the old percentage; the job gates by event."""
     posted, state, calls, _output = _run_comment_block(
         tmp, 'Post or update the pull request comment', state=[],
         head_sha='A', current_head='A', body='**100.0%**')

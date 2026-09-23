@@ -161,7 +161,8 @@ EXPECTED_STEP_MAPPINGS = (
         "  fi\n"
         '  numbers="$(sort -u pulls.txt)"\n'
         "fi\n"
-        "count=\"$(printf '%s\\n' \"$numbers\" | awk 'NF' | wc -l)\"\n"
+        "count=\"$(printf '%s\\n' \"$numbers\" | awk 'NF' | wc -l | "
+        "tr -d ' ')\"\n"
         'if [ "$count" -eq 0 ]; then\n'
         "  # A closed pull request's run has nowhere to comment and no\n"
         '  # head worth a check; that is a real state, not an error.\n'
