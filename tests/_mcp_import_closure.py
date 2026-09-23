@@ -105,11 +105,49 @@ def _is_dynamic_import(func, bound):
 
 
 def _yields_the_operation(value, bound):
-    """True when an expression hands out the import-by-name operation under
-    a name this map already tracks."""
+    """True when an expression can evaluate to the import-by-name operation.
+
+    Structural, not one level deep: a tracked name inside a conditional, a
+    boolean choice, a comparison, a container, a starred element, a
+    subscripted value or a comprehension can still reach the store, so each
+    of those wrappers is read into. Two shapes are read as NOT yielding it,
+    and both are readable to a specific other object: an attribute of a
+    known module that is not one of the operation's own (`importlib.util`),
+    and a call — a call evaluates to whatever its callee returns, not to
+    the callee. Those are the deliberate limits, and a name bound to a
+    call's result stays outside the property rather than refused, because
+    refusing every one of those would refuse ordinary code.
+    """
     if isinstance(value, ast.Name):
         return value.id in bound
-    return _is_dynamic_import(value, bound)
+    if isinstance(value, ast.Attribute):
+        return _is_dynamic_import(value, bound)
+    if isinstance(value, ast.IfExp):
+        return _yields_the_operation(value.body, bound) \
+            or _yields_the_operation(value.orelse, bound)
+    if isinstance(value, ast.BoolOp):
+        return any(_yields_the_operation(item, bound) for item in value.values)
+    if isinstance(value, ast.Compare):
+        return any(_yields_the_operation(item, bound)
+                   for item in (value.left, *value.comparators))
+    if isinstance(value, ast.Starred):
+        return _yields_the_operation(value.value, bound)
+    if isinstance(value, ast.Subscript):
+        return _yields_the_operation(value.value, bound)
+    if isinstance(value, ast.NamedExpr):
+        return _yields_the_operation(value.value, bound)
+    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+        return any(_yields_the_operation(item, bound) for item in value.elts)
+    if isinstance(value, ast.Dict):
+        return any(key is not None and _yields_the_operation(key, bound)
+                   for key in value.keys) \
+            or any(_yields_the_operation(item, bound) for item in value.values)
+    if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+        return _yields_the_operation(value.elt, bound)
+    if isinstance(value, ast.DictComp):
+        return _yields_the_operation(value.key, bound) \
+            or _yields_the_operation(value.value, bound)
+    return False
 
 
 def _store_leaves(target):
@@ -297,10 +335,14 @@ def _import_targets(path, root):
     naming the module and the import site; a constant resolves like an
     import. A spelling that hides the operation behind a name this map
     cannot follow — a store of any binding form, a `getattr` — raises too,
-    because a walk that skipped it would be the next blind spot. What stays
-    outside the property: an operation reached through an object this map
-    never bound, such as a module a resolved constant import was stored
-    under, or a name a value the resolver cannot read was assigned to.
+    because a walk that skipped it would be the next blind spot. Two value
+    shapes stay outside the property on purpose, and are accepted rather
+    than skipped in silence: a call's result, and an attribute of a known
+    module that is not the operation (`importlib.util`). Both are readable
+    to a specific other object, and refusing every store of either would
+    refuse `mod = importlib.import_module('fcntl')` and every `x = f()[0]`
+    with it; a name holding a call's result is followed by neither the
+    operation map nor these refusals.
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))

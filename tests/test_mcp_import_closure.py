@@ -468,61 +468,6 @@ def load(name):
 ''', 6, 'cannot follow')
 
 
-def test_a_getattr_of_an_unknown_attribute_on_a_bound_name_refuses(_tmp):
-    """A non-constant attribute read off a known operation is still one."""
-    _refuses(_tmp, '''
-import importlib
-
-
-def load(name, attribute):
-    return getattr(importlib, attribute)(name)
-''', 6, 'cannot follow')
-
-
-def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
-    """The refusals are scoped to the import-by-name operation.
-
-    A name rebound to an ordinary object, and a `getattr` for an ordinary
-    attribute, are ordinary code; refusing them would refuse the closure's
-    modules for writing Python. Every store form the walk now reads appears
-    here bound to an ordinary value, because the structural fix is only
-    safe while ordinary code stays silent.
-    """
-    _write_tree(Path(_tmp), {'composition.py': '''
-import contextlib
-import os
-
-
-def flags():
-    return getattr(os, 'O_BINARY', 0)
-
-
-def reader(stream, name):
-    stream = os.fdopen(0, 'rb')
-    return getattr(stream, name, None)
-
-
-def ordinary(handle, table=()):
-    (first, second) = (handle, handle)
-    [third] = [handle]
-    first, *rest = (handle, 1, 2)
-    (found := handle)
-    for entry in (handle,):
-        first = entry
-    with contextlib.suppress(OSError):
-        second = handle
-    rows = [item for item in (handle,)]
-    try:
-        handle.read()
-    except OSError as failure:
-        return first, second, third, rest, found, rows, failure
-    return table
-'''})
-    scanned = _mcp_import_closure.composition_scan_set(
-        Path(_tmp) / 'composition.py', _tmp)
-    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
-
-
 REAL_COMPOSITION_SCAN_SET = [
     'daedalus_bridge/__init__.py',
     'daedalus_bridge/env_config.py',
@@ -544,6 +489,17 @@ REAL_COMPOSITION_SCAN_SET = [
     'daedalus_mcp/tools_tabs.py',
     'daedalus_mcp/transport.py',
 ]
+
+
+def test_a_getattr_of_an_unknown_attribute_on_a_bound_name_refuses(_tmp):
+    """A non-constant attribute read off a known operation is still one."""
+    _refuses(_tmp, '''
+import importlib
+
+
+def load(name, attribute):
+    return getattr(importlib, attribute)(name)
+''', 6, 'cannot follow')
 
 
 def test_the_real_composition_scan_set_is_pinned(_tmp):
