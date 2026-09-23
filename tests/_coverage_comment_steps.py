@@ -233,9 +233,11 @@ EXPECTED_STEP_MAPPINGS = (
             '  then\n'
             "    reason='a cancelled tests run'\n"
             '  fi\n'
-            '  echo \'verdict=\' >> "$GITHUB_OUTPUT"\n'
-            '  echo \'skipped=true\' >> "$GITHUB_OUTPUT"\n'
-            '  echo "not_measured_reason=$reason" >> "$GITHUB_OUTPUT"\n'
+            '  {\n'
+            '    printf \'verdict=\\n\'\n'
+            '    printf \'skipped=true\\n\'\n'
+            '    printf \'not_measured_reason=%s\\n\' "$reason"\n'
+            '  } >> "$GITHUB_OUTPUT"\n'
             'fi\n'
             '\n'
             "marker='<!-- daedalus-diff-coverage -->'\n"
