@@ -88,9 +88,7 @@ async function bridgeFetch(target) {
   const url = String(target);
   // The stream stays unanswered, as a live SSE connection does: the fetch
   // never settles, so a boot that reaches startStream cannot spin on the
-  // retry loop (a 503 would, forever, and the watchdog interval is inert
-  // here). No assertion reads the stream, but nothing is answered 200 here
-  // that a plan did not place.
+  // retry loop (a 503 would, forever).
   if (url.includes('/stream?')) return new Promise(() => {});
   if (url.endsWith('/result')) return response(200, { ok: true });
   return response(200, { ok: true });
@@ -109,8 +107,8 @@ const chrome = {
             return new Promise((resolve) => { configHold = { resolve }; });
           }
           // holdIfNotHeld parks every config get AFTER boot's first, so a
-          // planted extra generation is caught mid-read rather than racing
-          // a resolved one, while boot itself still completes.
+          // planted extra generation is caught mid-read rather than racing a
+          // resolved one, while boot itself still completes.
           if (plan.holdIfNotHeld && configGets > 1 && !configHold) {
             return new Promise((resolve) => { configHold = { resolve }; });
           }
@@ -218,9 +216,9 @@ async function run() {
     // A later caller, now that the generation has settled, must still join
     // the memo rather than start a fresh generation: the memo outlives the
     // in-flight window. On a fresh install a fresh generation would re-read
-    // the empty token and mint a second UUID. Started inside the context and
-    // settled, never awaited across the vm boundary (a pending cross-context
-    // promise is not driven by a host await).
+    // the empty token and mint a second UUID. Settled inside the context,
+    // never awaited across the vm boundary (a pending cross-context promise
+    // is not driven by a host await).
     vm.runInContext('globalThis.__recalled = loadConfig();', context);
     await settle();
     outcome.configGets = configGets;
@@ -230,7 +228,8 @@ async function run() {
   } else if (plan.scenario === 'config-retry') {
     // Boot's first generation failed on its config read (failConfigFirst).
     // The memo must not cache that rejection: a later caller starts a fresh
-    // generation, which now succeeds and auto-generates a token.
+    // generation, which now succeeds and auto-generates a token, and boot's
+    // finally arms the heartbeat alarm regardless.
     const getsAfterFail = configGets;
     vm.runInContext('globalThis.__recalled = loadConfig();', context);
     await settle();
@@ -257,8 +256,7 @@ async function run() {
   } else if (plan.scenario === 'boot-success') {
     // A normal boot: the config read resolves, so boot's .then runs (the
     // fresh install mints and stores a token) and the .finally arms the
-    // heartbeat. The alarm must carry its name and its period; it is the
-    // only path that restarts the stream once the worker is killed.
+    // heartbeat. The alarm must carry its name and its period.
     outcome.createdAlarms = createdAlarms.slice();
     outcome.mintedTokens = mintedTokens.slice();
     outcome.finalToken = vm.runInContext('config.token', context);
@@ -266,14 +264,14 @@ async function run() {
     // Boot minted and stored a token. The operator then empties the options
     // token field and saves, which is what options.js does with the trimmed
     // field: it writes 'daedalus-token': '' and renders "Not configured".
-    // That write lands in storage and reaches the worker through onChanged,
-    // so a heartbeat tick arrives with config.token === '' and the
-    // listener's `if (!config.token) await loadConfig()` is live. The memo
-    // holds boot's resolved generation, so the tick joins it: no config
-    // read, no second mint, the extension stays unconfigured. A generation
-    // started here (the base's behaviour) would re-read the empty token and
-    // mint a fresh one behind the operator; holdIfNotHeld parks that read
-    // mid-flight so the extra generation is observed rather than raced.
+    // That write reaches the worker through onChanged, so a heartbeat tick
+    // arrives with config.token === '' and the listener's `if
+    // (!config.token) await loadConfig()` is live. The memo holds boot's
+    // resolved generation, so the tick joins it: no config read, no second
+    // mint, the extension stays unconfigured. A generation started here
+    // (the base's behaviour) would re-read the empty token and mint a fresh
+    // one behind the operator; holdIfNotHeld parks that read mid-flight so
+    // the extra generation is observed rather than raced.
     // loadConfig is wrapped, inside the context, with a call counter so the
     // absence below is not vacuous: the tick is PROVEN to have reached
     // loadConfig, and the memo is what answered it without a read. The wrap
@@ -302,7 +300,7 @@ async function run() {
     outcome.getsAfterClear = configGets - getsBeforeTick;
     // Release any parked extra generation and let it run to its token
     // branch, so a re-mint is observed as well as counted: getsAfterClear
-    // catches the read, mintedTokens catches the credential.
+    // catches the read, mintedTokens the credential.
     openConfig();
     await settle();
     outcome.mintedTokens = mintedTokens.slice();
@@ -353,7 +351,6 @@ def test_a_heartbeat_alarm_during_the_config_read_joins_boot(tmp):
     # One generation auto-generates and writes a token exactly once.
     assert outcome['mintedTokens'] == ['relay-1'], outcome
     assert outcome['tokenWrites'] == 1, outcome
-    # The one generation's token is what the shared config ends up holding.
     assert outcome['finalToken'] == 'relay-1', outcome
 
 
@@ -371,8 +368,8 @@ def test_a_failed_config_generation_does_not_poison_a_later_caller(tmp):
     del tmp
     outcome = _run({'scenario': 'config-retry', 'failConfigFirst': True,
                     'noToken': True})
-    # A fresh generation ran after the failure (a new config get), rather than
-    # the later caller joining the cached rejection.
+    # A fresh generation ran after the failure (a new config get), rather
+    # than the later caller joining the cached rejection.
     assert outcome['getsAfterFailed'] == 1, outcome
     assert outcome['tokenWrites'] == 1, outcome
     assert outcome['finalToken'] == 'relay-1', outcome
@@ -416,8 +413,8 @@ def test_a_failed_heartbeat_config_read_is_reported_and_skips_the_tick(tmp):
     assert outcome['finalToken'] == '', outcome
     # The tick was skipped: the only alarm is boot's. An empty keep-alive list
     # is the one assertion here that could read as vacuous, so it is the one
-    # with a recorded mutant behind it — a catch that falls through instead of
-    # returning arms it, and the mutant fails.
+    # with a recorded mutant behind it — a catch that falls through instead
+    # of returning arms it, and the mutant fails.
     assert outcome['createdAlarms'] == [
         {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
     assert outcome['keepAliveArms'] == [], outcome
@@ -464,21 +461,20 @@ def test_a_cleared_token_stays_cleared_and_is_not_re_minted(tmp):
 def test_a_successful_boot_arms_the_heartbeat(tmp):
     """A normal, resolved boot must still arm the heartbeat alarm.
 
-    The branch moved the alarm's create into boot's .finally so a failed
-    config read would still leave a retry path. The .finally runs on the
-    success path too, and that preserved arming is what restarts the stream
-    after the worker is killed — the common case, which nothing else in the
-    suite pins. Arming only in the .catch survives every test here; this one
-    does not. The alarm must be created with its name and its period.
+    Arming in boot's .finally (so a failed read still leaves a retry path) also
+    arms on the success path, and that preserved arming is what restarts the
+    stream after the worker is killed — the common case, which nothing else
+    in the suite pins. Arming only in the .catch survives every other test
+    here; this one does not. The alarm must be created with its name and its
+    period.
     """
     del tmp
     outcome = _run({'scenario': 'boot-success', 'noToken': True})
-    # The alarm exists, by name and period — this is the assertion that
-    # kills the catch-only arming.
+    # The alarm exists, by name and period — kills the catch-only arming.
     assert outcome['createdAlarms'] == [
         {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
-    # The success path itself ran: the fresh install minted its token, so
-    # the arming is observed on a resolved read, never a rejected one.
+    # The success path itself ran: the fresh install minted its token, so the
+    # arming is observed on a resolved read, never a rejected one.
     assert outcome['mintedTokens'] == ['relay-1'], outcome
 
 
