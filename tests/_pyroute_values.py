@@ -49,10 +49,10 @@ def stored_signature(value, occupancy=True):
     """Signature of a stored value by contents rather than object identity.
 
     A None item is a key occupied by an ordinary value. With ``occupancy``
-    off, the top-level container's None items are left out, so two paths
-    that differ only in which clean keys they wrote can be joined; nested
-    containers, instance attributes and alternatives keep occupancy on,
-    because the join intersects one level only.
+    off, a top-level container's None items and a dict's length are left
+    out, so paths differing only in which clean keys they wrote can join;
+    nested containers, instance attributes and alternatives keep occupancy
+    on, because the join intersects one level only.
 
     The three recursive kinds are memoized by object id: their items,
     attributes and values are never mutated after the value is built --
@@ -62,9 +62,10 @@ def stored_signature(value, occupancy=True):
         key = (id(value), occupancy)
         signature = _STORED_SIGNATURES.get(key)
         if signature is None:
-            signature = ('container', identity_token(value), value.length,
-                         value.kind,
-                         _items_signature(value.items, occupancy))
+            length = (value.length if occupancy or value.kind != 'dict'
+                      else None)
+            signature = ('container', identity_token(value), length,
+                         value.kind, _items_signature(value.items, occupancy))
             _STORED_SIGNATURES[key] = signature
             _STORED_ANCHORS.append(value)
         return signature
@@ -600,15 +601,16 @@ def materialize_deferred(consumer, value, node=None):
     if consumer == 'sum':
         return None
     if consumer == 'dict' and isinstance(value, DeferredContainer):
-        if value.kind not in ('list', 'tuple') or value.length != 2:
+        if value.kind not in ('list', 'tuple') or value.length not in (
+                2, None):
             return None
-        key = value.items.get(0)
-        item = value.items.get(1)
+        key = value.items.get(0) if value.length == 2 else None
+        item = value.items.get(1) if value.length == 2 else merge_yielded(
+            (value.items.get(1), value.items.get(DYNAMIC_KEY)))
         if not (is_deferred_value(item) or sender_value(item) is not None):
             return None
-        if key is None:
-            return DeferredContainer({DYNAMIC_KEY: item}, 1, 'dict', node)
-        return DeferredContainer({key: item}, 1, 'dict', node)
+        return DeferredContainer(
+            {DYNAMIC_KEY if key is None else key: item}, 1, 'dict', node)
     kind = 'list' if consumer == 'sorted' else consumer
     return DeferredContainer({0: value}, 1, kind)
 
