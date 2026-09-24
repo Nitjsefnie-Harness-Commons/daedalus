@@ -97,6 +97,41 @@ def _refuses_the_scan(_tmp, source, site):
     _assert_refusal(_tmp, source, site, 'cannot read statically')
 
 
+def _scans_silently(_tmp, source):
+    """The scan returns normally: a declared limit."""
+    _write_tree(Path(_tmp), {'composition.py': source})
+    return _mcp_import_closure.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+
+
+def test_a_registry_key_the_walk_cannot_read_refuses(_tmp):
+    """A registry subscript whose KEY the walk cannot read is refused; the
+    key is decided by the constant-folder, not its spelling."""
+    for source, site in (
+            ('\nimport sys\n\n\ndef load(k):\n    key = "modules"\n'
+             '    return sys.__dict__[key]["importlib"]\n', 7),
+            ('\nimport sys as s\n\n\ndef load(k):\n    key = "modules"\n'
+             '    return s.__dict__[key]["importlib"]\n', 7),
+            ('\nimport sys\n\n\ndef load():\n'
+             '    return sys.__dict__[f"modules"]\n', 6),
+            ('\nimport sys\n\n\ndef load():\n'
+             '    return sys.__dict__["mod" + "ules"]\n', 6)):
+        _assert_refusal(_tmp, source, site, 'cannot resolve')
+
+
+def test_a_registry_key_naming_another_attribute_resolves(_tmp):
+    """A registry subscript keyed by a different constant is NOT the
+    registry: the walk reads the key and resolves what it names."""
+    scanned = _scans_silently(_tmp, '''
+import sys
+
+
+def load():
+    return sys.__dict__['path']
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
 def test_an_import_module_from_import_refuses_the_scan(_tmp):
     """`from importlib import import_module` binds the operation too.
 
