@@ -596,6 +596,38 @@ def test_unknown_length_pair_does_not_trust_its_first_item_as_key(tmp):
                 + 'e.get("k", q)()') == (0, 1)
 
 
+_LAST_PREFIX = ('x = [ordinary, relay(), *' + _K2 + ']\na, b, *c = x'
+                + _SL + 'b()')
+_UNREAD_PAIR_KEY = '[("a", 1), (str(args.chrome_tab), 2)]'
+_UNREAD_PAIRS = {
+    'dict': 'd = dict(' + _UNREAD_PAIR_KEY + ')',
+    'update': 'd = {}\nd.update(' + _UNREAD_PAIR_KEY + ')',
+}
+
+
+def test_last_target_before_the_star_reads_its_own_position(tmp):
+    assert _run(tmp, _LAST_PREFIX) == (1, 1)
+
+
+def test_last_target_before_the_star_stays_clean(tmp):
+    assert _run(tmp, _LAST_PREFIX, clean=True) == (0, 0)
+
+
+def _unread_pair(tmp, name, clean=False):
+    return _run(tmp, _UNREAD_PAIRS[name] + '\nx = [*d, relay()]' + _SL
+                + 'x[2]()', clean)
+
+
+def test_pair_with_an_unread_key_leaves_the_count_unknown(tmp):
+    assert [_unread_pair(tmp, name) for name in _UNREAD_PAIRS] \
+        == [(1, 1)] * len(_UNREAD_PAIRS)
+
+
+def test_pair_with_an_unread_key_stays_clean(tmp):
+    assert [_unread_pair(tmp, name, True) for name in _UNREAD_PAIRS] \
+        == [(0, 0)] * len(_UNREAD_PAIRS)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='positions_')
 
