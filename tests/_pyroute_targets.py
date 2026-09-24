@@ -74,18 +74,12 @@ def probe_comprehension(node, active, skipped, copy_state, check, violations):
     return active
 
 
-def _reads_element(condition):
-    """Whether a filter's truth can turn on the element it sees: it reads a
-    name, a call, an attribute or a subscript."""
-    return any(isinstance(node, (ast.Name, ast.Call, ast.Attribute,
-                                 ast.Subscript))
-               for node in ast.walk(condition))
-
-
 def _constant_truth(condition):
-    """The truth of a filter that reads nothing, or None when it is not
-    decidable. literal_truth covers the literal forms it models; a `not`
-    over one of them is decided here."""
+    """The truth of a filter decided by its own literals, or None when it is
+    not decidable. literal_truth covers the literal forms it models; a `not`
+    over one of them is decided here. A true result also says the filter
+    reads no name, call, attribute or subscript, because none of those is a
+    literal form and each would leave the truth undecidable."""
     truth = literal_truth(condition)
     if truth is not None or not isinstance(condition, ast.UnaryOp):
         return truth
@@ -97,16 +91,16 @@ def _constant_truth(condition):
 
 def _filter_inert(condition):
     """Whether a filter provably keeps the element at that position. A
-    filter that reads nothing is decided by its own literals, and keeps the
-    element when that truth is true -- `if True`, `if not False`, `if 1`. A
-    bare name is a truthiness test, and the guard holds no falsy value at
-    one: a target carries a deferred element, and a deferred value is a
-    callable, a container, an instance or a class, all of them truthy. Every
-    other filter compares, resolves or calls on the element, and whether it
-    drops the element is not modelled here."""
+    filter decided by its own literals keeps the element when that truth is
+    true -- `if True`, `if not False`, `if 1`. A bare name is a truthiness
+    test, and the guard holds no falsy value at one: a target carries a
+    deferred element, and a deferred value is a callable, a container, an
+    instance or a class, all of them truthy. Every other filter compares,
+    resolves or calls on the element, and whether it drops the element is
+    not modelled here."""
     if isinstance(condition, ast.Name):
         return True
-    return not _reads_element(condition) and _constant_truth(condition) is True
+    return _constant_truth(condition) is True
 
 
 def _filters_inert(node):
@@ -122,16 +116,15 @@ def _first_element(value):
     or _UNPROVABLE. A tuple or list of known length carries its own element
     0. Alternatives bind only when every branch is such a container and they
     agree on that element: a union of the branches is not an agreement, so a
-    disagreement leaves the position unprovable."""
+    disagreement -- and a branch that proves no element at all -- leaves the
+    position unprovable."""
     if isinstance(value, DeferredContainer):
         if value.kind in ('tuple', 'list') and value.length:
             return value.items.get(0)
         return _UNPROVABLE
     if isinstance(value, DeferredAlternatives):
         elements = [_first_element(branch) for branch in value.values]
-        if (elements
-                and all(item is not _UNPROVABLE for item in elements)
-                and all(item is elements[0] for item in elements)):
+        if elements and all(item is elements[0] for item in elements):
             return elements[0]
     return _UNPROVABLE
 
@@ -152,15 +145,14 @@ def comprehension_first(node, results, states, copy_state, check, violations):
     index is determinable on both counts: the operand has to yield one, and
     no filter may drop it. Where either is not determinable the position
     keeps the merge the primary run already made, which is what a consumer
-    that reads one position then sees. The merged value is kept as the
-    container's `iterated` either way: a consumer that walks the result
-    visits every element, so it must still see the merge. The probe's own
-    findings are a narrowing of that merge, so they are discarded."""
+    that reads one position then sees. A consumer that walks the result
+    visits every element, so it must still see that merge too: it arrives
+    as the container's `iterated` on the narrowed path, and as the item
+    value itself where the position was not narrowed, because the two are
+    the same merge. The probe's own findings are a narrowing of that merge,
+    so they are discarded."""
     value_node = node.value if isinstance(node, ast.DictComp) else node.elt
     if not _filters_inert(node):
-        for state in states:
-            state.evaluated[iterated_key(node)] = state.evaluated.get(
-                id(value_node))
         return False
     for state in states:
         merged = state.evaluated.get(id(value_node))
