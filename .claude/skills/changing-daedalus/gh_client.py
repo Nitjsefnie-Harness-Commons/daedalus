@@ -71,6 +71,16 @@ class QueryError(RuntimeError):
     """One failed API read; the caller decides what a failure means."""
 
 
+class WaitExpired(RuntimeError):
+    """The bound a Watcher was given passed while it was still waiting.
+
+    The pause is a wait, and a wait needs a liveness escape: without one a
+    refusal that outlives the bound sleeps to the bound, retries, and spins
+    on the API that is refusing it. This is what the bound turns into, so
+    the caller reaches its own timed-out path rather than looping here.
+    """
+
+
 class RateLimited(RuntimeError):
     """A refusal that carries the instant to resume at, when it carries one.
 
@@ -333,9 +343,17 @@ class Watcher:
         self.deadline = deadline
 
     def poll(self, call):
-        """Run one poll, pausing and resuming across a refusal."""
+        """Run one poll, pausing and resuming across a refusal.
+
+        A bound, when one was given, is a liveness escape and not only a
+        cap on the sleep: once it has passed, the pause ends the wait
+        instead of buying one more request.
+        """
         while True:
             self.check_parent()
+            if (self.deadline is not None
+                    and time.monotonic() >= self.deadline):
+                raise WaitExpired('the wait deadline passed')
             try:
                 return call()
             except RateLimited as refusal:
