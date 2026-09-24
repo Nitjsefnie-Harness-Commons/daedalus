@@ -417,11 +417,11 @@ async function runStreamTimers() {
   for (const timer of timers) timer.cleared = true;
   timers.length = 0;
 
-  let reconnectFetches = 0;
-  context.fetch = async () => {
-    reconnectFetches++;
-    return response(503, { error: 'disabled' });
-  };
+  // On the shared gate: the reconnect phase is answered 503 from
+  // plan.statuses and the watchdog phase from a 'hang' answer (a connected
+  // 200 whose body never yields). The fetch COUNTS come from the gate's own
+  // record, so an invented request here is refused and recorded too.
+  const beforeReconnect = streamFetches.length;
   await vm.runInContext('startStream()', context);
   const reconnectDelays = timers
     .filter((timer) => !timer.cleared)
@@ -434,6 +434,7 @@ async function runStreamTimers() {
     (timer) => !timer.cleared && timer.delay === 1000);
   retry.callback();
   await settle();
+  const reconnectFetches = streamFetches.length - beforeReconnect;
 
   vm.runInContext('stopStream()', context);
   for (const timer of timers) timer.cleared = true;
@@ -441,22 +442,11 @@ async function runStreamTimers() {
 
   context.__streamNow = 1000;
   vm.runInContext('Date.now = () => __streamNow', context);
-  let watchdogFetches = 0;
-  context.fetch = async () => {
-    watchdogFetches++;
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        getReader() {
-          return { read: () => new Promise(() => {}) };
-        },
-      },
-    };
-  };
+  const beforeWatchdog = streamFetches.length;
   vm.runInContext('startStream()', context);
   await settle();
   const firstController = vm.runInContext('sseAbort', context);
+  const watchdogFetches = streamFetches.length - beforeWatchdog;
   const watchdogDelays = timers
     .filter((timer) => !timer.cleared)
     .map((timer) => timer.delay);

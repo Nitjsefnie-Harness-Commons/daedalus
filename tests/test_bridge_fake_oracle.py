@@ -70,6 +70,7 @@ let chunkedResponse = plan.noChunkFactory
 async function run() {
   const statuses = [];
   const answered = [];
+  const streamBodies = [];
   for (const step of plan.probe) {
     const init = { method: step.method };
     if (step.body !== undefined) init.body = JSON.stringify(step.body);
@@ -86,11 +87,21 @@ async function run() {
     }
     const answer = await bridgeFetch(step.url, init);
     statuses.push(answer.status);
-    answered.push(await answer.json().catch(() => null));
+    // A stream answer's body shape is the hang the watchdog exercises: a
+    // connected 200 whose reader never settles. Recorded so the oracle can
+    // pin it without awaiting a promise that (correctly) never resolves.
+    if (step.url.includes('/stream?')) {
+      streamBodies.push(
+        answer && answer.body
+          ? typeof answer.body.getReader === 'function' : null);
+    }
+    answered.push(answer && answer.json
+      ? await answer.json().catch(() => null) : null);
   }
   return {
     statuses,
     answered,
+    streamBodies,
     nonStream: nonStreamFetches.map((i) => i.request),
     refused: refusedFetches,
     badOrigins,
@@ -305,8 +316,8 @@ def test_a_planned_throw_answers_by_throwing_and_is_still_recorded(tmp):
                        plan=plan)
     assert outcome['statuses'] == ['throw: Failed to fetch'], outcome
     assert outcome['records'] == [
-        {'request': OTHER, 'refused': False, 'body': {}, 'auth': None,
-         'status': 'throw'}], outcome
+        {'request': OTHER, 'url': BRIDGE + '/other', 'refused': False,
+         'body': {}, 'auth': None, 'status': 'throw'}], outcome
     assert outcome['refused'] == [], outcome
 
 
@@ -504,6 +515,73 @@ def test_a_chunked_answer_without_a_chunk_factory_is_a_contract_fault(tmp):
     outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
                        plan=plan)
     assert outcome['contractFaults'] == ['chunkedResponse'], outcome
+
+
+def test_a_hang_stream_answer_is_a_connected_body_that_never_settles(tmp):
+    """A 'hang' statuses entry is a 200 whose reader never settles.
+
+    A live SSE connection the watchdog must treat as open-but-idle: the fetch
+    RESOLVES (so startStream proceeds and arms the watchdog) but the body's
+    read never returns a chunk. The probe reads the response without awaiting
+    the body, so it completes; the record carries the answer.
+    """
+    del tmp
+    plan = {
+        'planned': [],
+        'statuses': ['hang'],
+        'probe': [
+            {'method': 'GET', 'url': BRIDGE + '/stream?tab=x'},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == [200], outcome
+    assert outcome['streamBodies'] == [True], outcome
+    assert outcome['streamAnswered'] == ['hang'], outcome
+
+
+def test_a_string_typed_hosts_table_is_a_contract_fault(tmp):
+    """A non-array hosts turns the origin gate into a substring match.
+
+    permittedOrigins().includes(origin) on a string does a substring test, so a
+    string-typed `hosts` would admit a foreign origin the plan never permitted.
+    The splice-time check names it instead.
+    """
+    del tmp
+    plan = {
+        'planned': [SYNC],
+        'hosts': BRIDGE,
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/sync-tabs', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['contractFaults'] == ['plan.hosts'], outcome
+
+
+def test_a_string_typed_relay_hosts_table_is_a_contract_fault(tmp):
+    del tmp
+    plan = {
+        'planned': [],
+        'relayHosts': ELSEWHERE,
+        'probe': [],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['contractFaults'] == ['plan.relayHosts'], outcome
+
+
+def test_a_string_typed_statuses_table_is_a_contract_fault(tmp):
+    del tmp
+    plan = {
+        'planned': [],
+        'statuses': 503,
+        'probe': [],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['contractFaults'] == ['plan.statuses'], outcome
 
 
 # ---- assert_gate_clean's own controls -------------------------------------

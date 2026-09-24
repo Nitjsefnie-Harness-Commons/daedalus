@@ -51,6 +51,8 @@ against the plan it declared.
 import json
 import shutil
 
+from _noderun import run_node_program
+
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
 // runs once, at splice time, before any fetch.
@@ -76,6 +78,16 @@ if (typeof plan === 'undefined') {
 } else if (plan.answers !== undefined
   && (typeof plan.answers !== 'object' || Array.isArray(plan.answers))) {
   gateContractFaults.push('plan.answers');
+} else {
+  // hosts, relayHosts and statuses are origin/answer lists. A wrong-typed one
+  // must be named, not silently accepted: a string-typed `hosts` makes
+  // permittedOrigins().includes a substring match, which would admit a foreign
+  // origin the plan never permitted.
+  for (const field of ['hosts', 'relayHosts', 'statuses']) {
+    if (plan[field] !== undefined && !Array.isArray(plan[field])) {
+      gateContractFaults.push('plan.' + field);
+    }
+  }
 }
 // A {stream: N} answer is built by the harness, so the chunk factory is part
 // of the contract exactly when a plan declares such an answer.
@@ -104,11 +116,12 @@ if (typeof badOrigins === 'undefined') gateContractFaults.push('badOrigins');
 
 // A request is planned as often as the recording shows; beyond that it is
 // refused and recorded. No route is special-cased, so a new one is caught.
-// The parsed body and the Authorization header ride along so a harness reads
-// the worker's request without wrapping its own fetch. The entry is returned
-// so bridgeFetch can stamp the answer status on it only after the answer
-// really was built.
-function accountRequest(request, init) {
+// The full target URL, the parsed body and the Authorization header ride along
+// so a harness reads the worker's request without wrapping its own fetch; the
+// key alone would lose the origin for a request the config rotated. The entry
+// is returned so bridgeFetch can stamp the answer status on it only after the
+// answer really was built.
+function accountRequest(request, url, init) {
   const seen = nonStreamFetches.filter((i) => i.request === request).length;
   const planned = (plan.planned || []).filter((i) => i === request).length;
   const refused = seen >= planned;
@@ -117,7 +130,7 @@ function accountRequest(request, init) {
     try { body = JSON.parse(init.body); } catch (_) { body = init.body; }
   }
   const auth = (init && init.headers && init.headers.Authorization) || null;
-  const entry = { request, refused, body, auth, status: null };
+  const entry = { request, url, refused, body, auth, status: null };
   nonStreamFetches.push(entry);
   if (refused) refusedFetches.push(request);
   return entry;
@@ -187,6 +200,21 @@ async function bridgeFetch(target, init = {}) {
     if (next === 'down') {
       throw new TypeError('Failed to fetch');
     }
+    if (next === 'hang') {
+      // A connected 200 whose body never yields a chunk: the live-but-idle
+      // stream a watchdog must treat as open. The fetch RESOLVES (so the
+      // worker's stream loop arms its watchdog) but read() never settles.
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            read: () => new Promise(() => {}),
+            cancel: () => Promise.resolve(),
+          }),
+        },
+      };
+    }
     return streamResponse(next);
   }
   const request = requestKey(url, init);
@@ -194,7 +222,7 @@ async function bridgeFetch(target, init = {}) {
     const payload = JSON.parse(init.body);
     resultPosts.push({ ...payload, did: payload._did || null });
   }
-  const entry = accountRequest(request, init);
+  const entry = accountRequest(request, url, init);
   if (entry.refused) {
     entry.status = 599;
     return response(599, { ok: false, error: 'more often than declared' });
@@ -241,9 +269,6 @@ def require_node():
 
 
 def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
-    # Deferred: _boundary_env splices this module's gate, so a top-level
-    # import here would be circular. By call time _boundary_env is loaded.
-    from _boundary_env import run_node_program
     result = run_node_program(node, program, arguments, cwd=cwd,
                               payload=plan, timeout=timeout)
     assert result.returncode == 0, (

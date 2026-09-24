@@ -565,7 +565,7 @@ def test_filename_naming_vm_loads_run_verbatim_source(tmp):
             'path': module,
             'globals': _worker_globals(module),
             'watched': {'handleEval'},
-        }], plan={'planned': [], 'planned_stream': [503]})
+        }], plan={'planned': ['POST /sync-tabs'], 'planned_stream': [503]})
     finally:
         if previous is None:
             del os.environ['NODE_V8_COVERAGE']

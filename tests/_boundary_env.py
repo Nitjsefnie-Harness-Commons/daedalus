@@ -16,11 +16,11 @@ and read back by the runners in _boundary to `assert_gate_clean`.
 """
 
 import json
-import subprocess
-import tempfile
-from pathlib import Path
 
-import _util
+# run_node_program is re-exported: harnesses that predate the neutral _noderun
+# module import it from here. The gate itself imports it from _noderun, so
+# this module and _stream_fake do not import each other.
+from _noderun import run_node_program  # noqa: F401,E501 pylint: disable=W0611
 from _stream_fake import STRICT_FETCH
 from _worker_sources import import_scripts_stub
 
@@ -29,6 +29,7 @@ REPLACEMENT = 'https://replacement.example.com'
 RELAY = 'https://big.example.com'
 RESULT = 'POST /result'
 UPLOAD = 'POST /upload'
+SYNC = 'POST /sync-tabs'
 
 _UPLOAD_OK = {'status': 200, 'body': {'path': 'capture.png', 'size': 4}}
 _UPLOAD_REJECT = {'status': 400, 'body': {'error': 'invalid path component'}}
@@ -48,40 +49,51 @@ def _blob(chunks):
 
 # Every scenario's declaration, recorded from a run of the shipped worker on
 # the pre-change tree (a temporary recorder in the old bridgeFetch, five runs
-# each, all stable). Boot opens the stream; a restarted context opens it
-# again, so a restart scenario declares two stream fetches. A request the
-# worker invents is outside the plan and is refused and recorded by the gate.
+# each, all stable). Boot opens the stream and, now that the tabs.query double
+# honours its callback, syncs the tab list; a restarted context repeats both,
+# so a restart scenario declares two of each. A request the worker invents is
+# outside the plan and is refused and recorded by the gate.
 SCENARIO_PLANS = {
     # worker-sources returns the loader trace before its own loadConfig, but
-    # background.js's boot still opens the stream, so the drained gate records
-    # that one fetch.
-    'worker-sources': {'planned': [], 'planned_stream': [503]},
+    # background.js's boot still opens the stream and syncs the tab list, so
+    # the drained gate records one of each.
+    'worker-sources': {'planned': [SYNC], 'planned_stream': [503]},
     # The runtime observer's default: a stub background (the binding controls)
     # makes no bridge request. A caller observing the SHIPPED background must
-    # pass its own plan (the boot stream fetch); omitting it is a loud
+    # pass its own plan (the boot stream and sync); omitting it is a loud
     # mismatch, not a silent pass.
     'worker-bindings': {'planned': [], 'planned_stream': []},
-    'capability-routes': {'planned': [], 'planned_stream': [503]},
-    'unknown-command': {'planned': [RESULT], 'planned_stream': [503]},
-    'capacity': {'planned': [RESULT], 'planned_stream': [503]},
-    'expiry': {'planned': [RESULT], 'planned_stream': [503]},
-    # stream-timers replaces context.fetch after the boot stream fetch, so only
-    # the boot fetch is gated; see the report for what that cannot see.
-    'stream-timers': {'planned': [], 'planned_stream': [503]},
-    'clear-partitioned': {'planned': [RESULT], 'planned_stream': [503]},
-    'unblock-zero': {'planned': [RESULT], 'planned_stream': [503]},
-    'hotfix-race': {'planned': [RESULT, RESULT], 'planned_stream': [503]},
-    'net-capture': {'planned': [RESULT] * 4, 'planned_stream': [503]},
-    'dedup-restart': {'planned': [RESULT], 'planned_stream': [503, 503]},
-    'block-rule-restart': {'planned': [RESULT] * 4,
+    'capability-routes': {'planned': [SYNC], 'planned_stream': [503]},
+    'unknown-command': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
+    'capacity': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
+    'expiry': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
+    # On the gate: the boot stream fetch and boot's tab sync, then the
+    # reconnect phase answered 503 and the watchdog phase answered by a 'hang'
+    # entry (a connected 200 whose body never yields). statuses is the
+    # gate's stream-answer queue, consumed one per stream fetch.
+    'stream-timers': {
+        'planned': [SYNC, SYNC],
+        'planned_stream': [503, 503, 503, 'hang'],
+        'statuses': [503, 503, 503, 'hang'],
+    },
+    'clear-partitioned': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
+    'unblock-zero': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
+    'hotfix-race': {'planned': [SYNC, RESULT, RESULT],
+                    'planned_stream': [503]},
+    'net-capture': {'planned': [SYNC] + [RESULT] * 4, 'planned_stream': [503]},
+    'dedup-restart': {'planned': [SYNC, RESULT, SYNC],
+                      'planned_stream': [503, 503]},
+    'block-rule-restart': {'planned': [SYNC, RESULT, SYNC]
+                           + [RESULT] * 3,
                            'planned_stream': [503, 503]},
-    'screenshot-target': {'planned': [UPLOAD, RESULT], 'planned_stream': [503],
+    'screenshot-target': {'planned': [SYNC, UPLOAD, RESULT],
+                          'planned_stream': [503],
                           'answers': {UPLOAD: _UPLOAD_OK}},
-    'screenshot-reject': {'planned': [UPLOAD, RESULT],
+    'screenshot-reject': {'planned': [SYNC, UPLOAD, RESULT],
                           'planned_stream': [503],
                           'answers': {UPLOAD: _UPLOAD_REJECT}},
     'route': {
-        'planned': [UPLOAD, RESULT, RESULT, RESULT],
+        'planned': [SYNC, UPLOAD, RESULT, RESULT, RESULT],
         'planned_stream': [503, 503],
         # the config rotates to a second bridge, which is a bridge host (the
         # boot stream is fetched from it), not a relay origin.
@@ -89,7 +101,7 @@ SCENARIO_PLANS = {
         'answers': {UPLOAD: _UPLOAD_OK, RESULT: _ROUTE_RESULTS},
     },
     'fetch-bound': {
-        'planned': [_blob(n) for n in (8, 9, 12, 1)],
+        'planned': [SYNC] + [_blob(n) for n in (8, 9, 12, 1)],
         'planned_stream': [503],
         # big.example.com is the GM relay target, not a bridge: a permitted
         # non-bridge origin, keyed on the full URL so it cannot collide with a
@@ -98,23 +110,6 @@ SCENARIO_PLANS = {
         'answers': {_blob(n): {'stream': n} for n in (8, 9, 12, 1)},
     },
 }
-
-
-def run_node_program(node, program, arguments, *, cwd, payload=None,
-                     timeout=30):
-    """Run a Node program from a closed, automatically cleaned file."""
-    with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
-        program_path = Path(directory) / 'program.js'
-        prologue = 'process.argv.splice(1, 1);'
-        if payload is not None:
-            prologue += f' process.argv.push({json.dumps(payload)});'
-        prologue += '\n'
-        program_path.write_text(
-            prologue + program, encoding='utf-8')
-        return subprocess.run(
-            [node, str(program_path), *arguments], cwd=cwd,
-            env=_util.child_coverage('scrub'), capture_output=True,
-            text=True, encoding='utf-8', timeout=timeout)
 
 
 ENVIRONMENT = (
@@ -224,21 +219,25 @@ const chrome = {
       createdTabs.push(details);
       return { id: 100 + createdTabs.length, windowId: 1, url: details.url };
     },
-    query: async (query) => {
-      if (scenario === 'screenshot-target') {
-        return windowTabs
+    query: (query, callback) => {
+      const modeled = scenario === 'screenshot-target'
+        ? windowTabs
           .filter((tab) =>
             (query.active === undefined || tab.active === query.active)
             && (query.windowId === undefined || tab.windowId ==="""
     r""" query.windowId))
-          .map((tab) => ({ ...tab }));
-      }
+          .map((tab) => ({ ...tab }))
+        : [{ id: 7, url: 'https://page.example.com' }];
+      // registerAllTabs reads the result from a callback; the rest of the
+      // worker awaits the promise. Chrome honours both, so the double does
+      // too — otherwise the whole POST /sync-tabs boot path never runs.
+      if (typeof callback === 'function') callback(modeled);
       if (scenario === 'route' && Object.keys(query).length === 0) {
         return new Promise((resolve) => {
           tabQueryResolver = resolve;
         });
       }
-      return [{ id: 7, url: 'https://page.example.com' }];
+      return Promise.resolve(modeled);
     },
     get: async (tabId) => {
       const known = windowTabs.find((tab) => tab.id === tabId);
@@ -409,12 +408,10 @@ function chunkedResponse(count) {
 const resultPayloads = resultPosts;
 function bridgeRequests() {
   return nonStreamFetches.map((record) => {
-    const space = record.request.indexOf(' ');
-    const target = record.request.slice(space + 1);
-    // A relay key is the full URL; a bridge key is the bare path the gate
-    // recorded, so it gets the bridge origin back for the full URL the
-    // worker-behaviour assertions compare.
-    const url = /^https?:\/\//.test(target) ? target : BRIDGE_URL + target;
+    // The record carries the full target URL, so the origin is the one the
+    // request actually went to (the route scenario rotates the bridge), not a
+    // reconstruction that would always name BRIDGE_URL.
+    const url = record.url;
     const body = record.body || {};
     return {
       kind: url.endsWith('/result') ? 'result'
