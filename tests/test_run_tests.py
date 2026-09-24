@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """run_tests.py bounds each suite and names the one that overruns."""
+import ast
 import os
 import shutil
 import subprocess
@@ -68,6 +69,37 @@ def _suite_block(stdout, name):
     return rest.split('\n=== ', 1)[0]
 
 
+def _scale_suite_wait(source, factor):
+    """Return `source` with the suite wait handed `timeout * factor`.
+
+    The anchor is located by ast so an ordinary edit cannot retire it; a
+    miss blames the anchor, not the guarded behaviour."""
+    target = None
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == 'wait'
+                and isinstance(func.value, ast.Name)
+                and func.value.id == 'process'):
+            continue
+        for keyword in node.keywords:
+            if (keyword.arg == 'timeout'
+                    and isinstance(keyword.value, ast.Name)
+                    and keyword.value.id == 'timeout'):
+                target = keyword.value
+    assert target is not None, (
+        'no process.wait(timeout=timeout) call: the MUTATION ANCHOR changed '
+        'shape, so this control proves nothing until it is re-derived from '
+        'the runner source')
+    lines = source.splitlines(keepends=True)
+    row = target.lineno - 1
+    raw = lines[row].encode()
+    lines[row] = (raw[:target.col_offset] + f'timeout * {factor}'.encode()
+                  + raw[target.end_col_offset:]).decode()
+    return ''.join(lines)
+
+
 def _failed_suites(stdout):
     """The suites the aggregate named as failed, or [] when it named none.
 
@@ -112,6 +144,27 @@ def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
     assert _timeout_record(_OVERRUN_BOUND_S) in staller_block, result.stdout
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     assert '=== test_passer.py ===' in result.stdout, result.stdout
+
+
+def test_the_timeout_record_names_the_bound_the_wait_was_given(tmp):
+    # The record must name the applied 1.0 s, not the configured 2.0 s.
+    root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE})
+    runner = root / 'run_tests.py'
+    mutated = _scale_suite_wait(
+        runner.read_bytes().decode(), 0.5)
+    assert 'wait(timeout=timeout * 0.5)' in mutated, mutated
+    assert 'wait(timeout=timeout)' not in mutated, mutated
+    runner.write_text(mutated, encoding='utf-8')
+    result = _run_sandbox(
+        root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
+    assert result.returncode == 1, (result.returncode, result.stdout,
+                                    result.stderr)
+    staller_block = _suite_block(result.stdout, 'test_staller.py')
+    assert 'SUITE TIMED OUT' in staller_block, (result.stdout,
+                                                result.stderr)
+    assert _timeout_record(1.0) in staller_block, result.stdout
+    assert _timeout_record(_OVERRUN_BOUND_S) not in staller_block, (
+        result.stdout)
 
 
 def test_a_passing_suites_own_output_reaches_stdout(tmp):

@@ -93,12 +93,12 @@ def _run_suite(suite, summaries, timeout):
                     stderr=subprocess.STDOUT, env=env)
         try:
             returncode = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as expired:
             _terminate_and_reap(process)
             returncode = process.returncode
             with output_path.open("ab") as output:
                 output.write(
-                    f"SUITE TIMED OUT after {timeout} s "
+                    f"SUITE TIMED OUT after {expired.timeout} s "
                     f"(returncode {process.returncode!r}); "
                     "its last lines are above\n".encode())
     except BaseException:
