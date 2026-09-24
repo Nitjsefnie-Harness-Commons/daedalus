@@ -4,12 +4,39 @@ import ast
 from _pyroute_mapping import (_selected_values, apply_assignment_bindings,
                              resolve_expression_value)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
-                             DeferredClass, DeferredContainer,
-                             DeferredInstance, _known_value,
+                             DeferredCallable, DeferredClass,
+                             DeferredContainer, DeferredInstance, _known_value,
                              deferred_expression_value, is_deferred_value,
                              merge_yielded, reachable_callables)
 
 _LIVE_UNRESOLVED = object()
+# In-place list/tuple methods the model does not fold back into the tracked
+# container, so a measured length no longer matches the real one.
+LIST_LENGTH_MUTATIONS = frozenset(
+    {'append', 'extend', 'insert', 'remove', 'pop', 'clear'})
+
+
+def invalidate_mutated_length(node, state):
+    """A list/tuple mutated in place by a method the model does not fold back
+    has no provable length, so a later operand read of it leaves the call's
+    arity unprovable rather than a stale single fact (daedalus issue 990)."""
+    if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
+        return
+    call = node.value
+    if not (isinstance(call.func, ast.Attribute)
+            and call.func.attr in LIST_LENGTH_MUTATIONS
+            and isinstance(call.func.value, ast.Name)):
+        return
+    tracked = state.callables.get(call.func.value.id)
+    if not (isinstance(tracked, DeferredContainer)
+            and tracked.kind in ('list', 'tuple')
+            and tracked.length is not None):
+        return
+    lengthless = DeferredContainer(
+        tracked.items, None, tracked.kind, tracked.identity)
+    state.callables[call.func.value.id] = lengthless
+    for key, value in list(state.evaluated.items()):
+        if value is tracked: state.evaluated[key] = lengthless
 
 
 def _getattr_call(value, state):
@@ -160,6 +187,23 @@ def _selection_value(value, state):
                    default)
 
 
+def _generator_operand_yields(node, state):
+    """The deferred values a generator-function operand yields, the element
+    list the call splices. A generator function's yields live in its body, not
+    in the call's own subtree, so without this the carriers reach only the
+    function itself and a maker carried by a yield is lost. The genexp
+    spelling needs no help: its iterable is in the call's own subtree."""
+    for child in ast.walk(node):
+        function = state.callables.get(child.id) if isinstance(
+            child, ast.Name) else None
+        if not (isinstance(function, DeferredCallable)
+                and isinstance(function.scope, ast.FunctionDef)):
+            continue
+        for part in ast.walk(function.scope):
+            if isinstance(part, ast.Yield) and part.value is not None:
+                yield _known_value(part.value, function.state)
+
+
 def seed_selection_value(value, state):
     """Seed the evaluated cache so an unprovable selection never reads
     clean: a getattr call resolves to the value it selects, and a
@@ -173,6 +217,8 @@ def seed_selection_value(value, state):
         parts = [item for item in (_known_value(child, state)
                                    for child in ast.walk(value))
                  if is_deferred_value(item)]
+        parts += [item for item in _generator_operand_yields(value, state)
+                  if is_deferred_value(item)]
         if parts:
             carriers = (reachable_callables(DeferredAlternatives(tuple(parts)))
                         if selected == UNPROVABLE_SENDER else ())

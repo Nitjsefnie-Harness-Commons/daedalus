@@ -670,6 +670,30 @@ def test_unprovable_selection_verdict_reaches_every_binding_route(tmp):
     assert observed == expected, observed
 
 
+def test_starred_operand_arity_is_a_single_fact(tmp):
+    """A starred operand the model cannot resolve to a provable element
+    list leaves the call's arity unprovable, so the alias it binds is
+    reported rather than clean. A mutated-length container and a generator
+    call whose yields the model does not surface are such operands."""
+    rows = (
+        ('append', 'pair=[h]\npair.append("{attr}")\nx = getattr(*pair)'),
+        ('star-default', 'vals=(ordinary,)\nx=getattr(h,"{attr}",*vals)'),
+        ('generator', 'def g():\n    yield h\n    yield "{attr}"\n'
+         'x=getattr(*g())'),
+        ('bound-three', 'a=(h,)\nb=("z",)\nc=({val},)\nx=getattr(*a,*b,*c)'),
+    )
+    cases = []
+    for attribute, value, verdict in (
+            ('ext_cmd', 'relay()', (1, 1)), ('clean', 'ordinary', (0, 0))):
+        head = f'class H: pass\nh = H(); h.{attribute} = {value}\n'
+        cases += [(f'{label}-{attribute}', head + tmpl.format(
+            attr=attribute, val=value), verdict) for label, tmpl in rows]
+    observed = [(label, *_tracked_focus_verdict(
+        tmp, SELECTION_PRE + body + '\nsend = ext_cmd\nreturn x()\n',
+        counts=True)) for label, body, _ in cases]
+    assert observed == [(l, *v) for l, _, v in cases], observed
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='unprovable_')
 

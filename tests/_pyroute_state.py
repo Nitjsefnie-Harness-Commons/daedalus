@@ -3,7 +3,7 @@ import ast
 from dataclasses import dataclass, field
 from typing import cast
 
-from _pyroute_live import bind_alias_statement
+from _pyroute_live import bind_alias_statement, invalidate_mutated_length
 from _pyroute_mapping import (_UNSAFE_LITERAL, _literal_value,
                               alias_target_pairs, literal_iterable_cardinality,
                               literal_truth, store_deferred_target)
@@ -391,6 +391,7 @@ def delete_builtin_names(state, names):
 
 def apply_alias_statement(node, state):
     aliases = state.aliases
+    invalidate_mutated_length(node, state)
     if isinstance(node, ast.ImportFrom):
         for imported in node.names:
             local = imported.asname or imported.name
