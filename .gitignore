@@ -55,6 +55,7 @@
 !/.claude/skills/changing-daedalus/SKILL.md
 !/.claude/skills/changing-daedalus/ci_wait.py
 !/.claude/skills/changing-daedalus/ci_watch.py
+!/.claude/skills/changing-daedalus/gh_client.py
 !/.claude/skills/changing-daedalus/pr_comment_watch.py
 !/.claude/skills/changing-daedalus/watch_all.py
 
@@ -270,6 +271,7 @@
 !/tests/_deliveries.py
 !/tests/_drain.py
 !/tests/_evalpages.py
+!/tests/_fake_gh.py
 !/tests/_frontend.py
 !/tests/_ghexpr.py
 !/tests/_jsread.py
@@ -424,6 +426,7 @@
 !/tests/test_fetch_timings_count.py
 !/tests/test_file_sizes.py
 !/tests/test_generator_second_consumption.py
+!/tests/test_gh_client.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_relay_authority.py
@@ -542,6 +545,7 @@
 !/tests/test_version_set_atomic.py
 !/tests/test_vm_file_load_guard.py
 !/tests/test_watch_all.py
+!/tests/test_watcher_budget.py
 !/tests/test_wf_suite_boundaries.py
 !/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
