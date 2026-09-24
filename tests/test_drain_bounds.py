@@ -31,7 +31,7 @@ def test_the_scan_reads_exactly_the_tracked_python_tree(tmp):
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z', '*.py'],
-        capture_output=True, check=True, timeout=60)
+        capture_output=True, check=True)
     tracked = {os.fsdecode(name) for name in listed.stdout.split(b'\0')
                if name}
     assert tracked, 'Git returned no tracked Python paths'

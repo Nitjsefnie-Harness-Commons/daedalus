@@ -279,12 +279,13 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     Dropping the bound also drops the only hang-guard on a wedged local
     clone; the issue's remedy accepts a hang surfacing as run_tests.py's
     900-second suite bound ("SUITE TIMED OUT") instead of any wall-clock
-    margin here. The audit sees this file and `tests/_scratch_index.py`,
-    the scratch-staging helper whose git launch this change added,
-    accepts only a plain `import subprocess`, resolves every binding
-    derived from the module to a fixpoint (parameter defaults,
-    for-targets, class bodies, with-targets and def returns included),
-    and follows
+    margin here. The audit sees this file and the two modules this
+    change gave a git launch of its own — `tests/_scratch_index.py`
+    (the shared scratch-staging helper) and `tests/test_drain_bounds.py`
+    (its control) — accepting only a plain `import subprocess`, and
+    resolves every binding derived from the module to a fixpoint
+    (parameter defaults, for-targets, class bodies, with-targets and
+    def returns included), and follows
     functools/importlib under any alias: an aliased or from-imported
     subprocess, an eval-built launcher, an unresolvable callee or
     receiver, or a keyword it cannot read is a refusal, never an
@@ -307,7 +308,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     configs too.
     """
     del tmp
-    for name in ('test_repo_layout.py', '_scratch_index.py'):
+    for name in ('test_repo_layout.py', '_scratch_index.py',
+                 'test_drain_bounds.py'):
         refusals = _launch_refusals(
             Path(__file__).with_name(name).read_text(encoding='utf-8'),
             f'tests/{name}')
