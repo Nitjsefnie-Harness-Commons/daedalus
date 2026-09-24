@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What an idle watched pull request costs, and what happens when it is refused.
+"""What an idle watched pull request costs, and what a refusal does.
 
 Every watcher here is a real process answering from the fake `gh` in
 `_fake_gh.py`, so the numbers are the requests the scripts actually make. The
@@ -129,12 +129,12 @@ def _until(predicate, what, timeout=45):
 class _Child:
     """A watcher process with both of its streams drained."""
 
-    def __init__(self, argv, env, cwd=None):
+    def __init__(self, argv, env):
         self.argv = argv
         self.proc = subprocess.Popen(
-            argv, env=env, cwd=cwd, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding='utf-8',
-            errors='replace')
+            argv, env=_util.child_coverage('scrub', environment=env),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            encoding='utf-8', errors='replace')
         self.out = []
         self.err = []
         for stream, sink in ((self.proc.stdout, self.out),
@@ -154,9 +154,9 @@ class _Child:
         return self.proc.returncode
 
 
-def _watcher(name, args, fake, cwd=None):
+def _watcher(name, args, fake):
     return _Child([sys.executable, '-u', str(SKILL / name)] + args,
-                  fake.env(), cwd=cwd)
+                  fake.env())
 
 
 def _wait_for_calls(fake, count, timeout=45):
