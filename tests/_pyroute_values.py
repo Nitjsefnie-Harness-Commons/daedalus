@@ -591,17 +591,8 @@ def expression_callables(node, state):
                  for candidate in callable_candidates(value))
 
 
-def _held_callables(node, state):
-    """Every callable a container the expression names holds: a call the
-    model neither follows nor consumes may read any of them."""
-    return tuple(candidate for child in ast.walk(node)
-                 if isinstance(value := _known_value(child, state),
-                               DeferredContainer)
-                 for candidate in reachable_callables(value))
-
-
 def follow_callable_call(candidates, arguments, states, call, analyze,
-                         copy_states, dedupe_states, consumer=None):
+                         copy_states, dedupe_states):
     returned = []
     if candidates:
         invoked = []
@@ -616,9 +607,7 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
         return states, None
     callbacks = {id(candidate): candidate
                  for argument in arguments for state in states
-                 for candidate in (*expression_callables(argument, state),
-                                   *(() if consumer else _held_callables(
-                                       argument, state)))}
+                 for candidate in expression_callables(argument, state)}
     for callback in callbacks.values():
         states, _ = analyze(callback, states)
     return states, None

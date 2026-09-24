@@ -386,7 +386,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     violations.extend(found)
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
-                    copied, dedupe_states, consumer)
+                    copied, dedupe_states)
                 consumed_value = merge_yielded(consumed_values)
                 returned_value = merge_yielded(
                     (returned_value, consumed_value))
