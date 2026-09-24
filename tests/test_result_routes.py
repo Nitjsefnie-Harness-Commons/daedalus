@@ -410,8 +410,8 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
     """
     routes = _load('fixture_result_routes_compatroot')
     root = Path(tmp) / 'compat-results'
-    root.mkdir(parents=True)
     assert root != RES_DIR, 'the fixture made the roots equal'
+    root.mkdir(parents=True)
     token, did = 'compatroottok', 'compatroot-1'
     status, payload = routes.accept_result(
         root, tmp, token,

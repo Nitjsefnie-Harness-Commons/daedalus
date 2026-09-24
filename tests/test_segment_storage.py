@@ -678,6 +678,19 @@ def test_a_refused_write_keeps_its_recount_in_the_passed_root(tmp):
     assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
 
 
+_DAEDALUS_BASELINE = {k: os.environ[k] for k in os.environ
+                      if k.startswith('DAEDALUS_')}
+
+
+def test_z_the_decorated_controls_restore_the_environment(_tmp):
+    """The `@isolated_env` controls above hand the environment back,
+    absence included; `test_z_` runs after both by name order."""
+    now = {k: os.environ[k] for k in os.environ if k.startswith('DAEDALUS_')}
+    assert now == _DAEDALUS_BASELINE, (
+        f'leaked {sorted(now.items())} '
+        f'!= {sorted(_DAEDALUS_BASELINE.items())}')
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segstorage_')
 
