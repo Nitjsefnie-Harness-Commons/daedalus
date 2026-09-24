@@ -16,9 +16,9 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              load_callable_cells, materialize_deferred,
                              new_deferred_callable, new_deferred_generator,
                              payload_key, sender_value, sync_cells)
-from _pyroute_live import (clear_expression_cache, live_expression_value)
-from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
-                              resolve_expression_value as expression_value)
+from _pyroute_live import (clear_expression_cache, live_expression_value,
+                          seed_then_resolve)
+from _pyroute_mapping import apply_deferred_store as store_deferred_value
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -30,12 +30,11 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             deferred_generator, definition_values,
                             dict_assignments as _dict_assignments,
                             evaluated_value, function_allowed_opaque,
-                            is_extension_constant,
-                            literal_iterable_nonempty, lexical_scope_names,
-                            literal_truth, payload_keys, new_exits,
-                            rebound_names, record_exit, record_returns,
-                            resolve_sender_name, state_signature,
-                            statement_cannot_raise)
+                            is_extension_constant, literal_iterable_nonempty,
+                            lexical_scope_names, literal_truth,
+                            payload_keys, new_exits, rebound_names,
+                            record_exit, record_returns, resolve_sender_name,
+                            state_signature, statement_cannot_raise)
 from _pyroute_match import walk_match
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
@@ -210,7 +209,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
 
     def remember(node, current_pairs):
         for state in current_pairs:
-            state.evaluated[id(node)] = expression_value(
+            state.evaluated[id(node)] = seed_then_resolve(
                 node, state, deferred_generator, resolve_sender_name,
                 _UNPROVABLE_SENDER)
         return current_pairs

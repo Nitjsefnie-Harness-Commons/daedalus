@@ -11,6 +11,7 @@ from _pyroute import py_tab_routing_violations  # noqa: E402
 from _pyroute_live import seed_selection_value  # noqa: E402
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_values import UNPROVABLE_SENDER  # noqa: E402
+from _tabroute_selections import SELECTION_PRE  # noqa: E402
 from test_tab_routing import (  # noqa: E402
     _assert_focus_cases, _tracked_focus_verdict)
 
@@ -623,6 +624,50 @@ def test_starred_operand_unprovable_seeds_unprovable_sender(tmp):
     seed_selection_value(call, state)
     assert state.evaluated.get(id(call)) == UNPROVABLE_SENDER, (
         state.evaluated.get(id(call)))
+
+
+def test_unprovable_selection_verdict_reaches_every_binding_route(tmp):
+    """A selection the model cannot resolve leaves an unprovable verdict; a
+    name every binding route binds it to must keep the sender callable the
+    operands carry, so a later call through the name fails closed instead of
+    reading clean. The value-axis twin carries no deferred callable, so it
+    stays clean and discriminates the two."""
+    def routes(attribute, value, selection):
+        prefix = f'class H: pass\nh = H(); h.{attribute} = {value}\n'
+        with_case = prefix + (
+            'class C:\n'
+            f'    def __enter__(self): return {selection}\n'
+            '    def __exit__(self, *a): return False\n'
+            'with C() as x:\n    pass')
+        return [
+            ('assignment', prefix + f'x = {selection}', 'x()'),
+            ('with-as', with_case, 'x()'),
+            ('getattr-selection', prefix
+             + f'def run():\n    return {selection}', 'run()()'),
+            ('subscript', prefix + f'box = [None]\nbox[0] = {selection}',
+             'box[0]()'),
+            ('comprehension', prefix + f'box = [{selection} for _ in [1]]',
+             'box[0]()'),
+            ('for-target', prefix + f'for x in [{selection}]:\n    pass',
+             'x()'),
+        ]
+
+    starred = ', *args.values[:1]'
+    cases = [
+        (f'{label}-sender', body, invoke, (1, 1))
+        for label, body, invoke in routes(
+            'ext_cmd', 'relay()', f'getattr(h, "ext_cmd"{starred})')]
+    cases += [
+        (f'{label}-clean', body, invoke, (0, 0))
+        for label, body, invoke in routes(
+            'clean', 'ordinary', f'getattr(h, "clean"{starred})')]
+    observed = [
+        (label, *_tracked_focus_verdict(
+            tmp, SELECTION_PRE + body + '\nsend = ext_cmd\nreturn ' + invoke
+            + '\n', counts=True))
+        for label, body, invoke, _ in cases]
+    expected = [(label, *verdict) for label, _, _, verdict in cases]
+    assert observed == expected, observed
 
 
 def main():
