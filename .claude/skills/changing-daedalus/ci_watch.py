@@ -93,11 +93,13 @@ def is_immediate(name):
 def head_and_checks(repo, branch, seen=None):
     """The branch's current head and every check run against it.
 
-    `seen` is the set of (sha, check, conclusion) keys already announced;
-    the second return value is only the checks that are new since. The head
-    is re-resolved because a push moves it, and a branch that is gone raises
-    rather than answering with an empty surface a quiet matrix could pass
-    for.
+    Returns (sha, every check on it, the concluded ones). `seen` is the set
+    of (sha, check, conclusion) keys already announced, and narrows the
+    third to what is new since. The head is re-resolved because a push
+    moves it, and a branch that is gone raises rather than answering with
+    an empty surface a quiet matrix could pass for. The counts are kept
+    apart because a check that has not concluded is exactly what a trial
+    is asked about.
     """
     owner, name = repo.split('/', 1)
     pages = gh_client.paginate(
@@ -110,27 +112,27 @@ def head_and_checks(repo, branch, seen=None):
     if not sha:
         raise RuntimeError(f'no head sha for {branch}')
     checks = [node for page in pages
-              for node in gh_client.nodes(page, CONTEXTS)
-              if node.get('conclusion')]
+              for node in gh_client.nodes(page, CONTEXTS)]
+    concluded = [node for node in checks if node.get('conclusion')]
     if seen is None:
-        return sha, checks
+        return sha, checks, concluded
     fresh = []
-    for node in checks:
+    for node in concluded:
         key = (sha, node.get('name'), node.get('databaseId'),
                node['conclusion'].lower())
         if key in seen:
             continue
         seen.add(key)
         fresh.append(node)
-    return sha, fresh
+    return sha, checks, fresh
 
 
 def poll(repo, branch, seen):
     """One pass. Returns (immediate_lines, held_lines) for what is new."""
-    sha, checks = head_and_checks(repo, branch, seen)
+    sha, _, fresh = head_and_checks(repo, branch, seen)
     immediate = []
     held = []
-    for node in checks:
+    for node in fresh:
         name = node.get('name')
         conclusion = node['conclusion'].lower()
         line = (f'CI {branch} {sha[:7]} {name}: {conclusion} '
@@ -154,13 +156,14 @@ def main():
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()
+    gh_client.watch_parent()
 
     if args.once:
-        sha, checks = head_and_checks(args.repo, args.branch)
+        sha, checks, concluded = head_and_checks(args.repo, args.branch)
         print(f'ok head {sha}', file=sys.stderr)
-        print(f'ok {len(checks)} check run(s), {len(checks)} concluded',
+        print(f'ok {len(checks)} check run(s), {len(concluded)} concluded',
               file=sys.stderr)
-        for node in checks:
+        for node in concluded:
             print(f'  {node.get("name")}: {node["conclusion"].lower()}',
                   file=sys.stderr)
         return 0
