@@ -18,8 +18,7 @@ let config = { token: '', serverUrl: DEFAULT_SERVER };
 // trimmed field holds and renders the empty one as "Not configured", so a
 // cleared token is an operator saying "not configured" and must stay cleared.
 // A fresh generation would re-read the empty token and auto-generate a new
-// browser-control credential behind that operator. So the memo is never
-// cleared on success.
+// browser-control credential behind that operator.
 let _configPromise = null;
 
 function loadConfig() {
