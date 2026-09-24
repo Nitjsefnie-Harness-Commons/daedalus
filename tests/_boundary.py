@@ -10,6 +10,7 @@ projection of the record.
 """
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -64,12 +65,24 @@ def run_extension_hotfix_quota(plan):
     """Drive the hotfix store's byte bound through the shipped worker."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension hotfix path'
-    result = run_node_program(
-        node, HARNESS,
-        [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'], cwd=ROOT,
-        payload=json.dumps(plan))
+    try:
+        result = run_node_program(
+            node, HARNESS,
+            [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
+            cwd=ROOT, payload=json.dumps(plan))
+    except subprocess.TimeoutExpired:
+        # The worker never finished the plan. The command sequence the
+        # plan holds would have to have stopped answering, which is what a
+        # critical section that never released looks like from outside.
+        raise AssertionError(
+            'the hotfix-quota scenario timed out: the worker stopped '
+            'answering a command it had been given') from None
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
+    assert result.stdout.strip(), (
+        'the hotfix-quota scenario produced no answer: the worker stopped '
+        f'answering (rc={result.returncode}, '
+        f'stderr={result.stderr[:400]!r})')
     return json.loads(result.stdout)
 
 
