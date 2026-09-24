@@ -33,7 +33,11 @@ def _build_template():
         (root / 'run_tests.py').write_bytes(
             (ROOT / 'run_tests.py').read_bytes())
         _git(root, 'init', '-q')
-        _git(root, 'add', '--', 'tests', 'run_tests.py')
+        # A split index records a `link` to `.git/sharedindex.<sha>` beside
+        # the base index; only the base is copied, so a scratch would fail
+        # `ls-files` on a config that enables it. Stage one whole index.
+        _git(root, '-c', 'core.splitIndex=false', 'add', '--', 'tests',
+             'run_tests.py')
         return (root / '.git' / 'index').read_bytes()
 
 
