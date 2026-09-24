@@ -134,9 +134,12 @@ CASES = [
         _RELAY, 'e = {}; e.update([("k", ordinary), (None, relay())])',
         'x = e.setdefault("k", relay())', 'y = e.get(None, ordinary)',
         invoke='x(), y()'), (1, 1)),
+    # A setdefault whose key the pair list occupies returns that entry: the
+    # literal-None key beside it is stored under None, not in the
+    # unknown-key slot this read used to merge (issue 1025).
     ('issue857-pair-list-literal', _flow(
         _RELAY, 'e = {}; e.update([("k", ordinary), (None, relay())])',
-        'x = e.setdefault("k", relay())', invoke='x()'), (0, 1)),
+        'x = e.setdefault("k", relay())', invoke='x()'), (0, 0)),
     ('issue857-update-pairs-defect', _ext_flow(
         'e = {}; e.update([("k", relay())])',
         'x = e.setdefault("k", relay())', 'x()'), (1, 1)),
