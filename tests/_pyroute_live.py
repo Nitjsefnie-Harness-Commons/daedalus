@@ -273,13 +273,19 @@ def seed_unprovable_selection(value, state):
     seed_selection_value(value, state)
 
 
-def seed_then_resolve(node, state, *args):
+def seed_then_resolve(node, state, generator_factory, sender_resolver,
+                      unprovable_sender):
     """Widen an unprovable selection's carriers, then resolve the expression
     the ordinary way. Every expression flows through here, so a selection the
     model cannot resolve keeps a callable to follow however it is later bound.
+    The three forwarded parameters are named, not packed through ``*args``, so
+    the checker resolves this return as ``resolve_expression_value``'s declared
+    type rather than an opaque unpack; that inference otherwise reaches the
+    latent diagnostics in ``_pyroute_mapping`` (daedalus issue 990).
     """
     seed_unprovable_selection(node, state)
-    return resolve_expression_value(node, state, *args)
+    return resolve_expression_value(node, state, generator_factory,
+                                    sender_resolver, unprovable_sender)
 
 
 def bind_alias_statement(node, state, binder):
