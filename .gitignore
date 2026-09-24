@@ -532,6 +532,7 @@
 !/tests/test_tab_routing_signatures.py
 !/tests/test_tab_routing_starred_arity.py
 !/tests/test_tab_routing_store_sweep.py
+!/tests/test_tab_routing_unhashable_read.py
 !/tests/test_tab_routing_unprovable.py
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py

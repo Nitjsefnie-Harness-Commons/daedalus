@@ -6,7 +6,7 @@ from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
-                           _literal_value, _usable_key)
+                           _literal_value, _unhashable_key_sender)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -218,19 +218,10 @@ def _setdefault_value(node, state):
         return merge_yielded((default, UNPROVABLE_SENDER)) \
             if default is not None else None
     if key is _UNRESOLVED_KEY:
-        # A key the runtime cannot hash raises before the call returns, so
-        # the call is unprovable; one only too complex to fold names every
-        # stored item, as a plain read of the same shape does.
-        source = node.args[0] if node.args else None
-        probe = state.literals.get(source.id) if isinstance(
-            source, ast.Name) else _literal_value(source)
-        unusable = UNPROVABLE_SENDER if probe is not None \
-            and probe is not _UNSAFE_LITERAL \
-            and _usable_key(probe) is _UNRESOLVED_KEY else None
-        # `probe is not None` is a choice, not a requirement: a name bound
-        # to no literal probes as None, hashable, and fails the test beside
-        # it anyway; the `_UNSAFE_LITERAL` conjunct is the load-bearing one.
-        return merge_yielded((*owner.items.values(), default, unusable))
+        return merge_yielded((*owner.items.values(), default,
+                              _unhashable_key_sender(
+                                  node.args[0] if node.args else None,
+                                  state)))
     return _mapping_lookup(owner, key, default)
 
 
@@ -251,7 +242,9 @@ def _mapping_item_value(node, owner, state):
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
     if key is not _UNRESOLVED_KEY: return _mapping_lookup(owner, key, default)
-    return merge_yielded((*owner.items.values(), default))
+    return merge_yielded((*owner.items.values(), default,
+                          _unhashable_key_sender(
+                              node.args[0] if node.args else None, state)))
 
 
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
@@ -309,7 +302,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         # recurses into alternatives and reads a list by position.
         if key is _UNRESOLVED_KEY and isinstance(owner, DeferredContainer) \
                 and owner.kind == 'dict':
-            value = merge_yielded(owner.items.values())
+            value = merge_yielded((*owner.items.values(),
+                                  _unhashable_key_sender(node.slice, state)))
         else:
             value = merge_yielded(_selected_values(owner, key))
         if value is not None:
