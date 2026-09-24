@@ -104,8 +104,7 @@ def _filter_inert(condition):
 
 
 def _filters_inert(node):
-    """Whether every filter a comprehension carries is inert on the element
-    that would land at output index 0. A filter that may drop that element
+    """A filter that may drop the element that would land at output index 0
     puts a later one there, so the position is unprovable."""
     return all(_filter_inert(condition) for generator in node.generators
                for condition in generator.ifs)
@@ -113,11 +112,10 @@ def _filters_inert(node):
 
 def _first_element(value):
     """The producer's element at output index 0 when the operand proves it,
-    or _UNPROVABLE. A tuple or list of known length carries its own element
-    0. Alternatives bind only when every branch is such a container and they
-    agree on that element: a union of the branches is not an agreement, so a
-    disagreement -- and a branch that proves no element at all -- leaves the
-    position unprovable."""
+    or _UNPROVABLE. Alternatives bind only when every branch is a tuple or
+    list of known length and they agree on that element: a union of the
+    branches is not an agreement, so a disagreement -- and a branch that
+    proves no element at all -- leaves the position unprovable."""
     if isinstance(value, DeferredContainer):
         if value.kind in ('tuple', 'list') and value.length:
             return value.items.get(0)
