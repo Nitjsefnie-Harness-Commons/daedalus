@@ -14,8 +14,10 @@ from _pyroute_values import (DeferredAlternatives, DeferredContainer,
 class SpreadContainer(DeferredContainer):
     """A comprehension's result, read two ways: the item at each output
     index is the body's value for the producer's element at that index, but
-    a consumer that walks the result visits every element, so `iterated`
-    carries the body's value over all of them."""
+    a consumer that walks a list or set result visits every element, so
+    `iterated` carries the body's value over all of them. A dict
+    comprehension is consumed through the generator path, not this one, so
+    its result carries no `iterated`."""
 
     iterated: object = None
 

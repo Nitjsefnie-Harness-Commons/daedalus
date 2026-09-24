@@ -20,10 +20,11 @@ from _pyroute_values import (DeferredCallable, DeferredContainer,
 
 def materialized_order(consumer, argument, states):
     """The container an order-preserving materializer yields from a known
-    ordered operand, or None. list and tuple re-kinder such a container
-    without reordering or dropping an element, so the result keeps that
-    container's indices; the other eager consumers reorder or deduplicate, and
-    their result is not a positional pairing."""
+    ordered operand, or None. list and tuple re-kind such a container without
+    reordering or dropping an element, so the result keeps that container's
+    indices. Every other eager consumer either reorders or deduplicates the
+    operand, or -- as dict does -- projects each item into a key, so its
+    result is not a positional pairing of the operand's own elements."""
     if consumer not in ('list', 'tuple'):
         return None
     return ordered_container(
@@ -49,9 +50,13 @@ def enter_result(context_expr, state, analyze):
 def probe_comprehension(node, active, skipped, copy_state, check, violations):
     """Check a comprehension's body into the states, then record what the
     comprehension yields at output index 0 when that index is provable, and
-    return the states the body produced. A generator whose filters may drop
-    an element leaves the merge in place: the first surviving element is not
-    the iterable's element 0."""
+    return the states the body produced. The probe runs whatever filters a
+    generator carries: a comprehension does not reorder -- a filter selects
+    which elements appear, never their order -- so the element at output
+    index 0 is the iterable's element 0 whenever a filter keeps it, and the
+    merge of every element belongs only to a consumer that walks the result.
+    Which elements a filter drops is not modelled here; that is the same
+    unplaced position #948 records for the unfiltered x[1] read."""
     results = [node.key, node.value] if isinstance(
         node, ast.DictComp) else [node.elt]
     for result in results:
@@ -59,9 +64,8 @@ def probe_comprehension(node, active, skipped, copy_state, check, violations):
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
         for state in [*skipped, *active]:
             state.evaluated.pop(iterated_key(node), None)
-        if not any(generator.ifs for generator in node.generators):
-            comprehension_first(
-                node, results, active, copy_state, check, violations)
+        comprehension_first(
+            node, results, active, copy_state, check, violations)
     return active
 
 

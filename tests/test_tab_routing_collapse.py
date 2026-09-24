@@ -636,8 +636,11 @@ def test_shadowed_materializer_names(tmp):
 
 def test_materialized_order_only_for_order_preserving_consumers(_tmp):
     """list and tuple re-kind a container without reordering or dropping an
-    element, so their result keeps the operand's indices; every other eager
-    consumer destroys order or does not yield a positional container."""
+    element, so their result keeps the operand's indices. Every other eager
+    consumer either reorders or deduplicates, or -- as dict does -- projects
+    each item into a key, so its result is not a positional pairing of the
+    operand's own elements. dict preserves insertion order, so order alone is
+    not what excludes it: the projection is."""
     node = ast.parse('pair()').body[0].value
     container = DeferredContainer({0: 'first', 1: 'second'}, 2, 'tuple')
     state = FlowState({}, {}, {}, {id(node): container}, set(), set(),
@@ -650,6 +653,13 @@ def test_materialized_order_only_for_order_preserving_consumers(_tmp):
     for consumer in ('dict', 'frozenset', 'max', 'min', 'set', 'sorted',
                      'sum'):
         assert materialized_order(consumer, node, [state]) is None, consumer
+    # Why dict is excluded: iterating it yields the keys -- each pair's first
+    # element -- not the pairs the operand held, so a positional read cannot
+    # recover the operand's own elements. This is the projection, and it is
+    # what the exclusion is for; nothing here relies on order.
+    pairs = [('first', 1), ('second', 2)]
+    assert list(dict(pairs)) == ['first', 'second']
+    assert list(pairs) == pairs
 
 
 def main():
