@@ -272,17 +272,39 @@ def _dict_call_value(node, state):
     return DeferredContainer(items, len(node.keywords), 'dict', node)
 
 
+_UNRESOLVED_KEY = object()
+
+
+def _literal_key(node, state):
+    """The literal key one mapping lookup names, or _UNRESOLVED_KEY.
+
+    A constant is its own key and a name carries the literal it was bound
+    to; anything else, and any name bound to no literal, stays unresolved.
+    """
+    if isinstance(node, ast.Constant):
+        key = node.value
+    elif isinstance(node, ast.Name):
+        key = state.literals.get(node.id, _UNRESOLVED_KEY)
+    else:
+        return _UNRESOLVED_KEY
+    try:
+        hash(key)
+    except TypeError:
+        return _UNRESOLVED_KEY
+    return key
+
+
 def _setdefault_value(node, state):
     """The stored-or-existing item one setdefault call evaluates to."""
     owner = _known_value(node.func.value, state)
-    key = node.args[0] if node.args else None
+    key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
     if (not isinstance(owner, DeferredContainer)
-            or not isinstance(key, ast.Constant)):
+            or key is _UNRESOLVED_KEY):
         default = _known_value(node.args[1], state) if len(node.args) > 1 \
             else None
         return merge_yielded((default, UNPROVABLE_SENDER)) \
             if default is not None else None
-    if key.value in owner.items: return owner.items[key.value]
+    if key in owner.items: return owner.items[key]
     return _known_value(node.args[1], state) if len(node.args) > 1 else None
 
 
@@ -517,19 +539,10 @@ def _apply_setdefault(state, call, owner_name):
     _mark_unprovable(state, owner_name)
 
 
-_UNRESOLVED_KEY = object()
-
-
 def _pop_key(call, state):
     """The literal key one pop names, or _UNRESOLVED_KEY."""
-    if not call.args:
-        return _UNRESOLVED_KEY
-    key = call.args[0]
-    if isinstance(key, ast.Constant):
-        return key.value
-    if isinstance(key, ast.Name):
-        return state.literals.get(key.id, _UNRESOLVED_KEY)
-    return _UNRESOLVED_KEY
+    return _literal_key(call.args[0], state) if call.args \
+        else _UNRESOLVED_KEY
 
 
 def _apply_pop(state, call):
@@ -540,10 +553,7 @@ def _apply_pop(state, call):
     if key is _UNRESOLVED_KEY:
         return
     items = dict(owner.items)
-    try:
-        items.pop(key, None)
-    except TypeError:
-        return
+    items.pop(key, None)
     replacement = DeferredContainer(
         items, owner.length, owner.kind, owner.identity)
     replace_deferred_storage(state, owner, replacement)
