@@ -12,7 +12,7 @@ _LIVE_UNRESOLVED = object()
 
 
 def _getattr_call(value, state):
-    """The unbound keyword-free getattr call, or None."""
+    """The single getattr shape gate the plain and spliced arms share."""
     if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
             and value.func.id == 'getattr'
             and not value.keywords
@@ -64,8 +64,7 @@ def _select(owner, name, has_default, default):
 
 def _has_starred_arg(value, state):
     """Whether an unbound getattr call fills an argument in a starred
-    position, so its positional list must be spliced rather than read
-    plainly."""
+    position."""
     call = _getattr_call(value, state)
     return call is not None and any(
         isinstance(arg, ast.Starred) for arg in call.args)
@@ -98,10 +97,14 @@ def _argument_value(entry, state):
 def _argument_name(entry):
     """The string constant an argument position names, or None when the
     position is not a provable string (a dynamic name). A spliced position
-    carries whatever the operand's container holds: a sender marker, a benign
-    string (a genexp element stores a raw Constant), or nothing at all."""
+    carries whatever its container holds: a deferred value, a raw Constant of
+    any type, a raw sender alias, the normalised UNPROVABLE marker, or
+    nothing. A raw alias is read as the name; the marker is refused."""
     is_value, payload = entry
     if is_value:
+        # Value compare, not identity: _pyroute_state defines its own
+        # equal-but-distinct UNPROVABLE_SENDER, so `is not` would read a
+        # normalised marker as a name.
         return (payload if isinstance(payload, str)
                 and payload != UNPROVABLE_SENDER else None)
     if isinstance(payload, ast.Constant) and isinstance(payload.value, str):
