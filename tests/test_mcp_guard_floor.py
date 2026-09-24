@@ -64,7 +64,8 @@ def test_two_sites_spelling_one_condition_are_refused(_tmp):
 
     The two handlers below raise the same message, so their site keys spell
     one condition text in one (module, function); the scan refuses them
-    instead of silently merging, and the remedy is distinct messages.
+    instead of silently merging, and the remedy is distinct messages — the
+    text key, where the message is the whole of what distinguishes the two.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(
@@ -72,8 +73,37 @@ def test_two_sites_spelling_one_condition_are_refused(_tmp):
     except AssertionError as raised:
         assert 'same_text_shapes.twin' in str(raised), raised
         assert 'distinct' in str(raised), raised
+        assert 'one raise per condition' not in str(raised), raised
     else:
         raise AssertionError('two identical raises merged into one key')
+
+
+SHARED_PREDICATE_SHAPES = '''
+def twin(value):
+    while value:
+        raise ValueError('neg')
+        raise RuntimeError('pos')
+'''
+
+
+def test_two_sites_under_one_predicate_name_a_remedy_that_moves_the_key(_tmp):
+    """Two sites the predicate keys name the remedy the predicate can take.
+
+    The two raises already carry different messages, so the remedy a text
+    key answers with cannot restore this one: the key is the `while`'s test,
+    and only a condition of its own for the second raise moves it. A bare
+    re-raise makes the same point — it cannot be given a message at all.
+    """
+    try:
+        _mcp_guard_floor.guard_shape_probe(
+            _tmp, SHARED_PREDICATE_SHAPES, 'shared_predicate_shapes')
+    except AssertionError as raised:
+        assert 'shared_predicate_shapes.twin' in str(raised), raised
+        assert 'one raise per condition' in str(raised), raised
+        assert 'distinct messages' not in str(raised), raised
+    else:
+        raise AssertionError('two sites under one predicate merged into one '
+                             'key')
 
 
 OR_SHAPES = '''
@@ -167,6 +197,9 @@ def test_an_or_in_an_outer_test_still_refuses_the_inner_site(_tmp):
         _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
     except AssertionError as raised:
         assert 'outer_or_shapes.armed' in str(raised), raised
+        # The `or` the floor read is the outer test, not the key: a message
+        # naming the key sends the author to a `third` with no `or` in it.
+        assert 'first or second' in str(raised), raised
         assert 'split' in str(raised), raised
     else:
         raise AssertionError('a compound condition in an outer test was '
@@ -235,6 +268,120 @@ def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
                                  'of refused')
 
 
+def test_an_or_in_a_negated_test_still_refuses(_tmp):
+    """A `while` else is decided by the test the key negates.
+
+    The key reads `not (test)`, so an `or` read from the negation alone is
+    not the one that decides anything; the test carries it, and the refusal
+    has to name the test for the author to act on it.
+    """
+    sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
+    looped = {key: or_test for (_file, _line), (key, or_test)
+              in sites.items() if key[1] == 'looped'}
+
+    assert looped == {
+        ('guard_shapes', 'looped', 'value > 10 or value < -10'):
+            'value > 10 or value < -10',
+        ('guard_shapes', 'looped', 'not (value < 0 or value > 100)'):
+            'value < 0 or value > 100',
+    }, looped
+
+
+# One source per statement the walk reads as deciding nothing, each with its
+# raise as the direct child of that statement, so removing the entry leaves
+# the walk no other ancestor to read. The `if` around it carries an `or`, so
+# the key also shows the guard reaching the raise THROUGH the construct.
+TRANSPARENT_SOURCES = {
+    'AsyncFor': '''
+async def blocked(values):
+    if values is None or not values:
+        async for value in values:
+            raise ValueError('refused')
+''',
+    'AsyncWith': '''
+async def blocked(values):
+    if values is None or not values:
+        async with values:
+            raise ValueError('refused')
+''',
+    'ClassDef': '''
+def blocked(values):
+    if values is None or not values:
+        class Nested:
+            raise ValueError('refused')
+''',
+    'ExceptHandler': '''
+def blocked(values):
+    if values is None or not values:
+        try:
+            int(values)
+        except ValueError:
+            raise ValueError('refused')
+''',
+    'For': '''
+def blocked(values):
+    if values is None or not values:
+        for value in values:
+            raise ValueError('refused')
+''',
+    'Try': '''
+def blocked(values):
+    if values is None or not values:
+        try:
+            raise ValueError('refused')
+        finally:
+            pass
+''',
+    'TryStar': '''
+def blocked(values):
+    if values is None or not values:
+        try:
+            raise ValueError('refused')
+        except* ValueError:
+            pass
+''',
+    'With': '''
+def blocked(values):
+    if values is None or not values:
+        with values:
+            raise ValueError('refused')
+''',
+}
+
+
+def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
+    """Each entry the walk is transparent through is a control, not a name.
+
+    The construct comes off the node its own parse produced, so the plant
+    cannot miss the statement it means, and the same source is read twice:
+    shipped, where it keys on the surrounding `if`, and with its own entry
+    gone, where the walk can no longer classify it and refuses. An entry no
+    suite observes would leave both reads identical, which is what this
+    refuses.
+    """
+    for name, source in TRANSPARENT_SOURCES.items():
+        path = Path(_tmp) / f'{name.lower()}_shapes.py'
+        path.write_text(source, encoding='utf-8')
+        construct = next(node for node in ast.walk(ast.parse(source))
+                         if isinstance(node, getattr(ast, name)))
+        cases = tuple(node for node in _mcp_guard_floor.TRANSPARENT_STATEMENTS
+                      if node is not construct.__class__)
+        assert construct.__class__ not in cases, f'{name}: plant did not apply'
+        assert _mcp_guard_floor.guard_keys(
+            _mcp_guard_floor.tool_guards([path], Path(_tmp))) == [
+                (path.stem, 'blocked', 'values is None or not values')], name
+        with mock.patch.object(
+                _mcp_guard_floor, 'TRANSPARENT_STATEMENTS', cases):
+            try:
+                _mcp_guard_floor.tool_guards([path], Path(_tmp))
+            except AssertionError as refused:
+                assert name in str(refused), (name, refused)
+            else:
+                raise AssertionError(
+                    f'{name} is transparent by name only: with its entry gone '
+                    'the walk still reads it, so nothing observes the entry')
+
+
 TWIN_SHAPES = '''
 def twin(value):
     raise ValueError('neg'); raise ValueError('pos')
@@ -245,15 +392,17 @@ def test_two_raises_on_one_line_are_refused(_tmp):
     """A traceback names the line, not the statement.
 
     The two raises are unguarded and spell distinct messages, so no other
-    refusal produces this red: sharing one physical line is the only
-    shape at fault, and the scan refuses it — one raise per line —
-    instead of collapsing the sites.
+    refusal produces this red: sharing one physical line is the only shape
+    at fault, and the scan refuses it rather than collapsing the sites. The
+    remedy names both halves, because splitting the line only restores the
+    scan while each raise keeps a condition of its own.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(_tmp, TWIN_SHAPES, 'twin_shapes')
     except AssertionError as raised:
         assert 'twin_shapes:3' in str(raised), raised
         assert 'one raise per line' in str(raised), raised
+        assert 'condition of its own' in str(raised), raised
     else:
         raise AssertionError('two raises on one line were collapsed, not '
                              'refused')
@@ -369,8 +518,8 @@ def test_a_guard_outside_the_tool_surface_is_not_covered_by_reachability(_tmp):
     del _tmp
     reached_guard = ('tools_network', 'net_capture', 'max_requests < 1')
     moved_guard = ('transport', 'validate', 'max_requests < 1')
-    sites = {('net.py', 19): (reached_guard, False),
-             ('transport.py', 99): (moved_guard, False)}
+    sites = {('net.py', 19): (reached_guard, ''),
+             ('transport.py', 99): (moved_guard, '')}
 
     off_surface = _mcp_guard_floor.guards_off_the_tool_surface(
         sites, {'net_capture': {('net.py', 19): reached_guard}})
