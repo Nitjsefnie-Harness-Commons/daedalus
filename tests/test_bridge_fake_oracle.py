@@ -58,14 +58,28 @@ function streamResponse(answer) {
 
 async function run() {
   const statuses = [];
+  const answered = [];
   for (const step of plan.probe) {
     const init = { method: step.method };
     if (step.body !== undefined) init.body = JSON.stringify(step.body);
+    if (step.headers !== undefined) init.headers = step.headers;
+    // A step that expects the gate to throw says so, so the probe runs to
+    // completion and the throw is evidence rather than a dead child.
+    if (step.expectThrow) {
+      let thrown = null;
+      try { await bridgeFetch(step.url, init); }
+      catch (error) { thrown = error.message; }
+      statuses.push(thrown === null ? 'no throw' : 'throw: ' + thrown);
+      answered.push(null);
+      continue;
+    }
     const answer = await bridgeFetch(step.url, init);
     statuses.push(answer.status);
+    answered.push(await answer.json().catch(() => null));
   }
   return {
     statuses,
+    answered,
     nonStream: nonStreamFetches.map((i) => i.request),
     refused: refusedFetches,
     badOrigins,
@@ -74,6 +88,7 @@ async function run() {
     contractFaults: gateContractFaults,
     bodies: nonStreamFetches.map(
       (i) => ({ request: i.request, body: i.body })),
+    auths: nonStreamFetches.map((i) => i.auth),
     resultPosts,
   };
 }
@@ -223,6 +238,98 @@ def test_a_scenario_matching_its_plan_passes_the_whole_list_check(tmp):
         bad_origins=outcome['badOrigins'],
         stream_answered=outcome['streamAnswered'],
         planned=plan['planned'], planned_stream=[])
+
+
+def test_a_recorded_request_carries_its_authorization_header(tmp):
+    """The token travels in a header, so a scenario reads it off the record
+    instead of wrapping its own fetch."""
+    del tmp
+    plan = {
+        'planned': [SYNC],
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/sync-tabs', 'body': {},
+             'headers': {'Authorization': 'Bearer probe-token'}},
+            {'method': 'POST', 'url': BRIDGE + '/sync-tabs', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['auths'] == ['Bearer probe-token', None], outcome
+
+
+def test_a_planned_answer_sets_the_status_and_body_the_scenario_declared(
+        tmp):
+    """A scenario that exercises a bridge's own error answer declares that
+    answer; the gate then hands the worker the status and body it planned."""
+    del tmp
+    plan = {
+        'planned': [OTHER],
+        'answers': {OTHER: {'status': 403, 'body': {'error': 'forbidden'}}},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/other', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == [403], outcome
+    assert outcome['answered'] == [{'error': 'forbidden'}], outcome
+    assert outcome['records'][0]['status'] == 403, outcome
+
+
+def test_a_planned_throw_answers_by_throwing_and_is_still_recorded(tmp):
+    """An unreachable bridge is a thrown fetch, and a scenario that models
+    one declares the throw. The record carries it, so a swallowed throw
+    still shows the request happened."""
+    del tmp
+    plan = {
+        'planned': [OTHER],
+        'answers': {OTHER: {'throw': 'Failed to fetch'}},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/other', 'body': {},
+             'expectThrow': True},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == ['throw: Failed to fetch'], outcome
+    assert outcome['records'] == [
+        {'request': OTHER, 'refused': False, 'body': {}, 'auth': None,
+         'status': 'throw'}], outcome
+    assert outcome['refused'] == [], outcome
+
+
+def test_a_refused_request_is_refused_even_where_an_answer_was_planned(tmp):
+    """A planned answer never smuggles an undeclared request through: past
+    the declared count the gate refuses by status, plan or no plan."""
+    del tmp
+    plan = {
+        'planned': [SYNC],
+        'answers': {TABS: {'status': 200, 'body': {'ok': True}}},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/tabs', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == [599], outcome
+    assert outcome['refused'] == [TABS], outcome
+    assert outcome['records'][0]['status'] == 599, outcome
+
+
+def test_a_wrong_typed_plan_answers_table_is_a_contract_fault(tmp):
+    """A mis-spelled answers table would otherwise be ignored and every
+    declared request answered 200, so the self-check names it."""
+    del tmp
+    plan = {
+        'planned': [SYNC],
+        'answers': [OTHER],
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/sync-tabs', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['contractFaults'] == ['plan.answers'], outcome
 
 
 # ---- assert_gate_clean's own controls -------------------------------------

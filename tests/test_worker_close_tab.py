@@ -9,7 +9,7 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import RELAY_CONTEXT  # noqa: E402
 
 TOKEN = 'close-token'
 SERVER = 'https://bridge.example.com'
@@ -122,25 +122,7 @@ const badOrigins = [];
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
-""" + STRICT_FETCH + r"""
-
-const context = vm.createContext({
-  chrome,
-  fetch: bridgeFetch,
-  crypto: { randomUUID: () => 'relay-1' },
-  AbortController,
-  TextDecoder,
-  URL,
-  performance,
-  atob,
-  btoa,
-  setTimeout: () => 1,
-  clearTimeout() {},
-  setInterval: () => 1,
-  clearInterval() {},
-  console: { log() {}, warn() {}, error() {} },
-});
-""" + import_scripts_stub('context') + r"""
+""" + STRICT_FETCH + RELAY_CONTEXT + r"""
 
 async function run() {
   vm.runInContext(

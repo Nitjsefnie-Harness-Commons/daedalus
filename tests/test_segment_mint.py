@@ -3,20 +3,23 @@
 
 A page reaches `POST /segment-job` only through the service worker, and the
 worker mints only for an origin an operator has allowed. These run the
-shipped worker in a Node VM against a fake browser that records every fetch
-the worker makes, every result it posts, and what it leaves in storage.
+shipped worker in a Node VM against a fake browser, with the shared bridge
+gate in place: every scenario declares the exact requests it makes, the gate
+answers only those, and a request outside the plan is refused by status and
+recorded — so an invented fetch, a foreign origin or a request the scenario
+never planned fails the scenario instead of answering 200 to nobody.
 """
-import json
-import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import RELAY_CONTEXT  # noqa: E402
 
 ORIGINS_KEY = 'daedalus-segment-origins'
 ALLOWED = 'https://allowed.example.com'
@@ -24,6 +27,17 @@ OTHER = 'https://other.example.com'
 SERVER = 'https://bridge.example.com'
 TOKEN = 'mint-token'
 INVALID_ORIGIN = 'Missing or invalid origin (http(s) origin required)'
+SEGMENT = 'POST /segment-job'
+SYNC = 'POST /sync-tabs'
+RESULT = 'POST /result'
+# Every scenario's recording, from a run of the shipped worker: boot opens the
+# stream and syncs the tab list, then the scenario's own work posts its
+# result. A scenario with no stored bridge URL never gets boot past its
+# config, and declares no request at all. The boot stream fetch is answered
+# 503 and is declared and asserted like the accounted routes.
+BOOT_STREAM = (503,)
+MINT_PLAN = [SYNC, SEGMENT]
+REFUSED_PLAN = [SYNC]
 
 _MINT_HARNESS = (r"""
 const fs = require('fs');
@@ -32,8 +46,6 @@ const vm = require('vm');
 // run_node_program pushes the payload as an object literal, not text.
 const [backgroundPath, plan] = process.argv.slice(1);
 const messageListeners = [];
-const fetches = [];
-const resultPayloads = [];
 let storageBroken = false;
 let releaseWrite = null;
 const storageStore = Object.assign({
@@ -111,45 +123,20 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-async function bridgeFetch(target, init = {}) {
-  const url = String(target);
-  if (url.endsWith('/result') && init.method === 'POST') {
-    resultPayloads.push(JSON.parse(init.body));
-    return response(200, { ok: true });
-  }
-  if (url.includes('/stream?')) return response(503, { error: 'disabled' });
-  // The tab registry's control plane runs at boot; it is not under test.
-  if (/\/(register|sync-tabs|unregister)$/.test(url)) {
-    return response(200, { ok: true });
-  }
-  fetches.push({
-    url,
-    method: init.method || null,
-    headers: init.headers || {},
-    body: init.body === undefined ? null : init.body,
-  });
-  const bridge = plan.bridge || { status: 200, body: { ok: true } };
-  if (bridge.throw) throw new Error(bridge.throw);
-  return response(bridge.status, bridge.body);
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees. No route is
+// special-cased: the control plane the old fake waved through at boot is
+// declared in the plan like any other.
+const BRIDGE_URL = '__SERVER__';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
 }
-
-const context = vm.createContext({
-  chrome,
-  fetch: bridgeFetch,
-  crypto: { randomUUID: () => 'relay-1' },
-  AbortController,
-  TextDecoder,
-  URL,
-  performance,
-  atob,
-  btoa,
-  setTimeout: () => 1,
-  clearTimeout() {},
-  setInterval: () => 1,
-  clearInterval() {},
-  console: { log() {}, warn() {}, error() {} },
-});
-""" + import_scripts_stub('context') + r"""
+""" + STRICT_FETCH + RELAY_CONTEXT + r"""
 
 // One message, one answer, as content.js relays for a page. The sender is
 // the plan's, because what the worker trusts is exactly what Chrome puts
@@ -211,12 +198,16 @@ async function run() {
   }
   const stored = storageStore['__ORIGINS_KEY__'];
   return {
-    fetches,
     answers,
-    posted: resultPayloads.map((item) => ({
+    posted: resultPosts.map((item) => ({
       id: item.id, result: item.result, error: item.error,
     })),
     stored: stored === undefined ? null : stored,
+    records: nonStreamFetches,
+    refused: refusedFetches,
+    badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
   };
 }
 
@@ -230,33 +221,56 @@ run().then((result) => {
     '__ORIGINS_KEY__', ORIGINS_KEY)
 
 
-def _run_mint(plan):
-    """Drive the worker under Node with one plan and read back."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    result = run_node_program(
-        node, _MINT_HARNESS, [str(EXTENSION_ROOT / 'background.js')],
-        cwd=ROOT, payload=plan)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+def _run_mint(plan, planned_stream=BOOT_STREAM):
+    """Drive the worker under Node with one plan and read back.
+
+    The scenario's declared requests are checked against what the gate
+    recorded, so a request outside the plan is refused by status and fails
+    here, whatever the worker does with the refusal.
+    """
+    outcome = run_gate(require_node(), _MINT_HARNESS,
+                       [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
+                       plan=plan)
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=plan['planned'],
+        planned_stream=list(planned_stream))
+    return outcome
 
 
-def _sender(origin=ALLOWED):
+def _mint_requests(outcome, route):
+    return [record for record in outcome['records']
+            if record['request'] == route]
+
+
+def _sender(origin: Optional[str] = ALLOWED):
     sender = {'tab': {'id': 7}, 'url': ALLOWED + '/play'}
     if origin is not None:
         sender['origin'] = origin
     return sender
 
 
-def _mint_plan(allowlist, sender, message, bridge=None, **extra):
+def _mint_plan(allowlist, sender, message, answer=None, planned=None,
+               **extra):
+    """A mint scenario's plan: boot's sync plus the mint post.
+
+    `answer` is the bridge answer the scenario planned for the mint post —
+    a status and body, or a throw for a bridge it models as unreachable.
+    `planned` names the requests for a scenario that never reaches the
+    bridge at all (its default), or names none when no bridge URL is
+    configured and boot itself makes no request.
+    """
     plan = {
         'store': {} if allowlist is None else {ORIGINS_KEY: allowlist},
         'sender': sender,
         'messages': [message],
+        'planned': list(REFUSED_PLAN if planned is None else planned),
     }
-    if bridge is not None:
-        plan['bridge'] = bridge
+    if answer is not None:
+        plan['answers'] = {SEGMENT: answer}
     plan.update(extra)
     return plan
 
@@ -268,8 +282,9 @@ def _command(command_type, **fields):
 
 
 def _refused(outcome, message):
-    """A refusal is exactly `{error}` and never reached the bridge."""
-    assert outcome['fetches'] == [], outcome
+    """A refusal is exactly `{error}`, and the plan proved it never reached
+    the bridge: a mint post outside the scenario's plan is refused by the
+    gate, which the whole-list check would have failed on."""
     assert len(outcome['answers']) == 1, outcome
     answer = outcome['answers'][0]
     assert isinstance(answer, dict), f'reply channel dropped: {answer!r}'
@@ -282,14 +297,13 @@ def test_a_listed_origin_gets_a_sig_through_one_bridge_post(tmp):
     del tmp
     outcome = _run_mint(_mint_plan(
         [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
-        bridge={'status': 200, 'body': {'ok': True, 'sig': 'SIG1'}}))
-    assert len(outcome['fetches']) == 1, outcome
-    request = outcome['fetches'][0]
-    assert request['url'] == SERVER + '/segment-job', request
-    assert request['method'] == 'POST', request
-    assert request['headers']['Authorization'] == 'Bearer ' + TOKEN, request
-    assert json.loads(request['body']) == {
-        'token': TOKEN, 'job': 'job_1'}, request
+        answer={'status': 200, 'body': {'ok': True, 'sig': 'SIG1'}},
+        planned=MINT_PLAN))
+    mints = _mint_requests(outcome, SEGMENT)
+    assert len(mints) == 1, outcome
+    request = mints[0]
+    assert request['auth'] == 'Bearer ' + TOKEN, request
+    assert request['body'] == {'token': TOKEN, 'job': 'job_1'}, request
     assert outcome['answers'] == [{'sig': 'SIG1'}], outcome
     assert list(outcome['answers'][0]) == ['sig'], outcome
 
@@ -323,9 +337,10 @@ def test_an_unlisted_origin_learns_nothing_else(tmp):
         [ALLOWED], _sender(OTHER), {'type': 'segmentJob', 'job': ''}))
     _refused(outcome, 'origin not allowed')
     plan = _mint_plan(
-        [ALLOWED], _sender(OTHER), {'type': 'segmentJob', 'job': 'job_1'})
+        [ALLOWED], _sender(OTHER), {'type': 'segmentJob', 'job': 'job_1'},
+        planned=[])
     plan['store']['daedalus-server'] = ''
-    _refused(_run_mint(plan), 'origin not allowed')
+    _refused(_run_mint(plan, planned_stream=()), 'origin not allowed')
 
 
 def test_a_sender_without_an_origin_is_refused(tmp):
@@ -363,20 +378,27 @@ def test_a_missing_empty_or_non_string_job_is_refused(tmp):
 
 
 def test_an_unconfigured_bridge_is_reported_without_a_fetch(tmp):
-    """No server URL: say so rather than fetch a relative path."""
+    """No server URL: say so rather than fetch a relative path.
+
+    The plan names no request: without a bridge URL the worker is never
+    configured, so boot opens no stream and syncs no tabs — a claim the
+    gate now checks, which the old fake's blanket 200 could not.
+    """
     del tmp
     plan = _mint_plan(
-        [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'})
+        [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
+        planned=[])
     plan['store']['daedalus-server'] = ''
-    _refused(_run_mint(plan), 'bridge not configured')
+    _refused(_run_mint(plan, planned_stream=()), 'bridge not configured')
 
 
 def test_a_bridge_refusal_is_reported_with_its_status(tmp):
     del tmp
     outcome = _run_mint(_mint_plan(
         [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
-        bridge={'status': 403, 'body': {'error': 'forbidden'}}))
-    assert len(outcome['fetches']) == 1, outcome
+        answer={'status': 403, 'body': {'error': 'forbidden'}},
+        planned=MINT_PLAN))
+    assert len(_mint_requests(outcome, SEGMENT)) == 1, outcome
     assert outcome['answers'] == [{'error': 'segment-job refused (403)'}], (
         outcome)
 
@@ -387,8 +409,8 @@ def test_a_bridge_answer_without_a_sig_is_an_error(tmp):
                  {'ok': True, 'sig': 7}, None):
         outcome = _run_mint(_mint_plan(
             [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
-            bridge={'status': 200, 'body': body}))
-        assert len(outcome['fetches']) == 1, outcome
+            answer={'status': 200, 'body': body}, planned=MINT_PLAN))
+        assert len(_mint_requests(outcome, SEGMENT)) == 1, outcome
         assert outcome['answers'] == [
             {'error': 'segment-job answered no sig'}], (body, outcome)
 
@@ -397,7 +419,7 @@ def test_an_unreachable_bridge_is_reported_with_its_reason(tmp):
     del tmp
     outcome = _run_mint(_mint_plan(
         [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
-        bridge={'throw': 'Failed to fetch'}))
+        answer={'throw': 'Failed to fetch'}, planned=MINT_PLAN))
     assert outcome['answers'] == [
         {'error': 'segment-job unreachable: Failed to fetch'}], outcome
 
@@ -412,7 +434,15 @@ def test_a_storage_failure_answers_an_error_not_silence(tmp):
 
 
 def _commands(commands, store=None, concurrent=None):
-    plan = {'store': store or {}, 'commands': commands}
+    """Dispatch commands, declaring boot's sync plus one result per command.
+
+    The count is the recording: every dispatched command posts its result,
+    so a scenario that dispatches a third command the plan does not name is
+    refused by the gate rather than waved through.
+    """
+    dispatched = len(commands) + len(concurrent or [])
+    plan = {'store': store or {}, 'commands': commands,
+            'planned': [SYNC] + [RESULT] * dispatched}
     if concurrent:
         plan['concurrent'] = concurrent
     return _run_mint(plan)
@@ -555,6 +585,7 @@ def test_a_list_behind_an_in_flight_allow_sees_the_write(tmp):
     outcome = _run_mint({
         'store': {},
         'holdFirstWrite': True,
+        'planned': [SYNC, RESULT, RESULT],
         'heldSequence': [
             _command('allow-segment-origin', origin=ALLOWED, id='allow'),
             _command('list-segment-origins', id='list'),
