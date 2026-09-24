@@ -561,6 +561,7 @@ def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
 import contextlib
 import importlib
 import os
+import sys
 
 
 class Holder:
@@ -631,7 +632,8 @@ def shapes(handle, flag, table):
     return (conditional, choice, compared, indexed, starred, listed, counted,
             nested, joined, made, grown, renamed, submodules, loaded,
             rows_of(handle), attribute_bases(handle, flag, table),
-            string_keyed_but_ordinary(handle, table, table))
+            string_keyed_but_ordinary(handle, table, table),
+            ordinary_sys_reads(handle))
 
 
 def load_ordinary(handle):
@@ -668,6 +670,17 @@ def string_keyed_but_ordinary(handle, table, registry):
     other_dict_key = importlib.__dict__[registry]
     return (by_module_name, by_other_name, attribute_by_name,
             untracked_registry, other_modules, other_dict_key)
+
+
+def ordinary_sys_reads(k):
+    """An ordinary `sys` attribute indexed by a key is NOT a registry read.
+
+    `sys.argv`, `sys.path` and `sys.flags` MENTION sys but are not a
+    namespace, so subscripting one is ordinary. The near-misses —
+    `sys.modules`, `sys.__dict__` — still refuse, pinned in the closure suite.
+    """
+    return (sys.argv[k], sys.path[k], sys.version_info[k], sys.flags[k],
+            sys.executable[k])
 
 
 def rows_of(handle):

@@ -8,19 +8,13 @@ the import-by-name operation to a NAME the map does not track is refused
 too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. The
-registry is read structurally, so any base mentioning a tracked `sys` or
-registry name is one, and a store that hands it to an unfollowable name is
-refused too; a star import is refused outright. Three shapes it cannot
-follow are ACCEPTED rather than refused, and each is a declared limit, not
-a silent skip: a value reached through a call's result, bound to a name or
-read inline as a base, attribute or subscript; a tracked module or the
-operation delivered as a call ARGUMENT — including `sys`, whose registry is
-reachable only past the argument — because the walk follows nothing a call
-returns or is handed; and a string ASSEMBLED at runtime that the walk
-cannot fold to a constant — an interpolated f-string, a concatenation with
-a name, a `join`, a `.format()`, `%`. A string that DOES fold to a
-constant is refused like any other literal. Any accepted shape would leave
-the closure quietly short of the modules that composition can reach.
+registry is read at every level — the base structurally, the key by folding
+it — and a store that hands it away and a star import are refused too.
+Three shapes it cannot follow are ACCEPTED as declared limits: a value
+reached through a call's result, a tracked module or the operation handed
+as a call ARGUMENT (`use(sys)`), and a string ASSEMBLED at runtime the
+walk cannot fold to a constant. A string that DOES fold is refused. Any
+accepted shape leaves the closure quietly short.
 """
 import ast
 from pathlib import Path
@@ -393,17 +387,30 @@ def _registry_mention(value, bound, stop_at_call=False):
                for child in ast.iter_child_nodes(value))
 
 
+def _is_namespace(value, bound):
+    """True when this expression is a module NAMESPACE — a tracked `sys`
+    module's `__dict__` — which is where the registry is reachable under a
+    `'modules'` key.
+
+    The property is that the base IS a namespace, NOT that it mentions a
+    registry-carrying name: `sys.argv` and `sys.path` are ordinary
+    attributes. A call is not crossed.
+    """
+    return isinstance(value, ast.Attribute) and value.attr == '__dict__' \
+        and _registry_mention(value.value, bound, stop_at_call=True)
+
+
 def _is_registry(node, bound):
     """The module registry itself, read through the map's tracked names.
 
     A name bound to the registry is the registry; a `.modules` attribute is
     it when its base MENTIONS a registry-carrying name; a subscript keyed by
     the registry's name is it when its value mentions one either (the
-    `__dict__` route). A subscript's KEY is decided by the constant-folder,
-    not its spelling: a key folding to the registry's name is the registry, a
-    key folding to another constant resolves that attribute, and an
-    unreadable key is unresolvable — refused unless the base is a call's
-    result, which the call-result limit covers.
+    `__dict__` route). A subscript's KEY is decided by the constant-folder:
+    a key folding to the registry's name is the registry, a key folding to
+    another constant resolves that attribute, and an unreadable key is
+    unresolvable — refused only when the base is a NAMESPACE
+    (`_is_namespace`) or a call's result, which the call-result limit covers.
     """
     if isinstance(node, ast.Name):
         return bound.get(node.id) == 'registry'
@@ -415,7 +422,7 @@ def _is_registry(node, bound):
             return False
         if key == REGISTRY_ATTRIBUTE:
             return _registry_mention(node.value, bound)
-        return _registry_mention(node.value, bound, stop_at_call=True)
+        return _is_namespace(node.value, bound)
     return False
 
 
