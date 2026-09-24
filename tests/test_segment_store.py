@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import isolated_env  # noqa: E402
+from _segments import alt, isolated_env  # noqa: E402
 
 
 def _probe(tmp, script, extra_env=None):
@@ -626,25 +626,12 @@ def test_a_capability_authorizes_only_under_the_root_holding_it(tmp):
     }, answer
 
 
-def _alt(tmp, name):
-    """Two genuinely different roots, and the modules that take one."""
-    configured = Path(tmp) / 'segments'
-    passed = Path(tmp) / 'passed-segments'
-    configured.mkdir(parents=True)
-    passed.mkdir(parents=True)
-    bridge = _util.ROOT / 'daedalus_bridge'
-    return (_util.load(bridge / 'segment_jobs.py', name + '_jobs'),
-            _util.load(bridge / 'segment_routes.py', name + '_routes'),
-            configured, passed)
-
-
 @isolated_env
 def test_a_status_read_under_a_passed_root_authorizes_its_own_job(tmp):
     """A status read checks the capability against the record under the
     root it was handed. Resolving that record from configuration finds no
     record under a passed root and answers 403, listing nothing."""
-    jobs, routes, configured, passed = _alt(tmp, 'statusroot')
-    assert passed != configured, 'the fixture made the roots equal'
+    jobs, routes, configured, passed = alt(tmp, 'statusroot')
     job = 'statusroot-job'
     status, minted = jobs.mint_job(
         passed, 'statusroottok', {'job': job}, jobs.JobQuotas(9, 8, 256))
@@ -664,8 +651,7 @@ def test_a_job_lookup_under_a_passed_root_reads_its_own_record(tmp):
     """A lookup answers about the record under the passed root: the owner
     gets its own capability back and another token a 409. Resolving that
     record from configuration finds none there and answers 404."""
-    jobs, routes, configured, passed = _alt(tmp, 'lookuproot')
-    assert passed != configured, 'the fixture made the roots equal'
+    jobs, routes, configured, passed = alt(tmp, 'lookuproot')
     job = 'lookuproot-job'
     status, minted = jobs.mint_job(
         passed, 'lookuproottok', {'job': job}, jobs.JobQuotas(9, 8, 256))
@@ -677,6 +663,25 @@ def test_a_job_lookup_under_a_passed_root_reads_its_own_record(tmp):
         passed, 'othertok', {'job': [job]}) == (
             409, {'error': 'job owned by a different token'})
     assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
+
+
+_DAEDALUS_BASELINE = {k: os.environ[k] for k in os.environ
+                      if k.startswith('DAEDALUS_')}
+
+
+def test_z_the_decorated_controls_restore_the_environment(_tmp):
+    """The in-process controls hand the process environment back, absence
+    included.
+
+    The baseline is captured at import, before any test runs, so this
+    observes a leak only if the decorated controls above already ran. The
+    runner orders by name, and `test_z_` sorts after every `test_a_` the
+    decorated controls use, so a broken restore is visible here.
+    """
+    now = {k: os.environ[k] for k in os.environ if k.startswith('DAEDALUS_')}
+    assert now == _DAEDALUS_BASELINE, (
+        f'the decorated controls changed the environment: '
+        f'{sorted(now.items())} != {sorted(_DAEDALUS_BASELINE.items())}')
 
 
 def main():

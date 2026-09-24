@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 
 # Keep the bridge child's MCP side-thread off the fixed port 8086: several
@@ -54,27 +55,34 @@ def post_segment(base, job, sig, segment, payload=b'bytes', total='1'):
         headers={'Content-Type': 'application/octet-stream'})
 
 
+def alt(tmp, name):
+    """Two genuinely different roots, and the modules that take one.
+
+    The roots are checked distinct before the mkdirs, so a fixture that
+    aliased them would fail on this assertion rather than on the mkdir
+    that would follow.
+    """
+    configured = Path(tmp) / 'segments'
+    passed = Path(tmp) / 'passed-segments'
+    assert passed != configured, 'the fixture made the roots equal'
+    configured.mkdir(parents=True)
+    passed.mkdir(parents=True)
+    bridge = _util.ROOT / 'daedalus_bridge'
+    return (_util.load(bridge / 'segment_jobs.py', name + '_jobs'),
+            _util.load(bridge / 'segment_routes.py', name + '_routes'),
+            configured, passed)
+
+
 def isolated_env(func):
     """Run an in-process control against only `DAEDALUS_DIR`, then restore.
 
-    The bridge modules read `DAEDALUS_*` when they are first imported, so
-    an ambient value would otherwise reach the first in-process import
-    and stick for the whole process -- `DAEDALUS_DEBUG_TIMING`, for one,
-    is read once and never re-read. Only `DAEDALUS_DIR` is left set,
-    because a mutated call site re-derives its root from it; without it
-    the mutant would raise `KeyError` at the read instead of failing on
-    the behaviour. Every name is restored on the way out, absence
-    included, and the `finally` restores it even when the control fails.
+    Delegated to the tree's existing `_daedalus_env.isolated`, so there is
+    one DAEDALUS environment-isolation idiom rather than two. `DAEDALUS_DIR`
+    is the only name left set because a mutated call site re-derives its
+    root from it.
     """
     @functools.wraps(func)
     def wrapper(tmp):
-        saved = {k: os.environ.pop(k) for k in list(os.environ)
-                 if k.startswith('DAEDALUS_')}
-        os.environ['DAEDALUS_DIR'] = str(tmp)
-        try:
+        with _daedalus_env.isolated({'DAEDALUS_DIR': str(tmp)}):
             return func(tmp)
-        finally:
-            for k in [k for k in os.environ if k.startswith('DAEDALUS_')]:
-                del os.environ[k]
-            os.environ.update(saved)
     return wrapper

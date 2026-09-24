@@ -419,7 +419,6 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
     assert (status, payload) == (200, {'ok': True})
     delivery = root / 'deliveries' / f'{token}_2' / f'{did}.json'
     assert _read(delivery)['value'] == 'paired', delivery
-    # The compatibility consume: `consume=1` and no `delivery` parameter.
     status, consumed = routes.fetch_result(
         root, token, {'tab': ['2'], 'consume': ['1']})
     assert status == 200 and consumed.get('value') == 'paired', consumed

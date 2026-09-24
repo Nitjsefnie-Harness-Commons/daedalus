@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import (BRIDGE_ENV, TMP_SEG_ROOT, TOK,  # noqa: E402
+from _segments import (BRIDGE_ENV, TMP_SEG_ROOT, TOK, alt,  # noqa: E402
                        isolated_env, mint_job, post_segment, seg_job)
 
 # `[SEGMENT-TIMING] <job> stored=<n> <phase>=<ms>... parts=<ms> total=<ms>`
@@ -609,26 +609,13 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     assert [row['stored'] for row in observed] == ['0', '1'], observed
 
 
-def _alt(tmp, name):
-    """Two genuinely different roots, and the modules that take one."""
-    configured = Path(tmp) / 'segments'
-    passed = Path(tmp) / 'passed-segments'
-    configured.mkdir(parents=True)
-    passed.mkdir(parents=True)
-    bridge = _util.ROOT / 'daedalus_bridge'
-    return (_util.load(bridge / 'segment_jobs.py', name + '_jobs'),
-            _util.load(bridge / 'segment_routes.py', name + '_routes'),
-            configured, passed)
-
-
 @isolated_env
 def test_two_writes_under_a_passed_root_never_count_the_directory(tmp):
     """A trusted record is read, not recounted, and a stale mark in the
     other tree does not untrust this one. Resolving the record or its mark
     from configuration finds neither under a passed root, so every write
     recounts; the first recounts on purpose, proving the counter is live."""
-    jobs, routes, configured, passed = _alt(tmp, 'recount')
-    assert passed != configured, 'the fixture made the roots equal'
+    jobs, routes, configured, passed = alt(tmp, 'recount')
     job = 'recount-job'
     status, minted = jobs.mint_job(
         passed, 'recounttok', {'job': job}, jobs.JobQuotas(9, 8, 256))
@@ -670,8 +657,7 @@ def test_a_refused_write_keeps_its_recount_in_the_passed_root(tmp):
     """The recount an untrusted record forces is written back to the record
     under the passed root, even when this request is then refused on the
     totals the recount found. Nothing after that write runs."""
-    jobs, routes, configured, passed = _alt(tmp, 'refused')
-    assert passed != configured, 'the fixture made the roots equal'
+    jobs, routes, configured, passed = alt(tmp, 'refused')
     job = 'refused-job'
     status, minted = jobs.mint_job(
         passed, 'refusedtok', {'job': job}, jobs.JobQuotas(9, 2, 256))
