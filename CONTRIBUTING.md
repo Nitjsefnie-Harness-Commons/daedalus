@@ -258,8 +258,11 @@ closing. The gate closes a mergeable pull request only when the body's layout
 or section content fails the template or the Related section names no issue.
 Fix the claim or body on that same pull request; once every condition passes,
 the gate reopens it automatically if it closed it, so there is no need to open a
-second one — but a reopen does not bring the cancelled CI back, so push again
-once it has reopened.
+second one. The reopen is authored by the workflow's own token as
+`github-actions[bot]`, so GitHub creates the CI runs a `reopened` event
+triggers with no jobs and holds them for approval instead of running or
+refusing them: a reopen does not bring the cancelled CI back, nothing runs
+until you push again once it has reopened, and an empty commit is enough.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)

@@ -56,7 +56,7 @@ def test_one_bounded_runner_job_excludes_bots_and_drafts(_tmp):
 def test_gate_calls_only_the_reviewed_action_with_exact_inputs(_tmp):
     assert _workflow()['jobs']['gate']['steps'] == [{
         'uses': ('Nitjsefnie-Actions/pr-gate@'
-                 '44437212f1b931f53433b16455bb05aff67ad21e'),
+                 '39b1b91ed861dbb070629e34bf63fe25b916e54d'),
         'with': {
             'github-token': '${{ github.token }}',
             'repository': '${{ github.repository }}',
