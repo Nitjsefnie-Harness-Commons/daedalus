@@ -507,8 +507,8 @@ from pathlib import Path
 from daedalus_bridge import result_store
 
 root = Path(sys.argv[1]) / 'deliveries'
-(root / 'tok_real').mkdir(parents=True)
-(root / 'tok_absent').mkdir(parents=True)
+root.mkdir(parents=True)
+(root / 'tok_real').mkdir()
 
 # The stripe is keyed on the entry, so the key is not the name: two targets
 # whose names differ must not key alike, and a target whose name happens to
@@ -517,17 +517,37 @@ present = result_store.delivery_stripe_key(root / 'tok_real')
 absent = result_store.delivery_stripe_key(root / 'tok_absent')
 same_lock = (result_store.delivery_lock_for(root / 'tok_real')
              is result_store.delivery_lock_for(root / 'tok_real'))
-# An absent target has no entry to ask, so its name is the key -- and that is
-# stable, which is all the read paths need from it.
-absent_stable = (
-    result_store.delivery_lock_for(root / 'tok_absent')
-    is result_store.delivery_lock_for(root / 'tok_absent'))
+# A target that is not there has no entry to stripe on at all. Naming a
+# stripe for a directory that is not there is the mistake this issue is
+# about: a writer creates the entry first and then keys on the entry, so it
+# would never take the name's stripe.
+absent_refused = absent is None and result_store.delivery_lock_for(
+    root / 'tok_absent') is None
+
+# The mistake that shipped as the original bug was a caller handing the
+# selector a bare name, and a name is silently resolvable against the
+# process working directory -- it would take a stripe for a directory nobody
+# in the request ever named. Refused instead. Both spellings are asserted:
+# the one that actually shipped was a str, so refusing only path OBJECTS
+# would leave the original bug uncaught.
+refused_name = False
+try:
+    result_store.delivery_lock_for('tok_real')
+except TypeError:
+    refused_name = True
+refused_path = False
+try:
+    result_store.delivery_lock_for(os.path.join(str(root), 'tok_real'))
+except TypeError:
+    refused_path = True
 
 print('STRIPE ' + json.dumps({
     'same_lock': same_lock,
-    'absent_stable': absent_stable,
+    'absent_refused': absent_refused,
     'present_is_not_the_name': present != b'tok_real',
-    'present_differs_from_absent': present != absent,
+    'present_differs_from_absent': present and present != absent,
+    'refused_bare_name': refused_name,
+    'refused_str_path': refused_path,
 }))
 """
 
@@ -547,10 +567,12 @@ def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
     and the two-names-one-entry case on any host
     (`test_delivery_stripes.test_two_names_for_one_entry_take_one_stripe`).
 
-    The two path-shaped arguments this probe used to be refused are gone
-    with the contract they pinned: a path is what the function takes now, so
-    refusing one would refuse every real key. What replaced them is the
-    check that matters -- the key is not the name.
+    A directory is what it takes now, and a bare string is refused: a
+    string is silently resolvable against the process working directory, so
+    a caller that passed a name would take a stripe for a directory nobody
+    in the request named -- which is the shape that shipped as the original
+    bug. The absent-target half is here too, because it is the same
+    question: there is a stripe for an entry, and not for a name.
     """
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
@@ -569,9 +591,11 @@ def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
     assert len(marked) == 1, (proc.stdout, proc.stderr)
     answer = json.loads(marked[0][len('STRIPE '):])
     assert answer['same_lock'] is True, answer
-    assert answer['absent_stable'] is True, answer
+    assert answer['absent_refused'] is True, answer
     assert answer['present_is_not_the_name'] is True, answer
     assert answer['present_differs_from_absent'] is True, answer
+    assert answer['refused_bare_name'] is True, answer
+    assert answer['refused_str_path'] is True, answer
 
 
 def main():

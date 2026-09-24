@@ -95,6 +95,47 @@ def test_two_names_for_one_entry_take_one_stripe(tmp):
             is result_store.delivery_lock_for(alias))
 
 
+def test_an_entry_reporting_no_inode_falls_back_to_its_name(tmp):
+    """A parent that reports no inode number keys that entry on its name.
+
+    Every target would key on `b'0:0'` if the zero went into the identity
+    instead of the fallback, and the whole bridge would serialise its
+    delivery writes behind one stripe. The fallback is the pre-round
+    behaviour for such a filesystem, so this pins the branch that keeps it:
+    the name is the key, and it is the name of that entry and not of every
+    other one.
+    """
+    result_store = _load_result_store(tmp)
+    deliveries = Path(tmp) / 'results' / 'deliveries'
+    first = deliveries / 'stripe-token_first'
+    second = deliveries / 'stripe-token_second'
+    first.mkdir(parents=True)
+    second.mkdir()
+    real_stat = os.stat
+
+    class _NoInode:
+        """A stat that reports a device and no inode number."""
+
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+        @property
+        def st_ino(self):
+            return 0
+
+    os.stat = lambda path, *a, **k: _NoInode(real_stat(path, *a, **k))
+    try:
+        keyed = result_store.delivery_stripe_key(first)
+        other = result_store.delivery_stripe_key(second)
+    finally:
+        os.stat = real_stat
+    assert keyed == b'stripe-token_first', keyed
+    assert other == b'stripe-token_second', other
+
+
 def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
     """The control: on a case-sensitive parent they are two entries.
 
@@ -114,34 +155,29 @@ def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
     assert os.stat(upper).st_ino != os.stat(lower).st_ino
 
 
-def test_server_wiring_rejects_crc_collisions(tmp):
-    result_store = _load_result_store(tmp)
-    token = 'stripe-token'
-    target = zlib.crc32(b'crc-collision-seed') & 63
-    tabs = []
-    for number in itertools.count():
-        tab = f'crc-collision-{number:06d}'
-        key = result_store.result_key(token, tab)
-        if zlib.crc32(key.encode()) & 63 == target:
-            tabs.append(tab)
-            if len(tabs) == 128:
-                break
+def test_server_wiring_spreads_real_targets_across_the_table(tmp):
+    """The store draws its locks from the keyed table, not from one lock.
 
-    crc_stripes = {
-        zlib.crc32(result_store.result_key(token, tab).encode()) & 63
-        for tab in tabs
-    }
-    assert len(crc_stripes) == 1
-    # These targets do not exist, so each is striped on the name it would be
-    # created under; with 64 stripes and 128 names an accidental one-stripe
-    # result is impossible in practice, so the keyed mapping is what is
-    # being measured.
-    locks = [
-        result_store.delivery_lock_for(
-            result_store.result_key(token, tab))
-        for tab in tabs
-    ]
-    assert any(lock is not locks[0] for lock in locks[1:])
+    This used to pin that 128 names sharing a CRC32 bucket do not share a
+    lock, which was the keyed mapping's defence against a steerable
+    collision. A real target's key is its directory's entry, not its name,
+    so the CRC bucket describes no real target any more; the CRC-collision
+    property is `delivery_stripes`' own, pinned there. What is left for the
+    wiring to prove is that it selects through the keyed table at all, and
+    with 128 real directories spread over 64 stripes an accidental
+    one-stripe result is impossible in practice.
+    """
+    result_store = _load_result_store(tmp)
+    deliveries = Path(tmp) / 'results' / 'deliveries'
+    deliveries.mkdir(parents=True)
+    locks = []
+    for number in range(128):
+        target = deliveries / f'stripe-token_tab-{number:06d}'
+        target.mkdir()
+        locks.append(result_store.delivery_lock_for(target))
+    assert all(lock is not None for lock in locks), 'a live target had no lock'
+    assert any(lock is not locks[0] for lock in locks[1:]), (
+        'every target took one stripe, so the table is not in use')
 
 
 def test_crc_collisions_do_not_collide_under_keyed_mapping(tmp):

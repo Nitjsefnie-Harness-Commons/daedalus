@@ -391,19 +391,28 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         finally:
             sys.path.pop(0)
         (docroot / 'results').mkdir(parents=True)
+        deliveries = docroot / 'results' / result_store.DELIVERY_SUBDIR
+        deliveries.mkdir()
         original_locks = tuple(result_store.delivery_locks)
         initial = len(original_locks)
-        returned_locks = []
+        absent_locks, present_locks = [], []
         for index in range(10_000):
             _dir, delivery_file, _tab = result_store.find_delivery_result(
                 docroot / 'results', TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
-            returned_locks.append(result_store.delivery_lock_for(_dir))
+            # A target that is not there has no entry to stripe on, so it
+            # takes no stripe at all -- ten thousand of them must not grow
+            # the table either.
+            absent_locks.append(result_store.delivery_lock_for(_dir))
+            live = deliveries / f'{TOK}_present-{index}'
+            live.mkdir()
+            present_locks.append(result_store.delivery_lock_for(live))
+        assert all(lock is None for lock in absent_locks)
         assert initial == result_store.DELIVERY_LOCK_STRIPES
         assert len(result_store.delivery_locks) == initial
         assert all(any(lock is original for original in original_locks)
-                   for lock in returned_locks)
-        assert len({id(lock) for lock in returned_locks}) <= (
+                   for lock in present_locks)
+        assert len({id(lock) for lock in present_locks}) <= (
             result_store.DELIVERY_LOCK_STRIPES)
     finally:
         for name, value in saved.items():

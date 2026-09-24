@@ -505,7 +505,7 @@ def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
     target -- the POST, the delivery read and the compatibility consume.
     """
     root = _folding_parent(tmp)
-    work = _folding_token(root, tmp.rsplit('/', 1)[-1])
+    work = _folding_token(root, Path(tmp).name)
     routes = _load('fixture_result_routes_real_fold')
     store = routes.result_store
     res_dir, cmd_dir = work / 'results', work / 'commands'
@@ -549,31 +549,6 @@ def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
     assert set(names) == {f'{token}_Foo', f'{token}_foo'}, names
     assert keys == 1, seen
     assert stripes == 1, seen
-
-
-def test_the_post_hands_the_stripe_an_entry_not_a_name(tmp):
-    """What the folded fixture above composes with, on any filesystem.
-
-    The stripe is keyed on the directory, so what a route hands it has to be
-    the directory and not a name it derived: this pins the call shape, which
-    is the half of the property a case-sensitive host can see. The other
-    half -- one entry, one stripe -- is pinned where a folding parent is
-    available.
-    """
-    routes = _load('fixture_result_routes_lock_shape')
-    store = routes.result_store
-    token = 'shapetok'
-    with _recorded_locks(store) as seen:
-        stored = routes.accept_result(
-            RES_DIR, tmp, token,
-            {'tabId': 'shapetab', 'id': 'one', '_did': '1700000000000_c'},
-            DELIVERY_CAP)
-    names, keys, stripes = _one_stripe(seen)
-    assert stored == (200, {'ok': True}), stored
-    assert seen and all(isinstance(d, Path) for d, _k, _l in seen), seen
-    assert names == [f'{token}_shapetab'], names
-    assert keys == 1 and stripes == 1, seen
-    assert Path(seen[0][0]).is_dir(), seen
 
 
 def main():
