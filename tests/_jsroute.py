@@ -69,9 +69,8 @@ def js_tab_routing_violations(path, rel, work=None):
     violations = []
     senders = ('extCmd', 'extcmd', 'runCommand')
     line_of = source_index.line_of
-    # `computed_key` is filled in once the receiver index that resolves a
-    # name to the literal it is bound to exists; a computed key read
-    # before then resolves to nothing, which reads as unresolved.
+    # `computed_key` arrives below, once the receiver index exists; a
+    # computed key read before then resolves to nothing, read as unresolved.
     tab_context = {'mask': mask, 'text': text, 'computed_key': None,
                    'unprovable': _JS_UNPROVABLE, 'line_of': line_of}
 

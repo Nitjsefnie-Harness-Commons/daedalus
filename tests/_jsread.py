@@ -392,9 +392,8 @@ def js_split_top_level(mask, text, start, end):
 def js_object_entries(mask, text, obj_start, key_of=None):
     """Entries of the object literal at `obj_start`, as (key, value or None
     for shorthand, key offset); a spread's key is None. `key_of(left,
-    right)` names the key in one source span, for a reader that resolves
-    bindings; without it the key is the source text between the brackets
-    or quotes."""
+    right)` names the key in one source span for a reader that resolves
+    bindings, and without it the key is the source text."""
     obj_end = js_bracket_end(mask, obj_start)
     entries = []
     for s, e in js_split_top_level(mask, text, obj_start + 1, obj_end - 1):

@@ -3,20 +3,12 @@
 A `tab` that reaches a typed command send is the same key whether a
 literal, a name bound to a literal, or a concatenation of literals spells
 it, and a key position no reader can name leaves its object unprovable
-rather than clean. The two directions differ only in where the key sits:
-a property in an object literal, or a bracket on a tracked name.
+rather than clean.
 
 A bracket write names its object by the expression before the brackets, so
 `o.p['tab']` writes what `o` holds under `p` and `A.b.c['tab']` writes what
-`A.b.c` holds. `_write_target` walks that expression by kind — from the base
-name through each property the model can follow — so the chain spelling and
-the flat one reach the same name. Where the walk ends on something that is not
-a name: an object literal, a call, a receiver nothing is known about, or a
-base that is itself a property — the expression names no object the model
-follows, and the write is outside it rather than attributed to the last name
-in the chain. Attributing it to that name anyway is what makes `q.p['tab']`
-look like a write to `p`, and what would make `A.b.c['tab']` look like a write
-to the `c` a standalone `b` happens to hold.
+`A.b.c` holds. That expression is walked by kind, so the chain spelling and
+the flat one reach the same name.
 """
 import re
 
@@ -45,19 +37,17 @@ def is_extension_literal(value):
 
 
 def tab_key(text, left, right, context):
-    """The key one property position carries, or the unresolved marker."""
     key = static_key(text, left, right, context['computed_key'])
     return UNRESOLVED if key is None else key
 
 
 def computed_writes(mask, text):
-    """Bracket writes as (name match, key span, value offset).
+    """(name match, key span, value offset) for each bracket write.
 
     Found in the raw text because the mask blanks string contents, making
-    `p['tab']` unreadable there; a match that begins inside a blanked span
-    is a mention in a string or comment, not code. The mask preserves
-    positions, so the two diverge at the very first character of the name
-    exactly when the mention is not real code.
+    `p['tab']` unreadable there; a match beginning inside a blanked span is
+    a mention in a string or comment, and the two diverge at the first
+    character of the name exactly when it is.
     """
     found = []
     for match in _BRACKET_WRITE.finditer(text):
@@ -76,12 +66,9 @@ def computed_writes(mask, text):
 
 
 def _receiver_chain(match, mask):
-    """The names a bracket write's receiver names, base name first, or
-    None when the leftmost one is a property rather than a name.
-
-    `A.b.c` is three names; the leftmost is the base and the rest are
-    properties of what precedes them. Nothing before the base means the
-    base is a name, at the first offset of a file included.
+    """The receiver's names, base first, or None when the leftmost is a
+    property. Nothing before the base means the base is a name, at the
+    first offset of a file included.
     """
     parts = [(match.group(1), match.start())]
     cursor = match.start()
@@ -102,9 +89,8 @@ def _receiver_chain(match, mask):
 
 
 def _property_owner(owner, key, named):
-    """What an object holds under `key`: a name, the source of an object
-    literal, or None when the model does not follow it. A shorthand entry
-    holds the name the key itself spells."""
+    """A name, an object literal's source, or None when the model does not
+    follow it. A shorthand entry holds the name the key itself spells."""
     if re.fullmatch(r'[\w$]+', owner):
         state = named.get(owner)
         if not isinstance(state, dict):
@@ -121,15 +107,15 @@ def _property_owner(owner, key, named):
 
 
 def _write_target(match, named, mask):
-    """The name a bracket write retargets, or None when its receiver names
-    no object the model follows.
+    """The name the write retargets, or None when its receiver names no
+    object the model follows.
 
-    The receiver is walked by kind, from the base name through every
-    property the model can follow, so the chain spelling and the flat one
-    reach the same name — and a chain that lands on an object literal, a
-    call, or a receiver nothing is known about names nothing here. There
-    is no object to retire in that case, so the write is not attributed
-    rather than attributed to the last name in the chain.
+    A walk that ends on an object literal, a call, or a receiver nothing
+    is known about names nothing here, and there is no object to retire in
+    that case — so the write is not attributed rather than attributed to
+    the last name in the chain. Attributing it to that name anyway is what
+    would make `q.p['tab']` a write to `p`, and `A.b.c['tab']` a write to the
+    `c` a standalone `b` happens to hold.
     """
     chain = _receiver_chain(match, mask)
     if not chain:
@@ -143,13 +129,9 @@ def _write_target(match, named, mask):
 
 
 def tab_write(named, kind, match, context):
-    """Apply one property write to the named-object state table.
-
-    The dotted spelling names `tab` outright; the bracket spelling is read
-    with the same reader an object-literal key uses, so `p['tab']` and
-    `p[k]` are one write rather than two spellings, and the object they
-    retarget is the one the receiver provably holds. A write to another
-    key changes nothing, and one whose key cannot be named retires the
+    """`p['tab']` and `p[k]` are one write, not two spellings, and the
+    object they retarget is the one the receiver provably holds. A write to
+    another key changes nothing; one whose key cannot be named retires the
     object rather than trusting the keys that happened to be readable.
     """
     mask, text = context['mask'], context['text']

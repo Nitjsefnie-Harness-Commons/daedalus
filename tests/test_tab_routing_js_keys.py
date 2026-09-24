@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Computed property keys in a typed command send, paired with node.
-
-A `tab` spelled through a binding or a concatenation reaches the same send
-as the literal spelling, and a key no reader can name leaves its object
-unprovable rather than clean.
-"""
+"""Computed property keys in a typed command send, paired with node."""
 import json
 import shutil
 import subprocess
@@ -19,8 +14,6 @@ from test_tab_routing_js import _runtime_and_guard  # noqa: E402
 
 
 def test_computed_tab_keys_match_runtime(tmp):
-    """A key the guard cannot read is never silently clean, and a key it
-    reads as `tab` is reported whatever spelling carries it."""
     cases = [
         ('literal-read', "extCmd('focus', { ['tab']: chromeTab });\n",
          True, True),
@@ -81,7 +74,6 @@ def test_computed_tab_keys_match_runtime(tmp):
 
 
 def test_computed_tab_key_spellings_reach_one_verdict(tmp):
-    """The bound spelling is the literal spelling, not a second one."""
     path = Path(tmp) / 'verdict.js'
     literal = "\nextCmd('focus', { ['tab']: chromeTab });\n"
     bound = "const k = 'tab';\nextCmd('focus', { [k]: chromeTab });\n"
@@ -94,7 +86,6 @@ def test_computed_tab_key_spellings_reach_one_verdict(tmp):
 
 
 def test_computed_tab_write_spellings_reach_one_verdict(tmp):
-    """The bound write is the literal write, not a second one."""
     path = Path(tmp) / 'write-verdict.js'
     literal = "\nconst p = {};\np['tab'] = chromeTab;\n" \
               "extCmd('focus', { ...p });\n"
@@ -109,10 +100,10 @@ def test_computed_tab_write_spellings_reach_one_verdict(tmp):
 
 
 def test_a_bracket_write_resolves_a_tracked_member(tmp):
-    """`o.p['tab'] = x` writes the object `o` holds under `p`, which is the
-    object a send spreads when the two are the same name. A member the
-    model cannot follow names no object here, so a member write that
-    merely ends in a sent name is not one."""
+    """The rows pair each spelling that routes with one that does not: a
+    member a tracked receiver holds, a member a chain walks to, and the
+    chain that lands on an object literal while a standalone name holds
+    the same property."""
     cases = [
         ('aliased-member', "const p = {};\nconst o = { p };\n"
          "o.p['tab'] = chromeTab;\nextCmd('focus', { ...p });\n",
@@ -152,10 +143,9 @@ def test_a_bracket_write_resolves_a_tracked_member(tmp):
 
 
 def test_a_tab_value_other_than_extension_is_a_violation(tmp):
-    """`extension` is the one value `tab` may carry, so a `tab` carrying
-    another string is a violation whatever spelling writes it. The clean
-    twins elsewhere all carry `extension`; without this row the predicate
-    accepts any word and every one of them still passes."""
+    """Every clean twin elsewhere carries `extension`; without a row holding
+    a `tab` to another string, a predicate widened to any single word
+    leaves the whole suite green."""
     cases = [
         ('literal-read', "extCmd('focus', { tab: 'garbage' });\n"),
         ('bound-read', "const k = 'tab';\n"
@@ -175,14 +165,12 @@ def test_a_tab_value_other_than_extension_is_a_violation(tmp):
 
 
 def test_legacy_octal_escapes_decode_as_the_runtime_does(tmp):
-    r"""A legacy octal escape names the character its digits spell, and
-    the digit count is the runtime's: `\123` is `S` and `\477` is `'7`.
-    The forms are compared against node rather than against a table, so
-    the facets are the runtime's and not a transcription of them.
+    r"""Each form is evaluated under node and compared, so the facets are
+    the runtime's rather than a table transcribed from them.
 
-    `\8` and `\9` are the one deliberate divergence: the runtime reads
-    them as the digits themselves, and a key that can never be `tab` is
-    left undecoded so the object carrying it fails closed.
+    `\8` and `\9` are the one deliberate divergence: the runtime reads them
+    as the digits themselves, and a key that can never be `tab` is left
+    undecoded so the object carrying it fails closed.
     """
     forms = ['\\0', '\\00', '\\000', '\\0000', '\\07', '\\078', '\\1',
              '\\12', '\\123', '\\164', '\\164\\141\\142', '\\100',
