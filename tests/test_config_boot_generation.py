@@ -34,11 +34,6 @@ _HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
 
-// A generation that fails rejects the memo; boot's `.then` and the alarm's
-// `await` have no catch (shipped background.js), so swallow the resulting
-// unhandled rejections here instead of letting Node crash the harness.
-process.on('unhandledRejection', () => {});
-
 const [backgroundPath, plan] = process.argv.slice(1);
 
 const messageListeners = [];
@@ -54,6 +49,7 @@ let configGets = 0;
 let tokenWrites = 0;
 let uuidCalls = 0;
 const mintedTokens = [];
+const createdAlarms = [];
 
 // Settle boot's held config read with a FRESH-INSTALL result: no
 // 'daedalus-token' key, so config.js's `|| ''` leaves config.token empty and
@@ -147,6 +143,12 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 chrome.alarms.onAlarm = eventTarget(alarmListeners);
+chrome.alarms.create = (name, opts) => {
+  createdAlarms.push({
+    name,
+    periodInMinutes: opts ? opts.periodInMinutes : null,
+  });
+};
 chrome.runtime.onConnect = eventTarget();
 
 const context = vm.createContext({
@@ -222,6 +224,7 @@ async function run() {
     outcome.getsAfterFailed = configGets - getsAfterFail;
     outcome.tokenWrites = tokenWrites;
     outcome.finalToken = vm.runInContext('config.token', context);
+    outcome.createdAlarms = createdAlarms.slice();
   }
   return outcome;
 }
@@ -290,6 +293,22 @@ def test_a_failed_config_generation_does_not_poison_a_later_caller(tmp):
     assert outcome['getsAfterFailed'] == 1, outcome
     assert outcome['tokenWrites'] == 1, outcome
     assert outcome['finalToken'] == 'relay-1', outcome
+
+
+def test_a_failed_boot_config_read_still_arms_the_heartbeat(tmp):
+    """A rejected boot config read must not leave the worker with no retry.
+
+    Boot's first config read fails. The heartbeat alarm is the only thing
+    that re-reads config on a later tick, so if the alarm's create sits only
+    on boot's success path, one failed read leaves no stream, no registered
+    tabs and no retry path until the worker is killed and revived. The alarm
+    must be armed regardless of whether the read resolved.
+    """
+    del tmp
+    outcome = _run({'scenario': 'config-retry', 'failConfigFirst': True,
+                    'noToken': True})
+    assert outcome['createdAlarms'] == [
+        {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
 
 
 def main():
