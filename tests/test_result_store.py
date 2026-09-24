@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -303,6 +304,60 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     expected_file = os.path.realpath(
         root / 'deliveries' / 'tok_extension' / '123_1.json')
     assert answer['file'] == expected_file, (answer, expected_file)
+
+
+def test_a_folded_spelling_names_the_same_target(tmp):
+    """A name the parent folds onto another spelling is that target.
+
+    The directory was created under the spelling `Foo`, so a delivery for
+    the tab `foo` resolves to the entry `Foo` names. Two spellings of one
+    directory are one target, not one target and an alias to it.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_folded_target')
+    res_dir = Path(tmp) / 'results'
+    on_disk = res_dir / 'deliveries' / 'foldtoken_Foo'
+    on_disk.mkdir(parents=True)
+    with _case_fold.case_folding(res_dir):
+        folded, _folded_file = store.delivery_result_paths(
+            res_dir, 'foldtoken', 'foo', '123_1')
+        exact, _exact_file = store.delivery_result_paths(
+            res_dir, 'foldtoken', 'Foo', '123_1')
+    assert folded == exact == on_disk, (folded, exact, on_disk)
+    assert folded.name == 'foldtoken_Foo', folded.name
+
+
+def test_a_folded_spelling_does_not_admit_a_symlinked_alias(tmp):
+    """The accepted case must not become an accepted symlink.
+
+    The refusal is the guard the folded case relaxes, so the alias it exists
+    to catch is pinned under the relaxation too: `samefile` follows a
+    symlink, and a name that stands in for a sibling directory is not the
+    entry it names, whichever spelling the parent would report for it.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_folded_alias')
+    res_dir = Path(tmp) / 'results'
+    real = res_dir / 'deliveries' / 'aliascredential_real'
+    real.mkdir(parents=True)
+    alias = res_dir / 'deliveries' / 'aliascredential_ext'
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    output = io.StringIO()
+    refused = False
+    with _case_fold.case_folding(res_dir), contextlib.redirect_stdout(output):
+        try:
+            store.delivery_result_paths(
+                res_dir, 'aliascredential', 'ext', '123_1')
+        except ValueError:
+            refused = True
+    assert refused, output.getvalue()
+    assert output.getvalue().count('kind=alias') == 1, output.getvalue()
+    assert not list(real.iterdir()), list(real.iterdir())
 
 
 def main():

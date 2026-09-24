@@ -161,8 +161,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
         name = path.name
         if name.startswith('.') or not name.endswith('.json'):
             continue  # skip .tmp in-flight writes
-        # Use logical names: path spellings can differ between realpath and
-        # directory enumeration; see result_store.delivery_lock_for.
+        # Keyed on the names as found rather than on a resolved spelling of
+        # them; `path_safety.same_entry` is the predicate that answers when
+        # two such spellings are one entry.
         key = command_queue.queue_key(qdir.name, name)
         with command_queue.claimed(key) as owned:
             if not owned:
@@ -294,8 +295,8 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
     credential the file's name is derived from, kept to its 8-character
     prefix in the lines this drain prints.
     """
-    # Use the logical filename: path spellings can differ between routes;
-    # result_store.delivery_lock_for documents its logical target key.
+    # Keyed on the filename as found rather than on a resolved spelling of
+    # it, for the reason `drain_queue` gives.
     with command_queue.claimed(legacy_claim_key(path.name)) as owned:
         if not owned:
             return 0
@@ -358,10 +359,12 @@ def drain_legacy_ext(cmd_dir, token, killed_event, *,
         if (not path.is_file() or not name.startswith(prefix)
                 or not name.endswith('.json')):
             continue
-        if name == extension_legacy_name:
+        if path_safety.same_entry(
+                path.parent, name, extension_legacy_name):
             continue  # handled separately (no chromeTab tag)
         sub = name[len(prefix):-5]
-        if sub == 'dashboard':
+        if path_safety.same_entry(
+                path.parent, name, f'{prefix}dashboard.json'):
             continue
         count += drain_legacy_file(
             path, sub, command_ttl=command_ttl,

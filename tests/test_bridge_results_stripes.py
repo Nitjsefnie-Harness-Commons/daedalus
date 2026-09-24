@@ -97,9 +97,11 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     held_tab = 'stripe-held'
     other_tab = 'stripe-other'
     gate_dir, env = _stripe_holder_setup(tmp, held_tab)
-    # The stripe is keyed on the logical target, so comparing what the holder
-    # and the request locked is plain equality — there is no spelling left to
-    # normalise, which is the point of keying it this way.
+    # The stripe is keyed on the target entry's own name, which on a
+    # case-sensitive filesystem is the caller's spelling — so comparing what
+    # the holder and the request locked is plain equality here. The folded
+    # case, where the two differ and must still agree, is pinned in
+    # test_result_routes.
     target_key = f'{TOK}_{held_tab}'
 
     def failure_message():

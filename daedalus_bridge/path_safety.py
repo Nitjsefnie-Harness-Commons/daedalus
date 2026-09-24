@@ -105,6 +105,35 @@ def same_path(left, right, attempts=None):
     return False
 
 
+def same_entry(parent, name, other, deny_symlink=False):
+    """Return whether two component spellings under `parent` are one entry.
+
+    The filesystem is asked, because only it knows whether it folds case:
+    `posixpath.normcase` is the identity on POSIX and cannot see macOS's
+    default case-insensitive filesystem at all, while a platform literal or
+    a fold applied here would make a tab genuinely named `Extension`
+    indistinguishable from the extension's reserved name on a filesystem
+    that tells them apart.
+
+    `deny_symlink` asks the stricter question one caller needs: whether the
+    entry IS the one that was named, rather than whether two paths lead to
+    the same inode. A symlink standing in for a sibling directory answers
+    the second and must not answer the first, so the exclusion stays with
+    the call that needs it rather than burdening the ones that do not.
+    """
+    if name == other:
+        return True
+    left, right = os.path.join(parent, name), os.path.join(parent, other)
+    if deny_symlink and os.path.islink(left):
+        return False
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        # A spelling the parent holds no entry for names no entry here,
+        # which is the answer every filesystem gives for a missing name.
+        return False
+
+
 def redacted(value, secret):
     """One rendered evidence string with the credential shortened.
 

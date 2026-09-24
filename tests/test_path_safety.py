@@ -504,12 +504,14 @@ import os
 
 from daedalus_bridge import result_store
 
-# The same delivery directory, spelled the two ways `realpath` can answer.
-# On Windows the extended-length prefix survives exactly when a concurrent
-# writer makes the stripping check fail, which is why this is reproduced
-# rather than waited for: an idle box never produces the pair.
-# One logical target selects one stripe, and a filesystem path is refused
-# outright: keying on a spelling is what silently removed the serialization.
+# The stripe is keyed on the target entry's own name, which every caller
+# holds in its resolved directory before the lock is taken: the `\\?\`
+# prefix, the 8.3 alias, the junction and the mapped drive are all already
+# behind it, and a case-insensitive parent's spelling of the entry is the
+# one string every caller for that directory agrees on.
+# One entry name selects one stripe, and a filesystem path is refused
+# outright: keying on a path spelling is what silently removed the
+# serialization.
 key = result_store.result_key('tok', 'tab')
 same_lock = (result_store.delivery_lock_for(key)
              is result_store.delivery_lock_for(key))
@@ -634,19 +636,22 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     assert answer['escape'] == 'refused', answer
 
 
-def test_delivery_stripe_is_keyed_on_the_logical_target(tmp):
-    """One target must select one stripe, and a path must not choose one.
+def test_delivery_stripe_is_keyed_on_the_entry_name(tmp):
+    """One entry must select one stripe, and a path must not choose one.
 
     `result_store.delivery_lock_for` chooses a stripe from a hash of the
-    directory, and
-    two `realpath` results for one directory are not obliged to be spelled the
-    same way. When they are not, two callers for the same target take two
-    different locks and the serialization the stripe exists to provide is
-    silently absent -- which is not a 400 anybody sees, but a lost update.
+    target directory's own name, the spelling the resolved path carries on
+    this filesystem. Every caller for one directory holds that string, so
+    two callers for the same target cannot take two different locks and
+    leave the serialization the stripe exists to provide silently absent --
+    which is not a 400 anybody sees, but a lost update.
 
-    This is the same pair of spellings `under` already has to survive, and it
-    was found by a Windows leg where a delivery POST sailed past a stripe
-    another thread was holding.
+    Keyed on a path instead, the `\\?\\` prefix, the 8.3 alias, the junction
+    and the mapped drive are each a second spelling, and so is a caller's
+    `foo` against the `Foo` a case-insensitive parent already holds. The
+    paired pins are that the folded pair takes one stripe
+    (`test_result_routes.test_a_folded_tab_spelling_is_one_delivery_stripe`)
+    and that a path-shaped key is refused rather than hashed into one.
     """
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
