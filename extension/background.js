@@ -132,6 +132,12 @@ loadConfig().then(() => {
   ensureKeepAlive();
   startStream();
   registerAllTabs();
-  // chrome.alarms survives service worker kills (setInterval does not)
+}).catch((err) => {
+  // A failed config read must not escape as an unhandled rejection, and boot
+  // must still leave a retry path armed (the finally below).
+  console.warn('[Daedalus] boot config read failed; heartbeat will retry', err);
+}).finally(() => {
+  // chrome.alarms survives service worker kills (setInterval does not), so
+  // the heartbeat is armed whether the config read resolved or rejected.
   chrome.alarms.create('daedalus-heartbeat', { periodInMinutes: 0.5 });
 });
