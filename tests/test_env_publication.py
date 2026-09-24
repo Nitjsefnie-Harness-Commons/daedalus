@@ -13,12 +13,14 @@ Two halves, because either alone is a snapshot of today. The runtime half
 drives `PUBLISHERS` as a table, one row per module, and watches each import
 in a FRESH interpreter: this process has already imported the modules that
 matter, so an in-process before/after would snapshot an installed helper and
-read green whatever it did. The structural half scans every tracked
-`tests/*.py` for a module-level write into `os.environ`, so an EIGHTH site
-fails here rather than waiting for a successor to sweep for it. Every site
-that scan admits is classified below, and an unclassified one is a failure:
-a list of these seven paths with no classification behind it would pass by
-construction on a site nobody has met yet.
+read green whatever it did. The structural half reads every `tests/*.py` in
+the worktree for a write into the process environment that the module body
+executes at import, so an EIGHTH site fails here rather than waiting for a
+successor to sweep for it. Every site that scan admits is classified below,
+and an unclassified one is a failure: a list of these seven paths with no
+classification behind it would pass by construction on a site nobody has met
+yet. `_sites()` states the exact grammar it recognises, and the shapes it
+cannot see are named there rather than left for the next reader to assume.
 """
 import ast
 import json
@@ -37,6 +39,10 @@ TESTS_DIR = Path(__file__).resolve().parent
 NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_MCP_PORT', 'TOKEN')
 CREDENTIAL_NAMES = ('TOKEN',)
 CREDENTIAL_PREFIXES = ('DAEDALUS_',)
+
+# `except*` parses to its own node on 3.11+; the scan reads either as the
+# block it is, and a Python that has never heard of it is not this tree's.
+_TRY = (ast.Try, getattr(ast, 'TryStar', ast.Try))
 
 # The modules this branch took the publication out of, each with the names it
 # published. The runtime half imports every row; the structural half requires
@@ -132,7 +138,15 @@ def _values(snapshot, names, other=None) -> dict:
 
 
 def _is_credential(name):
-    return name in CREDENTIAL_NAMES or name.startswith(CREDENTIAL_PREFIXES)
+    """Whether a published name is one this tree treats as a credential.
+
+    A name the scan could not read arrives as None, and is not a credential
+    — but it is also not a name to skip, which is why the admission test
+    below needs both halves rather than this one.
+    """
+    return (isinstance(name, str)
+            and (name in CREDENTIAL_NAMES
+                 or name.startswith(CREDENTIAL_PREFIXES)))
 
 
 def _assert_nothing_published(snap):
@@ -155,26 +169,15 @@ def _assert_nothing_published(snap):
         f'changed={_values(before, changed, after)} removed={removed}')
 
 
-def _tracked_tests():
-    """Every tracked module under tests/, as worktree-relative paths."""
-    listed = subprocess.run(
-        ['git', '-C', str(_util.ROOT), 'ls-files', '-z', 'tests/*.py'],
-        capture_output=True, check=True, timeout=30)
-    return [raw.decode('utf-8') for raw in listed.stdout.split(b'\0') if raw]
+def _tests_modules():
+    """Every module under tests/, from the worktree the scan then reads.
 
-
-def _environ(node):
-    """The `os.environ` a node reaches, or None.
-
-    A subscript target and a method call both carry the mapping one level
-    down, so the receiver is what is read: a scan that matched only the
-    bare attribute would see `os.environ['X'] = ...` as no site at all,
-    which is the shape most of these writes have.
+    One source for the list and the contents: an enumeration taken from the
+    git index would miss a file that is written but not yet added, and a
+    local run would read green over what CI refuses. A stray untracked
+    `tests/*.py` is therefore scanned too, which is the loud direction.
     """
-    if isinstance(node, ast.Subscript):
-        node = node.value
-    return (isinstance(node, ast.Attribute) and node.attr == 'environ'
-            and isinstance(node.value, ast.Name) and node.value.id == 'os')
+    return sorted((_util.ROOT / 'tests').glob('*.py'))
 
 
 def _subscript_key(node):
@@ -203,50 +206,173 @@ def _published_names(node, bindings, depth=2):
     return None
 
 
-def _sites(source):
-    """Every module-level write into `os.environ`, as (line, names-or-None).
+def _imports(statements):
+    """The names the module binds the `os` module and its `environ` to.
 
-    Only the statements the module body holds directly are read: a write
-    inside a function or a `main()` guard runs per call, not at import, and
-    is another mechanism. `os.environ = <wrapper>` rebinds the name rather
-    than writing into the mapping, so it is not a site either.
+    `import os`, `import os as o` and `from os import environ as e` are
+    three spellings of one receiver, and a scan that matched only the
+    attribute `os.environ` would miss the other two outright.
     """
-    tree = ast.parse(source)
-    bindings = {node.targets[0].id: node.value for node in tree.body
-                if isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)}
+    modules, environs = set(), set()
+    for node in statements:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'os':
+                    modules.add(alias.asname or 'os')
+        elif isinstance(node, ast.ImportFrom) and node.module == 'os':
+            for alias in node.names:
+                if alias.name == 'environ':
+                    environs.add(alias.asname or 'environ')
+    return modules, environs
+
+
+def _is_environ(node, scope, depth=2):
+    """Whether an expression names the process environment mapping.
+
+    `scope` carries the module aliases, the `environ` names imported from
+    `os`, and the module-level assignments, so a name bound to `os.environ`
+    is followed to the mapping instead of being matched by its spelling.
+    """
+    modules, environs, bindings = scope
+    if (isinstance(node, ast.Attribute) and node.attr == 'environ'
+            and isinstance(node.value, ast.Name)
+            and node.value.id in modules):
+        return True
+    if not isinstance(node, ast.Name):
+        return False
+    if node.id in environs:
+        return True
+    return bool(depth and node.id in bindings
+                and _is_environ(bindings[node.id], scope, depth - 1))
+
+
+def _is_main_guard(node):
+    if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
+        return False
+    left = node.test.left
+    return (isinstance(left, ast.Name) and left.id == '__name__'
+            and any(isinstance(operand, ast.Constant)
+                    and operand.value == '__main__'
+                    for operand in node.test.comparators))
+
+
+def _bodies(node):
+    """The statement blocks a module-level statement runs at import."""
+    if isinstance(node, ast.If):
+        return [node.body, node.orelse]
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+        return [node.body, node.orelse]
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        return [node.body]
+    if isinstance(node, _TRY):
+        return ([node.body, node.orelse, node.finalbody]
+                + [handler.body for handler in node.handlers])
+    return []
+
+
+def _executed_statements(body):
+    """Every statement the module body runs when it is imported.
+
+    A statement inside a module-level `if`, `try`, loop or `with` runs at
+    import too, so those blocks are read; one inside a function or a class
+    body runs per call, and one under `if __name__ == '__main__'` runs only
+    when the file is the program rather than an import, so neither is read.
+    """
     found = []
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if _environ(target) and isinstance(target, ast.Subscript):
-                    key = _subscript_key(target.slice)
-                    found.append((node.lineno, [key] if key else None))
-        elif isinstance(node, ast.AugAssign) and _environ(node.target):
-            found.append((node.lineno, _published_names(node.value, bindings)))
-        else:
-            written = _written_value(node)
-            if written is not None:
-                found.append(
-                    (node.lineno, _published_names(written, bindings)))
+    for node in body:
+        if _is_main_guard(node):
+            continue
+        found.append(node)
+        for nested in _bodies(node):
+            found.extend(_executed_statements(nested))
     return found
 
 
-def _written_value(node):
-    """The value a module-level statement writes into `os.environ`.
+def _key_names(node, bindings):
+    """The name a subscript, `setdefault`, `set` or `__setitem__` writes."""
+    read = _published_names(node, bindings)
+    if read is not None:
+        return read
+    return [None]
 
-    `os.environ = <wrapper>` rebinds the name rather than writing into the
-    mapping, and is deliberately not a value here.
+
+def _update_names(call, bindings):
+    """The names an `update` publishes, positionally and by keyword.
+
+    `update(**BRIDGE_ENV)` publishes exactly what `update(BRIDGE_ENV)`
+    does, so the keywords are read as mappings too; a mapping that cannot
+    be read contributes None rather than dropping the site.
     """
+    names = []
+    for written in list(call.args) + [keyword.value
+                                      for keyword in call.keywords]:
+        read = _published_names(written, bindings)
+        names.extend([None] if read is None else read)
+    return names
+
+
+def _written_names(node, scope, bindings):
+    """The names a statement writes into the environment, or `()`.
+
+    An empty tuple is "not a site"; a list holding None is a site whose
+    names this scan cannot read, which has to be classified.
+    """
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            if (isinstance(target, ast.Subscript)
+                    and _is_environ(target.value, scope)):
+                return _key_names(target.slice, bindings)
+        return ()
+    if isinstance(node, ast.AugAssign):
+        if (isinstance(node.target, ast.Subscript)
+                and _is_environ(node.target.value, scope)):
+            return _key_names(node.target.slice, bindings)
+        return ()
     if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
-        return None
+        return ()
     call = node.value
     if not (isinstance(call.func, ast.Attribute)
-            and _environ(call.func.value)
-            and call.func.attr in ('setdefault', 'set', 'update')
-            and call.args):
-        return None
-    return call.args[0]
+            and _is_environ(call.func.value, scope)):
+        return ()
+    if call.func.attr in ('setdefault', 'set', '__setitem__'):
+        return _key_names(call.args[0], bindings) if call.args else [None]
+    if call.func.attr == 'update':
+        return _update_names(call, bindings)
+    return ()
+
+
+def _sites(source):
+    """Every write into the environment the module body runs at import.
+
+    The grammar, which the docstring above and the failure message both
+    claim: a statement of the module body, or of a module-level `if` (other
+    than the `__main__` guard), `try`, loop or `with`; writing through
+    `os.environ`, an `import os as ...` alias, a `from os import environ`
+    name, or a module-level name bound to any of those; by subscript
+    assignment or augmented assignment, or by `setdefault`, `set`,
+    `__setitem__` or `update` (positional or `**keyword`).
+
+    Not read, and named here so nobody assumes otherwise: a write inside a
+    function, a lambda or a class body; a rebind of `os.environ` itself,
+    which replaces the mapping rather than writing into it; a call reached
+    through a computed receiver such as `getattr(os, 'environ')`; and a
+    published mapping built by a call rather than spelled as a literal.
+    A name the scan cannot read is reported as unreadable, never as absent,
+    so it is classified rather than passed.
+    """
+    tree = ast.parse(source)
+    statements = _executed_statements(tree.body)
+    modules, environs = _imports(statements)
+    bindings = {node.targets[0].id: node.value for node in statements
+                if isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)}
+    scope = (modules, environs, bindings)
+    found = []
+    for node in statements:
+        names = _written_names(node, scope, bindings)
+        if names:
+            found.append((node.lineno, names))
+    return found
 
 
 def test_every_publisher_leaves_a_poisoned_environment_alone(_tmp):
@@ -281,40 +407,46 @@ def test_every_publisher_installs_nothing_into_an_empty_environment(_tmp):
 
 
 def test_no_unclassified_module_publishes_at_import(_tmp):
-    """Every module-level credential write is a classified site.
+    """Every write the scan's grammar admits is a classified site.
 
     This is the half that outlives today's seven rows. A module the table
     has never met fails here with its file and line, so the sweep is this
-    control's job and not a successor's.
+    control's job and not a successor's. The grammar is `_sites()`'s: a
+    statement of the module body, or of a module-level `if` (other than the
+    `__main__` guard), `try`, loop or `with`, writing through `os.environ`
+    or an alias of it by subscript, `|=`, `setdefault`, `set`,
+    `__setitem__` or `update`.
     """
     unclassified, republished = [], []
-    for rel in _tracked_tests():
-        source = (_util.ROOT / rel).read_text(encoding='utf-8')
-        stem = Path(rel).stem
-        for line, names in _sites(source):
-            if names is not None and not any(map(_is_credential, names)):
+    for path in _tests_modules():
+        stem = path.stem
+        for line, names in _sites(path.read_text(encoding='utf-8')):
+            if all(isinstance(name, str) and not _is_credential(name)
+                   for name in names):
                 continue
             if stem in dict(PUBLISHERS):
-                republished.append(f'{rel}:{line}')
+                republished.append(f'{path.relative_to(_util.ROOT)}:{line}')
             elif stem in KEPT:
                 admitted, reason = KEPT[stem]
                 if admitted is None:
                     continue
-                if names is None or set(names) - set(admitted):
+                if set(names) - set(admitted):
                     unclassified.append(
-                        f'{rel}:{line} publishes {names}; {stem} is '
-                        f'classified for {admitted} ({reason})')
+                        f'{path.relative_to(_util.ROOT)}:{line} publishes '
+                        f'{names}; {stem} is classified for {admitted} '
+                        f'({reason})')
             else:
-                published = names if names is not None else (
-                    'names this file does not spell out')
+                unread = ' (a name the scan cannot read)' \
+                    if None in names else ''
                 unclassified.append(
-                    f'{rel}:{line} publishes {published}, and no row '
-                    f'classifies it')
+                    f'{path.relative_to(_util.ROOT)}:{line} publishes '
+                    f'{names}{unread}, and no row classifies it')
     assert not republished, (
         'a module this branch took the publication out of has one again: '
         f'{republished}')
     assert not unclassified, (
-        'a module-level credential write with no classification: '
+        'a module-level write into the process environment, as read by the '
+        'grammar in _sites(), with no classification: '
         f'{unclassified}')
 
 
