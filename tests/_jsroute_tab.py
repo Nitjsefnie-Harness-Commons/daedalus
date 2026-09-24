@@ -78,15 +78,20 @@ def _write_target(match, named, mask):
 
     A bare name is itself. A member is the object a tracked receiver
     provably holds under that key: the shorthand `{ p }`, or a property
-    whose value is a name. Anything else — a receiver the model does not
-    track, a key it does not know that receiver to carry, a value that is
-    not a name — describes an object nothing here follows.
+    whose value is a name. A receiver that is itself a member — the `b` of
+    `A.b.c` — is a property of something else, not a name the write can
+    resolve through, so the chain resolves to nothing here. Anything else
+    the model does not follow: a receiver it does not track, a key it does
+    not know that receiver to carry, a value that is not a name.
     """
     name = match.group(1)
     dot = previous_nonspace(mask, match.start())
     if dot < 0 or mask[dot] != '.':
         return name
-    receiver, _, _ = identifier_before(mask, dot)
+    receiver, start, _ = identifier_before(mask, dot)
+    outer = previous_nonspace(mask, start)
+    if outer < 0 or mask[outer] == '.':
+        return None
     state = named.get(receiver)
     if not isinstance(state, dict):
         return None
