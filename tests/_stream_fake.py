@@ -55,12 +55,6 @@ import subprocess
 from _noderun import run_node_program
 from _util import child_coverage
 
-# The one scrubbed environment this module's own `-e` launcher runs its child
-# with — named at the launch below, the level that sets it. `_noderun` binds
-# the same environment for the file launcher; each module names it once so the
-# coverage guard's static check sees a real, bound-once declaration.
-_CHILD_ENV = child_coverage('scrub')
-
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
 // runs once, at splice time, before any fetch.
@@ -316,13 +310,14 @@ def run_inline_gate(node, program, arguments, *, cwd, plan):
     No wall bound of its own: these harness children are bounded by their own
     attempt counts, and a slow correct run must not become an intermittent
     failure — a genuine deadlock is better surfaced as a hung job under the
-    suite's ceiling than as a flaky timeout. The child runs with `_CHILD_ENV`,
-    the one scrubbed environment, which is the environment every call site
-    declares.
+    suite's ceiling than as a flaky timeout. The child runs with
+    `child_coverage('scrub')` evaluated at launch, so a value set in
+    `os.environ` per call reaches the child (the coverage guard reads this
+    `env=` declaration, which a direct call satisfies).
     """
     result = subprocess.run(
         [node, '-e', program, *arguments, json.dumps(plan)], cwd=cwd,
-        env=_CHILD_ENV, capture_output=True, text=True,
+        env=child_coverage('scrub'), capture_output=True, text=True,
         encoding='utf-8')
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
