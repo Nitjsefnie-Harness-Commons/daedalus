@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """Every ext-routing MCP tool reaches the real extension as a live row.
 
-Relocated from test_mcp_server (which sat at its size baseline) so the table
-has headroom. Each row drives one tool through a real bridge and pins the
-command it puts on the wire, read back from the queue the bridge routed it
-into. A completeness guard fails when a registered ext-routing tool has no
-row, so the table cannot drift behind the registry.
+Relocated from test_mcp_server, which sat at its size baseline, so the table
+has headroom. A completeness guard fails when a registered ext-routing tool
+has no row, so the table cannot drift behind the registry.
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _daedalus_env  # noqa: E402,F401
 import _util  # noqa: E402
 import _mcp_tool_commands  # noqa: E402
 import test_mcp_server as mcp  # noqa: E402
@@ -105,12 +102,11 @@ LIVE_ROWS = {
     'fetch_timings': _row('fetch-timings', {}, lambda mod: mod.fetch_timings),
     'ext_self_reload': _row('ext-reload', {},
                             lambda mod: mod.ext_self_reload),
-    # screenshot: the default form sends one ext_cmd and awaits a result, so
-    # it shares the ext-routing path. The include_image form is a different
-    # shape (it fetches bytes over get_raw after the result) and is pinned by
-    # test_screenshot_returns_the_bytes_its_own_result_named instead.
+    # screenshot: the default form shares the ext-routing path; the
+    # include_image form fetches bytes over get_raw and is pinned by
+    # test_screenshot_returns_the_bytes_its_own_result_named.
     'screenshot': _row('screenshot', {'format': 'png'},
-                       lambda mod: lambda: mod.screenshot()),
+                       lambda mod: mod.screenshot),
     'allow_segment_origin': _row(
         'allow-segment-origin', {'origin': 'https://example.com'},
         lambda mod: lambda: mod.allow_segment_origin('https://example.com')),
