@@ -313,26 +313,147 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
 # verdict is bound to the operation the harness performs, not to one function
 # name.
 _LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
+# Sentinel for a callee that names a launcher-module entity but whose body the
+# walk cannot see. It is a refusal, not a skip: an unread body is a hole in
+# this audit, so the audit cannot certify it, and a bound hiding there would
+# be a real false green. See `_resolve_callee` for the line drawn between this
+# and a genuinely-external call.
+_UNRESOLVED = 'unresolved'
 
 
-def _launcher_functions(trees):
-    """Every function the launcher modules define, by name."""
+def _is_def(node):
+    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+
+
+def _class_of_call(node):
+    """The launcher class a call constructs, or None."""
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+        return node.func.id
+    return None
+
+
+def _class_methods(node):
+    """`(classname, methodname) -> node` for one ClassDef."""
+    return {(node.name, child.name): child for child in node.body
+            if _is_def(child)}
+
+
+def _module_class_aliases(tree, classes):
+    """Module-level `NAME = _Class()` bindings, as `{name: class}`."""
+    aliases = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        cls = _class_of_call(node.value)
+        if cls in classes:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    aliases[target.id] = cls
+    return aliases
+
+
+def _launcher_context(trees):
+    """Index every function and method the launcher modules define.
+
+    Keys bodies three ways so a callee can be resolved by a bare name, by a
+    module-qualified attribute (`_noderun.run_node_program`), by `self.<m>`, or
+    by `<Class>.<m>` / `<Class>().<m>`. Collecting class methods here is what
+    stops the class-method route from being an unseen hole.
+    """
     functions = {}
-    for tree in trees.values():
+    methods = {}
+    classes = set()
+    local_classes = {}
+    stems = set()
+    for name, tree in trees.items():
+        stems.add(name[:-len('.py')])
+        classes.update(node.name for node in ast.walk(tree)
+                       if isinstance(node, ast.ClassDef))
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if _is_def(node):
                 functions.setdefault(node.name, node)
-    return functions
+            elif isinstance(node, ast.ClassDef):
+                methods.update(_class_methods(node))
+        local_classes.update(_module_class_aliases(tree, classes))
+    return {'functions': functions, 'methods': methods, 'classes': classes,
+            'local_classes': local_classes, 'stems': stems}
 
 
-def _harness_launchers(harness_tree, functions):
-    """Launcher names a harness actually calls, read off its own call sites."""
-    reached = set()
-    for node in ast.walk(harness_tree):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id in functions):
-            reached.add(node.func.id)
-    return reached
+def _local_class_bindings(function, classes):
+    """Local names bound to a launcher-module class inside `function`."""
+    bound = {}
+    for node in ast.walk(function):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id in classes):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound[target.id] = node.value.func.id
+    return bound
+
+
+def _resolve_callee(call, current_class, ctx, locals_):
+    """The bodies a call reaches, or `_UNRESOLVED`, or None for external.
+
+    This is a resolve-or-refuse census over the callee grammar. The line I draw
+    is *whose code is it*, not *does it look risky*:
+
+    - a receiver that is a launcher-module entity (a module stem, a class, a
+      `self`, or a local bound to a class) must resolve to a body I can read;
+      if it does not, the callee is `_UNRESOLVED` — an unread launcher-module
+      body is a hole in this audit, so it is refused;
+    - any other receiver (a stdlib module, a parameter, a local, a literal) is
+      external: I cannot type it as my own code, and refusing it would refuse
+      legitimate code like `dumps.glob(...)` and an imported helper module. It
+      is skipped, and a `timeout=` keyword on the call is still caught by the
+      concept scan of the caller's own body.
+    """
+    func = call.func
+    if isinstance(func, ast.Name):
+        if func.id in ctx['functions']:
+            return [('fn', func.id, None)]
+        if func.id in ctx['classes']:
+            return []
+        return None
+    if not isinstance(func, ast.Attribute):
+        return None
+    attr = func.attr
+    recv = func.value
+    if isinstance(recv, ast.Name):
+        if recv.id in ctx['stems']:
+            if attr in ctx['functions']:
+                return [('fn', attr, None)]
+            return _UNRESOLVED
+        if recv.id in ctx['classes']:
+            if (recv.id, attr) in ctx['methods']:
+                return [('method', recv.id, attr)]
+            return _UNRESOLVED
+        if recv.id == 'self' and current_class is not None:
+            if (current_class, attr) in ctx['methods']:
+                return [('method', current_class, attr)]
+            return _UNRESOLVED
+        local_class = locals_.get(recv.id) or ctx['local_classes'].get(recv.id)
+        if local_class is not None:
+            if (local_class, attr) in ctx['methods']:
+                return [('method', local_class, attr)]
+            return _UNRESOLVED
+        return None
+    if (isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name)
+            and recv.func.id in ctx['classes']):
+        if (recv.func.id, attr) in ctx['methods']:
+            return [('method', recv.func.id, attr)]
+        return _UNRESOLVED
+    return None
+
+
+def _bodies(trees, ctx):
+    """Index a resolved body key to its AST node."""
+    table = {}
+    for key in ctx['functions']:
+        table[('fn', key, None)] = ctx['functions'][key]
+    for (cls, meth) in ctx['methods']:
+        table[('method', cls, meth)] = ctx['methods'][(cls, meth)]
+    return table
 
 
 def _parameter_names(function):
@@ -352,39 +473,21 @@ def _const_str(node):
     return None
 
 
-def _reachable_functions(start_names, functions):
-    """Module functions transitively reachable from the harness launchers."""
-    seen = set()
-    work = list(start_names)
-    while work:
-        name = work.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        function = functions.get(name)
-        if function is None:
-            continue
-        for node in ast.walk(function):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id in functions):
-                work.append(node.func.id)
-    return seen
-
-
 def _timeout_faults(function):
     """Every place the deadline concept `timeout` appears in `function`.
 
     The recogniser decides the *concept* a deadline travels in, not the
     spelling of any one launch, because that is what keeps it from moving when
-    a route is missed. On the resolved launcher path the concept can enter a
-    child three ways, and all three are found here: a `timeout=` keyword on any
-    call (so `subprocess.run(timeout=)`, `communicate(timeout=)` and a locally
-    bound `_wait(timeout=)` are all the same fact), a `timeout` parameter in
-    the signature (a deadline passed through the function), and a `'timeout'`
-    key written into a container a `**` spread forwards (an aliased launcher
-    bounded via `k['timeout'] = n`). A bare `**opts` with no `timeout` anywhere
-    is deliberately NOT a fault: a spread is not evidence of a bound, and
-    refusing one refuses legitimate code.
+    a route is missed. On a resolved body the concept can enter a child three
+    ways, and all three are found here: a `timeout=` keyword on any call (so
+    `subprocess.run(timeout=)`, `communicate(timeout=)` and a locally bound
+    `_wait(timeout=)` are all the same fact), a `timeout` parameter in the
+    signature (a deadline passed through the function), and a `'timeout'` key
+    written into a container a `**` spread forwards (an aliased launcher
+    bounded via `k['timeout'] = n`). A bare `**opts` with no `timeout`
+    anywhere is
+    deliberately NOT a fault: a spread is not evidence of a bound, and refusing
+    one refuses legitimate code.
     """
     faults = []
     if 'timeout' in _parameter_names(function):
@@ -402,53 +505,110 @@ def _timeout_faults(function):
     return faults
 
 
+def _census(entry_bodies, trees, ctx):
+    """Every timeout fault and every refusal reachable from the entries.
+
+    Walks the resolved call graph. A body visited more than once is visited
+    once; a callee that resolves to `_UNRESOLVED` is a refusal (this audit
+    cannot see it, so it cannot certify it); a body whose timeout concept the
+    scan finds is a fault.
+    """
+    table = _bodies(trees, ctx)
+    faults = []
+    seen = set()
+    work = list(entry_bodies)
+    while work:
+        key = work.pop()
+        if key in seen:
+            continue
+        seen.add(key)
+        body = table.get(key)
+        if body is None:
+            faults.append((key, _UNRESOLVED))
+            continue
+        current_class = key[1] if key[0] == 'method' else None
+        locals_ = _local_class_bindings(body, ctx['classes'])
+        for fault in _timeout_faults(body):
+            faults.append((key, fault))
+        for node in ast.walk(body):
+            if not isinstance(node, ast.Call):
+                continue
+            resolved = _resolve_callee(node, current_class, ctx, locals_)
+            if resolved is _UNRESOLVED:
+                faults.append((key, _UNRESOLVED))
+            elif resolved:
+                work.extend(resolved)
+    return faults
+
+
+def _harness_entries(harness_tree, ctx):
+    """The launcher bodies a harness reaches, resolved off its call sites.
+
+    Resolves each call in the harness with the same census grammar, so an
+    attribute-called or class-instantiated launcher is an entry just as a bare
+    one is. Returns `(entries, refusals)`.
+    """
+    entries = []
+    refusals = []
+    for node in ast.walk(harness_tree):
+        if not isinstance(node, ast.Call):
+            continue
+        resolved = _resolve_callee(node, None, ctx, {})
+        if resolved is _UNRESOLVED:
+            refusals.append((node.lineno, _UNRESOLVED))
+        elif resolved:
+            entries.extend(resolved)
+    return entries, refusals
+
+
 def test_the_harness_children_run_without_a_wall_timeout(tmp):
     """The Surface D runners launch their children with no wall bound.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. This recogniser asks one
-    question it can decide soundly — *does the deadline concept `timeout` reach
-    the child on this path* — instead of enumerating launch spellings that
-    moved every time a route was missed. From each harness's own call sites it
-    resolves the launcher the child is launched through, follows that
-    launcher's call graph across `_stream_fake.py` and `_noderun.py`, and
-    refuses the concept in each of the three positions it can enter: a
-    `timeout=` keyword on any call (a locally bound `communicate` and the
-    subprocess launchers are the same fact), a `timeout` parameter, and a
-    `'timeout'` key forwarded through a `**` spread. A clean `**_opts` with no
-    `timeout` anywhere is not a fault — refusing a spread would refuse
-    legitimate code.
+    starvation rejection this branch removes. This guard asks two questions it
+    can decide soundly. First, *reachability*: from each harness's own call
+    sites it resolves the launcher the child is launched through and performs a
+    resolve-or-refuse census over the callee grammar — a bare name, a
+    module-qualified attribute, `self.<method>`, and a class or class-instance
+    method all resolve to a body, and a callee that names a launcher-module
+    entity but whose body the walk cannot read is refused, not skipped, because
+    an unread body is a hole this audit cannot certify. Second, *recognition*:
+    on every body the walk reaches it refuses the deadline concept `timeout`
+    in the three positions it can enter a child — a `timeout=` keyword on any
+    call, a `timeout` parameter, and a `'timeout'` key forwarded through a
+    `**` spread. A bare `**opts` with no `timeout` anywhere is deliberately not
+    a fault.
 
-    This guard enforces exactly: no `timeout` keyword, parameter, or forwarded
-    dict key anywhere on the resolved launcher path of either harness. It does
-    NOT enforce, and does not claim to, a deadline reached by any other means:
-    (1) the harness's own JavaScript, which the guard's input language (Python
-    `ast`) cannot see; (2) a helper the launcher modules import from outside
-    themselves, which the walk does not follow; (3) a deadline assembled
-    without the word `timeout` at all — a clock comparison plus a kill, or
-    `signal.alarm`. Those three, and nothing else, are the residual set; they
-    are named here rather than implied absent, the way the cross-file duplicate
-    check's blindness to string-literal JavaScript is named in
-    `_worker_sources.py`.
+    What this guard enforces: no `timeout` concept, and no unread
+    launcher-module body, on the resolved call graph from each harness's
+    launcher. What it does not enforce, and does not claim to: a deadline
+    reached any other way — (1) the harness's own JavaScript, which this
+    guard's input language (Python `ast`) cannot see; (2) a helper the launcher
+    modules import from outside themselves, whose body the walk does not
+    follow; (3) a `timeout` parameter defaulted inside a method called on a
+    launcher-module object through a receiver the walk cannot type to a class
+    (an untypeable receiver is external, not refused, to avoid refusing
+    legitimate code); (4) a deadline assembled without the word `timeout` at
+    all — a clock comparison plus a kill, or `signal.alarm`. Those four, and
+    nothing else, are the residual set; they are named here rather than implied
+    absent, the way the cross-file duplicate check's blindness to
+    string-literal JavaScript is named in `_worker_sources.py`.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
     trees = {name: ast.parse((tests_dir / name).read_text(encoding='utf-8'))
              for name in _LAUNCHER_MODULES}
-    functions = _launcher_functions(trees)
+    ctx = _launcher_context(trees)
     for name in ('_relayharness.py', '_cdpharness.py'):
         tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
         # A Python-level `timeout=` anywhere in the harness is refused.
         sites = [node.lineno for node in ast.walk(tree)
                  if isinstance(node, ast.keyword) and node.arg == 'timeout']
         assert not sites, (name, sites)
-        launchers = _harness_launchers(tree, functions)
-        assert launchers, (name, 'no launcher call resolved from the harness')
-        path = _reachable_functions(launchers, functions)
-        bounded = [(fname, fault)
-                   for fname in sorted(path)
-                   for fault in _timeout_faults(functions[fname])]
-        assert not bounded, (name, sorted(launchers), bounded)
+        entries, refusals = _harness_entries(tree, ctx)
+        assert entries, (name, 'no launcher call resolved from the harness')
+        faults = _census(entries, trees, ctx) + refusals
+        assert not faults, (name, sorted(entries), faults)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):
