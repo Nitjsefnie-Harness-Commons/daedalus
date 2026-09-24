@@ -130,13 +130,12 @@ function streamResponse(answer) {
     };
   }
   if (answer === 'ledger-commands') {
-    const frame = (did) => 'event: command\ndata: '
-      + JSON.stringify({
-        id: did === 'did-old' ? 'cmd-old' : 'cmd-new',
-        type: 'no-such-type',
-        _did: did,
-      }) + '\n\n';
-    const chunks = [frame('did-old'), frame('did-new')];
+    const commands = [
+      ['cmd-old', 'did-old'],
+      ['cmd-new', 'did-new'],
+    ];
+    const chunks = commands.map(([id, did]) => 'event: command\ndata: '
+      + JSON.stringify({ id, type: 'no-such-type', _did: did }) + '\n\n');
     let reads = 0;
     return {
       ok: true,
