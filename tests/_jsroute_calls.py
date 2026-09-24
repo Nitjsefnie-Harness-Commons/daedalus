@@ -7,6 +7,7 @@ from _jsroute_returns import (chained_member, folded_return,
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
+from _jsroute_tab import computed_writes
 
 
 _NON_CALL_WORDS = {
@@ -653,15 +654,13 @@ def routing_events(mask, text, senders):
         events.append((m.start(), 'prop', m))
     for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
         events.append((m.start(), 'assign', m))
-    # The bracket form is found in the raw text because the mask blanks
-    # string contents, making `['tab']` unreadable there — but then a match
-    # that begins inside a blanked span is a mention in a string or comment,
-    # not code. The mask preserves positions, so the two diverge at the very
-    # first character of the name exactly when the mention is not real code.
-    for m in re.finditer(
-            r'(?<![\w$])([\w$]+)\s*\[\s*["\']tab["\']\s*\]\s*=', text):
-        if mask[m.start()] == text[m.start()]:
-            events.append((m.start(), 'prop', m))
+    # A bracket write names its key in brackets, so the same reader the
+    # object-literal keys use reads it: `p['tab'] = x` and `p[k] = x` are
+    # one write, not two spellings.
+    for match, key_left, key_right, equals in computed_writes(
+            mask, text):
+        events.append((match.start(), 'computed',
+                       (match, key_left, key_right, equals)))
     # A tracked object handed to any other call escapes: a helper that writes
     # through its parameter is invisible from here, so the object stops being
     # provable at that point rather than being trusted on its literal.

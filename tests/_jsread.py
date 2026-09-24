@@ -389,9 +389,12 @@ def js_split_top_level(mask, text, start, end):
     return [(s, e) for s, e in spans if text[s:e].strip()]
 
 
-def js_object_entries(mask, text, obj_start):
+def js_object_entries(mask, text, obj_start, key_of=None):
     """Entries of the object literal at `obj_start`, as (key, value or None
-    for shorthand, key offset); a spread's key is None."""
+    for shorthand, key offset); a spread's key is None. `key_of(left,
+    right)` names the key in one source span, for a reader that resolves
+    bindings; without it the key is the source text between the brackets
+    or quotes."""
     obj_end = js_bracket_end(mask, obj_start)
     entries = []
     for s, e in js_split_top_level(mask, text, obj_start + 1, obj_end - 1):
@@ -421,12 +424,18 @@ def js_object_entries(mask, text, obj_start):
             if m:
                 entries.append((m.group(1), None, s + m.start(1)))
             continue
-        key_text = seg_text[:colon].strip()
-        quoted = re.fullmatch(r'["\']([^"\']+)["\']', key_text)
-        computed = re.fullmatch(
-            r'\[\s*(["\'])([^"\']+)\1\s*\]', key_text)
-        key = quoted.group(1) if quoted else (
-            computed.group(2) if computed else key_text)
+        if key_of is not None:
+            key_left = s
+            while key_left < s + colon and text[key_left].isspace():
+                key_left += 1
+            key = key_of(key_left, s + colon)
+        else:
+            key_text = seg_text[:colon].strip()
+            quoted = re.fullmatch(r'["\']([^"\']+)["\']', key_text)
+            computed = re.fullmatch(
+                r'\[\s*(["\'])([^"\']+)\1\s*\]', key_text)
+            key = quoted.group(1) if quoted else (
+                computed.group(2) if computed else key_text)
         entries.append((key,
                         seg_text[colon + 1:].strip(), s))
     return entries
