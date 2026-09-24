@@ -493,28 +493,8 @@ print('MINTROOT ' + json.dumps({
 
 
 def _mint_root_probe(tmp):
-    """Mint one job under a root configuration does not name.
-
-    `DAEDALUS_DIR` is set, so `config.SEG_DIR` is a real second tree the
-    probe can report on.
-    """
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    env.update({
-        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
-        'DAEDALUS_PORT': '0',
-        'DAEDALUS_TOKEN': TOK,
-        'PYTHONDONTWRITEBYTECODE': '1',
-        'ALT_SEG_ROOT': str(Path(tmp) / 'alt-segments'),
-    })
-    proc = subprocess.run(
-        [sys.executable, '-c', _MINT_ROOT_PROBE], cwd=_util.ROOT, env=env,
-        capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, (proc.stdout, proc.stderr)
-    marked = [line for line in proc.stdout.splitlines()
-              if line.startswith('MINTROOT ')]
-    assert len(marked) == 1, (proc.stdout, proc.stderr)
-    return json.loads(marked[0][len('MINTROOT '):])
+    """Mint one job under a root configuration does not name."""
+    return _alt_probe(tmp, _MINT_ROOT_PROBE, 'MINTROOT ')
 
 
 def test_the_segments_root_governs_where_a_mint_writes(tmp):
