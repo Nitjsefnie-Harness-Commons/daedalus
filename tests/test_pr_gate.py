@@ -18,8 +18,10 @@ def test_only_admission_events_run_the_gate(_tmp):
     assert set(workflow) == {
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, workflow
     assert workflow['on'] == {
-        'pull_request_target': {'types': ['opened', 'edited', 'reopened']},
-    }, 'admission must run only on opened, edited and reopened PRs'
+        'pull_request_target': {'types': [
+            'opened', 'edited', 'reopened', 'ready_for_review']},
+    }, ('admission must run on opened, edited and reopened PRs, and on '
+        'ready_for_review so a draft leaves the gate the moment it matters')
 
 
 def test_gate_token_has_exactly_the_required_permissions(_tmp):
@@ -41,8 +43,10 @@ def test_only_one_bounded_runner_job_excludes_bots(_tmp):
     job = jobs['gate']
     assert set(job) == {'if', 'runs-on', 'timeout-minutes', 'steps'}, (
         'gate must not override permissions or add job controls')
-    assert job['if'] == "github.event.pull_request.user.type != 'Bot'", (
-        'gate must exclude exactly Bot authors')
+    assert job['if'] == (
+        "github.event.pull_request.user.type != 'Bot' && "
+        "github.event.pull_request.draft == false"), (
+        'gate must exclude exactly Bot authors and every draft PR')
     assert job['runs-on'] == 'ubuntu-latest', 'gate must run on Ubuntu'
     assert job['timeout-minutes'] == '5', 'gate must keep its timeout'
 
