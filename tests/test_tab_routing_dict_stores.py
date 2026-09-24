@@ -65,8 +65,8 @@ _PAIR_STORE = 'e = {}; e.update([("k", ordinary), (None, relay())])'
 
 def _folded_pair_key_rows():
     """One row per foldable key class, each reading a key the stored entry
-    provably cannot be selected for: a store that parks the value in the
-    unknown-key slot over-reports it, `(0, 1)` against the `(0, 0)` here."""
+    cannot be selected for: a store that parks the value in the unknown-key
+    slot over-reports it, `(0, 1)` against the `(0, 0)` here."""
     classes = [(f'pair-{name}-key', _flow(
         _RELAY, f'e = {{}}; e.update([("k", ordinary), ({key}, relay())])',
         'x = e.get("k", ordinary)', invoke='x()'), (0, 0))
@@ -82,15 +82,12 @@ def _folded_pair_key_rows():
             ('read', 'e.get(None, ordinary)', (1, 1)))] + classes
 
 
-# A pair key the shared resolver folds is stored under that key, the way
-# the subscript store already stores one (issue 1025).
-# `pair-none-key-read` reads the None key itself, so a store that dropped
-# the entry rather than filing it under its key would fail it; the last
-# three rows keep the unknown-key slot where a key the fold cannot
-# resolve still belongs, and pin the rule per pair: the first mixed row
-# reads "k" while the unreadable pair's value is ordinary, so a leaked
-# None entry would show as a violation, and the second gives that pair a
-# relay, so clearing the slot wholesale would read clean.
+# A pair key the shared resolver folds is stored under that key, as the
+# subscript store already stores one (issue 1025). `pair-none-key-read`
+# reads the None key itself, so a store that dropped the entry would fail
+# it; the last three rows keep the unknown-key slot where an unreadable key
+# belongs, the first mixed row catching a leaked None entry and the second
+# a wholesale clear of the slot.
 _FOLDED_PAIR_KEYS = _folded_pair_key_rows() + [
     ('pair-none-key-tuple-source', _flow(
         _RELAY, 'e = {}; e.update((("k", ordinary), (None, relay())))',
@@ -127,10 +124,9 @@ def test_folded_pair_key_stores_under_their_own_key(tmp):
     assert not bad, bad
 
 
-# A pair sequence that repeats a key holds the LAST pair's value, the way
-# every dict store at runtime does; `1 == True` makes those one entry
-# there too. The relay-last rows are the true positives a first-write
-# merge dropped, the relay-first row is the false positive it kept.
+# A pair sequence that repeats a key holds the LAST pair's value, as every
+# dict store at runtime does (`1 == True` is one key there). The relay-last
+# rows are the true positives, the relay-first row the false positive.
 _REPEATED_PAIR_KEYS = [
     ('pair-dup-str-relay-last', _flow(
         _RELAY, 'e = {}; e.update([("a", ordinary), ("a", relay())])',

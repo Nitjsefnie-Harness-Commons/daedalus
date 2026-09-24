@@ -353,14 +353,11 @@ def _literal_pair_items(source, state):
     keys, by position, and whether a modelled position is that pair's own.
 
     The deferred container for a literal list carries the display length but
-    not its items, so occupancy is recovered from the source text, by the
-    position each pair is written at; a key the shared resolver folds is
-    stored under that key the way every other store writes one, and a pair
+    not its items, so occupancy is recovered from the source text; a pair
     the loop could name no key for still joins the unknown-key slot. A pair
     value that is an unresolvable call is stored unprovable, as a keyword
-    store does. A star splices the display's positions, so the entries are
-    still folded beside the dynamic slot but no position names the pair it
-    sits at.
+    store does. A star splices the display's positions, so the entries fold
+    beside the dynamic slot but no position names the pair it sits at.
     """
     entries, aligned = {}, True
     if not isinstance(source, (ast.List, ast.Tuple, ast.Set)):
@@ -456,9 +453,8 @@ def _source_items(source, state):
             else:
                 # A modelled key is a callable or a sender, never a key.
                 _fold_dynamic(items, pair.items.get(1))
-    # The last pair written at a key is the one the dict holds, `1` and
-    # `True` being one key there; the dynamic slot is the only entry
-    # above, and a folded key is never that slot.
+    # The last pair written at a key is the one the dict holds (`1` and
+    # `True` one key there), and only the dynamic slot precedes it.
     for key, value in entries.values():
         items[key] = value
     return items, len(known.items) == known.length

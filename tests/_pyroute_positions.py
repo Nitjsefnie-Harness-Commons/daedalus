@@ -129,9 +129,9 @@ def bind_deferred_states(target, value, states):
 
 def materialize_deferred(consumer, value, node=None, keys=()):
     """A consumer that reorders, deduplicates or projects its operand puts
-    any item at any position of an unknown count. `keys` names the keys the
-    source's pairs fold to, in yield order, the literal None among them; an
-    empty tuple leaves every pair in the unknown-key slot."""
+    any item at any position of an unknown count. `keys` names the source's
+    pair keys in yield order, the literal None among them; empty means the
+    unknown-key slot."""
     if value is None: return None
     if isinstance(value, DeferredAlternatives):
         return merge_yielded(
@@ -152,8 +152,7 @@ def materialize_deferred(consumer, value, node=None, keys=()):
         if keys:
             key = keys[0]
         elif exact and value.items.get(0) is not None:
-            # A key the element modelled outright; a key position the
-            # model left empty names no key, so the pair's key is unknown.
+            # A key the element modelled; an empty key position names none.
             key = value.items[0]
         item = merge_yielded(at_position(value, 1))
         if not (is_deferred_value(item) or sender_value(item) is not None):
