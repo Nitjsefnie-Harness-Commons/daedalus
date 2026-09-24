@@ -1,10 +1,9 @@
 """A shared, pre-staged index, so a scratch need not re-add the tree.
 
-`git ls-files` answers from the index alone, so a scratch reaches the same
-enumeration with the index copied in and no loose objects present. Staging
-the whole tree per scratch is what timed out on a loaded runner; the one
-template add that replaces it runs unbounded, so it either finishes or Git
-reports its own failure, never a wall-clock verdict.
+`git ls-files` answers from the index alone, so a copy reaches the same
+enumeration with no loose objects present. The one template add that
+replaces the per-scratch staging runs unbounded, so it either finishes or
+Git reports its own failure, never a wall-clock verdict.
 """
 import subprocess
 import sys
@@ -19,13 +18,11 @@ _TEMPLATE = None
 
 
 def _git(root, *command):
-    """Run one git command in `root`; unbounded, so it cannot time out."""
     subprocess.run(['git', '-C', str(root), *command],
                    capture_output=True, check=True)
 
 
 def _build_template():
-    """Stage the whole tree once and return the index it wrote."""
     with tempfile.TemporaryDirectory() as workspace:
         root = Path(workspace) / 'template'
         root.mkdir()
@@ -33,9 +30,8 @@ def _build_template():
         (root / 'run_tests.py').write_bytes(
             (ROOT / 'run_tests.py').read_bytes())
         _git(root, 'init', '-q')
-        # A split index records a `link` to `.git/sharedindex.<sha>` beside
-        # the base index; only the base is copied, so a scratch would fail
-        # `ls-files` on a config that enables it. Stage one whole index.
+        # A split index links to a `.git/sharedindex.<sha>` the copy does
+        # not carry, so a scratch would fail `ls-files`; stage one index.
         _git(root, '-c', 'core.splitIndex=false', 'add', '--', 'tests',
              'run_tests.py')
         return (root / '.git' / 'index').read_bytes()
@@ -43,7 +39,7 @@ def _build_template():
 
 def _template():
     global _TEMPLATE
-    if _TEMPLATE is None:
+    if _TEMPLATE is None:  # process-cached; the suite never changes the paths
         _TEMPLATE = _build_template()
     return _TEMPLATE
 
