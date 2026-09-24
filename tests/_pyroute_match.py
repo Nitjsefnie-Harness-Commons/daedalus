@@ -90,6 +90,9 @@ def _bind_sequence(patterns, value, state):
     if pairs is None:
         return
     for item, (_, item_value) in zip(patterns, pairs):
+        if item_value is None and not isinstance(item, ast.MatchStar):
+            _unprovable(item, state)
+            continue
         _bind_pattern(item, item_value, state)
 
 
@@ -106,21 +109,20 @@ def _bind_mapping(pattern, value, state):
     unprovable; a subject that is not a mapping, or a key it does not carry,
     cannot match, so the case leaves its names unpaired."""
     branches = _mapping_branches(value)
-    usable = all(isinstance(branch, DeferredContainer)
-                 and branch.kind == 'dict' for branch in branches)
+    if not all(isinstance(branch, DeferredContainer)
+               and branch.kind == 'dict' for branch in branches):
+        return  # the subject is not a mapping; the case cannot match
     for key, sub in zip(pattern.keys, pattern.patterns):
         literal = _literal_key(key, state)
         if literal is _UNRESOLVED_KEY:
             _unprovable(sub, state)
-            continue
-        if not usable:
             continue
         holders = [branch.items.get(literal) for branch in branches
                    if literal in branch.items]
         if not holders:
             continue  # no branch carries the key; the case cannot match
         _merge_bind(sub, holders, state)
-    if pattern.rest and usable:
+    if pattern.rest:
         rests = []
         for branch in branches:
             rest = {k: item for k, item in branch.items.items()
