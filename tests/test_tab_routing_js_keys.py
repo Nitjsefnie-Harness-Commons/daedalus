@@ -72,6 +72,21 @@ def test_computed_tab_key_spellings_reach_one_verdict(tmp):
     assert '`tab` in a typed command send' in direct[0], direct
 
 
+def test_computed_tab_write_spellings_reach_one_verdict(tmp):
+    """The bound write is the literal write, not a second one."""
+    path = Path(tmp) / 'write-verdict.js'
+    literal = "\nconst p = {};\np['tab'] = chromeTab;\n" \
+              "extCmd('focus', { ...p });\n"
+    bound = "const k = 'tab';\nconst p = {};\np[k] = chromeTab;\n" \
+            "extCmd('focus', { ...p });\n"
+    path.write_text(literal, encoding='utf-8')
+    direct = js_tab_routing_violations(path, 'write.js')
+    path.write_text(bound, encoding='utf-8')
+    indirect = js_tab_routing_violations(path, 'write.js')
+    assert direct == indirect and len(direct) == 1, (direct, indirect)
+    assert '`tab` in a typed command send' in direct[0], direct
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='jskeys_')
 
