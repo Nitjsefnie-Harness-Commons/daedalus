@@ -12,11 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-
-
-def _load_queue(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
+from _command_candidates import _load_queue  # noqa: E402
 
 
 def _load_service(name):
