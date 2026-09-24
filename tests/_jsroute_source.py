@@ -184,6 +184,18 @@ def previous_nonspace(mask, position):
     return position
 
 
+def identifier_before(mask, position):
+    """The identifier ending at `position`, its start, and the offset
+    before it."""
+    pos = position - 1
+    while pos >= 0 and mask[pos].isspace():
+        pos -= 1
+    end = pos + 1
+    while pos >= 0 and (mask[pos].isalnum() or mask[pos] in '_$'):
+        pos -= 1
+    return mask[pos + 1:end], pos + 1, pos
+
+
 def word_before(mask, position):
     position = previous_nonspace(mask, position) + 1
     end = position

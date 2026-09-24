@@ -5,11 +5,21 @@ literal, a name bound to a literal, or a concatenation of literals spells
 it, and a key position no reader can name leaves its object unprovable
 rather than clean. The two directions differ only in where the key sits:
 a property in an object literal, or a bracket on a tracked name.
+
+A bracket write names its object by the expression before the brackets, so
+`o.p['tab']` writes what `o` holds under `p`. That is the object
+`_write_target` names, when the model can prove what it holds; when it
+cannot — an untracked receiver, a member the receiver is not known to carry,
+or a property whose value is not a name — the expression names no object the
+model follows, and the write is outside it rather than attributed to the last
+name in the chain. Attributing it to that name anyway is what makes
+`q.p['tab']` look like a write to `p`.
 """
 import re
 
 from _jsread import js_bracket_end
 from _jsroute_keys import static_key
+from _jsroute_source import identifier_before, previous_nonspace
 
 
 # A name whose object exists but whose contents this scanner cannot prove.
@@ -23,7 +33,7 @@ UNPROVABLE = object()
 # `tab` the guard must answer for, not a key it may skip.
 UNRESOLVED = object()
 
-_BRACKET_WRITE = re.compile(r'(?<![\w$.])([\w$]+)\s*\[')
+_BRACKET_WRITE = re.compile(r'(?<![\w$])([\w$]+)\s*\[')
 
 
 def is_extension_literal(value):
@@ -62,12 +72,41 @@ def computed_writes(mask, text):
     return found
 
 
+def _write_target(match, named, mask):
+    """The name a bracket write retargets, or None when the model names no
+    object for it.
+
+    A bare name is itself. A member is the object a tracked receiver
+    provably holds under that key: the shorthand `{ p }`, or a property
+    whose value is a name. Anything else — a receiver the model does not
+    track, a key it does not know that receiver to carry, a value that is
+    not a name — describes an object nothing here follows.
+    """
+    name = match.group(1)
+    dot = previous_nonspace(mask, match.start())
+    if dot < 0 or mask[dot] != '.':
+        return name
+    receiver, _, _ = identifier_before(mask, dot)
+    state = named.get(receiver)
+    if not isinstance(state, dict):
+        return None
+    held = state.get(name)
+    if held is None:
+        return None
+    value = held[1]
+    if value is None:
+        return name
+    value = value.strip()
+    return value if re.fullmatch(r'[\w$]+', value) else None
+
+
 def tab_write(named, kind, match, context):
     """Apply one property write to the named-object state table.
 
     The dotted spelling names `tab` outright; the bracket spelling is read
     with the same reader an object-literal key uses, so `p['tab']` and
-    `p[k]` are one write rather than two spellings. A write to another
+    `p[k]` are one write rather than two spellings, and the object they
+    retarget is the one the receiver provably holds. A write to another
     key changes nothing, and one whose key cannot be named retires the
     object rather than trusting the keys that happened to be readable.
     """
@@ -78,7 +117,10 @@ def tab_write(named, kind, match, context):
         key = 'tab'
     else:
         found, key_left, key_right, equals = match
-        name, at = found.group(1), found.start()
+        at = found.start()
+        name = _write_target(found, named, mask)
+        if name is None:
+            return
         key = static_key(text, key_left, key_right, context['computed_key'])
     state = named.get(name)
     if state is context['unprovable']:
