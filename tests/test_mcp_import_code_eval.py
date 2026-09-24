@@ -340,23 +340,30 @@ def test_a_store_of_a_code_eval_calls_result_is_the_declared_limit(_tmp):
     parenthesised callee all deliver nothing, exactly as the bare name does.
     `f(eval(var))` passes eval's RESULT on, which the same limit covers.
     """
-    for source in ('''
+    for source in (
+            '''
 def load(var):
     x = eval(var)
     return x
-''', '''
+''',
+            '''
 def load(var):
     z = (eval)(var)
     return z
-''', '''
+''',
+            '''
 def load(var):
     z2 = f(eval(var))
     return z2
-''', 'v = (eval if c else print)(x)\n',
+''',
+            'v = (eval if c else print)(x)\n',
             'v = [eval for _ in [0]][0](x)\n',
             'v = (eval or print)(x)\n',
             'v = (0, eval)[0](x)\n',
-            'v = (lambda: eval)()(x)\n'):
+            'v = (lambda: eval)()(x)\n',
+            'v = [[eval]][0][0](x)\n',
+            'v = (0, eval)[0](x)\n',
+            "v = {'a': 0, 'b': eval}['a']('importlib.import_module')\n"):
         _assert_silent(_tmp, source)
 
 
@@ -386,18 +393,26 @@ def test_a_code_eval_builtin_delivered_to_a_call_is_still_refused(_tmp):
 
 def test_a_constant_program_through_an_effective_callee_is_refused(_tmp):
     """A CONSTANT program reaches the builtin however the effective callee
-    is spelled, so the call arm reads the program through the same resolution
-    the store uses.
+    is spelled, so the call arm reads the program through the same value
+    resolution the store uses.
 
     Without this the store treats these callees as a use and the call arm
     reads no program, so a constant program slips through — a regression the
     store-use cases alone cannot see, because they carry no constant program.
+    A two-level or string-key selection, a `__call__` projection, and an
+    unreadable index are the same resolution, not new spellings.
     """
     for source in (
             "v = (eval if c else print)('importlib.import_module')\n",
             "v = (eval or print)('importlib.import_module')\n",
             "v = [eval for _ in [0]][0]('importlib.import_module')\n",
-            "v = (lambda: eval)()('importlib.import_module')\n"):
+            "v = (lambda: eval)()('importlib.import_module')\n",
+            "v = [[eval]][0][0]('importlib.import_module')\n",
+            "v = {'a': eval}['a']('importlib.import_module')\n",
+            "v = [eval][i]('importlib.import_module')\n",
+            "v = (0, eval)[1]('importlib.import_module')\n",
+            "eval.__call__('importlib.import_module')('os')\n",
+            "getattr(eval, '__call__')('importlib.import_module')('os')\n"):
         _assert_refusal(_tmp, source, 1, 'code-evaluating')
 
 

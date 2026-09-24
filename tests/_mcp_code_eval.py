@@ -123,114 +123,162 @@ def _is_plain_lambda(func):
         and not func.args.vararg and not func.args.kwarg
 
 
-def _selected_element(node):
-    """The element a subscript selects, when that element is readable; None
-    when the container or the index is not, so the walk never guesses a
-    builtin the runtime would not select."""
-    index = node.slice
-    container = node.value
-    if isinstance(index, ast.Constant) and isinstance(index.value, int):
-        if isinstance(container, (ast.Tuple, ast.List)) and \
-                -len(container.elts) <= index.value < len(container.elts):
-            return container.elts[index.value]
-        if index.value == 0 and isinstance(
-                container, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            return container.elt
-    return None
-
-
 def _arguments(call):
     return list(call.args) + [keyword.value for keyword in call.keywords]
 
 
-def may_be_code_eval(node, bound, scopes):
-    """Does this expression evaluate, or may it evaluate, to a code-evaluating
-    builtin — the EFFECTIVE callee, however it is spelled?
+def _builtin_projection(node, bound, scopes):
+    """A projection of the builtin that still RUNS it: `X.__call__` or
+    `getattr(X, '__call__')` where X denotes a code-evaluating builtin.
 
-    The property, not a list of callee spellings: a node that denotes the
-    builtin directly is one; a conditional or boolean choice is one when
-    either branch is; a subscript is one when the element it SELECTS is; and a
-    no-parameter lambda called with no arguments is one when its body is. Each
-    resolves the value the runtime would actually use, so a form nobody
-    thought of is read by the same rule rather than a new branch.
+    `__call__` is how Python spells "this object is callable", so calling the
+    projection calls the builtin; the walk therefore reads it as the callee it
+    denotes. A lambda is NOT modelled as transparent — it is a function the
+    walk cannot follow, so a builtin passed to one is delivered.
     """
-    if denotes_code_eval(node, bound, scopes):
-        return True
-    if isinstance(node, ast.IfExp):
-        return may_be_code_eval(node.body, bound, scopes) or \
-            may_be_code_eval(node.orelse, bound, scopes)
-    if isinstance(node, ast.BoolOp):
-        return any(may_be_code_eval(value, bound, scopes)
-                   for value in node.values)
-    if isinstance(node, ast.Subscript):
-        if may_be_code_eval(node.slice, bound, scopes):
+    if isinstance(node, ast.Attribute) and node.attr == '__call__':
+        return may_be_code_eval(node.value, bound, scopes)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'getattr' and len(node.args) >= 2):
+        attribute = node.args[1]
+        if isinstance(attribute, ast.Constant) \
+                and attribute.value != '__call__':
             return False
-        element = _selected_element(node)
-        return element is not None and may_be_code_eval(
-            element, bound, scopes)
-    if isinstance(node, ast.Call) and _is_plain_lambda(node.func) \
-            and not _arguments(node):
-        return may_be_code_eval(node.func.body, bound, scopes)
+        return may_be_code_eval(node.args[0], bound, scopes)
     return False
 
 
-def _data_delivers(node, bound, scopes, is_callee=False):
-    """Does evaluating this expression HAND a code-evaluating builtin to a
-    callee or lookup the walk cannot follow — an argument, a lookup key, or a
-    builtin held in a value that is itself passed or bound?
+def _element_node(subscript, bound, scopes):
+    """The expression a subscript SELECTS, resolved through the container
+    and the key by their values, and through any further subscripts the
+    selection lands on; None when the value it selects is not readable.
 
-    A builtin in a data position is a DELIVERY. The one thing that is not a
-    delivery is the builtin in CALLEE position: the call arm reads its program
-    and the value that reaches the store is the call's result. A lambda is a
-    function the walk cannot follow, so a builtin passed to one is delivered.
+    An int key reads a sequence element, a str key reads a mapping value, and
+    a selection that lands on another subscript is followed, so a two-level
+    or string-key selection resolves by the same rule as a one-level one.
     """
-    if denotes_code_eval(node, bound, scopes):
-        return not is_callee
-    if isinstance(node, ast.Lambda):
-        return False
-    if isinstance(node, ast.Call):
-        if any(_data_delivers(argument, bound, scopes)
-               for argument in _arguments(node)):
-            return True
-        return _data_delivers(node.func, bound, scopes, is_callee=True)
-    if isinstance(node, ast.IfExp):
-        return _data_delivers(node.body, bound, scopes, is_callee) or \
-            _data_delivers(node.orelse, bound, scopes, is_callee)
-    if isinstance(node, ast.BoolOp):
-        return any(_data_delivers(value, bound, scopes, is_callee)
+    key = subscript.slice
+    container = subscript.value
+    if isinstance(container, ast.Subscript):
+        # A selection whose container is itself a selection: resolve the
+        # container's value first, so a two-level or string-key selection
+        # reads by the same rule as a one-level one.
+        container = _element_node(container, bound, scopes)
+        if container is None:
+            return None
+    if isinstance(key, ast.Constant) and isinstance(key.value, int) \
+            and not isinstance(key.value, bool):
+        if isinstance(container, (ast.Tuple, ast.List)) and \
+                -len(container.elts) <= key.value < len(container.elts):
+            element = container.elts[key.value]
+        elif key.value == 0 and isinstance(
+                container, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            element = container.elt
+        else:
+            return None
+    elif isinstance(key, ast.Constant) and isinstance(key.value, str) \
+            and isinstance(container, ast.Dict):
+        element = None
+        for dict_key, dict_value in zip(container.keys, container.values):
+            if isinstance(dict_key, ast.Constant) \
+                    and dict_key.value == key.value:
+                element = dict_value
+                break
+        if element is None:
+            return None
+    else:
+        return None
+    return element
+
+
+def _holds_code_eval(node, bound, scopes):
+    """This expression's value STRUCTURE holds a code-evaluating builtin —
+    in a container element, a mapping value, or a comprehension element —
+    whether or not the value is itself the builtin."""
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return any(may_be_code_eval(element, bound, scopes)
+                   or _holds_code_eval(element, bound, scopes)
+                   for element in node.elts)
+    if isinstance(node, ast.Dict):
+        return any(may_be_code_eval(value, bound, scopes)
+                   or _holds_code_eval(value, bound, scopes)
                    for value in node.values)
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+        return may_be_code_eval(node.elt, bound, scopes) \
+            or _holds_code_eval(node.elt, bound, scopes)
+    return False
+
+
+def _scan(node, bound, scopes):
+    """What value does this expression hold, and does it HAND a builtin on?
+
+    Returns `(is_builtin, holds)`. `is_builtin` is true when the value the
+    expression evaluates to is, or may be, a code-evaluating builtin — the
+    EFFECTIVE callee or stored value. `holds` is true when the expression
+    hands a builtin to something the walk cannot follow: an argument, a lookup
+    key, or a builtin sitting in a container that is itself bound or passed.
+
+    This is the property, read from the value rather than from a list of node
+    types. Every way Python builds a value is one of: a reference, a
+    projection, a choice, a selection, a return, or a container — and a
+    builtin reached through any of them is the value, while one passed to
+    another call or used as a lookup key is a hand-off. A sixth spelling of
+    "evaluates to the builtin" is resolved by the same rules, not a new branch.
+    """
+    if denotes_code_eval(node, bound, scopes) or _builtin_projection(
+            node, bound, scopes):
+        return True, False
+    if isinstance(node, ast.Lambda):
+        return False, False
+    if isinstance(node, ast.IfExp):
+        body = _scan(node.body, bound, scopes)
+        orelse = _scan(node.orelse, bound, scopes)
+        return body[0] or orelse[0], body[1] or orelse[1]
+    if isinstance(node, ast.BoolOp):
+        results = [_scan(value, bound, scopes) for value in node.values]
+        return any(r[0] for r in results), any(r[1] for r in results)
     if isinstance(node, ast.Subscript):
-        if _data_delivers(node.slice, bound, scopes):
-            return True
-        element = _selected_element(node)
+        key_is, key_holds = _scan(node.slice, bound, scopes)
+        element = _element_node(node, bound, scopes)
         if element is not None:
-            return _data_delivers(element, bound, scopes, is_callee)
-        return _data_delivers(node.value, bound, scopes, is_callee)
-    return any(_data_delivers(child, bound, scopes, is_callee=False)
-               for child in ast.iter_child_nodes(node))
+            value_is, value_holds = _scan(element, bound, scopes)
+        else:
+            # An unreadable key (or container) selects a value the walk
+            # cannot name; it is the builtin only when the container provably
+            # holds one, which is the fail-closed answer.
+            value_is = _holds_code_eval(node.value, bound, scopes)
+            value_holds = False
+        return value_is, value_holds or key_is or key_holds
+    if isinstance(node, ast.Call):
+        result = _is_plain_lambda(node.func) and not _arguments(node) \
+            and _scan(node.func.body, bound, scopes)[0]
+        handed = any(_scan(argument, bound, scopes)[0]
+                     or _scan(argument, bound, scopes)[1]
+                     for argument in _arguments(node))
+        return result, handed or _scan(node.func, bound, scopes)[1]
+    return False, any(
+        _scan(child, bound, scopes)[0] or _scan(child, bound, scopes)[1]
+        for child in ast.iter_child_nodes(node))
+
+
+def may_be_code_eval(node, bound, scopes):
+    """The EFFECTIVE callee, however it is spelled: does this expression
+    evaluate, or may it evaluate, to a code-evaluating builtin?"""
+    return _scan(node, bound, scopes)[0]
 
 
 def yields_code_eval(value, bound, scopes):
     """True when a store's value DELIVERS a code-evaluating builtin to a name
     the walk cannot follow.
 
-    The property is delivery, decided over the value the store will hold. A
-    store that binds a call's RESULT binds no builtin, so a builtin that is
-    the call's EFFECTIVE callee — however it is reached, including through a
-    conditional, a boolean choice, a comprehension, or a subscript that
-    selects it — is a USE, and the declared call-result limit covers the
-    result. A builtin in a DATA position of the value (an argument, a lookup
-    key, a builtin held in a value that is passed or bound) is a DELIVERY, and
-    that is the only thing a Call can be refused for. A store that binds the
-    builtin itself — a bare builtin, or a conditional or subscript that
-    resolves to one — is not a Call, and is a delivery to the name itself.
+    A store binds its value to a name, so it delivers when that value is the
+    builtin (a use that reaches a name) or when it hands the builtin on (an
+    argument, a lookup key, or a builtin held in a container that is bound).
+    A store that binds a call's RESULT binds no builtin, so a builtin that is
+    the call's effective callee is a USE, and the declared call-result limit
+    covers the result; that is the same value-resolution the call arm uses to
+    read a program, so a constant program reaches the builtin however the
+    callee is spelled.
     """
-    if isinstance(value, ast.Call):
-        if may_be_code_eval(value, bound, scopes):
-            return True
-        if any(_data_delivers(argument, bound, scopes)
-               for argument in _arguments(value)):
-            return True
-        return _data_delivers(value.func, bound, scopes, is_callee=True)
-    return may_be_code_eval(value, bound, scopes) or \
-        _data_delivers(value, bound, scopes)
+    is_builtin, holds = _scan(value, bound, scopes)
+    return is_builtin or holds
