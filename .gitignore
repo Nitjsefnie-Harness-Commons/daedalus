@@ -439,6 +439,7 @@
 !/tests/test_fetch_timings_count.py
 !/tests/test_file_sizes.py
 !/tests/test_gate_freshness.py
+!/tests/test_gate_freshness_run.py
 !/tests/test_generator_second_consumption.py
 !/tests/test_gh_client.py
 !/tests/test_ghexpr.py
