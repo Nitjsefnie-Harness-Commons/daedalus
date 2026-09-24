@@ -82,6 +82,7 @@
 !/.github/workflows/claim.yml
 !/.github/workflows/codeql.yml
 !/.github/workflows/coverage-comment.yml
+!/.github/workflows/gate-freshness.yml
 !/.github/workflows/pr-gate.yml
 !/.github/workflows/release.yml
 !/.github/workflows/scorecard.yml
@@ -227,6 +228,7 @@
 !/scripts/ci/coverage_combine.py
 !/scripts/ci/coverage_suites.py
 !/scripts/ci/diff_coverage.py
+!/scripts/ci/gate_freshness.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/line_lengths.py
@@ -436,6 +438,7 @@
 !/tests/test_extension_policy.py
 !/tests/test_fetch_timings_count.py
 !/tests/test_file_sizes.py
+!/tests/test_gate_freshness.py
 !/tests/test_generator_second_consumption.py
 !/tests/test_gh_client.py
 !/tests/test_ghexpr.py
