@@ -198,11 +198,10 @@ def on_name_vacated(callback):
     object can be indistinguishable from the recorded one (see `_identity`),
     so the registry retires the name here rather than guess.
 
-    Contract: the callback runs INSIDE the sweep, holding the
-    non-reentrant `command_fs_lock`, so it must not re-enter that lock (a
-    self-deadlock in a daemon thread nothing monitors) and must not raise.
-    The call site guards it anyway, so a raising callback cannot kill the
-    sweeper, but the sweeper cannot rely on that to keep working.
+    Contract: the callback runs INSIDE the sweep, holding the non-reentrant
+    `command_fs_lock`; it must not re-enter that lock (a self-deadlock in a
+    daemon thread nothing monitors) and must not raise — the call site
+    guards the raise, but the sweeper cannot rely on that to keep working.
     """
     global _name_vacated
     _name_vacated = callback
@@ -237,11 +236,9 @@ def remove_expired(path, now, ttl, legacy=False):
                 json.loads(opened.read().decode('utf-8'))
         path.unlink()
         if _name_vacated is not None:
-            # A queue entry expires by name and a parseable legacy file is
-            # unlinked, so in both namespaces the unlink frees the name; the
-            # registry retires it so a later object there is not suppressed.
-            # The callback runs under command_fs_lock; guard it so a raising
-            # callback cannot kill the sweeper (see on_name_vacated).
+            # An unlink frees the name in both namespaces; retire it so a
+            # later object there is not suppressed. Callback contract:
+            # on_name_vacated.
             key = (legacy_key(path.name) if legacy
                    else queue_key(path.parent.name, path.name))
             try:

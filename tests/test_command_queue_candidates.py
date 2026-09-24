@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """A command candidate is opened through a descriptor checked against its name.
 
-One command candidate is read through a single descriptor checked against the
-name it was found under, so two names for one object are not two delivery
-targets and a name that stopped naming the object behind it is refused. This
-module is what a candidate IS: the reading of one name, opened and refused
-without following it. What the bridge does about a refusal — recording it once
-per object, retiring a name the sweep vacates — lives with the registry rows in
+This module is what a candidate IS: the reading of one name, opened and refused
+without following it, so two names for one object are not two delivery targets.
+What the bridge does about a refusal — recording it once per object, retiring a
+name the sweep vacates — lives with the registry rows in
 ``test_command_queue_aliased``.
 """
 import json
@@ -16,30 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-
-
-def _load_queue(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
-
-
-def _write_command(path, identifier):
-    path.write_text(
-        json.dumps({'id': identifier, 'code': '1'}), encoding='utf-8')
-
-
-def _hard_link(source, destination):
-    try:
-        os.link(source, destination)
-    except (OSError, NotImplementedError):
-        _util.skip('this filesystem will not hold a hard link')
-
-
-def _symlink(link, target):
-    try:
-        link.symlink_to(target)
-    except (OSError, NotImplementedError):
-        _util.skip('this filesystem will not hold a symlink')
+from _command_candidates import (  # noqa: E402
+    _hard_link, _load_queue, _symlink, _write_command)
 
 
 def test_a_plain_candidate_opens_and_reads(tmp):

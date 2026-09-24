@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Aliased command names deliver nothing, and a refusal logs once per object.
 
-The queue drain, the legacy drain and poll open each candidate through one
-descriptor (what a candidate IS, and how it is refused, is in
-``test_command_queue_candidates``) and share the refusal registry: a retained,
-refused candidate logs its ``[STREAM] REFUSED`` line once per object, not once
-per drain pass. The key is the candidate's logical name paired with the
-object's incarnation, and the expiry sweep retires a name it vacates so a
-different object taking that name logs again.
+The queue drain, the legacy drain and poll share the refusal registry: a
+retained, refused candidate logs its ``[STREAM] REFUSED`` line once per object,
+not once per drain pass. The key is the candidate's logical name paired with
+the object's incarnation, and the expiry sweep retires a name it vacates so a
+different object taking that name logs again. How a candidate is read is in
+``test_command_queue_candidates``.
 """
 import contextlib
 import io
@@ -22,35 +21,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK, framer, put_command,  # noqa: E402
                      stream_response)
-
-
-def _load_queue(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
+from _command_candidates import (  # noqa: E402
+    _hard_link, _load_queue, _symlink, _write_command)
 
 
 def _load_service(name):
     return _util.load(
         _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
-
-
-def _write_command(path, identifier):
-    path.write_text(
-        json.dumps({'id': identifier, 'code': '1'}), encoding='utf-8')
-
-
-def _hard_link(source, destination):
-    try:
-        os.link(source, destination)
-    except (OSError, NotImplementedError):
-        _util.skip('this filesystem will not hold a hard link')
-
-
-def _symlink(link, target):
-    try:
-        link.symlink_to(target)
-    except (OSError, NotImplementedError):
-        _util.skip('this filesystem will not hold a symlink')
 
 
 def _refusals(captured):
