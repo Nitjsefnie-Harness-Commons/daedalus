@@ -4,12 +4,14 @@ much of it.
 
 Page-written GM keys are partitioned by the calling page's origin inside the
 shared chrome.storage.local, and each origin's partition carries its own byte
-budget so a page cannot make the extension's own writes fail. The Node-VM
-harnesses live in _gm_harness; these are the pins over them — the reserved and
-invalid-key refusals, the per-origin partition (no origin may read, overwrite,
-list or delete another's key, and a spoofed origin in the payload is ignored),
-the per-origin quota, and that a write Chrome refused rejects rather than
-resolving, since Chrome reports that only through lastError.
+budget so a page cannot make the extension's own writes fail. The SUM over
+every origin carries a second budget, because a dozen origins each at their
+own cap are all admitted and the writes that then fail are the extension's own.
+The Node-VM harnesses live in _gm_harness; these are the pins over them — the
+reserved and invalid-key refusals, the per-origin partition (no origin may
+read, overwrite, list or delete another's key, and a spoofed origin in the
+payload is ignored), both quotas, and that a write Chrome refused rejects
+rather than resolving, since Chrome reports that only through lastError.
 """
 import sys
 from pathlib import Path
@@ -19,6 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _gm_harness  # noqa: E402
 import _gm_two_origin  # noqa: E402
+
+# The aggregate refusal names a different limit from the per-origin one, so a
+# page (and this suite) can tell which cap fired.
+AGGREGATE_ERROR = 'gm storage total quota exceeded'
+ORIGIN_ERROR = 'gm storage quota exceeded'
 
 
 def _gm_key(key, origin):
@@ -296,6 +303,107 @@ def test_an_unserialisable_value_is_refused_and_never_reaches_set(tmp):
     assert case['error'] == 'value could not be measured', case
     assert case['calls'] == [], case
     assert case['storeKeys'] == [], case
+
+
+def test_the_aggregate_cap_bounds_the_sum_over_every_origin(tmp):
+    """The sum over every origin carries its own cap, on both sides.
+
+    The threshold is the production constant read out of the module, so these
+    boundaries move with the cap rather than restating it.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['aggregate']
+    assert case['declared'] is True, case
+    assert case['boundary']['under'] == {
+        'error': None, 'calls': ['get', 'set'], 'total': case['cap'] - 1,
+    }, case
+    assert case['boundary']['on'] == {
+        'error': None, 'calls': ['get', 'set'], 'total': case['cap'],
+    }, case
+    over = case['boundary']['over']
+    assert over['error'] == AGGREGATE_ERROR, case
+    assert over['calls'] == ['get'], case
+    assert over['total'] <= case['cap'], case
+
+
+def test_concurrent_writes_from_distinct_origins_hold_the_aggregate_cap(tmp):
+    """Writes from DIFFERENT origins in one turn cannot overflow the sum.
+
+    A queue kept per origin lets every origin read the pre-write store, so
+    each passes the aggregate check and the committed total runs past the cap.
+    Each write here is far inside its own origin's cap on its own.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['aggregate']
+    assert case['declared'] is True, case
+    burst = case['concurrency']
+    assert burst['total'] <= case['cap'], case
+    assert burst['stored'] == 5, case
+    assert burst['refusals'] == 1, case
+    assert burst['errors'][:5] == [None] * 5, case
+    assert burst['errors'][5] == AGGREGATE_ERROR, case
+
+
+def test_the_aggregate_cap_ignores_the_extensions_own_keys(tmp):
+    """A token nearly as large as the cap does not refuse a page write.
+
+    The extension's own keys are what the reserve is FOR, so the sum covers
+    gm: keys alone; here the token and the write together exceed the cap.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['aggregate']
+    assert case['declared'] is True, case
+    beside = case['extensionKeys']
+    assert beside['error'] is None, case
+    assert beside['calls'] == ['get', 'set'], case
+    assert beside['total'] <= case['cap'], case
+    assert beside['token'] + beside['total'] > case['cap'], case
+
+
+def test_replacing_a_key_is_charged_once_against_the_aggregate_cap(tmp):
+    """A rewrite is charged its delta, not the old and new entry both.
+
+    The store here is close enough to the cap that charging the replaced key
+    beside the incoming one would put it over.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['aggregate']
+    assert case['declared'] is True, case
+    replaced = case['replacement']
+    assert replaced['error'] is None, case
+    assert replaced['calls'] == ['get', 'set'], case
+    assert replaced['after'] == replaced['before'], case
+    assert replaced['before'] + replaced['charge'] > case['cap'], case
+
+
+def test_the_aggregate_cap_charges_the_key_and_the_value_terms(tmp):
+    """A long key beside a long value is charged for both.
+
+    Dropping either term roughly halves the sum here and admits a write that
+    lands over the cap.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['aggregate']
+    assert case['declared'] is True, case
+    terms = case['terms']
+    assert terms['before'] + terms['incoming'] > case['cap'], case
+    assert terms['before'] - terms['keyTerm'] + terms['incoming'] \
+        <= case['cap'], case
+    assert terms['error'] == AGGREGATE_ERROR, case
+    assert terms['calls'] == ['get'], case
+    assert terms['after'] == terms['before'], case
+
+
+def test_each_cap_refuses_with_its_own_distinguishable_message(tmp):
+    """The two caps name two limits, so a page can tell which one fired."""
+    del tmp
+    result = _gm_two_origin.run_two_origin()
+    aggregate = result['aggregate']
+    assert aggregate['declared'] is True, aggregate
+    assert aggregate['boundary']['over']['error'] == AGGREGATE_ERROR, aggregate
+    assert result['cross']['error'] == ORIGIN_ERROR, result['cross']
+    assert AGGREGATE_ERROR != ORIGIN_ERROR, (AGGREGATE_ERROR, ORIGIN_ERROR)
+    assert AGGREGATE_ERROR != 'QUOTA_BYTES quota exceeded', AGGREGATE_ERROR
 
 
 def main():
