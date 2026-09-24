@@ -4,8 +4,27 @@ A materializer that preserves a container's element order and count yields a
 deferred container the destructuring binder can pair by index. This builds
 that container from a known ordered operand, whatever expression ordered it.
 """
+from dataclasses import dataclass
+
 from _pyroute_values import (DeferredAlternatives, DeferredContainer,
                              merge_yielded)
+
+
+@dataclass(frozen=True)
+class SpreadContainer(DeferredContainer):
+    """A comprehension's result, read two ways: the item at each output
+    index is the body's value for the producer's element at that index, but
+    a consumer that walks the result visits every element, so `iterated`
+    carries the body's value over all of them."""
+
+    iterated: object = None
+
+
+def iterated_key(node):
+    """The evaluated slot holding a comprehension's `iterated` value beside
+    its item value. A node's id is positive, so the negation cannot collide
+    with the slot the node's own value occupies."""
+    return -id(node)
 
 
 def ordered_container(value, kind, order=None):

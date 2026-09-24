@@ -84,7 +84,7 @@ def stored_signature(value, occupancy=True):
             _STORED_SIGNATURES[(id(value), True)] = signature
             _STORED_ANCHORS.append(value)
         return signature
-    if type(value) in _DEFERRED_TYPES:
+    if isinstance(value, DEFERRED_VALUES):
         return ('deferred', id(value), None, None, None)
     return ('plain', value, None, None, None)
 
@@ -111,7 +111,7 @@ def value_signature(value):
         signature = ('generator', value.expression.lineno,
                      value.expression.col_offset, value.remaining,
                      value.evaluate_zero)
-    elif type(value) in _DEFERRED_TYPES:
+    elif isinstance(value, DEFERRED_VALUES):
         signature = deferred_signature(value) or value
     else:
         return value
@@ -618,9 +618,9 @@ def iterable_deferred(value):
         return merge_yielded(
             iterable_deferred(item) for item in value.values)
     if isinstance(value, DeferredContainer):
-        if value.kind == 'dict':
-            return merge_yielded(value.items.keys())
-        return merge_yielded(value.items.values())
+        items = (value.items.keys() if value.kind == 'dict'
+                 else value.items.values())
+        return getattr(value, 'iterated', None) or merge_yielded(items)
     return None
 
 

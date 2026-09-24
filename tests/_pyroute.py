@@ -36,7 +36,8 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             rebound_names, record_exit, record_returns,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
-from _pyroute_targets import bind_with_target, materialized_order
+from _pyroute_targets import (bind_with_target, materialized_order,
+                             probe_comprehension)
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
@@ -425,10 +426,9 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                         return remember(node, dedupe_states(
                             [*skipped, *active]))
                     if truth is None: skipped.extend(copied(active))
-            results = [node.key, node.value] if isinstance(
-                node, ast.DictComp) else [node.elt]
-            for result in results:
-                active = check_expression(result, active)
+            active = probe_comprehension(
+                node, active, skipped, _copy_state_pair, check_expression,
+                violations)
             return remember(
                 node, dedupe_states([*skipped, *active]))
         if isinstance(node, ast.Starred):
@@ -610,8 +610,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                 entered = check_expression(item.context_expr, entered)
                 if item.optional_vars is None: continue
                 for state in entered:
-                    bind_with_target(
-                        item, state, analyze_callable, violations)
+                    bind_with_target(item, state, analyze_callable)
             found, pairs = walk(statement.body, entered)
             violations.extend(found)
             continue
