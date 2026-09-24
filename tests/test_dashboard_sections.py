@@ -633,6 +633,12 @@ def test_recent_captures_show_newest_24_within_one_id(tmp):
 
 
 def test_recent_captures_find_newest_beyond_the_first_page(tmp):
+    if sys.platform.startswith('win'):
+        _util.skip(
+            'issue 1030: a windows-latest runner can starve the Node child '
+            'below the rate its serviced-time bounds charge, so no inner '
+            'bound reports it and only the outer backstop does; it runs on '
+            'every other platform')
     _recent_captures(tmp, 225, ['_ss'])
 
 
