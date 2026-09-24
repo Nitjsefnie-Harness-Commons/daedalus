@@ -13,9 +13,10 @@ from _pyroute_mapping import apply_assignment_bindings
 from _pyroute_state import (bind_alias_target, bind_builtin_names, bound_names,
                             discard_state_dict, evaluated_value, literal_truth,
                             resolve_sender_name, sync_cells)
-from _pyroute_values import (DeferredAlternatives, DeferredCallable,
-                             DeferredContainer, DeferredInstance, _known_value,
-                             bind_deferred_target, merge_yielded)
+from _pyroute_positions import bind_deferred_target
+from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
+                             DeferredCallable, DeferredContainer,
+                             DeferredInstance, _known_value, merge_yielded)
 
 
 _UNPROVABLE = object()
@@ -113,11 +114,13 @@ def _filters_inert(node):
 def _first_element(value):
     """The producer's element at output index 0 when the operand proves it,
     or _UNPROVABLE. Alternatives bind only when every branch is a tuple or
-    list of known length and they agree on that element: a union of the
+    list of known length with no unknown-key slot, and they agree on that
+    element: a union of the
     branches is not an agreement, so a disagreement -- and a branch that
     proves no element at all -- leaves the position unprovable."""
     if isinstance(value, DeferredContainer):
-        if value.kind in ('tuple', 'list') and value.length:
+        if value.kind in ('tuple', 'list') and value.length \
+                and DYNAMIC_KEY not in value.items:
             return value.items.get(0)
         return _UNPROVABLE
     if isinstance(value, DeferredAlternatives):

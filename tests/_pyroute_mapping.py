@@ -8,6 +8,8 @@ from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
                            _literal_value, _unhashable_key_sender,
                            literal_iterable_cardinality)
+from _pyroute_positions import (alias_target_pairs, at_position,
+                                from_position, sequence_method_value)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -25,82 +27,8 @@ def _selected_values(value, key, attribute=False):
     if attribute and isinstance(value, DeferredClass):
         return [value.methods.get(key)]
     if not attribute and isinstance(value, DeferredContainer):
-        return _at_position(value, key)
+        return at_position(value, key)
     return []
-
-
-def _at_position(container, index):
-    """Values a container may hold at exact position or key index."""
-    return [container.items.get(index), container.items.get(DYNAMIC_KEY)]
-
-
-def _from_position(container, start):
-    """The join of every value a container may hold at position start or
-    later."""
-    return merge_yielded(
-        item for key, item in container.items.items()
-        if key is DYNAMIC_KEY or key >= start)
-
-
-def alias_target_pairs(target, value):
-    if isinstance(value, DeferredAlternatives):
-        branches = [alias_target_pairs(target, item) for item in value.values]
-        unknown = [UNPROVABLE_SENDER] if None in branches else []
-        branches = [branch for branch in branches if branch is not None]
-        if not branches:
-            return None
-        paired = []
-        for index, (nested, _) in enumerate(branches[0]):
-            values = [branch[index][1] for branch in branches]
-            paired.append((nested, merge_yielded(values + unknown)))
-        return paired
-    if isinstance(value, DeferredContainer):
-        if value.kind not in ('tuple', 'list', 'set'):
-            return None
-        if value.length is None:
-            return _unknown_length_pairs(target, value)
-        items = [merge_yielded(_at_position(value, index))
-                 for index in range(value.length)]
-    elif isinstance(value, (ast.Tuple, ast.List)):
-        items = value.elts
-    else:
-        return None
-    stars = [index for index, item in enumerate(target.elts)
-             if isinstance(item, ast.Starred)]
-    if not stars:
-        return list(zip(target.elts, items)) \
-            if len(target.elts) == len(items) else None
-    if len(stars) != 1 or len(items) < len(target.elts) - 1:
-        return None
-    star = stars[0]
-    suffix = len(target.elts) - star - 1
-    end = len(items) - suffix
-    pairs = [*zip(target.elts[:star], items[:star])]
-    if isinstance(value, DeferredContainer):
-        rest = items[star:end]
-        pairs.append((target.elts[star].value, DeferredContainer(
-            dict(enumerate(rest)), len(rest), 'list')))
-    pairs.extend(zip(target.elts[star + 1:], items[end:]))
-    return pairs
-
-
-def _unknown_length_pairs(target, value):
-    """A target before the star reads its own position; the star and every
-    target after it read the open tail from the star's position."""
-    start = next((index for index, item in enumerate(target.elts)
-                  if isinstance(item, ast.Starred)), len(target.elts))
-    tail = _from_position(value, start)
-    rest = DeferredContainer(
-        {} if tail is None else {DYNAMIC_KEY: tail}, None, 'list')
-    pairs = []
-    for index, item in enumerate(target.elts):
-        if index < start:
-            pairs.append((item, merge_yielded(_at_position(value, index))))
-        elif isinstance(item, ast.Starred):
-            pairs.append((item.value, rest))
-        else:
-            pairs.append((item, tail))
-    return pairs
 
 
 def _assignment_values(target, value, state):
@@ -166,10 +94,10 @@ def _display_value(node, state):
                      else index + value.length)
         elif starred and (index is None or value.length is None):
             index = None
-            _fold_dynamic(items, _from_position(value, 0))
+            _fold_dynamic(items, from_position(value, 0))
         elif starred:
             for offset in range(value.length):
-                nested = merge_yielded(_at_position(value, offset))
+                nested = merge_yielded(at_position(value, offset))
                 if nested is not None:
                     items[index + offset] = nested
             index += value.length
@@ -399,7 +327,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 and 'dict' not in state.builtin_globals \
                 and 'dict' not in state.builtin_locals:
             return _dict_call_value(node, state)
-        value = reversed_read(node, state)
+        value = reversed_read(node, state) or sequence_method_value(
+            node, state)
         if value is not None:
             return value
         if (isinstance(node.func, ast.Attribute)
@@ -478,7 +407,7 @@ def _source_items(source, state):
         if pair.kind not in ('list', 'tuple'):
             return None
         if pair.length != 2 or DYNAMIC_KEY in pair.items:
-            _fold_dynamic(items, _from_position(pair, 0))
+            _fold_dynamic(items, from_position(pair, 0))
         else:
             # A modelled key is a callable or a sender, never a key value.
             _fold_dynamic(items, pair.items.get(1))
