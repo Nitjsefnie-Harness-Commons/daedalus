@@ -7,17 +7,20 @@ rather than clean. The two directions differ only in where the key sits:
 a property in an object literal, or a bracket on a tracked name.
 
 A bracket write names its object by the expression before the brackets, so
-`o.p['tab']` writes what `o` holds under `p`. That is the object
-`_write_target` names, when the model can prove what it holds; when it
-cannot — an untracked receiver, a member the receiver is not known to carry,
-or a property whose value is not a name — the expression names no object the
-model follows, and the write is outside it rather than attributed to the last
-name in the chain. Attributing it to that name anyway is what makes
-`q.p['tab']` look like a write to `p`.
+`o.p['tab']` writes what `o` holds under `p` and `A.b.c['tab']` writes what
+`A.b.c` holds. `_write_target` walks that expression by kind — from the base
+name through each property the model can follow — so the chain spelling and
+the flat one reach the same name. Where the walk ends on something that is not
+a name: an object literal, a call, a receiver nothing is known about, or a
+base that is itself a property — the expression names no object the model
+follows, and the write is outside it rather than attributed to the last name
+in the chain. Attributing it to that name anyway is what makes `q.p['tab']`
+look like a write to `p`, and what would make `A.b.c['tab']` look like a write
+to the `c` a standalone `b` happens to hold.
 """
 import re
 
-from _jsread import js_bracket_end
+from _jsread import js_bracket_end, js_mask, js_object_entries
 from _jsroute_keys import static_key
 from _jsroute_source import identifier_before, previous_nonspace
 
@@ -72,37 +75,71 @@ def computed_writes(mask, text):
     return found
 
 
-def _write_target(match, named, mask):
-    """The name a bracket write retargets, or None when the model names no
-    object for it.
+def _receiver_chain(match, mask):
+    """The names a bracket write's receiver names, base name first, or
+    None when the leftmost one is a property rather than a name.
 
-    A bare name is itself. A member is the object a tracked receiver
-    provably holds under that key: the shorthand `{ p }`, or a property
-    whose value is a name. A receiver that is itself a member — the `b` of
-    `A.b.c` — is a property of something else, not a name the write can
-    resolve through, so the chain resolves to nothing here. Anything else
-    the model does not follow: a receiver it does not track, a key it does
-    not know that receiver to carry, a value that is not a name.
+    `A.b.c` is three names; the leftmost is the base and the rest are
+    properties of what precedes them. Nothing before the base means the
+    base is a name, at the first offset of a file included.
     """
-    name = match.group(1)
-    dot = previous_nonspace(mask, match.start())
-    if dot < 0 or mask[dot] != '.':
-        return name
-    receiver, start, _ = identifier_before(mask, dot)
-    outer = previous_nonspace(mask, start)
-    if outer < 0 or mask[outer] == '.':
+    parts = [(match.group(1), match.start())]
+    cursor = match.start()
+    while True:
+        dot = previous_nonspace(mask, cursor)
+        if dot < 0 or mask[dot] != '.':
+            break
+        name, start, _ = identifier_before(mask, dot)
+        if not name:
+            break
+        parts.append((name, start))
+        cursor = start
+    parts.reverse()
+    before = previous_nonspace(mask, parts[0][1])
+    if before >= 0 and mask[before] in '.]':
         return None
-    state = named.get(receiver)
-    if not isinstance(state, dict):
+    return [name for name, _ in parts]
+
+
+def _property_owner(owner, key, named):
+    """What an object holds under `key`: a name, the source of an object
+    literal, or None when the model does not follow it. A shorthand entry
+    holds the name the key itself spells."""
+    if re.fullmatch(r'[\w$]+', owner):
+        state = named.get(owner)
+        if not isinstance(state, dict):
+            return None
+        held = state.get(key)
+        if held is None:
+            return None
+        return key if held[1] is None else held[1].strip()
+    if owner.startswith('{') and owner.endswith('}'):
+        for found, entry, _ in js_object_entries(js_mask(owner), owner, 0):
+            if found == key:
+                return key if entry is None else entry.strip()
+    return None
+
+
+def _write_target(match, named, mask):
+    """The name a bracket write retargets, or None when its receiver names
+    no object the model follows.
+
+    The receiver is walked by kind, from the base name through every
+    property the model can follow, so the chain spelling and the flat one
+    reach the same name — and a chain that lands on an object literal, a
+    call, or a receiver nothing is known about names nothing here. There
+    is no object to retire in that case, so the write is not attributed
+    rather than attributed to the last name in the chain.
+    """
+    chain = _receiver_chain(match, mask)
+    if not chain:
         return None
-    held = state.get(name)
-    if held is None:
-        return None
-    value = held[1]
-    if value is None:
-        return name
-    value = value.strip()
-    return value if re.fullmatch(r'[\w$]+', value) else None
+    owner = chain[0]
+    for key in chain[1:]:
+        owner = _property_owner(owner, key, named)
+        if owner is None:
+            return None
+    return owner if re.fullmatch(r'[\w$]+', owner) else None
 
 
 def tab_write(named, kind, match, context):
