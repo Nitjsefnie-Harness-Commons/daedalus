@@ -415,6 +415,7 @@
 !/tests/test_diff_coverage_boundaries.py
 !/tests/test_diff_coverage_javascript.py
 !/tests/test_drain.py
+!/tests/test_drain_bounds.py
 !/tests/test_eval_relay.py
 !/tests/test_examples_parse.py
 !/tests/test_exclusive_bind.py
