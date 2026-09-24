@@ -1,9 +1,9 @@
 """Positional reads of deferred sequence containers.
 
 An int key is an exact position from the start and the DYNAMIC_KEY slot may
-sit at any position from the container's exact prefix on. A read that cannot name one exact position, or that
-meets an unknown length it would need, joins every item: it never answers
-with a clean subset.
+sit at any position from the container's exact prefix on. A read that
+cannot name one exact position, or that meets an unknown length it would
+need, joins every item: it never answers with a clean subset.
 """
 import ast
 
