@@ -75,12 +75,10 @@ def apply_assignment_bindings(targets, value, state, binder):
 
 
 def _display_value(node, state):
-    """Positions after a star of unknown length share the DYNAMIC_KEY slot;
-    the positions before it are its exact prefix."""
+    """Positions after a star of unknown length share the DYNAMIC_KEY slot."""
     items = {}
-    index = prefix = 0
+    index = 0
     for item in node.elts:
-        before = index
         starred = isinstance(item, ast.Starred)
         value = _known_value(item.value if starred else item, state)
         if not starred:
@@ -110,8 +108,6 @@ def _display_value(node, state):
                 if nested is not None:
                     items[index + offset] = nested
             index += value.length
-        if index is None and before is not None:
-            prefix = before
     starred_any = any(isinstance(item, ast.Starred) for item in node.elts)
     if isinstance(node, ast.Set) and (items or starred_any):
         # A set has no positions; equal elements collapse at runtime.
@@ -120,8 +116,7 @@ def _display_value(node, state):
             {} if joined is None else {DYNAMIC_KEY: joined},
             None if starred_any or len(node.elts) > 1 else 1, 'set')
     if items or isinstance(node, ast.List) or starred_any:
-        return DeferredContainer(items, index, type(node).__name__.lower(),
-                                 exact_prefix=prefix)
+        return DeferredContainer(items, index, type(node).__name__.lower())
     return None
 
 
@@ -428,15 +423,12 @@ def _mark_unprovable(state, owner_name):
 
 
 def _container_copy(owner, items, unknown_length=False):
-    """A copy of owner holding items; a dict's length is recounted, and a
-    changed unknown-key slot may sit at any position."""
+    """A copy of owner holding items; a dict's length is recounted."""
     length = owner.length
     if owner.kind == 'dict':
         length = _dict_length(
             items, owner.length is not None and not unknown_length)
-    exact = items.get(DYNAMIC_KEY) is owner.items.get(DYNAMIC_KEY)
-    return DeferredContainer(items, length, owner.kind, owner.identity,
-                             owner.exact_prefix if exact else 0)
+    return DeferredContainer(items, length, owner.kind, owner.identity)
 
 
 def _replace_container(state, owner_name, owner, items,

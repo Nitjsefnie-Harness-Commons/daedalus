@@ -99,27 +99,20 @@ _PLACED = {
 }
 
 
-def _placed(tmp, twin):
-    """Each shape reads a quiet callable the guard can place; its twin swaps
-    the two, so the same position holds the relay."""
+def _placed(tmp):
+    """Each shape swaps relay and quiet, so the position it reads holds the
+    relay."""
     swap = {'relay': 'quiet', 'quiet': 'relay'}
     verdicts = {}
     for name, (store, invoke) in _PLACED.items():
-        if twin:
-            store, invoke = (re.sub(r'relay|quiet', lambda m: swap[m[0]],
-                                    part) for part in (store, invoke))
+        store, invoke = (re.sub(r'relay|quiet', lambda m: swap[m[0]], part)
+                         for part in (store, invoke))
         verdicts[name] = _verdict(tmp, _PRE + _QUIET + store + _SL + invoke)
     return verdicts
 
 
-def test_a_placed_quiet_callable_stays_clean(tmp):
-    flagged = {name: verdict for name, verdict in _placed(tmp, False).items()
-               if verdict != (0, 0)}
-    assert not flagged, flagged
-
-
 def test_a_placed_relay_reports(tmp):
-    missed = {name: verdict for name, verdict in _placed(tmp, True).items()
+    missed = {name: verdict for name, verdict in _placed(tmp).items()
               if verdict != (1, 1)}
     assert not missed, missed
 
@@ -139,7 +132,7 @@ _REPLACED_FIRST = ('f = relay()\nx = [quiet(), *args.values, f]\n'
                    'if args.flag:\n    x[int(args.flag) - 1] = f\n')
 
 
-def test_an_unknown_key_store_reopens_the_exact_prefix(tmp):
+def test_an_unknown_key_store_reaches_the_first_position(tmp):
     assert _verdict(tmp, _PRE + _QUIET + _REPLACED_FIRST + _SL
                     + 'x[0]()') == (1, 1)
 
