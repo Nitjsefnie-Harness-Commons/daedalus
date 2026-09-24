@@ -62,9 +62,13 @@ def test_yielded_sender_triple_members_are_pinned(tmp):
          'ext_cmd keyword `tab`'),
         ('known-dict', '', "send = {'k': ext_cmd}['k']\n",
          'ext_cmd keyword `tab`'),
-        ('unprovable-dict', '',
+        # A subscript read whose key the guard cannot resolve names every
+        # item of the dict, so this dict's single item is the sender it
+        # reports; the unprovable route itself stays pinned by the
+        # unprovable suite, whose rows still expect it.
+        ('unevaluable-dict-key', '',
          "send = {'k': ext_cmd}[args.flag and 'k']\n",
-         'may be ext_cmd'),
+         'ext_cmd keyword `tab`'),
     ]
     for label, before, assignment, expected_message in cases:
         body = (assignment + 'gen = (send for _ in [1])\n'

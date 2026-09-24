@@ -210,9 +210,12 @@ def _dict_value(node, state):
     for key, item in zip(node.keys, node.values):
         if key is not None:
             value = _known_value(item, state)
-            literal = _usable_key(_literal_value(key))
+            literal = _literal_key(key, state)
             if literal is not _UNRESOLVED_KEY:
                 items[literal] = value
+            else:
+                items[DYNAMIC_KEY] = merge_yielded(
+                    (items.get(DYNAMIC_KEY), value))
             continue
         if isinstance(item, ast.Dict):
             nested = _dict_value(item, state)
@@ -379,9 +382,15 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 {DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
-        key = (node.slice.value
-               if isinstance(node.slice, ast.Constant) else None)
-        value = merge_yielded(_selected_values(owner, key))
+        key = _literal_key(node.slice, state)
+        # A dict read the guard cannot resolve has no position to name, so
+        # every item is a candidate; every other owner keeps the lookup that
+        # recurses into alternatives and reads a list by position.
+        if key is _UNRESOLVED_KEY and isinstance(owner, DeferredContainer) \
+                and owner.kind == 'dict':
+            value = merge_yielded(owner.items.values())
+        else:
+            value = merge_yielded(_selected_values(owner, key))
         if value is not None:
             return value
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -523,21 +532,22 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
 
 def _apply_setdefault(state, call, owner_name):
     owner = state.callables.get(owner_name)
-    key = call.args[0] if call.args else None
     default = _known_value(call.args[1], state) if len(call.args) > 1 \
         else None
     if default is None and len(call.args) > 1 \
             and isinstance(call.args[1], ast.Call):
         _mark_unprovable(state, owner_name)
         return
-    if (isinstance(key, ast.Constant)
+    literal = _literal_key(call.args[0], state) if call.args \
+        else _UNRESOLVED_KEY
+    if (literal is not _UNRESOLVED_KEY
             and (owner is None or isinstance(owner, DeferredContainer))):
         if owner is None:
             owner = DeferredContainer({}, None, 'dict', call)
             state.callables[owner_name] = owner
-        if key.value not in owner.items:
+        if literal not in owner.items:
             _replace_container(state, owner_name, owner,
-                               {**owner.items, key.value: default})
+                               {**owner.items, literal: default})
         return
     if isinstance(owner, DeferredContainer):
         value = merge_yielded((owner.items.get(DYNAMIC_KEY), default))
@@ -639,7 +649,8 @@ def store_deferred_target(target, value, state, removing=False,
         sync_cells(state, {owner_name})
     elif isinstance(target, ast.Subscript) \
             and isinstance(target.value, ast.Name):
-        dynamic = not isinstance(target.slice, ast.Constant)
+        literal = _literal_key(target.slice, state)
+        dynamic = literal is _UNRESOLVED_KEY
         if owner is None:
             if value is None and (removing or not unknown_call):
                 return
@@ -649,16 +660,16 @@ def store_deferred_target(target, value, state, removing=False,
             return
         items = dict(owner.items)
         if value is not None:
-            items[DYNAMIC_KEY if dynamic else target.slice.value] = value
+            items[DYNAMIC_KEY if dynamic else literal] = value
         elif unknown_call:
             if dynamic:
                 items.setdefault(DYNAMIC_KEY, UNPROVABLE_SENDER)
-            elif items.get(target.slice.value) is None:
-                items[target.slice.value] = UNPROVABLE_SENDER
+            elif items.get(literal) is None:
+                items[literal] = UNPROVABLE_SENDER
         elif dynamic:
             return
         elif removing:
-            items.pop(target.slice.value, None)
+            items.pop(literal, None)
         else:
-            items[target.slice.value] = None
+            items[literal] = None
         _replace_container(state, owner_name, owner, items)

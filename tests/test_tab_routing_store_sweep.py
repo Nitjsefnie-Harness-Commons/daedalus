@@ -228,15 +228,16 @@ def test_issue962_name_bound_setdefault_key(tmp):
 
 
 # The literal key forms around that lookup. A key the shared evaluator folds
-# reaches the model the same way on the three operations that resolve one: a
-# dict literal's key, the key a `pop` removes and the key a `get`/`pop`
-# reads, which is the property `test_pop_then_read_resolves_one_key` pins and
-# which the read side satisfied only from the third wave on. A subscript
-# store is not one of the three: it parks a non-constant key in the dynamic
-# slot, as it always has. An f-string is not folded by the evaluator at all,
-# so both f-string rows stay unresolved and read clean, as issue 967 records;
-# the label carries that, so the row cannot be read as a claim that a clean
-# verdict is correct.
+# reaches the model the same way on every operation that takes one: a dict
+# literal's key, a subscript store's, the key a `setdefault` stores, the key
+# a `pop` or `del` removes, and the key a `get`, `pop` or subscript reads.
+# `test_key_resolution_is_operation_independent` is that property as a
+# matrix, and a presence test is the one operation that consults no
+# occupancy at all: the guard reads both arms of the `if`, so a resolved
+# membership could only ever remove a report. An f-string is not folded by
+# the evaluator, so both f-string rows stay unresolved and read clean, as
+# issue 967 records; the label carries that, so the row cannot be read as a
+# claim that a clean verdict is correct.
 _ISSUE967 = [
     ('tuple-key-by-name', _flow(
         _RELAY, 'd = {(1, 2): relay()}; key = (1, 2)',
@@ -396,6 +397,122 @@ def test_pop_then_read_resolves_one_key(tmp):
         if actual != expected:
             bad.append((label, actual, expected))
     assert not bad, bad
+
+
+# The key-resolution property as a table: every key form against every
+# operation that touches a key, each measured with the runtime beside it.
+# The three evaluable forms must agree operation-for-operation with the
+# string constant, and the two the evaluator cannot fold must agree with
+# each other, because both take the unresolved arm. The labels name the
+# forms whose verdicts are known defects, not the operations.
+_KEY_FORMS = {
+    'str-const': ([], '"k"', '"k"'),
+    'tuple-lit': ([], '(1, 2)', '(1, 2)'),
+    'name-lit': (['r = "k"'], 'r', 'r'),
+    'known-defect-963-form-name-nonliteral': (['r = "k" + ""'], 'r', 'r'),
+    'known-defect-967-form-fstring': ([], 'f"k"', 'f"k"'),
+}
+_EVALUABLE_FORMS = ('str-const', 'tuple-lit', 'name-lit')
+_UNRESOLVED_FORMS = ('known-defect-963-form-name-nonliteral',
+                     'known-defect-967-form-fstring')
+
+# What each operation reads, per key form. An occupied store holds the
+# relay under the key, so a read of that key is a defect the guard must
+# report; a removal of it is clean; a clean store holds `ordinary` under
+# it, so a read of it is clean and a read of an absent key is not.
+_KEY_OPERATIONS = [
+    ('get-read', ('',), '{store}\nx = d.get({key}, ordinary)', 'x()'),
+    ('subscript-read', ('',), '{store}\nx = d[{key}]', 'x()'),
+    ('subscript-store+get', ('',), 'd = {{}}\nd[{key}] = relay()\n'
+     'x = d.get({key}, ordinary)', 'x()'),
+    ('subscript-store+read', ('',), 'd = {{}}\nd[{key}] = relay()\n'
+     'x = d[{key}]', 'x()'),
+    ('setdefault-read', ('',), '{store}\nx = d.setdefault({key}, ordinary)',
+     'x()'),
+    ('setdefault-store+get', ('',), 'd = {{}}\nd.setdefault({key}, relay())\n'
+     'x = d.get({key}, ordinary)', 'x()'),
+    ('pop+get', ('',),
+     '{store}\nd.pop({key}, None)\nx = d.get({key}, ordinary)', 'x()'),
+    ('del+get', ('',), '{store}\ndel d[{key}]\nx = d.get({key}, ordinary)',
+     'x()'),
+    ('del+presence', ('',), '{store}\ndel d[{key}]',
+     '(d.get({key}, ordinary)() if {key} in d else None)'),
+    ('presence+get', ('',), '{store}',
+     '(d.get({key}, ordinary)() if {key} in d else None)'),
+    ('clean-store+get', ('',), '{clean}\nx = d.get({key}, relay())', 'x()'),
+    ('clean-subscript-store+get', ('',), 'd = {{}}\nd[{key}] = ordinary\n'
+     'x = d.get({key}, relay())', 'x()'),
+    ('clean-setdefault+get', ('',), 'd = {{}}\nd.setdefault({key}, ordinary)\n'
+     'x = d.get({key}, relay())', 'x()'),
+]
+
+# The verdicts, measured form by form. The evaluable rows are the ideal:
+# the form behaves exactly as the string constant does.
+_KEY_EXPECTED = {
+    'get-read': (1, 1), 'subscript-read': (1, 1),
+    'subscript-store+get': (1, 1), 'subscript-store+read': (1, 1),
+    'setdefault-read': (1, 1), 'setdefault-store+get': (1, 1),
+    'pop+get': (0, 0), 'del+get': (0, 0), 'del+presence': (0, 0),
+    'presence+get': (1, 1), 'clean-store+get': (0, 0),
+    'clean-subscript-store+get': (0, 0), 'clean-setdefault+get': (0, 0),
+}
+# The evaluator cannot fold either of these, so the guard reads the key as
+# absent on every operation: a read reports because the store's contents
+# are not known to miss it, and a removal is not applied, so what the
+# program removed the guard still holds. The setdefault read is issue
+# 963's known defect; the rest are the consistency of the unresolved arm.
+_UNRESOLVED_EXPECTED = {
+    'get-read': (1, 1), 'subscript-read': (1, 1),
+    'subscript-store+get': (1, 1), 'subscript-store+read': (1, 1),
+    'setdefault-read': (1, 0), 'setdefault-store+get': (1, 1),
+    'pop+get': (0, 1), 'del+get': (0, 1), 'del+presence': (0, 1),
+    'presence+get': (1, 1), 'clean-store+get': (0, 1),
+    'clean-subscript-store+get': (0, 1), 'clean-setdefault+get': (0, 1),
+}
+
+
+def _key_matrix_rows():
+    rows = []
+    for form, (bind, key, literal) in _KEY_FORMS.items():
+        expected = (_UNRESOLVED_EXPECTED if form in _UNRESOLVED_FORMS
+                    else _KEY_EXPECTED)
+        for operation, _unused, shape, invoke in _KEY_OPERATIONS:
+            store = f'd = {{{literal}: relay()}}'
+            clean = f'd = {{{literal}: ordinary}}'
+            body = _flow(_RELAY, *bind, shape.format(
+                store=store, clean=clean, key=key),
+                invoke=invoke.format(key=key))
+            rows.append((f'{form}/{operation}', body, expected[operation]))
+    return rows
+
+
+_KEY_MATRIX = _key_matrix_rows()
+
+
+def test_key_form_matrix_matches_the_runtime(tmp):
+    bad = []
+    for label, body, expected in _KEY_MATRIX:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+def test_key_resolution_is_operation_independent(tmp):
+    """The property, read off the matrix: an evaluable form behaves as the
+    string constant does on every operation, and the two the evaluator
+    cannot fold behave as each other do."""
+    by_form = {form: {} for form in _KEY_FORMS}
+    for label, _body, expected in _KEY_MATRIX:
+        form, operation = label.split('/', 1)
+        by_form[form][operation] = expected
+    reference = by_form['str-const']
+    for form in _EVALUABLE_FORMS:
+        assert by_form[form] == reference, form
+    for form in _UNRESOLVED_FORMS:
+        assert by_form[form] == by_form[_UNRESOLVED_FORMS[0]], form
+    assert set(reference) == {operation for operation, *_ in
+                              _KEY_OPERATIONS}
 
 
 def test_store_form_verdicts(tmp):
