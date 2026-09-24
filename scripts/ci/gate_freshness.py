@@ -1,31 +1,21 @@
 #!/usr/bin/env python3
 """Publish a `gate freshness` verdict on every open pull request head.
 
-A pull request whose head predates a NEW GATE can merge with every one of its
-own checks green, and the merge then turns `main` red: the branch never ran the
-gate that landed on `main` after it. PR 986 shipped that shape -- its head did
-not contain the type-error ratchet added to the `pyright` job, so no run of
-its own CI executed the ratchet and the merge failed it for the first time on
-the already-merged tree.
-
-A check computed only in the pull request's own CI is therefore not enough.
-This script decides, for each open pull request head based on `main`, whether
-the head contains every gate-defining commit on `main`, and publishes a
-`gate freshness` check run onto that head through the Checks API. The
-maintainer's ruleset requires that check, so only branches that predate a NEW
-GATE are forced to rebase -- a branch that already contains the gates stays
-green without rebasing.
+For each open pull request head based on `main`, decide whether the head
+contains every gate-defining commit on `main`, and publish a `gate freshness`
+check run onto that head. A branch that already contains the gates stays green
+without rebasing; only a branch that predates a new gate is forced to rebase.
 
 THE GATE-DEFINING PATH SET. A file is gate-defining when a change to it can
 change the verdict of a required check FOR THE SAME SOURCE TREE -- when it
 decides *what a check computes*, not *what tree it computes it on*. A changed
-TEST is not gate-defining: the source tree is exactly what a branch carries, so
-a branch always runs the tests it brings with it. That boundary is why this is
-a dozen paths and not "all of CI".
+TEST is not gate-defining: the tree is what a branch carries, so a branch
+always runs the tests it brings with it.
 
   .github/workflows/**       which checks run, and what each one does
-  .github/ci-thresholds.json the recorded baselines every ratchet gates on
-  scripts/ci/**             the gate implementations themselves
+  scripts/ci/**             the gate implementations under the CI directory
+  scripts/check_versions.py the version gate run on every push to main
+  .gitleaks.toml            the configuration secrets.yml scans with
   pyrightconfig.json        the type checker's scope and settings
   pyrightconfig.tests.json  the type checker's scope over the test tree
   .pylintrc                 pylint's configuration
@@ -36,47 +26,33 @@ a dozen paths and not "all of CI".
   requirements-dev.txt      the tools the gates install and run
   requirements-test.txt     the tools the gates install and run
 
-The set is derived, not trusted: tests/test_gate_freshness.py reads every
-`.github/workflows/*.yml` and requires every gate-configuration file those
-workflows actually name to be listed here, so a gate file added to a workflow
-later fails that suite instead of silently going unlisted.
+A file the branch carries itself is deliberately NOT here; see
+CARRIED_BY_THE_BRANCH below. The set is derived, not trusted: the suite reads
+every `.github/workflows/*.yml` and requires every tracked file those
+workflows execute or pass to a tool to be listed here (or declared
+carried-by-the-branch), so a gate file added to a workflow later fails the
+suite.
 
-`.github/ci-thresholds.json` is written by the coverage job's automatic
-ratchet commit, so a coverage raise also red-flags open pull requests. The
-entry stays because the recorded baselines are exactly what a ratchet gates
-on; the cost is stated rather than quietly dropped.
+THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
+The gate commit is an ancestor of the head IFF the merge base equals the gate
+commit, validated as 40 lowercase hex. Every enumerated gate commit is checked
+-- short-circuiting on the first miss would be an optimisation, not the proof.
+A compare that cannot be read is NOT evidence of freshness: that head is
+published RED, because that is exactly the case where a stale green is
+waiting to be overwritten.
 
-THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request,
-and the gate commit is an ancestor of the head IFF the merge base equals the
-gate commit. Every enumerated gate commit is checked -- "the newest gate is a
-descendant of the rest" is a claim about history shape, not a fact about this
-repository. A 40-lowercase-hex merge base is validated before it is compared.
-
-FORK HEADS. The primary `compare/<gate>...<head_sha>` already resolves a fork
-head from the base repository (measured: PR 709's fork head answers HTTP 200).
-The `owner:ref` spelling is belt-and-braces for a head the primary form
-cannot reach -- a deleted fork, a ref that no longer exists -- and is only
-tried after the primary form has already failed, so it costs nothing on the
-healthy path. If BOTH spellings are unreadable, the head is published RED: a
-freshness answer that cannot be computed is not evidence of freshness, and
-failing open would reintroduce exactly this defect. The remedy -- rebase onto
-`main` -- is the same one a genuinely stale branch needs.
-
-READING FAILURES. A GLOBAL failure (the open-PR list, or a gate-commit lookup,
-cannot be read, or the run would exceed its call bound) publishes NOTHING and
-exits nonzero: there are no heads to write a verdict for, and an invented
-verdict is worse than a missing one. A PER-HEAD failure (one head's compare is
-unreadable) still writes that head's RED verdict, because that is precisely
-the case where a stale green is waiting to be overwritten. Both print a loud
-line to stderr.
+READING FAILURES. A GLOBAL failure (the open-PR list, a gate-commit lookup,
+the call bound) publishes NOTHING and exits nonzero: an invented verdict is
+worse than a missing one. A PER-HEAD failure (one head's compare unreadable,
+or its write failing) still writes that head's RED verdict where it can, skips
+it loudly where it cannot, and never lets one head's failure abandon the
+rest. All print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
-commits, up to two compare requests (the fallback), plus one head revalidation,
-one check-runs listing, a second head revalidation, and one write. The run
-refuses LOUDLY -- publishing nothing, exiting nonzero -- if the worst case
-exceeds the call budget, rather than truncating the head set: a run that
-publishes verdicts for the heads it reached and none for the rest is the
-silent-pass shape.
+commits, one compare, plus one head revalidation, one check-runs listing, a
+second head revalidation, and one write: G + 4. The run refuses LOUDLY --
+publishing nothing, exiting nonzero -- if the worst case exceeds the call
+budget, rather than truncating the head set, which is the silent-pass shape.
 """
 import json
 import os
@@ -84,19 +60,18 @@ import subprocess
 import sys
 from urllib.parse import quote
 
-# The check name the maintainer's ruleset matches, and a stable external id so
-# a re-run UPDATES the same check instead of accumulating duplicates.
 NAME = 'gate freshness'
 EXTERNAL_ID = 'daedalus-gate-freshness/v1'
 APP_SLUG = 'github-actions'
 BASE_BRANCH = 'main'
 
-# THE SET, in the order of the justification above. The order is only for
-# readability; every entry is checked against every head.
+# THE SET. Order is readability only; every entry is checked against every
+# head.
 GATE_PATTERNS = (
     '.github/workflows/**',
-    '.github/ci-thresholds.json',
     'scripts/ci/**',
+    'scripts/check_versions.py',
+    '.gitleaks.toml',
     'pyrightconfig.json',
     'pyrightconfig.tests.json',
     '.pylintrc',
@@ -108,10 +83,20 @@ GATE_PATTERNS = (
     'requirements-test.txt',
 )
 
+# Deliberately NOT gate-defining, because the branch reads them FROM ITS OWN
+# TREE: the ratchet scripts that read them are already gate-defining above, so
+# a branch carrying an older baseline measures its older tree
+# self-consistently. And every baseline move is permissive (--tighten only
+# lowers; a coverage-floor raise moves the floor up), so a stale branch's
+# recorded baseline can never turn main red by merging. The derivation guard
+# subtracts exactly this tuple: a new such file must be added here with its
+# own reason, never slip through silently.
+CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',)
+
 _HEX40 = frozenset('0123456789abcdef')
 
-# Per-head worst case that is not a compare: 1 revalidation + 1 check-runs
-# listing + 1 revalidation + 1 write. Each gate commit adds up to 2 compares.
+# Per-head worst case that is not a compare: 1 revalidation + 1 listing
+# + 1 revalidation + 1 write. Each gate commit adds one compare.
 PER_HEAD_OVERHEAD = 4
 
 DEFAULT_CALL_BUDGET = 1200
@@ -140,9 +125,9 @@ def _hex40(value):
 def matches(pattern, path):
     """Whether `pattern` selects `path`.
 
-    Only the two shapes the set uses are implemented: a `/**` suffix (a
-    directory prefix) and an exact path. A path is a repository-relative
-    POSIX path as git records it, so it never carries a `..` component.
+    Only the two shapes the set uses: a `/**` suffix (a directory prefix) and
+    an exact path. A path is repository-relative POSIX as git records it, so it
+    never carries a `..` component.
     """
     if pattern.endswith('/**'):
         return path.startswith(pattern[:-2])
@@ -167,9 +152,11 @@ def _one(read, argv):
 def enumerate_gates(read, repository):
     """The newest commit on `main` touching each gate path, as (path, sha).
 
-    One request per path. A path with no commit yet contributes nothing -- the
-    API returning `[]` is a real answer, not a failure. Returns None when a
-    lookup cannot be read at all (a GLOBAL failure).
+    One request per path. A path with no commit yet contributes nothing (the
+    API returning `[]` is a real answer). A payload that is not a list at all,
+    or a first entry with no readable sha, is a GLOBAL failure -- never "this
+    path has no commits", which would silently drop a gate and turn every head
+    green.
     """
     gates = []
     for pattern in GATE_PATTERNS:
@@ -180,10 +167,11 @@ def enumerate_gates(read, repository):
                 f'&path={quote(pattern, safe="/.*")}'])
         except QueryError:
             return None
-        entries = payload if isinstance(payload, list) else []
-        if not entries:
+        if not isinstance(payload, list):
+            return None
+        if not payload:
             continue
-        sha = entries[0].get('sha') if isinstance(entries[0], dict) else None
+        sha = payload[0].get('sha') if isinstance(payload[0], dict) else None
         if not _hex40(sha):
             return None
         gates.append((pattern, sha))
@@ -191,35 +179,28 @@ def enumerate_gates(read, repository):
 
 
 def merge_base(read, repository, gate, head):
-    """The merge base of `gate` and `head`, or None if unreadable.
+    """The merge base of `gate` and `head`, or None if it cannot be read.
 
-    Returns (merge_base, attempts) where each attempt is (request, outcome).
-    Tries the primary `<head_sha>` spelling, then the `owner:ref` spelling
-    only if the primary failed. A merge base that is not 40 lowercase hex is
-    refused (a shape guard, distinct from the verdict).
+    One `compare/<gate>...<head_sha>` request; that spelling resolves a fork
+    head from the base repository (measured against PR 709), so there is no
+    second spelling to try. Returns (merge_base, attempts); each attempt is
+    (request, outcome). A merge base that is not 40 lowercase hex is a shape
+    failure, distinct from the verdict.
     """
-    attempts = []
-    specs = [head['sha']]
-    if head.get('owner') and head.get('ref'):
-        specs.append(f"{head['owner']}:{head['ref']}")
-    for spec in specs:
-        target = f'repos/{repository}/compare/{gate}...{spec}'
-        try:
-            payload = _one(read, [
-                'gh', 'api', '-H', 'Cache-Control: no-cache', target])
-        except QueryError as error:
-            attempts.append((target, f'failed: {error}'))
-            continue
-        sha = None
-        if isinstance(payload, dict):
-            base = payload.get('merge_base_commit')
-            if isinstance(base, dict):
-                sha = base.get('sha')
-        if _hex40(sha):
-            attempts.append((target, f'merge base {sha}'))
-            return sha, attempts
-        attempts.append((target, f'merge base {sha!r} is not 40 hex'))
-    return None, attempts
+    target = f'repos/{repository}/compare/{gate}...{head["sha"]}'
+    try:
+        payload = _one(read, [
+            'gh', 'api', '-H', 'Cache-Control: no-cache', target])
+    except QueryError as error:
+        return None, [(target, f'failed: {error}')]
+    sha = None
+    if isinstance(payload, dict):
+        base = payload.get('merge_base_commit')
+        if isinstance(base, dict):
+            sha = base.get('sha')
+    if _hex40(sha):
+        return sha, [(target, f'merge base {sha}')]
+    return None, [(target, f'merge base {sha!r} is not 40 hex')]
 
 
 def _remedy():
@@ -347,16 +328,17 @@ def select_heads(pulls):
 def required_calls(head_count, gate_count):
     """Worst-case `gh api` calls: enumeration plus per-head work."""
     return (len(GATE_PATTERNS)
-            + head_count * (PER_HEAD_OVERHEAD + 2 * gate_count))
+            + head_count * (PER_HEAD_OVERHEAD + gate_count))
 
 
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
     """Publish a verdict for each head. Returns (exit_code, published).
 
-    `dry_run` computes and reports every verdict but publishes nothing, so the
-    decision can be exercised over the real pull requests without writing a
-    check run to any of them.
+    A head whose write fails is skipped loudly and the run continues: one
+    transient failure must not abandon the later heads, which include stale
+    ones waiting for a red. `dry_run` computes and reports but publishes
+    nothing.
     """
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
@@ -384,8 +366,15 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
                   f'{verdict.conclusion:>7} [{verdict.kind}] '
                   f'{verdict.summary}')
         else:
-            publish(read, repository, head['sha'], verdict.conclusion,
-                    verdict.title, verdict.summary, details_url)
+            try:
+                publish(read, repository, head['sha'], verdict.conclusion,
+                        verdict.title, verdict.summary, details_url)
+            except QueryError as error:
+                print(f'gate freshness: could not publish the verdict for '
+                      f'pull request {head["number"]}: {error}; skipping',
+                      file=sys.stderr)
+                skipped += 1
+                continue
         published.append(verdict)
     return (1 if skipped else 0), published
 
@@ -433,9 +422,10 @@ def _open_pulls(read, repository):
         f'&per_page=100'])
 
 
-def main(argv=None):
+def main(argv=None, read=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     dry_run = '--dry-run' in arguments
+    read = gh_read if read is None else read
     repository = os.environ.get('GITHUB_REPOSITORY', '')
     event = _event()
     name = os.environ.get('GITHUB_EVENT_NAME', '')
@@ -444,18 +434,18 @@ def main(argv=None):
         heads = select_heads([pr]) if pr else []
     else:
         try:
-            pulls = _open_pulls(gh_read, repository)
+            pulls = _open_pulls(read, repository)
         except QueryError as error:
             print('gate freshness: could not read the open pull request list; '
                   f'publishing nothing: {error}', file=sys.stderr)
             return 1
         heads = select_heads(pulls if isinstance(pulls, list) else [])
-    gates = enumerate_gates(gh_read, repository)
+    gates = enumerate_gates(read, repository)
     if gates is None:
         print('gate freshness: could not read a gate commit on main; '
               'publishing nothing', file=sys.stderr)
         return 1
-    code, published = process(gh_read, repository, heads, gates,
+    code, published = process(read, repository, heads, gates,
                               _details_url(), _call_budget(), dry_run)
     verb = 'would publish' if dry_run else 'published'
     print(f'gate freshness: {verb} {len(published)} verdict(s) for '

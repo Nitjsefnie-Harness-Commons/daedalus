@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Contract for the gate-freshness publication (issue 1008).
+"""Contract for the gate-freshness decision core (issue 1008).
 
 Every decision function is pure and driven here through an injected fake for
-the ``read`` seam, so a verdict is tested without a network and the network is
-tested without a real pull request. The two halves that must never be confused
--- "the branch is stale" and "the answer could not be computed" -- get separate
-entries, and the publish path is exercised against a head already carrying a
-published success, because overwriting that green is the whole defect.
+the ``read`` seam, so a verdict is tested without a network. The two halves
+that must never be confused -- "the branch is stale" and "the answer could not
+be computed" -- get separate entries, and the publish path is exercised
+against a head already carrying a published success, because overwriting that
+green is the whole defect. The orchestration (``process``/``main``), the run
+bound, and the workflow shape live in ``test_gate_freshness_run.py``.
 """
 import json
 import re
@@ -28,20 +29,6 @@ def _mod():
                       'gate_freshness_mod')
 
 
-def _url(argv):
-    for token in argv:
-        if token.startswith('repos/'):
-            return token
-    raise AssertionError(f'no repos/ target in {argv!r}')
-
-
-def _method(argv):
-    for index, token in enumerate(argv):
-        if token in ('-X', '--method') and index + 1 < len(argv):
-            return argv[index + 1].upper()
-    return 'GET'
-
-
 def _encode(value):
     return value if isinstance(value, str) else json.dumps(value)
 
@@ -59,12 +46,6 @@ def _gate(path, sha):
     return (path, sha)
 
 
-def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
-    return {'number': number, 'head': {'sha': sha, 'ref': ref,
-                                       'repo': {'owner': {'login': owner}}},
-            'base': {'ref': base}}
-
-
 # ---- gate-defining path set ----
 
 def test_the_set_is_exactly_the_documented_patterns(tmp):
@@ -72,18 +53,18 @@ def test_the_set_is_exactly_the_documented_patterns(tmp):
     del tmp
     m = _mod()
     assert tuple(m.GATE_PATTERNS) == (
-        '.github/workflows/**', '.github/ci-thresholds.json',
-        'scripts/ci/**', 'pyrightconfig.json', 'pyrightconfig.tests.json',
+        '.github/workflows/**', 'scripts/ci/**', 'scripts/check_versions.py',
+        '.gitleaks.toml', 'pyrightconfig.json', 'pyrightconfig.tests.json',
         '.pylintrc', 'setup.cfg', 'eslint.config.js', 'pyproject.toml',
         'run_tests.py', 'requirements-dev.txt', 'requirements-test.txt')
     for path in m.GATE_PATTERNS:
         assert m.is_gate_defining(path), path
     assert m.is_gate_defining('scripts/ci/deep/x.py')
-    assert m.is_gate_defining('.github/workflows/a/b/c.yml')  # nested
+    assert m.is_gate_defining('.github/workflows/a/b/c.yml')
 
 
 def test_near_miss_spellings_are_not_gate_defining(tmp):
-    """A change to a test or a similarly named neighbour is not a gate."""
+    """A change to a test, or a similarly named neighbour, is not a gate."""
     del tmp
     m = _mod()
     negatives = (
@@ -94,10 +75,25 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
         'server.py', 'README.md',
         '.github/dependabot.yml',     # proposes updates; decides no verdict
         '.github/ci-thresholds.json.bak', 'pyrightconfig.jsonx',
-        'setup.cfg.bak', 'run_tests.pyc',
+        'setup.cfg.bak', 'run_tests.pyc', 'scripts/check_version.py',
+        '.gitleaks.toml.bak',
     )
     for path in negatives:
         assert not m.is_gate_defining(path), path
+
+
+def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
+    """The baselines the branch carries itself are excluded, and the rule is
+    narrow enough to notice if it is widened by a new entry without a
+    reason."""
+    del tmp
+    m = _mod()
+    assert m.CARRIED_BY_THE_BRANCH == ('.github/ci-thresholds.json',)
+    # Excluded from the set: a branch measures its own tree, so it is safe.
+    assert not m.is_gate_defining('.github/ci-thresholds.json')
+    assert '.github/ci-thresholds.json' not in m.GATE_PATTERNS
+    doc = m.__doc__ or ''
+    assert 'carries itself' in doc or 'carry' in doc
 
 
 def test_the_docstring_justifies_every_pattern(tmp):
@@ -110,51 +106,111 @@ def test_the_docstring_justifies_every_pattern(tmp):
         assert leaf in doc, (pattern, leaf)
 
 
-# ---- derive the set from the workflows ----
+# ---- derive the set from the workflows (the guard) ----
 
-_GATE_REFS = (
-    re.compile(r'--rcfile=([\w.\-]+)'),
-    re.compile(r'\b(requirements-[\w\-]+\.txt)\b'),
-    re.compile(r'\b(pyrightconfig[\w.\-]*\.json)\b'),
-    re.compile(r'\b(eslint\.config(?:\.[\w\-]+)*\.js)\b'),
-    re.compile(r'\b(run_tests\.py)\b'),
-    re.compile(r'\b(setup\.cfg)\b'),
-    re.compile(r'\b(pyproject\.toml)\b'),
-    re.compile(r'\b(\.github/ci-thresholds\.json)\b'),
-    re.compile(r'\b(scripts/ci/[\w\-]+\.py)\b'),
-)
+_EXECUTED = re.compile(r'python3? +([\w./-]+\.py)\b')
+_FLAG_VALUE = re.compile(
+    r'--(?:rcfile|config|requirement|project|input|file)[= ]+([^\s\'"]+)'
+    r'|(?<!\w)-r[= ]+([^\s\'"]+)')
 
 
-def _referenced_gate_files(directory):
+def _normalise(candidate, base=ROOT):
+    """A tracked repo-relative path for `candidate`, or None."""
+    parts = [p for p in candidate.split('/')
+             if p and p not in ('.', '..', 'head')]
+    parts = [p for p in parts if not p.startswith('$')]
+    rel = '/'.join(parts)
+    return rel if rel and (base / rel).is_file() else None
+
+
+def _workflow_gate_files(directory, base=ROOT):
+    """Every TRACKED file a workflow executes or passes to a tool.
+
+    Two forms, both real here: a `.py` a step executes, and a file passed by a
+    config-style flag. Candidates are kept only when they name a tracked file,
+    which is what excludes files a job generates at run time and shell
+    fragments like `-r 'arrays'` that a jq expression contributes.
+    """
     found = set()
     for path in sorted(directory.glob('*.yml')):
         text = path.read_text(encoding='utf-8')
-        for pattern in _GATE_REFS:
-            found.update(pattern.findall(text))
+        for match in _EXECUTED.findall(text):
+            resolved = _normalise(match, base)
+            if resolved:
+                found.add(resolved)
+        for first, second in _FLAG_VALUE.findall(text):
+            resolved = _normalise(first or second, base)
+            if resolved:
+                found.add(resolved)
     return found
 
 
-def test_every_gate_file_the_workflows_name_is_in_the_set(tmp):
-    """The set is derived from the workflows, not trusted from a reading."""
+def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
+    """The set is derived from the workflows, not trusted from a reading.
+
+    Every tracked file a workflow executes or passes to a tool must be gate-
+    defining, unless it is a declared carried-by-the-branch file. A gate file
+    added to a workflow later -- including one outside scripts/ci/ -- fails
+    here rather than going silently unlisted.
+    """
     del tmp
     m = _mod()
-    referenced = _referenced_gate_files(ROOT / '.github' / 'workflows')
-    assert referenced, 'the workflows name no gate-configuration file'
-    for path in sorted(referenced):
+    used = _workflow_gate_files(ROOT / '.github' / 'workflows')
+    assert used, 'the workflows name no gate file'
+    unaccounted = used - set(m.CARRIED_BY_THE_BRANCH)
+    for path in sorted(unaccounted):
         assert m.is_gate_defining(path), path
 
 
-def test_a_planted_new_gate_file_is_caught_by_the_derivation(tmp):
-    """The derivation discriminates: a new requirements file is not listed."""
+def test_the_guard_accounts_for_the_files_the_set_now_carries(tmp):
+    """The two files a gate step actually uses outside scripts/ci/ are
+    covered."""
+    del tmp
     m = _mod()
-    root = Path(tmp) / 'workflows'
-    root.mkdir()
-    (root / 'probe.yml').write_text(
-        'jobs:\n  lint:\n    steps:\n      - run: pip install -r'
-        ' requirements-lint.txt\n', encoding='utf-8')
-    found = _referenced_gate_files(root)
-    assert 'requirements-lint.txt' in found
-    assert not m.is_gate_defining('requirements-lint.txt')
+    used = _workflow_gate_files(ROOT / '.github' / 'workflows')
+    assert 'scripts/check_versions.py' in used
+    assert '.gitleaks.toml' in used
+    for path in ('scripts/check_versions.py', '.gitleaks.toml'):
+        assert m.is_gate_defining(path), path
+
+
+def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
+    """The derivation discriminates where the literal list did not.
+
+    A new gate script run by a workflow from OUTSIDE scripts/ci/ -- the shape
+    scripts/check_versions.py already ships -- is a real tracked file, so the
+    guard requires it to be gate-defining. A literal list of nine config names
+    would not have seen this file.
+    """
+    m = _mod()
+    base = Path(tmp) / 'repo'
+    (base / 'scripts').mkdir(parents=True)
+    (base / 'scripts' / 'scan_secrets_extra.py').write_text(
+        '# gate\n', encoding='utf-8')
+    workflows = base / '.github' / 'workflows'
+    workflows.mkdir(parents=True)
+    (workflows / 'probe.yml').write_text(
+        'jobs:\n  gate:\n    steps:\n'
+        '      - run: python3 scripts/scan_secrets_extra.py\n',
+        encoding='utf-8')
+    used = _workflow_gate_files(workflows, base=base)
+    assert 'scripts/scan_secrets_extra.py' in used
+    # The guard's assertion, run against the planted tree: the file is used but
+    # not gate-defining, so the guard would fail here -- which is the point.
+    unaccounted = used - set(m.CARRIED_BY_THE_BRANCH)
+    not_gate = [p for p in unaccounted if not m.is_gate_defining(p)]
+    assert not_gate == ['scripts/scan_secrets_extra.py'], not_gate
+
+
+def test_a_generated_untracked_requirements_file_is_not_required(tmp):
+    """A file a job generates at run time is not a tracked gate file."""
+    del tmp
+    m = _mod()
+    used = _workflow_gate_files(ROOT / '.github' / 'workflows')
+    # extras-requirements.txt is written by audit.yml from pyproject.toml; it
+    # is not tracked, so the guard never requires it.
+    assert 'extras-requirements.txt' not in used
+    assert not m.is_gate_defining('extras-requirements.txt')
 
 
 # ---- merge base: the shape guard ----
@@ -206,82 +262,31 @@ def test_an_absent_merge_base_field_is_unreadable(tmp):
     assert mb is None
 
 
-# ---- fork / unreadable: the two compares ----
-
-def _two_form_read(m, first_error=None, second=None, mb=G1):
-    """Route the first compare (head SHA) and the fallback (owner:ref)."""
-    def read(argv):
-        target = _url(argv)
-        if '/compare/' not in target:
-            raise AssertionError(target)
-        if target.endswith(f'...{HEAD}'):
-            if first_error is not None:
-                raise first_error
-            return _encode(_compare_ok(mb, 'ahead'))
-        if isinstance(second, BaseException):
-            raise second
-        if second is not None:
-            return _encode(second)
-        return _encode(_compare_ok(mb, 'ahead'))
-    return read
-
-
-def test_first_compare_fails_but_the_fallback_succeeds_is_fresh(tmp):
-    """A head the first spelling cannot reach but the second can is green.
-    This is the discriminator between the fallback and the unreadable branch:
-    a single '404 goes red' assertion passes with the fallback gone too."""
+def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
+    """A 404 is not evidence of access denial. The message names the request
+    and its outcome and gives the remedy; it does not diagnose a cause."""
     del tmp
     m = _mod()
-    read = _two_form_read(m, first_error=m.QueryError('HTTP 404'),
-                          second=_compare_ok(G1, 'ahead'))
-    mb, _ = m.merge_base(read, 'o/r', G1, _head())
-    assert mb == G1
-    verdict = m.head_verdict(read, 'o/r', _head(), [_gate('.pylintrc', G1)])
-    assert verdict.conclusion == 'success', verdict.summary
 
-
-def test_first_compare_fails_and_fallback_returns_a_different_base_is_stale(
-        tmp):
-    del tmp
-    m = _mod()
-    read = _two_form_read(m, first_error=m.QueryError('HTTP 404'),
-                          second=_compare_ok('e' * 40, 'diverged'))
-    verdict = m.head_verdict(read, 'o/r', _head(), [_gate('.pylintrc', G1)])
-    assert verdict.conclusion == 'failure'
-    assert verdict.kind == 'stale'
-
-
-def test_both_compares_failing_is_unreadable_and_red(tmp):
-    del tmp
-    m = _mod()
-    read = _two_form_read(m, first_error=m.QueryError('HTTP 404'),
-                          second=m.QueryError('HTTP 404'))
-    mb, _ = m.merge_base(read, 'o/r', G1, _head())
-    assert mb is None
+    def read(_argv):
+        raise m.QueryError('HTTP 404')
     verdict = m.head_verdict(read, 'o/r', _head(), [_gate('.pylintrc', G1)])
     assert verdict.conclusion == 'failure'
     assert verdict.kind == 'unreadable'
-
-
-def test_unreadable_summary_states_the_observation_not_a_diagnosis(tmp):
-    """A 404 is not evidence of access denial; the message names the two
-    requests and their outcomes, and the remedy."""
-    del tmp
-    m = _mod()
-    read = _two_form_read(m, first_error=m.QueryError('HTTP 404'),
-                          second=m.QueryError('HTTP 404'))
-    verdict = m.head_verdict(read, 'o/r', _head(), [_gate('.pylintrc', G1)])
-    text = (verdict.title + ' ' + verdict.summary).lower()
-    assert 'access denied' not in text
-    assert 'permission' not in text
+    text = verdict.title + ' ' + verdict.summary
+    # The observation, positively: the compare request and its failure appear.
     assert 'compare' in text
-    assert '404' in text
-    assert 'rebase' in text
+    assert f'compare/{G1}...{HEAD}' in text
+    assert 'HTTP 404' in text
+    assert 'rebase' in text.lower()
+    assert 'not evidence of access denial' in text
 
+
+# ---- gate commit enumeration ----
 
 def _enumeration_read(commits):
     def read(argv):
-        target = _url(argv)
+        target = next(t for t in argv if t.startswith('repos/'))
         if '/commits?' not in target:
             raise AssertionError(target)
         pattern = target.split('path=')[1]
@@ -314,10 +319,25 @@ def test_enumeration_unreadable_is_a_global_failure(tmp):
     assert m.enumerate_gates(read, 'o/r') is None
 
 
-def _multi_gate_read(missing_at):
+def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
+    """A payload that is not a list is not 'no commits' -- it drops a gate."""
+    del tmp
+    m = _mod()
+    for bad in ('not-a-list', 42, {'error': 'rate limited'}):
+        def read(_argv, shape=bad):
+            return _encode(shape)
+        assert m.enumerate_gates(read, 'o/r') is None, bad
+
+
+# ---- verdicts over many gate commits ----
+
+def _multi_gate_read(missing_at, asked=None):
     """A head that lacks exactly the gate commit `missing_at`."""
     def read(argv):
-        gate = _url(argv).split('compare/')[1].split('...')[0]
+        target = next(t for t in argv if t.startswith('repos/'))
+        gate = target.split('compare/')[1].split('...')[0]
+        if asked is not None:
+            asked.append(gate)
         if gate == missing_at:
             return _encode(_compare_ok('f' * 40, 'diverged'))
         return _encode(_compare_ok(gate, 'ahead'))
@@ -346,6 +366,17 @@ def test_a_head_missing_a_middle_gate_is_red_and_names_it(tmp):
     assert 'path-a' not in verdict.summary
 
 
+def test_every_gate_is_compared_not_short_circuited(tmp):
+    """Check every gate, never short-circuit. A fake records the gate SHAs it
+    was asked about; adding `break` after the first miss would drop them."""
+    del tmp
+    m = _mod()
+    asked = []
+    gates = [_gate('a', G1), _gate('b', G2), _gate('c', 'd' * 40)]
+    m.head_verdict(_multi_gate_read(G2, asked), 'o/r', _head(), gates)
+    assert asked == [G1, G2, 'd' * 40], asked
+
+
 def test_every_gate_commit_is_checked_not_just_the_newest(tmp):
     """The newest gate is not a proxy for the rest: a head lacking only the
     older one is still red."""
@@ -363,7 +394,8 @@ def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
     gates = [_gate('a', G1), _gate('b', G2)]
 
     def read(argv):
-        gate = _url(argv).split('compare/')[1].split('...')[0]
+        target = next(t for t in argv if t.startswith('repos/'))
+        gate = target.split('compare/')[1].split('...')[0]
         if gate == G2:
             raise m.QueryError('HTTP 404')
         return _encode(_compare_ok(gate, 'ahead'))
@@ -372,13 +404,18 @@ def test_a_gate_commit_that_cannot_be_read_makes_the_whole_head_red(tmp):
     assert verdict.kind == 'unreadable'
 
 
-# ---- publishing: a failure must overwrite a published success ----
+# ---- publish: a failure must overwrite a published success ----
 
-def _publish_read(existing_ids, recorded):
+def _publish_read(existing_ids, recorded, fail_listing=None):
     def read(argv):
-        target = _url(argv)
-        method = _method(argv)
+        target = next(t for t in argv if t.startswith('repos/'))
+        method = 'GET'
+        for index, token in enumerate(argv):
+            if token in ('-X', '--method') and index + 1 < len(argv):
+                method = argv[index + 1].upper()
         if '/check-runs?' in target and method == 'GET':
+            if fail_listing is not None:
+                raise fail_listing('could not read the check runs')
             return '\n'.join(str(i) for i in existing_ids)
         if method in ('POST', 'PATCH'):
             recorded.append((method, target, list(argv)))
@@ -442,251 +479,63 @@ def test_re_running_updates_the_same_check_rather_than_accumulating(tmp):
     assert all(r[1].endswith('/check-runs/99') for r in recorded)
 
 
-def test_publish_filters_on_name_external_id_and_app_slug(tmp):
+def test_publish_filters_and_sends_no_cache(tmp):
+    """The existing-check lookup is filtered server-side and no-cached."""
     del tmp
     m = _mod()
     recorded = []
     captured = []
 
     def read(argv):
-        target = _url(argv)
-        if '/check-runs?' in target and _method(argv) == 'GET':
+        target = next(t for t in argv if t.startswith('repos/'))
+        method = 'GET'
+        for index, token in enumerate(argv):
+            if token in ('-X', '--method') and index + 1 < len(argv):
+                method = argv[index + 1].upper()
+        if '/check-runs?' in target and method == 'GET':
             captured.append(' '.join(argv))
             return ''
-        recorded.append((_method(argv), target))
+        recorded.append((method, target))
         return '{}'
     m.publish(read, 'o/r', HEAD, 'success', 't', 's', RUN)
     assert captured, 'the existing-check lookup was never made'
     for fragment in ('gate freshness', 'daedalus-gate-freshness/v1',
-                     'github-actions', 'filter=all', '--paginate'):
+                     'github-actions', 'filter=all', '--paginate',
+                     'Cache-Control: no-cache'):
         assert fragment in captured[0], (fragment, captured[0])
 
 
-# ---- the per-head flow ----
-
-def _flow_read(m, gates, current, published, heads_missing=(), moved=None):
-    """The whole per-head flow. `moved` makes the head change after the first
-    pull-request read, so the pre-write revalidation sees a different sha."""
-    state = {'reads': 0}
-
-    def read(argv):
-        target = _url(argv)
-        method = _method(argv)
-        if re.search(r'/pulls/\d+$', target):
-            number = int(target.rsplit('/', 1)[1])
-            if number not in current:
-                raise m.QueryError('HTTP 404')
-            state['reads'] += 1
-            sha = current[number]
-            if moved is not None and state['reads'] > 1:
-                sha = moved
-            return _encode({'head': {'sha': sha}})
-        if '/commits?' in target:
-            pattern = target.split('path=')[1]
-            return _encode([{'sha': s} for s in gates.get(pattern, [])])
-        if '/compare/' in target:
-            gate = target.split('compare/')[1].split('...')[0]
-            if gate in heads_missing:
-                return _encode(_compare_ok('f' * 40, 'diverged'))
-            return _encode(_compare_ok(gate, 'ahead'))
-        if '/check-runs?' in target and method == 'GET':
-            return ''
-        if method in ('POST', 'PATCH'):
-            published.append((target, method))
-            return '{}'
-        raise AssertionError(f'{method} {target}')
-    return read
-
-
-def test_a_fresh_head_publishes_a_green_check(tmp):
+def test_a_per_head_listing_failure_raises_so_the_run_can_skip(tmp):
+    """An unreadable existing-check listing is a per-head failure, not a
+    crash: publish raises and process() catches and skips that head."""
     del tmp
     m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published)
-    code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                               [_gate('.pylintrc', G1)], RUN)
-    assert code == 0, verdicts
-    assert len(published) == 1
-    assert published[0][1] == 'POST'
-    assert verdicts[0].conclusion == 'success'
+    try:
+        m.publish(_publish_read([], [], fail_listing=m.QueryError), 'o/r',
+                  HEAD, 'failure', 't', 's', RUN)
+    except m.QueryError:
+        return
+    raise AssertionError('an unreadable listing did not raise QueryError')
 
 
-def test_a_stale_head_publishes_a_red_check(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
-                      heads_missing={G1})
-    code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                               [_gate('.pylintrc', G1)], RUN)
-    assert code == 0, 'a stale branch is a verdict, not a script failure'
-    assert len(published) == 1
-    assert verdicts[0].conclusion == 'failure'
-    assert verdicts[0].kind == 'stale'
-
-
-def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: 'z' * 40}, published)
-    code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                               [_gate('.pylintrc', G1)], RUN)
-    assert published == [], 'published onto a superseded SHA'
-    assert code != 0, 'skipping a moved head must be loud'
-    assert verdicts == []
-
-
-def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
-    """Revalidate immediately before the write.
-
-    The only entry that reaches this is a read whose answer changes between
-    the two revalidations; it discriminates the pre-write revalidation from
-    the first one, which the moved-head entry above already covers.
-    """
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {}, {7: HEAD}, published, moved='m' * 40)
-    code, _ = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                        [_gate('.pylintrc', G1)], RUN)
-    assert published == [], 'published onto a SHA that stopped being the head'
-    assert code != 0, 'skipping a head that moved must be loud'
-
+# ---- select_heads / required_calls ----
 
 def test_a_pull_request_not_based_on_main_is_skipped(tmp):
     del tmp
     m = _mod()
-    assert m.select_heads([_pr(7, base='release/1.0')]) == []
+    pr = {
+        'number': 7,
+        'head': {'sha': HEAD, 'ref': 'f',
+                 'repo': {'owner': {'login': 'o'}}},
+        'base': {'ref': 'release/1.0'},
+    }
+    assert m.select_heads([pr]) == []
 
 
-def test_an_empty_open_pull_request_list_publishes_nothing(tmp):
+def test_required_calls_charges_one_compare_per_gate(tmp):
     del tmp
     m = _mod()
-    code, verdicts = m.process(_flow_read(m, {}, {}, []), 'o/r', [], [], RUN)
-    assert code == 0
-    assert verdicts == []
-
-
-def test_a_head_whose_current_read_fails_is_not_published(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {}, published)  # 7 unreadable
-    code, _ = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                        [_gate('.pylintrc', G1)], RUN)
-    assert published == []
-    assert code != 0
-
-
-def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published)
-    code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                               [_gate('.pylintrc', G1)], RUN, dry_run=True)
-    assert code == 0
-    assert len(verdicts) == 1
-    assert verdicts[0].conclusion == 'success'
-    assert published == [], 'a dry run wrote a check run'
-
-
-def test_required_calls_accounts_for_both_compares_per_gate(tmp):
-    del tmp
-    m = _mod()
-    assert m.required_calls(3, 4) == len(m.GATE_PATTERNS) + 3 * (4 + 2 * 4)
-
-
-def test_over_the_head_bound_refuses_and_publishes_nothing(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    heads = m.select_heads([_pr(i) for i in range(1, 6)])
-    read = _flow_read(m, {'.pylintrc': [G1]}, {}, published)
-    code, _ = m.process(read, 'o/r', heads, [_gate('.pylintrc', G1)], RUN,
-                        call_budget=5)
-    assert code != 0
-    assert published == [], 'a truncated run must publish nothing'
-
-
-def test_within_the_bound_publishes_every_head(tmp):
-    del tmp
-    m = _mod()
-    published = []
-    heads = m.select_heads([_pr(i) for i in range(1, 4)])
-    read = _flow_read(m, {'.pylintrc': [G1]},
-                      {i: HEAD for i in (1, 2, 3)}, published)
-    code, verdicts = m.process(read, 'o/r', heads, [_gate('.pylintrc', G1)],
-                               RUN)
-    assert code == 0, verdicts
-    assert len(published) == 3
-    assert len(verdicts) == 3
-
-
-# ---- the workflow shape ----
-
-def _workflow_text():
-    return (ROOT / '.github' / 'workflows' / 'gate-freshness.yml').read_text(
-        encoding='utf-8')
-
-
-def test_the_job_is_not_named_the_published_check(tmp):
-    """On pull_request_target the job's own check lands on the head, so the
-    job must not carry the name the ruleset matches, or a ruleset reading by
-    context sees two different things under one name."""
-    del tmp
-    m = _mod()
-    text = _workflow_text()
-    assert '  publish-freshness:' in text
-    assert 'name: publish freshness' in text
-    assert '  gate-freshness:' not in text, (
-        'the job name collides with the published check context')
-    assert m.NAME == 'gate freshness'
-
-
-def test_workflow_permissions_are_exactly_the_three_scopes(tmp):
-    del tmp
-    from _yamlread import top_level_mapping
-    permissions = top_level_mapping(_workflow_text(), 'permissions')
-    assert permissions == {'checks': 'write', 'contents': 'read',
-                           'pull-requests': 'read'}, permissions
-
-
-def test_workflow_declares_both_triggers(tmp):
-    del tmp
-    from _workflows import _event_option_keys, _workflow_triggers
-    triggers = _workflow_triggers(_workflow_text(), 'gate-freshness.yml')
-    assert 'push' in triggers
-    assert 'pull_request_target' in triggers
-    assert 'branches' in _event_option_keys(triggers['push'], 'g')
-    assert 'main' in ' '.join(triggers['push'])
-    assert 'types' in _event_option_keys(triggers['pull_request_target'], 'g')
-    types = ' '.join(triggers['pull_request_target'])
-    for kind in ('opened', 'synchronize', 'reopened', 'ready_for_review'):
-        assert kind in types
-
-
-def test_workflow_is_well_formed(tmp):
-    del tmp
-    text = _workflow_text()
-    assert 'concurrency:' in text
-    from _wfjobs import load
-    for name, job in load(ROOT / '.github' / 'workflows'
-                          / 'gate-freshness.yml').jobs.items():
-        assert 'timeout-minutes' in job, name
-    assert 'persist-credentials: false' in text
-    assert 'github.event.pull_request.head' not in text
-    assert 'refs/pull' not in text
-    assert 'thresholds.py --check' not in text
-
-
-def test_workflow_header_states_the_bound_and_its_arithmetic(tmp):
-    del tmp
-    text = _workflow_text().lower()
-    assert 'timeout-minutes' in text
-    assert 'compare' in text
-    assert re.search(r'open pull request', text), text[:400]
+    assert m.required_calls(3, 4) == len(m.GATE_PATTERNS) + 3 * (4 + 4)
 
 
 def main():
