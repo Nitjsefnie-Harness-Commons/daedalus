@@ -688,6 +688,73 @@ def test_setdefault_unresolved_key_names_every_stored_item(tmp):
     assert not bad, bad
 
 
+# The same value read back through a name, because a verdict that stops at
+# the store is a false green: the value the runtime returns is the value the
+# call reaches, and a frame between the store and the call must not lose it.
+# The rows vary how far the value travels — a statement, a nested def, a
+# helper's return value — for each of the two unresolved spellings, and each
+# twin holds the same travel with clean data.
+_SETDEFAULT_CALL_THROUGH = [
+    ('call-through-concat-statement', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\nd.get("a", ordinary)',
+        invoke='x()'), (1, 1)),
+    ('call-through-concat-nested', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x()',
+        invoke='inner()'), (1, 1)),
+    ('call-through-concat-helper', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x',
+        invoke='inner()()'), (1, 1)),
+    ('call-through-fstring-statement', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\nd.get("a", ordinary)',
+        invoke='x()'), (1, 1)),
+    ('call-through-fstring-nested', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x()',
+        invoke='inner()'), (1, 1)),
+    ('call-through-fstring-helper', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x',
+        invoke='inner()()'), (1, 1)),
+    ('call-through-twin-concat-statement', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\nd.get("a", ordinary)',
+        invoke='x()'), (0, 0)),
+    ('call-through-twin-concat-nested', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x()',
+        invoke='inner()'), (0, 0)),
+    ('call-through-twin-concat-helper', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x',
+        invoke='inner()()'), (0, 0)),
+    ('call-through-twin-fstring-statement', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\nd.get("a", ordinary)',
+        invoke='x()'), (0, 0)),
+    ('call-through-twin-fstring-nested', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x()',
+        invoke='inner()'), (0, 0)),
+    ('call-through-twin-fstring-helper', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = f"k"',
+        'x = d.setdefault(key, ordinary)\ndef inner():\n    return x',
+        invoke='inner()()'), (0, 0)),
+]
+
+
+def test_setdefault_unresolved_value_survives_to_the_call(tmp):
+    bad = []
+    for label, body, expected in _SETDEFAULT_CALL_THROUGH:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 # One arm of the same lookup per row, with a default the guard models, so a
 # row is refused by that arm alone. The owner the model cannot read and the
 # container that is not a dict both keep the unprovable sender; the dict the
