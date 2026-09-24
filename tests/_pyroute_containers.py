@@ -51,15 +51,16 @@ def ordered_container(value, kind, order=None):
             or value.kind not in ('tuple', 'list')):
         return None
     if order is None:
-        return DeferredContainer(dict(value.items), value.length, kind)
+        return DeferredContainer(dict(value.items), value.length, kind,
+                                 exact_prefix=value.exact_prefix)
     if value.length is None:
         joined = merge_yielded(value.items.values())
         return DeferredContainer(
             {} if joined is None else {DYNAMIC_KEY: joined}, None, kind)
     positions = order(value.length)
-    items = {index: value.items[position]
-             for index, position in enumerate(positions)
-             if position in value.items}
+    items: dict = {index: value.items[position]
+                   for index, position in enumerate(positions)
+                   if position in value.items}
     if DYNAMIC_KEY in value.items:
         items[DYNAMIC_KEY] = value.items[DYNAMIC_KEY]
     return DeferredContainer(items, len(positions), kind)
