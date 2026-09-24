@@ -1,0 +1,72 @@
+name: gate freshness
+
+# Publish a `gate freshness` verdict on every open pull request head based on
+# `main`, so only branches that PREDATE A NEW GATE are forced to rebase. The
+# script decides whether a head contains every gate-defining commit on `main`
+# and writes one check run per head through the Checks API; the maintainer's
+# ruleset requires that check. PR 986 is the defect this exists for: its head
+# never ran the ratchet that landed on `main` after it, merged green, and the
+# merge turned `main` red. A check computed only in a pull request's own CI is
+# not enough.
+#
+# WHY THE SCRIPT PUBLISHES RATHER THAN RELYING ON THE JOB. On a push to `main`
+# this job's own check run lands on `main`, where no ruleset reads it, so the
+# verdict every ruleset sees must be written onto each pull request HEAD by the
+# script. The job is therefore named `publish freshness` -- deliberately NOT
+# the published context `gate freshness` -- so no ruleset reading by context
+# can ever match two different things under one name. The job's own check is
+# informational; the published one is the gate.
+#
+# WHY `pull_request_target` IS SAFE HERE. On this trigger BOTH halves come from
+# the BASE: the workflow text and the `actions/checkout` copy are the trusted
+# base branch, and the only head data used is the SHA/ref/owner from the event
+# payload -- the script never checks out, imports, or executes anything from
+# the pull request. That is the whole safety argument. (A `pull_request` run
+# would take its workflow text from the merge ref while running a script from
+# the branch SHA, and the two can disagree.)
+#
+# THE BOUND, AND ITS ARITHMETIC. Per open pull request the worst case is, for
+# each of G gate commits, up to two `compare` requests (the fork fallback),
+# plus one head revalidation, one check-runs listing, a second head
+# revalidation, and one write. With G = 12 and P open pull requests that is
+# 12 + P * (2*12 + 4) `gh api` calls. The run refuses LOUDLY -- publishing
+# nothing, exiting nonzero -- rather than truncating the head set, so the
+# `timeout-minutes` below sits above the worst case at the enforced call
+# budget. See the BOUND section of scripts/ci/gate_freshness.py.
+on:
+  push:
+    branches: [main]
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: gate-freshness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-freshness:
+    name: publish freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: >-
+          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: >-
+          actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+
+      - name: Publish the gate freshness verdicts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/gate_freshness.py
