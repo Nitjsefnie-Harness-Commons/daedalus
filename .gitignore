@@ -301,6 +301,7 @@
 !/tests/_pyroute.py
 !/tests/_pyroute_live.py
 !/tests/_pyroute_mapping.py
+!/tests/_pyroute_selections.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
 !/tests/_pyroute_values.py

@@ -2,40 +2,81 @@
 import ast
 
 from _pyroute_mapping import (_selected_values, apply_assignment_bindings)
-from _pyroute_values import (UNPROVABLE_SENDER, _known_value,
+from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
+                             DeferredClass, DeferredInstance, _known_value,
                              deferred_expression_value, is_deferred_value,
                              merge_yielded)
 
 _LIVE_UNRESOLVED = object()
 
 
-def _constant_getattr(value, state):
-    """The constant attribute name of a plain getattr call, or None."""
+def _plain_getattr(value, state):
+    """The unbound getattr call of arity 2 or 3 without keywords, or None."""
     if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
             and value.func.id == 'getattr'):
         return None
     if value.keywords or len(value.args) not in (2, 3):
         return None
-    if value.func.id in state.bound or not isinstance(
-            value.args[1], ast.Constant):
+    return None if value.func.id in state.bound else value
+
+
+def _constant_getattr(value, state):
+    """The constant attribute name of a plain getattr call, or None."""
+    call = _plain_getattr(value, state)
+    if call is None or not isinstance(call.args[1], ast.Constant):
         return None
-    return value.args[1].value if isinstance(value.args[1].value,
+    return call.args[1].value if isinstance(call.args[1].value,
                                              str) else None
+
+
+def _attribute_values(owner):
+    """Every deferred value an owner carries, for a name that cannot be
+    resolved to one attribute."""
+    if isinstance(owner, DeferredAlternatives):
+        return [item for value in owner.values
+                for item in _attribute_values(value)]
+    if isinstance(owner, DeferredInstance):
+        return list(owner.attributes.values())
+    if isinstance(owner, DeferredClass):
+        return list(owner.methods.values())
+    return []
+
+
+def _selection_value(value, state):
+    """The value a plain getattr call selects: the named attribute when the
+    owner carries it, else the default, and every value the owner carries
+    when the name is not a provable string constant. A non-string constant
+    name and an absent name without a default raise before any call, so they
+    select nothing."""
+    call = _plain_getattr(value, state)
+    if call is None:
+        return None
+    owner = _known_value(call.args[0], state)
+    name = _constant_getattr(value, state)
+    if name is not None:
+        selected = merge_yielded(_selected_values(owner, name, attribute=True))
+        if selected is not None:
+            return selected
+        if len(call.args) < 3:
+            return None
+    elif not isinstance(call.args[1], ast.Constant):
+        selected = merge_yielded(_attribute_values(owner))
+    else:
+        return None
+    return merge_yielded(
+        (selected, _known_value(call.args[2], state))) \
+        if len(call.args) == 3 else selected
 
 
 def seed_selection_value(value, state):
     """Seed the evaluated cache so an unprovable selection never reads
-    clean: a constant-name getattr resolves like the attribute it names,
-    and a maybe-sender keeps the deferred values it carries."""
+    clean: a getattr call resolves to the value it selects, and a
+    maybe-sender keeps the deferred values it carries."""
     cached = state.evaluated.get(id(value))
-    name = _constant_getattr(value, state)
-    if name is not None:
-        owner = _known_value(value.args[0], state)
-        selected = merge_yielded(
-            _selected_values(owner, name, attribute=True))
-        if selected is not None:
-            state.evaluated[id(value)] = selected
-            cached = selected
+    selected = _selection_value(value, state)
+    if selected is not None:
+        state.evaluated[id(value)] = selected
+        cached = selected
     if cached == UNPROVABLE_SENDER:
         parts = [item for item in (_known_value(child, state)
                                    for child in ast.walk(value))
