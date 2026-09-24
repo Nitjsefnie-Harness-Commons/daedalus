@@ -109,19 +109,31 @@ def _executable():
 
 
 def _parse(text):
-    """(status, headers, body) from a `-i` response."""
-    parts = re.split(r'\r?\n\r?\n', text, maxsplit=1)
-    if len(parts) != 2:
-        raise QueryError('no header block in the gh response')
-    head, body = parts
-    lines = head.replace('\r\n', '\n').split('\n')
-    match = re.search(r'\s(\d{3})\s', lines[0])
+    """(status, headers, body) from a `-i` response.
+
+    Read line by line rather than split at the first blank-line byte pair:
+    a Windows text stream re-translates the `\r\n` the answer already
+    carried, so each ending arrives as `\r\r\n` and the blank line is two
+    near-empty lines. A byte-pair split cuts inside the block, the header
+    lines fall into the body, and a reported reset arrives as no reset at
+    all - a fixed default instead of the wait the API asked for.
+    """
+    lines = text.split('\n')
     headers = {}
-    for line in lines[1:]:
-        name, _, value = line.partition(':')
-        if name and value:
-            headers[name.strip().lower()] = value.strip()
-    return int(match.group(1)) if match else 0, headers, body
+    status = 0
+    for index, line in enumerate(lines):
+        line = line.rstrip('\r')
+        if index == 0:
+            match = re.search(r'\s(\d{3})\s', line)
+            status = int(match.group(1)) if match else 0
+        elif not line.strip():
+            body = '\n'.join(part.rstrip('\r') for part in lines[index + 1:])
+            return status, headers, body
+        else:
+            name, _, value = line.partition(':')
+            if name and value:
+                headers[name.strip().lower()] = value.strip()
+    raise QueryError('no header block in the gh response')
 
 
 def _resume_at(headers, now):
@@ -173,31 +185,43 @@ def _graphql_refusal(payload):
 
 
 def _call(query, variables):
-    """One `gh api graphql`, payload on stdin, headers asked for."""
-    payload = json.dumps({'query': query, 'variables': variables or {}})
+    """One `gh api graphql`, payload on stdin, headers asked for.
+
+    The answer is read as bytes and decoded here rather than through a
+    text-mode read. A text-mode read translates line endings again on a
+    Windows relay: the `\r\n` the producer already spelled arrives as
+    `\r\r\n`, and the universal-newline reader turns each `\r` into a
+    line of its own - a blank line after every real line, which cuts the
+    header block short and takes the reported rate-limit reset with it. The
+    parse reads the endings as they came, so the block survives whatever
+    the relay did to them.
+    """
+    payload = json.dumps({'query': query,
+                          'variables': variables or {}}).encode('utf-8')
     try:
         proc = subprocess.run(
             [_executable(), 'api', '-i', 'graphql',
              '-H', 'Cache-Control: no-cache', '--input', '-'],
-            input=payload, capture_output=True, text=True, encoding='utf-8',
-            errors='replace', timeout=GH_TIMEOUT)
+            input=payload, capture_output=True, timeout=GH_TIMEOUT)
     except (subprocess.SubprocessError, OSError) as exc:
         raise QueryError(f'gh failed: {exc}') from exc
-    if not proc.stdout.strip():
-        detail = proc.stderr.strip()[:400] or f'gh exited {proc.returncode}'
+    answered = proc.stdout.decode('utf-8', 'replace')
+    complained = proc.stderr.decode('utf-8', 'replace')
+    if not answered.strip():
+        detail = complained.strip()[:400] or f'gh exited {proc.returncode}'
         raise QueryError(detail)
-    return proc
+    return proc.returncode, answered, complained
 
 
 def graphql(query, variables=None):
     """One page of a GraphQL query, fresh, no-cache, headers included."""
-    proc = _call(query, variables)
-    status, headers, body = _parse(proc.stdout)
+    code, answered, complained = _call(query, variables)
+    status, headers, body = _parse(answered)
     refused, resume = _refused(status, headers, body)
     if refused:
         raise RateLimited(f'HTTP {status}: {body.strip()[:200]}', resume)
-    if proc.returncode != 0 or status >= 400:
-        detail = (proc.stderr or body).strip()[:400] or f'HTTP {status}'
+    if code != 0 or status >= 400:
+        detail = (complained or body).strip()[:400] or f'HTTP {status}'
         raise QueryError(detail)
     try:
         payload = json.loads(body)

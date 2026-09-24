@@ -31,6 +31,17 @@ def _client():
     return _util.load(SOURCE, 'gh_client_contract')
 
 
+def _windows_text(text):
+    """What a text-mode stdout on Windows writes for `text`.
+
+    Python's Windows stdout translates every `\n` to `\r\n`, so a line
+    ending the caller already spelled `\r\n` leaves as `\r\r\n`. The
+    fake's response goes through such a stream, and so can any `gh` answer
+    relayed through one.
+    """
+    return text.replace('\n', '\r\n')
+
+
 def _page(nodes, has_next=False, cursor=None):
     return {'data': {'repository': {'items': {
         'pageInfo': {'hasNextPage': has_next, 'endCursor': cursor},
@@ -89,6 +100,56 @@ def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
             raise AssertionError('a body-only rate-limit 403 must refuse')
 
 
+def test_a_retranslated_header_block_still_yields_its_values(tmp):
+    """A header block re-translated by a Windows text stream still parses.
+
+    The four controls that read their reset from the body pass on Windows
+    while every one that reads a header fails: the answer's `\r\n` line
+    endings are translated a second time on the way out, so the blank line
+    that ends the block is no longer the byte pair the split looks for, the
+    header lines fall into the body, and a reported reset arrives as no
+    reset at all - a 60-second default instead of the wait the API asked
+    for.
+    """
+    del tmp
+    mod = _client()
+    answered = _windows_text(
+        'HTTP/2.0 403 Forbidden\r\nX-RateLimit-Reset: 42\r\n'
+        'Retry-After: 7\r\n\r\n{"data": null}\n')
+    status, headers, body = mod._parse(answered)
+    assert status == 403
+    assert headers.get('x-ratelimit-reset') == '42', headers
+    assert headers.get('retry-after') == '7', headers
+    assert json.loads(body) == {'data': None}, body
+    refused, resume = mod._refused(status, headers, body)
+    assert refused and resume is not None, resume
+
+
+def test_a_header_reset_survives_a_windows_text_stream_end_to_end(tmp):
+    """The whole chain, with the bytes a Windows stdout really delivers.
+
+    The fake re-translates its own response when asked, so this drives a
+    real `gh` process, the real request and the real parse over the byte
+    sequence the failing platform produces, and reads the reset the fixture
+    wrote into the header.
+    """
+    mod = _client()
+    reset = int(time.time()) + 120
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
+        'status': 403, 'headers': {'X-RateLimit-Reset': str(reset)},
+        'body': 'API rate limit exceeded for the account.'}})
+    with fake.activate():
+        os.environ['DAEDALUS_FAKE_GH_CRLF'] = '1'
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at == reset
+        else:
+            raise AssertionError('a 403 with a reset header must refuse')
+        finally:
+            os.environ.pop('DAEDALUS_FAKE_GH_CRLF', None)
+
+
 def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
     mod = _client()
     before = time.time()
@@ -128,17 +189,46 @@ def test_a_graphql_rate_limited_error_is_a_refusal_naming_its_reset(tmp):
 
 def test_a_graphql_retry_after_is_honoured_when_no_reset_is_reported(tmp):
     mod = _client()
-    before = time.time()
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
         'status': 200,
         'body': {'data': None, 'errors': [{
             'type': 'RATE_LIMITED',
             'extensions': {'retryAfter': 90}}]}}})
     with fake.activate():
+        before = time.time()
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
         except mod.RateLimited as refusal:
             assert 90 <= refusal.resume_at - before <= 91, refusal.resume_at
+        else:
+            raise AssertionError('retryAfter must be honoured')
+
+
+def test_a_slow_install_cannot_move_the_measured_retry_after(tmp):
+    """The offset is read at the call, so setup time cannot shift it.
+
+    `before` used to be taken before the fake is installed, whose launcher
+    self-test is a subprocess: a second of setup inside a one-second window
+    is the whole margin, and on a Windows coverage leg the install takes
+    longer than that. Measuring beside the call is what makes the control's
+    claim - and the same claim is what the offset is for.
+    """
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
+        'status': 200,
+        'body': {'data': None, 'errors': [{
+            'type': 'RATE_LIMITED',
+            'extensions': {'retryAfter': 90}}]}}})
+    with fake.activate():
+        at_install = time.time()
+        before = time.time()
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert 90 <= refusal.resume_at - before <= 91, refusal.resume_at
+            # The point the old control measured from, a second and a half
+            # of setup earlier, lands outside the window it asserts.
+            assert refusal.resume_at - (at_install - 1.5) > 91
         else:
             raise AssertionError('retryAfter must be honoured')
 
