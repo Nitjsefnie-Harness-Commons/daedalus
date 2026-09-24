@@ -487,6 +487,59 @@ use(importlib.import_module)
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
 
 
+def test_the_registry_module_delivered_as_a_call_argument_is_the_limit(_tmp):
+    """`use(sys)` is the call-argument limit's registry form: the walk follows
+    nothing a call is handed, so a module whose registry is only reachable
+    past the argument is accepted."""
+    scanned = _scans_silently(_tmp, '''
+import sys
+
+
+def use(loader):
+    return loader
+
+
+use(sys)
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+def test_a_registry_reached_through_a_call_result_is_the_declared_limit(_tmp):
+    """`__import__('sys').modules[x]` is the call-result limit's inline form:
+    nothing a call returns is followed, so a module obtained by a call and
+    used as a base is accepted."""
+    scanned = _scans_silently(_tmp, '''
+def load(key):
+    return __import__('sys').modules[key]
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+def test_a_getattr_call_result_used_as_a_base_is_the_declared_limit(_tmp):
+    """`getattr(sys, 'modules')[x]` is the call-result limit's other inline
+    form: a call's result used as a subscript base."""
+    scanned = _scans_silently(_tmp, '''
+import sys
+
+
+def load(key):
+    return getattr(sys, 'modules')[key]
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
+def test_a_call_result_the_structural_read_sees_through_refuses(_tmp):
+    """`vars(sys)['modules']` and `(lambda: sys)().modules` are REFUSED, not
+    limits: the structural read sees the tracked `sys` NAME through the call
+    or lambda, so the registry is recognised."""
+    for source, site in (
+            ('\nimport sys\n\n\ndef load(key):\n'
+             '    return vars(sys)["modules"][key]\n', 6),
+            ('\nimport sys\n\n\ndef load(key):\n'
+             '    return (lambda: sys)().modules[key]\n', 6)):
+        _assert_refusal(_tmp, source, site, 'cannot resolve')
+
+
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
     """The refusals are scoped to the import-by-name operation.
 
