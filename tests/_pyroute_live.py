@@ -45,13 +45,12 @@ def _attribute_values(owner):
 def _selection_value(value, state):
     """The value a plain getattr call resolves to, within what the model can
     prove: the named attribute when it resolves to a tracked value, else the
-    default in the 3-argument form; and every value the owner carries when the
-    name is not a provable string constant.
+    default in the 3-argument form; every value the owner carries when the name
+    is not a provable string constant.
 
-    The model records no occupancy, so an attribute it does not track reads as
-    absent and the default is selected instead (daedalus issue 978). A
-    non-string constant name cannot match the model's string keys, so it
-    resolves to nothing."""
+    The model records no occupancy, so an untracked attribute reads as absent
+    and the default is selected (daedalus issue 978). A non-string constant
+    name cannot match the model's string keys, so it resolves to nothing."""
     call = _plain_getattr(value, state)
     if call is None:
         return None
