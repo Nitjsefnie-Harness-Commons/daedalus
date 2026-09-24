@@ -468,7 +468,8 @@ async function run() {
   } else if (plan.scenario === 'fake-probe') {
     // Pins the fake itself, with no worker path in between, so what is
     // refused is the fake's own decision.
-    const post = (route) => bridgeFetch(BRIDGE_URL + route, { method: 'POST' });
+    const post = (route) => bridgeFetch(
+      BRIDGE_URL + route, { method: 'POST' });
     outcome.plannedStatus = (await post(plan.plannedRoute)).status;
     outcome.unplannedStatus = (await post(plan.unplannedRoute)).status;
   }
