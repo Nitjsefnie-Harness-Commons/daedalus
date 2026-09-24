@@ -273,10 +273,10 @@ def test_issue967_literal_key_forms(tmp):
 # guard that keeps the first binding resolves the key it must not know. The
 # pop row is the false-green discriminator and the setdefault row the
 # over-report one: a guard keeping the first binding turns the pair into
-# `(1, 0)` and `(1, 1)`. The setdefault row rebinds to a callable, which the
-# runtime cannot hash, so the program raises before the call returns and the
-# runtime sends nothing; the guard reports the unreadable call rather than
-# the healthy verdict `(0, 0)` a usable key would earn.
+# `(1, 0)` and `(1, 1)`. In the setdefault row the rebound key evaluates to a
+# callable, which misses the store whose only key is `"k"`, so the runtime
+# returns the default and sends nothing. The guard cannot resolve that key at
+# all, so it names every stored item — the relay among them — and reports.
 _REBINDING = [
     ('pop-rebound-to-non-literal', _flow(
         _RELAY, 'd = {"k": relay(), "j": relay()}; k = "k"; k = relay()',
