@@ -41,14 +41,12 @@ NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_MCP_PORT', 'TOKEN')
 CREDENTIAL_NAMES = ('TOKEN',)
 CREDENTIAL_PREFIXES = ('DAEDALUS_',)
 
-# `except*` parses to its own node on 3.11+; the scan reads either as the
-# block it is, and a Python that has never heard of it is not this tree's.
-_TRY = (ast.Try, getattr(ast, 'TryStar', ast.Try))
-
 # The statements the scan does not descend into, because a module import
-# does not run their bodies. A list of what is refused, so that a statement
-# type nobody thought of is read rather than passed.
-_NOT_AT_IMPORT = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+# does not run their bodies: a function, a coroutine, a method. A class is
+# NOT on this list — defining the class body is what the import does, so a
+# write in one runs at import and is read. A list of what is refused, so
+# that a statement type nobody thought of is read rather than passed.
+_NOT_AT_IMPORT = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 # The modules this branch took the publication out of, each with the names it
 # published. The runtime half imports every row; the structural half requires
@@ -291,13 +289,15 @@ def _child_statements(node):
 def _executed_statements(body):
     """Every statement the module body can run when it is imported.
 
-    The recursion names what does NOT run at import and refuses those:
-    a function, a lambda's scope and a class body, which run per call or
-    per definition rather than at import, and the body of the `__main__`
-    guard, which runs only when the file is the program. Every other
-    statement is reached, whatever its type: a branch, a handler, a loop,
-    a `with`, a `match` arm. The guard's `else` is reached like any other,
-    because an importer runs it.
+    The recursion names what does NOT run at import and refuses those: a
+    function, a coroutine or a method, whose body runs per call, and the
+    body of the `__main__` guard, which runs only when the file is the
+    program. Every other statement is reached, whatever its type: a
+    branch, a handler, a loop, a `with`, a `match` arm, and a class body
+    — defining a class is what the import does, so a write in one runs at
+    import, while the methods defined inside it are refused as functions.
+    The guard's `else` is reached like any other, because an importer runs
+    it.
     """
     found = []
     for node in body:
@@ -368,15 +368,45 @@ def _written_names(node, scope, bindings):
     return ()
 
 
+def _walrus_bindings(node):
+    """Every `(name := value)` a statement carries, in source order.
+
+    A walrus binds at the scope it appears in, so one in a module-level
+    `if` test or in a comprehension's condition binds a module-level name.
+    The walk stops at a nested statement, which the caller visits on its
+    own, and at nothing else.
+    """
+    found = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt):
+            continue
+        if isinstance(child, ast.NamedExpr):
+            found.append((child.target.id, child.value))
+        found.extend(_walrus_bindings(child))
+    return found
+
+
 def _bound_names(node):
-    """The names a statement binds, with the value each is given."""
+    """The names a statement binds, in source order, with each value.
+
+    Three forms, all of them targets in the language's own sense: each
+    name target of an assignment, chained included; the target of an
+    annotated assignment; and a walrus anywhere in the statement's
+    expressions. The forms not read are named in `_sites()`'s grammar
+    rather than assumed away — a destructuring target, a loop or `except`
+    binding and a `match` capture need a positional correspondence
+    between a value's parts and a target's names, which is a different
+    reader from this one.
+    """
     if isinstance(node, ast.Assign):
-        return [(target.id, node.value) for target in node.targets
-                if isinstance(target, ast.Name)]
-    if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-            and node.value is not None):
-        return [(node.target.id, node.value)]
-    return []
+        bound = [(target.id, node.value) for target in node.targets
+                 if isinstance(target, ast.Name)]
+    elif (isinstance(node, ast.AnnAssign)
+          and isinstance(node.target, ast.Name) and node.value is not None):
+        bound = [(node.target.id, node.value)]
+    else:
+        bound = []
+    return bound + _walrus_bindings(node)
 
 
 def _bindings(statements):
@@ -391,10 +421,9 @@ def _bindings(statements):
     `_sites()`: a name bound inside a branch is decided by source order,
     not by which branch runs.
 
-    Every binding form is taken — each name target of an assignment,
-    chained targets included, and the target of an annotated assignment —
-    so a new shape is a new case in `_bound_names` only if it is not a
-    target at all.
+    The binding forms taken are the three `_bound_names` names, and the
+    ones it does not take are named in `_sites()`'s grammar rather than
+    left as a claim this file makes and does not keep.
     """
     bound = {}
     for node in statements:
@@ -409,8 +438,9 @@ def _sites(source):
     The grammar, which the module docstring and the failure message both
     claim. POSITION: any statement the module body reaches on import —
     its own, or one nested anywhere inside it, whatever statement type that
-    is — except a function, a lambda's scope or a class body, and the body
-    of an `if __name__ == '__main__':` guard. RECEIVER: `os.environ`, an
+    is, a class body included, since defining the class is what the import
+    does — except a function, a coroutine or a method, and the body of an
+    `if __name__ == '__main__':` guard. RECEIVER: `os.environ`, an
     `import os as ...` alias, a `from os import environ` name, or a
     module-level name whose FIRST binding is any of those. WRITE: a
     subscript assignment, an augmented assignment (the subscript's key, or
@@ -419,14 +449,17 @@ def _sites(source):
     `**keyword`.
 
     Not read, and named here so nobody assumes otherwise: a write inside a
-    function, a lambda or a class body; a rebind of `os.environ` itself,
-    which replaces the mapping rather than writing into it; a receiver
-    reached by computation, such as `getattr(os, 'environ')` or
-    `__import__('os').environ`; a mapping that merely CONTAINS the
-    environment, as `CFG['env'][...]` does; a write the module delegates to
-    a helper it calls; a published mapping built by a call rather than
-    spelled as a literal; and a deletion (`del e[...]`, `pop`, `clear`),
-    which removes a name rather than publishing one.
+    function, a coroutine or a method, including a lambda's; a rebind of
+    `os.environ` itself, which replaces the mapping rather than writing
+    into it; a receiver reached by computation, such as `getattr(os,
+    'environ')` or `__import__('os').environ`; a mapping that merely
+    CONTAINS the environment, as `CFG['env'][...]` does; a write the module
+    delegates to a helper it calls; a published mapping built by a call
+    rather than spelled as a literal; a deletion (`del e[...]`, `pop`,
+    `clear`), which removes a name rather than publishing one; and the
+    binding forms that need a positional correspondence between a value's
+    parts and a target's names — a destructuring target, a `for` or `with`
+    or `except` binding, a `match` capture.
 
     A name this scan cannot read is reported as unreadable, never as
     absent, so it is classified rather than passed.
