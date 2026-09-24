@@ -97,12 +97,13 @@ def _argument_value(entry, state):
 
 def _argument_name(entry):
     """The string constant an argument position names, or None when the
-    position is not a provable string (a dynamic name). A spliced position is
-    never one: the model keeps only sender markers, normalized to
-    UNPROVABLE_SENDER, and filters a benign string out."""
+    position is not a provable string (a dynamic name). A spliced position
+    carries whatever the operand's container holds: a sender marker, a benign
+    string (a genexp element stores a raw Constant), or nothing at all."""
     is_value, payload = entry
     if is_value:
-        return None
+        return (payload if isinstance(payload, str)
+                and payload != UNPROVABLE_SENDER else None)
     if isinstance(payload, ast.Constant) and isinstance(payload.value, str):
         return payload.value
     return None
@@ -113,11 +114,11 @@ def _starred_selection(value, state):
     UNPROVABLE_SENDER when a starred operand's elements cannot be proved.
 
     Each starred operand is spliced into the positional argument list, so the
-    owner and default are read as if written plainly. A spliced name is never
-    a readable plain string (see _argument_name), so it always joins the
-    dynamic-name arm (every value the owner carries). A starred operand
-    resolving to no provable element list hides the call's arity, so no
-    position can be read and the whole selection stays unprovable."""
+    owner, name and default are read as if written plainly. A spliced name
+    that is not a readable string joins the dynamic-name arm (every value the
+    owner carries). A starred operand resolving to no provable element list
+    hides the call's arity, so no position can be read and the whole selection
+    stays unprovable."""
     args = _expand_starred_args(value, state)
     if args is None:
         return UNPROVABLE_SENDER

@@ -131,7 +131,7 @@ SELECTIONS = [
      '    x = ordinary', 'x()', False),
     # Value-axis control for the starred-argument-list shape: the owner carries
     # no tracked value, so it is clean by emptiness, not by a clean value.
-    ('getattr-star-args-clean-value', 'class H: pass\nh = H(); '
+    ('getattr-star-args-empty-owner', 'class H: pass\nh = H(); '
      'h.clean = ordinary\npair = (h, "clean")\nx = getattr(*pair)', 'x()',
      False),
     # Starred argument positions (list, owner, default): each operand is
@@ -142,6 +142,14 @@ SELECTIONS = [
     ('getattr-star-owner (977)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()\nowners = (h,)\nx = getattr(*owners, "ext_cmd")',
      'x()', True),
+    # A genexp element stores a raw string Constant, so a spliced name can be a
+    # readable plain string; read, it picks the clean attribute, but deleted it
+    # falls to the dynamic arm and over-reports. Tracked by 977.
+    ('getattr-star-name-genexp (977)', 'class H: pass\n'
+     'h = H(); h.clean = ordinary; h.ext_cmd = relay()\n'
+     'def maker2():\n    return h\ncallback = maker2()\n'
+     'gen = ((callback, "clean") for _ in [1])\n'
+     'pair = next(gen)\nx = getattr(*pair)', 'x()', False),
     # A spliced owner with a tracked clean attribute beside the sender: the
     # literal name read picks the clean attribute (0), while a name the splice
     # cannot read takes the dynamic arm and reports the sender (1).
