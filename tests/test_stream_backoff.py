@@ -437,6 +437,7 @@ async function run() {
     outcome.badOriginStatus = (
       await post('https://elsewhere.example.com/other')).status;
     outcome.relativeStatus = (await post('/other')).status;
+    outcome.afterBadOriginStatus = (await post(route('/other'))).status;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   outcome.nonStream = nonStreamFetches.map((item) => item.request);
@@ -466,11 +467,17 @@ def _drive(plan):
 
 
 def _run(plan):
-    """Three checks, each catching a direction the others miss: an origin
-    the plan did not name, a route seen more often than the declared
-    MULTISET allows (the fake's 599 arm), and a multiset mismatch, which
-    catches a declared route the worker stopped making. The first two fire
-    inside the worker; the third is the record read back."""
+    """Two checks carry coverage; a third names the route in the message.
+
+    `badOrigins` is the only thing that catches a request to an origin the
+    plan did not name: the origin gate spends no route allowance, so the
+    MULTISET below is blind to it. The multiset check catches any route
+    whose count differs from the declared multiset, over or under. The
+    `refused` check is NOT a third direction: multiset equality implies
+    every route's seen count equals its declared one, which is exactly
+    when the fake refuses nothing — so it is kept for the route it names
+    in the failure, not for coverage it adds.
+    """
     outcome = _drive(plan)
     assert outcome['badOrigins'] == [], (
         'bridge origin(s) the scenario did not permit:',
