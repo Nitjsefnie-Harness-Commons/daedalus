@@ -16,11 +16,15 @@ resolve nor follow, so it is refused, and so is any store that DELIVERS the
 builtin to a name — as a name, a parameter default, a container, or a call
 argument — read through the SAME store grammar as the operation and the
 registry, so the three axes cannot reach different store forms. A store that
-USES the builtin as a call's callee (`x = eval(var)`) receives the call's
-RESULT, which is the declared call-result limit below, not a delivery.
-Three shapes it cannot follow are ACCEPTED as declared limits: a value
-reached through a call's result, a tracked module or the operation handed as
-a call ARGUMENT (`use(sys)`), and a value the walk cannot fold to a
+USES the builtin as a call's EFFECTIVE CALLEE, however it is spelled
+(`x = eval(var)`, `x = (eval if c else print)(x)`, a subscript that selects
+it), receives the call's RESULT, which is the declared call-result limit
+below, not a delivery; the walk resolves which value would actually be
+called, so a builtin in a DATA position of that callee expression — an
+argument, a lookup key — stays a delivery. Three shapes it cannot follow are
+ACCEPTED as declared limits: a value reached through a call's result, a
+tracked module or the operation handed as a call ARGUMENT (`use(sys)`), and
+a value the walk cannot fold to a
 constant — whether an import name or a program. Any accepted shape leaves
 the closure quietly short.
 """
@@ -583,7 +587,7 @@ def _import_targets(path, root):
             _refuse(path, root, node,
                     f'{ast.unparse(node)} can hand out the import-by-name '
                     'operation through a lookup this scan cannot follow')
-        elif isinstance(node, ast.Call) and _mcp_code_eval.denotes_code_eval(
+        elif isinstance(node, ast.Call) and _mcp_code_eval.may_be_code_eval(
                 node.func, bound, scopes):
             program = _folded_string(node.args[0]) if node.args else None
             if program is not None:

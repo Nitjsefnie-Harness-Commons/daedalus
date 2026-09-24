@@ -196,12 +196,18 @@ def load(x):
 
 def test_a_store_hiding_a_code_evaluating_builtin_refuses(_tmp):
     """`loader = eval` hands the builtin to a name the walk cannot follow,
-    and that name is then handed a program."""
+    and that name is then handed a program. A reach-call whose RESULT is the
+    builtin binds it to a name the same way, and shares this refusal."""
     _assert_refusal(_tmp, '''
 def load():
     loader = eval
     return loader('importlib')
 ''', 3, 'code-evaluating')
+    _assert_refusal(_tmp, '''
+import builtins
+
+x = getattr(builtins, 'eval')
+''', 4, 'code-evaluating')
 
 
 # Every store form the import-by-name operation axis already reaches, each
@@ -324,13 +330,14 @@ def load(attribute, name):
 
 
 def test_a_store_of_a_code_eval_calls_result_is_the_declared_limit(_tmp):
-    """`x = eval(var)` USES the builtin as the call's callee and stores the
-    call's RESULT, which the declared call-result limit already accepts.
+    """`x = eval(var)` USES the builtin as the call's effective callee and
+    stores the call's RESULT, which the declared call-result limit accepts.
 
-    The recursion that closes a builtin hidden in a container must read a
-    call's callee with position awareness: the callee is used, not delivered
-    to the store, so this shape is the ordinary legitimate one and must scan
-    silent. `(eval)(var)` is the same callee however it is parenthesised, and
+    The recognition is a property over the value the store will hold, not a
+    check on the immediate callee node: a builtin that becomes the EFFECTIVE
+    callee through an expression is still used. So the conditional callee,
+    the `or` callee, a comprehension subscripted back to the builtin, and a
+    parenthesised callee all deliver nothing, exactly as the bare name does.
     `f(eval(var))` passes eval's RESULT on, which the same limit covers.
     """
     for source in ('''
@@ -345,25 +352,53 @@ def load(var):
 def load(var):
     z2 = f(eval(var))
     return z2
-'''):
+''', 'v = (eval if c else print)(x)\n',
+            'v = [eval for _ in [0]][0](x)\n',
+            'v = (eval or print)(x)\n',
+            'v = (0, eval)[0](x)\n',
+            'v = (lambda: eval)()(x)\n'):
         _assert_silent(_tmp, source)
 
 
 def test_a_code_eval_builtin_delivered_to_a_call_is_still_refused(_tmp):
-    """A builtin handed to a callee as an ARGUMENT is delivered, not used.
+    """A builtin in a DATA position of the callee expression is delivered.
 
     The counterpart of the callee case, pinned together with it so neither
     side can regress alone: a blanket stop-at-call would silence the
-    delivery, and a recursion that reads every child alike would refuse the
-    callee use. `f(eval)(x)` delivers eval to f even though that call is in
-    callee position of the outer one.
+    delivery, and a walk of the callee expression would refuse the callee use.
+    A builtin that is the lookup KEY, an argument (plain, starred, or handed
+    to an inner call), or a parameter a lambda is called with is a delivery;
+    a builtin that is the SELECTED callee is a use. The walk does not model a
+    lambda as transparent — a lambda is a function the walk cannot follow, so
+    a builtin passed to one is delivered, which is the safe direction.
     """
     for source in (
             'y = f(eval)\n',
             'y2 = f(code=eval)\n',
             'w = f(g(eval))\n',
-            'v = f(eval)(var)\n'):
+            'v = f(eval)(var)\n',
+            'v = tbl[eval](x)\n',
+            'v = (g(eval))(x)\n',
+            'v = f(*[eval])(x)\n',
+            'v = (lambda e: e)(eval)(x)\n'):
         _refused_with_code_eval(_tmp, source, source.strip())
+
+
+def test_a_constant_program_through_an_effective_callee_is_refused(_tmp):
+    """A CONSTANT program reaches the builtin however the effective callee
+    is spelled, so the call arm reads the program through the same resolution
+    the store uses.
+
+    Without this the store treats these callees as a use and the call arm
+    reads no program, so a constant program slips through — a regression the
+    store-use cases alone cannot see, because they carry no constant program.
+    """
+    for source in (
+            "v = (eval if c else print)('importlib.import_module')\n",
+            "v = (eval or print)('importlib.import_module')\n",
+            "v = [eval for _ in [0]][0]('importlib.import_module')\n",
+            "v = (lambda: eval)()('importlib.import_module')\n"):
+        _assert_refusal(_tmp, source, 1, 'code-evaluating')
 
 
 if __name__ == '__main__':
