@@ -56,7 +56,6 @@ Not recognised, each gap named because the guard claims it:
   bound its name-only call sites inherit.
 """
 import ast
-import subprocess
 import sys
 from pathlib import Path
 
@@ -66,6 +65,7 @@ from _coverage_scopes import (  # noqa: E402
     _containing_binding_scope, _evaluation_scopes, _scope_shadows)
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
+import _scratch_index  # noqa: E402
 _STOPS = frozenset({'kill', 'terminate', 'send_signal'})
 _DRAINS = frozenset({'communicate', 'wait'})
 _STOP = 'stop'
@@ -687,9 +687,7 @@ def _scratch_git_tree(root):
     # `copy_test_tree` mirrors the test package; the root entry point is a
     # converted site too, so the scratch tree carries it as well.
     (root / 'run_tests.py').write_bytes((ROOT / 'run_tests.py').read_bytes())
-    for command in (['init', '-q'], ['add', '--', 'tests', 'run_tests.py']):
-        subprocess.run(['git', '-C', str(root), *command],
-                       capture_output=True, check=True, timeout=60)
+    _scratch_index.install(root)
 
 
 def _synthetic(source):
