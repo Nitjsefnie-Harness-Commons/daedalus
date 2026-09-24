@@ -206,9 +206,13 @@ jobs:
             ~\AppData\Local\pip\Cache
           key: pip-${{ runner.os }}-3.13-${{ hashFiles('requirements-*.txt') }}
 
-  # pyright over the bridge, the CLI and the scripts. The suites are excluded
-  # in pyrightconfig.json: they load their target by path and reach into module
-  # internals on purpose, which a type checker can only ever call an error.
+  # pyright runs over two scopes. This job checks the bridge, the CLI and the
+  # scripts under pyrightconfig.json, which excludes the suites: they load
+  # their target by path and reach into module internals on purpose, which a
+  # type checker can only ever call an error. A second scope,
+  # pyrightconfig.tests.json, checks the suites themselves, and the type error
+  # ratchet below is what keeps that scope measured. A file belongs to exactly
+  # one: a suite in the second, everything else in the first.
   #
   # pythonPlatform is "All" rather than the runner's: the bridge branches on
   # platform at runtime, and those branches should be checked wherever this
@@ -581,11 +585,17 @@ jobs:
             pip-${{ runner.os }}-${{ matrix.python }}-
 
       # Without the MCP extra that suite skips; test_diff_coverage imports the
-      # statement analyzer pinned in requirements-test.txt.
+      # statement analyzer pinned in requirements-test.txt. requirements-dev.txt
+      # is here for test_type_errors, which drives the real pyright binary the
+      # way only a real run can. A job that runs every suite needs the
+      # toolchain those suites invoke, and a needs: relation sequences jobs
+      # without sharing an environment between them, so this file has to be
+      # installed here too, not only by the lint jobs.
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
           python -m pip install -r requirements-test.txt
+          python -m pip install -r requirements-dev.txt
 
       - name: Run every suite
         env:
@@ -729,11 +739,17 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python }}-
 
+      # This job runs every suite too, so it needs the toolchain those suites
+      # invoke: test_type_errors drives the real pyright binary. A needs:
+      # relation sequences jobs without sharing an environment between them,
+      # so the lint jobs installing this file do not put pyright here.
+      # Same file, same pinned version, as those jobs install.
       - name: Install the coverage toolchain and the project
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt
           python -m pip install . ".[mcp]"
+          python -m pip install -r requirements-dev.txt
 
       - name: Measure the bridge's child processes too
         # On Windows terminate() kills fixture children without a coverage
