@@ -334,6 +334,7 @@
 !/tests/_realbrowser_workers.py
 !/tests/_relayharness.py
 !/tests/_repo.py
+!/tests/_scratch_index.py
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_speedharness.py

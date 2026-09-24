@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain_scan as scan  # noqa: E402
 import _util  # noqa: E402
 from _drain_scan import _SITES, _UNBOUNDED_WITHOUT_STOP  # noqa: E402
+from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
@@ -54,6 +55,48 @@ def test_a_scratch_tree_is_clean_before_a_bound_is_removed(tmp):
     root = Path(tmp, 'pristine')
     scan._scratch_git_tree(root)
     assert not scan._tree_violations(root), scan._tree_violations(root)
+
+
+def _listed(root):
+    """The paths `git ls-files` answers for `root`; the scan's enumeration."""
+    result = subprocess.run(['git', '-C', str(root), 'ls-files', '-z'],
+                            capture_output=True, check=True)
+    return {os.fsdecode(name) for name in result.stdout.split(b'\0') if name}
+
+
+def _whole_tree_add(root):
+    """A scratch staged one file at a time; the enumeration's ground truth.
+
+    Built from the checkout, not from a scratch, so the reference is
+    independent of whatever `_scratch_git_tree` currently does.
+    """
+    copy_test_tree(root)
+    (root / 'run_tests.py').write_bytes((ROOT / 'run_tests.py').read_bytes())
+    for command in (['init', '-q'], ['add', '--', 'tests', 'run_tests.py']):
+        subprocess.run(['git', '-C', str(root), *command],
+                       capture_output=True, check=True)
+
+
+def test_a_scratch_stages_no_object_but_enumerates_the_whole_tree(tmp):
+    """The scratch reaches the full enumeration without a whole-tree add.
+
+    Rebuilding the index from the whole tree each time is what timed out
+    on a loaded runner, and `git ls-files` never reads the loose objects
+    that add writes — the index alone carries the enumeration. So the
+    scratch must hold no staged object, and its `ls-files` set must equal
+    the one a whole-tree add of the same tree produces. The second half is
+    what keeps a narrower staged set from buying the first by dropping
+    paths.
+    """
+    root = Path(tmp, 'shared')
+    scan._scratch_git_tree(root)
+    objects = [path for path in (root / '.git' / 'objects').rglob('*')
+               if path.is_file()]
+    assert not objects, f'the scratch staged {len(objects)} loose objects'
+    reference = Path(tmp, 'reference')
+    _whole_tree_add(reference)
+    assert _listed(root) == _listed(reference), (
+        'the copied index enumerates differently from a whole-tree add')
 
 
 def test_a_bounded_drain_is_clean(tmp):
