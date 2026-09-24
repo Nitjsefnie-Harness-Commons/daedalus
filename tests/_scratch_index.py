@@ -48,9 +48,11 @@ def _template():
 def install(root):
     """Make `root` a repo whose index enumerates the whole test tree.
 
-    The enumeration is a frozen snapshot of the checkout taken at first
-    use, so a file written into the scratch after `install` is not
-    listed; under the per-scratch add it would have been.
+    The enumeration is a frozen snapshot of the checkout taken once per
+    process and copied into every scratch, so a file written into a
+    scratch afterwards is not listed; the old per-scratch add behaved
+    the same way, since it never re-staged. Only a fresh add would list
+    it.
     """
     _git(root, 'init', '-q')
     (root / '.git' / 'index').write_bytes(_template())
