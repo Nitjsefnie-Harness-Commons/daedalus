@@ -127,7 +127,6 @@ def test_folded_pair_key_stores_under_their_own_key(tmp):
     assert not bad, bad
 
 
-
 def test_deleted_holder_copy_invocation_reports(tmp):
     body = ('send = ordinary\nbox = {}\n'
             f'box["k"] = lambda: {_CALL}\n'
