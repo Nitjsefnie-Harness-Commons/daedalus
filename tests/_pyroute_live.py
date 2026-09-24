@@ -20,7 +20,9 @@ LIST_LENGTH_MUTATIONS = frozenset(
 def _mutation_receiver(node, state):
     """The tracked list/tuple a statement mutates in place, or None. Covers
     the method-call, slice-assign, augmented-assign and subscript-del forms
-    the model does not fold back (daedalus issue 990)."""
+    the model does not fold back (daedalus issue 990). A subscript store only
+    counts when its slice can resize the container: a slice assignment may
+    change the length; an index store is length-neutral by construction."""
     target = None
     if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Attribute)
@@ -32,7 +34,8 @@ def _mutation_receiver(node, state):
         subs = [t for t in (node.targets if isinstance(node, ast.Assign)
                             else [node.target]
                             if isinstance(node, ast.AnnAssign) else [])
-                if isinstance(t, ast.Subscript)]
+                if isinstance(t, ast.Subscript)
+                and isinstance(t.slice, ast.Slice)]
         if len(subs) == 1: target = subs[0].value
     if not isinstance(target, ast.Name):
         return None, None
