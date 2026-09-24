@@ -12,9 +12,7 @@ exits 0: a double that cannot fail proves nothing about what the step does
 with a flag the parser does not know.
 """
 import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -195,12 +193,17 @@ def _step(name):
     return workflow_script(_tests_yml(), 'timed', name)
 
 
-def _probe(workdir):
-    """Run the probe step over this workdir's head checkout."""
+def _probe(workdir, **environment):
+    """Run the probe step over this workdir's head checkout.
+
+    The step's own `$GITHUB_OUTPUT`, read back as a mapping. A control that
+    wants the tokens the probe really produced reads them from here rather
+    than re-running the extraction in a shell of its own.
+    """
     output = workdir / 'probe-output'
     output.write_text('', encoding='utf-8')
     result = run_workflow_script(workdir, _step(_PROBE),
-                                 {'GITHUB_OUTPUT': str(output)})
+                                 {'GITHUB_OUTPUT': str(output), **environment})
     values = {}
     for line in output.read_text(encoding='utf-8').splitlines():
         key, _, value = line.partition('=')
@@ -379,21 +382,20 @@ def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
 
     argparse wraps its usage line to the terminal, so a pattern over a
     rendered help could read a truncated option at one width and the whole
-    of it at another. The pattern is the workflow's own, read out of the
-    probe step and handed to the same grep the probe uses, so this covers
-    the workflow's regex rather than a copy that could drift from it.
+    of it at another. The tokens compared here are the ones the PROBE STEP
+    itself emitted, so this covers the workflow's pattern in the workflow's
+    own shell, rather than a second invocation of the extraction with its
+    own platform surface: a hand-built `grep` call or a copy of the pattern
+    is a second thing to keep correct, and a second thing to fail on a leg
+    nobody runs locally.
     """
-    del tmp
-    comparator = ROOT / 'scripts' / 'ci' / 'compare_durations.py'
-    # `--help` is the one token the parser adds implicitly rather than
-    # declares. `-h` is absent because the regex body `[a-z][a-z0-9-]+`
-    # needs two characters after the dash and the options line spells it
-    # `-h,` — not because of the usage line, where it is bracketed too —
-    # and no caller ever passes it.
     expected = _declared_options('compare_durations.py') | {'--help'}
     for columns in ('40', '60', '80', '200'):
-        environment = dict(os.environ, COLUMNS=columns)
-        extracted = _help_tokens(comparator, environment)
+        workdir = _workdir(tmp, f'width-{columns}')
+        _install_comparator(workdir)
+        result, options = _probe(workdir, COLUMNS=columns)
+        assert result.returncode == 0, (columns, result.stdout, result.stderr)
+        extracted = set(options['compare_options'].split())
         assert extracted == expected, (columns, sorted(extracted))
 
 
@@ -497,38 +499,6 @@ def _declared_options(script):
     """One script's options, read from its own parser declarations."""
     source = (ROOT / 'scripts' / 'ci' / script).read_text(encoding='utf-8')
     return set(re.findall(r"add_argument\(\s*'(--[a-z][a-z0-9-]*)'", source))
-
-
-def _probe_pattern():
-    """The probe step's own extraction pattern, read out of the workflow.
-
-    Read rather than copied: a copy is a second thing to keep in step with
-    the first, and a control built on one keeps passing when the workflow's
-    own pattern is changed or truncated.
-    """
-    step = workflow_script(_tests_yml(), 'timed', _PROBE)
-    found = re.search(r"grep -oE '([^']+)'", step)
-    assert found, 'the probe step has no grep -oE extraction pattern'
-    return found.group(1)
-
-
-def _help_tokens(script, environment):
-    """The option tokens the PROBE'S OWN reduction finds, at one width.
-
-    The pattern is read from the workflow and run under the same shell the
-    probe runs under, so this exercises the workflow's extraction. `grep -o`
-    keeps the leading whitespace its pattern matched; the probe's `tr -d ' '`
-    is what strips it, and the set drops the repeats the usage line adds.
-    """
-    completed = subprocess.run(
-        ['python3', str(script), '--help'], capture_output=True,
-        check=True, timeout=120, env=environment)
-    reduced = subprocess.run(
-        [_util.workflow_bash(), '-c', 'grep -oE "$1"', 'sh',
-         _probe_pattern()],
-        input=completed.stdout, capture_output=True, check=True, timeout=120)
-    return {line.replace(' ', '')
-            for line in reduced.stdout.decode('utf-8').splitlines()}
 
 
 def main():
