@@ -323,6 +323,22 @@ def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
         assert extracted == expected, (columns, sorted(extracted))
 
 
+def test_a_compare_with_no_probed_options_refuses(tmp):
+    """The arm a skipped probe lands in, which is not itself a skip.
+
+    An empty token set is the absence of an answer, so the step names the
+    script whose options are unknown and stops. Passing the full list
+    instead would reach the very argparse refusal this branch exists to
+    remove, so the two paths must not look alike.
+    """
+    workdir = _workdir(tmp, 'no-probe')
+    _install_comparator(workdir)
+    result, _summary = _run_compare(workdir, {'compare_options': ''})
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert _COMPARATOR in result.stdout, result.stdout
+    assert 'unknown' in result.stdout, result.stdout
+
+
 def test_a_required_option_the_head_does_not_offer_stops_the_step(tmp):
     """The required path is a refusal; the drop path must not swallow it."""
     workdir = _workdir(tmp, 'headless-comparator')
