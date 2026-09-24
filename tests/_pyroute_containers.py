@@ -6,8 +6,8 @@ that container from a known ordered operand, whatever expression ordered it.
 """
 from dataclasses import dataclass
 
-from _pyroute_values import (DeferredAlternatives, DeferredContainer,
-                             merge_yielded)
+from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
+                             DeferredContainer, merge_yielded)
 
 
 @dataclass(frozen=True)
@@ -34,12 +34,13 @@ def ordered_container(value, kind, order=None):
     container operand, or None when the operand is not one.
 
     `order` maps a length to the operand positions the result reads, in
-    result order; without it the result keeps the operand's own order. The
+    result order; without it the result keeps the operand's own items. The
     result is renumbered from zero, and a key the operand does not carry
     stays absent, so a missing item keeps its difference from an ordinary
-    one. Alternatives recurse, and one branch that is not an ordered
-    container refuses the whole value rather than dropping a sender on that
-    path."""
+    one. The unknown-key slot stays unknown in the result, and reordering an
+    operand of unknown length leaves every item at an unknown position.
+    Alternatives recurse, and one branch that is not an ordered container
+    refuses the whole value rather than dropping a sender on that path."""
     if isinstance(value, DeferredAlternatives):
         branches = [ordered_container(item, kind, order)
                     for item in value.values]
@@ -47,11 +48,18 @@ def ordered_container(value, kind, order=None):
             return None
         return merge_yielded(branches)
     if (not isinstance(value, DeferredContainer)
-            or value.kind not in ('tuple', 'list')
-            or value.length is None):
+            or value.kind not in ('tuple', 'list')):
         return None
-    positions = range(value.length) if order is None else order(value.length)
+    if order is None:
+        return DeferredContainer(dict(value.items), value.length, kind)
+    if value.length is None:
+        joined = merge_yielded(value.items.values())
+        return DeferredContainer(
+            {} if joined is None else {DYNAMIC_KEY: joined}, None, kind)
+    positions = order(value.length)
     items = {index: value.items[position]
              for index, position in enumerate(positions)
              if position in value.items}
+    if DYNAMIC_KEY in value.items:
+        items[DYNAMIC_KEY] = value.items[DYNAMIC_KEY]
     return DeferredContainer(items, len(positions), kind)

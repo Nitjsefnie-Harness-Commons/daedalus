@@ -2,18 +2,18 @@
 import ast
 import sys
 
+from _pyroute_positions import bind_deferred_states, materialize_deferred
 from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              PARTIAL_ITERABLE_CALLS as _PARTIAL_ITERABLE_CALLS,
                              DeferredCallable, DeferredClass,
                              advance_generator, append_deferred,
-                             bind_call_arguments, bind_deferred_states,
-                             callable_candidates, consumer_results,
-                             exposed_callables, exhaust_generators,
-                             expression_callables, follow_callable_call,
-                             generator_context, generator_for,
-                             is_deferred_value, iterable_deferred,
-                             iterable_nonempty, merge_yielded,
-                             load_callable_cells, materialize_deferred,
+                             bind_call_arguments, callable_candidates,
+                             consumer_results, exposed_callables,
+                             exhaust_generators, expression_callables,
+                             follow_callable_call, generator_context,
+                             generator_for, is_deferred_value,
+                             iterable_deferred, iterable_nonempty,
+                             merge_yielded, load_callable_cells,
                              new_deferred_callable, new_deferred_generator,
                              payload_key, sender_value, sync_cells)
 from _pyroute_live import (clear_expression_cache, live_expression_value,
@@ -225,7 +225,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             cardinality = iterable_nonempty(
                 clause.iter, active, literal_iterable_nonempty)
             active, yielded = consume_iterable(clause.iter, active, True)
-            if sender_value(yielded) is not None:
+            if yielded is not None:
                 bind_deferred_states(clause.target, yielded, active)
             if cardinality is False:
                 return dedupe_states([*skipped, *active]), None
@@ -386,7 +386,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     violations.extend(found)
                 current, returned_value = follow_callable_call(
                     candidates, arguments, current, node, analyze_callable,
-                    copied, dedupe_states)
+                    copied, dedupe_states, consumer)
                 consumed_value = merge_yielded(consumed_values)
                 returned_value = merge_yielded(
                     (returned_value, consumed_value))
