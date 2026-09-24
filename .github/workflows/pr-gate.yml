@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: >-
-          Nitjsefnie-Actions/pr-gate@44437212f1b931f53433b16455bb05aff67ad21e
+          Nitjsefnie-Actions/pr-gate@39b1b91ed861dbb070629e34bf63fe25b916e54d
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
