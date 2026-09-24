@@ -124,7 +124,7 @@ def _review_item(node):
     submitted.
     """
     return {'id': node.get('databaseId'), 'body': node.get('body'),
-            'state': (node.get('state') or '').lower(),
+            'state': node.get('state') or '',
             'submitted_at': node.get('submittedAt'), 'user': _user(node)}
 
 
@@ -236,6 +236,7 @@ def poll(repo, pr, seen, announce):
         raise RuntimeError(f'no pull request {pr} in {repo}')
 
     announced = 0
+    processed = set()
     state_now = pr_state(found)
     state_before = seen.get(STATE_KEY)
     if state_before != state_now:
@@ -247,6 +248,12 @@ def poll(repo, pr, seen, announce):
         announced += 1
     for page in pages:
         for node in gh_client.nodes(page, PULL + ('reviews',)):
+            # A page list that repeats a review it has already finished is
+            # one review: following its inline comments twice would spend a
+            # second request on the quota this watcher exists to protect.
+            if node.get('databaseId') in processed:
+                continue
+            processed.add(node.get('databaseId'))
             announced += _announce(pr, seen, announce, 'review',
                                    _review_item(node))
             announced += _inline_comments(pr, seen, announce, node)
@@ -268,6 +275,7 @@ def main():
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()
+    gh_client.watch_parent()
 
     if args.once:
         seen = {}

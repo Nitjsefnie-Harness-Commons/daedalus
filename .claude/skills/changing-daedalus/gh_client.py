@@ -357,7 +357,7 @@ def spawn_watched(argv, env=None, **popen):
     if os.name == 'nt':
         msvcrt = importlib.import_module('msvcrt')
         read_handle = msvcrt.get_osfhandle(read_fd)
-        inheritable = os.set_handle_inheritable
+        inheritable = getattr(os, 'set_handle_inheritable')
         inheritable(read_handle, True)
         startup = subprocess.STARTUPINFO()
         startup.lpAttributeList = {'handle_list': [read_handle]}
