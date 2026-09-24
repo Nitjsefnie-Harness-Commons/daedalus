@@ -10,6 +10,7 @@ import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _pyroute import (dict_assignments, payload_keys,  # noqa: E402
                       py_tab_routing_violations)
+from _pyroute_selections import SELECTION_PRE, SELECTIONS  # noqa: E402
 from _pyroute_state import literal_iterable_cardinality  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -753,35 +754,10 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
         assert not scan('js', src), f'disclosed limit {label!r} caught: {src}'
 
 
-_SELECTION_PRE = ('send = ordinary\ndef maker():\n    return lambda: send('
-                  '"_focus", "focus-tab", tab=args.chrome_tab)\n'
-                  'def relay(): return maker()\n')
-_SELECTIONS = [
-    ('tuple-select', 'x = (relay(), ext_cmd)[int(args.flag) - 1]',
-     'x()', True),
-    ('getattr-default', 'class H: pass\nh = H(); h.ext_cmd = ordinary; '
-     'h.fn = relay()\nx = getattr(h, "fn", h.ext_cmd)', 'x()', True),
-    ('getattr-direct', 'class H: pass\nh = H(); h.ext_cmd = relay()\n'
-     'x = getattr(h, "ext_cmd")', 'x()', True),
-    ('control-ordinary', 'x = relay()', 'ordinary()', False),
-    ('sighting-getattr-dict', 'class C: pass\nc = C(); c.box = '
-     '{"k": relay()}\nx = getattr(c, "box")', 'x["k"]()', True),
-    ('sighting-control-attr', 'class C: pass\nc = C(); c.box = '
-     '{"k": relay()}\nx = c.box', 'x["k"]()', True),
-    ('select-constant-index', 'x = (relay(), ext_cmd)[1]', 'x()',
-     (True, False)),
-    ('rebound-getattr', 'getattr = lambda *a: ordinary\nclass H: pass\n'
-     'h = H(); h.fn = relay()\nx = getattr(h, "fn")', 'x()', False),
-    ('getattr-keywords', 'class H: pass\nh = H(); h.fn = relay()\n'
-     'try:\n    x = getattr(h, "fn", None, bad=1)\nexcept TypeError:\n'
-     '    x = ordinary', 'x()', False),
-]
-
-
 def test_selected_deferred_callables_stay_beside_their_senders(tmp):
-    cases = [(label, _SELECTION_PRE + store + '\nsend = ext_cmd\nreturn '
+    cases = [(label, SELECTION_PRE + store + '\nsend = ext_cmd\nreturn '
               + invoke + '\n', '', '', expected)
-             for label, store, invoke, expected in _SELECTIONS]
+             for label, store, invoke, expected in SELECTIONS]
     _assert_focus_cases(tmp, cases)
 
 
