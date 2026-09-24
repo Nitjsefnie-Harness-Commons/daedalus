@@ -59,7 +59,6 @@ def _git(repo, *args):
 
 
 def _repo(tmp, name, files, document, config=None):
-    """A committed tree the real script can be pointed at."""
     repo = Path(tmp) / name
     (repo / '.github').mkdir(parents=True)
     (repo / 'tests').mkdir(parents=True)
@@ -100,7 +99,6 @@ def _write(repo, rel, content):
 
 
 def test_a_type_error_in_a_baselined_file_is_grown(tmp):
-    """Planted past the recorded count, and restoring it is green again."""
     repo, target = _repo(tmp, 'grown', {'tests/typed.py': _typed(1)},
                          _document({'tests/typed.py': 1}))
     green = _gate(repo, target)
@@ -117,7 +115,6 @@ def test_a_type_error_in_a_baselined_file_is_grown(tmp):
 
 
 def test_only_a_type_error_in_a_new_test_file_is_over(tmp):
-    """A clean new module is green; the same module with an error is red."""
     repo, target = _repo(tmp, 'over', {'tests/clean.py': _clean()},
                          _document())
     _write(repo, 'tests/new.py', 'y = 2\n')
@@ -141,7 +138,6 @@ def test_a_run_analysing_no_file_is_unanalysed(tmp):
 
 
 def test_a_scope_missing_a_tracked_module_is_a_mismatch(tmp):
-    """A non-zero count that disagrees with the tracked count also fails."""
     repo, target = _repo(
         tmp, 'mismatch',
         {'tests/kept.py': _clean(), 'tests/skipped.py': _clean()},
@@ -179,7 +175,6 @@ def test_the_success_line_states_the_analysed_count(tmp):
 
 
 def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
-    """A falls 5->2, B reaches zero and is dropped, C rises 1->4 and stays."""
     repo, target = _repo(
         tmp, 'tighten',
         {'tests/a.py': _typed(2), 'tests/b.py': _clean(),
