@@ -11,55 +11,38 @@ the hand-rolled loops this replaces conflate:
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding
-  3  the invocation was rejected, or a query failed. Both are loud and
-     immediate: a malformed SHA or a refused argument exits 3 before the
-     first poll, a failed query exits 3 on the first failure, and the
-     reason goes to stderr. Never wrap this tool in a retry - retrying a
-     failed query behind a message that reads like waiting is the exact
-     failure this tool exists to remove
+  3  the invocation was rejected, or a query failed - a malformed SHA, a
+     refused argument, or the first failed query, with the reason on stderr.
+     Never wrap this tool in a retry: retrying a failed query behind a
+     message that reads like waiting is the failure it exists to remove
 
-Two distinctions the loops got wrong are deliberate here. Zero runs on the
-SHA is a waiting state, never success: "no run has started yet" and "every
-run concluded" must not be answerable the same way, and an exit 2 says
-which wait it was - no run ever appeared, or named runs were still open.
-And the SHA is PINNED: unlike the sibling watcher ci_watch.py, which
-re-resolves the branch head every poll because a watcher's subject is
-whatever is there now, a wait answers about the commit it was given -
-re-resolving would let a push landing mid-wait silently change the
-subject, and the verdict would describe a commit the caller never asked
-about.
+Two distinctions the loops got wrong are deliberate. Zero runs on the SHA is
+a waiting state, never success, and an exit 2 says which wait it was: no run
+ever appeared, or named runs were still open. The SHA is PINNED, unlike the
+sibling watcher re-resolving the head each poll: a push landing mid-wait
+must not turn the answer into one about a commit nobody asked about.
 
-A rate-limit refusal is the ONE exception to the exit-3 rule, and it is a
-deliberate one: a refusal is not a failed query, it is a known wait, so the
-wait says once where it is waiting, sleeps until the reset the API reported
-(bounded by its own --timeout) and polls again. Every other failure still
-exits 3 at once, which is what makes a 403 that is really a permission
-refusal stay loud.
+A rate-limit refusal is the one exception to the exit-3 rule, and
+deliberate: a refusal is a known wait, not a failed query, so the wait says
+once where it is waiting, sleeps until the reset the API reported (bounded
+by its own --timeout, which then ends the wait rather than buying another
+request) and polls again. Every other failure exits 3 at once, which keeps a
+403 that is really a permission refusal loud.
 
-Runs are read through the commit's workflow runs, not the check-runs list:
-the check-runs list is appended to while a matrix fills, so "every check run
-has concluded" is true early and repeatedly during a run that is still
-starting jobs.
+A cancelled run whose workflow has a strictly newer run against the same SHA
+is ignored: it is the remnant of a re-run, which says nothing about the
+commit and gates nothing; with no newer sibling it is a deliberate cancel and
+still fails. The grouping is by workflow, the path standing in when the id
+is absent; "newer" is by run_started_at, created_at standing in when that is
+missing, ties broken by numeric id. Only a cancelled run is ever superseded,
+so an older failure beside a newer success fails as before. The runs are read
+through the commit's check suites rather than the check-runs list because
+that list is appended to while a matrix fills; how is `gh_client`'s subject.
 
-One distinction more, in the other direction: a cancelled run whose
-workflow has a strictly newer run against the same SHA is ignored. It is
-the remnant of a re-run - GitHub cancels the in-progress run a newer run
-supersedes and keeps the cancelled record on the SHA beside its
-replacement - so it says nothing about the commit, and it gates nothing.
-A cancelled run with no newer same-workflow sibling is a deliberate
-cancel, a real non-success, and still fails the wait. The grouping is by
-workflow, same workflow_id with the workflow path standing in when the
-id is absent; "newer" is ordered by run_started_at, created_at standing
-in when that is missing, ties broken by numeric id. Only a cancelled run
-is ever superseded: an older failure beside a newer success fails
-exactly as before.
-
-Run --once before a long wait. A polling loop is never armed without one
-trial cycle: an unsupported flag or a renamed endpoint makes every fetch
-fail, and the trial proves the query shape on the real repository first.
---once evaluates the current state, prints the matrix to stderr, and
-exits 0 when the query itself succeeded; only a failed query exits 3.
+Run --once before a long wait; --once prints the matrix to stderr and exits 0
+when the query succeeded, and only a failed query exits 3.
 """
+
 import argparse
 import re
 import sys

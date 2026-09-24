@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The shared gh client: one request per query, refusals that pause, cursors.
 
-Every call here goes through a real `gh` invocation answered by the fake
-executable double in `_fake_gh.py`, so what is under test is the request the
-client actually makes, not a stub of the function that would make it.
+Every call here is a real `gh` invocation answered by the fake executable
+double in `_fake_gh.py`, so what is under test is the request the client
+actually makes.
 """
 import io
 import json
@@ -72,10 +72,9 @@ def test_a_403_with_a_reset_header_is_a_rate_limit_refusal(tmp):
 
 
 def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
-    """Some refusals carry the rate limit in the body and nowhere else.
-
-    Dropping that clause would turn this into an ordinary failure, and
-    ci_wait would exit 3 at once instead of waiting out the reset.
+    """Some refusals carry the rate limit in the body and nowhere else;
+    without that clause ci_wait would exit 3 instead of waiting out the
+    reset.
     """
     mod = _client()
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
@@ -189,7 +188,7 @@ def test_pagination_is_one_call_per_page_and_every_cursor_is_followed(tmp):
 
 
 class _Clock:
-    """A refused call that records when each attempt was made."""
+    """A call that records each attempt's time and may refuse."""
 
     def __init__(self, refusals):
         self.refusals = refusals
@@ -211,7 +210,7 @@ def _suite_page(suites, has_next=False, cursor=None):
 def _suite(rid, conclusion: str | None = 'SUCCESS',
            status='COMPLETED', workflow=11, name=None,
            started='2026-09-20T10:00:00Z'):
-    """One check suite, the way the live schema reports a workflow's jobs."""
+    """One check suite, as the live schema reports a workflow's jobs."""
     return {'status': status, 'conclusion': conclusion,
             'createdAt': started,
             'workflowRun': {

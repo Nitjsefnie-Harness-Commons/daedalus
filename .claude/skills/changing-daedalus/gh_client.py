@@ -8,24 +8,24 @@ payload on stdin, which is what keeps a GraphQL `null` variable a `null`
 instead of the empty string `-f` would send, and `-i` asks for the response
 headers, which is where the rate-limit reset lives.
 
-Two shapes of exhaustion are recognised, because GitHub reports both: a 403
+Two shapes of exhaustion are recognised because GitHub reports both: a 403
 or 429 carrying rate-limit evidence, and a 200 whose `errors[]` carries a
 `RATE_LIMITED` entry. A 403 with no rate-limit evidence is an ordinary
-failure and is never a pause — a permission refusal must not be answered by
+failure and is never a pause - a permission refusal must not be answered by
 sleeping. `Watcher` is the long-running half: on a refusal it says once
-where it is waiting, sleeps until the reset the API reported, and resumes.
-The wait is clamped, so a hostile or absent header cannot hang or hot-loop a
-watcher, and it is slept in slices so a watcher whose parent has gone still
-notices while it waits.
+where it is waiting, sleeps until the reset the API reported - bounded so a
+hostile or absent header cannot hang or hot-loop a watcher - and resumes. The
+parent-death guarantee is the pipe's, below, and a thread rather than the
+poll loop's business.
 
-Cursor pagination is the GraphQL spelling of `--paginate`: `paginate` loops
-while any named connection reports another page and feeds each `endCursor`
-back as its own `after`, one `gh` invocation per page, so nothing is missed.
+`paginate` is the GraphQL spelling of `--paginate`: it loops while any named
+connection reports another page and feeds each `endCursor` back as its own
+`after`, one `gh` invocation per page, so nothing is missed.
 
 `DAEDALUS_GH` overrides the executable, which is how the suites put a fake
-`gh` in front of a watcher on a platform where a bare `gh` name does not
-resolve.
+`gh` in front of a watcher where a bare `gh` name does not resolve.
 """
+
 import importlib
 import json
 import os
@@ -39,22 +39,18 @@ from datetime import datetime, timezone
 
 GH_TIMEOUT = 120
 PAGE_SIZE = 100
-# The floor stops a reset already in the past from becoming a hot loop, and
-# the ceiling is the bound on ONE pause's total wait: a reset the API
-# reports is inside the hour, so six hours is far past anything real and
-# bounds only an absurd header. Past the ceiling the pause ends and the next
-# refusal is a new pause with its own line; the point of the bound is that a
-# hostile header cannot wedge a watcher, not that the reported reset is cut
-# short. An absent reset is a plain minute.
+# The floor stops a reset already in the past from becoming a hot loop; the
+# ceiling bounds ONE pause's total wait, six hours being far past any reset
+# the API reports, so it bounds an absurd header rather than cutting a real
+# one short - past it the next refusal is a new pause with its own line. An
+# absent reset is a plain minute.
 MIN_BACKOFF = 2
 MAX_BACKOFF = 6 * 3600
 DEFAULT_BACKOFF = 60
 SLEEP_SLICE = 1.0
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
-# Where the pipe the child watches for its parent's death is named. Its own
-# name, not the bridge's: the watchers must import with no bridge beside
-# them, and a process may legitimately run a bridge child and a watcher
-# child at once without the two watching each other.
+# The pipe's own name, not the bridge's: a process may run a bridge child
+# and a watcher child at once without the two watching each other.
 PARENT_WATCH_ENV = 'DAEDALUS_WATCH_PARENT_FD'
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 
@@ -87,20 +83,19 @@ class QueryError(RuntimeError):
 class WaitExpired(RuntimeError):
     """The bound a Watcher was given passed while it was still waiting.
 
-    The pause is a wait, and a wait needs a liveness escape: without one a
-    refusal that outlives the bound sleeps to the bound, retries, and spins
-    on the API that is refusing it. This is what the bound turns into, so
-    the caller reaches its own timed-out path rather than looping here.
+    A wait needs a liveness escape: without one, a refusal that outlives
+    the bound sleeps to it, retries and spins on the API refusing it. This
+    is what the bound becomes, so the caller reaches its own timed-out path
+    rather than looping here.
     """
 
 
 class RateLimited(RuntimeError):
-    """A refusal that carries the instant to resume at, when it carries one.
+    """A refusal carrying the instant to resume at, when it carries one.
 
     A sibling of `QueryError`, never a subclass: a pause must be handled
-    before the failure path, and an `except QueryError` that also caught
-    this would turn a known wait back into the loud immediate failure it is
-    not.
+    before the failure path, and an `except QueryError` that caught this
+    too would turn a known wait back into the loud failure it is not.
     """
 
     def __init__(self, message, resume_at=None):
@@ -153,8 +148,8 @@ def _refused(status, headers, body):
 def _graphql_refusal(payload):
     """Whether a 200 body reports exhaustion in `errors[]`, and when to resume.
 
-    This is how GraphQL reports a throttled query: the transport succeeded,
-    so the evidence is the error's `type` and its `rateLimit` extension.
+    How GraphQL reports a throttled query: the transport succeeded, so the
+    evidence is the error's `type` and its `rateLimit` extension.
     """
     for error in payload.get('errors') or []:
         if str(error.get('type') or '').upper() != 'RATE_LIMITED':
@@ -195,7 +190,7 @@ def _call(query, variables):
 
 
 def graphql(query, variables=None):
-    """One page of a GraphQL query, fresh, no-cache, and header-carrying."""
+    """One page of a GraphQL query, fresh, no-cache, headers included."""
     proc = _call(query, variables)
     status, headers, body = _parse(proc.stdout)
     refused, resume = _refused(status, headers, body)
@@ -221,12 +216,12 @@ def graphql(query, variables=None):
 
 
 def nodes(page, path):
-    """The nodes of the connection at `path`, empty when it is absent."""
+    """The nodes of the connection at `path`, empty when absent."""
     return at(page, path).get('nodes') or []
 
 
 def page_info(page, path):
-    """The pageInfo of the connection at `path`, empty when it is absent."""
+    """The pageInfo of the connection at `path`, empty when absent."""
     return at(page, path).get('pageInfo') or {}
 
 
@@ -241,10 +236,9 @@ def at(page, path):
 def paginate(query, variables, connections):
     """Every page a set of connections names, one `gh` call per page.
 
-    `connections` is a sequence of (path, cursor variable) pairs. The loop
-    ends when none of them reports another page, so a list is as complete
-    here as it was under `--paginate`: no page is skipped and none is read
-    twice.
+    `connections` is a sequence of (path, cursor variable) pairs; the loop
+    ends when none reports another page, so a list is as complete here as
+    under `--paginate`: no page skipped, none read twice.
     """
     variables = dict(variables or {})
     pages = []
@@ -276,12 +270,11 @@ def _run_status(states):
 def _run_from_suites(suites):
     """One workflow run, from the check suites it created.
 
-    A workflow run has no status or conclusion of its own in the GraphQL
-    schema — the state lives on the suites, one per job — so the run's
-    state is read off its suites: completed only when every one of them is,
-    and the first conclusion that is not an acceptable one otherwise. The
-    fields are the ones the verdict logic already reads, so it is unchanged
-    by where they came from.
+    A workflow run has no status or conclusion of its own in the schema -
+    the state lives on the suites, one per job - so it is read off them:
+    completed only when every suite is, and otherwise the first conclusion
+    that is not an acceptable one. The fields are the ones the verdict
+    logic already reads.
     """
     runs = [run for run in (_suite_run(suite) for suite in suites) if run]
     if not runs:
@@ -308,12 +301,11 @@ def _run_from_suites(suites):
 def workflow_runs(owner, name, sha):
     """Every workflow run GitHub reports against one SHA.
 
-    Runs are read through the commit's check suites rather than the
-    check-runs list, for the reason `ci_wait.py` documents: that list is
-    appended to while a matrix fills. A run whose jobs have not started has
-    no suite yet, and reads as no runs at all — which is a wait, never a
-    pass. The suites of one run collapse to that run, so a run is one entry
-    here exactly as the REST list returned it.
+    Through the commit's check suites rather than the check-runs list, for
+    the reason `ci_wait.py` documents. A run whose jobs have not started has
+    no suite yet and reads as no runs at all, which is a wait, never a pass.
+    The suites of one run collapse to that run, so a run is one entry here
+    exactly as the REST list returned it.
     """
     pages = paginate(
         RUNS_QUERY,
@@ -341,19 +333,15 @@ def _exit_at_eof(descriptor):
 def spawn_watched(argv, env=None, **popen):
     """Start a child that exits when this process disappears.
 
-    One pipe per child, and the guarantee it carries is the same on every
-    platform: the child holds the read end, this process holds the only
-    write end, and this process dying closes the last copy, which the
-    child reads as end of file. Nothing in the check depends on how the
-    platform reports a parent id, so nothing in it is a POSIX assumption -
-    a process-group kill, and a parent pid compared with `os.getppid()`,
-    both fail on Windows, where the parent id is historical and does not
-    change when the parent dies.
-
-    The handle travels to the child as a number in the environment: a file
-    descriptor on POSIX, passed with `pass_fds`; the inherited HANDLE's own
-    value on Windows, marked inheritable for the launch, which the child
-    wraps back into a descriptor with `msvcrt`.
+    One pipe per child: the child holds the read end, this process the
+    only write end, and this process dying closes the last copy, which the
+    child reads as end of file. The check depends on no platform's idea of
+    a parent id, which is the point - a process-group kill, and a pid
+    compared with `os.getppid()`, both fail on Windows, where the parent
+    id is historical and does not change when the parent dies. The handle
+    travels as a number in the environment: a descriptor passed with
+    `pass_fds` on POSIX, the inherited HANDLE's own value on Windows, which
+    the child wraps back into a descriptor with `msvcrt`.
 
     Returns the child and the write end to hold until it is done with.
     """
@@ -392,11 +380,10 @@ def spawn_watched(argv, env=None, **popen):
 def watch_parent():
     """Exit this process when the one that started it disappears.
 
-    A watcher blocked on a poll interval is a watcher that cannot notice
-    anything, so the check is not a tick: a daemon thread sits on the
-    inherited pipe and ends the process at end of file, which is what the
-    parent's death looks like from inside the child. A watcher started by
-    hand has no pipe and is left alone.
+    A watcher asleep for a poll interval cannot notice anything, so this
+    is not a tick: a daemon thread sits on the pipe and ends the process at
+    end of file. Started by hand there is no pipe, and the watcher is left
+    alone.
     """
     raw = os.environ.get(PARENT_WATCH_ENV)
     if raw is None:

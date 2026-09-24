@@ -36,12 +36,10 @@ def _run(rid, status, conclusion):
 
 
 def _fake_runs(mod, answer, seen=None):
-    """A client double installed on the module alone.
-
-    `answer` is the run list the query returns, or the exception it raises.
-    The real `gh` invocation behind it is exercised end to end in
-    `test_gh_client.py`; what is under test here is what this script does
-    with the answer.
+    """A client double installed on the module alone: `answer` is the run
+    list the query returns, or the exception it raises. The `gh` invocation
+    behind it is exercised end to end in `test_gh_client.py`; what is under
+    test here is what this script does with the answer.
     """
     def workflow_runs(owner, name, sha):
         if seen is not None:
@@ -55,11 +53,9 @@ def _fake_runs(mod, answer, seen=None):
 
 
 def test_a_queued_run_holds_even_when_every_check_run_is_complete(tmp):
-    """The defect: the runs list is complete while a run is queued.
-
-    The query no longer reads check runs at all, so the half of the case
-    that named them is structural; what must still hold is that one queued
-    workflow run keeps the batch from reading as settled.
+    """The defect: the list is complete while a run is queued. The query no
+    longer reads check runs, so what must still hold is that one queued run
+    keeps the batch from reading as settled.
     """
     del tmp
     mod = _watch_all()
@@ -116,10 +112,8 @@ def test_without_a_repo_slug_nothing_is_queried(tmp):
 
 
 def test_every_run_the_client_reports_is_considered(tmp):
-    """No run is dropped between the query and the hold: one list, all of it.
-
-    The list is now paged by the shared client, so "all of it" is its
-    contract; what this script must not do is look at a prefix of it.
+    """No run is dropped between the query and the hold: the list is paged by
+    the shared client, and this script must not read a prefix of it.
     """
     del tmp
     mod = _watch_all()
