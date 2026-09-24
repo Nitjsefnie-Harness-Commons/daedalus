@@ -60,6 +60,19 @@ def run_extension_result_boundary(scenario):
     return _run(scenario)
 
 
+def run_extension_hotfix_quota(plan):
+    """Drive the hotfix store's byte bound through the shipped worker."""
+    node = shutil.which('node')
+    assert node, 'node is required to execute the extension hotfix path'
+    result = run_node_program(
+        node, HARNESS,
+        [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'], cwd=ROOT,
+        payload=json.dumps(plan))
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
 def run_extension_capability_routes(routes, background_path=None):
     """Probe a module's published command routes in one worker process."""
     return _run('capability-routes', background_path=background_path,

@@ -1,5 +1,5 @@
 /* exported handleGmStorage */
-/* global canonicalOrigin */
+/* global canonicalOrigin, storageEntryBytes */
 
 // ─── Page-facing GM storage, served in the service-worker realm ───
 //
@@ -32,8 +32,8 @@ const GM_QUOTA_BYTES = 1024 * 1024;
 // GM_TOTAL_QUOTA_BYTES bounds the SUM over every origin, which the per-origin
 // cap cannot: a dozen origins at their own 1 MB are all admitted, they overrun
 // the 10 MB area, and the writes that then fail are the extension's own. Half
-// the area is the sum, and half is reserve: 5 MB of GM + 2 MB of hotfixes
-// (HOTFIX_QUOTA_BYTES) + 3 MB of reserve = the 10 MB Chrome caps `local` at.
+// the area is the sum, and half is reserve: 5 MiB of GM + 2 MiB of hotfixes
+// (HOTFIX_QUOTA_BYTES) + 3 MiB of reserve = the 10 MB Chrome caps `local` at.
 // Chrome's own enforcement stays the backstop — the extension asks for no
 // `unlimitedStorage`, so a browser cap is still there under this one. The 3 MB
 // reserve spends on the extension's own four keys — daedalus-token,
@@ -48,21 +48,6 @@ const GM_KEY_PREFIX = 'gm:';
 
 function gmNamespace(origin) {
   return GM_KEY_PREFIX + encodeURIComponent(origin) + ':';
-}
-
-function _jsonBytes(value) {
-  const json = JSON.stringify(value);
-  if (typeof json !== 'string') throw new Error('not serialisable');
-  return new TextEncoder().encode(json).length;
-}
-
-// Chrome's local QUOTA_BYTES is "as measured by the JSON stringification of
-// every value plus every key's length", so an entry's charge is the value's
-// JSON byte length PLUS the byte length of the storage key it lives under. A
-// long key holding a tiny value is a real quota consumer; a measure that
-// omitted the key would let a page blow past Chrome's whole area.
-function gmEntryBytes(storageKey, value) {
-  return _jsonBytes(value) + new TextEncoder().encode(storageKey).length;
 }
 
 // The one GM write queue. chrome.storage has no compare-and-swap, so the
@@ -104,7 +89,7 @@ function _gmSetValue(origin, key, value, sendResponse) {
   const storeKey = namespace + key;
   let incoming;
   try {
-    incoming = gmEntryBytes(storeKey, value);
+    incoming = storageEntryBytes(storeKey, value);
   } catch (e) {
     return sendResponse({ error: 'value could not be measured' });
   }
@@ -124,9 +109,12 @@ function _gmSetValue(origin, key, value, sendResponse) {
           let total = 0;
           for (const storedKey of Object.keys(data)) {
             if (storedKey === storeKey) continue;
-            const bytes = gmEntryBytes(storedKey, data[storedKey]);
+            // Only a gm: key is charged, so an extension key is skipped
+            // before it is stringified rather than measured and dropped.
+            if (!storedKey.startsWith(GM_KEY_PREFIX)) continue;
+            const bytes = storageEntryBytes(storedKey, data[storedKey]);
             if (storedKey.startsWith(namespace)) stored += bytes;
-            if (storedKey.startsWith(GM_KEY_PREFIX)) total += bytes;
+            total += bytes;
           }
           if (stored + incoming > GM_QUOTA_BYTES) {
             sendResponse({ error: 'gm storage quota exceeded' });
