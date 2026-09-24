@@ -378,9 +378,11 @@ def spawn_watched(argv, env=None, **popen):
                 child = subprocess.Popen(argv, env=child_env,
                                          pass_fds=(read_fd,), **popen)
         finally:
-            if os.name == 'nt':
-                inheritable(read_handle, False)
-            os.close(read_fd)
+            try:
+                if os.name == 'nt':
+                    inheritable(read_handle, False)
+            finally:
+                os.close(read_fd)
     except BaseException:
         os.close(write_fd)
         raise
