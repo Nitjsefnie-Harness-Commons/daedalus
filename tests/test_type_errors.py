@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _wfgraph import _job_names  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 ROOT = _util.ROOT
@@ -24,9 +25,13 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 SCRIPT = ROOT / 'scripts' / 'ci' / 'type_error_baseline.py'
 THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
-WORKFLOW_SOURCE = ROOT / '.github' / 'workflows' / 'tests.yml'
+WORKFLOW_DIR = ROOT / '.github' / 'workflows'
 CONFIG_NAME = 'pyrightconfig.tests.json'
 RATCHET_RUN = 'python3 scripts/ci/type_error_baseline.py'
+# Both runners discover suites by glob, so either one puts this suite in the
+# job's scope whether or not the job names it.
+SUITE_RUNNERS = ('run_tests.py', 'coverage_suites.py')
+INSTALL_DEV = 'pip install -r requirements-dev.txt'
 
 
 def _thresholds():
@@ -102,41 +107,54 @@ def _write(repo, rel, content):
     (repo / rel).write_text(content, encoding='utf-8')
 
 
-def _job_runs(job):
-    """The ordered `run:` values of every step in a named workflow job."""
-    workflow = WORKFLOW_SOURCE.read_text(encoding='utf-8')
+def _job_runs(workflow, job):
+    """The ordered `run:` values of every step in one workflow job."""
     mapping = complete_job_mapping(workflow, job)
     assert mapping is not None, f'the workflow has no {job} job'
-    steps = mapping['steps']
-    return [step.get('run', '') for step in steps]
+    return [step.get('run', '') for step in mapping['steps']]
 
 
-def _pyright_job_runs():
-    """The ordered `run:` values of the workflow's pyright job's steps."""
-    return _job_runs('pyright')
+def _workflow_jobs(marker):
+    """Every job in every workflow with a step whose `run:` names `marker`.
+
+    Read off what the jobs run, not off a list of their names: a job that
+    globs the suites belongs to this control whichever workflow file it was
+    added to, and a control that could only see one file was exactly the
+    defect a third job in a second file walked past.
+    """
+    found = []
+    for source in sorted(WORKFLOW_DIR.glob('*.yml')):
+        workflow = source.read_text(encoding='utf-8')
+        for job in _job_names(workflow):
+            runs = _job_runs(workflow, job)
+            if any(marker in run for run in runs):
+                found.append((source.name, job, runs))
+    return found
 
 
-def test_the_ratchet_runs_in_ci_after_pyright_is_installed(tmp):
+def test_the_ratchet_runs_in_ci_after_the_checker_is_installed(tmp):
     """CI measures the test-tree scope, and does so once the checker exists."""
     del tmp
-    runs = _pyright_job_runs()
-    assert RATCHET_RUN in runs, (
-        f'the pyright job no longer runs {RATCHET_RUN!r}; without this step '
-        'nothing measures the second type-checker scope, and a reorder or a '
-        'careless merge that drops it reproduces exactly issue 983 with CI '
-        'still green')
-    install = next(
-        (index for index, run in enumerate(runs)
-         if 'pip install -r requirements-dev.txt' in run), None)
-    assert install is not None, (
-        'the pyright job no longer installs the pinned type checker, so the '
-        'ratchet has no pyright to run')
-    assert runs.index(RATCHET_RUN) > install, (
-        f'{RATCHET_RUN!r} runs before the type checker is installed, so the '
-        'step would fail for want of pyright rather than measure anything')
+    found = _workflow_jobs(RATCHET_RUN)
+    assert found, (
+        f'no workflow job runs {RATCHET_RUN!r}; without this step nothing '
+        'measures the second type-checker scope, and a reorder or a careless '
+        'merge that drops it reproduces exactly issue 983 with CI still '
+        'green')
+    for source, job, runs in found:
+        install = next(
+            (index for index, run in enumerate(runs)
+             if INSTALL_DEV in run), None)
+        assert install is not None, (
+            f'the {job} job in {source} no longer installs the pinned type '
+            'checker, so the ratchet has no pyright to run')
+        assert runs.index(RATCHET_RUN) > install, (
+            f'the {job} job in {source} runs {RATCHET_RUN!r} before the type '
+            'checker is installed, so the step would fail for want of '
+            'pyright rather than measure anything')
 
 
-def test_the_suite_jobs_install_the_toolchain_the_suites_drive(tmp):
+def test_every_suite_running_job_installs_the_toolchain_it_drives(tmp):
     """This suite drives the real ``pyright`` binary, so the jobs that run
     it install the file that pins pyright.
 
@@ -145,14 +163,19 @@ def test_the_suite_jobs_install_the_toolchain_the_suites_drive(tmp):
     leaves the suite jobs without pyright however green those jobs are.
     """
     del tmp
-    for job in ('suites', 'coverage-matrix'):
-        runs = _job_runs(job)
-        assert any('pip install -r requirements-dev.txt' in run
-                   for run in runs), (
-            f'the {job} job runs this suite, which drives the real pyright '
-            'binary, but never installs requirements-dev.txt that pins it; '
-            'on a runner without pyright already cached the suite cannot '
-            'find the tool it is written to exercise')
+    found = [entry for runner in SUITE_RUNNERS
+             for entry in _workflow_jobs(runner)]
+    assert found, (
+        'no workflow job runs a suite runner, so this control has found '
+        'nothing to check and would pass on a tree that runs no suites at '
+        'all')
+    for source, job, runs in found:
+        assert any(INSTALL_DEV in run for run in runs), (
+            f'the {job} job in {source} runs a suite runner, which discovers '
+            'this suite and drives the real pyright binary, but the job '
+            f'never installs {INSTALL_DEV!r} that pins it; on a runner '
+            'without pyright already cached the suite cannot find the tool '
+            'it is written to exercise')
 
 
 def test_the_key_format_is_forward_slash_on_every_host(tmp):
