@@ -34,10 +34,17 @@ from _repo import EXTENSION_ROOT  # noqa: E402
 # source: a boundary derived from it moves with the cap rather than restating
 # it, and a module that declares no cap fails to parse here.
 HOTFIX_KEY = 'daedalus-hotfixes'
-# The record the worker stamps on every store it composes.
-VERSION = re.search(r"const VERSION = '([^']+)'",
-                    (EXTENSION_ROOT / 'background.js').read_text(
-                        encoding='utf-8')).group(1)
+
+
+def _background_version():
+    """The record's `version` field: the version background.js declares."""
+    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
+    match = re.search(r"const VERSION = '([^']+)'", source)
+    assert match, 'background.js declares no VERSION'
+    return match.group(1)
+
+
+VERSION = _background_version()
 # Chrome's documented QUOTA_BYTES for `local`, which is why every cap in the
 # worker sums below it. The relationship is checked, not the constants: the
 # two caps are numbers the modules own, and what must hold is that they fit.
@@ -86,9 +93,7 @@ def _code_length_for(version, seeds, fix_id, permanent, target):
     for _unused in range(3):
         fix = {'id': fix_id, 'code': 'x' * length, 'ts': 1700000000000,
                'permanent': permanent}
-        length += target - _charge(version, seeds + [fix])
-        if length < 0:
-            length = 0
+        length = max(0, length + target - _charge(version, seeds + [fix]))
     return length
 
 
