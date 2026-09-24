@@ -516,6 +516,52 @@ def test_the_refused_line_carries_no_full_token(tmp):
     assert '[STREAM] REFUSED q=tok-veri…_tab3/' in line, line
 
 
+def test_the_poll_refused_line_carries_no_full_token(tmp):
+    """poll's refusal names the token's legacy file: redacted the same way.
+
+    `secret=` is a per-call-site argument, so the poll producer needs its own
+    limb: dropping `secret=token` here would leak the whole token.
+    """
+    service = _load_service('stream_service_poll_refused_redact')
+    cq = service.command_queue
+    cmd_dir = Path(tmp)
+    _, legacy = cq.command_target_names('tokverify')
+    entry = cmd_dir / legacy
+    twin = cmd_dir / 'twin.json'
+    twin.write_text('{}', encoding='utf-8')
+    os.link(twin, entry)  # a hard link carries two names: poll refuses it
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        answer = service.poll_legacy(cmd_dir, 'tokverify')
+    assert answer == (200, {}), answer
+    line = output.getvalue()
+    assert '[STREAM] REFUSED' in line, line
+    assert 'tokverify' not in line, line
+    assert 'tokverif…' in line, line
+
+
+def test_the_legacy_refused_line_carries_no_full_token(tmp):
+    """A refused legacy drop is named with the token: redacted too.
+
+    The legacy-drain producer's own `secret=` argument needs a limb as well.
+    """
+    service = _load_service('stream_service_legacy_refused_redact')
+    legacy = Path(tmp) / 'tok-verify_tab6.json'
+    twin = Path(tmp) / 'tok-verify_tab6_twin.json'
+    twin.write_text('{}', encoding='utf-8')
+    os.link(twin, legacy)  # a hard link carries two names: the drain refuses
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        delivered = service.drain_legacy_file(
+            legacy, 'tab6', command_ttl=100,
+            frame_writer=lambda frame: None, secret='tok-verify')
+    assert delivered == 0, delivered
+    line = output.getvalue()
+    assert '[STREAM] REFUSED' in line, line
+    assert 'tok-verify' not in line, line
+    assert 'tok-veri…' in line, line
+
+
 def test_the_legacy_delivered_line_carries_no_full_token(tmp):
     """A legacy drop's own name is <token>[_<tab>].json: redacted too."""
     service = _load_service('stream_service_legacy_redact')
