@@ -489,30 +489,72 @@ def _key_matrix_rows():
 _KEY_MATRIX = _key_matrix_rows()
 
 
-def test_key_form_matrix_matches_the_runtime(tmp):
+# The pair-list store of issue 857's first facet, whose key the evaluator
+# folds but the pair helper used to gate on a raw `ast.Constant`: a tuple
+# key and a name-bound key both landed in the dynamic slot. The first two
+# rows are the real defect the guard read clean and the clean program it
+# read dirty, the last two the string-key controls they must equal.
+_PAIR_LIST_KEYS = [
+    ('pair-tuple-key-setdefault', _flow(
+        _RELAY, 'e = {}; e.update([((1, 2), relay())])',
+        'x = e.setdefault((1, 2), ordinary)', invoke='x()'), (1, 1)),
+    ('pair-name-key-setdefault', _flow(
+        _RELAY, 'e = {}; k = "k"; e.update([(k, relay())])',
+        'x = e.setdefault("k", ordinary)', invoke='x()'), (1, 1)),
+    ('pair-tuple-key-clean-get', _flow(
+        _RELAY, 'e = {}; e.update([((1, 2), ordinary)])',
+        'x = e.get((1, 2), relay())', invoke='x()'), (0, 0)),
+    ('pair-str-key-setdefault', _flow(
+        _RELAY, 'e = {}; e.update([("k", relay())])',
+        'x = e.setdefault("k", ordinary)', invoke='x()'), (1, 1)),
+    ('pair-str-key-clean-get', _flow(
+        _RELAY, 'e = {}; e.update([("k", ordinary)])',
+        'x = e.get("k", relay())', invoke='x()'), (0, 0)),
+]
+
+
+def test_pair_list_key_forms(tmp):
     bad = []
-    for label, body, expected in _KEY_MATRIX:
+    for label, body, expected in _PAIR_LIST_KEYS:
         actual = _tracked_focus_verdict(tmp, body, counts=True)
         if actual != expected:
             bad.append((label, actual, expected))
     assert not bad, bad
 
 
-def test_key_resolution_is_operation_independent(tmp):
-    """The property, read off the matrix: an evaluable form behaves as the
-    string constant does on every operation, and the two the evaluator
-    cannot fold behave as each other do."""
-    by_form = {form: {} for form in _KEY_FORMS}
-    for label, _body, expected in _KEY_MATRIX:
+def test_key_form_matrix_and_operation_independence(tmp):
+    """The matrix measured, and the property read off the measurement.
+
+    The property is that an evaluable key form behaves as the string
+    constant does on every operation, and that the two forms the evaluator
+    cannot fold behave as each other do. Both are checked against measured
+    verdicts, never against the table, so a site that stops resolving one
+    form reds this test on the divergence rather than on a cell. The
+    string-constant column is also anchored to the ideal, so a cell that is
+    wrong for every form cannot pass by being the reference they are
+    compared with.
+    """
+    measured, cells = {}, {}
+    for label, body, expected in _KEY_MATRIX:
         form, operation = label.split('/', 1)
-        by_form[form][operation] = expected
-    reference = by_form['str-const']
-    for form in _EVALUABLE_FORMS:
-        assert by_form[form] == reference, form
-    for form in _UNRESOLVED_FORMS:
-        assert by_form[form] == by_form[_UNRESOLVED_FORMS[0]], form
-    assert set(reference) == {operation for operation, *_ in
-                              _KEY_OPERATIONS}
+        verdict = _tracked_focus_verdict(tmp, body, counts=True)
+        measured.setdefault(form, {})[operation] = verdict
+        cells.setdefault(form, {})[operation] = (verdict, expected)
+    reference = measured['str-const']
+    diverged = [(form, operation, verdict, reference[operation])
+                for form in _EVALUABLE_FORMS
+                for operation, verdict in sorted(measured[form].items())
+                if verdict != reference[operation]]
+    assert not diverged, diverged
+    unresolved = _UNRESOLVED_FORMS[0]
+    for form in _UNRESOLVED_FORMS[1:]:
+        assert measured[form] == measured[unresolved], form
+    assert reference == _KEY_EXPECTED, reference
+    bad = [(f'{form}/{operation}', verdict, expected)
+           for form, entries in sorted(cells.items())
+           for operation, (verdict, expected) in sorted(entries.items())
+           if verdict != expected]
+    assert not bad, bad
 
 
 def test_store_form_verdicts(tmp):
