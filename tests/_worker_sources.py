@@ -102,3 +102,78 @@ const context = vm.createContext({
 });
 """ + import_scripts_stub('context') + r"""
 """
+
+
+def chrome_stub(token, server, send_command):
+    """The chrome surface the CDP and starvation harnesses stand against.
+
+    The storage no-op, the single-tab list, the debugger attach/detach pair,
+    the scripting/runtime/alarms tail, and the shared `Runtime.releaseObject`
+    bookkeeping are identical in every harness that uses this, so they live
+    here once and cannot drift — the same one-copy rule as `RELAY_CONTEXT`
+    above. A caller supplies only what is genuinely its own: the token and
+    server it hands the worker, and a `send_command` async function for the
+    methods its scenario drives. That function closes over the harness's own
+    `released` array and `pendingResolve`; the shared release bookkeeping
+    uses the same two names.
+    """
+    template = r"""
+const chrome = {
+  storage: {
+    local: {
+      get: async () => ({
+        'daedalus-token': __TOKEN__,
+        'daedalus-server': __SERVER__,
+      }),
+      set: async () => {},
+      remove: async () => {},
+    },
+    onChanged: eventTarget(),
+  },
+  tabs: {
+    onUpdated: eventTarget(),
+    onCreated: eventTarget(),
+    onRemoved: eventTarget(),
+    query(_query, callback) {
+      const tabs = [{ id: 7, url: '', title: 'Page' }];
+      if (callback) {
+        callback(tabs);
+        return undefined;
+      }
+      return Promise.resolve(tabs);
+    },
+  },
+  debugger: {
+    onEvent: eventTarget(),
+    onDetach: eventTarget(),
+    attach: async () => {},
+    detach: async () => {},
+    sendCommand: async (_target, method, params) => {
+      if (method === 'Runtime.releaseObject') {
+        released.push(params.objectId);
+        if (params.objectId === 'pending-original' && pendingResolve) {
+          const resolve = pendingResolve;
+          pendingResolve = null;
+          setImmediate(() => resolve({
+            result: { objectId: 'pending-late' },
+          }));
+        }
+        return {};
+      }
+      return __SEND_COMMAND__(_target, method, params);
+    },
+  },
+  scripting: { executeScript: async () => [{ result: false }] },
+  runtime: {
+    onMessage: eventTarget(),
+    onConnect: eventTarget(),
+    getPlatformInfo() {},
+    getManifest: () => ({ version: '0.18.0' }),
+  },
+  alarms: { onAlarm: eventTarget(), create() {} },
+};
+"""
+    return (template
+            .replace('__TOKEN__', token)
+            .replace('__SERVER__', server)
+            .replace('__SEND_COMMAND__', send_command))
