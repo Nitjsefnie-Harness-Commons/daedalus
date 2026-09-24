@@ -137,7 +137,7 @@ The rest of the gate runs on GitHub:
 | --- | --- |
 | `tests` | The suites across 3 OSes x 4 Pythons, plus a wheel that is installed with no checkout in reach and has its console script run, plus a coverage ratchet per language. |
 | `lint` / `types` / `eslint` | pycodestyle and pylint, pyright, and eslint over the shipped JavaScript. |
-| `codeql` | Security analysis for Python and JavaScript. Findings go to the Security tab, not the build. Also weekly, because a new query only ever sees code that changed after it shipped. |
+| `codeql` | Security analysis for Python and JavaScript. Findings land in the Security tab, and no CodeQL check is required, so a new query cannot block an unrelated push. Also weekly, because a new query only ever sees code that changed after it shipped. |
 | `actionlint` | `actionlint` + `zizmor` over the workflows themselves. A broken workflow does not go red, it silently stops running. |
 | `tests` (`speed` check) | Verdict job; fails above 30% slowdown. |
 | `release` | Builds and publishes the wheel, the sdist and `SHA256SUMS` on a `v*` tag. |
