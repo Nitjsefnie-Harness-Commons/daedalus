@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import STRICT_FETCH  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
@@ -25,11 +26,15 @@ TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
 NEW_TOKEN = 'tok-2'
 NEW_BRIDGE = 'https://other.example.com'
-# Every stream connect and the boot re-register the tab list; a dispatched
-# command posts its result. Counts come from each scenario's recording.
+# A CONNECTED stream re-registers the tab list (as do boot and the
+# heartbeat alarm), and a dispatched command posts its result. Counts and
+# the permitted origins below come from each scenario's recording.
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
+OTHER = 'POST /other'
 TWO = [SYNC, SYNC]
+# The resumed-bridge scenario legitimately posts the same route to two.
+BOTH = [BRIDGE, NEW_BRIDGE]
 
 
 _STREAM_HARNESS = r"""
@@ -47,6 +52,7 @@ const streamFetches = [];
 const resultPosts = [];
 const nonStreamFetches = [];
 const refusedFetches = [];
+const badOrigins = [];
 const timeoutTimers = [];
 const intervalTimers = [];
 let nextTimerId = 0;
@@ -183,47 +189,7 @@ function streamResponse(answer) {
   return { ok: false, status: answer, body: null };
 }
 
-// A request is planned as often as the recording shows; beyond that it is
-// refused and recorded. No route is special-cased, so a new one is caught.
-function accountRequest(request) {
-  const seen = nonStreamFetches.filter((i) => i.request === request).length;
-  const planned = (plan.planned || []).filter((i) => i === request).length;
-  const refused = seen >= planned;
-  nonStreamFetches.push({ request, refused });
-  if (refused) refusedFetches.push(request);
-  return refused;
-}
-
-// Route, not host: the resumed-bridge scenario posts one route to two.
-function requestKey(url, init) {
-  return (init.method || 'GET') + ' ' + url.replace(/^https?:\/\/[^/]+/, '');
-}
-
-async function bridgeFetch(target, init = {}) {
-  const url = String(target);
-  if (url.includes('/stream?')) {
-    const next = plan.statuses && plan.statuses.length
-      ? plan.statuses.shift()
-      : 503;
-    streamFetches.push({
-      auth: (init.headers || {}).Authorization || null,
-      answered: next,
-    });
-    if (next === 'down') {
-      throw new TypeError('Failed to fetch');
-    }
-    return streamResponse(next);
-  }
-  const request = requestKey(url, init);
-  if (url.endsWith('/result') && init.method === 'POST') {
-    const payload = JSON.parse(init.body);
-    resultPosts.push({ did: payload._did || null });
-  }
-  return accountRequest(request)
-    ? response(599, { ok: false, error: 'more often than declared' })
-    : response(200, { ok: true });
-}
-
+""" + STRICT_FETCH + r"""
 const chrome = {
   storage: {
     local: {
@@ -463,14 +429,19 @@ async function run() {
     await settle();
     outcome.fetches = streamFetches.length;
   } else if (plan.scenario === 'fake-probe') {
-    const post = (route) => bridgeFetch(
-      BRIDGE_URL + route, { method: 'POST' });
-    outcome.plannedStatus = (await post(plan.plannedRoute)).status;
-    outcome.unplannedStatus = (await post(plan.unplannedRoute)).status;
+    const post = (url) => bridgeFetch(url, { method: 'POST' });
+    const route = (r) => BRIDGE_URL + r;
+    outcome.firstStatus = (await post(route('/sync-tabs'))).status;
+    outcome.secondStatus = (await post(route('/sync-tabs'))).status;
+    outcome.undeclaredStatus = (await post(route('/tabs'))).status;
+    outcome.badOriginStatus = (
+      await post('https://elsewhere.example.com/other')).status;
+    outcome.relativeStatus = (await post('/other')).status;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   outcome.nonStream = nonStreamFetches.map((item) => item.request);
   outcome.refused = refusedFetches;
+  outcome.badOrigins = badOrigins;
   return outcome;
 }
 
@@ -495,11 +466,15 @@ def _drive(plan):
 
 
 def _run(plan):
-    """Two-sided oracle: the fake refuses a request seen more often than
-    declared, and this also requires the observed sequence to match the
-    declaration, so a dropped planned request is caught too.
-    """
+    """Three checks, each catching a direction the others miss: an origin
+    the plan did not name, a route seen more often than the declared
+    MULTISET allows (the fake's 599 arm), and a multiset mismatch, which
+    catches a declared route the worker stopped making. The first two fire
+    inside the worker; the third is the record read back."""
     outcome = _drive(plan)
+    assert outcome['badOrigins'] == [], (
+        'bridge origin(s) the scenario did not permit:',
+        outcome['badOrigins'], outcome)
     assert outcome['refused'] == [], (
         'bridge request(s) seen more often than the scenario declared:',
         outcome['refused'], outcome)
@@ -596,7 +571,7 @@ def test_a_new_bridge_url_resumes_connecting(tmp):
     del tmp
     outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
                     'field': 'daedalus-server', 'value': NEW_BRIDGE,
-                    'planned': TWO})
+                    'planned': TWO, 'hosts': BOTH})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + TOKEN, outcome
