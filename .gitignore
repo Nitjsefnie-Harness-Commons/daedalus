@@ -370,6 +370,7 @@
 !/tests/test_atomic_file.py
 !/tests/test_bash_resolver_scan.py
 !/tests/test_bridge_credentials.py
+!/tests/test_bridge_fake_oracle.py
 !/tests/test_bridge_requests.py
 !/tests/test_bridge_results.py
 !/tests/test_bridge_results_stripes.py
