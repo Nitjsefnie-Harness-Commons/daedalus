@@ -166,6 +166,18 @@ The remedy for a refusal is to wrap the line, and the shrink is recorded with
 whose file has no over-limit line left. `tests/test_line_lengths.py` gates
 the policy and reads this paragraph the same way.
 
+**`.github/ci-thresholds.json`'s `type_error_baseline` holds the test tree's
+type-error count on the same terms.** It records how many type errors each
+tracked test module still carries, as measured by `pyright` over
+`pyrightconfig.tests.json`;
+a number is never raised by hand and no entry is ever added by hand. The
+remedy for a refusal is to fix the type error in the named test module, and
+the fall is recorded with
+`python3 scripts/ci/type_error_baseline.py --tighten`, which also drops an
+entry whose file has no type error left. An entry naming a file that is gone
+is removed by hand. `tests/test_type_errors.py` gates the policy and reads
+this paragraph the same way.
+
 ## Git and CI
 
 **Audit co-author trailer values before every push.** Run

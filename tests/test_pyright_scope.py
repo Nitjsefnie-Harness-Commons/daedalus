@@ -24,6 +24,7 @@ import _util  # noqa: E402
 
 ROOT = _util.ROOT
 CONFIG = ROOT / 'pyrightconfig.json'
+CONFIG_TESTS = ROOT / 'pyrightconfig.tests.json'
 
 GLOB_CHARACTERS = '*?['
 
@@ -39,6 +40,10 @@ EXCLUSIONS = {
 
 def _config():
     return json.loads(CONFIG.read_text(encoding='utf-8'))
+
+
+def _tests_config():
+    return json.loads(CONFIG_TESTS.read_text(encoding='utf-8'))
 
 
 def _tracked_python():
@@ -92,6 +97,38 @@ def test_every_exclusion_is_one_this_suite_states_a_reason_for(tmp):
         f'pyrightconfig.json excludes {excluded}, while this suite states '
         f'a reason for {sorted(EXCLUSIONS)}; a directory leaves the type '
         'checker\'s scope by being named in both places')
+
+
+def test_the_test_tree_config_exists_and_really_scopes_the_tests(tmp):
+    """The test tree's own config must exist and include tests."""
+    del tmp
+    assert CONFIG_TESTS.is_file(), (
+        f'{CONFIG_TESTS.name} is missing; without it nothing type-checks '
+        'the test tree, and a clean gate reads the same as a zero-file '
+        'analysis')
+    config = _tests_config()
+    assert 'tests' in config['include'], (
+        f'{CONFIG_TESTS.name} include is {config["include"]}, which does '
+        'not name the tests directory, so the test tree is not in scope')
+    assert 'tests' not in config['exclude'], (
+        f'{CONFIG_TESTS.name} excludes tests as well as including it, so '
+        'the checker analyses nothing there')
+
+
+def test_the_two_configs_agree_outside_their_deliberate_differences(tmp):
+    """Only include, exclude and extraPaths may differ between them."""
+    del tmp
+    main = _config()
+    tests = _tests_config()
+    deliberate = {'include', 'exclude', 'extraPaths'}
+    shared = (set(main) | set(tests)) - deliberate
+    mismatched = sorted(key for key in shared
+                        if main.get(key) != tests.get(key))
+    assert not mismatched, (
+        f'the two checker configs disagree on {mismatched}; every key '
+        f'other than {sorted(deliberate)} must stay byte-identical, so the '
+        'two scopes are one policy stated twice rather than two drifting '
+        'ones')
 
 
 if __name__ == '__main__':

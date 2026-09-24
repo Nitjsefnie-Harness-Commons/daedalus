@@ -47,6 +47,7 @@ def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
             'tests/test_cli.py': 1238,
         },
         'long_line_baseline': {},
+        'type_error_baseline': {},
     }
 
 

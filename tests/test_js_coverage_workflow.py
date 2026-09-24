@@ -577,6 +577,7 @@ def test_javascript_gate_reads_floor_from_thresholds_file(tmp):
         },
         'module_size_baseline': {},
         'long_line_baseline': {},
+        'type_error_baseline': {},
     }
     (work / '.github' / 'ci-thresholds.json').write_text(
         json.dumps(document), encoding='utf-8')

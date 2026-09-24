@@ -266,6 +266,9 @@ jobs:
       - name: pyright
         run: pyright
 
+      - name: type error ratchet
+        run: python3 scripts/ci/type_error_baseline.py
+
       # Only a push of main writes cross-run state, and a cancelled run
       # never reaches this step; nothing between the install and here runs
       # pip, so the position after the lint run decides who writes a cache,
