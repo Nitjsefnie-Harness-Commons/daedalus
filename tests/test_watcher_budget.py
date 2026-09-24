@@ -83,19 +83,23 @@ def _check(rid, name, conclusion='SUCCESS'):
             'url': f'https://github.com/o/r/runs/{rid}'}
 
 
-def runs_page(runs=()):
+def runs_page(suites=()):
     """One page of the single query the wait and the hold now make."""
-    return {'data': {'repository': {'commit': {'checkSuites': {
+    return {'data': {'repository': {'object': {'checkSuites': {
         'pageInfo': _page_info(),
-        'nodes': [{'workflowRun': run} for run in runs]}}}}}
+        'nodes': list(suites)}}}}}
 
 
-def _run(rid, conclusion='SUCCESS', status='COMPLETED',
-         started='2026-09-20T10:00:00Z', workflow=11):
-    return {'databaseId': rid, 'name': f'run {rid}', 'status': status,
-            'conclusion': conclusion, 'createdAt': started,
-            'url': f'https://github.com/o/r/actions/runs/{rid}',
-            'workflow': {'databaseId': workflow}}
+def _suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
+           started='2026-09-20T10:00:00Z'):
+    """One check suite of a workflow run, as the live schema reports it."""
+    return {'status': status, 'conclusion': conclusion, 'createdAt': started,
+            'workflowRun': {
+                'databaseId': rid, 'createdAt': started,
+                'url': f'https://github.com/o/r/actions/runs/{rid}',
+                'file': {'path': '.github/workflows/ci.yml'},
+                'workflow': {'databaseId': workflow,
+                             'name': f'workflow {workflow}'}}}
 
 
 def _refusal(status=403, headers=None, body='API rate limit exceeded.'):
@@ -255,7 +259,7 @@ def _idle_answers():
     return {
         'reviews(first: 100': pr_page(),
         'statusCheckRollup': ci_page([_check(1, 'pylint')]),
-        'checkSuites': runs_page([_run(1)]),
+        'checkSuites': runs_page([_suite(1)]),
         **_base_answers(),
     }
 
@@ -439,7 +443,7 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
     answers = dict(_idle_answers())
     answers['checkSuites'] = [
         _rate_limited_error(reset_at=reset_at.strftime(STAMP)),
-        runs_page([_run(1)])]
+        runs_page([_suite(1)])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -465,8 +469,8 @@ def test_a_plain_refusal_still_exits_three_at_once(tmp):
 def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
     answers = dict(_idle_answers())
     answers['checkSuites'] = [runs_page([
-        _run(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
-        _run(2, 'SUCCESS', started='2026-09-20T10:05:00Z')])]
+        _suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
+        _suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -476,11 +480,11 @@ def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
 def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):
     answers = dict(_idle_answers())
     answers['checkSuites'] = [runs_page([
-        _run(1, 'CANCELLED', started='2026-09-20T10:00:00Z')])]
+        _suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
-    assert 'run 1: cancelled' in done.stdout, done.stdout
+    assert 'workflow 11: cancelled' in done.stdout, done.stdout
 
 
 def test_the_wait_reads_runs_for_the_pinned_sha_in_one_query(tmp):
