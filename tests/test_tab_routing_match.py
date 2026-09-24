@@ -19,6 +19,30 @@ CLASS = ('class C:\n'
          '    __match_args__ = ("fn",)\n'
          '    def __init__(self, fn): self.fn = fn\n')
 ATTR_KEY = 'class K:\n    k = "j"\n'
+# A tab-accepting routed callable the runtime can call with a tab keyword.
+ROUTED = ('def routed(tab=None):\n'
+          '    return ext_cmd("_focus", "focus-tab", tab=tab) \\\n'
+          '        if tab is not None else None\n'
+          'def make_routed():\n    return routed\n')
+HOLE = 'mystery = locals()["make_routed"]()\n'
+
+
+def guard_only_verdict(tmp, body):
+    """Guard-only verdict (no runtime execution) for a body that would raise
+    at runtime — a literal-None position, whose call is a TypeError there."""
+    from _pyroute import py_tab_routing_violations
+    from _repo import ROOT
+    source = (ROOT / 'daedalus_cli' / 'commands_browser.py').read_text(
+        encoding='utf-8')
+    tree = ast.parse(source)
+    function = next(node for node in tree.body if isinstance(
+        node, ast.FunctionDef) and node.name == 'do_focus_tab')
+    function.body = ast.parse(body).body
+    ast.fix_missing_locations(tree)
+    mutated = Path(tmp) / 'guard_only.py'
+    mutated.write_text(ast.unparse(tree) + '\n', encoding='utf-8')
+    return len(py_tab_routing_violations(mutated, mutated.name))
+
 
 
 def case(subject, pattern, call, guard='', extra=''):
@@ -107,6 +131,8 @@ def _rows():
                                      'alternative'),
         # A value pattern that the subject cannot satisfy binds nothing.
         ('value-as-capture', case('relay()', '5 as v', 'v()'), (0, 0), 'F5'),
+        # The singleton half of the same value-test rule (N3).
+        ('none-as-capture', case('relay()', 'None as v', 'v()'), (0, 0), 'N3'),
         # A singleton binds nothing and reads clean.
         ('singleton', case('relay()', 'None', 'ordinary()'), (0, 0), 'F6'),
         # Pins this arm's known limitation: a class capture names an
@@ -121,8 +147,48 @@ def _rows():
         ('attr-key-known-gap', case('{"j": relay()}', '{K.k: v}', 'v()',
                                     extra=ATTR_KEY), (1, 0),
          'known gap: attribute key unresolved'),
+        # N2: the unresolvable-key marker fires on a live dict subject when
+        # the slot is called with a tab keyword; the v() twin stays clean.
+        ('attr-key-tab', case('{"j": routed}', '{K.k: v}', 'v(tab=0)',
+                              extra=ATTR_KEY + ROUTED), (1, 1), 'N2'),
+        ('attr-key-tab-twin', case('{"j": routed}', '{K.k: v}', 'v()',
+                                   extra=ATTR_KEY + ROUTED), (0, 0), 'N2'),
+        # N1: a provably-dead case (mapping pattern over a sequence subject)
+        # reads clean, because the subject test is hoisted above the loop.
+        ('attr-key-cannot-match', case('[1, 2]', '{K.k: v}', 'v(tab=0)',
+                                       extra=ATTR_KEY), (0, 0), 'N1'),
+        # F2a: an undecidable match position binds unprovable, so a tab-
+        # keyword call through it is reported; the v() twin stays clean.
+        ('hole-tab', case('[relay(), mystery, ordinary]', '[a, b, c]',
+                          'b(tab=0)', extra=ROUTED + HOLE), (1, 1), 'F2a'),
+        ('hole-twin', case('[relay(), mystery, ordinary]', '[a, b, c]',
+                           'b()', extra=ROUTED + HOLE), (0, 0), 'F2a'),
+        # The assignment binder's hole is pre-existing and unfixed here; it is
+        # filed separately (value-model change). This row pins the current
+        # false green so the gap is visible, not silent.
+        ('assignment-hole-known-gap', PREFIX +
+         'mystery = locals()["relay"]()\n'
+         'a, b, c = [relay(), mystery, ordinary]\nsend = ext_cmd\nb()',
+         (1, 0), 'known gap: assignment binder hole, filed'),
     ]
     return r
+
+
+def test_guard_only_cost_rows(tmp):
+    """Rows whose call is a runtime TypeError, so they are measured guard-only.
+    A literal-None position binds unprovable; calling it with a tab reports
+    even though the runtime call would raise. That is the accepted
+    fail-closed cost of the match-local hole fix (F2a); the routed-lambda
+    form of the same hole is pinned by the F2 issue, not here."""
+    rows = [
+        ('literal-none-tab', PREFIX + 'match [relay(), None]:\n'
+         '    case [a, b]:\n        send = ext_cmd\n        b(tab=0)', 1),
+    ]
+    observed = [(label, guard_only_verdict(tmp, body))
+                for label, body, _ in rows]
+    expected = [(label, value) for label, _, value in rows]
+    assert observed == expected, observed
+
 
 
 def test_match_capture_pairing(tmp):
@@ -139,9 +205,11 @@ _FALLTHROUGH = ('MatchClass', 'MatchSingleton')
 
 
 def test_pattern_node_sweep(tmp):
-    """Sweep the pattern node types a `match` grammar admits, keyed on
-    type(node).__name__ rather than on any spelling in the table, and report
-    every type the binder neither names nor routes to its fall-through."""
+    """Sweep the pattern node types the listed grammar forms produce, keyed
+    on type(node).__name__ rather than on any spelling in the table, and fail
+    on any such type the binder neither names nor routes to its fall-through.
+    Scope: a node type none of the listed forms produces would not enter the
+    sweep, so this is not a claim about a future node type."""
     assert tmp is not None
     grammar = ('case 1', 'case None', 'case x', 'case [a] as w', 'case [*r]',
                'case [a, b]', 'case {"k": v}', 'case [a] | [b]', 'case C(a)')
