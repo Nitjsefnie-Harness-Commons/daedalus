@@ -147,6 +147,12 @@ def main(argv):
     # have met in the wild.
     if '-i' in argv or '--include' in argv:
         text = _render(status, headers, text)
+    if os.environ.get('DAEDALUS_FAKE_GH_CRLF'):
+        # What a Windows text stream does to a response that already spells
+        # its line endings: every \n is translated a second time. Asking
+        # for it here is how a Linux run hands the client the bytes that
+        # platform produces.
+        text = text.replace('\n', '\r\n')
     sys.stdout.write(text + '\n')
     if status >= 400:
         sys.stderr.write(f'gh: {text.strip()[:200]} (HTTP {status})\n')
