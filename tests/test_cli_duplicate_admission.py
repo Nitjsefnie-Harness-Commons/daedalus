@@ -15,9 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
 
-# Keep bridge children off the fixed MCP port (see tests/_bridge.py).
-os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
-
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
 # The result header's marker is whichever glyph the console can encode, so
@@ -25,8 +22,6 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 # tests/test_cli.py).
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
-os.environ['TOKEN'] = ''
-os.environ['DAEDALUS_TOKEN'] = TOK
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
 
 

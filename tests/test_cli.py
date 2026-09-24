@@ -28,9 +28,6 @@ from _queueread import queued_command  # noqa: E402
 sys.path.insert(0, str(_util.ROOT))
 from daedalus_cli import __version__  # noqa: E402
 
-# Keep bridge children off the fixed MCP port (see tests/_bridge.py).
-os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
-
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
 # The CLI picks its decorative markers from what the console can encode, so a
@@ -41,7 +38,6 @@ OUT_MARKS = ('\u2192', '->')
 IN_MARKS = ('\u2190', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-os.environ.update(BRIDGE_ENV)
 
 
 def cli_env(**overrides):

@@ -25,7 +25,6 @@ import _util  # noqa: E402
 
 TOKEN = 'toksafety'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOKEN, 'TOKEN': ''}
-os.environ.update(BRIDGE_ENV)
 # One component up from the docroot, plus a name no legitimate handler writes.
 ESCAPES = ('../escaped', '..', 'a/b', 'a\\b')
 WINDOWS_UNSAFE = (

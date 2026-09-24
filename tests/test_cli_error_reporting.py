@@ -22,9 +22,6 @@ sys.path.insert(0, str(_util.ROOT))
 
 from daedalus_cli.output import print_result  # noqa: E402
 
-# Keep bridge children off the fixed MCP port (see tests/_bridge.py).
-os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
-
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 TOK = 'clitok'
 
