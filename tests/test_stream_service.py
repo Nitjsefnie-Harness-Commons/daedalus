@@ -12,11 +12,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-
-
-def _load_service(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
+from _service_loader import _load_service  # noqa: E402
 
 
 class _RecordingByteSink:

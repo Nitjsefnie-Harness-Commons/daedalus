@@ -15,11 +15,6 @@ import _util  # noqa: E402
 from _command_candidates import _load_queue  # noqa: E402
 
 
-def _load_service(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
-
-
 def test_command_queue_imports_without_daedalus_configuration(_tmp):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DAEDALUS_') and key != 'TOKEN'}
