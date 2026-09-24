@@ -35,10 +35,10 @@ Not recognised, each gap named because the guard claims it:
   `tests/test_speedharness.py::`
   `test_the_harness_bounds_cleanup_when_tree_kill_fails` pins the reap, so
   the shape is held by that test rather than by this scan.
-* A drain in a helper CALLED WITH the process, and a name bound more than
-  once in its scope or bound to something that is not a receiver. All
-  stand for themselves, so a stop and a drain that can only be connected
-  through an argument list are invisible here.
+* A drain in a helper CALLED WITH the process, which no binding in this
+  scope can reach. A name bound more than once in its scope, or bound to
+  something that is not a receiver, stands for itself instead. A stop and a
+  drain that can only be connected through one of those are invisible here.
 * A computed member is refused rather than read, because an unread name is
   neither "no stop" nor "a bound": `getattr(proc, 'kill')()` and
   `proc['wait']()` are refused outright, and so is `proc[name]()` when the
