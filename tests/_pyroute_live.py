@@ -31,10 +31,7 @@ def _constant_getattr(value, state):
 
 def _attribute_values(owner):
     """Every deferred value an owner carries, for a name that cannot be
-    resolved to one attribute. The alternatives arm is unreachable today —
-    no owner reaching this with a dynamic name is a DeferredAlternatives in
-    the model — and is kept to mirror the dispatch idiom, not as a
-    guarantee that it can fire."""
+    resolved to one attribute."""
     if isinstance(owner, DeferredAlternatives):
         return [item for value in owner.values
                 for item in _attribute_values(value)]
