@@ -117,3 +117,20 @@ def _literal_key(node, state):
     if isinstance(node, ast.Name):
         return _usable_key(state.literals.get(node.id, _UNSAFE_LITERAL))
     return _usable_key(_literal_value(node))
+
+
+def _unhashable_key_sender(node, state):
+    """UNPROVABLE_SENDER when the key is a literal the runtime cannot hash.
+
+    A key the runtime cannot hash raises before the call returns, so
+    the call is unprovable; one only too complex to fold names every
+    stored item, as a plain read of the same shape does.
+    """
+    # `probe is not None` is a choice, not a requirement: a name bound
+    # to no literal probes as None, hashable, and fails the test beside
+    # it anyway; the `_UNSAFE_LITERAL` conjunct is the load-bearing one.
+    probe = state.literals.get(node.id) if isinstance(
+        node, ast.Name) else _literal_value(node)
+    return UNPROVABLE_SENDER if probe is not None \
+        and probe is not _UNSAFE_LITERAL \
+        and _usable_key(probe) is _UNRESOLVED_KEY else None
