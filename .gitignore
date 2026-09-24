@@ -221,6 +221,7 @@
 !/scripts/ci/aggregate_gate.py
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/classify_changes.py
+!/scripts/ci/codeql_suppression_probe.py
 !/scripts/ci/compare_durations.py
 !/scripts/ci/coverage_combine.py
 !/scripts/ci/coverage_suites.py
