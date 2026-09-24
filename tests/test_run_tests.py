@@ -24,10 +24,18 @@ _STALLING_SUITE = (
     'time.sleep(60)\n'
 )
 
-# The passer the loaded runner never got to finish: it shares the bound the
-# staller exhausts, so the run must name the staller either way.
-_SLOW_PASSING_SUITE = _PASSING_SUITE.replace(
-    "import json, os\n", "import json, os, time\ntime.sleep(4)\n")
+# Models a bystander a loaded runner could not start in time: the sleep
+# exceeds any bound this file uses, so it is killed on every machine, and
+# its own output carries a FAILED: line the pin must not read.
+_SLOW_PASSING_SUITE = (
+    'import json, os, time\n'
+    "print('FAILED: my own subtest', flush=True)\n"
+    'time.sleep(4)\n'
+    "summary = os.environ['DAEDALUS_TEST_SUMMARY']\n"
+    "json.dump({'total': 1, 'passed': 1, 'skipped': 0, 'failed': 0,\n"
+    "           'requires': None}, open(summary, 'w'))\n"
+    "print('stub pass')\n"
+)
 
 
 def _sandbox(tmp, suites):
@@ -48,22 +56,35 @@ def _run_sandbox(root, timeout_env):
 
 
 def _failed_suites(stdout):
-    """The suites the run named as failed, from its FAILED: line."""
-    for line in stdout.splitlines():
-        if line.startswith('FAILED: '):
-            return [name.strip() for name in line[8:].split(',')]
-    return []
+    """The suites the aggregate named as failed, or [] when it named none.
+
+    The aggregate is the last non-empty line the runner prints; a suite's
+    own output arrives earlier, so the scan starts at the end.
+    """
+    lines = stdout.splitlines()
+    aggregate = next((line for line in reversed(lines) if line.strip()), '')
+    if not aggregate.startswith('FAILED: '):
+        return []
+    return [name.strip()
+            for name in aggregate[8:].split(',') if name.strip()]
 
 
-def test_a_suite_that_overruns_is_named_and_the_run_completes(tmp):
+def test_a_suites_own_failed_line_is_not_the_aggregate(tmp):
+    decoy = '=== test_passer.py ===\nFAILED: my own subtest\n\n'
+    assert _failed_suites(decoy + 'FAILED: test_staller.py\n') == [
+        'test_staller.py']
+    assert _failed_suites(decoy + 'FAILED: \n') == []
+    assert _failed_suites(decoy + 'OVERALL: PASS (2 suites)\n') == []
+
+
+def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE,
                           'test_passer.py': _PASSING_SUITE})
     result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': '2'})
     assert result.returncode == 1, (result.returncode, result.stdout)
     assert 'SUITE TIMED OUT' in result.stdout, result.stdout
     assert 'returncode' in result.stdout, result.stdout
-    # Membership, not a substring: a bystander that missed the bound is
-    # named on the same line, and the run still named the staller.
+    # Membership, not a substring: a bystander is named on the same line.
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     # The other suite's block still lands: the run did not go silent.
     assert '=== test_passer.py ===' in result.stdout, result.stdout
@@ -77,6 +98,16 @@ def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
     assert 'SUITE TIMED OUT' in result.stdout, result.stdout
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     assert '=== test_passer.py ===' in result.stdout, result.stdout
+
+
+def test_a_passing_suites_own_output_reaches_stdout(tmp):
+    # A bound no trivial child approaches: this witness cannot turn on
+    # the machine's speed the way the overrun tests' bystander could.
+    root = _sandbox(tmp, {'test_passer.py': _PASSING_SUITE})
+    result = _run_sandbox(root, {'DAEDALUS_SUITE_TIMEOUT': '60'})
+    assert result.returncode == 0, (result.returncode, result.stdout)
+    assert '=== test_passer.py ===' in result.stdout, result.stdout
+    assert 'stub pass' in result.stdout, result.stdout
 
 
 def test_a_suite_within_its_budget_still_passes(tmp):
