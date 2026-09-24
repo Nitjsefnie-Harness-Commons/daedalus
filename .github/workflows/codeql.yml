@@ -1,10 +1,10 @@
 name: codeql
 
-# Static security analysis (advanced setup, not the repo-settings "default
-# setup" — the config lives here so it is reviewable in a diff like every
-# other gate). Free on this public repository; findings land in the
-# Security tab rather than turning the build red, so a new query shipping
-# upstream cannot block an unrelated push.
+# Static security analysis — advanced setup, the config lives here,
+# reviewable in a diff like every other gate. The repo-settings default
+# setup runs too, as a dynamic workflow. Free on this public repository;
+# findings land in the Security tab and no CodeQL check is required, so a
+# new query cannot block an unrelated push.
 #
 # TRIGGER DIFFERS FROM THE OTHER WORKFLOWS ON PURPOSE. `analyze` uploads its
 # SARIF against the ref and SHA of the *event*, so CodeQL has to analyse

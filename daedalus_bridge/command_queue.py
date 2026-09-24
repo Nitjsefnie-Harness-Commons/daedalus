@@ -213,9 +213,9 @@ def notify_dashboard(cmd_dir, token, payload):
                      {'id': event_id, 'kind': 'event', **payload})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
-        # The prefix redacted() leaves is the stream connect line's
-        # by-design residual; the clear-text-logging alert it earns is
-        # dispositioned on the Security tab (issue 890).
+        # The stream connect line's by-design residual; alert 124 is a
+        # false positive, dismissed on the Security tab: this prefix
+        # prints, not the credential (issue 890).
         print(f'[DASH-NOTIFY-FAIL] '
               f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 
