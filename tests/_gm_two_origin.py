@@ -18,6 +18,7 @@ const [contentPath, , utilPath, gmPath] = process.argv.slice(1);
 const ORIGIN_A = 'https://alpha.example.com';
 const ORIGIN_B = 'https://beta.example.com';
 const QUOTA_BYTES = 1048576;
+const enc = new TextEncoder();
 const store = Object.create(null);
 const storageCalls = [];
 const deferred = [];
@@ -57,6 +58,12 @@ function makeStorage() {
 }
 
 const background = buildBackground(utilPath, gmPath, makeStorage);
+// The caps as the PRODUCTION module declares them, so every boundary below is
+// placed by a measured charge against the real constant. A cap the module
+// does not declare reads null and its cases then fail rather than falling back
+// to a copy of the number that could drift.
+const PER_ORIGIN_CAP = background.constants.GM_QUOTA_BYTES;
+const TOTAL_CAP = background.constants.GM_TOTAL_QUOTA_BYTES;
 
 function createFrame(origin, hostname) {
   const listeners = {};
@@ -145,16 +152,73 @@ function bigString(n) { return 'x'.repeat(n); }
 // construction of the storage key and value (never the production formula):
 // Chrome measures QUOTA_BYTES as the JSON stringification of every value plus
 // every key's length, so an entry costs value-JSON bytes + storage-key bytes.
+function entryBytes(key, value) {
+  return enc.encode(JSON.stringify(value)).length + enc.encode(key).length;
+}
+
 function partitionBytes(origin) {
   const ns = 'gm:' + encodeURIComponent(origin) + ':';
-  const enc = new TextEncoder();
   let total = 0;
   for (const key of Object.keys(store)) {
     if (!key.startsWith(ns)) continue;
-    total += enc.encode(JSON.stringify(store[key])).length;
+    total += entryBytes(key, store[key]);
+  }
+  return total;
+}
+
+// The same measure over EVERY gm: key, which is the page-owned set by
+// construction: a GM key is 'gm:' + encodeURIComponent(origin) + ':' + key and
+// no extension key carries that prefix.
+function gmBytes() {
+  let total = 0;
+  for (const key of Object.keys(store)) {
+    if (!key.startsWith('gm:')) continue;
+    total += entryBytes(key, store[key]);
+  }
+  return total;
+}
+
+// The key-length term of gmBytes() on its own, so a test can show that
+// charging it (or the value term beside it) is what makes a write go over.
+function keyLengthBytes() {
+  let total = 0;
+  for (const key of Object.keys(store)) {
+    if (!key.startsWith('gm:')) continue;
     total += enc.encode(key).length;
   }
   return total;
+}
+
+// A value whose stored charge is exactly `charge` bytes, from the test's own
+// construction: the value's JSON is two quote characters around the 'x' run.
+function valueOfCharge(origin, key, charge) {
+  const overhead = 2 + enc.encode(nsKey(origin, key)).length;
+  return 'x'.repeat(charge - overhead);
+}
+
+// Six distinct origins, so a case that needs several partitions writes to
+// genuinely different senders rather than to one origin under several keys.
+const FILLERS = [
+  'https://cap-0.example.com', 'https://cap-1.example.com',
+  'https://cap-2.example.com', 'https://cap-3.example.com',
+  'https://cap-4.example.com', 'https://cap-5.example.com',
+];
+
+function fillerHost(origin) {
+  return origin.slice('https://'.length);
+}
+
+// A fixture written straight into the store, so a boundary is placed by a
+// measured charge rather than by a restated byte count.
+function seed(specs) {
+  for (const spec of specs) {
+    store[nsKey(spec.origin, spec.key)] =
+      valueOfCharge(spec.origin, spec.key, spec.charge);
+  }
+}
+
+function seedSpecs(origins, charge) {
+  return origins.map((origin) => ({ origin, key: 's', charge }));
 }
 
 function main() {
@@ -361,6 +425,117 @@ function main() {
                          calls: unserialisable.calls,
                          storeKeys: unserialisable.storeKeys };
 
+  out.aggregate = aggregateCases();
+  return out;
+}
+
+// ── The aggregate cap ──
+// The per-origin cap bounds ONE partition; the sum over every origin is what
+// overruns Chrome's `local` area, because a dozen origins each at their own
+// cap are all admitted and the writes that then fail are the extension's own.
+// Every boundary below is placed against the PRODUCTION GM_TOTAL_QUOTA_BYTES,
+// measured the way Chrome measures the area: the JSON stringification of every
+// value plus every key's length, over every gm: key. A module that declares no
+// aggregate cap reports that fact instead of falling back to a local copy.
+function aggregateCases() {
+  const out = { declared: typeof TOTAL_CAP === 'number',
+                cap: TOTAL_CAP, perOriginCap: PER_ORIGIN_CAP };
+
+  // Six DISTINCT origins, one write each, all dispatched in ONE turn: the
+  // deferred store hands every read the pre-write snapshot, so only a single
+  // serial queue over the whole GM area keeps the committed total under the
+  // cap. Each write is just inside its own origin's cap, so the aggregate is
+  // the only thing that can refuse any of them — which is why this case needs
+  // no aggregate constant to be meaningful.
+  resetStore();
+  const perWrite = PER_ORIGIN_CAP - 1000;
+  const crowd = [];
+  for (let i = 0; i < 6; i++) {
+    const origin = FILLERS[i];
+    crowd.push(createFrame(origin, fillerHost(origin)));
+  }
+  const reqIds = crowd.map((f, i) =>
+    f.dispatch('setValue', 'k' + i, bigString(perWrite)));
+  flushDeferred();
+  const replies = crowd.map((f, i) => f.replyFor(reqIds[i]));
+  out.concurrency = {
+    total: gmBytes(),
+    stored: replies.filter((m) => m && !m.error).length,
+    refusals: replies.filter((m) => m && m.error).length,
+    errors: replies.map((m) => (m && m.error) || null),
+    perWrite,
+  };
+  if (!out.declared) return out;
+
+  const seeds = FILLERS.slice(0, 5);
+  const sixth = FILLERS[5];
+  const last = createFrame(sixth, fillerHost(sixth));
+  const sendCharge = (frame, origin, key, charge) =>
+    frame.send('setValue', key, valueOfCharge(origin, key, charge));
+  const perSeed = Math.floor((TOTAL_CAP - 2000) / seeds.length);
+  const tail = TOTAL_CAP - perSeed * seeds.length;
+  const leg = Math.floor(TOTAL_CAP / 11);
+  if (perSeed >= PER_ORIGIN_CAP || tail < 2000 ||
+      5 * perWrite + 400 > TOTAL_CAP) {
+    throw new Error('GM cap changed: aggregate fixtures no longer fit it');
+  }
+
+  // Five origins filled to the cap less a small tail, then one write that
+  // lands the sum under, exactly on, and one byte over the cap. Under and on
+  // are admitted; over is refused with set never called, and the refusal names
+  // the aggregate limit rather than the per-origin one.
+  const boundary = {};
+  for (const [label, charge] of
+    [['under', tail - 1], ['on', tail], ['over', tail + 1]]) {
+    resetStore();
+    seed(seedSpecs(seeds, perSeed));
+    const r = sendCharge(last, sixth, 't', charge);
+    boundary[label] = { error: r.error, calls: r.calls, total: gmBytes() };
+  }
+  out.boundary = boundary;
+
+  // The extension's own keys are the cap's REASON, not its charge: a token
+  // nearly as large as the cap beside an empty GM area does not refuse a page
+  // write, because the reserve is what pays for the token and only gm: keys
+  // are summed. Their sum together is past the cap, so charging them would
+  // refuse this write.
+  resetStore();
+  const token = Math.floor(TOTAL_CAP * 0.85);
+  store['daedalus-token'] = bigString(token);
+  const beside = sendCharge(last, sixth, 'b',
+    Math.floor(TOTAL_CAP * 0.16));
+  out.extensionKeys = { error: beside.error, calls: beside.calls,
+                        total: gmBytes(), token };
+
+  // Replacing a key is old-out/new-in: the aggregate charges the incoming
+  // entry and excludes the key being written, so a rewrite that lands the sum
+  // back under the cap is admitted rather than counted twice.
+  resetStore();
+  const replaceCharge = 2000;
+  seed(seedSpecs(seeds, Math.floor((TOTAL_CAP - 3000) / seeds.length)));
+  seed([{ origin: sixth, key: 'r', charge: replaceCharge }]);
+  const beforeReplace = gmBytes();
+  const replaced = sendCharge(last, sixth, 'r', replaceCharge);
+  out.replacement = { error: replaced.error, calls: replaced.calls,
+                      before: beforeReplace, after: gmBytes(),
+                      charge: replaceCharge };
+
+  // The aggregate charges the two terms Chrome's QUOTA_BYTES names, the
+  // value's JSON bytes AND the key's length: five origins holding a long key
+  // beside a long value fill the cap, so one further entry is refused.
+  // Charging either term alone roughly halves the sum and admits it.
+  resetStore();
+  const longKey = 'k'.repeat(leg);
+  for (let i = 0; i < 5; i++) {
+    const origin = seeds[i];
+    store[nsKey(origin, longKey)] = bigString(leg);
+  }
+  const legs = gmBytes();
+  const legKeyTerm = keyLengthBytes();
+  const incoming = Math.floor(TOTAL_CAP / 10);
+  const term = sendCharge(last, sixth, 'L', incoming);
+  out.terms = { error: term.error, calls: term.calls, before: legs,
+                after: gmBytes(), incoming, keyTerm: legKeyTerm };
   return out;
 }
 
