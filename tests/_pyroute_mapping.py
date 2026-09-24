@@ -5,6 +5,7 @@ import ast
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
+from _pyroute_invalidation import invalidate_unmodelled
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
                            _literal_value, _unhashable_key_sender)
 from _pyroute_pop import _unknown_lookup_default
@@ -551,17 +552,21 @@ def _pop_key(call, state):
 
 
 def _apply_pop(state, call):
+    """The mapping one pop call removes a key from, or None when this call is
+    not a mutation the model follows: no tracked mapping behind it, so the
+    general invalidation is what answers for it."""
     owner = mapping_lookup_owner(call, state)
     if owner is None or call.func.attr != 'pop':
-        return
+        return None
     key = _pop_key(call, state)
     items = dict(owner.items)
     if key is not _UNRESOLVED_KEY:
         items.pop(key, None)
     elif owner.kind != 'dict':
-        return
+        return None
     replace_deferred_storage(state, owner, _container_copy(
         owner, items, key is _UNRESOLVED_KEY))
+    return owner
 
 
 def _apply_set_store(state, name, operator, operands, node):
@@ -581,6 +586,14 @@ def _apply_set_store(state, name, operator, operands, node):
 
 
 def apply_deferred_store(statement, state):
+    """Apply the statement's own stores, then drop what an in-place mutation
+    it did not model made stale."""
+    claimed = set()
+    _apply_modelled_store(statement, state, claimed)
+    invalidate_unmodelled(statement, state, claimed)
+
+
+def _apply_modelled_store(statement, state, claimed):
     drop_shifted_positions(statement, state)
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
@@ -588,7 +601,8 @@ def apply_deferred_store(statement, state):
         if not isinstance(call.func, ast.Attribute):
             return
         if call.func.attr == 'pop':
-            _apply_pop(state, call)
+            if _apply_pop(state, call) is not None:
+                claimed.add(id(call))
             return
         if not isinstance(call.func.value, ast.Name):
             return
@@ -599,13 +613,16 @@ def apply_deferred_store(statement, state):
                 {}, 0, owner.kind, owner.identity)
             replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
+            claimed.add(id(call))
         elif call.func.attr == 'update':
             _apply_mapping_store(
                 state, owner_name, call.args, {
                     keyword.arg: keyword.value for keyword in call.keywords
                     if keyword.arg is not None}, call)
+            claimed.add(id(call))
         elif call.func.attr == 'setdefault':
             _apply_setdefault(state, call, owner_name)
+            claimed.add(id(call))
         return
     if isinstance(statement, ast.AugAssign):
         if isinstance(statement.target, ast.Name):
@@ -622,6 +639,7 @@ def apply_deferred_store(statement, state):
             if isinstance(held, DeferredContainer) and held.kind == 'dict':
                 state.callables[statement.target.id] = held
                 sync_cells(state, {statement.target.id})
+                claimed.add(id(statement))
             _apply_mapping_store(
                 state, statement.target.id, [statement.value], {},
                 statement)
