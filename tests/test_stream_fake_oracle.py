@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The bridge fake's own gates, driven without the worker.
 
-The harness is test_stream_backoff's; the asserts below are its spec.
+The harness is test_stream_backoff's. A target naming no origin is as
+unaccounted for as a foreign one.
 """
 import sys
 from pathlib import Path
@@ -22,8 +23,7 @@ def test_a_declared_route_answers_200_the_first_time(tmp):
 
 
 def test_a_declared_route_is_refused_the_second_time(tmp):
-    """The count limit is a gate of its own, not a side effect of the
-    undeclared-route arm: SYNC is declared once and still refuses."""
+    """Its own gate: M7 (`planned === 0`) left this green without it."""
     del tmp
     outcome = _probe()
     assert outcome['secondStatus'] == 599, outcome
@@ -45,12 +45,19 @@ def test_a_route_at_an_unpermitted_origin_is_refused(tmp):
 
 
 def test_a_relative_url_is_refused(tmp):
-    """No origin is not a permitted origin: a relative target names no
-    bridge, so it is as unaccounted for as a foreign one."""
     del tmp
     outcome = _probe()
     assert outcome['relativeStatus'] == 599, outcome
     assert '(no origin)' in outcome['badOrigins'], outcome
+
+
+def test_an_unpermitted_origin_spends_no_route_allowance(tmp):
+    """A refused origin spends no budget, so the next legitimate post
+    keeps its 200."""
+    del tmp
+    outcome = _probe()
+    assert outcome['afterBadOriginStatus'] == 200, outcome
+    assert 'POST /other' not in outcome['refused'], outcome
 
 
 def main():
