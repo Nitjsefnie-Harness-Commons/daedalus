@@ -159,15 +159,15 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
             continue  # skip .tmp in-flight writes
         # Use logical names: path spellings can differ between realpath and
         # directory enumeration; see result_store.delivery_lock_for.
-        with command_queue.claimed(
-                f'queue:{qdir.name}/{name}') as owned:
+        key = command_queue.queue_key(qdir.name, name)
+        with command_queue.claimed(key) as owned:
             if not owned:
                 continue  # another consumer covering this queue has it
             opened, reason, ident = command_queue.open_command_candidate(path)
             if opened is None:
                 if reason is not None:
                     _refusal_once(
-                        (f'queue:{qdir.name}/{name}', ident),
+                        (key, ident),
                         f'q={qdir.name}/{name}', reason, secret=secret)
                 continue  # absent, or refused: never delivered or unlinked
             # Decide with the descriptor open; unlink only once it closes.
@@ -219,8 +219,12 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
 
 
 def legacy_claim_key(name):
-    """The logical claim key one legacy command file is consumed under."""
-    return f'legacy:{name}'
+    """The logical claim key one legacy command file is consumed under.
+
+    The same key a refused legacy file is recorded and retired under, so it
+    comes from `command_queue`, which owns the format.
+    """
+    return command_queue.legacy_key(name)
 
 
 def poll_legacy(cmd_dir, token):
