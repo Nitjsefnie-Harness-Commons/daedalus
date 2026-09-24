@@ -37,7 +37,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
 from _pyroute_targets import (bind_with_target, materialized_order,
-                             probe_comprehension)
+                              probe_comprehension)
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
