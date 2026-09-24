@@ -75,9 +75,9 @@ def chained(value):
 
 
 def looped(value):
-    while value > 10:
+    while value > 10 or value < -10:
         raise RuntimeError('in a while body')
-    while value < 0:
+    while value < 0 or value > 100:
         break
     else:
         raise RuntimeError('in a while else')
@@ -87,6 +87,12 @@ def scoped(value):
     class Nested:
         if value is None:
             raise RuntimeError('in a class body')
+
+
+def blocked(values):
+    if values is None or not values:
+        with values:
+            raise RuntimeError('in a with body')
 '''
 
 # Every raise shape the scan can meet, and the one key each resolves to. The
@@ -102,9 +108,10 @@ GUARD_SHAPE_SITES = {
     ('guard_shapes', 'nested', 'value < 0 or value > 10'),
     ('guard_shapes', 'chained', 'value'),
     ('guard_shapes', 'chained', 'not (value)'),
-    ('guard_shapes', 'looped', 'value > 10'),
-    ('guard_shapes', 'looped', 'not (value < 0)'),
+    ('guard_shapes', 'looped', 'value > 10 or value < -10'),
+    ('guard_shapes', 'looped', 'not (value < 0 or value > 100)'),
     ('guard_shapes', 'scoped', 'value is None'),
+    ('guard_shapes', 'blocked', 'values is None or not values'),
 }
 
 SELECT_SHAPES = '''
@@ -177,16 +184,23 @@ def _controlling_test(statement, child, module, lineno):
 
 
 def _raise_condition(node, parents, module):
-    """The condition key and `or` flag one raise carries.
+    """The condition key, the `or` its chain carries, and whether a
+    controlling statement gave the key, for one raise.
 
     The walk reads the chain of enclosing statements up to the enclosing
     function: the innermost statement that decides the raise names the key,
-    and every statement in the chain that decides it feeds the `or` flag, so
+    and every statement in the chain that decides it is read for an `or`, so
     a compound condition hides in no nesting. A chain that decides nothing
     keys on the raise's own text.
+
+    Two limits the key carries. A bare `raise` under a controlling
+    predicate keys on that predicate like any other site, so the
+    `bare raise at line N` spelling survives only where nothing decides it;
+    and a `while True:` body keys on `True`, which names no condition a
+    table entry can pin.
     """
     key = None
-    or_guard = False
+    or_test = ''
     child = node
     parent = parents.get(node)
     while parent is not None and not isinstance(
@@ -194,23 +208,26 @@ def _raise_condition(node, parents, module):
         found = _controlling_test(parent, child, module, node.lineno)
         if found is not None:
             test, negated = found
-            or_guard = or_guard or _contains_or(test)
+            if not or_test and _contains_or(test):
+                or_test = ast.unparse(test)
             if key is None:
                 key = (f'not ({ast.unparse(test)})' if negated
                        else ast.unparse(test))
         child = parent
         parent = parents.get(parent)
-    return key or _unguarded_text(node), or_guard
+    return key or _unguarded_text(node), or_test, key is not None
 
 
 def _module_guard_sites(path, root):
     """Every raise site one module spells, keyed by (file, line).
 
-    Each value is ((module, function, condition), or_guard), read from the
-    statements enclosing the raise. Two shapes a site key cannot tell apart
-    are refused here instead of collapsed: two raises on one physical line —
-    a traceback names the line, not the statement — and two sites in one
-    function spelling one condition, whose remedy is distinct messages.
+    Each value is ((module, function, condition), or_test), read from the
+    statements enclosing the raise; or_test is the controlling test the `or`
+    refusal names, or '' where the chain holds none. Two shapes a site key
+    cannot tell apart are refused here instead of collapsed: two raises on
+    one physical line — a traceback names the line, not the statement — and
+    two sites in one function resolving to one key, each refused with the
+    remedy its own key takes.
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     parents = {child: node for node in ast.walk(tree)
@@ -221,22 +238,34 @@ def _module_guard_sites(path, root):
         if node.lineno in by_line:
             raise AssertionError(
                 f'{dotted_module(path, root)}:{node.lineno}: two raises '
-                'share this line; one raise per line, because a traceback '
-                'names the line and one witness cannot answer for both')
+                'share this line; one raise per line, each under a condition '
+                'of its own, because a traceback names the line and one '
+                'witness cannot answer for both')
         by_line[node.lineno] = node
     module = dotted_module(path, root)
     sites = {}
     spelled = set()
+    predicated = set()
     for node in raises:
-        condition, or_guard = _raise_condition(node, parents, module)
+        condition, or_test, by_predicate = _raise_condition(
+            node, parents, module)
         key = (module, _enclosing_function(node, parents), condition)
         if key in spelled:
+            if key in predicated:
+                observed = ('two raise sites run under the controlling '
+                            f'predicate {condition!r}')
+                remedy = ('give each site a predicate of its own, one raise '
+                          'per condition')
+            else:
+                observed = f'two raise sites spell {condition!r}'
+                remedy = 'give the sites distinct messages'
             raise AssertionError(
-                f'{module}.{key[1]} spells {condition!r} at two raise '
-                'sites; one witness cannot answer for both — give the sites '
-                'distinct messages')
+                f'{module}.{key[1]}: {observed}; one refusal case witnesses '
+                f'one key, so {remedy}')
         spelled.add(key)
-        sites[(str(path.resolve()), node.lineno)] = (key, or_guard)
+        if by_predicate:
+            predicated.add(key)
+        sites[(str(path.resolve()), node.lineno)] = (key, or_test)
     return sites
 
 
@@ -329,12 +358,13 @@ def tool_code_objects(tool, root):
 
 def reachable_guards(sites, codes):
     """The raise sites a tool's own code objects can raise from, as their
-    keys. A reached site refusing on an `or` test is refused by the floor:
-    split it into one raise per condition, because one witness cannot answer
-    for two conditions on one line. The `or` test read is the whole chain of
-    statements deciding the raise, so wrapping it in a `try`, a `with` or an
-    `else` body does not hide it, and a test spelled `not (a and b)` is one
-    site like any other."""
+    keys. A reached site decided by a test containing an `or` is refused by
+    the floor: split it into one raise per condition, because one witness
+    cannot answer for two conditions in one chain. The `or` is read from the
+    whole chain of statements deciding the raise — the refusal names the test
+    it read, not the site's key, which may be an inner statement of its own —
+    so wrapping the test in a `try`, a `with` or an `else` body does not hide
+    it, and a test spelled `not (a and b)` is one site like any other."""
     reached = {}
     for code in codes:
         filename = str(Path(code.co_filename).resolve())
@@ -345,19 +375,20 @@ def reachable_guards(sites, codes):
             site = sites.get((filename, positions.lineno))
             if site is None:
                 continue
-            key, or_guard = site
-            if or_guard:
+            key, or_test = site
+            if or_test:
                 raise AssertionError(
-                    f'{key[0]}.{key[1]} refuses on an `or` test ({key[2]}); '
-                    'split it into one raise per condition, because one '
-                    'witness cannot answer for two conditions on one line')
+                    f'{key[0]}.{key[1]}: the controlling test {or_test!r} '
+                    'contains an `or`; split it into one raise per condition, '
+                    'because one witness cannot answer for two conditions in '
+                    'one chain')
             reached[(filename, positions.lineno)] = key
     return reached
 
 
 def guard_keys(sites):
     """The (module, function, condition) keys a site mapping spells."""
-    return [key for key, _or in sites.values()]
+    return [key for key, _or_test in sites.values()]
 
 
 def witnessed_guard(sites, raised):
