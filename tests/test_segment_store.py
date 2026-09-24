@@ -625,6 +625,58 @@ def test_a_capability_authorizes_only_under_the_root_holding_it(tmp):
     }, answer
 
 
+def _alt(tmp, name):
+    """Two genuinely different roots, and the modules that take one."""
+    os.environ['DAEDALUS_DIR'] = str(Path(tmp))
+    configured = Path(tmp) / 'segments'
+    passed = Path(tmp) / 'passed-segments'
+    configured.mkdir(parents=True)
+    passed.mkdir(parents=True)
+    bridge = _util.ROOT / 'daedalus_bridge'
+    return (_util.load(bridge / 'segment_jobs.py', name + '_jobs'),
+            _util.load(bridge / 'segment_routes.py', name + '_routes'),
+            configured, passed)
+
+
+def test_a_status_read_under_a_passed_root_authorizes_its_own_job(tmp):
+    """A status read checks the capability against the record under the
+    root it was handed. Resolving that record from configuration finds no
+    record under a passed root and answers 403, listing nothing."""
+    jobs, routes, configured, passed = _alt(tmp, 'statusroot')
+    assert passed != configured, 'the fixture made the roots equal'
+    job = 'statusroot-job'
+    status, minted = jobs.mint_job(
+        passed, 'statusroottok', {'job': job}, jobs.JobQuotas(9, 8, 256))
+    assert status == 200, (status, minted)
+    sig = minted['sig']
+    admitted = routes.admit_segment(
+        passed, {'job': [job], 'seg': ['0']}, sig)
+    assert isinstance(admitted, routes.Admission), admitted
+    assert routes.store_segment(b'ab', admitted) == (200, {'ok': True})
+    assert routes.segment_status(
+        passed, {'job': [job]}, sig) == (200, {'done': [0], 'count': 1})
+    assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
+
+
+def test_a_job_lookup_under_a_passed_root_reads_its_own_record(tmp):
+    """A lookup answers about the record under the passed root: the owner
+    gets its own capability back and another token a 409. Resolving that
+    record from configuration finds none there and answers 404."""
+    jobs, routes, configured, passed = _alt(tmp, 'lookuproot')
+    assert passed != configured, 'the fixture made the roots equal'
+    job = 'lookuproot-job'
+    status, minted = jobs.mint_job(
+        passed, 'lookuproottok', {'job': job}, jobs.JobQuotas(9, 8, 256))
+    assert status == 200, (status, minted)
+    assert routes.lookup_job(
+        passed, 'lookuproottok', {'job': [job]}) == (
+            200, {'ok': True, 'sig': minted['sig']})
+    assert routes.lookup_job(
+        passed, 'othertok', {'job': [job]}) == (
+            409, {'error': 'job owned by a different token'})
+    assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segment_store_')
 
