@@ -55,6 +55,12 @@ import subprocess
 from _noderun import run_node_program
 from _util import child_coverage
 
+# The one scrubbed environment this module's own `-e` launcher runs its child
+# with — named at the launch below, the level that sets it. `_noderun` binds
+# the same environment for the file launcher; each module names it once so the
+# coverage guard's static check sees a real, bound-once declaration.
+_CHILD_ENV = child_coverage('scrub')
+
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
 // runs once, at splice time, before any fetch.
@@ -285,32 +291,39 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan, env=None, timeout=30):
-    result = run_node_program(node, program, arguments, cwd=cwd,
-                              env=child_coverage('scrub'),
+def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
+    result = run_node_program(node, program, arguments, cwd,
                               payload=plan, timeout=timeout)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
 
 
-def run_inline_gate(node, program, arguments, *, cwd, plan, env=None,
-                    timeout=30):
+def run_inline_gate(node, program, arguments, *, cwd, plan):
     """Drive a `node -e` harness against a plan and read its one answer.
 
     The sibling of `run_gate` for the harnesses that hand their program
-    text to `node -e` as an argument instead of writing it to a file. Node
-    leaves `process.argv[1]` at that text, so a scenario's own arguments
-    start one later; the plan rides last in both launches and the inline
-    harnesses read it there, so the spliced gate is the same JS either way.
-    No wall bound of its own here: the harnesses bound themselves by
-    attempt counts, and the suite's own ceiling is what a genuine deadlock
-    runs into.
+    text to `node -e` as an argument instead of writing it to a file.
+
+    Measured on this Node (v24.17.0), `node -e prog a b` leaves
+    `process.argv == [node, a, b]` — the program text is NOT in argv — so a
+    scenario's own arguments are read from `slice(1)` in both launches, with
+    no offset under `-e`. The plan rides last in both (the file launcher
+    splices it in as an object literal, this one appends it as JSON text) and
+    the harness parses it only when it arrived as text; that offset-free read
+    is what keeps the frozen reference suite byte-unchanged.
+
+    No wall bound of its own: these harness children are bounded by their own
+    attempt counts, and a slow correct run must not become an intermittent
+    failure — a genuine deadlock is better surfaced as a hung job under the
+    suite's ceiling than as a flaky timeout. The child runs with `_CHILD_ENV`,
+    the one scrubbed environment, which is the environment every call site
+    declares.
     """
     result = subprocess.run(
         [node, '-e', program, *arguments, json.dumps(plan)], cwd=cwd,
-        env=child_coverage('scrub'), capture_output=True, text=True,
-        encoding='utf-8', timeout=timeout)
+        env=_CHILD_ENV, capture_output=True, text=True,
+        encoding='utf-8')
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

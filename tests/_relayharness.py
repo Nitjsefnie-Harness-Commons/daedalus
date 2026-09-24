@@ -12,15 +12,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _repo import EXTENSION_ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
-from _util import child_coverage  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
-
-# The coverage guard cannot prove EXTENSION_ROOT is the checkout root
-# through the inline driver, so this call site declares its child env.
-_ENV = child_coverage('scrub')
+from _worker_sources import (  # noqa: E402
+    STREAM_RESPONSE, import_scripts_stub)
 
 _BRIDGE = (
     str(EXTENSION_ROOT / 'background.js'),
@@ -84,21 +80,7 @@ const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
 
-function streamResponse(answer) {
-  if (answer === 'hang') {
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => ({
-          read: () => new Promise(() => {}),
-          cancel: () => Promise.resolve(),
-        }),
-      },
-    };
-  }
-  return response(answer, { error: 'disabled' });
-}
+""" + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
 
 const backgroundChrome = {
@@ -588,7 +570,7 @@ def _observe(plan, *args):
     """
     outcome = run_inline_gate(
         require_node(), _EVAL_RELAY_OVERLAP_HARNESS, list(args),
-        cwd=EXTENSION_ROOT, plan=plan, env=_ENV)
+        cwd=ROOT, plan=plan)
     gate = outcome.pop('gate')
     assert_gate_clean(
         contract_faults=gate['contractFaults'],
