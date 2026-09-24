@@ -11,32 +11,59 @@ from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
 
 _LIVE_UNRESOLVED = object()
 # In-place list/tuple methods the model does not fold back into the tracked
-# container, so a measured length no longer matches the real one.
+# container, so a measured length no longer matches the real one. Methods that
+# only read (count, index, copy) leave the length provable and must not match.
 LIST_LENGTH_MUTATIONS = frozenset(
     {'append', 'extend', 'insert', 'remove', 'pop', 'clear'})
 
 
-def invalidate_mutated_length(node, state):
-    """A list/tuple mutated in place by a method the model does not fold back
-    has no provable length, so a later operand read of it leaves the call's
-    arity unprovable rather than a stale single fact (daedalus issue 990)."""
-    if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
-        return
-    call = node.value
-    if not (isinstance(call.func, ast.Attribute)
-            and call.func.attr in LIST_LENGTH_MUTATIONS
-            and isinstance(call.func.value, ast.Name)):
-        return
-    tracked = state.callables.get(call.func.value.id)
+def _mutation_receiver(node, state):
+    """The tracked list/tuple a statement mutates in place, or None. Covers
+    the method-call, slice-assign, augmented-assign and subscript-del forms
+    the model does not fold back (daedalus issue 990)."""
+    target = None
+    if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr in LIST_LENGTH_MUTATIONS):
+        target = node.value.func.value
+    elif isinstance(node, ast.AugAssign):
+        target = node.target
+    else:
+        subs = [t for t in (node.targets if isinstance(node, ast.Assign)
+                            else [node.target]
+                            if isinstance(node, ast.AnnAssign) else [])
+                if isinstance(t, ast.Subscript)]
+        if len(subs) == 1: target = subs[0].value
+    if not isinstance(target, ast.Name):
+        return None, None
+    tracked = state.callables.get(target.id)
     if not (isinstance(tracked, DeferredContainer)
             and tracked.kind in ('list', 'tuple')
             and tracked.length is not None):
-        return
+        return None, None
+    return target.id, tracked
+
+
+def invalidate_mutated_length(node, state):
+    """A list/tuple mutated in place by a form the model does not fold back has
+    no provable length, so a later operand read of any name bound to that same
+    container leaves the call's arity unprovable rather than a stale single
+    fact (daedalus issue 990). Invalidation is by container identity across
+    every bound name, so an alias mutated through another name is covered too.
+
+    Returns ``(name, lengthless)`` for an augmented assign, whose name the
+    caller re-binds after the generic rebind path drops it, so the operand read
+    still fails closed with the maker in reach; other forms return None."""
+    name, tracked = _mutation_receiver(node, state)
+    if tracked is None:
+        return None
     lengthless = DeferredContainer(
         tracked.items, None, tracked.kind, tracked.identity)
-    state.callables[call.func.value.id] = lengthless
-    for key, value in list(state.evaluated.items()):
-        if value is tracked: state.evaluated[key] = lengthless
+    for bound, value in list(state.callables.items()):
+        if (isinstance(value, DeferredContainer)
+                and value.identity is tracked.identity):
+            state.callables[bound] = lengthless
+    return (name, lengthless) if isinstance(node, ast.AugAssign) else None
 
 
 def _getattr_call(value, state):
@@ -200,8 +227,11 @@ def _generator_operand_yields(node, state):
                 and isinstance(function.scope, ast.FunctionDef)):
             continue
         for part in ast.walk(function.scope):
-            if isinstance(part, ast.Yield) and part.value is not None:
-                yield _known_value(part.value, function.state)
+            if not isinstance(part, (ast.Yield, ast.YieldFrom)):
+                continue
+            if part.value is not None:
+                yield deferred_expression_value(
+                    part.value, function.state, lambda *_: None)
 
 
 def seed_selection_value(value, state):
