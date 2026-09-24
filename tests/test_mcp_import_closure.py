@@ -79,7 +79,7 @@ from mcp.server.mcpserver import MCPServer
 '''
 
 
-def _refuses(_tmp, source, site, phrase):
+def _assert_refusal(_tmp, source, site, phrase):
     """The scan refuses this composition source, naming the site and why."""
     _write_tree(Path(_tmp), {'composition.py': source})
     try:
@@ -94,7 +94,7 @@ def _refuses(_tmp, source, site, phrase):
 
 def _refuses_the_scan(_tmp, source, site):
     """The scan refuses this composition source, naming the import site."""
-    _refuses(_tmp, source, site, 'cannot read statically')
+    _assert_refusal(_tmp, source, site, 'cannot read statically')
 
 
 def test_an_import_module_from_import_refuses_the_scan(_tmp):
@@ -252,7 +252,8 @@ def test_a_dotted_importlib_import_binds_the_operation(_tmp):
     scan matching the whole alias walks past a real import-by-name call and
     the closure drops whatever it loads.
     """
-    _refuses(_tmp, DOTTED_IMPORTLIB_COMPOSITION, 6, 'cannot read statically')
+    _assert_refusal(
+        _tmp, DOTTED_IMPORTLIB_COMPOSITION, 6, 'cannot read statically')
 
 
 def test_a_dotted_importlib_import_resolves_a_constant_name(_tmp):
@@ -290,11 +291,11 @@ def test_an_assigned_alias_of_a_bound_name_refuses_the_scan(_tmp):
     Naming the assignment is what a reader can go and change; the call it
     feeds reads as an ordinary attribute on an ordinary local.
     """
-    _refuses(_tmp, ASSIGNED_ALIAS_COMPOSITION, 6, 'cannot follow')
+    _assert_refusal(_tmp, ASSIGNED_ALIAS_COMPOSITION, 6, 'cannot follow')
 
 
 def test_an_assignment_of_the_operation_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -310,7 +311,7 @@ def test_a_walrus_alias_refuses_the_scan(_tmp):
     An ordinary refactor to a walrus, with no evasion in it, used to leave
     the call reading as an ordinary attribute on an ordinary local.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -321,7 +322,7 @@ def load(name):
 
 
 def test_a_tuple_unpack_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -332,7 +333,7 @@ def load(name):
 
 
 def test_a_list_unpack_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -348,7 +349,7 @@ def test_an_unpaired_unpack_alias_refuses_the_scan(_tmp):
     The starred target's arity is not knowable statically, so every leaf
     is offered every value — refusing more rather than reading less.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -359,7 +360,7 @@ def load(name):
 
 
 def test_a_for_target_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -370,7 +371,7 @@ def load(name):
 
 
 def test_a_with_target_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -386,7 +387,7 @@ def test_an_attribute_store_alias_refuses_the_scan(_tmp):
     A name store is what the map can reason about; an attribute store is
     the same escape with no name to record.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -398,7 +399,7 @@ class Holder:
 
 
 def test_a_comprehension_target_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -409,7 +410,7 @@ def load(name):
 
 def test_a_parameter_default_alias_refuses_the_scan(_tmp):
     """A default binds a name the map never saw either."""
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -444,7 +445,7 @@ def load(name, loader=importlib):
 
 
 def test_an_except_target_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -462,7 +463,7 @@ def test_a_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
     The map's answer for `importlib` cannot survive a store to that name,
     and refusing the store is the only way the answer stays true.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -473,7 +474,7 @@ def load(name):
 
 
 def test_an_unreadable_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -484,7 +485,7 @@ def load(name):
 
 
 def test_a_getattr_of_the_operation_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -518,7 +519,7 @@ REAL_COMPOSITION_SCAN_SET = [
 
 def test_a_getattr_of_an_unknown_attribute_on_a_bound_name_refuses(_tmp):
     """A non-constant attribute read off a known operation is still one."""
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
