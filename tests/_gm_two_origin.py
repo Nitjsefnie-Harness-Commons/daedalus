@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"Two-origin GM storage isolation + quota harness (service-worker realm)."
+"Two-origin GM storage isolation, quota and admission harness."
 import sys
 from pathlib import Path
 
@@ -14,14 +14,21 @@ _TWO_ORIGIN_HARNESS = _PRELUDE + r"""
 // so two frames of the same origin share the worker's one per-namespace
 // queue: the real cross-tab serialization. Storage callbacks are deferred, so
 // a burst dispatched in one turn submits every read before any write commits.
+// The one queue serves every origin, and the cases below record the order the
+// pages were ANSWERED in, so admission order is asserted from the record
+// rather than from a wall clock.
 const [contentPath, , utilPath, gmPath] = process.argv.slice(1);
 const ORIGIN_A = 'https://alpha.example.com';
 const ORIGIN_B = 'https://beta.example.com';
+const ORIGIN_C = 'https://gamma.example.com';
 const QUOTA_BYTES = 1048576;
 const enc = new TextEncoder();
 const store = Object.create(null);
 const storageCalls = [];
 const deferred = [];
+// Every reply the worker sent to a page, in the order it sent it: the record
+// the admission cases assert on.
+const answered = [];
 let reqCounter = 0;
 
 function storedValues(keys) {
@@ -58,6 +65,29 @@ function makeStorage() {
 }
 
 const background = buildBackground(utilPath, gmPath, makeStorage);
+// A second worker's store over the SAME chrome.storage, differing in exactly
+// one place: set hands its callback to the deferred queue twice. It exists for
+// the queue's release-once guard, which an honest store never exercises.
+function makeDoubleFireStorage() {
+  return {
+    get(keys, callback) {
+      storageCalls.push('get');
+      const data = keys === null ? { ...store } : storedValues(keys);
+      deferred.push(() => callback(data));
+    },
+    set(values, callback) {
+      storageCalls.push('set');
+      Object.assign(store, values);
+      deferred.push(() => callback());
+      deferred.push(() => callback());
+    },
+    remove(keys, callback) {
+      storageCalls.push('remove');
+      for (const key of keys) delete store[key];
+      deferred.push(() => callback());
+    },
+  };
+}
 // The caps as the PRODUCTION module declares them, so every boundary below is
 // placed by a measured charge against the real constant. A cap the module
 // does not declare reads null and its cases then fail rather than falling back
@@ -65,19 +95,22 @@ const background = buildBackground(utilPath, gmPath, makeStorage);
 const PER_ORIGIN_CAP = background.constants.GM_QUOTA_BYTES;
 const TOTAL_CAP = background.constants.GM_TOTAL_QUOTA_BYTES;
 
-function createFrame(origin, hostname) {
+function createFrame(origin, hostname, target) {
   const listeners = {};
   const posted = [];
+  const realm = target || background;
   const windowObject = {
     addEventListener(type, listener) {
       (listeners[type] ||= []).push(listener);
     },
     postMessage(message) {
       posted.push(message);
+      if (message.direction === 'daedalus-bg-to-page') {
+        answered.push(message.reqId);
+      }
     },
   };
-  const chrome = frameChrome(background.chrome.storage.local, background,
-    origin);
+  const chrome = frameChrome(realm.chrome.storage.local, realm, origin);
   const context = {
     window: windowObject,
     chrome,
@@ -144,6 +177,24 @@ function resetStore() {
   for (const key of Object.keys(store)) delete store[key];
   storageCalls.length = 0;
   deferred.length = 0;
+  answered.length = 0;
+}
+
+// The order the worker ANSWERED these submissions in, labelled by the key each
+// one wrote. A submission the worker never answered is absent from the record,
+// so a stalled queue shows up as a short order rather than as a slow one.
+function completionOrder(ids, labels) {
+  const wanted = new Set(ids);
+  const order = answered.filter((id) => wanted.has(id))
+    .map((id) => labels.get(id));
+  return { order, answered: order.length, submitted: ids.length };
+}
+
+// The label map a run of submissions shares: one label per key, in order.
+function labelsFor(keys, ids) {
+  const labels = new Map();
+  keys.forEach((key, i) => labels.set(ids[i], key));
+  return labels;
 }
 
 function bigString(n) { return 'x'.repeat(n); }
@@ -426,6 +477,104 @@ function main() {
                          storeKeys: unserialisable.storeKeys };
 
   out.aggregate = aggregateCases();
+  out.admission = admissionCases();
+  return out;
+}
+
+// ── Admission order ──
+// The aggregate cap makes the queue ONE serial section over the whole GM area,
+// so a run holds it for exactly its own single write. The order that section
+// takes its next write in is the other half: an origin with a write waiting is
+// served once per turn, so a page's burst decides only how long its OWN writes
+// wait. Every case records the order the pages were ANSWERED in.
+function admissionCases() {
+  const a = createFrame(ORIGIN_A, 'alpha.example.com');
+  const b = createFrame(ORIGIN_B, 'beta.example.com');
+  const c = createFrame(ORIGIN_C, 'gamma.example.com');
+  const out = {};
+
+  // Five writes from one origin issued WITHOUT awaiting between them, then one
+  // from an unrelated origin: a flooding page's loop with a bystander page's
+  // single ordinary write landing inside it. Nothing is refused and no cap is
+  // broken — the bystander's write is merely behind every write the flood
+  // issued, which is the wait this case measures.
+  resetStore();
+  const floodKeys = ['f0', 'f1', 'f2', 'f3', 'f4'];
+  const flood = floodKeys.map((k) => a.dispatch('setValue', k, 'v'));
+  const bystander = b.dispatch('setValue', 'b', 'v');
+  flushDeferred();
+  const rotation = [...flood, bystander];
+  out.rotation = completionOrder(rotation,
+    labelsFor([...floodKeys, 'b'], rotation));
+
+  // One origin alone, so no other origin is ever in the rotation: the writes
+  // still commit in submission order and every one of them is answered.
+  resetStore();
+  const soloKeys = ['s0', 's1', 's2', 's3'];
+  const solo = soloKeys.map((k) => a.dispatch('setValue', k, 'v'));
+  flushDeferred();
+  out.singleOrigin = completionOrder(solo, labelsFor(soloKeys, solo));
+
+  // An origin whose queue drained is no longer in the rotation, and a write it
+  // issues later re-enters at the BACK — so a page that refills its queue does
+  // not resume the front it held before. The two rounds are flushed apart, so
+  // the second one starts from an empty rotation: A's two later writes are
+  // behind the origins that were already waiting when A came back.
+  resetStore();
+  const firstKeys = ['a0', 'a1', 'a2', 'b0'];
+  const first = [a.dispatch('setValue', 'a0', 'v'),
+    a.dispatch('setValue', 'a1', 'v'),
+    a.dispatch('setValue', 'a2', 'v'),
+    b.dispatch('setValue', 'b0', 'v')];
+  flushDeferred();
+  const secondKeys = ['a3', 'b1', 'a4', 'c0'];
+  const second = [a.dispatch('setValue', 'a3', 'v'),
+    b.dispatch('setValue', 'b1', 'v'),
+    a.dispatch('setValue', 'a4', 'v'),
+    c.dispatch('setValue', 'c0', 'v')];
+  flushDeferred();
+  out.rejoin = completionOrder([...first, ...second],
+    labelsFor([...firstKeys, ...secondKeys], [...first, ...second]));
+
+  // Nothing active and nothing waiting: the first submission runs at once, so
+  // the second is served behind it rather than ahead of it.
+  resetStore();
+  const idleKeys = ['i0', 'i1'];
+  const idle = [a.dispatch('setValue', 'i0', 'v'),
+    b.dispatch('setValue', 'i1', 'v')];
+  flushDeferred();
+  out.idle = completionOrder(idle, labelsFor(idleKeys, idle));
+
+  // The queue's release is once per run. A storage callback entered twice must
+  // not release the queue twice and admit a write beside the one still in
+  // flight — the read-modify-write hole the one serial section exists to
+  // close. Three writes of a measured charge are seeded one byte under the
+  // point where all three fit, so the first two are admitted and the third is
+  // not: a concurrent pair would read the store before the first of them
+  // committed, admit the third, and land the sum one byte over the cap.
+  resetStore();
+  const charge = 1000;
+  seed(seedSpecs([FILLERS[0]], TOTAL_CAP - 3 * charge + 1));
+  const twice = buildBackground(utilPath, gmPath, makeDoubleFireStorage);
+  const t0 = createFrame(ORIGIN_A, 'alpha.example.com', twice);
+  const t1 = createFrame(ORIGIN_A, 'alpha.example.com', twice);
+  const t2 = createFrame(ORIGIN_B, 'beta.example.com', twice);
+  const ids = [t0, t1, t2].map((frame, i) => {
+    const origin = i === 2 ? ORIGIN_B : ORIGIN_A;
+    const key = 'd' + i;
+    return frame.dispatch('setValue', key, valueOfCharge(origin, key, charge));
+  });
+  flushDeferred();
+  const errors = ids.map((id, i) => {
+    const frame = [t0, t1, t2][i];
+    return (frame.replyFor(id) || {}).error || null;
+  });
+  out.doubleCallback = {
+    errors,
+    order: completionOrder(ids, labelsFor(['d0', 'd1', 'd2'], ids)).order,
+    total: gmBytes(), charge, seeded: TOTAL_CAP - 3 * charge + 1,
+    cap: TOTAL_CAP,
+  };
   return out;
 }
 
