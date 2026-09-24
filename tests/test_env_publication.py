@@ -1,27 +1,23 @@
 #!/usr/bin/env python3
 """No test module publishes a credential into its own environment.
 
-Seven modules wrote into the suite process's `os.environ` at import and never
-restored it: the credential and the child's MCP port, for consumers that did
-not exist. Nothing that runs after the import in the same process needs
-them, and a raw child that inherits `os.environ` inherits a credential the
-suite never meant to hand it. The suites take the credential as a Python
-name, or as an explicit per-spawn `env=`, which is what the modules' own
-constants are for.
+Seven modules wrote the credential and the child's MCP port into the suite
+process's `os.environ` at import, for consumers that did not exist. The
+suites take the credential as a Python name, or as a per-spawn `env=`,
+which is what the modules' own constants are for; a raw child that
+inherits `os.environ` inherits a credential the suite never meant to hand it.
 
 Two halves, because either alone is a snapshot of today. The runtime half
-drives `PUBLISHERS` as a table, one row per module, and watches each import
-in a FRESH interpreter: this process has already imported the modules that
-matter, so an in-process before/after would snapshot an installed helper and
-read green whatever it did. The structural half reads every `tests/*.py` in
-the worktree for a write into the process environment that the module body
-can execute at import, so an EIGHTH site fails here rather than waiting for
-a successor to sweep for it. Every site that scan admits is classified
-below, and an unclassified one is a failure: a list of these seven paths
-with no classification behind it would pass by construction on a site
-nobody has met yet. `_sites()` states the exact grammar it recognises, and
-the shapes it cannot see are named there rather than left for the next
-reader to assume.
+drives `PUBLISHERS` as a table and watches each import in a FRESH
+interpreter: this process has already imported the modules that matter, so
+an in-process before/after would snapshot an installed helper and read
+green whatever it did. The structural half reads every `tests/*.py` in the
+worktree for a write the module body can execute at import, so an EIGHTH
+site fails here rather than waiting for a successor to sweep for it. Every
+site it admits is classified below, and an unclassified one is a failure: a
+list of these seven paths with no classification behind it would pass by
+construction on a site nobody has met. `_sites()` states the grammar it
+recognises, and names the shapes it cannot see.
 """
 import ast
 import json
@@ -35,22 +31,20 @@ import _util  # noqa: E402
 
 TESTS_DIR = Path(__file__).resolve().parent
 
-# The three names the publication is about, and the whole of the family the
-# structural half reads: a module-level write of any of them is a site.
+# The three names the publication is about; the structural half reads the
+# whole credential family, and a write of any of them is a site.
 NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_MCP_PORT', 'TOKEN')
 CREDENTIAL_NAMES = ('TOKEN',)
 CREDENTIAL_PREFIXES = ('DAEDALUS_',)
 
-# The statements the scan does not descend into, because a module import
-# does not run their bodies: a function, a coroutine, a method. A class is
-# NOT on this list — defining the class body is what the import does, so a
-# write in one runs at import and is read. A list of what is refused, so
-# that a statement type nobody thought of is read rather than passed.
+# What a module import does not run: a function, a coroutine, a method. A
+# class is NOT here — defining the class body is the import, so a write in
+# one runs now. This is a list of refusals, so a statement type nobody
+# thought of is read rather than passed.
 _NOT_AT_IMPORT = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 # The modules this branch took the publication out of, each with the names it
-# published. The runtime half imports every row; the structural half requires
-# that none of them has a site left.
+# published. Every row is imported; none may have a site left.
 PUBLISHERS = (
     ('_bridge', ('DAEDALUS_MCP_PORT', 'DAEDALUS_TOKEN', 'TOKEN')),
     ('_segments', ('DAEDALUS_MCP_PORT', 'DAEDALUS_TOKEN', 'TOKEN')),
@@ -62,10 +56,10 @@ PUBLISHERS = (
     ('test_path_safety', ('DAEDALUS_TOKEN', 'TOKEN')),
 )
 
-# The sites the scan admits that STAY, with the reason each write is the
-# purpose rather than a publication: the names are the ones the row admits,
-# and `None` admits whatever the file publishes. A site here publishing a
-# name outside its row is unclassified, and fails like any other.
+# The sites the scan admits that STAY, each with the reason its write is the
+# purpose rather than a publication. The names are the ones the row admits;
+# `None` admits whatever the file publishes, and a name outside the row is
+# unclassified and fails like any other.
 KEPT = {
     'test_http_transport': (
         ('DAEDALUS_DIR', 'DAEDALUS_PORT'),
@@ -104,11 +98,10 @@ print(json.dumps({'before': before, 'after': dict(os.environ)},
 def _import_in_a_fresh_process(module, **ambient):
     """What a fresh interpreter's environment holds after the import.
 
-    Every inherited `DAEDALUS_*` and `TOKEN` is dropped first, so the child
-    starts from a known environment and `ambient` alone decides which of the
-    watched names are present. Both snapshots are taken by the child itself,
-    in one interpreter: a name the platform normalises on the way into a
-    child is then already normalised in both halves of the comparison.
+    Every inherited `DAEDALUS_*` and `TOKEN` is dropped first, so `ambient`
+    alone decides which watched names are present. The child takes both
+    snapshots itself, so a name the platform normalises on the way in is
+    normalised in both halves of the comparison.
     """
     env = {name: value for name, value in os.environ.items()
            if name not in NAMES and not name.startswith('DAEDALUS_')}
@@ -124,10 +117,10 @@ def _import_in_a_fresh_process(module, **ambient):
 def _values(snapshot, names, other=None) -> dict:
     """The named entries, as a reader of the credential needs to see them.
 
-    A name the snapshot does not carry is absent, not a value: absence is
-    one of the outcomes these controls score, so it is skipped here and
-    found by the caller's comparison. `other` is the second snapshot, and
-    then each entry reads as the pair the two snapshots disagree about.
+    A name the snapshot does not carry is absent, not a value, and absence
+    is one of the outcomes these controls score — the caller's comparison
+    finds it. `other` is the second snapshot; each entry then reads as the
+    pair the two disagree about.
     """
     reads: dict = {
         name: (snapshot[name] if other is None
@@ -144,9 +137,9 @@ def _values(snapshot, names, other=None) -> dict:
 def _is_credential(name):
     """Whether a published name is one this tree treats as a credential.
 
-    A name the scan could not read arrives as None, and is not a credential
-    — but it is also not a name to skip, which is why the admission test
-    below needs both halves rather than this one.
+    A name the scan could not read arrives as None: not a credential, and
+    not a name to skip either, which is why the admission test needs both
+    halves rather than this one.
     """
     return (isinstance(name, str)
             and (name in CREDENTIAL_NAMES
@@ -156,9 +149,9 @@ def _is_credential(name):
 def _assert_nothing_published(snap):
     """The whole environment is one value, its key set included.
 
-    Comparing only the names this issue happens to name would pass a helper
-    that published some fourth one, so the diff is over both snapshots in
-    full. Values are reported for the credential family only: a failure
+    The diff is over both snapshots in full, because comparing only the
+    names this issue happens to name would pass a module that published
+    some fourth one. Values are reported for the credential family only: a
     message that printed the whole inherited environment would put this
     machine's secrets into every CI log that ever saw it go red.
     """
@@ -176,10 +169,10 @@ def _assert_nothing_published(snap):
 def _tests_modules():
     """Every module under tests/, from the worktree the scan then reads.
 
-    One source for the list and the contents: an enumeration taken from the
-    git index would miss a file that is written but not yet added, and a
-    local run would read green over what CI refuses. A stray untracked
-    `tests/*.py` is therefore scanned too, which is the loud direction.
+    One source for the list and the contents: an enumeration from the git
+    index would miss a file written but not yet added, and a local run
+    would read green over what CI refuses. A stray untracked `tests/*.py` is
+    therefore scanned too, which is the loud direction.
     """
     return sorted((_util.ROOT / 'tests').glob('*.py'))
 
@@ -195,9 +188,9 @@ def _subscript_key(node):
 def _published_names(node, bindings, depth=2):
     """The names a written value publishes, or None when unreadable here.
 
-    An unreadable value is None rather than an empty list on purpose: a site
-    whose names cannot be read has to be classified, because a control that
-    read "no names" for what it could not parse would pass it.
+    Unreadable is None rather than an empty list on purpose: a site whose
+    names cannot be read has to be classified, and a control that read "no
+    names" for what it could not parse would pass it.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return [node.value]
@@ -213,9 +206,8 @@ def _published_names(node, bindings, depth=2):
 def _imports(statements):
     """The names the module binds the `os` module and its `environ` to.
 
-    `import os`, `import os as o` and `from os import environ as e` are
-    three spellings of one receiver, and a scan that matched only the
-    attribute `os.environ` would miss the other two outright.
+    Three spellings of one receiver; matching only the attribute
+    `os.environ` would miss the other two outright.
     """
     modules, environs = set(), set()
     for node in statements:
@@ -233,9 +225,9 @@ def _imports(statements):
 def _is_environ(node, scope, depth=2):
     """Whether an expression names the process environment mapping.
 
-    `scope` carries the module aliases, the `environ` names imported from
-    `os`, and the module-level assignments, so a name bound to `os.environ`
-    is followed to the mapping instead of being matched by its spelling.
+    `scope` carries the module aliases, the imported `environ` names and
+    the module-level assignments, so a name bound to `os.environ` is
+    followed to the mapping rather than matched by its spelling.
     """
     modules, environs, bindings = scope
     if (isinstance(node, ast.Attribute) and node.attr == 'environ'
@@ -253,11 +245,9 @@ def _is_environ(node, scope, depth=2):
 def _is_main_guard(node):
     """Whether this `if` is the `if __name__ == '__main__':` guard.
 
-    Exactly that spelling: `type(...) is ast.Eq` over the single comparison
-    against `'__main__'`. A `!=` guard, an `in` guard or a guard with an
-    `else` are not this statement's body — the first two run in every
-    importer and the `else` runs in every importer — so a check that
-    matched them would skip a write that happens.
+    Exactly that spelling. A `!=` guard, an `in` guard and a guard's `else`
+    all run in every importer, so a looser check would skip a write that
+    happens.
     """
     if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
         return False
@@ -272,10 +262,10 @@ def _is_main_guard(node):
 def _child_statements(node):
     """The statements directly inside a statement, in source order.
 
-    Not every container for statements IS a statement: a `match` arm, an
-    `except` handler and a `case` guard are not, and their bodies are. So
-    the walk passes through a non-statement until it reaches a statement
-    one, and leaves descending into a statement to the caller's recursion.
+    Not every container for statements IS a statement — a `match` arm and
+    an `except` handler are not — so the walk passes through a
+    non-statement until it reaches one, and leaves descending into a
+    statement to the caller's recursion.
     """
     found = []
     for child in ast.iter_child_nodes(node):
@@ -289,15 +279,12 @@ def _child_statements(node):
 def _executed_statements(body):
     """Every statement the module body can run when it is imported.
 
-    The recursion names what does NOT run at import and refuses those: a
-    function, a coroutine or a method, whose body runs per call, and the
-    body of the `__main__` guard, which runs only when the file is the
-    program. Every other statement is reached, whatever its type: a
-    branch, a handler, a loop, a `with`, a `match` arm, and a class body
-    — defining a class is what the import does, so a write in one runs at
-    import, while the methods defined inside it are refused as functions.
-    The guard's `else` is reached like any other, because an importer runs
-    it.
+    What does NOT run at import is refused: a function, a coroutine or a
+    method, whose body runs per call, and the `__main__` guard's body,
+    which runs only when the file is the program. Everything else is
+    reached whatever its type — a branch, a handler, a loop, a `with`, a
+    `match` arm, a class body, whose definition IS the import, and a
+    guard's `else`, which an importer runs.
     """
     found = []
     for node in body:
@@ -323,9 +310,9 @@ def _key_names(node, bindings):
 def _update_names(call, bindings):
     """The names an `update` publishes, positionally and by keyword.
 
-    `update(**BRIDGE_ENV)` publishes exactly what `update(BRIDGE_ENV)`
-    does, so the keywords are read as mappings too; a mapping that cannot
-    be read contributes None rather than dropping the site.
+    `update(**BRIDGE_ENV)` publishes what `update(BRIDGE_ENV)` does, so
+    keywords are read as mappings too; an unreadable one contributes None
+    rather than dropping the site.
     """
     names = []
     for written in list(call.args) + [keyword.value
@@ -372,9 +359,8 @@ def _walrus_bindings(node):
     """Every `(name := value)` a statement carries, in source order.
 
     A walrus binds at the scope it appears in, so one in a module-level
-    `if` test or in a comprehension's condition binds a module-level name.
-    The walk stops at a nested statement, which the caller visits on its
-    own, and at nothing else.
+    `if` test or a comprehension's condition binds a module-level name.
+    The walk stops at a nested statement, which the caller visits itself.
     """
     found = []
     for child in ast.iter_child_nodes(node):
@@ -389,14 +375,13 @@ def _walrus_bindings(node):
 def _bound_names(node):
     """The names a statement binds, in source order, with each value.
 
-    Three forms, all of them targets in the language's own sense: each
-    name target of an assignment, chained included; the target of an
-    annotated assignment; and a walrus anywhere in the statement's
-    expressions. The forms not read are named in `_sites()`'s grammar
-    rather than assumed away — a destructuring target, a loop or `except`
-    binding and a `match` capture need a positional correspondence
-    between a value's parts and a target's names, which is a different
-    reader from this one.
+    Three forms, all targets in the language's own sense: each name target
+    of an assignment, chained included; the target of an annotated
+    assignment; and a walrus in the statement's expressions. The forms NOT
+    taken are named in `_sites()`'s grammar: a destructuring target, a
+    `for` / `with` / `except` binding and a `match` capture each need a
+    positional correspondence between a value's parts and a target's
+    names, which is a different reader from this one.
     """
     if isinstance(node, ast.Assign):
         bound = [(target.id, node.value) for target in node.targets
@@ -413,17 +398,12 @@ def _bindings(statements):
     """What each module-level name first holds, in source order.
 
     First-wins, because the order a module body actually runs in is not
-    knowable from its text. A name bound twice is read here as its FIRST
-    binding, which closes both directions at once: a name that ends up
-    holding a plain dict gets no environment write invented for it, and a
-    name that WAS the environment when the write happened keeps the write
-    even if something rebinds the name afterwards. The cost is named in
-    `_sites()`: a name bound inside a branch is decided by source order,
-    not by which branch runs.
-
-    The binding forms taken are the three `_bound_names` names, and the
-    ones it does not take are named in `_sites()`'s grammar rather than
-    left as a claim this file makes and does not keep.
+    knowable from its text. It closes both directions at once: a name
+    that ends up holding a plain dict gets no environment write invented
+    for it, and a name that WAS the environment when the write happened
+    keeps the write even if the name is rebound afterwards. The cost is
+    named in `_sites()`: a name bound inside a branch is decided by
+    source order, not by which branch runs.
     """
     bound = {}
     for node in statements:
@@ -460,9 +440,6 @@ def _sites(source):
     binding forms that need a positional correspondence between a value's
     parts and a target's names — a destructuring target, a `for` or `with`
     or `except` binding, a `match` capture.
-
-    A name this scan cannot read is reported as unreadable, never as
-    absent, so it is classified rather than passed.
     """
     tree = ast.parse(source)
     statements = _executed_statements(tree.body)
@@ -511,14 +488,14 @@ def test_every_publisher_installs_nothing_into_an_empty_environment(_tmp):
 def test_no_unclassified_module_publishes_at_import(_tmp):
     """Every write the scan's grammar admits is a classified site.
 
-    This is the half that outlives today's seven rows. A module the table
+    This is the half that outlives today's seven rows: a module the table
     has never met fails here with its file and line, so the sweep is this
     control's job and not a successor's. The grammar is `_sites()`'s, and it
-    is two denylists rather than two lists: a statement is read unless it
-    is a function, a class body or the `__main__` guard's, and a name is
-    read as the environment when it resolves to the environment rather than
-    when it is spelled a way this file happens to know. So a statement type
-    or a binding form nobody has met is read, not passed.
+    is two denylists rather than two lists: a statement is read unless it is
+    a function, a coroutine, a method or the `__main__` guard's, and a name
+    is read as the environment when it resolves to the environment rather
+    than when it is spelled a way this file happens to know. So a statement
+    type or a binding form nobody has met is read, not passed.
     """
     unclassified, republished = [], []
     for path in _tests_modules():
