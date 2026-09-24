@@ -1598,9 +1598,6 @@ jobs:
           # slice, so it says so rather than losing the slice in silence.
           REQUIRED="--tree --python --out"
           add() { opt="$1"; shift
-            if [ -z "$TIME_OPTIONS" ]; then
-              args+=("$opt" "$@"); return
-            fi
             case " $TIME_OPTIONS " in
               *" $opt "*) args+=("$opt" "$@"); return ;;
             esac
@@ -1614,6 +1611,10 @@ jobs:
 
           args=()
           dropped=""
+          if [ -z "$TIME_OPTIONS" ]; then
+            echo "::error::head/scripts/ci/time_tests.py was not probed, so the options it takes are unknown."
+            exit 1
+          fi
           # set -f keeps the glob metacharacters away from the shell's own
           # pathname expansion — they have to reach the instrument as
           # patterns — and the unquoted expansion below is what turns the
@@ -1665,9 +1666,6 @@ jobs:
             done
           done
 
-          if [ -z "$TIME_OPTIONS" ]; then
-            echo "::warning::no option set was probed for this instrument, so every option was passed as written."
-          fi
           if [ -n "$dropped" ]; then
             if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
               note="this instrument's --help did not list$dropped, so it was not passed"
@@ -1721,9 +1719,6 @@ jobs:
           # and without --summary-file it reports nothing to the run.
           REQUIRED="--base --head"
           add() { opt="$1"; shift
-            if [ -z "$COMPARE_OPTIONS" ]; then
-              args+=("$opt" "$@"); return
-            fi
             case " $COMPARE_OPTIONS " in
               *" $opt "*) args+=("$opt" "$@"); return ;;
             esac
@@ -1736,6 +1731,10 @@ jobs:
           }
           args=()
           dropped=""
+          if [ -z "$COMPARE_OPTIONS" ]; then
+            echo "::error::head/scripts/ci/compare_durations.py was not probed, so the options it takes are unknown."
+            exit 1
+          fi
           # shellcheck disable=SC2046
           add --base $(ls -d reports/base-*)
           # shellcheck disable=SC2046
@@ -1747,9 +1746,6 @@ jobs:
           add --ratio-file reports/ratio.txt
           add --summary-file "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "$COMPARE_OPTIONS" ]; then
-            echo "::warning::no option set was probed for this comparator, so every option was passed as written."
-          fi
           if [ -n "$dropped" ]; then
             if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
               note="this comparator's --help did not list$dropped, so it was not passed"

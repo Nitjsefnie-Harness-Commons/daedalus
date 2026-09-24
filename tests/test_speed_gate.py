@@ -548,6 +548,7 @@ def test_the_timing_step_reports_what_it_measured(tmp):
             'ROUNDS': '2',
             'SUITES_ONLY': '',
             'SUITES_EXCEPT': '',
+            'TIME_OPTIONS': '--except --help --only --out --python --tree',
             'STUB_INSTRUMENT_CALLS': str(workdir / 'instrument-calls'),
             'STUB_SKIP': skip or '@@none@@',
             'GITHUB_STEP_SUMMARY': str(summary),
