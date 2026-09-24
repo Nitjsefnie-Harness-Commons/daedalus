@@ -6,10 +6,14 @@ drained from its stream, a call appended to the log, a pid gone - and not
 on how long the runner took to do it. The clock appears exactly once: as
 the failure-reporting backstop on the single wait with no live process to
 give up on, which renders the surviving pids, the parent's exit and the
-captured output at expiry instead of a number of seconds. The shape pin at
-the end reads the budget suite's own bindings and refuses every comparison
-a numeric bound takes part in against a wall-clock reading - the shape
-issue 1039 removed - and names beside itself what it cannot resolve.
+captured output at expiry instead of a number of seconds. The control at
+the end is what the waits' being clock-free rests on, and it is a
+structural fact rather than a scan: the budget suite holds no loop, so
+every wait it performs is a call - into the waits above, or into one of
+the six calls whose bounds the control names - and there is nothing in it
+for a wall-clock bound to decide. What proves these particular waits
+carry no margin is the mutation ledger, which is what killed the
+parent-death guarantee with the names of the survivors in the message.
 """
 import ast
 import sys
@@ -294,236 +298,46 @@ def test_the_death_wait_names_the_survivors_when_the_backstop_passes(tmp):
     assert 'started ci watcher pid 9' in message, message
 
 
-def _wall_clock_margins(source):
-    """Every comparison a numeric bound takes part in against a reading.
+def _waits_of_its_own(source):
+    """Every loop a wait of this file's own would spin in.
 
-    The class, stated once: **a numeric bound compared against a wall-clock
-    reading**. Both halves resolve through the file's own bindings, because
-    a name is not what it denotes - `from time import monotonic as _clock`,
-    `c = time`, `r = time.monotonic` and `getattr(time, "monotonic")` are the
-    same reading under four bindings, and a required parameter is the same
-    bound as a defaulted one. A number is a literal, a constant, a constant
-    expression, a parameter of any kind, or a local holding a reading and a
-    bound; a reading is a standard-library clock called through any of those
-    bindings.
+    Two forms, and they are the two a bounded wait takes: a `while`, and a
+    `for` over a numeric range. Either is a place a wall-clock bound can be
+    decided, so either in a suite whose waits are all calls is the margin
+    coming back.
+    """
+    tree = ast.parse(source)
+    return sorted(ast.unparse(node)[:72] for node in ast.walk(tree)
+                  if isinstance(node, ast.While)
+                  or (isinstance(node, ast.For)
+                      and isinstance(node.iter, ast.Call)
+                      and isinstance(node.iter.func, ast.Name)
+                      and node.iter.func.id == 'range'))
 
-    Declared limits, each a thing no static reading of one file can resolve,
-    and each with a control that pins the behaviour it names: a star import
-    (`from time import *`), a number that arrives from a call's return value
-    or from the environment, a bound handed to a call as an argument
-    (`time.sleep(45)`, `queue.get(timeout=45)`), a clock outside the standard
-    library, and a margin in any file other than the one this reads - which
-    is what issue 1038 enumerates for the rest of the tree.
+
+def _bounds_handed_to_calls(source):
+    """Every wall-clock bound the file hands to a CALL, as a census of
+    (function, callee, the value). A census and not a rule: it names what
+    the loop marker does not reach.
     """
     tree = ast.parse(source)
     parents = _parents(tree)
-    readings, clocks, numbers, deadlines, parameters = _bindings(tree, parents)
-    found = set()
+    rows = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Compare):
+        if not isinstance(node, ast.Call):
             continue
-        sides = [node.left] + node.comparators
-        owner = _owner(node, parents)
-        if not any(_reads(side, readings, clocks) for side in sides):
+        if not isinstance(node.func, ast.Attribute):
             continue
-        counted = [_counts(side, numbers, deadlines, owner, parameters)
-                   for side in sides]
-        if any(counted):
-            found.add((owner, ast.unparse(node)[:72]))
-    return sorted(found)
-
-
-# The clock universe, as the standard library names it: the domain's
-# specification rather than a spelling set of the file under the pin.
-CLOCK_READERS = {
-    'datetime': frozenset({'now', 'today', 'utcnow'}),
-    'time': frozenset({'monotonic', 'monotonic_ns', 'perf_counter',
-                       'perf_counter_ns', 'process_time', 'time', 'time_ns'}),
-}
-# How many times the binding pass runs. An alias chain resolves when a pass
-# adds a name the next pass can use, and the cap is what stops a cycle of two
-# aliases from spinning.
-ALIAS_PASSES = 8
+        for keyword in node.keywords:
+            if keyword.arg == 'timeout':
+                rows.append((_owner(node, parents), node.func.attr,
+                             ast.unparse(keyword.value)))
+    return sorted(rows)
 
 
 def _parents(tree):
     return {child: node for node in ast.walk(tree)
             for child in ast.iter_child_nodes(node)}
-
-
-def _bindings(tree, parents):
-    """What every name denotes, resolved until the alias chains settle."""
-    clocks, readings, numbers, deadlines, parameters = {}, set(), {}, set(), {}
-    for _ in range(ALIAS_PASSES):
-        before = (len(clocks), len(readings), len(numbers), len(deadlines),
-                  len(parameters))
-        clocks, readings, numbers, deadlines, parameters = _one_pass(
-            tree, parents, clocks, readings, numbers, deadlines, parameters)
-        if before == (len(clocks), len(readings), len(numbers),
-                      len(deadlines), len(parameters)):
-            break
-    return readings, clocks, numbers, deadlines, parameters
-
-
-def _one_pass(tree, parents, clocks, readings, numbers, deadlines, parameters):
-    clocks, readings, numbers = dict(clocks), set(readings), dict(numbers)
-    deadlines, parameters = set(deadlines), dict(parameters)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                # The module decides what the name is; the name it is bound
-                # to may be the module's own or any alias of it.
-                root = alias.name.split('.')[0]
-                if root in CLOCK_READERS:
-                    clocks[alias.asname or alias.name] = root
-        elif isinstance(node, ast.ImportFrom):
-            module = (node.module or '').split('.')[0]
-            if module not in CLOCK_READERS:
-                continue
-            for alias in node.names:
-                name = alias.asname or alias.name
-                if alias.name in CLOCK_READERS[module]:
-                    readings.add(name)
-                elif module == 'datetime' and alias.name == 'datetime':
-                    clocks[name] = module
-        elif isinstance(node, ast.FunctionDef):
-            # A name a second function also declares is still this one's
-            # parameter, which is how the pre-fix file spelled its pair.
-            for argument in node.args.args + node.args.kwonlyargs:
-                parameters.setdefault(argument.arg, set()).add(node.name)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = ([node.target] if isinstance(node, ast.AnnAssign)
-                       else node.targets)
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    _bind(target.id, node, parents, clocks, readings, numbers,
-                          deadlines, parameters)
-    return clocks, readings, numbers, deadlines, parameters
-
-
-def _bind(name, node, parents, clocks, readings, numbers, deadlines,
-          parameters):
-    """Record what a name now holds, from what the value is."""
-    value = node.value
-    if _number(value, numbers) is not None:
-        numbers[name] = _number(value, numbers)
-        return
-    owner = _owner(node, parents)
-    if _reader(value, readings, clocks):
-        readings.add(name)
-    elif isinstance(value, ast.Name) and value.id in clocks:
-        clocks[name] = clocks[value.id]
-    elif (_reads(value, readings, clocks)
-          and _counts(value, numbers, deadlines, owner, parameters)):
-        deadlines.add(name)
-
-
-def _reader(node, readings, clocks):
-    """A reference to a reader, called or waiting to be called."""
-    if isinstance(node, ast.Name):
-        return node.id in readings
-    if isinstance(node, ast.Attribute):
-        return _clock_reads(node, clocks)
-    return _getattr_reads(node, clocks)
-
-
-def _clock_reads(node, clocks):
-    """A reader under a clock name: `time.monotonic`, `datetime.datetime.now`
-    and `when.datetime.now` are the same read three depths down, so the
-    attribute chain is walked to the name it hangs from.
-    """
-    if not isinstance(node, ast.Attribute):
-        return False
-    path, cursor = [], node
-    while isinstance(cursor, ast.Attribute):
-        path.append(cursor.attr)
-        cursor = cursor.value
-    if not (isinstance(cursor, ast.Name) and cursor.id in clocks):
-        return False
-    module = clocks[cursor.id]
-    return any(step in CLOCK_READERS[module] for step in path)
-
-
-def _getattr_reads(node, clocks):
-    """`getattr(clock, "monotonic")`, the computed spelling of a read."""
-    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'getattr' and len(node.args) >= 2
-            and isinstance(node.args[0], ast.Name)
-            and isinstance(node.args[1], ast.Constant)):
-        return False
-    module = clocks.get(node.args[0].id)
-    return bool(module and node.args[1].value in CLOCK_READERS[module])
-
-
-def _reads(node, readings, clocks):
-    """Whether this expression reads the wall clock."""
-    if node is None:
-        return False
-    if isinstance(node, ast.Name):
-        return node.id in readings
-    if isinstance(node, ast.Call):
-        if _reader(node.func, readings, clocks) or _getattr_reads(
-                node.func, clocks):
-            return True
-        return any(_reads(argument, readings, clocks)
-                   for argument in node.args) or any(
-                       _reads(keyword.value, readings, clocks)
-                       for keyword in node.keywords)
-    if isinstance(node, ast.UnaryOp):
-        return _reads(node.operand, readings, clocks)
-    if isinstance(node, ast.BinOp):
-        return (_reads(node.left, readings, clocks)
-                or _reads(node.right, readings, clocks))
-    return False
-
-
-def _counts(node, numbers, deadlines, owner, parameters):
-    """Whether this expression is a number or a bound the file decided on."""
-    if _number(node, numbers) is not None:
-        return True
-    if isinstance(node, ast.Name):
-        return (node.id in deadlines
-                or owner in parameters.get(node.id, ()))
-    if isinstance(node, ast.Call):
-        return any(_counts(argument, numbers, deadlines, owner, parameters)
-                   for argument in node.args) or any(
-                       _counts(keyword.value, numbers, deadlines, owner,
-                               parameters) for keyword in node.keywords)
-    if isinstance(node, ast.UnaryOp):
-        return _counts(node.operand, numbers, deadlines, owner, parameters)
-    if isinstance(node, ast.BinOp):
-        return (_counts(node.left, numbers, deadlines, owner, parameters)
-                or _counts(node.right, numbers, deadlines, owner, parameters))
-    return False
-
-
-def _number(node, numbers):
-    """The value of a numeric expression the source states, else None."""
-    if isinstance(node, ast.Constant):
-        if isinstance(node.value, bool) or not isinstance(
-                node.value, (int, float)):
-            return None
-        return float(node.value)
-    if isinstance(node, ast.Name):
-        return numbers.get(node.id)
-    if isinstance(node, ast.UnaryOp) and isinstance(
-            node.op, (ast.UAdd, ast.USub)):
-        value = _number(node.operand, numbers)
-        if value is None:
-            return None
-        return -value if isinstance(node.op, ast.USub) else value
-    if isinstance(node, ast.BinOp) and isinstance(
-            node.op, (ast.Add, ast.Sub, ast.Mult)):
-        left = _number(node.left, numbers)
-        right = _number(node.right, numbers)
-        if left is None or right is None:
-            return None
-        if isinstance(node.op, ast.Add):
-            return left + right
-        if isinstance(node.op, ast.Sub):
-            return left - right
-        return left * right
-    return None
 
 
 def _owner(node, parents):
@@ -536,149 +350,169 @@ def _owner(node, parents):
         node = parents[node]
 
 
-def _indent(lines, pad='    '):
-    return [pad + line if line else line for line in lines]
+# Every wall-clock bound the budget suite hands to a call, and why each is the
+# module's own contract rather than a wait's health margin: a `wait` on a
+# child this module has already decided to stop, and the `--timeout` of the
+# script under test. A seventh is a finding, and the control below arrives as
+# a diff against this list rather than as a name-keyed exemption.
+BOUND_CALLS = (
+    ('_ci_wait', 'run', 'limit'),
+    ('stop', 'wait', '60'),
+    ('test_a_graceful_exit_leaves_no_children_behind', 'wait', '60'),
+    ('test_a_review_whose_inline_comments_overflow_is_followed_once', 'run',
+     '60'),
+    ('test_the_children_die_with_their_parent', 'wait', '60'),
+    ('test_the_once_trial_counts_the_checks_that_have_not_concluded', 'run',
+     '60'),
+)
 
-
-# The bypass universe, crossed from the rule's own productions rather than
-# from the plants of the last round: a reading binding, a source a number
-# arrives from, a place the wait sits, and a shape the comparison takes. The
-# cross product is what the rule claims to refuse, so a shape it misses is a
-# finding about the rule rather than a spelling for the next round to name.
-_READINGS = (
-    ('a canonical reader', ('import time',), 'time.monotonic()'),
-    ('the epoch reader', ('import time',), 'time.time()'),
-    ('a module aliased at import', ('import time as c',), 'c.monotonic()'),
-    ('a from-imported reader', ('from time import monotonic',),
+# The ways Python binds a name, from the language's own grammar rather than
+# from any recogniser: the crossing below is a property of the marker, which
+# does not care what any of them bound. A form that cannot carry a clock - a
+# `with` target, an `except ... as`, a `global`, a `nonlocal` - appears beside
+# a bound of its own, so the wait is a real one either way. A `for` target
+# brings its own loop, because a for target exists only in one; the wait's own
+# loop stands beside it, and the marker is that one.
+BINDING_FORMS = (
+    ('a plain assignment', 'deadline = {read} + {bound}', 'deadline'),
+    ('an annotated assignment', 'deadline: float = {read} + {bound}',
+     'deadline'),
+    ('an augmented assignment', 'deadline = {read}\ndeadline += {bound}',
+     'deadline'),
+    ('a tuple target', 'start, deadline = {read}, {read} + {bound}',
+     'deadline'),
+    ('an attribute target', 'holder.deadline = {read} + {bound}',
+     'holder.deadline'),
+    ('a subscript target', "state['deadline'] = {read} + {bound}",
+     "state['deadline']"),
+    ('a for target', 'for deadline in iter(({read} + {bound},), 1):\n    pass',
+     'deadline'),
+    ('a with target', 'with _held() as held:\n    pass\n'
+     'deadline = {read} + {bound}', 'deadline'),
+    ('an except target', 'try:\n    _held()\nexcept ValueError as seconds:\n'
+     '    pass\ndeadline = {read} + {bound}', 'deadline'),
+    ('a global declaration', 'global deadline\ndeadline = {read} + {bound}',
+     'deadline'),
+    ('a nonlocal declaration',
+     'deadline = _held()\nnonlocal deadline\ndeadline = {read} + {bound}',
+     'deadline'),
+)
+# Every way a standard-library clock reaches the comparison, including the two
+# that arrive as a binding rather than as a spelling: a reader bound to a
+# name, and a clock the caller injects as a default argument.
+CLOCK_BINDINGS = (
+    ('a module', ('import time',), '', 'time.monotonic()'),
+    ('a module aliased at import', ('import time as c',), '', 'c.monotonic()'),
+    ('a from-imported reader', ('from time import monotonic',), '',
      'monotonic()'),
-    ('a from-imported alias', ('from time import monotonic as m',), 'm()'),
-    ('a reader bound to a name', ('import time', 'r = time.monotonic'), 'r()'),
-    ('a module aliased again', ('import time', 'c = time'), 'c.monotonic()'),
-    ('a computed attribute', ('import time',),
+    ('a from-imported alias', ('from time import monotonic as m',), '', 'm()'),
+    ('a reader bound to a name', ('import time', 'clock = time.monotonic'),
+     '', 'clock()'),
+    ('a computed attribute', ('import time',), '',
      'getattr(time, "monotonic")()'),
-    ('a reader imported under a guard',
-     ('try:', '    from time import monotonic as m', 'except ImportError:',
-      '    from time import monotonic_ns as m'), 'm()'),
-    ('a datetime class', ('from datetime import datetime',),
+    ('a datetime class', ('from datetime import datetime',), '',
      'datetime.now()'),
-    ('a datetime module aliased', ('import datetime as when',),
-     'when.datetime.now()'),
+    ('a clock injected as a default argument', ('import time',),
+     ', clock=time.monotonic', 'clock()'),
 )
-_BOUNDS = (
-    # label, setup, the signature it adds, the bound, a line that holds it
-    ('a literal', (), '', '45', ()),
-    ('a negative literal', (), '', '-45', ()),
-    ('a constant', ('WAIT = 45',), '', 'WAIT', ()),
-    ('a constant expression', ('WAIT = 30 + 15',), '', 'WAIT', ()),
-    ('a parameter with a default', (), ', seconds=45', 'seconds', ()),
-    ('a required parameter', (), ', seconds', 'seconds', ()),
-    ('a local holding both', (), '', 'deadline',
-     ('deadline = {read} + 45',)),
-    ('a timedelta', ('from datetime import timedelta',), '', 'deadline',
-     ('deadline = {read} + timedelta(seconds=45)',)),
+# The three shapes a comparison between a reading and a bound can take.
+COMPARISON_SHAPES = (
+    ('the reading on the left', '{read} > {bound}'),
+    ('the bound on the left', '{bound} < {read}'),
+    ('an elapsed form', '{read} - began > {bound}'),
 )
-_PLACES = ('a test body', 'a helper at module level', 'a nested function',
-           'beside a function declaring the same name')
-_SHAPES = ('{read} > {bound}', '{bound} < {read}', '{read} - began > {bound}')
 
 
 def _reintroductions():
-    """Every reintroduction the rule's grammar produces, as (label, source)."""
-    for read_label, reading_setup, read in _READINGS:
-        for bound_label, bound_setup, signature, bound, held in _BOUNDS:
-            lines = [line.format(read=read) for line in held]
-            for place in _PLACES:
-                for shape in _SHAPES:
-                    expression = shape.format(read=read, bound=bound)
-                    label = (f'{read_label} / {bound_label} / {place} / '
-                             f'{shape}')
-                    yield (label, _source(reading_setup, bound_setup,
-                                          signature, lines, expression, place))
+    """Every reintroduction the marker is claimed to refuse.
+
+    The universe is the language's and the runtime's, not a recogniser's:
+    every way a name can be bound, every way a standard-library clock can
+    reach a comparison, and every shape that comparison can take. There is
+    no recogniser here to derive it from - the marker is a loop, so what the
+    crossing measures is the marker.
+    """
+    for clock_label, clock_setup, signature, read in CLOCK_BINDINGS:
+        for form_label, form, bound in BINDING_FORMS:
+            for shape_label, shape in COMPARISON_SHAPES:
+                label = (f'{clock_label} / {form_label} / {shape_label}')
+                yield label, _source(clock_setup, signature, read, form,
+                                     bound, shape)
 
 
-def _source(reading_setup, bound_setup, signature, held, expression, place):
-    """One reintroduced wait, written the way `place` says it sits."""
-    setup = list(reading_setup) + list(bound_setup)
-    wait = ([f'if {expression}:', "    raise AssertionError('x')"])
-    if place == 'a helper at module level':
-        return '\n'.join(setup + [f'def _until(predicate, what{signature}):']
-                         + _indent(held + wait))
-    if place == 'beside a function declaring the same name':
-        head = f'def _until(predicate, what{signature}):'
-        twin = 'def _sibling(predicate, what):\n    return None'
-        return '\n'.join(setup + [twin, head] + _indent(held + wait))
-    inner = setup + held + wait
-    if place == 'a nested function':
-        return '\n'.join(
-            ['def test_a_wait(tmp):']
-            + _indent([f'def _until(predicate, what{signature}):']
-                      + _indent(inner)))
-    return '\n'.join(
-        [f'def test_a_wait(tmp{signature}):'] + _indent(inner))
+def _source(clock_setup, signature, read, form, bound, shape):
+    """One working wait: a clock and a bound, bound the way the form says,
+    compared the way the shape says, spun in a loop the marker can read."""
+    body = [form.format(read=read, bound=bound),
+            'began = time.monotonic()', 'holder = _Holder()', 'state = {}',
+            'while predicate():',
+            '    if {}:'.format(shape.format(read=read, bound=bound)),
+            "        raise AssertionError(what)"]
+    wait = [f'def test_a_wait(tmp{signature}):'] + _indent(body)
+    if form.startswith('nonlocal'):
+        # `nonlocal` needs a binding in an enclosing scope, so the wait is
+        # nested in one that has it.
+        return '\n'.join(['def outer():', '    deadline = None']
+                         + _indent(wait) + list(clock_setup))
+    return '\n'.join(list(clock_setup) + wait)
 
 
-def test_no_wait_in_the_budget_suite_carries_a_wall_clock_margin(tmp):
-    """The class the wait helpers replaced, read out of the file: no
-    comparison there takes a numeric bound against a wall-clock reading.
+def test_the_budget_suite_runs_no_wait_of_its_own(tmp):
+    """The suite holds no loop, so every wait it performs is a call: into
+    `test_watcher_waits.py`, whose waits synchronise on what the process
+    under test did, or into one of the six calls the census below names.
+    That is the property the three claims rest on, and it is why the class a
+    static scan cannot decide is not scanned for here.
     """
     del tmp
-    margins = _wall_clock_margins(BUDGET_SUITE.read_text(encoding='utf-8'))
-    assert margins == [], margins
+    source = BUDGET_SUITE.read_text(encoding='utf-8')
+    loops = _waits_of_its_own(source)
+    assert loops == [], loops
+    assert _bounds_handed_to_calls(source) == list(BOUND_CALLS), (
+        'a bound handed to a call arrived; name it and its reason here')
 
 
-def test_the_shape_pin_refuses_every_reintroduction_its_grammar_produces(tmp):
-    """The bypass universe, crossed from the rule's own productions rather
-    than from the last round's plants. Every shape the grammar can spell has
-    to be refused, so a shape it misses is a finding about the rule.
+def test_the_marker_is_the_loop_and_not_what_the_names_denote(tmp):
+    """The marker's boundary, in one place: the same clock and the same
+    bound, spun in a loop, is a wait and is found; compared once, it is not
+    a wait and carries nothing to bound. What decides that is the loop.
+    """
+    del tmp
+    head = ('import time\n'
+            'def test_a_wait(tmp, predicate, what, bound=45):\n'
+            '    clock = time.monotonic\n'
+            '    began = clock()\n')
+    comparison = ['if clock() - began > bound:',
+                  '    raise AssertionError(what)']
+    looped = '\n'.join(
+        [head.rstrip('\n'), '    while predicate():']
+        + _indent(comparison, '        '))
+    found = _waits_of_its_own(looped)
+    assert len(found) == 1, found
+    assert found[0].startswith('while predicate():'), found
+    once = '\n'.join([head] + _indent(comparison))
+    assert _waits_of_its_own(once) == [], once
+
+
+def test_the_loop_marker_refuses_every_reintroduction_the_language_offers(tmp):
+    """The bypass universe, crossed from the language's binding grammar and
+    the clock's own spellings rather than from any recogniser: whatever
+    binds the number, the loop is what the control reads, and a wait that
+    has one is refused.
     """
     del tmp
     produced = list(_reintroductions())
-    assert len(produced) > 500, len(produced)
+    assert len(produced) > 200, len(produced)
     missed = [label for label, source in produced
-              if not _wall_clock_margins(source)]
+              if not _waits_of_its_own(source)]
     assert missed == [], f'{len(missed)} shapes pass: {missed[:3]}'
 
 
-def test_the_shape_pin_reports_only_what_its_grammar_can_resolve(tmp):
-    """The limits the rule's docstring declares, each pinned by what it
-    leaves alone: a bound the process under test enforces itself, a pause
-    asserted against an instant a child recorded, and the two the rule
-    cannot resolve - a bound handed to a call, and a number from the
-    environment.
-    """
-    del tmp
-    clean = {
-        'a subprocess timeout the process enforces':
-            ('import subprocess\n'
-             'def _ci_wait(fake, bound=30, limit=120):\n'
-             '    return subprocess.run(["ci_wait.py", "--timeout",\n'
-             '                            str(bound)], timeout=limit)\n'),
-        'a pause asserted against an instant a child recorded':
-            ('import time\n'
-             'def test_a_refused_poll_pauses(tmp):\n'
-             '    before = time.time()\n'
-             '    reset = int(time.time()) + 6\n'
-             '    assert calls[1]["t"] >= before + 4\n'
-             '    assert calls[1]["t"] >= reset\n'),
-        'numbers compared with numbers':
-            ('def test_a_ratio():\n'
-             '    assert 45 - 40 == 5\n'),
-        'a bound handed to a call as an argument':
-            ('import time\n'
-             'def test_a_sleep(tmp):\n'
-             '    time.sleep(45)\n'),
-        'a number that arrives from the environment':
-            ('import os\n'
-             'import time\n'
-             'def test_a_wait(tmp):\n'
-             '    limit = int(os.environ["LIMIT"])\n'
-             '    began = time.monotonic()\n'
-             '    if time.monotonic() - began > limit:\n'
-             '        raise AssertionError("x")\n'),
-    }
-    for description, source in clean.items():
-        margins = _wall_clock_margins(source)
-        assert margins == [], (description, margins)
+def _indent(lines, pad='    '):
+    """Pad every line, so an entry that is itself several lines keeps its
+    shape instead of losing all but its first line's indent."""
+    return [pad + line for entry in lines
+            for line in entry.splitlines() or ['']]
 
 
 def main():
