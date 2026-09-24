@@ -8,6 +8,7 @@ the credential the suites' requests present, applied per spawn, because
 its own settings and the caller's `env=`. The `os.environ` writes below keep
 serving the suite process's own in-process consumers of the credential.
 """
+import functools
 import os
 import sys
 import uuid
@@ -51,3 +52,29 @@ def post_segment(base, job, sig, segment, payload=b'bytes', total='1'):
         base + f'/segment?job={job}&seg={segment}&total={total}&sig={sig}',
         'POST', body=payload,
         headers={'Content-Type': 'application/octet-stream'})
+
+
+def isolated_env(func):
+    """Run an in-process control against only `DAEDALUS_DIR`, then restore.
+
+    The bridge modules read `DAEDALUS_*` when they are first imported, so
+    an ambient value would otherwise reach the first in-process import
+    and stick for the whole process -- `DAEDALUS_DEBUG_TIMING`, for one,
+    is read once and never re-read. Only `DAEDALUS_DIR` is left set,
+    because a mutated call site re-derives its root from it; without it
+    the mutant would raise `KeyError` at the read instead of failing on
+    the behaviour. Every name is restored on the way out, absence
+    included, and the `finally` restores it even when the control fails.
+    """
+    @functools.wraps(func)
+    def wrapper(tmp):
+        saved = {k: os.environ.pop(k) for k in list(os.environ)
+                 if k.startswith('DAEDALUS_')}
+        os.environ['DAEDALUS_DIR'] = str(tmp)
+        try:
+            return func(tmp)
+        finally:
+            for k in [k for k in os.environ if k.startswith('DAEDALUS_')]:
+                del os.environ[k]
+            os.environ.update(saved)
+    return wrapper
