@@ -36,6 +36,7 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             rebound_names, record_exit, record_returns,
                             resolve_sender_name, state_signature,
                             statement_cannot_raise)
+from _pyroute_match import walk_match
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
 
@@ -669,18 +670,8 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = normal_pairs
             continue
         if isinstance(statement, ast.Match):
-            pairs = check_expression(statement.subject, pairs)
-            incoming = [_copy_state_pair(pair) for pair in pairs]
-            case_pairs = []
-            for case in statement.cases:
-                entered = [_copy_state_pair(pair) for pair in incoming]
-                clear_names(entered, rebound_names(case.pattern))
-                if case.guard is not None:
-                    entered = check_expression(case.guard, entered)
-                found, matched = walk(case.body, entered)
-                violations.extend(found)
-                case_pairs.extend(matched)
-            pairs = dedupe_states([*incoming, *case_pairs])
+            found, pairs = walk_match(statement, pairs, check_expression, walk)
+            violations.extend(found)
             continue
         pairs = check_expression(statement, pairs)
         targets = (statement.targets if isinstance(statement, ast.Assign)
