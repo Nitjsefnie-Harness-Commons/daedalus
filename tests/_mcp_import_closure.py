@@ -351,7 +351,7 @@ class _BindingWalk(ast.NodeVisitor):
         self.generic_visit(node)
         self._each(node, node.target, node.iter)
 
-    visit_AsyncFor = visit_For  # type: ignore[assignment]
+    visit_AsyncFor = visit_For  # pyright: ignore[reportAssignmentType]
 
     def _comprehension(self, node):
         self.generic_visit(node)
@@ -371,7 +371,7 @@ class _BindingWalk(ast.NodeVisitor):
             if item.optional_vars is not None:
                 self._paired(node, item.optional_vars, item.context_expr)
 
-    visit_AsyncWith = visit_With  # type: ignore[assignment]
+    visit_AsyncWith = visit_With  # pyright: ignore[reportAssignmentType]
 
     def visit_ExceptHandler(self, node):
         self.generic_visit(node)
@@ -388,7 +388,8 @@ class _BindingWalk(ast.NodeVisitor):
         self._positional_defaults(node)
         self._keyword_defaults(node)
 
-    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+    visit_AsyncFunctionDef = (  # pyright: ignore[reportAssignmentType]
+        visit_FunctionDef)
 
     def visit_Lambda(self, node):
         self.generic_visit(node)
