@@ -7,15 +7,32 @@ session that is kept for a capture keeps the attachment too — so the release
 has to happen on the compile, throw, reject and pending paths alike. This
 harness makes each of those observable.
 """
-import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
+from _util import child_coverage  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
+
+# The coverage guard cannot prove EXTENSION_ROOT is the checkout root
+# through the inline driver, so this call site declares its child env.
+_ENV = child_coverage('scrub')
+
+SYNC = 'POST /sync-tabs'
+RESULT = 'POST /result'
+
+# The recording on this tree, not a wish. A `hang` stream is a connected
+# body that never settles, so the worker's stream loop retries and each
+# connect re-syncs: two `POST /sync-tabs`, not the one the old
+# never-settling fetch hid. The three results are the compile, throw and
+# reject evals. The stream itself is fetched once, answered `hang`.
+_PLAN = {
+    'planned': [SYNC, SYNC, RESULT, RESULT, RESULT],
+    'statuses': ['hang'],
+}
 
 
 _CDP_HANDLE_LIFECYCLE_HARNESS = (
@@ -24,8 +41,13 @@ const fs = require('fs');
 const vm = require('vm');
 
 const backgroundPath = process.argv[1];
+// The plan rides last on the command line; the inline driver appends it as
+// JSON text, so read it here and parse only when it arrived as text.
+const gatePlanArg = process.argv[process.argv.length - 1];
+const plan = typeof gatePlanArg === 'string'
+  ? JSON.parse(gatePlanArg) : gatePlanArg;
 const released = [];
-const postedResults = [];
+const resultWorlds = [];
 const submittedTransports = { eval: [], hotfix: [] };
 const timers = [];
 let pendingResolve;
@@ -45,12 +67,36 @@ function eventTarget() {
   return { addListener() {} };
 }
 
+const BRIDGE_URL = 'https://bridge.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+
+function streamResponse(answer) {
+  if (answer === 'hang') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+          cancel: () => Promise.resolve(),
+        }),
+      },
+    };
+  }
+  return response(answer, { error: 'disabled' });
+}
+""" + STRICT_FETCH + r"""
+
 const chrome = {
   storage: {
     local: {
       get: async () => ({
         'daedalus-token': 'lifecycle-token',
-        'daedalus-server': 'test-bridge',
+        'daedalus-server': BRIDGE_URL,
       }),
       set: async () => {},
       remove: async () => {},
@@ -161,14 +207,18 @@ const chrome = {
 
 const context = vm.createContext({
   chrome,
+  // A thin wrapper that DELEGATES to the gate and then does this harness's
+  // own attribution. Every request — the answer, the accounting, the
+  // refusal, the record — is the gate's; `resultWorlds` is the harness's own
+  // note of which dispatched command produced which result, which the gate
+  // cannot know because it sees a fetch, not the command behind it. The
+  // wrapper decides no status and counts nothing.
   fetch: async (target, init = {}) => {
     const url = String(target);
-    if (url.endsWith('/result') && init.method === 'POST') {
-      postedResults.push(JSON.parse(init.body));
-      return response(200, { ok: true });
+    if (url.endsWith('/result') && init && init.method === 'POST') {
+      resultWorlds.push(JSON.parse(init.body).world);
     }
-    if (url.includes('/stream?')) return new Promise(() => {});
-    return response(200, { ok: true });
+    return bridgeFetch(target, init);
   },
   crypto: { randomUUID: () => 'lifecycle-id' },
   AbortController,
@@ -252,7 +302,16 @@ async function runEval(id, code) {
     // keeps rescheduling and delays the service worker's suspend.
     armedSamplers: timers.filter((item) => item.active && item.ms === 100)
       .length,
-    resultWorlds: postedResults.map((item) => item.world),
+    resultWorlds,
+    // The gate's own record, so the Python side compares the whole recorded
+    // list against the plan this scenario declared.
+    gate: {
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+      contractFaults: gateContractFaults,
+    },
   }));
 })().catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
@@ -262,14 +321,23 @@ async function runEval(id, code) {
 
 
 def run_cdp_handle_lifecycle():
-    node = shutil.which('node')
-    assert node, 'node is required to execute the CDP lifecycle harness'
-    # The child is bounded internally by fire counts; a genuine deadlock
-    # surfaces as a hung job under the runner's own suite ceiling.
-    proc = subprocess.Popen(
-        [node, '-e', _CDP_HANDLE_LIFECYCLE_HARNESS,
-         str(EXTENSION_ROOT / 'background.js')],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    out, err = proc.communicate()
-    assert proc.returncode == 0, (proc.returncode, out, err)
-    return json.loads(out)
+    """Drive the CDP lifecycle child under one plan and read its answer.
+
+    The stream is answered `hang` — a connected body that never settles —
+    which is the faithful model of the session this scenario holds open. The
+    plan declares the sync count that answer actually produces, measured on
+    this tree, not a wish.
+    """
+    plan = _PLAN
+    outcome = run_inline_gate(
+        require_node(), _CDP_HANDLE_LIFECYCLE_HARNESS,
+        [str(EXTENSION_ROOT / 'background.js')],
+        cwd=EXTENSION_ROOT, plan=plan, env=_ENV)
+    gate = outcome.pop('gate')
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(plan['planned']), planned_stream=list(plan['statuses']))
+    return outcome

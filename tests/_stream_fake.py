@@ -50,6 +50,7 @@ against the plan it declared.
 """
 import json
 import shutil
+import subprocess
 
 from _noderun import run_node_program
 from _util import child_coverage
@@ -117,10 +118,11 @@ if (typeof badOrigins === 'undefined') gateContractFaults.push('badOrigins');
 
 // A request is planned as often as the recording shows; beyond that it is
 // refused and recorded. No route is special-cased, so a new one is caught.
-// The full target URL, the parsed body and the Authorization header ride along
-// so a harness reads the worker's request without wrapping its own fetch; the
-// key alone would lose the origin for a request the config rotated. The entry
-// is returned so bridgeFetch can stamp the answer status on it only after the
+// The full target URL, the parsed body, the Authorization header and the
+// request's own AbortSignal ride along so a harness reads the worker's
+// request — and cancels it — without wrapping its own fetch; the key alone
+// would lose the origin for a request the config rotated. The entry is
+// returned so bridgeFetch can stamp the answer status on it only after the
 // answer really was built.
 function accountRequest(request, url, init) {
   const seen = nonStreamFetches.filter((i) => i.request === request).length;
@@ -131,7 +133,8 @@ function accountRequest(request, url, init) {
     try { body = JSON.parse(init.body); } catch (_) { body = init.body; }
   }
   const auth = (init && init.headers && init.headers.Authorization) || null;
-  const entry = { request, url, refused, body, auth, status: null };
+  const signal = (init && init.signal) || null;
+  const entry = { request, url, refused, body, auth, signal, status: null };
   nonStreamFetches.push(entry);
   if (refused) refusedFetches.push(request);
   return entry;
@@ -233,6 +236,31 @@ async function bridgeFetch(target, init = {}) {
     entry.status = 'throw';
     throw new TypeError(planned.throw);
   }
+  if (planned && planned.hang) {
+    // A declared hang is a request the scenario wants held open: the fetch
+    // waits for the request's own signal and rejects with the AbortError
+    // that is the only thing that can end it. A hang declared for a request
+    // with no signal has no way to settle at all, so that answer is refused
+    // and recorded rather than leaked as a promise nothing can resolve.
+    if (!entry.signal) {
+      entry.refused = true;
+      refusedFetches.push(request);
+      entry.status = 599;
+      return response(599, {
+        ok: false, error: 'declared hang on a request with no signal',
+      });
+    }
+    // The stamp is the status a real fetch would have carried: the request
+    // left, and only cancellation ends it.
+    entry.status = 200;
+    return new Promise((_resolve, reject) => {
+      entry.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    });
+  }
   if (planned && planned.stream !== undefined
       && typeof chunkedResponse === 'function') {
     entry.status = 200;
@@ -257,11 +285,32 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan,
-             env=child_coverage('scrub'), timeout=30):
+def run_gate(node, program, arguments, *, cwd, plan, env=None, timeout=30):
     result = run_node_program(node, program, arguments, cwd=cwd,
                               env=child_coverage('scrub'),
                               payload=plan, timeout=timeout)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
+
+
+def run_inline_gate(node, program, arguments, *, cwd, plan, env=None,
+                    timeout=30):
+    """Drive a `node -e` harness against a plan and read its one answer.
+
+    The sibling of `run_gate` for the harnesses that hand their program
+    text to `node -e` as an argument instead of writing it to a file. Node
+    leaves `process.argv[1]` at that text, so a scenario's own arguments
+    start one later; the plan rides last in both launches and the inline
+    harnesses read it there, so the spliced gate is the same JS either way.
+    No wall bound of its own here: the harnesses bound themselves by
+    attempt counts, and the suite's own ceiling is what a genuine deadlock
+    runs into.
+    """
+    result = subprocess.run(
+        [node, '-e', program, *arguments, json.dumps(plan)], cwd=cwd,
+        env=child_coverage('scrub'), capture_output=True, text=True,
+        encoding='utf-8', timeout=timeout)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
