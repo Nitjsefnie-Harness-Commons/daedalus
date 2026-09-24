@@ -25,9 +25,8 @@ TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
 NEW_TOKEN = 'tok-2'
 NEW_BRIDGE = 'https://other.example.com'
-# Every stream connect and the boot re-register the tab list, and a
-# dispatched command posts its result. Each scenario declares the count
-# its recording shows, so an extra or dropped call is refused.
+# Every stream connect and the boot re-register the tab list; a dispatched
+# command posts its result. Counts come from each scenario's recording.
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
 TWO = [SYNC, SYNC]
@@ -184,9 +183,8 @@ function streamResponse(answer) {
   return { ok: false, status: answer, body: null };
 }
 
-// A request is planned only as often as the scenario's recording shows
-// it happening; beyond that it is refused with a non-ok status and
-// recorded. No route is special-cased, so a new one cannot slip through.
+// A request is planned as often as the recording shows; beyond that it is
+// refused and recorded. No route is special-cased, so a new one is caught.
 function accountRequest(request) {
   const seen = nonStreamFetches.filter((i) => i.request === request).length;
   const planned = (plan.planned || []).filter((i) => i === request).length;
@@ -196,8 +194,7 @@ function accountRequest(request) {
   return refused;
 }
 
-// A declaration names a route, not a host: the resumed-bridge scenario
-// legitimately talks to two hosts on the same route.
+// Route, not host: the resumed-bridge scenario posts one route to two.
 function requestKey(url, init) {
   return (init.method || 'GET') + ' ' + url.replace(/^https?:\/\/[^/]+/, '');
 }
@@ -223,7 +220,7 @@ async function bridgeFetch(target, init = {}) {
     resultPosts.push({ did: payload._did || null });
   }
   return accountRequest(request)
-    ? response(599, { ok: false, error: 'unplanned request' })
+    ? response(599, { ok: false, error: 'more often than declared' })
     : response(200, { ok: true });
 }
 
@@ -346,8 +343,7 @@ async function nextRetryTimer() {
 }
 
 async function run() {
-  // The fake-probe drives bridgeFetch directly; loading the worker would
-  // only spend the plan's allowance on its boot request.
+  // fake-probe skips the worker: its boot would spend the plan's allowance.
   if (plan.scenario !== 'fake-probe') {
     vm.runInContext(
       fs.readFileSync(backgroundPath, 'utf8'), context,
@@ -431,12 +427,13 @@ async function run() {
     outcome.delays = delays;
   } else if (plan.scenario === 'ledger-window') {
     if (plan.trigger === 'connect') {
-      const port = {
-        name: 'keepalive',
-        onMessage: eventTarget(),
-        onDisconnect: eventTarget(),
-      };
-      for (const listener of connectListeners) listener(port);
+      for (const listener of connectListeners) {
+        listener({
+          name: 'keepalive',
+          onMessage: eventTarget(),
+          onDisconnect: eventTarget(),
+        });
+      }
     }
     if (plan.trigger === 'alarm') {
       for (const listener of alarmListeners) {
@@ -466,8 +463,6 @@ async function run() {
     await settle();
     outcome.fetches = streamFetches.length;
   } else if (plan.scenario === 'fake-probe') {
-    // Pins the fake itself, with no worker path in between, so what is
-    // refused is the fake's own decision.
     const post = (route) => bridgeFetch(
       BRIDGE_URL + route, { method: 'POST' });
     outcome.plannedStatus = (await post(plan.plannedRoute)).status;
@@ -489,7 +484,6 @@ run().then((result) => {
 
 
 def _drive(plan):
-    """Run the harness under Node with one plan and return its outcome."""
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'
     result = run_node_program(
@@ -501,15 +495,13 @@ def _drive(plan):
 
 
 def _run(plan):
-    """Drive the worker under Node with one plan and read back.
-
-    The oracle is two-sided: the fake refuses any non-stream request the
-    plan did not declare, and this also requires the observed sequence to
-    match the declaration, so a dropped planned request is caught too.
+    """Two-sided oracle: the fake refuses a request seen more often than
+    declared, and this also requires the observed sequence to match the
+    declaration, so a dropped planned request is caught too.
     """
     outcome = _drive(plan)
     assert outcome['refused'] == [], (
-        'unplanned bridge request(s) the scenario did not declare:',
+        'bridge request(s) seen more often than the scenario declared:',
         outcome['refused'], outcome)
     assert sorted(outcome['nonStream']) == sorted(plan.get('planned', [])), (
         'non-stream requests differ from the scenario declaration:',
