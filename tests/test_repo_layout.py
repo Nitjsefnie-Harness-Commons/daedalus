@@ -282,10 +282,13 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     margin here. The audit sees this file and the two modules this
     change gave a git launch of its own — `tests/_scratch_index.py`
     (the shared scratch-staging helper) and `tests/test_drain_bounds.py`
-    (its control) — accepting only a plain `import subprocess`, and
-    resolves every binding derived from the module to a fixpoint
-    (parameter defaults, for-targets, class bodies, with-targets and
-    def returns included), and follows
+    (its control). That set is where this change put a launch, not
+    every module that launches git: a bound elsewhere (e.g. the
+    pre-existing `ls-files` in `tests/_repo.py`) is not observed here,
+    and widening the set is a separate decision. The audit accepts only
+    a plain `import subprocess`, resolves every binding derived from
+    the module to a fixpoint (parameter defaults, for-targets, class
+    bodies, with-targets and def returns included), and follows
     functools/importlib under any alias: an aliased or from-imported
     subprocess, an eval-built launcher, an unresolvable callee or
     receiver, or a keyword it cannot read is a refusal, never an
