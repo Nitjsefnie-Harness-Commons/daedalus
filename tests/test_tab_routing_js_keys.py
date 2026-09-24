@@ -50,6 +50,13 @@ def test_computed_tab_keys_match_runtime(tmp):
         ('unresolved-write', "const pick = () => 'tab';\n"
          "const p = {};\np[pick()] = chromeTab;\n"
          "extCmd('focus', { ...p });\n", True, True),
+        ('spaced-bracket-write', "const p = {};\np [ 'tab' ] = "
+         "chromeTab;\nextCmd('focus', { ...p });\n", True, True),
+        ('compared-bracket-write', "const p = {};\np['tab'] == chromeTab;\n"
+         "extCmd('focus', { ...p });\n", False, False),
+        ('bound-compared-bracket-write', "const k = 'tab';\n"
+         "const p = {};\np[k] == chromeTab;\n"
+         "extCmd('focus', { ...p });\n", False, False),
     ]
     path = Path(tmp) / 'computed-key.js'
     observed = [(label, *_runtime_and_guard(source, path))
@@ -85,6 +92,56 @@ def test_computed_tab_write_spellings_reach_one_verdict(tmp):
     indirect = js_tab_routing_violations(path, 'write.js')
     assert direct == indirect and len(direct) == 1, (direct, indirect)
     assert '`tab` in a typed command send' in direct[0], direct
+
+
+def test_a_bracket_write_resolves_a_tracked_member(tmp):
+    """`o.p['tab'] = x` writes the object `o` holds under `p`, which is the
+    object a send spreads when the two are the same name. A member the
+    model cannot follow names no object here, so a member write that
+    merely ends in a sent name is not one."""
+    cases = [
+        ('aliased-member', "const p = {};\nconst o = { p };\n"
+         "o.p['tab'] = chromeTab;\nextCmd('focus', { ...p });\n",
+         True, True),
+        ('aliased-under-another-name', "const p = {};\nconst q = {};\n"
+         "const o = { p: q };\no.p['tab'] = chromeTab;\n"
+         "extCmd('focus', { ...q });\n", True, True),
+        ('unrelated-member', "const p = {};\nconst q = { p: {} };\n"
+         "q.p['tab'] = chromeTab;\n"
+         "extCmd('focus', { type: 'focus' });\n", False, False),
+        ('legal-aliased-member', "const p = {};\nconst o = { p };\n"
+         "o.p['tab'] = 'extension';\n"
+         "extCmd('focus', { ...p });\n", False, False),
+    ]
+    path = Path(tmp) / 'member-write.js'
+    observed = [(label, *_runtime_and_guard(source, path))
+                for label, source, _, _ in cases]
+    expected = [(label, runtime, guard)
+                for label, _, runtime, guard in cases]
+    assert observed == expected, observed
+
+
+def test_a_tab_value_other_than_extension_is_a_violation(tmp):
+    """`extension` is the one value `tab` may carry, so a `tab` carrying
+    another string is a violation whatever spelling writes it. The clean
+    twins elsewhere all carry `extension`; without this row the predicate
+    accepts any word and every one of them still passes."""
+    cases = [
+        ('literal-read', "extCmd('focus', { tab: 'garbage' });\n"),
+        ('bound-read', "const k = 'tab';\n"
+         "extCmd('focus', { [k]: 'garbage' });\n"),
+        ('near-miss-read', "extCmd('focus', { tab: 'notextension' });\n"),
+        ('literal-write', "const p = {};\np['tab'] = 'garbage';\n"
+         "extCmd('focus', { ...p });\n"),
+        ('bound-write', "const k = 'tab';\nconst p = {};\n"
+         "p[k] = 'notextension';\nextCmd('focus', { ...p });\n"),
+    ]
+    path = Path(tmp) / 'other-value.js'
+    for label, source in cases:
+        path.write_text(source, encoding='utf-8')
+        found = js_tab_routing_violations(path, 'value.js')
+        assert len(found) == 1, (label, found)
+        assert '`tab` in a typed command send' in found[0], (label, found)
 
 
 def main():

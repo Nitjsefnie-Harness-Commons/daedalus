@@ -5,6 +5,7 @@ from _jsroute_keys import decode_string_literal, source_key
 from _jsroute_returns import (chained_member, folded_return,
                               getter_value, invoked_body)
 from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
+                             identifier_before as _identifier_before,
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
 from _jsroute_tab import computed_writes
@@ -288,16 +289,6 @@ def _target(status, binding=None, body=None, member=None, name=None,
             source=None, form=None):
     return {'status': status, 'binding': binding, 'body': body,
             'member': member, 'name': name, 'source': source, 'form': form}
-
-
-def _identifier_before(mask, pos):
-    pos -= 1
-    while pos >= 0 and mask[pos].isspace():
-        pos -= 1
-    end = pos + 1
-    while pos >= 0 and (mask[pos].isalnum() or mask[pos] in '_$'):
-        pos -= 1
-    return mask[pos + 1:end], pos + 1, pos
 
 
 def _target_fields(target):
