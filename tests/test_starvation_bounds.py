@@ -544,9 +544,9 @@ def _census(entry_bodies, trees, ctx):
 def _harness_entries(harness_tree, ctx):
     """The launcher bodies a harness reaches, resolved off its call sites.
 
-    Resolves each call in the harness with the same census grammar, so an
-    attribute-called or class-instantiated launcher is an entry just as a bare
-    one is. Returns `(entries, refusals)`.
+    Resolves each call in the harness with the census grammar, so an
+    attribute-called launcher and a class-instance method are entries just as
+    a bare name is. Returns `(entries, refusals)`.
     """
     entries = []
     refusals = []
@@ -565,34 +565,43 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     """The Surface D runners launch their children with no wall bound.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. This guard asks two questions it
-    can decide soundly. First, *reachability*: from each harness's own call
-    sites it resolves the launcher the child is launched through and performs a
-    resolve-or-refuse census over the callee grammar — a bare name, a
-    module-qualified attribute, `self.<method>`, and a class or class-instance
-    method all resolve to a body, and a callee that names a launcher-module
-    entity but whose body the walk cannot read is refused, not skipped, because
-    an unread body is a hole this audit cannot certify. Second, *recognition*:
-    on every body the walk reaches it refuses the deadline concept `timeout`
-    in the three positions it can enter a child — a `timeout=` keyword on any
-    call, a `timeout` parameter, and a `'timeout'` key forwarded through a
-    `**` spread. A bare `**opts` with no `timeout` anywhere is deliberately not
-    a fault.
+    starvation rejection this branch removes. The guard asks two questions.
+    *Reachability*: from each harness's own call sites it resolves the launcher
+    the child is launched through and performs a resolve-or-refuse census over
+    the callee grammar — a bare name, a module-qualified attribute,
+    `self.<method>`, and a class-instance method (`C().m()`) resolve to a body;
+    a callee that names a launcher-module entity but whose body the walk cannot
+    read is refused, not skipped, because an unread body is a hole this audit
+    cannot certify. *Recognition*: on every body the walk reaches it refuses
+    the deadline concept `timeout` in the three positions it enters a child — a
+    `timeout=` keyword on any call, a `timeout` parameter, and a `'timeout'`
+    key forwarded through a `**` spread. A bare `**opts` with no `timeout`
+    anywhere is deliberately not a fault.
 
-    What this guard enforces: no `timeout` concept, and no unread
-    launcher-module body, on the resolved call graph from each harness's
-    launcher. What it does not enforce, and does not claim to: a deadline
-    reached any other way — (1) the harness's own JavaScript, which this
-    guard's input language (Python `ast`) cannot see; (2) a helper the launcher
-    modules import from outside themselves, whose body the walk does not
-    follow; (3) a `timeout` parameter defaulted inside a method called on a
-    launcher-module object through a receiver the walk cannot type to a class
-    (an untypeable receiver is external, not refused, to avoid refusing
-    legitimate code); (4) a deadline assembled without the word `timeout` at
-    all — a clock comparison plus a kill, or `signal.alarm`. Those four, and
-    nothing else, are the residual set; they are named here rather than implied
-    absent, the way the cross-file duplicate check's blindness to
-    string-literal JavaScript is named in `_worker_sources.py`.
+    Enforced: no `timeout` concept, and no unread launcher-module body, on the
+    resolved call graph from each harness's launcher. Not enforced, and not
+    claimed to be, a deadline reached any other way: (1) the harness's own
+    JavaScript, which this guard's input language (Python `ast`) cannot see;
+    (2) a helper the launcher modules import from outside themselves;
+    (3) a `timeout` parameter defaulted inside a method reached through a
+    receiver the walk cannot type to a class (an untypeable receiver is
+    external, not refused, to avoid refusing legitimate code); (4) a deadline
+    assembled without the word `timeout` — a clock comparison plus a kill, or
+    `signal.alarm`; (5) a launcher-module body the census does not put on the
+    graph by construction — a class constructor (a bare `C()` call resolves to
+    no body), a method reached through a subscript or other
+    non-Name/non-Attribute callee, or a decorator that replaces a body at
+    runtime; (6) a method inherited from a base class, which the census refuses
+    rather than follows, so a deadline-free launcher of that shape is a false
+    red.
+
+    (5) and (6) are parked: the property is currently true — none of those
+    forms is on the shipped launcher path — and the one-line remedy for (5)'s
+    constructor arm (in `_resolve_callee`, return the class's `__init__` key
+    for a bare class-name call instead of `[]`) is recorded here and
+    deliberately not applied, because it would not fix (6). Each mechanism is
+    named so the next maintainer can act on it, the way `_worker_sources.py`
+    names the duplicate check's blindness to string-literal JavaScript.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
