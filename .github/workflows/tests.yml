@@ -586,11 +586,11 @@ jobs:
 
       # Without the MCP extra that suite skips; test_diff_coverage imports the
       # statement analyzer pinned in requirements-test.txt. requirements-dev.txt
-      # is here for test_type_errors, which drives the real pyright binary the
-      # way only a real run can. A job that runs every suite needs the
-      # toolchain those suites invoke, and a needs: relation sequences jobs
-      # without sharing an environment between them, so this file has to be
-      # installed here too, not only by the lint jobs.
+      # is here for test_type_errors, which drives the real pyright binary. A
+      # job that runs every suite needs the toolchain those suites invoke, and
+      # a needs: relation sequences jobs without sharing an environment between
+      # them, so this file has to be installed here too, not only by the lint
+      # jobs.
       - name: Install the test dependencies and project
         run: |
           python -m pip install --upgrade pip . ".[mcp]"
