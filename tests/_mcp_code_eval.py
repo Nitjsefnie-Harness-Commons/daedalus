@@ -116,18 +116,35 @@ def denotes_code_eval(node, bound, scopes):
     return False
 
 
-def yields_code_eval(value, bound, scopes):
-    """True when a store's value can hide a code-evaluating builtin, read
-    the same recursive way the operation recogniser reads a hidden operation.
+def yields_code_eval(value, bound, scopes, as_callee=False):
+    """True when a store's value delivers a code-evaluating builtin to a name
+    the walk cannot follow, read the same recursive way the operation
+    recogniser reads a hidden operation.
 
-    The property, not the shapes that have been met: a node that IS a reach
-    is a hide, and otherwise every child is read, so a builtin nested in any
-    container — a dict, list, tuple, set, call argument, or a container of
-    containers — is the same hole as a bare one. Unlike the operation
-    recogniser it does not stop at a call, because a recognised reach call
-    (`getattr(builtins, 'eval')`) evaluates to the builtin itself.
+    The property is DELIVERY, and position decides it. A node that denotes
+    the builtin is a delivery unless it is a call's immediate CALLEE: a
+    callee is USED — the call arm already reads its program, and the store
+    receives the call's result, which the declared call-result limit accepts.
+    So `x = eval(var)` and `x = (eval)(var)` deliver nothing and scan silent,
+    while `x = f(eval)` and `x = f(code=eval)` hand the builtin to a callee
+    the walk cannot follow and are refused. A call reached in callee position
+    is still read, so `f(eval)(x)` delivers eval to f.
+
+    A builtin nested in any container — a dict, list, tuple, set, or a
+    container of containers — is on the delivery path, so it is a hide. The
+    recursion does NOT stop at a call the way the operation recogniser does,
+    because a recognised reach call (`getattr(builtins, 'eval')`) evaluates
+    to the builtin itself.
     """
-    if denotes_code_eval(value, bound, scopes):
+    if not as_callee and denotes_code_eval(value, bound, scopes):
         return True
+    if isinstance(value, ast.Call):
+        if any(yields_code_eval(argument, bound, scopes)
+               for argument in value.args):
+            return True
+        if any(yields_code_eval(keyword.value, bound, scopes)
+               for keyword in value.keywords):
+            return True
+        return yields_code_eval(value.func, bound, scopes, as_callee=True)
     return any(yields_code_eval(child, bound, scopes)
                for child in ast.iter_child_nodes(value))

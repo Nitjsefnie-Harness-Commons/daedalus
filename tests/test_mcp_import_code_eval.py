@@ -323,5 +323,48 @@ def load(attribute, name):
         _assert_refusal(_tmp, source, 6, 'code-evaluating')
 
 
+def test_a_store_of_a_code_eval_calls_result_is_the_declared_limit(_tmp):
+    """`x = eval(var)` USES the builtin as the call's callee and stores the
+    call's RESULT, which the declared call-result limit already accepts.
+
+    The recursion that closes a builtin hidden in a container must read a
+    call's callee with position awareness: the callee is used, not delivered
+    to the store, so this shape is the ordinary legitimate one and must scan
+    silent. `(eval)(var)` is the same callee however it is parenthesised, and
+    `f(eval(var))` passes eval's RESULT on, which the same limit covers.
+    """
+    for source in ('''
+def load(var):
+    x = eval(var)
+    return x
+''', '''
+def load(var):
+    z = (eval)(var)
+    return z
+''', '''
+def load(var):
+    z2 = f(eval(var))
+    return z2
+'''):
+        _assert_silent(_tmp, source)
+
+
+def test_a_code_eval_builtin_delivered_to_a_call_is_still_refused(_tmp):
+    """A builtin handed to a callee as an ARGUMENT is delivered, not used.
+
+    The counterpart of the callee case, pinned together with it so neither
+    side can regress alone: a blanket stop-at-call would silence the
+    delivery, and a recursion that reads every child alike would refuse the
+    callee use. `f(eval)(x)` delivers eval to f even though that call is in
+    callee position of the outer one.
+    """
+    for source in (
+            'y = f(eval)\n',
+            'y2 = f(code=eval)\n',
+            'w = f(g(eval))\n',
+            'v = f(eval)(var)\n'):
+        _refused_with_code_eval(_tmp, source, source.strip())
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))

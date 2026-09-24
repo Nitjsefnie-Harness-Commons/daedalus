@@ -12,14 +12,17 @@ registry is read at every level — the base structurally, the key by folding
 it — and a store that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one step
 on: a CONSTANT program handed to one is a program the walk can neither
-resolve nor follow, so it is refused, and so is any store that hides the
-builtin — in a name, a parameter default, or a container — read through the
-SAME store grammar as the operation and the registry, so the three axes
-cannot reach different store forms. Three shapes it cannot follow are
-ACCEPTED as declared limits: a value reached through a call's result, a
-tracked module or the operation handed as a call ARGUMENT (`use(sys)`), and
-a value the walk cannot fold to a constant — whether an import name or a
-program. Any accepted shape leaves the closure quietly short.
+resolve nor follow, so it is refused, and so is any store that DELIVERS the
+builtin to a name — as a name, a parameter default, a container, or a call
+argument — read through the SAME store grammar as the operation and the
+registry, so the three axes cannot reach different store forms. A store that
+USES the builtin as a call's callee (`x = eval(var)`) receives the call's
+RESULT, which is the declared call-result limit below, not a delivery.
+Three shapes it cannot follow are ACCEPTED as declared limits: a value
+reached through a call's result, a tracked module or the operation handed as
+a call ARGUMENT (`use(sys)`), and a value the walk cannot fold to a
+constant — whether an import name or a program. Any accepted shape leaves
+the closure quietly short.
 """
 import ast
 from pathlib import Path
