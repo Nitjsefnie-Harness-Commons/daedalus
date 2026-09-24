@@ -15,7 +15,8 @@ from _repo import EXTENSION_ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
 from _util import child_coverage  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    chrome_stub, import_scripts_stub)
 
 # The coverage guard cannot prove EXTENSION_ROOT is the checkout root
 # through the inline driver, so this call site declares its child env.
@@ -52,6 +53,72 @@ const submittedTransports = { eval: [], hotfix: [] };
 const timers = [];
 let pendingResolve;
 let activeRoute = 'eval';
+
+// The inspector commands this scenario drives; the shared release
+// bookkeeping lives in the chrome stub. This handles the rest.
+async function sendCommand(_target, method, params) {
+  if (method === 'Runtime.evaluate') {
+    if (params.expression.startsWith('typeof (function')) {
+      return {
+        result: { objectId: 'compile-result' },
+        exceptionDetails: {
+          text: 'compile failed',
+          exception: {
+            objectId: 'compile-exception',
+            description: 'compile failed',
+          },
+        },
+      };
+    }
+    submittedTransports[activeRoute].push({
+      replModeEnabled: params.replMode === true,
+      awaitPromiseEnabled: params.awaitPromise === true,
+      returnByValueEnabled: params.returnByValue === true,
+    });
+    if (params.expression.includes('throw-case')) {
+      return {
+        result: { objectId: 'throw-result' },
+        exceptionDetails: {
+          text: 'throw failed',
+          exception: {
+            objectId: 'throw-exception',
+            description: 'throw failed',
+          },
+        },
+      };
+    }
+    if (params.expression.includes('reject-case')) {
+      return {
+        result: {
+          objectId: 'reject-original',
+          subtype: 'promise',
+        },
+      };
+    }
+    return { result: { value: 1 } };
+  }
+  if (method === 'Runtime.awaitPromise') {
+    if (params.promiseObjectId === 'reject-original') {
+      return {
+        result: { objectId: 'reject-result' },
+        exceptionDetails: {
+          text: 'promise rejected',
+          exception: {
+            objectId: 'reject-exception',
+            description: 'promise rejected',
+          },
+        },
+      };
+    }
+    if (params.promiseObjectId === 'pending-original') {
+      return new Promise((resolve) => { pendingResolve = resolve; });
+    }
+  }
+  if (method === 'Runtime.callFunctionOn') {
+    return { result: { value: 'settled' } };
+  }
+  return {};
+}
 
 function response(status, data) {
   return {
@@ -91,120 +158,7 @@ function streamResponse(answer) {
 }
 """ + STRICT_FETCH + r"""
 
-const chrome = {
-  storage: {
-    local: {
-      get: async () => ({
-        'daedalus-token': 'lifecycle-token',
-        'daedalus-server': BRIDGE_URL,
-      }),
-      set: async () => {},
-      remove: async () => {},
-    },
-    onChanged: eventTarget(),
-  },
-  tabs: {
-    onUpdated: eventTarget(),
-    onCreated: eventTarget(),
-    onRemoved: eventTarget(),
-    query(_query, callback) {
-      const tabs = [{ id: 7, url: '', title: 'Page' }];
-      if (callback) {
-        callback(tabs);
-        return undefined;
-      }
-      return Promise.resolve(tabs);
-    },
-  },
-  debugger: {
-    onEvent: eventTarget(),
-    onDetach: eventTarget(),
-    attach: async () => {},
-    detach: async () => {},
-    sendCommand: async (_target, method, params) => {
-      if (method === 'Runtime.releaseObject') {
-        released.push(params.objectId);
-        if (params.objectId === 'pending-original' && pendingResolve) {
-          const resolve = pendingResolve;
-          pendingResolve = null;
-          setImmediate(() => resolve({ result: { objectId:"""
-    r""" 'pending-late' } }));
-        }
-        return {};
-      }
-      if (method === 'Runtime.evaluate') {
-        if (params.expression.startsWith('typeof (function')) {
-          return {
-            result: { objectId: 'compile-result' },
-            exceptionDetails: {
-              text: 'compile failed',
-              exception: {
-                objectId: 'compile-exception',
-                description: 'compile failed',
-              },
-            },
-          };
-        }
-        submittedTransports[activeRoute].push({
-          replModeEnabled: params.replMode === true,
-          awaitPromiseEnabled: params.awaitPromise === true,
-          returnByValueEnabled: params.returnByValue === true,
-        });
-        if (params.expression.includes('throw-case')) {
-          return {
-            result: { objectId: 'throw-result' },
-            exceptionDetails: {
-              text: 'throw failed',
-              exception: {
-                objectId: 'throw-exception',
-                description: 'throw failed',
-              },
-            },
-          };
-        }
-        if (params.expression.includes('reject-case')) {
-          return {
-            result: {
-              objectId: 'reject-original',
-              subtype: 'promise',
-            },
-          };
-        }
-        return { result: { value: 1 } };
-      }
-      if (method === 'Runtime.awaitPromise') {
-        if (params.promiseObjectId === 'reject-original') {
-          return {
-            result: { objectId: 'reject-result' },
-            exceptionDetails: {
-              text: 'promise rejected',
-              exception: {
-                objectId: 'reject-exception',
-                description: 'promise rejected',
-              },
-            },
-          };
-        }
-        if (params.promiseObjectId === 'pending-original') {
-          return new Promise((resolve) => { pendingResolve = resolve; });
-        }
-      }
-      if (method === 'Runtime.callFunctionOn') {
-        return { result: { value: 'settled' } };
-      }
-      return {};
-    },
-  },
-  scripting: { executeScript: async () => [{ result: false }] },
-  runtime: {
-    onMessage: eventTarget(),
-    onConnect: eventTarget(),
-    getPlatformInfo() {},
-    getManifest: () => ({ version: '0.18.0' }),
-  },
-  alarms: { onAlarm: eventTarget(), create() {} },
-};
-
+""" + chrome_stub("'lifecycle-token'", 'BRIDGE_URL', 'sendCommand') + r"""
 const context = vm.createContext({
   chrome,
   // A thin wrapper that DELEGATES to the gate and then does this harness's
