@@ -3,8 +3,13 @@
 
 A comprehension does not reorder: a filter selects which elements appear,
 never their order, so the element at output index 0 is the iterable's own
-element 0 whenever a filter keeps it. The merge of every element belongs only
-to a consumer that walks the result, because a walk visits every element.
+element 0 -- but only while that element is determinable on both counts: the
+operand has to yield one element there, and no filter may drop it. Where
+either is not determinable the position is unprovable, and unprovable in
+this guard means reported, never silently clean and never a union written as
+though it were one element. The merge of every element belongs only to a
+consumer that walks the result, because a walk visits every element, and it
+is kept either way.
 
 These tests pin that contract end to end and at the probe's own boundary, so
 each limb of `comprehension_first` fails a named test when it is deleted.
@@ -18,8 +23,9 @@ import _util  # noqa: E402
 from _pyroute_containers import iterated_key  # noqa: E402
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_targets import (  # noqa: E402
-    _known_ordered, comprehension_first, probe_comprehension)
-from _pyroute_values import DeferredContainer  # noqa: E402
+    _UNPROVABLE, _first_element, comprehension_first, probe_comprehension)
+from _pyroute_values import (  # noqa: E402
+    DeferredAlternatives, DeferredContainer)
 from test_tab_routing_collapse import body, verdicts  # noqa: E402
 
 
@@ -89,15 +95,147 @@ def test_comprehension_probe_discards_its_own_findings(_tmp):
     assert violations == []
 
 
-def test_known_ordered_refuses_unordered_kinds(_tmp):
-    """The probe reads a comprehension's first output position, so it accepts
-    only a tuple or list operand: a set, dict or sorted result has no
-    positional element 0 for it to bind the target to."""
-    assert _known_ordered(_ordered_operand())
-    assert _known_ordered(DeferredContainer({0: 'a', 1: 'b'}, 2, 'list'))
+def test_first_element_refuses_unordered_kinds(_tmp):
+    """The probe binds a comprehension's first output position to the
+    operand's own element 0, so it accepts only a tuple or list operand: a
+    set, dict or sorted result has no positional element 0 to bind the
+    target to, and neither has a container of unknown length."""
+    assert _first_element(_ordered_operand()) == 'first'
+    assert _first_element(
+        DeferredContainer({0: 'a', 1: 'b'}, 2, 'list')) == 'a'
+    assert _first_element(
+        DeferredContainer({1: 'b'}, 2, 'tuple')) is None, 'an absent key'
     for kind in ('set', 'dict', 'sorted'):
-        assert not _known_ordered(
-            DeferredContainer({0: 'a', 1: 'b'}, 2, kind)), kind
+        assert _first_element(
+            DeferredContainer({0: 'a', 1: 'b'}, 2, kind)) is _UNPROVABLE, kind
+    assert _first_element(
+        DeferredContainer({0: 'a', 1: 'b'}, None, 'tuple')) is _UNPROVABLE
+
+
+def test_first_element_binds_alternatives_only_on_agreement(_tmp):
+    """An alternatives operand places the position only when every branch is
+    an ordered container and they agree on that element. A union of the
+    branches is not an agreement, so a disagreement -- and a branch that is
+    not an ordered container at all -- leaves the position unprovable."""
+    first = DeferredContainer({0: 'routed'}, 1, 'list')
+    agree = DeferredAlternatives(
+        (first, DeferredContainer({0: 'routed'}, 1, 'tuple')))
+    assert _first_element(agree) == 'routed'
+    disagree = DeferredAlternatives(
+        (first, DeferredContainer({0: 'other'}, 1, 'tuple')))
+    assert _first_element(disagree) is _UNPROVABLE
+    assert _first_element(DeferredAlternatives(
+        (first, DeferredContainer({0: 'other'}, 1, 'set')))) is _UNPROVABLE
+
+
+def test_filter_that_may_drop_the_element_leaves_the_position_unprovable(
+        tmp):
+    """A filter that may drop the element at index 0 puts a later element
+    there, so the position is unprovable and the merge the primary run made
+    stands: reported when that merge routes, and also where the runtime
+    happens to leave the result clean, because the guard cannot tell which
+    element the filter kept. Inertness is the filter's shape, not its
+    spelling: a bare name, whose value the guard holds truthy, and a literal
+    the filter reads nothing from are inert; a comparison, an attribute, a
+    call or a subscript is not. The boundary is drawn toward false greens."""
+    drops = 'x = [c for c in reversed(pair()) if c is not ordinary]'
+    verdicts(tmp, [
+        ('filter-drops-routed', body(drops, 'x[0]()'), (1, 1)),
+        ('filter-drops-routed-clean', body(drops, 'x[0]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('filter-drops-walk', body(
+            'send = ext_cmd\n' + drops + '\nfor v in x: v()', '0'), (1, 1)),
+        ('filter-drops-walk-clean', body(
+            'send = ext_cmd\n' + drops + '\nfor v in x: v()', '0').replace(
+                'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('filter-drops-preserving', body(
+            'x = [c for c in pair() if c is ordinary]', 'x[0]()'), (0, 1)),
+        ('filter-unknown', body(
+            'x = [c for c in reversed(pair()) if args.flag]',
+            'x[0]()'), (0, 1)),
+        ('unprovable-call', body(
+            'x = [c for c in reversed(pair()) if bool(c)]',
+            'x[0]()'), (0, 1)),
+        ('unprovable-subscript', body(
+            'x = [c for c in reversed(pair()) if args.values[0]]',
+            'x[0]()'), (0, 1)),
+        ('inert-second-generator', body(
+            'x = [c for c in reversed(pair()) for _ in [0] if True]',
+            'x[0]()'), (0, 0)),
+    ])
+
+
+def test_alternatives_operand_agrees_at_the_first_position(tmp):
+    """Where every branch's element 0 agrees the position is bound, so a
+    result the runtime proves clean is not reported. Where the branches
+    disagree the position is unprovable, which is the same reported side a
+    filter the guard cannot evaluate lands on. Index 1 stays the unplaced
+    position #948 records, and the walk keeps seeing every element either
+    way."""
+    agree = ('def alt():\n'
+             '    if args.flag: return list(pair())\n'
+             '    return tuple(pair())\n'
+             'x = [c for c in reversed(alt())]')
+    disagree = ('def alt():\n'
+                '    if args.flag: return (relay(), ordinary)\n'
+                '    return (ordinary, relay())\n'
+                'x = [c for c in reversed(alt())]')
+    both_clean = ('def alt():\n'
+                  '    if args.flag: return (ordinary, ordinary)\n'
+                  '    return (ordinary, ordinary)\n'
+                  'x = [c for c in reversed(alt())]')
+    verdicts(tmp, [
+        ('alt-agree-first', body(agree, 'x[0]()'), (0, 0)),
+        ('alt-agree-first-clean', body(agree, 'x[0]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('alt-agree-other', body(agree, 'x[1]()'), (1, 0)),
+        ('alt-agree-walk', body('send = ext_cmd\n' + agree
+                                + '\nfor v in x: v()', '0'), (1, 1)),
+        ('alt-agree-walk-clean', body('send = ext_cmd\n' + agree
+                                      + '\nfor v in x: v()', '0').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('alt-disagree-first', body(disagree, 'x[0]()'), (0, 1)),
+        ('alt-disagree-first-clean', body(disagree, 'x[0]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('alt-disagree-walk', body('send = ext_cmd\n' + disagree
+                                   + '\nfor v in x: v()', '0'), (1, 1)),
+        ('alt-both-clean-agree', body(both_clean, 'x[0]()'), (0, 0)),
+    ])
+
+
+def test_comprehension_probe_refuses_a_fork(_tmp):
+    """The probe narrows one state at a time, so a producer that re-checks
+    into two states is not one branch standing in for the other: the probe
+    returns False, stops at the fork and writes nothing. Dropping the
+    len(outputs) != 1 half of the early return lets the probe keep only the
+    first state, write a value derived from one branch of a two-branch
+    answer, and collapse the discarded branch silently."""
+    node = ast.parse('x = [c for c in seq]').body[0].value
+    generator = node.generators[0]
+    ordered = DeferredContainer({0: 'routed'}, 1, 'list')
+    other = DeferredContainer({0: 'other'}, 1, 'list')
+    state = FlowState({}, {}, {}, {id(generator.iter): ordered},
+                      set(), set(), {}, set())
+    seen = []
+
+    def check(expression, states):
+        seen.append(ast.unparse(expression))
+        if expression is generator.iter:
+            first, second = states[0].copy(), states[0].copy()
+            first.evaluated[id(generator.iter)] = ordered
+            second.evaluated[id(generator.iter)] = other
+            return [first, second]
+        for entry in states:
+            entry.evaluated[id(node.elt)] = 'routed'
+        return states
+
+    violations = []
+    assert comprehension_first(node, [node.elt], [state], FlowState.copy,
+                               check, violations) is False
+    assert seen == ['seq'], seen
+    assert id(node.elt) not in state.evaluated
+    assert id(node) not in state.evaluated
+    assert not violations
 
 
 def test_comprehension_probe_clears_a_stale_iterated_slot(_tmp):
