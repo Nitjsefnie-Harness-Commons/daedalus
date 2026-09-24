@@ -37,16 +37,21 @@ def test_starred_operand_arity_is_a_single_fact(tmp):
          'pair=[h,"clean",k]\npair[0]=h\nx=getattr(*pair)'),
     )
     pre = 'class H: pass\nclass K: pass\nh = H()\nk = K()\n'
-    def run(b): return _tracked_focus_verdict(
-        tmp, SELECTION_PRE + b + '\nsend = ext_cmd\nreturn x()\n', counts=True)
-    cases = [(f'{l}-{a}', pre + f'h.{a} = {v}\n' + b.format(a=a, v=v), w)
-             for a, v, w in (('ext_cmd', 'relay()', (1, 1)),
-                              ('clean', 'ordinary', (0, 0)))
-             for l, b in rows]
-    assert [(l, *run(b)) for l, b, _ in cases] == [
-        (l, *w) for l, _, w in cases]
-    g = [(l, pre + b) for l, b in guards]
-    assert [(l, *run(b)) for l, b in g] == [(l, 0, 0) for l, _ in g]
+
+    def run(body):
+        return _tracked_focus_verdict(
+            tmp, SELECTION_PRE + body + '\nsend = ext_cmd\nreturn x()\n',
+            counts=True)
+
+    axes = (('ext_cmd', 'relay()', (1, 1)), ('clean', 'ordinary', (0, 0)))
+    cases = [(f'{label}-{attr}', pre + f'h.{attr} = {val}\n'
+              + tmpl.format(a=attr, v=val), want)
+             for attr, val, want in axes for label, tmpl in rows]
+    assert [(label, *run(body)) for label, body, _ in cases] == [
+        (label, *want) for label, _, want in cases]
+    guards = [(label, pre + body) for label, body in guards]
+    assert [(label, *run(body)) for label, body in guards] == [
+        (label, 0, 0) for label, _ in guards]
 
 
 def main():
