@@ -106,7 +106,10 @@ def _scans_silently(_tmp, source):
 
 def test_a_registry_key_the_walk_cannot_read_refuses(_tmp):
     """A registry subscript whose KEY the walk cannot read is refused; the
-    key is decided by the constant-folder, not its spelling."""
+    key is decided by the constant-folder, not its spelling. The base must be
+    a NAMESPACE or the registry: `sys.modules[k]` and `sys.__dict__[k]` are
+    the near-misses that keep refusing, and `vars(sys)['mod'+'ules']` pins
+    the fold's `stop_at_call=False` path over a call base."""
     for source, site in (
             ('\nimport sys\n\n\ndef load(k):\n    key = "modules"\n'
              '    return sys.__dict__[key]["importlib"]\n', 7),
@@ -115,7 +118,11 @@ def test_a_registry_key_the_walk_cannot_read_refuses(_tmp):
             ('\nimport sys\n\n\ndef load():\n'
              '    return sys.__dict__[f"modules"]\n', 6),
             ('\nimport sys\n\n\ndef load():\n'
-             '    return sys.__dict__["mod" + "ules"]\n', 6)):
+             '    return sys.__dict__["mod" + "ules"]\n', 6),
+            ('\nimport sys\n\n\ndef load(k):\n'
+             '    return sys.modules[k]\n', 6),
+            ('\nimport sys\n\n\ndef load():\n'
+             '    return vars(sys)["mod" + "ules"]\n', 6)):
         _assert_refusal(_tmp, source, site, 'cannot resolve')
 
 
