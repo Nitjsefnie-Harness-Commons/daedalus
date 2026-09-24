@@ -22,7 +22,7 @@ def _write_tree(directory, files):
         path.write_text(source, encoding='utf-8')
 
 
-def _refuses(_tmp, source, site, phrase):
+def _assert_refusal(_tmp, source, site, phrase):
     """The scan refuses this composition source, naming the site and why."""
     _write_tree(Path(_tmp), {'composition.py': source})
     try:
@@ -48,7 +48,7 @@ def test_a_conditional_alias_refuses_the_scan(_tmp):
     The operation sits in one arm of a conditional, so a value classifier
     that reads one level deep walks straight past the store.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -59,7 +59,7 @@ def load(name, flag):
 
 
 def test_a_boolean_choice_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -76,7 +76,7 @@ def test_a_comparison_alias_refuses_the_scan(_tmp):
     direction: the resolver reads a wrapper uniformly rather than special-
     casing the ones whose result type is known.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -87,7 +87,7 @@ def load(name, flag):
 
 
 def test_a_subscripted_container_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -98,7 +98,7 @@ def load(name):
 
 
 def test_a_starred_value_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -109,7 +109,7 @@ def load(name):
 
 
 def test_a_container_element_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -120,7 +120,7 @@ def load(name):
 
 
 def test_a_comprehension_value_alias_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -131,7 +131,7 @@ def load(name):
 
 
 def test_a_walrus_inside_a_value_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -148,7 +148,7 @@ def test_a_lambda_delivery_alias_refuses_the_scan(_tmp):
     returns one, and the call it is called with comes later, spelled on an
     expression this walk has already passed.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -159,7 +159,7 @@ def load(name):
 
 
 def test_a_lambda_returning_the_operation_refuses_the_scan(_tmp):
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -175,7 +175,7 @@ def test_a_yield_delivery_alias_refuses_the_scan(_tmp):
     Deferred delivery, not a call, and the spelling that resumes it is
     written after the store the scan has already read.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -193,7 +193,7 @@ def test_an_attribute_over_a_comprehension_base_refuses_the_scan(_tmp):
     the operation itself, and a base that is not a bare Name must be read
     through its own children rather than skipped.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -209,7 +209,7 @@ def test_an_attribute_over_a_subscript_key_base_refuses_the_scan(_tmp):
     `table[importlib].import_module` reads the operation's own name off a
     base the two-member match cannot see, so the base's children decide.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -225,7 +225,7 @@ def test_an_attribute_over_a_conditional_base_refuses_the_scan(_tmp):
     The base is not a bare Name, so the arm must descend into it; the
     tracked name is in the `IfExp` and the store is refused.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -241,7 +241,7 @@ def test_an_attribute_over_a_boolean_base_refuses_the_scan(_tmp):
     Same mechanism as the conditional: the base is a `BoolOp`, not a Name,
     and the tracked name sits in its children.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -259,7 +259,7 @@ def test_a_key_position_mention_refuses_the_scan(_tmp):
     rule over the whole subtree rather than a hand-picked set of children
     per node type.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
@@ -314,7 +314,7 @@ def test_a_bare_call_over_a_wrapped_base_is_read_as_dynamic(_tmp):
     the store side uses; when it only recognised a bare-Name base, the name
     this call loaded was dropped from the scan set in silence.
     """
-    _refuses(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
