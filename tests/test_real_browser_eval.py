@@ -54,13 +54,14 @@ def test_worker_configures_under_a_slow_boot_read(tmp):
     loadConfig() is memoized for the worker's lifetime, so a storage write
     reaches the in-memory `config` only through the change-driven onChanged
     listener. A boot generation whose storage read resolves AFTER the fixture
-    writes reassigns `config` from a stale pre-write snapshot, and because
-    storage already holds the target, the fixture's retries write identical
-    values: no onChanged fires and the readiness verdict stays false. The
-    gate below forces that ordering deterministically by holding the boot
-    generation until the fixture's onChanged has landed, so the stale
-    snapshot always clobbers `config`. The fixture must still configure the
-    worker and yield its tab.
+    writes reassigns `config` from a stale pre-write snapshot. The token
+    recovers on the next retry — the auto-generate left a uuid in storage, so
+    writing the fixture token back is a change that fires onChanged — but the
+    server does not: storage already held the target, so nothing changes it
+    again, no onChanged re-fires for it, and the clobbered `config.serverUrl`
+    never recovers. The gate below forces that ordering deterministically by
+    holding the boot generation until the fixture's onChanged has landed. The
+    fixture must still configure the worker and yield its tab.
     """
     browser_requirements()  # skips honestly where no browser exists
     slow = Path(tmp) / 'slow-boot-extension'
