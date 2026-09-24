@@ -1,29 +1,27 @@
 """Match-statement capture pairing for the Python routing guard.
 
 A `match` case binds its capture names from the value the subject evaluates
-to. That is the same pairing the assignment binder performs between a
-destructuring target and a deferred container, so a case reuses it: a
-sequence pattern is handed to `alias_target_pairs` as the assignment target
-it is, and each capture is bound by `apply_assignment_bindings`. Where the
-rule's answer is "this position is undecidable", the capture is marked
-unprovable rather than left unpaired, so a call through one is reported.
+to, through the assignment binder's own pairing: a sequence pattern is
+handed to `alias_target_pairs` as the assignment target it is, and a mapping
+key is read through the shared `_selected_values`. The bound: a position the
+subject cannot decide is marked unprovable (a call through it is reported); a
+pattern that provably cannot match the subject leaves its names unpaired; a
+class pattern is the one unmodelled form (issue 1003).
 
-An or-pattern offers every alternative the same subject; a name the
-alternatives disagree on is the merge of their values, so differing
-reachable states become unprovable (never last-write-wins). A mapping
-pattern pairs a resolvable literal key to the subject's value under it, a
-merge subject pairs to the merge of its branches, and a key the guard cannot
-resolve leaves the slot unprovable rather than silent. A pattern that
-provably cannot match the subject (a sequence of the wrong arity, a value
-pattern over a deferred subject) leaves its names unpaired. A class pattern
-is the one form this binder does not model: its captures name an attribute
-reached through the subject's class, so it is left cleared and unpaired. That
-is this arm's measured limitation, filed as issue 1003, and the fail-closed
-alternative false-positives on `test_destructured_and_walrus_alias_boundaries`.
+An or-pattern offers every alternative the same subject; a name they disagree
+on is the merge of their values, so differing reachable states become
+unprovable (never last-write-wins). Accepted fail-closed costs, each pinned by
+a row: an or-pattern over disagreeing alternatives, a literal-None position,
+a value test the guard cannot disprove, a merge over disagreeing branches, and
+a literal key read that folds a distinct DYNAMIC_KEY entry (the same fold the
+`**rest` arm and the shared subscript make, so the routes agree).
 
-The merge rows depend on the shared `merge_yielded` agreement rule and
-`alias_target_pairs`' cross-branch merge; `merge-discriminating` is the row
-that moves under a first-branch-only or first-wins rewrite of this arm.
+`merge-discriminating` moves under a first-branch-only read of the holders.
+Two inherited merge limbs have no row and are recorded here: `merge_yielded`'s
+duplicate-sender clause is equivalent at the call surface by construction
+(no call distinguishes a sender from an unprovable one), and
+`alias_target_pairs`' cross-branch merge is masked by the unresolvable-slot
+hole filed as issue 1010, not equivalent.
 """
 import ast
 
