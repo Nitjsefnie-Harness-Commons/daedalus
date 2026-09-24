@@ -6,7 +6,9 @@ handed to `alias_target_pairs` as the assignment target it is, and a mapping
 key is read through the shared `_selected_values`. The bound: a position the
 subject cannot decide is marked unprovable (a call through it is reported); a
 pattern that provably cannot match the subject leaves its names unpaired; a
-class pattern is the one unmodelled form (issue 1003).
+class pattern is the one unmodelled form (issue 1003), whose captures name an
+attribute reached through the subject's class, and the fail-closed
+alternative false-positives on `test_destructured_and_walrus_alias_boundaries`.
 
 An or-pattern offers every alternative the same subject; a name they disagree
 on is the merge of their values, so differing reachable states become
@@ -16,12 +18,18 @@ a value test the guard cannot disprove, a merge over disagreeing branches, and
 a literal key read that folds a distinct DYNAMIC_KEY entry (the same fold the
 `**rest` arm and the shared subscript make, so the routes agree).
 
-`merge-discriminating` moves under a first-branch-only read of the holders.
-Two inherited merge limbs have no row and are recorded here: `merge_yielded`'s
-duplicate-sender clause is equivalent at the call surface by construction
-(no call distinguishes a sender from an unprovable one), and
-`alias_target_pairs`' cross-branch merge is masked by the unresolvable-slot
-hole filed as issue 1010, not equivalent.
+`merge-discriminating` moves under a first-branch-only read of the holders,
+and the or-pattern merge is pinned on the last-write-wins axis
+(`or-swap-routed` reds when `_bind_or` is rewritten to the last alternative).
+Three inherited merge limbs have no row and are recorded here.
+`merge_yielded`'s duplicate-sender clause is equivalent at the call surface by
+construction
+(no call distinguishes a sender from an unprovable one). `_merge_bind`
+first-wins (`bound[0]`) has no discriminating row because the `None`-filter in
+the holders read drops a benign branch before `_merge_bind` sees it, so in
+every row it is handed a single deferred value and first-wins and the merge
+agree. And `alias_target_pairs`' cross-branch merge is masked by the
+unresolvable-slot hole filed as issue 1010, not equivalent.
 """
 import ast
 
