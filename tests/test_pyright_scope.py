@@ -100,7 +100,6 @@ def test_every_exclusion_is_one_this_suite_states_a_reason_for(tmp):
 
 
 def test_the_test_tree_config_exists_and_really_scopes_the_tests(tmp):
-    """The test tree's own config must exist and include tests."""
     del tmp
     assert CONFIG_TESTS.is_file(), (
         f'{CONFIG_TESTS.name} is missing; without it nothing type-checks '
@@ -116,7 +115,6 @@ def test_the_test_tree_config_exists_and_really_scopes_the_tests(tmp):
 
 
 def test_the_two_configs_agree_outside_their_deliberate_differences(tmp):
-    """Only include, exclude and extraPaths may differ between them."""
     del tmp
     main = _config()
     tests = _tests_config()

@@ -53,7 +53,6 @@ REMEDY_FOR = {
 
 
 def tracked_test_modules(root=ROOT):
-    """Return the relative path of every tracked test module."""
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z', '--', TEST_GLOB],
         capture_output=True, check=True, timeout=30)
@@ -73,7 +72,6 @@ def _pyright_report(root):
 
 
 def _errors_by_file(report, root):
-    """Count error-severity diagnostics per tracked test module."""
     counts = {}
     for diagnostic in report.get('generalDiagnostics', []):
         if diagnostic.get('severity') != 'error':
@@ -130,7 +128,6 @@ def tightened(baseline, counts):
 
 
 def refuse(found):
-    """Print each violation and its remedy to stderr, and refuse."""
     remedies = []
     for kind, detail in found.items():
         if detail:
