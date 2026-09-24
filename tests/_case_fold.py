@@ -1,30 +1,41 @@
 """Emulate a case-folding filesystem for the tree one test names.
 
-Not a suite itself -- run_tests.py only loads `test_*.py`. A
-case-insensitive parent is a different filesystem, not a broken host, and a
-test cannot be handed one on a case-sensitive box without root and a mount.
-So the two answers a platform gives and the code under test reads are
-emulated instead, and only under the root the test names: the on-disk
-spelling a name resolves to (`realpath`), and whether two spellings reach
-one entry (`samefile`). Nothing else about a case-folding parent is
-modelled, and every path outside that root keeps the host's own answers, so
-a test that does not ask for this emulates nothing.
+Not a suite itself -- run_tests.py only loads `test_*.py`.
+
+A case-insensitive parent is a different filesystem, not a broken host, and
+a case-sensitive box cannot be handed one without root and a mount. So the
+one property such a parent has -- it resolves a name that differs only in
+case to the entry it spells -- is emulated for the root the test names, by
+answering `os.stat` and `os.lstat` with the entry the parent's own listing
+resolves the name to. Every other answer is the host's: `os.listdir` still
+lists the spelling on disk, and `os.path.realpath` still returns the
+caller's spelling, because a POSIX `realpath` does not canonicalise case
+(only `ntpath.realpath`, through `_getfinalpathname`, ever did). An earlier
+version of this file faked that Windows answer as though it were POSIX's,
+and the whole suite's stripe guarantee rested on the fiction.
+
+Measured on a real vfat image, which is the shape being emulated and needs
+no faking at all: with `Alpha` on disk, `os.listdir` answers `['Alpha']`,
+`os.stat`/`os.path.samefile` answer for `alpha` too and report one
+`(st_dev, st_ino)`, and `os.path.realpath('/…/alpha')` answers with
+`alpha`. That is every claim this file makes, and the same assertions run
+against that mount verify it.
 
 A test that pins behaviour under it must pin the same fixture's behaviour
 without it as well: the two verdicts together are what make the difference
-a property of the filesystem rather than of the assertion.
+a property of the parent rather than of the assertion.
 """
 import contextlib
 import os
 
 
 def _folded_spelling(parent, name):
-    """The spelling a case-folding parent reports for `name`, or None.
+    """The spelling a folding parent lists for `name`, or None.
 
-    A parent that folds case resolves a name it does not spell itself to the
-    entry whose spelling only case distinguishes. A case-sensitive parent has
-    no such entry, which is what makes this a property to ask about rather
-    than a normalization to apply.
+    An exact match wins, so a parent that holds both `Foo` and `foo` -- a
+    case-sensitive one, where they are two entries -- keeps the entry the
+    caller named. Only a name the parent does not spell itself falls to the
+    case-insensitive match, and a parent with no such entry has none.
     """
     try:
         names = os.listdir(parent)
@@ -36,10 +47,14 @@ def _folded_spelling(parent, name):
                  if entry.lower() == name.lower()), None)
 
 
-def _folding_realpath(original, root, path):
-    """`realpath` as a case-folding parent under `root` answers it."""
-    resolved = original(path)
-    head, tail = os.path.split(resolved)
+def _folded(root, path):
+    """The path a folding parent under `root` resolves `path` to.
+
+    A component with no entry keeps the spelling it was given, so the
+    syscall that follows still raises the refusal a real parent raises for a
+    name it holds nothing for.
+    """
+    head, tail = os.path.split(os.fspath(path))
     parts = []
     while tail:
         parts.append(tail)
@@ -55,52 +70,34 @@ def _folding_realpath(original, root, path):
     return out
 
 
-def _folding_samefile(original, root, left, right):
-    """`samefile` as a case-folding parent under `root` answers it."""
-    try:
-        return original(left, right)
-    except OSError:
-        left_text, right_text = os.fspath(left), os.fspath(right)
-        if not all(text == root or text.startswith(root + os.sep)
-                   for text in (left_text, right_text)):
-            raise
-        # The host has no entry for one of the two spellings. A parent that
-        # folds case answers with the entry the other spelling does reach;
-        # two spellings differing in more than case are two entries there.
-        if os.path.basename(left_text).lower() != os.path.basename(
-                right_text).lower():
-            return False
-        return _folded_spelling(
-            os.path.dirname(left_text),
-            os.path.basename(left_text)) is not None
-
-
 @contextlib.contextmanager
 def case_folding(root):
-    """Answer two path queries as a case-folding filesystem would.
+    """Answer name resolution under `root` as a case-folding parent would.
 
-    A case-folding filesystem is a different filesystem, not a broken host:
-    the tree under `root` is emulated, and every path outside it keeps the
-    host's own answers, so a test that does not ask for this emulates
-    nothing. What is emulated is the pair of answers the platform gives and
-    the code under test reads -- the on-disk spelling a name resolves to
-    (`realpath`), and whether two spellings reach one entry (`samefile`) --
-    because those two are all a Windows, macOS or vfat parent changes, and
-    nothing else.
-
-    A test that pins behaviour under it must also pin the same fixture's
-    behaviour without it: the two verdicts are what make the difference a
-    property of the filesystem rather than of the assertion.
+    The patch covers `os.stat` and `os.lstat`, so `os.path.samefile`,
+    `os.path.islink` and `os.path.exists` inherit it, and every path outside
+    `root` keeps the host's own answers. `os.path.realpath` is deliberately
+    left alone: a POSIX `realpath` answers with the caller's spelling on a
+    folding parent too, and a double that disagrees with the program it
+    stands in for proves nothing.
     """
     root = os.path.realpath(str(root))
-    real_realpath = os.path.realpath
-    real_samefile = os.path.samefile
-    os.path.realpath = lambda path: _folding_realpath(
-        real_realpath, root, path)
-    os.path.samefile = lambda left, right: _folding_samefile(
-        real_samefile, root, left, right)
+    real_stat, real_lstat = os.stat, os.lstat
+
+    def folding_stat(path, *args, **kwargs):
+        if isinstance(path, (str, bytes, os.PathLike)):
+            path = _folded(root, path)
+        return real_stat(path, *args, **kwargs)
+
+    def folding_lstat(path, *args, **kwargs):
+        if isinstance(path, (str, bytes, os.PathLike)):
+            path = _folded(root, path)
+        return real_lstat(path, *args, **kwargs)
+
+    os.stat = folding_stat
+    os.lstat = folding_lstat
     try:
         yield root
     finally:
-        os.path.realpath = real_realpath
-        os.path.samefile = real_samefile
+        os.stat = real_stat
+        os.lstat = real_lstat

@@ -85,11 +85,16 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     try:
         if delivery_dir is not None:
             assert delivery_file is not None
-            with result_store.delivery_lock_for(delivery_dir.name):
+            # The directory exists before the stripe is chosen, so the stripe
+            # is keyed on this target's own entry even for a first delivery:
+            # a target created here and a concurrent one naming it the other
+            # way round would otherwise each key on a name, and take two
+            # locks for the one directory they are about to share.
+            delivery_dir.mkdir(parents=True, exist_ok=True)
+            with result_store.delivery_lock_for(delivery_dir):
                 with result_store.result_lock:
                     duplicate = result_store.delivery_recorded(did)
                 if not duplicate:
-                    delivery_dir.mkdir(parents=True, exist_ok=True)
                     entries = result_store.scan_delivery_results(
                         delivery_dir)
                     with result_store.result_lock:
@@ -180,7 +185,7 @@ def fetch_result(res_dir, token, params):
     try:
         if delivery:
             assert delivery_dir is not None
-            with result_store.delivery_lock_for(delivery_dir.name):
+            with result_store.delivery_lock_for(delivery_dir):
                 with result_store.result_lock:
                     response, _ = result_store.read_result_file(
                         res_file, consume, expected)
@@ -242,7 +247,7 @@ def fetch_result(res_dir, token, params):
                     break
                 changed = False
                 assert candidate_dir is not None
-                with result_store.delivery_lock_for(candidate_dir.name):
+                with result_store.delivery_lock_for(candidate_dir):
                     with result_store.result_lock:
                         current, _current_delivery = (
                             result_store.read_result_file(

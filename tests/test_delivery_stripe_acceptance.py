@@ -13,6 +13,7 @@ import ast
 import os
 import re
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
@@ -147,11 +148,20 @@ def test_acceptance_recorded_on_the_delivery_write_path(tmp):
 
 
 def test_lock_table_stays_bounded_as_targets_are_named(tmp):
-    """Naming targets does not grow the delivery lock table."""
-    del tmp
+    """Targets, named and created, do not grow the delivery lock table.
+
+    Half are directories that exist, which is what the stripe is keyed on,
+    and half are not, which is the name fallback the read paths use. Both
+    have to land in the same fixed table.
+    """
     store = _util.load(RESULT_STORE, 'stripe_acceptance_store')
+    deliveries = Path(tmp) / 'deliveries'
+    deliveries.mkdir(parents=True)
     for number in range(200):
-        store.delivery_lock_for(f'bounded-token_tab-{number:04d}')
+        present = deliveries / f'bounded-token_tab-{number:04d}'
+        present.mkdir()
+        store.delivery_lock_for(present)
+        store.delivery_lock_for(f'absent-token_tab-{number:04d}')
     assert len(store.delivery_locks) == store.DELIVERY_LOCK_STRIPES, (
         'the delivery lock table grew with the target names mapped into '
         'it; the bounded stripe count is what the timing acceptance '

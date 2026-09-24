@@ -628,5 +628,69 @@ def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
         {'id': 'extension', 'chromeTab': 'Extension'}], frames
 
 
+def _symlinked_legacy_file(command_dir):
+    """A `tok_Extension.json` that is a symlink to a tab's real file.
+
+    The shape only a case-insensitive parent produces: there
+    `tok_extension.json` resolves to this entry, so the entry answers to the
+    extension's own name and `samefile` agrees. On a case-sensitive parent
+    the same fixture is a tab's file that happens to be a symlink.
+    """
+    real = command_dir / 'tok_42.json'
+    real.write_text('{"id":"tab"}', encoding='utf-8')
+    alias = command_dir / 'tok_Extension.json'
+    try:
+        alias.symlink_to(real)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    return real, alias
+
+
+def test_legacy_drain_skips_a_folded_symlinked_reserved_file(tmp):
+    """A reserved name reached through a symlink is still reserved.
+
+    The direction is the issue's own: on that parent the entry answers to the
+    extension's name, and this records that rather than leaving it to how
+    `samefile` happens to follow links.
+    """
+    service = _load_service('stream_service_legacy_folded_symlink')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    real, alias = _symlinked_legacy_file(command_dir)
+    frames = []
+
+    with _case_fold.case_folding(command_dir):
+        delivered = service.drain_legacy_ext(
+            command_dir, 'tok', None,
+            extension_legacy_name='tok_extension.json',
+            command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 0, delivered
+    assert frames == [], frames
+    assert alias.is_symlink() and real.exists()
+
+
+def test_legacy_drain_takes_a_symlinked_tab_file_here(tmp):
+    """The control: the same symlink where the parent folds nothing.
+
+    `tok_extension.json` names nothing here, so the entry is a tab's file --
+    the behaviour the folded case changes, and the reason the check asks the
+    parent rather than folding the name itself.
+    """
+    service = _load_service('stream_service_legacy_symlink_control')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    _real, _alias = _symlinked_legacy_file(command_dir)
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(globals())))

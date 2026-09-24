@@ -23,26 +23,32 @@ import traceback
 gate = pathlib.Path(os.environ["STRIPE_GATE_DIR"])
 held_tab = os.environ["STRIPE_HELD_TAB"]
 lock_calls_lock = threading.Lock()
-def record_lock_call(target_key, lock):
+def record_lock_call(target_dir, lock):
     with lock_calls_lock:
         with (gate / "lock-calls").open("a", encoding="utf-8") as handle:
-            handle.write(f"{target_key}\t{id(lock)}\n")
+            handle.write(f"{target_dir}\t{id(lock)}\n")
 def install():
     try:
         while not all(hasattr(result_store, name) for name in (
                 "delivery_lock_for", "delivery_result_paths")):
             time.sleep(0.001)
         real_lock_for = result_store.delivery_lock_for
-        def recording_lock_for(target_key):
-            lock = real_lock_for(target_key)
-            record_lock_call(target_key, lock)
+        def recording_lock_for(target_dir):
+            lock = real_lock_for(target_dir)
+            record_lock_call(target_dir, lock)
             return lock
         result_store.delivery_lock_for = recording_lock_for
+        # The stripe is the delivery directory's own entry, so the holder
+        # creates it before it locks: holding a stripe over a name that has
+        # no entry yet is holding nothing the request will ever ask for.
         target_key = result_store.result_key(
             os.environ["DAEDALUS_TOKEN"], held_tab)
-        target_lock = result_store.delivery_lock_for(target_key)
+        target_dir = (pathlib.Path(os.environ["DAEDALUS_DIR"]) / "results"
+                      / result_store.DELIVERY_SUBDIR / target_key)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_lock = result_store.delivery_lock_for(target_dir)
         (gate / "holder-lock").write_text(
-            f"{target_key}\t{id(target_lock)}\n", encoding="utf-8")
+            f"{target_dir}\t{id(target_lock)}\n", encoding="utf-8")
         with target_lock:
             (gate / "holding").write_text("y", encoding="utf-8")
             try:
@@ -56,6 +62,11 @@ def install():
             traceback.format_exc(), encoding="utf-8")
 threading.Thread(target=install, daemon=True).start()
 '''
+
+
+def _target_dir(tmp, tab):
+    """The delivery directory a stripe for `tab` is keyed on."""
+    return Path(tmp) / 'docroot' / 'results' / 'deliveries' / f'{TOK}_{tab}'
 
 
 def _stripe_holder_setup(tmp, held_tab):
@@ -97,12 +108,11 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     held_tab = 'stripe-held'
     other_tab = 'stripe-other'
     gate_dir, env = _stripe_holder_setup(tmp, held_tab)
-    # The stripe is keyed on the target entry's own name, which on a
-    # case-sensitive filesystem is the caller's spelling — so comparing what
-    # the holder and the request locked is plain equality here. The folded
-    # case, where the two differ and must still agree, is pinned in
-    # test_result_routes.
-    target_key = f'{TOK}_{held_tab}'
+    # The stripe is keyed on the target directory, so the holder and the
+    # request are compared on the directory and not on a name. The folded
+    # case, where two spellings of one directory must still agree, is
+    # pinned in test_result_routes against a real case-folding parent.
+    target_key = str(_target_dir(tmp, held_tab))
 
     def failure_message():
         calls = _stripe_lock_calls(gate_dir)
@@ -277,7 +287,7 @@ def _assert_discovered_owner_lock(gate_dir, owner):
     """The scan-discovered owner must be the lock key used by the request."""
     holder = _stripe_holder_lock(gate_dir)
     calls = _stripe_lock_calls(gate_dir)
-    owner_key = f'{TOK}_{owner}'
+    owner_key = str(_target_dir(gate_dir.parent, owner))
     owner_calls = [entry for entry in calls
                    if len(entry) == 2 and entry[0] == owner_key]
     assert holder and len(holder) == 2 and holder[0] == owner_key, (
@@ -385,11 +395,10 @@ def test_absent_delivery_lookups_use_fixed_lock_stripes(tmp):
         initial = len(original_locks)
         returned_locks = []
         for index in range(10_000):
-            _dir, delivery_file, tab = result_store.find_delivery_result(
+            _dir, delivery_file, _tab = result_store.find_delivery_result(
                 docroot / 'results', TOK, f'absent-{index}', 'missing-did')
             assert not delivery_file.exists()
-            returned_locks.append(result_store.delivery_lock_for(
-                result_store.result_key(TOK, tab)))
+            returned_locks.append(result_store.delivery_lock_for(_dir))
         assert initial == result_store.DELIVERY_LOCK_STRIPES
         assert len(result_store.delivery_locks) == initial
         assert all(any(lock is original for original in original_locks)

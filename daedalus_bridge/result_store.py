@@ -31,36 +31,45 @@ def delivery_root(res_dir):
     return res_dir / DELIVERY_SUBDIR
 
 
-def delivery_lock_for(target_key):
-    r"""Return the lock that serializes one target's delivery files.
+def delivery_stripe_key(target_dir):
+    """The byte key one delivery directory is striped on.
 
-    Keyed on the target entry's own name -- the spelling the resolved
-    delivery directory carries on this filesystem, which every caller holds
-    before the lock is taken. The caller's spelling is not usable: on a
-    case-insensitive filesystem `foo` and `Foo` are two spellings of one
-    directory, so keying on the spelling a caller happened to type puts two
-    callers for the same target on two different locks, which is silently
-    no serialization at all. (An earlier version of this claimed the logical
-    key had no spellings to normalise; there it has exactly the spellings
-    the filesystem gives it.) A resolved name is also past the `\\?\`
-    prefix, the 8.3 alias, the junction and the mapped drive, so one entry
-    is one string again.
+    The entry itself, as the filesystem reports it: the device and inode of
+    the directory, which every path that reaches that one entry shares. A
+    directory that does not exist has no identity to ask for, so its name is
+    the key -- the best answer available, and the one that errs toward two
+    stripes for one entry only while the entry is still absent.
 
-    The key is still a name a caller chose, hashed through a per-process
-    secret, so it is neither computable nor steerable offline; what remains
-    discoverable is the timing the acceptance comment above records.
+    A name could not serve here, and not only because of case. `realpath`
+    answers with the caller's spelling on every POSIX platform, so `Foo` and
+    `foo` reach one directory on a case-insensitive parent while carrying
+    two different names, and two names take two locks: the serialization the
+    stripe exists to provide, silently absent. An inode is not a spelling
+    and is not something a caller can compute or steer, which is a little
+    more than the per-process secret alone was asked for.
     """
-    # A path-like spelling is refused, str or object alike: two spellings of
-    # one directory would otherwise choose two stripes and serialize nothing.
-    # No legitimate key contains one of these characters — a key is
-    # `<token>_<tab>` and `unsafe_component` rejects every one of them in
-    # either half — so refusing them costs no real key.
-    if not isinstance(target_key, str):
-        raise TypeError('delivery stripe key must be an entry name')
-    if any(char in path_safety.WINDOWS_INVALID_PATH_CHARS
-           for char in target_key):
-        raise TypeError('delivery stripe key must be an entry name')
-    key = os.fsencode(target_key)
+    try:
+        info = os.stat(target_dir)
+    except OSError:
+        info = None
+    if info is None or not info.st_ino:
+        # No entry to ask, or a filesystem that reports no inode number --
+        # where every entry would share one identity and every write would
+        # serialize behind every other.
+        return os.fsencode(os.path.basename(os.fspath(target_dir)))
+    return f'{info.st_dev}:{info.st_ino}'.encode()
+
+
+def delivery_lock_for(target_dir):
+    """Return the lock that serializes one target's delivery files.
+
+    Keyed on the target directory itself, not on anything a caller spelled:
+    see `delivery_stripe_key` for why a name cannot answer, and for the one
+    case where the name is all there is. Every caller holds the resolved
+    directory before the lock is taken, so no caller has to resolve a name
+    to reach the right stripe.
+    """
+    key = delivery_stripe_key(target_dir)
     index = stripe_index(key, DELIVERY_LOCK_STRIPES)
     return delivery_locks[index]
 

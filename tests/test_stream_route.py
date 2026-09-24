@@ -393,44 +393,89 @@ def test_a_folded_extension_queue_is_not_drained_as_a_tab(tmp):
 
     A case-folding parent gives the extension's queue directory one entry
     whose name is spelled `Extension`, and the per-tab scan then reads that
-    entry as a tab named `Extension` and drains it a second time. What the
-    second drain takes is a command published between the two drains, so
-    the fixture publishes one there: it is the extension's own command,
-    handed to the background tagged for a tab that does not exist.
+    entry as a tab named `Extension` and drains it as one -- handing the
+    background a command of the extension's own, tagged for a tab that does
+    not exist. The scan's verdict is a question about the parent, so this
+    pins it where the answer is a different one: the other tab in the same
+    scan is delivered, which is what shows the tick ran at all.
     """
     route = _load_route('stream_route_folded_extension_queue')
     cq = route.command_queue
     root = Path(tmp)
     cq.enqueue(root, 'tok', 'Extension', {'id': 'queued-for-extension'},
                command_ttl=90)
-    sink = _FrameSink(on_first_frame=lambda: cq.enqueue(
-        root, 'tok', 'Extension', {'id': 'published-mid-tick'},
-        command_ttl=90))
+    cq.enqueue(root, 'tok', 'realtab', {'id': 'another-tab'},
+               command_ttl=90)
+    sink = _FrameSink()
 
     with _case_fold.case_folding(root):
         _one_tick(route, sink, root, 'tok', 'extension')
 
-    assert sink.ids() == ['queued-for-extension'], sink.ids()
-    assert sink.tags() == [None], sink.tags()
-    assert len(list((root / 'tok_Extension').iterdir())) == 1, (
-        'the extension\'s own command was drained as a tab\'s')
+    assert sink.ids() == ['another-tab'], sink.ids()
+    assert sink.tags() == ['realtab'], sink.tags()
+    assert [path.name for path in (root / 'tok_Extension').iterdir()], (
+        'the extension\'s own queue was drained as a tab\'s')
 
 
-def test_a_tab_named_like_the_extension_is_a_tab_here(tmp):
-    """The control: where the parent folds nothing, `Extension` is a tab.
+def _symlinked_extension_queue(root, name):
+    """A `tok_Extension` that is a symlink to a tab's real queue.
 
-    The same fixture without the emulated parent, so the difference the
-    fold case pins is the parent's and not the assertion's.
+    The case that only a case-insensitive parent produces: there,
+    `tok_extension` resolves to this entry, so the entry IS the extension's
+    own namespace by name -- and `samefile`, which the reserved-name check
+    asks, follows the link and agrees. On a case-sensitive parent the same
+    fixture is a tab whose queue happens to be a symlink, and the check must
+    keep treating it as one.
     """
-    route = _load_route('stream_route_extension_named_tab')
-    cq = route.command_queue
+    real = root / f'{name}_behind_the_link'
+    real.mkdir(parents=True)
+    (real / '1700000000000_000001.json').write_text(
+        '{"id":"behind-the-link"}', encoding='utf-8')
+    alias = root / 'tok_Extension'
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    return real, alias
+
+
+def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
+    """A reserved name reached through a symlink is still reserved.
+
+    `same_entry` follows a symlink, which is what makes the folded
+    comparison right and is also what could swallow a tab: the direction is
+    the issue's own (on that parent the entry answers to the extension's
+    name), and this pins it so the choice is recorded rather than incidental.
+    """
+    route = _load_route('stream_route_folded_symlink_reserved')
     root = Path(tmp)
-    cq.enqueue(root, 'tok', 'Extension', {'id': 'per-tab'}, command_ttl=90)
+    real, alias = _symlinked_extension_queue(root, 'tok')
+    sink = _FrameSink()
+
+    with _case_fold.case_folding(root):
+        _one_tick(route, sink, root, 'tok', 'extension')
+
+    assert sink.ids() == [], sink.ids()
+    assert len(list(real.iterdir())) == 1, 'a reserved entry was drained'
+    assert alias.is_symlink()
+
+
+def test_a_symlinked_tab_named_like_the_extension_is_drained_here(tmp):
+    """The control: the same symlink where the parent folds nothing.
+
+    `tok_extension` names nothing on this filesystem, so the entry is a
+    tab's queue and is drained as one -- the behaviour the folded case
+    changes, and the reason the check asks the parent rather than folding
+    the name itself.
+    """
+    route = _load_route('stream_route_symlink_tab_control')
+    root = Path(tmp)
+    _real, _alias = _symlinked_extension_queue(root, 'tok')
     sink = _FrameSink()
 
     _one_tick(route, sink, root, 'tok', 'extension')
 
-    assert sink.ids() == ['per-tab'], sink.ids()
+    assert sink.ids() == ['behind-the-link'], sink.ids()
     assert sink.tags() == ['Extension'], sink.tags()
 
 
