@@ -551,33 +551,6 @@ def generator_context(generator, caller, chain, copy_state, overlay):
     return entry, keep, blocked, True
 
 
-def bind_deferred_target(target, value, state):
-    names = {node.id for node in ast.walk(target)
-             if isinstance(node, ast.Name)}
-    for name in names:
-        state.aliases.pop(name, None)
-        state.generators.pop(name, None)
-        state.callables.pop(name, None)
-        state.bound.add(name)
-    if isinstance(target, ast.Name):
-        if isinstance(value, DeferredGenerator):
-            state.generators[target.id] = value
-        elif is_deferred_value(value):
-            state.callables[target.id] = value
-        sender = sender_value(value)
-        if sender is not None: state.aliases[target.id] = sender
-    elif isinstance(target, (ast.Tuple, ast.List)) \
-            and isinstance(value, DeferredContainer):
-        for index, nested in enumerate(target.elts):
-            bind_deferred_target(nested, value.items.get(index), state)
-    sync_cells(state, names)
-
-
-def bind_deferred_states(target, value, states):
-    for state in states:
-        bind_deferred_target(target, value, state)
-
-
 def append_deferred(values, value):
     if value is not None: values.append(value)
 
@@ -588,31 +561,6 @@ def consumer_results(consumer, arguments, states):
     value = merge_yielded(
         _known_value(arguments[0], state) for state in states)
     return [value] if value is not None else []
-
-
-def materialize_deferred(consumer, value, node=None):
-    if value is None: return None
-    if isinstance(value, DeferredAlternatives):
-        return merge_yielded(
-            materialize_deferred(consumer, item, node)
-            for item in value.values)
-    if consumer in ('max', 'min'):
-        return value
-    if consumer == 'sum':
-        return None
-    if consumer == 'dict' and isinstance(value, DeferredContainer):
-        if value.kind not in ('list', 'tuple') or value.length not in (
-                2, None):
-            return None
-        key = value.items.get(0) if value.length == 2 else None
-        item = value.items.get(1) if value.length == 2 else merge_yielded(
-            (value.items.get(1), value.items.get(DYNAMIC_KEY)))
-        if not (is_deferred_value(item) or sender_value(item) is not None):
-            return None
-        return DeferredContainer(
-            {DYNAMIC_KEY if key is None else key: item}, 1, 'dict', node)
-    kind = 'list' if consumer == 'sorted' else consumer
-    return DeferredContainer({0: value}, 1, kind)
 
 
 def iterable_deferred(value):
@@ -643,8 +591,17 @@ def expression_callables(node, state):
                  for candidate in callable_candidates(value))
 
 
+def _held_callables(node, state):
+    """Every callable a container the expression names holds: a call the
+    model neither follows nor consumes may read any of them."""
+    return tuple(candidate for child in ast.walk(node)
+                 if isinstance(value := _known_value(child, state),
+                               DeferredContainer)
+                 for candidate in reachable_callables(value))
+
+
 def follow_callable_call(candidates, arguments, states, call, analyze,
-                         copy_states, dedupe_states):
+                         copy_states, dedupe_states, consumer=None):
     returned = []
     if candidates:
         invoked = []
@@ -659,10 +616,33 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
         return states, None
     callbacks = {id(candidate): candidate
                  for argument in arguments for state in states
-                 for candidate in expression_callables(argument, state)}
+                 for candidate in (*expression_callables(argument, state),
+                                   *(() if consumer else _held_callables(
+                                       argument, state)))}
     for callback in callbacks.values():
         states, _ = analyze(callback, states)
     return states, None
+
+
+def _argument_value(expression, caller, sender_resolver):
+    """A parameter's value and sender. A list of arguments stands for a
+    parameter at or after a starred one, whose position is unknown: it may
+    be any of them, or any item a starred one unpacks."""
+    if not isinstance(expression, list):
+        value = _known_value(expression, caller)
+        return value, sender_resolver(expression, caller.aliases)
+    values = []
+    for argument in expression:
+        value = _known_value(argument, caller)
+        if isinstance(argument, ast.Starred) \
+                and isinstance(value, DeferredContainer):
+            values.extend(value.items.values())
+        else:
+            values.extend((value, None if sender_value(value) else
+                           sender_resolver(argument, caller.aliases)))
+    joined = merge_yielded(values)
+    return (joined if is_deferred_value(joined) else None,
+            sender_value(joined))
 
 
 def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
@@ -671,7 +651,11 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
     positional = [*args.posonlyargs, *args.args]
     if isinstance(call.func, ast.Attribute) and positional:
         positional = positional[1:]
-    expressions = list(zip(positional, call.args))
+    star = next((index for index, argument in enumerate(call.args)
+                 if isinstance(argument, ast.Starred)), len(call.args))
+    expressions = list(zip(positional, call.args[:star]))
+    expressions.extend((parameter, call.args[star:])
+                       for parameter in positional[star:])
     by_name = {parameter.arg: parameter
                for parameter in [*positional, *args.kwonlyargs]}
     expressions.extend((by_name[keyword.arg], keyword.value)
@@ -680,10 +664,9 @@ def bind_call_arguments(deferred, call, caller, entry, sender_resolver,
     literals = []
     for parameter, expression in expressions:
         name = parameter.arg
-        value = _known_value(expression, caller)
+        value, sender = _argument_value(expression, caller, sender_resolver)
         if value is not None:
             entry.callables[name] = value
-        sender = sender_resolver(expression, caller.aliases)
         if sender is not None:
             entry.aliases[name] = sender
         if isinstance(expression, ast.Constant):

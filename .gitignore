@@ -311,6 +311,7 @@
 !/tests/_pyroute_live.py
 !/tests/_pyroute_mapping.py
 !/tests/_pyroute_match.py
+!/tests/_pyroute_positions.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
 !/tests/_pyroute_targets.py
@@ -530,6 +531,7 @@
 !/tests/test_tab_routing_match.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_positions.py
+!/tests/test_tab_routing_sequence_reads.py
 !/tests/test_tab_routing_setdefault.py
 !/tests/test_tab_routing_signatures.py
 !/tests/test_tab_routing_starred_arity.py
