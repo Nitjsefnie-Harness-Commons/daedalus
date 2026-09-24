@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
+import test_watcher_waits as waits  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -118,17 +119,16 @@ def _rate_limited_error(reset_at=None, retry_after=None):
          'extensions': {'rateLimit': rate}}]}}
 
 
-def _until(predicate, what, timeout=45):
-    """Wait for a thing to become true; fail with what never became true."""
-    deadline = time.monotonic() + timeout
-    while True:
-        value = predicate()
-        if value:
-            return value
-        if time.monotonic() > deadline:
-            raise AssertionError(f'timed out after {timeout}s waiting for '
-                                 f'{what}')
-        time.sleep(0.05)
+def _announces_pid(line):
+    return 'watcher pid' in line
+
+
+def _reports_rate_limit(line):
+    return 'rate limit' in line
+
+
+def _announces_review(line):
+    return ' review from ' in line
 
 
 class _Child:
@@ -145,17 +145,19 @@ class _Child:
             argv, env=_util.child_coverage('scrub', environment=env),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             encoding='utf-8', errors='replace', creationflags=group)
-        self.out = []
-        self.err = []
+        self.out = waits.Stream()
+        self.err = waits.Stream()
         for stream, sink in ((self.proc.stdout, self.out),
                              (self.proc.stderr, self.err)):
-            threading.Thread(target=self._pump, args=(stream, sink),
+            threading.Thread(target=sink.pump, args=(stream,),
                              daemon=True).start()
 
-    @staticmethod
-    def _pump(stream, sink):
-        for line in stream:
-            sink.append(line.rstrip('\n'))
+    def alive(self):
+        return self.proc.poll() is None
+
+    def captured(self):
+        """Everything the child printed, for a wait's failure report."""
+        return '\n'.join(self.out.lines + self.err.lines)
 
     def stop(self):
         if self.proc.poll() is None:
@@ -169,11 +171,8 @@ def _watcher(name, args, fake):
                   fake.env())
 
 
-def _wait_for_calls(fake, count, timeout=45):
-    def enough():
-        calls = fake.calls()
-        return calls if len(calls) >= count else None
-    return _until(enough, f'{count} gh call(s)', timeout)
+def _await_calls(fake, count, child):
+    return waits.await_calls(fake, count, child, f'{count} gh call(s)')
 
 
 def _ticks(calls, tick=TICK):
@@ -223,7 +222,7 @@ def _measure(tmp, name, args, fake, tick=TICK, calls=MEASURED_CALLS):
     """Calls per poll for one watcher, measured from what gh received."""
     child = _watcher(name, args, fake)
     try:
-        _wait_for_calls(fake, calls)
+        _await_calls(fake, calls, child)
     finally:
         child.stop()
     seen = fake.calls()
@@ -347,7 +346,7 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
         child = _Child([sys.executable, '-u', str(script),
                         *args, '--interval', str(TICK)], fake.env())
         try:
-            _wait_for_calls(fake, MEASURED_CALLS)
+            _await_calls(fake, MEASURED_CALLS, child)
         finally:
             child.stop()
         before[name] = _per_tick(fake.calls())
@@ -364,17 +363,16 @@ def test_the_children_die_with_their_parent(tmp):
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                      '--debounce', '1', '--max-hold', '5'], fake.env())
     try:
-        _until(lambda: len([line for line in parent.err
-                            if 'watcher pid' in line]) == 2,
-               'both children to announce their pid')
-        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err
-                if 'watcher pid' in line]
-        _wait_for_calls(fake, 2)
+        waits.await_lines(parent.err, _announces_pid, 2,
+                          'both children to announce their pid')
+        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
+                if _announces_pid(line)]
+        _await_calls(fake, 2, parent)
         assert all(_pid_alive(pid) for pid in pids), pids
         parent.proc.kill()
         parent.proc.wait(timeout=60)
-        _until(lambda: not any(_pid_alive(pid) for pid in pids),
-               f'children {pids} to die with the parent')
+        waits.await_gone(pids, parent, f'children {pids} to die with the '
+                         f'parent', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), pids
     finally:
         parent.stop()
@@ -389,20 +387,20 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
     try:
-        _until(lambda: [line for line in child.out
-                        if 'rate limit' in line],
-               'the pause line naming the reset')
+        waits.await_lines(child.out, _reports_rate_limit, 1,
+                          'the pause line naming the reset')
         stamp = datetime.fromtimestamp(reset, timezone.utc).strftime(STAMP)
-        pause = [line for line in child.out if 'rate limit' in line][0]
+        pause = [line for line in child.out.lines
+                 if _reports_rate_limit(line)][0]
         assert stamp in pause, (stamp, pause)
-        _until(lambda: any('state: open' in line for line in child.out),
-               'the resumed poll to report what it found')
+        waits.await_lines(child.out, lambda line: 'state: open' in line, 1,
+                          'the resumed poll to report what it found')
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
         assert calls[1]['t'] >= reset, (calls[1]['t'], reset)
         # One line for the whole wait, not one per poll inside it.
-        assert len([line for line in child.out
-                    if 'rate limit' in line]) == 1
+        assert len([line for line in child.out.lines
+                    if _reports_rate_limit(line)]) == 1
     finally:
         child.stop()
 
@@ -417,17 +415,16 @@ def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
     child = _watcher('ci_watch.py',
                      [BRANCH, '--interval', '5', '--debounce', '0'], fake)
     try:
-        _until(lambda: [line for line in child.out
-                        if 'rate limit' in line],
-               'the CI pause line')
-        _until(lambda: any('pyright: failure' in line
-                           for line in child.out),
-               'the resumed poll to announce the conclusion')
+        waits.await_lines(child.out, _reports_rate_limit, 1,
+                          'the CI pause line')
+        waits.await_lines(child.out,
+                          lambda line: 'pyright: failure' in line, 1,
+                          'the resumed poll to announce the conclusion')
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
         assert calls[1]['t'] >= before + 4, (calls[1]['t'], before)
-        assert len([line for line in child.out
-                    if 'rate limit' in line]) == 1
+        assert len([line for line in child.out.lines
+                    if _reports_rate_limit(line)]) == 1
     finally:
         child.stop()
 
@@ -511,9 +508,10 @@ def test_the_review_line_keeps_the_uppercase_state(tmp):
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
     try:
-        _until(lambda: [line for line in child.out if ' review from ' in line],
-               'the review announcement')
-        line = [row for row in child.out if ' review from ' in row][0]
+        waits.await_lines(child.out, _announces_review, 1,
+                          'the review announcement')
+        line = [row for row in child.out.lines
+                if _announces_review(row)][0]
         assert 'state=APPROVED' in line, line
     finally:
         child.stop()
@@ -546,12 +544,11 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
                      '--debounce', '1', '--max-hold', '5'], fake.env(),
                     interruptible=True)
     try:
-        _until(lambda: len([line for line in parent.err
-                            if 'watcher pid' in line]) == 2,
-               'both children to announce their pid')
-        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err
-                if 'watcher pid' in line]
-        _wait_for_calls(fake, 2)
+        waits.await_lines(parent.err, _announces_pid, 2,
+                          'both children to announce their pid')
+        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err.lines
+                if _announces_pid(line)]
+        _await_calls(fake, 2, parent)
         assert all(_pid_alive(pid) for pid in pids), pids
         if sys.platform.startswith('win'):
             parent.proc.send_signal(
@@ -559,8 +556,8 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
         else:
             parent.proc.send_signal(signal.SIGINT)
         parent.proc.wait(timeout=60)
-        _until(lambda: not any(_pid_alive(pid) for pid in pids),
-               f'children {pids} to leave with a graceful exit')
+        waits.await_gone(pids, parent, f'children {pids} to leave with a '
+                         f'graceful exit', _pid_alive)
         assert not any(_pid_alive(pid) for pid in pids), pids
     finally:
         parent.stop()
