@@ -460,6 +460,17 @@ def load(loader=importlib, name=None):
 ''', 5, 'cannot follow')
 
 
+def test_a_parameter_default_holding_the_registry_refuses_the_scan(_tmp):
+    """A default holding the registry is refused; it shares the store path's
+    decision."""
+    for source, site in (
+            ('\nimport sys\n\n\ndef load(r=sys):\n'
+             '    return r.modules["json"]\n', 5),
+            ('\nimport sys\n\n\ndef load(*, r=sys):\n'
+             '    return r.modules["json"]\n', 5)):
+        _assert_refusal(_tmp, source, site, 'cannot follow')
+
+
 def test_a_parameter_default_refusal_is_one_line_naming_the_parameter(_tmp):
     """The refusal names the parameter, not the whole definition.
 
@@ -483,6 +494,16 @@ def load(name, loader=importlib):
         assert 'parameter loader=importlib' in message, message
     else:
         raise AssertionError('a computed import was silently skipped')
+
+
+def test_a_bare_registry_store_is_refused_as_the_registry(_tmp):
+    """A bare registry store routes to the registry refusal, not the
+    operation one: the exclusion is load-bearing."""
+    _assert_refusal(_tmp, '''
+import sys
+
+m = sys
+''', 4, 'module registry')
 
 
 def test_an_except_target_alias_refuses_the_scan(_tmp):
