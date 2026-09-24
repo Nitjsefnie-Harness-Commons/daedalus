@@ -353,12 +353,14 @@ where it is waiting - the instant the API reported as `X-RateLimit-Reset` or
 which is what used to keep the limit at zero after it was reached. A 403
 with no rate-limit evidence is an ordinary failure and is never a pause.
 
-**The children cannot outlive the aggregator.** `watch_all.py` passes its pid
-to both (`--parent-pid`) and each compares it on every tick and while it
-waits, and they are terminated on the way out; a kill of the parent never
-runs a `finally`, so neither mechanism carries the guarantee alone. A restart
-of the aggregator can therefore never leave the old pair polling beside the
-new one.
+**The children cannot outlive the aggregator.** `watch_all.py` gives each
+child the read end of a pipe and keeps the only write end itself: this
+process dying is end of file, and the child exits on it. That is the whole
+guarantee, on every platform - a parent pid is re-parented on POSIX and is
+the historical creator on Windows, so a pid check protects a child on one
+platform and not the other, and a kill runs no `finally`, so the teardown
+only makes a graceful exit immediate. A restart of the aggregator can
+therefore never leave the old pair polling beside the new one.
 
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 

@@ -22,9 +22,10 @@ stdout is the event channel; everything else is stderr, which Monitor keeps
 in a silent file. A rate-limit refusal is announced once, on stdout, with the
 instant the wait ends, and the poll resumes at that reset rather than at the
 next interval. Consecutive poll failures escalate to a stdout line, because a
-watcher that has gone blind must not look like a quiet branch. With
-`--parent-pid` the watcher exits as soon as that parent is gone, so a
-restarted aggregator never leaves the old pair polling beside the new one.
+watcher that has gone blind must not look like a quiet branch. Started by
+`watch_all.py`, the watcher holds the read end of a pipe whose only write
+end the aggregator holds, and exits when that goes - so a restarted
+aggregator never leaves the old pair polling beside the new one.
 
 Conclusions are held for DEBOUNCE_SECONDS and flushed together, because a
 twelve-cell matrix finishing over a couple of minutes is one thing happening,
@@ -149,10 +150,6 @@ def main():
     parser.add_argument('--debounce', type=int, default=DEBOUNCE_SECONDS,
                         help='seconds to batch conclusions before emitting; '
                              'coverage and speed always emit at once')
-    parser.add_argument('--parent-pid', type=int, default=None,
-                        help='exit when this process is gone; watch_all.py '
-                             'passes its own pid so a restart never leaves '
-                             'the old pair polling')
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()
@@ -172,8 +169,7 @@ def main():
     failures = 0
     pending = []
     window_opened = None
-    watcher = gh_client.Watcher(f'CI {args.branch} watcher',
-                                parent_pid=args.parent_pid)
+    watcher = gh_client.Watcher(f'CI {args.branch} watcher')
     while True:
         try:
             immediate, held = watcher.poll(

@@ -6,11 +6,13 @@ until neither child has produced a line for the debounce window, then the
 whole batch is emitted as a single block — so a burst of twenty CI verdicts
 arrives as one notification instead of twenty.
 
-Each child is told this process's pid and exits when it is gone, and they
-are terminated here on the way out, so a restart never leaves the old pair
-polling beside the new one. The children each spend one GraphQL query per
-poll, and a rate-limit refusal pauses the child that read it until the reset
-the API reported.
+Each child holds the read end of a pipe whose only write end this process
+holds: this process dying is end of file, and the child exits on it, so a
+restart never leaves the old pair polling beside the new one - on a hard kill
+as much as on a graceful exit, and without a platform's idea of who a
+parent is. The children each spend one GraphQL query per poll, and a
+rate-limit refusal pauses the child that read it until the reset the API
+reported.
 
 stdout carries the batches, which is what a Monitor turns into notifications.
 stderr carries this script's own diagnostics and stays off that stream --
@@ -264,14 +266,14 @@ def _spawn(argv):
         encoding='utf-8', errors='replace')
 
 
-def _watchers(pr, branch, parent_pid=None):
-    """The two children, each told which process armed it.
+def _watchers(pr, branch):
+    """The two children. Their liveness pipe is what keeps them from orphaning.
 
-    The parent pid is what makes an orphan impossible: a child compares it
-    against its own on every tick and while it waits, and exits when the
-    parent is gone. This is redundant with the terminate below on purpose —
-    a kill of this process never runs a `finally`, so neither mechanism
-    alone carries the guarantee.
+    Not a parent pid: `os.getppid()` is re-parented on POSIX and is the
+    historical creator on Windows, so a pid check protects a child on one
+    platform and not the other. The terminate below is not the guarantee
+    either - a kill of this process runs no `finally` - it only makes a
+    graceful exit immediate.
     """
     return (
         ('comments', [sys.executable, '-u',

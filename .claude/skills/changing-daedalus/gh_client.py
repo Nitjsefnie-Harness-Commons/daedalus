@@ -408,32 +408,18 @@ def watch_parent():
                      name='parent-watch', daemon=True).start()
 
 
-def check_parent(parent_pid):
-    """Exit the process when the parent it was told about is gone.
-
-    A second signal beside the pipe, for a watcher that was given a pid
-    rather than armed by `spawn_watched`. `os.getppid()` is re-parented
-    when the parent dies on POSIX, and is the historical creator on
-    Windows - which is why the pipe, not this, is what carries the
-    guarantee there.
-    """
-    if parent_pid and os.getppid() != parent_pid:
-        raise SystemExit(0)
-
-
 class Watcher:
     """The pause a long-running watcher applies to a rate-limit refusal.
 
     A refusal is a known wait, not a failure: one line says where the wait
     is until, and the poll resumes when the reset passes rather than at the
-    next tick. The wait is bounded, and slept in slices, so neither a
-    hostile header nor a gone parent can hang or hot-loop the watcher.
+    next tick. The wait is bounded, so neither a hostile header nor an
+    absurd reset can hang or hot-loop the watcher.
     """
 
-    def __init__(self, label, out=None, parent_pid=None, deadline=None):
+    def __init__(self, label, out=None, deadline=None):
         self.label = label
         self.out = sys.stdout if out is None else out
-        self.parent_pid = parent_pid
         self.deadline = deadline
 
     def poll(self, call):
@@ -444,7 +430,6 @@ class Watcher:
         instead of buying one more request.
         """
         while True:
-            self.check_parent()
             if (self.deadline is not None
                     and time.monotonic() >= self.deadline):
                 raise WaitExpired('the wait deadline passed')
@@ -454,15 +439,11 @@ class Watcher:
                 self._pause(refusal)
 
     def sleep(self, seconds):
-        """Sleep, noticing a gone parent while it waits."""
+        """Sleep the whole wait in slices, so it stays a sequence of steps."""
         left = max(0.0, float(seconds))
         while left > 0:
-            self.check_parent()
             time.sleep(min(SLEEP_SLICE, left))
             left -= SLEEP_SLICE
-
-    def check_parent(self):
-        check_parent(self.parent_pid)
 
     def _wait_seconds(self, refusal, now=None):
         """How long to wait for this refusal, clamped into a sane bound."""
