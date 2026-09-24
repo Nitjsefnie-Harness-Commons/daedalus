@@ -5,15 +5,26 @@ spliced into a Node harness, so it shares that harness's scope.
 
 A harness that splices `STRICT_FETCH` must define, before the splice:
 
-  plan        the scenario's object. `planned` lists the `"METHOD /path"`
-              keys it declares; `hosts` optionally narrows the permitted
-              origins, `statuses` queues the stream branch's answers, and
-              `answers` optionally maps a declared key to the answer the
-              scenario planned for it — `{status, body}`, or `{throw: msg}`
-              for a bridge the scenario models as unreachable.
+  plan        the scenario's object. `planned` lists the declared request
+              keys; `hosts` optionally lists the permitted BRIDGE origins
+              (a bridge request keys on `"METHOD /path"`, so a new bridge URL
+              the config rotates to is the same route), `relayHosts`
+              optionally lists permitted NON-bridge origins (a relay request
+              keys on `"METHOD <full-url>"`, so it can never collide with a
+              bridge request to the same path), `statuses` queues the stream
+              branch's answers, and `answers` optionally maps a declared key
+              to the answer the scenario planned for it — `{status, body}`,
+              `{throw: msg}` for a bridge the scenario models as unreachable,
+              `{stream: N}` to have the harness build an N-chunk relay answer,
+              or a LIST of these for a per-attempt sequence (one answer per
+              attempt; a sequence that runs out is a recorded refusal, never
+              a 200).
   BRIDGE_URL  the default permitted origin.
   response(status, data)  plain response factory.
   streamResponse(answer)  response factory for the stream branch.
+  chunkedResponse(count)  builds a declared `{stream: N}` answer. Required by
+              the contract exactly when a plan declares a `{stream: N}`
+              answer; otherwise it need not exist.
   streamFetches, resultPosts, nonStreamFetches, refusedFetches,
   badOrigins  arrays the gate records into.
 
@@ -40,12 +51,24 @@ against the plan it declared.
 import json
 import shutil
 
-from _boundary_env import run_node_program
-
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
 // runs once, at splice time, before any fetch.
 const gateContractFaults = [];
+// A per-attempt answer sequence is a list; when it runs out the attempt is a
+// recorded refusal, never a silent fallback to the default 200.
+const EXHAUSTED = { exhausted: true };
+const answerCursors = new Map();
+
+function answerEntries(value) {
+  return Array.isArray(value) ? value : [value];
+}
+
+function declaresChunkedAnswer(answers) {
+  return Object.keys(answers).some((key) => answerEntries(answers[key])
+    .some((entry) => entry && entry.stream !== undefined));
+}
+
 if (typeof plan === 'undefined') {
   gateContractFaults.push('plan');
 } else if (!Array.isArray(plan.planned)) {
@@ -53,6 +76,14 @@ if (typeof plan === 'undefined') {
 } else if (plan.answers !== undefined
   && (typeof plan.answers !== 'object' || Array.isArray(plan.answers))) {
   gateContractFaults.push('plan.answers');
+}
+// A {stream: N} answer is built by the harness, so the chunk factory is part
+// of the contract exactly when a plan declares such an answer.
+if (typeof plan !== 'undefined' && plan.answers !== undefined
+    && typeof plan.answers === 'object' && !Array.isArray(plan.answers)
+    && declaresChunkedAnswer(plan.answers)
+    && typeof chunkedResponse !== 'function') {
+  gateContractFaults.push('chunkedResponse');
 }
 if (typeof BRIDGE_URL === 'undefined') gateContractFaults.push('BRIDGE_URL');
 if (typeof response !== 'function') gateContractFaults.push('response');
@@ -92,11 +123,20 @@ function accountRequest(request, init) {
   return entry;
 }
 
-// What the scenario planned for this key, or null for the default answer.
+// What the scenario planned for this key, or null for the default answer. A
+// list is a per-attempt sequence: each attempt consumes the next entry, and
+// the marker EXHAUSTED is returned once the sequence runs out so the caller
+// refuses it by status instead of answering 200.
 function plannedAnswer(request) {
   const answers = plan.answers || {};
-  return Object.prototype.hasOwnProperty.call(answers, request)
-    ? answers[request] : null;
+  if (!Object.prototype.hasOwnProperty.call(answers, request)) {
+    return null;
+  }
+  const declared = answers[request];
+  if (!Array.isArray(declared)) return declared;
+  const used = answerCursors.get(request) || 0;
+  answerCursors.set(request, used + 1);
+  return used < declared.length ? declared[used] : EXHAUSTED;
 }
 
 function originOf(url) {
@@ -104,14 +144,26 @@ function originOf(url) {
   return match ? match[0] : '(no origin)';
 }
 
-function permittedOrigins() {
+// `hosts` are the permitted BRIDGE origins (the count is per route, keyed on
+// the bare path, so a new bridge URL the config rotates to is the same
+// route). `relayHosts` are permitted NON-bridge origins — a relay fetch is
+// keyed on its full URL, so it can never collide with a bridge request to the
+// same path. Both lists pass the origin gate; only their keying differs.
+function bridgeOrigins() {
   return plan.hosts || [BRIDGE_URL];
 }
 
-// Route, not host: the count is per route, and the origin gate above
-// decides which bridges the plan admits at all.
+function permittedOrigins() {
+  return bridgeOrigins().concat(plan.relayHosts || []);
+}
+
+// Route, not host: a bridge request keys on the bare path; a permitted
+// non-bridge (relay) origin keeps its full URL, so the two can never share
+// one key.
 function requestKey(url, init) {
-  return (init.method || 'GET') + ' ' + url.replace(/^https?:\/\/[^/]+/, '');
+  const path = bridgeOrigins().includes(originOf(url))
+    ? url.replace(/^https?:\/\/[^/]+/, '') : url;
+  return (init.method || 'GET') + ' ' + path;
 }
 
 async function bridgeFetch(target, init = {}) {
@@ -148,11 +200,26 @@ async function bridgeFetch(target, init = {}) {
     return response(599, { ok: false, error: 'more often than declared' });
   }
   const planned = plannedAnswer(request);
+  if (planned === EXHAUSTED) {
+    // The sequence is the contract; past its end nothing is declared, so the
+    // attempt is refused by status and recorded rather than answered 200.
+    entry.refused = true;
+    refusedFetches.push(request);
+    entry.status = 599;
+    return response(599, {
+      ok: false, error: 'declared answer sequence exhausted',
+    });
+  }
   if (planned && planned.throw) {
     // A scenario that models an unreachable bridge declares the throw; the
     // record carries it, so a worker that swallows it still shows the call.
     entry.status = 'throw';
     throw new TypeError(planned.throw);
+  }
+  if (planned && planned.stream !== undefined
+      && typeof chunkedResponse === 'function') {
+    entry.status = 200;
+    return chunkedResponse(planned.stream);
   }
   const status = planned && planned.status !== undefined
     ? planned.status : 200;
@@ -174,6 +241,9 @@ def require_node():
 
 
 def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
+    # Deferred: _boundary_env splices this module's gate, so a top-level
+    # import here would be circular. By call time _boundary_env is loaded.
+    from _boundary_env import run_node_program
     result = run_node_program(node, program, arguments, cwd=cwd,
                               payload=plan, timeout=timeout)
     assert result.returncode == 0, (

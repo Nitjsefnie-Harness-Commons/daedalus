@@ -194,7 +194,7 @@ async function runCapacity() {
   return {
     firstId: first && first.id,
     sentMessages: sentMessages.length,
-    results: requests.filter((item) => item.kind === 'result'),
+    results: bridgeRequests().filter((item) => item.kind === 'result'),
   };
 }
 
@@ -214,7 +214,7 @@ async function runExpiry() {
   return {
     stillPending: Boolean(vm.runInContext(
       "_takeEvalRelay(expiredRelay, '7')", context)),
-    results: requests.filter((item) => item.kind === 'result'),
+    results: bridgeRequests().filter((item) => item.kind === 'result'),
   };
 }
 
@@ -250,7 +250,7 @@ async function runRouteSnapshot() {
   tabQueryResolver([{ id: 7 }]);
   await blockExecution;
   return {
-    requests,
+    requests: bridgeRequests(),
     excludedRequestDomains: rules[0]
       ? rules[0].condition.excludedRequestDomains
       : null,
@@ -265,9 +265,10 @@ async function runScreenshotTarget() {
     _did: 'did-targeted',
   };
   await vm.runInContext('dispatchCommand(screenshotCommand)', context);
+  const uploads = uploadBodies();
   return {
-    captured: uploadedData.length
-      ? Buffer.from(uploadedData[0], 'base64').toString() : null,
+    captured: uploads.length
+      ? Buffer.from(uploads[0].data, 'base64').toString() : null,
     activeAfter: (windowTabs.find((tab) => tab.active) || {}).id,
     activations,
     posted: resultPayloads.map((item) => ({
@@ -284,7 +285,7 @@ async function runScreenshotReject() {
   };
   await vm.runInContext('dispatchCommand(screenshotCommand)', context);
   return {
-    uploads: requests.filter((item) => item.kind === 'upload').length,
+    uploads: bridgeRequests().filter((item) => item.kind === 'upload').length,
     posted: resultPayloads.map((item) => ({
       result: item.result === undefined ? '<absent>' : item.result,
       error: item.error,
@@ -623,8 +624,29 @@ async function run() {
   throw new Error('unknown scenario: ' + scenario);
 }
 
-run().then((result) => {
-  process.stdout.write(JSON.stringify(result));
+run().then(async (result) => {
+  // Drain the event loop first: background.js's boot request
+  // (loadConfig().then -> startStream) is asynchronous, so a scenario that
+  // returns without awaiting it (worker-sources) would otherwise leave the
+  // boot stream fetch out of the snapshot. The scenario's own answer is
+  // already captured; this only completes the gate's record.
+  for (let turn = 0; turn < 4; turn++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  // The scenario's own answer, plus the shared gate's record of every bridge
+  // request it made. The Python runner asserts the gate and returns `result`,
+  // so a request the worker invents is refused and recorded here even when a
+  // scenario reads only a projection of the record.
+  process.stdout.write(JSON.stringify({
+    result,
+    gate: {
+      contractFaults: gateContractFaults,
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+    },
+  }));
 }).catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;

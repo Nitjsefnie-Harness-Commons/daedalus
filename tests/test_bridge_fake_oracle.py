@@ -40,6 +40,7 @@ const resultPosts = [];
 const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
+const chunkCalls = [];
 
 function response(status, data) {
   return {
@@ -54,6 +55,16 @@ function response(status, data) {
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
+
+// The gate builds a declared {stream: N} answer through the harness's chunk
+// factory; `noChunkFactory` withholds it so the splice-time contract check can
+// be exercised.
+let chunkedResponse = plan.noChunkFactory
+  ? undefined
+  : (count) => {
+    chunkCalls.push(count);
+    return response(200, { chunked: count });
+  };
 """ + STRICT_FETCH + r"""
 
 async function run() {
@@ -90,6 +101,7 @@ async function run() {
       (i) => ({ request: i.request, body: i.body })),
     auths: nonStreamFetches.map((i) => i.auth),
     resultPosts,
+    chunkCalls,
   };
 }
 
@@ -330,6 +342,168 @@ def test_a_wrong_typed_plan_answers_table_is_a_contract_fault(tmp):
     outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
                        plan=plan)
     assert outcome['contractFaults'] == ['plan.answers'], outcome
+
+
+# ---- gate extensions this worker family needed -----------------------------
+# The boundary harness fetches a NON-bridge origin through the relay and needs
+# per-attempt answers on one route and a chunked answer factory. Each extension
+# is pinned here against the shared gate directly, and each fixture can carry
+# the defect it guards.
+
+def test_a_non_bridge_origin_is_keyed_by_its_full_url(tmp):
+    """A permitted non-bridge origin keys on the whole URL, not the bare path.
+
+    A bridge request keys on the bare path, so a relay fetch and a bridge
+    request to the SAME path would otherwise collide on one key. A permitted
+    relay origin is keyed by the full URL, so the two can never share a key.
+    """
+    del tmp
+    plan = {
+        'planned': ['GET ' + ELSEWHERE + '/same'],
+        'relayHosts': [ELSEWHERE],
+        'probe': [
+            {'method': 'GET', 'url': ELSEWHERE + '/same'},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['nonStream'] == [
+        'GET ' + ELSEWHERE + '/same'], outcome
+    assert outcome['statuses'] == [200], outcome
+
+
+def test_a_bridge_and_a_relay_request_to_one_path_do_not_collide(tmp):
+    """The bridge keys on the bare path, the relay on the full URL: distinct.
+
+    Both requests are to the same path, one on the bridge origin and one on a
+    permitted relay origin. The bridge strips its origin, the relay keeps its
+    own, so the two records differ and each is answered from its own entry.
+    """
+    del tmp
+    plan = {
+        'planned': ['GET /shared', 'GET ' + ELSEWHERE + '/shared'],
+        'relayHosts': [ELSEWHERE],
+        'probe': [
+            {'method': 'GET', 'url': BRIDGE + '/shared'},
+            {'method': 'GET', 'url': ELSEWHERE + '/shared'},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['nonStream'] == [
+        'GET /shared', 'GET ' + ELSEWHERE + '/shared'], outcome
+    assert outcome['statuses'] == [200, 200], outcome
+    assert outcome['refused'] == [], outcome
+
+
+def test_a_new_bridge_origin_is_keyed_on_the_bare_path(tmp):
+    """A bridge URL the config rotates to is the same route, not a new one.
+
+    `hosts` lists permitted BRIDGE origins, and a bridge request keys on the
+    bare path whatever bridge it went to. This is what a new bridge URL is:
+    the same route on another bridge, not a distinct key.
+    """
+    del tmp
+    other_bridge = 'https://other-bridge.example.com'
+    plan = {
+        'planned': [SYNC, SYNC],
+        'hosts': [BRIDGE, other_bridge],
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/sync-tabs', 'body': {}},
+            {'method': 'POST', 'url': other_bridge + '/sync-tabs', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['nonStream'] == [SYNC, SYNC], outcome
+    assert outcome['statuses'] == [200, 200], outcome
+    assert outcome['refused'] == [], outcome
+
+
+def test_a_per_attempt_sequence_gives_each_attempt_its_own_answer(tmp):
+    """A route that needs a different answer per attempt declares a list.
+
+    The scenario needs the first POST answered 503 and the retry 200, on the
+    same route. plan.answers maps the key to a LIST; each attempt consumes the
+    next entry, so the sequence is a real per-attempt declaration.
+    """
+    del tmp
+    plan = {
+        'planned': [RESULT, RESULT],
+        'answers': {RESULT: [
+            {'status': 503, 'body': {'error': 'retry'}},
+            {'status': 200, 'body': {'ok': True}},
+        ]},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/result',
+             'body': {'id': 'r'}},
+            {'method': 'POST', 'url': BRIDGE + '/result',
+             'body': {'id': 'r'}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == [503, 200], outcome
+    assert [r['status'] for r in outcome['records']] == [503, 200], outcome
+
+
+def test_a_per_attempt_sequence_that_runs_out_refuses_the_next_attempt(tmp):
+    """A declared sequence that runs out is a recorded refusal, not a 200.
+
+    The sequence is the contract; past its end there is no declared answer, so
+    the next attempt is refused by status and recorded. A silent fallback to
+    the default 200 is exactly the defect this branch exists to kill.
+    """
+    del tmp
+    plan = {
+        'planned': [RESULT, RESULT, RESULT],
+        'answers': {RESULT: [
+            {'status': 503, 'body': {'error': 'retry'}},
+            {'status': 200, 'body': {'ok': True}},
+        ]},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/result', 'body': {'id': 'r'}},
+            {'method': 'POST', 'url': BRIDGE + '/result', 'body': {'id': 'r'}},
+            {'method': 'POST', 'url': BRIDGE + '/result', 'body': {'id': 'r'}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['statuses'] == [503, 200, 599], outcome
+    assert outcome['refused'] == [RESULT], outcome
+
+
+def test_a_chunked_answer_is_built_by_the_harness_chunk_factory(tmp):
+    """A declared {stream: N} answer is handed to the harness to build."""
+    del tmp
+    plan = {
+        'planned': [OTHER],
+        'answers': {OTHER: {'stream': 4}},
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/other', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['chunkCalls'] == [4], outcome
+    assert outcome['statuses'] == [200], outcome
+    assert outcome['records'][0]['status'] == 200, outcome
+
+
+def test_a_chunked_answer_without_a_chunk_factory_is_a_contract_fault(tmp):
+    """A {stream: N} answer with no chunk factory is named, not ignored."""
+    del tmp
+    plan = {
+        'planned': [OTHER],
+        'answers': {OTHER: {'stream': 4}},
+        'noChunkFactory': True,
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/other', 'body': {}},
+        ],
+    }
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=plan)
+    assert outcome['contractFaults'] == ['chunkedResponse'], outcome
 
 
 # ---- assert_gate_clean's own controls -------------------------------------

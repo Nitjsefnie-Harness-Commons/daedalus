@@ -7,10 +7,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import ENVIRONMENT, run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import assert_gate_clean  # noqa: E402
 
 
 OBSERVER = ENVIRONMENT + r"""
-const sourceDetails = JSON.parse(commandText);
+const observerInput = JSON.parse(commandText);
+const sourceDetails = observerInput.sources;
+// The observation is gated like every other harness. A stub background makes
+// no bridge request (the default plan declares none); observing the shipped
+// background declares its boot stream fetch.
+if (observerInput.plan) plan = observerInput.plan;
 
 function observationContext(details) {
   const workerContext = makeContext();
@@ -246,37 +252,83 @@ const observations = observedBindings(states, shared);
 for (const details of sourceDetails) {
   Object.assign(observations[details.path], observeHandlerWrites(details));
 }
-process.stdout.write(JSON.stringify({
-  sources: observations,
-  shared,
-}));
+// The bindings above are captured synchronously, but background.js's boot
+// request (loadConfig().then -> startStream) is asynchronous and would land
+// after a synchronous write. Drain the event loop first so the gate's record
+// is the whole request, not the synchronous prefix. A stub background has
+// nothing pending, so this is a no-op there.
+async function snapshot() {
+  for (let turn = 0; turn < 4; turn++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  process.stdout.write(JSON.stringify({
+    sources: observations,
+    shared,
+    gate: {
+      contractFaults: gateContractFaults,
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+    },
+  }));
+}
+snapshot();
 """
 
 
-def observe_worker_runtime(source_details, background_path=None):
+def observe_worker_runtime(source_details, background_path=None, plan=None):
     """Run sources to observe global bindings and handler publication.
 
     The Node vm is not a security boundary; host functions expose their realm
     intrinsics to deliberately hostile source. This guard catches honest
     classic-worker split drift, not a worker author trying to forge evidence.
+
+    The observation runs on the shared gate: `plan` declares the bridge
+    traffic this background makes, and the gate's record is checked with
+    `assert_gate_clean`, so a request the loaded background invents is refused
+    and recorded. A stub background (the default for the binding controls)
+    makes no request and needs no plan.
     """
     node = shutil.which('node')
     assert node, 'node is required to observe worker declarations'
     if background_path is None:
         background_path = EXTENSION_ROOT / 'background.js'
-    payload = [
-        {
-            'path': str(Path(details['path']).resolve()),
-            'globals': sorted(details.get('globals', ())),
-            'probes': sorted(details.get('probes', ())),
-            'watched': sorted(details.get('watched', ())),
-        }
-        for details in source_details
-    ]
+    payload = {
+        'sources': [
+            {
+                'path': str(Path(details['path']).resolve()),
+                'globals': sorted(details.get('globals', ())),
+                'probes': sorted(details.get('probes', ())),
+                'watched': sorted(details.get('watched', ())),
+            }
+            for details in source_details
+        ],
+        'plan': plan,
+    }
     result = run_node_program(
         node, OBSERVER,
         [str(background_path), 'worker-bindings'], cwd=ROOT,
         payload=json.dumps(payload))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    outcome = json.loads(result.stdout)
+    # A stubbed launcher that returns a bare payload is not a real observation;
+    # treat its absent gate block as an empty (clean) one so the argv-length
+    # probe below is not coupled to the gate's output shape.
+    gate = outcome.get('gate') or {
+        'contractFaults': [], 'records': [], 'refused': [],
+        'badOrigins': [], 'streamAnswered': [],
+    }
+    # The effective plan is the caller's, or the harness default (zero). A
+    # caller observing the shipped background that omits its plan mismatches
+    # its boot stream fetch against zero and fails here — fail-closed.
+    effective = plan or {'planned': [], 'planned_stream': []}
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(effective['planned']),
+        planned_stream=list(effective['planned_stream']))
+    return outcome
