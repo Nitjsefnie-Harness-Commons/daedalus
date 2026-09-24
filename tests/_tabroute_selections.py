@@ -127,4 +127,9 @@ SELECTIONS = [
     ('getattr-nested-dynamic (979)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()\nname = "ext_cmd"', '[getattr(h, name)][0]()',
      (True, False)),
+    # Issue 959's absent-name deferred default with the binding moved inside
+    # the expression, so the seeding (which runs only on the whole RHS) never
+    # reaches the getattr. Same use-site mechanism as 979.
+    ('getattr-nested-absent-default (979)', 'class H: pass\nh = H()\n'
+     'x = [getattr(h, "missing", relay())][0]', 'x()', (True, False)),
 ]
