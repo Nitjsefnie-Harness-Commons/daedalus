@@ -76,7 +76,7 @@ function frameChrome(storage, background, origin) {
 """
 
 
-_STORAGE_RELAY_HARNESS = (_PRELUDE + r"""
+_STORAGE_RELAY_HARNESS = _PRELUDE + r"""
 // Single-origin relay: content.js + page.js in one frame over a synchronous
 // fake store and a synchronous background. Drives GM through the page's
 // promise API for the reserved/invalid-key refusals and the ordinary round
@@ -277,10 +277,10 @@ main().catch((error) => {
   process.stderr.write(`${error.stack || error}\n`);
   process.exitCode = 1;
 });
-""")
+"""
 
 
-_STORAGE_FAILURE_HARNESS = (_PRELUDE + r"""
+_STORAGE_FAILURE_HARNESS = _PRELUDE + r"""
 // Every chrome.storage call in the background fails the way Chrome fails one:
 // the callback is invoked exactly as on success, the store is left alone, and
 // the only trace is chrome.runtime.lastError.
@@ -366,7 +366,7 @@ flushMessages();
 Promise.all(settled).then(() => {
   process.stdout.write(JSON.stringify(outcomes), () => process.exit(0));
 });
-""")
+"""
 
 
 def _run_node(harness, content_path=None, with_page=False):
