@@ -46,7 +46,6 @@ def dotted_module(path, root):
 
 
 def _refuse(path, root, node, detail):
-    """Refuse a spelling the closure cannot follow, naming module and line."""
     raise AssertionError(
         f'{dotted_module(path, root)}:{node.lineno}: {detail}{CLOSURE_TAIL}')
 
@@ -59,8 +58,7 @@ def composition_scan_set(composition, root):
     files under the repository root or is provably elsewhere (stdlib, site
     packages), and the walk iterates to a fixed point. A target the walk
     cannot determine statically is unprovable and fails loudly, naming the
-    module and the import site: a walk that silently omitted what it cannot
-    resolve would be the next blind spot, not a closure.
+    module and the import site.
     """
     root = Path(root).resolve()
     composition = Path(composition).resolve()
@@ -87,9 +85,7 @@ def _dynamic_callees(tree):
     their function names, and the builtin `__import__` is bound before
     anything runs. `import sys [as s]` binds the name whose `modules`
     attribute is the module registry, and `from sys import modules [as r]`
-    and `import sys.modules [as r]` bind the registry itself. Classification
-    then resolves a call's callee through this map instead of matching
-    spellings.
+    and `import sys.modules [as r]` bind the registry itself.
     """
     bound = {'__import__': 'by name'}
     for node in ast.walk(tree):
@@ -120,8 +116,7 @@ def _is_dynamic_import(func, bound):
     specific other object and is not the operation; one whose attribute IS
     the operation's is the operation exactly when its base mentions the
     operation, and that base is read through the same property the store
-    side uses, so a non-`Name` base is a question with an answer rather
-    than a node the walk skips. Loading a module by PATH —
+    side uses. Loading a module by PATH —
     `spec_from_file_location`, `SourceFileLoader` — is a different
     operation and stays outside this recognition.
     """
@@ -140,8 +135,7 @@ def _yields_the_operation(value, bound):
     cannot follow.
 
     The property, not a list of the shapes that have been met: a tracked
-    name anywhere inside a lambda body, a yield, a conditional, a
-    comprehension or a subscript key is a mention, and every type nobody
+    name anywhere inside an expression is a mention, and every type nobody
     has thought of is read the same way, by its own children. A registry
     name is the one tracked name that is not a mention: the map tracks it
     so a read of it can be refused. Two early
@@ -166,7 +160,6 @@ def _yields_the_operation(value, bound):
 
 
 def _store_leaves(target):
-    """Every name, attribute or subscript a store target binds."""
     if isinstance(target, (ast.Tuple, ast.List)):
         for element in target.elts:
             yield from _store_leaves(element)
@@ -432,8 +425,8 @@ def _yields_the_registry(value, bound):
 
     A bare registry-carrying name IS the thing a store must not hide; a
     `.modules` attribute or a `['modules']` subscript is the registry by
-    `_is_registry`; a call is the declared call-result limit; everything else
-    is read by its children. `m = sys` is the shape.
+    `_is_registry`; a call is the declared call-result limit. `m = sys` is
+    the shape.
     """
     if isinstance(value, ast.Name):
         return bound.get(value.id) in REGISTRY_NAMES
@@ -479,16 +472,9 @@ def _refused_string_reads(tree, bound, refuse):
 def _import_targets(path, root):
     """The repo-local files one module's source can import.
 
-    Empty when nothing the module names lives under root — stdlib and
-    site-package targets are provably not this repository's. A dynamic
-    import whose argument is not a constant string is unprovable and raises,
-    naming the module and the import site; a constant resolves like an
-    import. A spelling that hides the operation behind a name this map
-    cannot follow — a store of any binding form, a `getattr` — raises too,
-    because a walk that skipped it would be the next blind spot. A call's
-    result stays outside the property on purpose, and is accepted rather than
-    skipped in silence: a call evaluates to whatever its callee returns, so
-    refusing every store of one would refuse
+    A call's result stays outside the property on purpose, and is accepted
+    rather than skipped in silence: a call evaluates to whatever its callee
+    returns, so refusing every store of one would refuse
     `mod = importlib.import_module('fcntl')` and every `x = f()` with it; a
     value reached through a call's result is followed by neither the operation
     map nor these refusals, whether it is bound to a name or read inline as a
@@ -496,22 +482,13 @@ def _import_targets(path, root):
     module or the operation delivered as a call ARGUMENT is likewise accepted
     — `use(importlib)` and `use(sys)`, whose registry is reachable only past
     the argument — because the walk follows nothing a call returns or is
-    handed. An attribute of a known module that is not the
-    operation (`importlib.util`) is not a limit but an answer: its own name is
-    not the operation's, so no base can make it one. A string ASSEMBLED at
-    runtime that the walk cannot fold to a constant is the third declared
-    limit, named by the mechanism rather than one spelling: an interpolated
-    f-string, a concatenation with a name, a `''.join`, a `.format()`, `%`.
-    A string that DOES fold to a constant — a field-less f-string, a
-    concatenation of literals — is refused like any other literal. A string
-    that NAMES the operation — folded
-    from its parts, so a concatenation of literals is the name it assembles
-    to — and a module read out of the registry by string are refused rather
-    than accepted: they reach the operation the way a tracked name does, and
-    the walk cannot prove a string naming it is doing anything else. The
-    registry's base is read structurally and a store that hands it away is
-    refused, so no spelling of the base hides a registry read; a star import
-    is refused because it binds names this map cannot hold.
+    handed. A string ASSEMBLED at runtime that the walk cannot fold to a
+    constant is the third declared limit, named by the mechanism rather than
+    one spelling: an interpolated f-string, a concatenation with a name, a
+    `''.join`, a `.format()`, `%`. A string that DOES fold to a constant — a
+    field-less f-string, a concatenation of literals — is refused like any
+    other literal. A star import is refused because it binds names this map
+    cannot hold.
     """
     targets = set()
     tree = ast.parse(path.read_text(encoding='utf-8'))
