@@ -431,6 +431,23 @@ def test_a_body_past_the_opener_bound_still_walks_its_bytes(_tmp):
         walk.call_args_list
 
 
+def test_a_mixed_opener_body_reaches_the_walk(_tmp):
+    """The bound is on both opener kinds added, not on the larger count.
+
+    Two braces and one bracket nest three deep, so `{[{}]}` at a limit
+    of 2 must answer True. A bound that counted only the larger kind
+    would admit it: every single-kind body the other two tests use makes
+    that cheaper reading and the sum agree, so only a mixed body
+    separates them.
+    """
+    real = getattr(json_body, '_opens_past_limit', None)
+    with mock.patch.object(json_body, '_opens_past_limit',
+                           side_effect=real, create=True) as walk:
+        assert json_body.json_nests_deeper_than(b'{[{}]}', 2)
+    assert walk.call_count == 1, walk.call_args_list
+    assert walk.call_args_list[0][0] == (b'{[{}]}', 2), walk.call_args_list
+
+
 def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
     once = json_body.JSONObject([('token', 'a'), ('id', 'x')])
     twice = json_body.JSONObject([('token', 'a'), ('token', 'a')])
