@@ -236,9 +236,10 @@ def remove_expired(path, now, ttl, legacy=False):
                 json.loads(opened.read().decode('utf-8'))
         path.unlink()
         if _name_vacated is not None:
-            # An unlink frees the name in both namespaces; retire it so a
-            # later object there is not suppressed. Callback contract:
-            # on_name_vacated.
+            # A successful unlink frees the name in both namespaces, so
+            # retire it here rather than leave a record for an object that
+            # is gone; the callback runs under command_fs_lock, so guard it
+            # — a raising callback must not kill the sweeper.
             key = (legacy_key(path.name) if legacy
                    else queue_key(path.parent.name, path.name))
             try:
