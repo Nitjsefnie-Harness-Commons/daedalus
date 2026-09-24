@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -430,12 +430,12 @@ def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
         child.stop()
 
 
-def _ci_wait(fake, extra=()):
+def _ci_wait(fake, extra=(), bound=30, limit=120):
     return subprocess.run(
         [sys.executable, '-u', str(SKILL / 'ci_wait.py'), SHA,
-         '--interval', '1', '--timeout', '30', *extra],
+         '--interval', '1', '--timeout', str(bound), *extra],
         env=fake.env(), capture_output=True, text=True, encoding='utf-8',
-        errors='replace', timeout=120)
+        errors='replace', timeout=limit)
 
 
 def test_a_refused_wait_pauses_and_still_answers(tmp):
@@ -452,6 +452,25 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
     assert 'acceptable' in done.stdout, done.stdout
     assert len(fake.calls()) == 2, [call['request'][:60]
                                     for call in fake.calls()]
+
+
+def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
+    """A limit that outlives the bound ends the wait; it does not spin.
+
+    The refusal here is never lifted, so the only way out is the wait's own
+    --timeout. The call count is the point: a wait that keeps polling after
+    its bound has passed is hammering the API that is refusing it.
+    """
+    far = datetime.now(timezone.utc) + timedelta(hours=2)
+    reset_at = far.strftime(STAMP)
+    answers = dict(_idle_answers())
+    answers['checkSuites'] = _rate_limited_error(reset_at=reset_at)
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = _ci_wait(fake, bound=5, limit=40)
+    assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
+    assert 'wait exceeded' in done.stdout, done.stdout
+    calls = [call['request'][:60] for call in fake.calls()]
+    assert len(calls) <= 2, len(calls)
 
 
 def test_a_plain_refusal_still_exits_three_at_once(tmp):

@@ -278,6 +278,21 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     assert clock.at[1] >= clock.at[0] + 3, clock.at
 
 
+def test_a_passed_bound_ends_the_wait_without_another_request(tmp):
+    del tmp
+    mod = _client()
+    clock = _Clock([mod.RateLimited('rate limited', None)])
+    watcher = mod.Watcher('w', out=io.StringIO(),
+                          deadline=time.monotonic() - 1)
+    try:
+        watcher.poll(clock)
+    except mod.WaitExpired:
+        pass
+    else:
+        raise AssertionError('a bound that has passed must end the wait')
+    assert clock.at == [], clock.at
+
+
 def test_an_absent_or_nonsense_reset_clamps_into_a_bounded_wait(tmp):
     del tmp
     mod = _client()

@@ -161,7 +161,12 @@ def wait(repo, sha, interval, timeout, out, parent_pid=None):
     watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
                                 parent_pid=parent_pid, deadline=deadline)
     while True:
-        runs = watcher.poll(lambda: runs_on(repo, sha))
+        try:
+            runs = watcher.poll(lambda: runs_on(repo, sha))
+        except gh_client.WaitExpired:
+            print(f'wait exceeded {timeout}s on {sha[:12]}: still rate '
+                  'limited, no verdict to report', file=out, flush=True)
+            return 2
         state, offenders = verdict(runs)
         print_matrix(runs, sha, out)
         if state == 'acceptable':
