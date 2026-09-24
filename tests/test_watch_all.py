@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """watch_all.py's hold: a success-only batch waits on the head's runs."""
-import json
-import subprocess
+import io
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +11,10 @@ import _util  # noqa: E402
 
 ROOT = _util.ROOT
 SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'watch_all.py'
+SKILL = SOURCE.parent
+sys.path.insert(0, str(SKILL))
+import gh_client  # noqa: E402
+
 SHA = 'a' * 40
 
 
@@ -21,50 +25,41 @@ def _watch_all():
 
 
 def _run(rid, status, conclusion):
-    """One workflow run as the actions API reports it against a SHA."""
+    """One workflow run as the shared client reports it against a SHA."""
     return {'id': rid, 'name': f'run {rid}', 'status': status,
             'conclusion': conclusion}
 
 
-def _runs_body(*runs):
-    return json.dumps({'workflow_runs': list(runs)})
+def _fake_runs(mod, answer, seen=None):
+    """A client double installed on the module alone.
 
-
-def _fake_gh(mod, answers, seen=None):
-    """A path-keyed subprocess double installed on the module alone.
-
-    An unmodelled argv is an AssertionError, and the real `subprocess` is
-    left alone so the next load's `git rev-parse` stays real.
+    `answer` is the run list the query returns, or the exception it raises.
+    The real `gh` invocation behind it is exercised end to end in
+    `test_gh_client.py`; what is under test here is what this script does
+    with the answer.
     """
-    def run(argv, **kwargs):
+    def workflow_runs(owner, name, sha):
         if seen is not None:
-            seen.append((list(argv), kwargs))
-        path = argv[-1]
-        for fragment, answer in answers.items():
-            if fragment in path:
-                if isinstance(answer, BaseException):
-                    raise answer
-                return SimpleNamespace(stdout=answer, returncode=0)
-        raise AssertionError(argv)
-    mod.subprocess = SimpleNamespace(
-        run=run, SubprocessError=subprocess.SubprocessError)
+            seen.append((owner, name, sha))
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+    mod.gh_client = SimpleNamespace(
+        workflow_runs=workflow_runs, QueryError=gh_client.QueryError,
+        RateLimited=gh_client.RateLimited)
 
 
 def test_a_queued_run_holds_even_when_every_check_run_is_complete(tmp):
-    """The defect: the check-runs list is complete while a run is queued."""
+    """The defect: the runs list is complete while a run is queued.
+
+    The query no longer reads check runs at all, so the half of the case
+    that named them is structural; what must still hold is that one queued
+    workflow run keeps the batch from reading as settled.
+    """
     del tmp
     mod = _watch_all()
-    check_runs = json.dumps({'check_runs': [
-        {'id': 1, 'name': 'pylint', 'status': 'completed',
-         'conclusion': 'success'},
-        {'id': 2, 'name': 'pyright', 'status': 'completed',
-         'conclusion': 'success'},
-    ]})
-    _fake_gh(mod, {
-        '/check-runs': check_runs,
-        '/actions/runs': _runs_body(_run(1, 'completed', 'success'),
-                                    _run(2, 'queued', None)),
-    })
+    _fake_runs(mod, [_run(1, 'completed', 'success'),
+                     _run(2, 'queued', None)])
     assert mod._all_concluded(SHA) is False
 
 
@@ -72,7 +67,7 @@ def test_no_run_yet_is_not_settled(tmp):
     del tmp
     mod = _watch_all()
     assert mod._settled([]) is None
-    _fake_gh(mod, {'/actions/runs': _runs_body()})
+    _fake_runs(mod, [])
     assert mod._all_concluded(SHA) is not True
 
 
@@ -84,7 +79,7 @@ def test_every_run_completed_is_settled(tmp):
             _run(3, 'completed', 'neutral'),
             _run(4, 'completed', 'failure')]
     assert mod._settled(runs) is True
-    _fake_gh(mod, {'/actions/runs': _runs_body(*runs)})
+    _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
 
 
@@ -99,63 +94,75 @@ def test_an_in_progress_run_is_not_settled(tmp):
 def test_a_failed_query_cannot_look_settled(tmp):
     del tmp
     mod = _watch_all()
-    _fake_gh(mod, {
-        '/actions/runs': subprocess.CalledProcessError(1, 'gh')})
+    _fake_runs(mod, gh_client.QueryError('gh failed'))
     assert mod._all_concluded(SHA) is None
-    _fake_gh(mod, {'/actions/runs': 'not json'})
+    _fake_runs(mod, [])
     assert mod._all_concluded(SHA) is None
-    one_good_page = _runs_body(_run(1, 'completed', 'success')) + 'not json'
-    _fake_gh(mod, {'/actions/runs': one_good_page})
-    assert mod._all_concluded(SHA) is None
-    _fake_gh(mod, {'/actions/runs': OSError('gh missing')})
-    assert mod._all_concluded(SHA) is None
-    for not_an_object in ('[]', '1'):
-        _fake_gh(mod, {'/actions/runs': not_an_object})
-        assert mod._all_concluded(SHA) is None
 
 
 def test_without_a_repo_slug_nothing_is_queried(tmp):
     del tmp
     mod = _watch_all()
     mod._repo_slug = lambda: None
-    _fake_gh(mod, {})
+    seen = []
+    _fake_runs(mod, [], seen)
     assert mod._all_concluded(SHA) is None
+    assert seen == []
 
 
-def test_paginated_pages_are_all_read(tmp):
+def test_every_run_the_client_reports_is_considered(tmp):
+    """No run is dropped between the query and the hold: one list, all of it.
+
+    The list is now paged by the shared client, so "all of it" is its
+    contract; what this script must not do is look at a prefix of it.
+    """
     del tmp
     mod = _watch_all()
-    pages = (_runs_body(_run(1, 'completed', 'success'))
-             + _runs_body(_run(2, 'queued', None)))
-    assert '\n' not in pages
-    _fake_gh(mod, {'/actions/runs': pages})
+    runs = [_run(index, 'completed', 'success') for index in range(1, 6)]
+    _fake_runs(mod, runs)
+    assert mod._all_concluded(SHA) is True
+    _fake_runs(mod, [*runs, _run(6, 'queued', None)])
     assert mod._all_concluded(SHA) is False
 
 
-def test_the_query_is_fresh_paginated_and_pinned_to_the_sha(tmp):
+def test_the_query_is_fresh_and_pinned_to_the_sha(tmp):
     del tmp
     mod = _watch_all()
     seen = []
-    _fake_gh(mod, {'/actions/runs': _runs_body()}, seen)
+    _fake_runs(mod, [], seen)
     mod._all_concluded(SHA)
-    assert len(seen) == 1
-    argv, kwargs = seen[0]
-    assert kwargs.get('check') is True
-    assert kwargs.get('timeout')
-    assert kwargs.get('encoding') == 'utf-8'
-    assert '--paginate' in argv
-    assert 'Cache-Control: no-cache' in argv
-    assert f'actions/runs?head_sha={SHA}' in argv[-1]
-    assert 'check-runs' not in argv[-1]
+    mod._all_concluded(SHA)
+    assert seen == [('o', 'r', SHA), ('o', 'r', SHA)]
 
 
-def test_newline_separated_pages_are_still_read(tmp):
+def _fake_runs_in_order(mod, answers, seen=None):
+    """A client double whose successive answers are given in order."""
+    def workflow_runs(owner, name, sha):
+        if seen is not None:
+            seen.append(sha)
+        answer = answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+    mod.gh_client = SimpleNamespace(
+        workflow_runs=workflow_runs, QueryError=gh_client.QueryError,
+        RateLimited=gh_client.RateLimited)
+
+
+def test_a_rate_limited_completion_query_waits_rather_than_holding(tmp):
+    """A refusal is a known wait, not a failed query: it must not hold."""
     del tmp
     mod = _watch_all()
-    pages = (_runs_body(_run(1, 'completed', 'success')) + '\n'
-             + _runs_body(_run(2, 'queued', None)) + '\n')
-    _fake_gh(mod, {'/actions/runs': pages})
-    assert mod._all_concluded(SHA) is False
+    seen = []
+    _fake_runs_in_order(
+        mod,
+        [gh_client.RateLimited('rate limited', time.time() + 2),
+         [_run(1, 'completed', 'success')]], seen)
+    out = io.StringIO()
+    assert mod._all_concluded(SHA, gh_client.Watcher('watch_all', out=out))
+    assert len(seen) == 2, seen
+    assert len([line for line in out.getvalue().splitlines()
+                if 'rate limit' in line]) == 1, out.getvalue()
 
 
 def test_a_cap_release_is_announced_in_the_batch(tmp):
