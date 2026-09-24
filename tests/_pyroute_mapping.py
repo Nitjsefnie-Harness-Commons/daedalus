@@ -83,32 +83,33 @@ def _display_value(node, state):
         before = index
         starred = isinstance(item, ast.Starred)
         value = _known_value(item.value if starred else item, state)
-        if starred and not isinstance(value, DeferredContainer):
+        if not starred:
+            if index is None:
+                _fold_dynamic(items, value)
+            else:
+                if value is not None:
+                    items[index] = value
+                index += 1
+        elif not isinstance(value, DeferredContainer):
             count = _literal_count(item.value)
             if count is None:
                 index = None
                 _fold_dynamic(items, UNPROVABLE_SENDER)
             elif index is not None:
                 index += count
-        elif starred and value.kind == 'dict':
+        elif value.kind == 'dict':
             # Unpacking a dict yields its keys, never the modelled values.
             index = (None if index is None or value.length is None
                      else index + value.length)
-        elif starred and (index is None or value.length is None):
+        elif index is None or value.length is None:
             index = None
             _fold_dynamic(items, from_position(value, 0))
-        elif starred:
+        else:
             for offset in range(value.length):
                 nested = merge_yielded(at_position(value, offset))
                 if nested is not None:
                     items[index + offset] = nested
             index += value.length
-        elif index is None:
-            _fold_dynamic(items, value)
-        else:
-            if value is not None:
-                items[index] = value
-            index += 1
         if index is None and before is not None:
             prefix = before
     starred_any = any(isinstance(item, ast.Starred) for item in node.elts)
