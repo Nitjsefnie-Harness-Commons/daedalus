@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """Resetting the timer would starve registration during continuous updates."""
-import json
-import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
+
+REGISTER = 'POST /register'
+SYNC = 'POST /sync-tabs'
+# Every scenario's recording, from a run of the shipped worker: boot opens the
+# stream, syncs the tab list, then one register post per fired timer. No route
+# is special-cased, so an invented call lands outside the plan and is refused.
+ONE = [SYNC, REGISTER]
+TWO = [SYNC, REGISTER, REGISTER]
 
 _REGISTER_HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
-const [backgroundPath, steps] = process.argv.slice(1);
+const [backgroundPath, plan] = process.argv.slice(1);
 const messageListeners = [];
 const updateListeners = [];
-const requests = [];
 const timers = [];
 const cleared = [];
 const tabs = new Map([
@@ -62,19 +68,24 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-async function bridgeFetch(target, init = {}) {
-  const path = new URL(target).pathname;
-  requests.push({
-    path, method: init.method || 'GET',
-    body: init.body ? JSON.parse(init.body) : null,
-  });
-  const status = path === '/stream' ? 503 : 200;
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees.
+const BRIDGE_URL = 'https://bridge.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function response(status, data) {
   return {
-    ok: status === 200, status, body: null,
-    json: async () => ({ ok: true, updated: true }),
-    text: async () => '',
+    ok: status >= 200 && status < 300, status, body: null,
+    json: async () => data, text: async () => JSON.stringify(data),
   };
 }
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
+}
+""" + STRICT_FETCH + r"""
 
 const context = vm.createContext({
   chrome, fetch: bridgeFetch, AbortController, TextDecoder, URL,
@@ -96,7 +107,7 @@ async function run() {
   const baseline = timers.length;
   const baselineClears = cleared.length;
   const observations = [];
-  for (const step of steps) {
+  for (const step of plan.steps) {
     if (step.state) {
       tabs.set(step.id, { ...tabs.get(step.id), ...step.state });
     }
@@ -115,10 +126,11 @@ async function run() {
       delays: timers.slice(baseline).map(timer => timer.delay),
       pending: timers.slice(baseline).filter(timer => timer.pending).length,
       cleared: cleared.slice(baselineClears),
-      requests: requests.slice(),
+      requests: nonStreamFetches.map(
+        (item) => ({ request: item.request, body: item.body })),
     });
   }
-  return observations;
+  return { observations, refused: refusedFetches, badOrigins };
 }
 
 run().then(result => process.stdout.write(JSON.stringify(result)))
@@ -129,15 +141,16 @@ run().then(result => process.stdout.write(JSON.stringify(result)))
 """
 
 
-def _observe(*steps):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    result = run_node_program(
-        node, _REGISTER_HARNESS,
-        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT, payload=steps)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+def _observe(*steps, planned):
+    outcome = run_gate(
+        require_node(), _REGISTER_HARNESS,
+        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
+        plan={'steps': list(steps), 'planned': list(planned)})
+    last = outcome['observations'][-1]
+    assert_gate_clean([r['request'] for r in last['requests']],
+                      outcome['refused'], outcome['badOrigins'],
+                      list(planned))
+    return outcome['observations']
 
 
 def _update(tab_id=7, **change):
@@ -145,9 +158,8 @@ def _update(tab_id=7, **change):
 
 
 def _posts(observation):
-    return [request['body'] for request in observation['requests']
-            if request['path'] == '/register'
-            and request['method'] == 'POST']
+    return [r['body'] for r in observation['requests']
+            if r['request'] == REGISTER]
 
 
 def test_title_burst_arms_once_without_resetting(tmp):
@@ -155,7 +167,7 @@ def test_title_burst_arms_once_without_resetting(tmp):
     del tmp
     *events, fired = _observe(
         _update(title='A'), _update(title='B'), _update(title='C'),
-        {'fire': True})
+        {'fire': True}, planned=ONE)
     for event in events:
         assert event['delays'] == [250], event
         assert event['pending'] == 1, event
@@ -171,7 +183,7 @@ def test_register_reads_live_tab_state_when_timer_fires(tmp):
         _update(title='A'), _update(title='B'),
         {'id': 7, 'state': {
             'title': 'B', 'url': 'https://page.example.com/current'}},
-        {'fire': True})
+        {'fire': True}, planned=ONE)
     assert _posts(fired) == [{
         'token': 'register-token', 'tabId': '7', 'title': 'B',
         'url': 'https://page.example.com/current',
@@ -183,7 +195,8 @@ def test_different_tabs_keep_independent_timers(tmp):
     del tmp
     *_, pending, fired = _observe(
         _update(7, title='A'), _update(8, title='X'),
-        _update(7, title='B'), _update(8, title='Y'), {'fire': True})
+        _update(7, title='B'), _update(8, title='Y'), {'fire': True},
+        planned=TWO)
     assert pending['delays'] == [250, 250], pending
     assert pending['pending'] == 2, pending
     assert _posts(pending) == [], pending
@@ -195,7 +208,7 @@ def test_fired_tab_can_arm_a_new_registration(tmp):
     del tmp
     first, fired, again, twice = _observe(
         _update(title='A'), {'fire': True}, _update(title='B'),
-        {'fire': True})
+        {'fire': True}, planned=TWO)
     assert first['delays'] == [250], first
     assert len(_posts(fired)) == 1, fired
     assert again['delays'] == [250, 250], again
@@ -209,7 +222,8 @@ def test_url_burst_uses_the_same_coalescing_path(tmp):
     del tmp
     _, pending, fired = _observe(
         _update(url='https://page.example.com/a'),
-        _update(url='https://page.example.com/b'), {'fire': True})
+        _update(url='https://page.example.com/b'), {'fire': True},
+        planned=ONE)
     assert pending['delays'] == [250], pending
     assert pending['pending'] == 1, pending
     assert pending['cleared'] == [], pending
@@ -220,7 +234,8 @@ def test_url_burst_uses_the_same_coalescing_path(tmp):
 def test_registration_window_is_250_milliseconds(tmp):
     """Catches direct registration or a changed scheduler delay."""
     del tmp
-    pending, fired = _observe(_update(title='A'), {'fire': True})
+    pending, fired = _observe(_update(title='A'), {'fire': True},
+                              planned=ONE)
     assert pending['delays'] == [250], pending
     assert len(_posts(fired)) == 1, fired
 
