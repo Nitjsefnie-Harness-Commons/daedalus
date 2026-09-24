@@ -12,9 +12,10 @@ from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 def test_starred_operand_arity_is_a_single_fact(tmp):
     """A starred operand the model cannot resolve to a provable element list
     leaves the arity unprovable, so the alias is reported not clean. Every
-    length-mutating spelling and the generator / yield-from operand, plus two
+    length-mutating spelling and the generator / yield-from operand, plus three
     boundary controls (count() reads length; an unrelated generator adds no
-    carriers) that fail (0,1) if their boundary is over-broadened."""
+    carriers; an index store is length-neutral) that fail (0,1) if their
+    boundary is over-broadened."""
     rows = (
         ('append', 'pair=[h]\npair.append("{a}")\nx=getattr(*pair)'),
         ('alias', 'pair=[h]\nq=pair\npair.append("{a}")\nx=getattr(*q)'),
@@ -32,6 +33,8 @@ def test_starred_operand_arity_is_a_single_fact(tmp):
         ('unrel-gen', 'h.clean=ordinary\nk.ext_cmd=relay()\ndef o():\n'
          '    yield k\n    yield "ext_cmd"\nvals=(ordinary,)\n'
          'x=getattr(h,"clean",*vals)'),
+        ('index-store', 'h.clean=ordinary\nk.ext_cmd=relay()\n'
+         'pair=[h,"clean",k]\npair[0]=h\nx=getattr(*pair)'),
     )
     pre = 'class H: pass\nclass K: pass\nh = H()\nk = K()\n'
     def run(b): return _tracked_focus_verdict(
