@@ -5,6 +5,7 @@ Every call here is a real `gh` invocation answered by the fake executable
 double in `_fake_gh.py`, so what is under test is the request the client
 actually makes.
 """
+import contextlib
 import io
 import json
 import os
@@ -136,19 +137,54 @@ def test_a_header_reset_survives_a_windows_text_stream_end_to_end(tmp):
             os.environ.pop('DAEDALUS_FAKE_GH_CRLF', None)
 
 
+@contextlib.contextmanager
+def _frozen_client_clock(mod, now):
+    """The clock the client reads, pinned to the fixture's own instant.
+
+    Everything but `time()` is the real module's, so a client that reads
+    the monotonic clock or sleeps while it answers still can. What the
+    refusal then carries is derived from the fixture and from this instant,
+    which is the whole point: no interval the runner spends decides it.
+    """
+
+    class _Frozen:
+        @staticmethod
+        def time():
+            return now
+
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+    real = getattr(mod, 'time')
+    setattr(mod, 'time', _Frozen())
+    try:
+        yield
+    finally:
+        setattr(mod, 'time', real)
+
+
 def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
+    """The refusal carries the instant `Retry-After` asked for, counted
+    from the clock the client itself read.
+
+    The two headers name instants an hour apart, so the value the refusal
+    carries says which one was read; a window around the runner's own clock
+    would say only how fast this machine got here, which is a claim a
+    loaded windows leg decides.
+    """
     mod = _client()
-    before = time.time()
+    now = 1790266796.5
+    retry_after = 60
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
         'status': 429, 'headers': {
-            'Retry-After': '60',
-            'X-RateLimit-Reset': str(int(before) + 3600)},
+            'Retry-After': str(retry_after),
+            'X-RateLimit-Reset': str(int(now) + 3600)},
         'body': 'You have exceeded a secondary rate limit.'}})
-    with fake.activate():
+    with fake.activate(), _frozen_client_clock(mod, now):
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
         except mod.RateLimited as refusal:
-            assert 60 <= refusal.resume_at - before <= 61, refusal.resume_at
+            assert refusal.resume_at == now + retry_after, refusal.resume_at
         else:
             raise AssertionError('a 429 with Retry-After must refuse')
 
@@ -174,43 +210,45 @@ def test_a_graphql_rate_limited_error_is_a_refusal_naming_its_reset(tmp):
 
 
 def test_a_graphql_retry_after_is_honoured_when_no_reset_is_reported(tmp):
+    """No reset reported, so the refusal's instant is the `retryAfter`
+    counted from the clock the client read - the value, not a window.
+    """
     mod = _client()
+    now = 1790266796.5
+    retry_after = 90
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
         'status': 200,
         'body': {'data': None, 'errors': [{
             'type': 'RATE_LIMITED',
-            'extensions': {'retryAfter': 90}}]}}})
-    with fake.activate():
-        before = time.time()
+            'extensions': {'retryAfter': retry_after}}]}}})
+    with fake.activate(), _frozen_client_clock(mod, now):
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
         except mod.RateLimited as refusal:
-            assert 90 <= refusal.resume_at - before <= 91, refusal.resume_at
+            assert refusal.resume_at == now + retry_after, refusal.resume_at
         else:
             raise AssertionError('retryAfter must be honoured')
 
 
 def test_a_slow_install_cannot_move_the_measured_retry_after(tmp):
-    """The offset is read at the call, so setup time cannot shift it:
-    `before` once sat before the fake's install, a subprocess, and a second
-    of that is the whole margin of a one-second window.
+    """The offset is read at the call, so setup time cannot shift it: the
+    resume instant is the fixture's own `retryAfter` counted from the clock
+    the client read, so a slow install moves nothing and a window the
+    runner's speed decides is not what is left to assert.
     """
     mod = _client()
+    now = 1790266796.5
+    retry_after = 90
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
         'status': 200,
         'body': {'data': None, 'errors': [{
             'type': 'RATE_LIMITED',
-            'extensions': {'retryAfter': 90}}]}}})
-    with fake.activate():
-        at_install = time.time()
-        before = time.time()
+            'extensions': {'retryAfter': retry_after}}]}}})
+    with fake.activate(), _frozen_client_clock(mod, now):
         try:
             mod.graphql(ITEM_QUERY, {'after': None})
         except mod.RateLimited as refusal:
-            assert 90 <= refusal.resume_at - before <= 91, refusal.resume_at
-            # The point the old control measured from, a second and a half
-            # of setup earlier, lands outside the window it asserts.
-            assert refusal.resume_at - (at_install - 1.5) > 91
+            assert refusal.resume_at == now + retry_after, refusal.resume_at
         else:
             raise AssertionError('retryAfter must be honoured')
 
