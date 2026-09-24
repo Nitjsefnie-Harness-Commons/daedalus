@@ -95,10 +95,9 @@ def _names_builtins(node, bound):
 
 
 def denotes_code_eval(node, bound, scopes):
-    """The code-evaluating builtin this node evaluates to, or nothing.
-
-    A bare name is the builtin only where no enclosing scope binds it
-    (`scopes`); the module attribute and the constant `getattr` are the same
+    """The code-evaluating builtin this node evaluates to DIRECTLY, or
+    nothing: a bare builtin name (`scopes` decides shadow), the module
+    attribute, or the constant `getattr` off the builtins module — the same
     routes the import operation is recognised through.
     """
     if isinstance(node, ast.Name):
@@ -116,35 +115,122 @@ def denotes_code_eval(node, bound, scopes):
     return False
 
 
-def yields_code_eval(value, bound, scopes, as_callee=False):
-    """True when a store's value delivers a code-evaluating builtin to a name
-    the walk cannot follow, read the same recursive way the operation
-    recogniser reads a hidden operation.
+def _is_plain_lambda(func):
+    """A lambda that takes no parameters, so a no-argument call to it returns
+    the lambda's body directly."""
+    return isinstance(func, ast.Lambda) and not func.args.args \
+        and not func.args.posonlyargs and not func.args.kwonlyargs \
+        and not func.args.vararg and not func.args.kwarg
 
-    The property is DELIVERY, and position decides it. A node that denotes
-    the builtin is a delivery unless it is a call's immediate CALLEE: a
-    callee is USED — the call arm already reads its program, and the store
-    receives the call's result, which the declared call-result limit accepts.
-    So `x = eval(var)` and `x = (eval)(var)` deliver nothing and scan silent,
-    while `x = f(eval)` and `x = f(code=eval)` hand the builtin to a callee
-    the walk cannot follow and are refused. A call reached in callee position
-    is still read, so `f(eval)(x)` delivers eval to f.
 
-    A builtin nested in any container — a dict, list, tuple, set, or a
-    container of containers — is on the delivery path, so it is a hide. The
-    recursion does NOT stop at a call the way the operation recogniser does,
-    because a recognised reach call (`getattr(builtins, 'eval')`) evaluates
-    to the builtin itself.
+def _selected_element(node):
+    """The element a subscript selects, when that element is readable; None
+    when the container or the index is not, so the walk never guesses a
+    builtin the runtime would not select."""
+    index = node.slice
+    container = node.value
+    if isinstance(index, ast.Constant) and isinstance(index.value, int):
+        if isinstance(container, (ast.Tuple, ast.List)) and \
+                -len(container.elts) <= index.value < len(container.elts):
+            return container.elts[index.value]
+        if index.value == 0 and isinstance(
+                container, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return container.elt
+    return None
+
+
+def _arguments(call):
+    return list(call.args) + [keyword.value for keyword in call.keywords]
+
+
+def may_be_code_eval(node, bound, scopes):
+    """Does this expression evaluate, or may it evaluate, to a code-evaluating
+    builtin — the EFFECTIVE callee, however it is spelled?
+
+    The property, not a list of callee spellings: a node that denotes the
+    builtin directly is one; a conditional or boolean choice is one when
+    either branch is; a subscript is one when the element it SELECTS is; and a
+    no-parameter lambda called with no arguments is one when its body is. Each
+    resolves the value the runtime would actually use, so a form nobody
+    thought of is read by the same rule rather than a new branch.
     """
-    if not as_callee and denotes_code_eval(value, bound, scopes):
+    if denotes_code_eval(node, bound, scopes):
         return True
+    if isinstance(node, ast.IfExp):
+        return may_be_code_eval(node.body, bound, scopes) or \
+            may_be_code_eval(node.orelse, bound, scopes)
+    if isinstance(node, ast.BoolOp):
+        return any(may_be_code_eval(value, bound, scopes)
+                   for value in node.values)
+    if isinstance(node, ast.Subscript):
+        if may_be_code_eval(node.slice, bound, scopes):
+            return False
+        element = _selected_element(node)
+        return element is not None and may_be_code_eval(
+            element, bound, scopes)
+    if isinstance(node, ast.Call) and _is_plain_lambda(node.func) \
+            and not _arguments(node):
+        return may_be_code_eval(node.func.body, bound, scopes)
+    return False
+
+
+def _data_delivers(node, bound, scopes, is_callee=False):
+    """Does evaluating this expression HAND a code-evaluating builtin to a
+    callee or lookup the walk cannot follow — an argument, a lookup key, or a
+    builtin held in a value that is itself passed or bound?
+
+    A builtin in a data position is a DELIVERY. The one thing that is not a
+    delivery is the builtin in CALLEE position: the call arm reads its program
+    and the value that reaches the store is the call's result. A lambda is a
+    function the walk cannot follow, so a builtin passed to one is delivered.
+    """
+    if denotes_code_eval(node, bound, scopes):
+        return not is_callee
+    if isinstance(node, ast.Lambda):
+        return False
+    if isinstance(node, ast.Call):
+        if any(_data_delivers(argument, bound, scopes)
+               for argument in _arguments(node)):
+            return True
+        return _data_delivers(node.func, bound, scopes, is_callee=True)
+    if isinstance(node, ast.IfExp):
+        return _data_delivers(node.body, bound, scopes, is_callee) or \
+            _data_delivers(node.orelse, bound, scopes, is_callee)
+    if isinstance(node, ast.BoolOp):
+        return any(_data_delivers(value, bound, scopes, is_callee)
+                   for value in node.values)
+    if isinstance(node, ast.Subscript):
+        if _data_delivers(node.slice, bound, scopes):
+            return True
+        element = _selected_element(node)
+        if element is not None:
+            return _data_delivers(element, bound, scopes, is_callee)
+        return _data_delivers(node.value, bound, scopes, is_callee)
+    return any(_data_delivers(child, bound, scopes, is_callee=False)
+               for child in ast.iter_child_nodes(node))
+
+
+def yields_code_eval(value, bound, scopes):
+    """True when a store's value DELIVERS a code-evaluating builtin to a name
+    the walk cannot follow.
+
+    The property is delivery, decided over the value the store will hold. A
+    store that binds a call's RESULT binds no builtin, so a builtin that is
+    the call's EFFECTIVE callee — however it is reached, including through a
+    conditional, a boolean choice, a comprehension, or a subscript that
+    selects it — is a USE, and the declared call-result limit covers the
+    result. A builtin in a DATA position of the value (an argument, a lookup
+    key, a builtin held in a value that is passed or bound) is a DELIVERY, and
+    that is the only thing a Call can be refused for. A store that binds the
+    builtin itself — a bare builtin, or a conditional or subscript that
+    resolves to one — is not a Call, and is a delivery to the name itself.
+    """
     if isinstance(value, ast.Call):
-        if any(yields_code_eval(argument, bound, scopes)
-               for argument in value.args):
+        if may_be_code_eval(value, bound, scopes):
             return True
-        if any(yields_code_eval(keyword.value, bound, scopes)
-               for keyword in value.keywords):
+        if any(_data_delivers(argument, bound, scopes)
+               for argument in _arguments(value)):
             return True
-        return yields_code_eval(value.func, bound, scopes, as_callee=True)
-    return any(yields_code_eval(child, bound, scopes)
-               for child in ast.iter_child_nodes(value))
+        return _data_delivers(value.func, bound, scopes, is_callee=True)
+    return may_be_code_eval(value, bound, scopes) or \
+        _data_delivers(value, bound, scopes)
