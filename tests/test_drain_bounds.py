@@ -3,10 +3,7 @@
 
 The property, the spelling surface and the shapes the guard does not
 follow are the recognition claim on `tests/_drain_scan.py`, which is
-where the analysis lives. These tests hold that analysis to the tree:
-every converted site caught when its bound is removed, every real
-unbounded drain without a stop left alone, and every declared limit
-reached by the shape that would expose it.
+where the analysis lives. These tests hold that analysis to the tree.
 """
 import ast
 import os
@@ -29,7 +26,7 @@ def test_every_stop_then_drain_carries_a_bound(tmp):
 
 
 def test_the_scan_reads_exactly_the_tracked_python_tree(tmp):
-    """A tracked Python file Git does not list is one the scan never reads."""
+    """A file Git does not list is one the scan never reads."""
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z', '*.py'],
@@ -53,7 +50,7 @@ def test_each_real_site_is_caught_when_its_bound_is_removed(tmp):
 
 
 def test_a_scratch_tree_is_clean_before_a_bound_is_removed(tmp):
-    """The same scratch tree the plants use, with nothing planted in it."""
+    """The plants scratch tree, with nothing planted in it."""
     root = Path(tmp, 'pristine')
     scan._scratch_git_tree(root)
     assert not scan._tree_violations(root), scan._tree_violations(root)
@@ -68,7 +65,7 @@ def test_a_bounded_drain_is_clean(tmp):
 
 
 def test_the_bounded_helper_is_clean(tmp):
-    """The helper every routed site calls kills, then drains under a bound."""
+
     del tmp
     relative = 'tests/_drain.py'
     source = (ROOT / relative).read_text(encoding='utf-8')
@@ -212,7 +209,7 @@ def drain(process):
 
 
 def test_the_real_cross_scope_shape_is_the_speedharness(tmp):
-    """The declared cross-scope gap is a real site, named as declared."""
+
     del tmp
     relative = 'tests/_speedharness.py'
     source = (ROOT / relative).read_text(encoding='utf-8')
@@ -238,7 +235,7 @@ def test_the_real_cross_scope_shape_is_the_speedharness(tmp):
 
 
 def test_a_non_kill_unbounded_drain_is_not_flagged(tmp):
-    """The false-positive control: a real unbounded drain with no stop."""
+
     for relative, drain in _UNBOUNDED_WITHOUT_STOP:
         source = (ROOT / relative).read_text(encoding='utf-8')
         assert source.count(drain) >= 1, relative
@@ -257,7 +254,7 @@ def test_the_false_positive_control_still_catches_a_stop(tmp):
 
 
 def test_a_walrus_target_is_followed_to_its_receiver(tmp):
-    """`(p := proc)` binds `p`; the walk must record it as an alias."""
+
     del tmp
     violations = scan._synthetic("""def reap(proc):
     if (p := proc):
@@ -270,7 +267,7 @@ def test_a_walrus_target_is_followed_to_its_receiver(tmp):
 
 
 def test_a_for_target_is_followed_to_its_receiver(tmp):
-    """`for p in (proc,)` binds `p` to the process the loop walks."""
+
     del tmp
     violations = scan._synthetic("""def reap(proc):
     for p in (proc,):
