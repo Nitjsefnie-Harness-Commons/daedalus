@@ -75,9 +75,8 @@ def _refuses_argument_reads(text, mask, start, end):
             raw = text[start + match.end():start + read_end - 1]
             raw = raw.encode('latin1').decode('utf-8')
             raw = blank_js_comments(raw).strip()
-            # A legacy numeric escape is a refusal here whatever the
-            # shared decoder makes of it: `\0` through `\7` name a
-            # character, and the policy refuses a digit it cannot read.
+            # A legacy numeric escape is a refusal here whatever the shared
+            # decoder makes of it: the policy reads no digit in a key.
             if re.search(r'\\[0-9\u2028\u2029]', raw):
                 return True
             key = decode_string_literal(raw)

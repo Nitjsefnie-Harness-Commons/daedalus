@@ -645,9 +645,6 @@ def routing_events(mask, text, senders):
         events.append((m.start(), 'prop', m))
     for m in re.finditer(r'\bObject\s*\.\s*assign\s*\(', mask):
         events.append((m.start(), 'assign', m))
-    # A bracket write names its key in brackets, so the same reader the
-    # object-literal keys use reads it: `p['tab'] = x` and `p[k] = x` are
-    # one write, not two spellings.
     for match, key_left, key_right, equals in computed_writes(
             mask, text):
         events.append((match.start(), 'computed',

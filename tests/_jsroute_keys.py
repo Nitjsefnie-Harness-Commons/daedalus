@@ -59,10 +59,9 @@ def decode_string_literal(raw):
             values.append(value)
             continue
         if escaped in '01234567':
-            # A legacy octal escape, which sloppy mode still reads and a
-            # `\377`-wide digit run bounds. `\0` to `\3` take two further
+            # The runtime's own digit counts: `\0` to `\3` take two further
             # digits and `\4` to `\7` one, so `\123` is `S` and `\477` is
-            # `'7` — the counts the runtime uses, not a greedy read.
+            # `'7`. A greedy read of either is a different character.
             digits = escaped
             room = 2 if escaped in '0123' else 1
             while (len(digits) <= room
@@ -72,9 +71,8 @@ def decode_string_literal(raw):
             values.append(int(digits, 8))
             continue
         if escaped in '89':
-            # Not an escape: no legacy octal digit, and the single-escape
-            # table does not carry it. Left undecoded so the key it spells
-            # is unresolvable rather than read as the digit.
+            # Neither an octal digit nor a single escape, so a key spelling
+            # one is unresolvable rather than read as the digit.
             return None
         values.append(ord(_ESCAPES.get(escaped, escaped)))
     merged = []
@@ -115,10 +113,8 @@ _QUOTED_SPAN = re.compile(_QUOTED)
 
 
 def static_key(text, left, right, computed_key=None):
-    """The key one property position carries, or None when the reader
-    cannot name it. `source_key` reads a whole literal or a name bound to
-    one; this also folds a concatenation of literals, so `'ta' + 'b'`
-    names the key `tab` rather than no key at all."""
+    """`source_key`, plus the concatenation of literals it declines:
+    `'ta' + 'b'` names the key `tab` rather than no key at all."""
     raw = text[left:right].strip()
     if raw.startswith('[') and raw.endswith(']'):
         raw = raw[1:-1].strip()
