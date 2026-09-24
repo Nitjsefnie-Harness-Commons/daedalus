@@ -1,6 +1,6 @@
 /* global _takeEvalRelay, postResult, registerTab, handleHotfixReplay */
 /* global readBoundedBody, gmResponseLimit, bytesToBase64, _recordTiming */
-/* global mintSegmentSig */
+/* global mintSegmentSig, handleGmStorage */
 
 // ─── Message handler (from content scripts) ───
 
@@ -21,6 +21,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     postResult(execution, msg.result, msg.error, tabId, extra);
   } else if (msg.type === 'register') {
     if (sender.tab) registerTab(sender.tab.id);
+  } else if (msg.type === 'gm-storage') {
+    // The page-facing GM storage namespace, byte cap and per-namespace write
+    // queue live in the service-worker realm (worker/gm_storage.js) so a
+    // sibling tab of the same origin cannot race them; the content script
+    // forwards and maps this answer back to the page.
+    handleGmStorage(msg, sender, sendResponse);
+    return true;
   } else if (msg.type === 'replayHotfixes') {
     if (sender.tab) handleHotfixReplay(sender.tab.id);
   } else if (msg.type === 'fetch') {

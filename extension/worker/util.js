@@ -1,6 +1,6 @@
 /* exported _hasNativeToBase64, bytesToBase64, gmResponseLimit */
 /* exported readBoundedBody, bridgeAuth, bridgeHeaders, _fetchTimings */
-/* exported _recordTiming, _serializer */
+/* exported _recordTiming, _serializer, canonicalOrigin */
 
 // Fast base64 encode. Prefers native Uint8Array.prototype.toBase64 (TC39,
 // Chrome 137+, Node 25+). Falls back to chunked String.fromCharCode.apply
@@ -102,4 +102,24 @@ function _serializer() {
     tail = run.then(() => {}, () => {});
     return run;
   };
+}
+
+// ─── Origin canonicalization ───
+
+// The only origin canonicalizer: reduce a reported origin to `scheme://host`
+// with a lowercase host, or refuse. An absent, unparseable, non-http(s) or
+// opaque ("null") value has no owner to name a partition after, so callers
+// must refuse it rather than fall back to anything a page supplied.
+function canonicalOrigin(value) {
+  if (typeof value !== 'string') return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (_) {
+    return null;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+  return parsed.origin;
 }

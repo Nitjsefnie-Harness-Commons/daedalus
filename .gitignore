@@ -198,6 +198,7 @@
 !/extension/worker/config.js
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
+!/extension/worker/gm_storage.js
 !/extension/worker/hotfixes.js
 !/extension/worker/messaging.js
 !/extension/worker/netcapture.js
@@ -276,6 +277,7 @@
 !/tests/_frontend.py
 !/tests/_ghexpr.py
 !/tests/_gm_harness.py
+!/tests/_gm_two_origin.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
