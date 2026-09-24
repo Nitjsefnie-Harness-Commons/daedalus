@@ -52,16 +52,13 @@ def test_deleted_holder_copy_invocation_reports(tmp):
 
 
 # The setdefault read of a key the evaluator cannot fold. The runtime
-# resolves the key, finds the stored relay and returns that, so the stored
-# value is the value the call reaches; a guard that named only the default
-# reads clean on a path that reaches the sender. The PIN rows vary one
-# property each: the two spellings differ only in the key expression, and
-# the two orders differ only in the position of the relay, so neither pair
-# can be satisfied by a spelling-only or a position-only rule. The relay
-# sits in the SECOND position, because a one-item store cannot tell "every
-# item" from "the first". The twins hold the same shape with clean data —
-# an empty store, a store the key misses, and a call with no default — and
-# must not move. The controls are the arms the change leaves alone.
+# resolves the key and returns the stored value, so a guard that named only
+# the default reads clean on a path that reaches the sender. The PIN rows
+# vary one property each — the two spellings differ only in the key
+# expression, the two orders only in the relay's position — so neither pair
+# is satisfiable by a spelling-only or a position-only rule, and the relay
+# sits second because a one-item store cannot tell "every item" from "the
+# first". The twins hold the same shape with clean data and must not move.
 _SETDEFAULT_UNRESOLVED = [
     ('setdefault-concat-relay-last', _flow(
         _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
@@ -94,11 +91,10 @@ _SETDEFAULT_UNRESOLVED = [
     ('setdefault-resolvable-miss', _flow(
         _RELAY, 'd = {"a": relay()}', 'x = d.setdefault("k", ordinary)',
         invoke='x()'), (0, 0)),
-    # The key spelled in place rather than through a name, so the probe
-    # reads the key EXPRESSION rather than a name's absent literal. Both
-    # spellings here evaluate to no literal at all, which is not the same
-    # as a literal the runtime cannot hash, and a guard that cannot tell
-    # them apart reports a healthy program.
+    # The key spelled in place, so the probe reads the key EXPRESSION
+    # rather than a name's absent literal. Clean twins over the shape a
+    # guard reads as an unevaluable key; `_SETDEFAULT_ARMS` carries the
+    # rows that tell that shape apart from an unhashable one.
     ('setdefault-concat-direct-vacant', _flow(
         _RELAY, 'd = {}', 'x = d.setdefault("k" + "", ordinary)',
         invoke='x()'), (0, 0)),
@@ -117,12 +113,11 @@ def test_setdefault_unresolved_key_names_every_stored_item(tmp):
     assert not bad, bad
 
 
-# The same value read back through a name, because a verdict that stops at
-# the store is a false green: the value the runtime returns is the value the
-# call reaches, and a frame between the store and the call must not lose it.
-# The rows vary how far the value travels — a statement, a nested def, a
-# helper's return value — for each of the two unresolved spellings, and each
-# twin holds the same travel with clean data.
+# The same value read back through a name: a verdict that stops at the store
+# is a false green, because the value the runtime returns is the value the
+# call reaches and a frame between them must not lose it. Each unresolved
+# spelling travels as far as the other, and each twin covers the same travel
+# with clean data.
 _SETDEFAULT_CALL_THROUGH = [
     ('call-through-concat-statement', _flow(
         _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
