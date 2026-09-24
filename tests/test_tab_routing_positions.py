@@ -268,50 +268,50 @@ def test_star_of_a_set_holding_a_name_stays_opaque(tmp):
 
 
 _PAIR_SLOT = 'p = ["k", ordinary]\np[int(args.flag)] = relay()\n'
-_SURVIVORS = {
-    'X3a_pair_dyn_slot': _PAIR_SLOT + 'd = dict([p])' + _SL + 'd["k"]()',
-    'X3a_pair_dyn_slot_update': (_PAIR_SLOT + 'd = {}\nd.update([p])'
-                                 + _SL + 'd["k"]()'),
-    'X5b_starstar_single': ('d = {"a": 1, "b": 2}\nx = [*{**d}, relay()]'
-                            + _SL + 'x[2]()'),
-    'X7c_rest_restar': ('a, *b = [*' + _K2 + ', ordinary]\n'
-                        'x = [*b, relay()]' + _SL + 'x[1]()'),
+_SLOT_SHAPES = {
+    'pair_dyn_slot': _PAIR_SLOT + 'd = dict([p])' + _SL + 'd["k"]()',
+    'pair_dyn_slot_update': (_PAIR_SLOT + 'd = {}\nd.update([p])'
+                             + _SL + 'd["k"]()'),
+    'starstar_single': ('d = {"a": 1, "b": 2}\nx = [*{**d}, relay()]'
+                        + _SL + 'x[2]()'),
+    'rest_restar': ('a, *b = [*' + _K2 + ', ordinary]\n'
+                    'x = [*b, relay()]' + _SL + 'x[1]()'),
 }
 
 
-def test_survivor_X3a_pair_dyn_slot_reports(tmp):
-    assert _run(tmp, _SURVIVORS['X3a_pair_dyn_slot']) == (1, 1)
+def test_pair_dyn_slot_reports(tmp):
+    assert _run(tmp, _SLOT_SHAPES['pair_dyn_slot']) == (1, 1)
 
 
-def test_survivor_X3a_pair_dyn_slot_stays_clean(tmp):
-    assert _run(tmp, _SURVIVORS['X3a_pair_dyn_slot'],
+def test_pair_dyn_slot_stays_clean(tmp):
+    assert _run(tmp, _SLOT_SHAPES['pair_dyn_slot'],
                 clean=True) == (0, 0)
 
 
-def test_survivor_X3a_pair_dyn_slot_update_reports(tmp):
-    assert _run(tmp, _SURVIVORS['X3a_pair_dyn_slot_update']) == (1, 1)
+def test_pair_dyn_slot_update_reports(tmp):
+    assert _run(tmp, _SLOT_SHAPES['pair_dyn_slot_update']) == (1, 1)
 
 
-def test_survivor_X3a_pair_dyn_slot_update_stays_clean(tmp):
-    assert _run(tmp, _SURVIVORS['X3a_pair_dyn_slot_update'],
+def test_pair_dyn_slot_update_stays_clean(tmp):
+    assert _run(tmp, _SLOT_SHAPES['pair_dyn_slot_update'],
                 clean=True) == (0, 0)
 
 
-def test_survivor_X5b_starstar_single_reports(tmp):
-    assert _run(tmp, _SURVIVORS['X5b_starstar_single']) == (1, 1)
+def test_starstar_single_reports(tmp):
+    assert _run(tmp, _SLOT_SHAPES['starstar_single']) == (1, 1)
 
 
-def test_survivor_X5b_starstar_single_stays_clean(tmp):
-    assert _run(tmp, _SURVIVORS['X5b_starstar_single'],
+def test_starstar_single_stays_clean(tmp):
+    assert _run(tmp, _SLOT_SHAPES['starstar_single'],
                 clean=True) == (0, 0)
 
 
-def test_survivor_X7c_rest_restar_reports(tmp):
-    assert _run(tmp, _SURVIVORS['X7c_rest_restar']) == (1, 1)
+def test_rest_restar_reports(tmp):
+    assert _run(tmp, _SLOT_SHAPES['rest_restar']) == (1, 1)
 
 
-def test_survivor_X7c_rest_restar_stays_clean(tmp):
-    assert _run(tmp, _SURVIVORS['X7c_rest_restar'],
+def test_rest_restar_stays_clean(tmp):
+    assert _run(tmp, _SLOT_SHAPES['rest_restar'],
                 clean=True) == (0, 0)
 
 
