@@ -19,7 +19,7 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
 from _pyroute_live import (clear_expression_cache, live_expression_value,
                            seed_then_resolve)
 from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
-                             literal_pair_keys)
+                              literal_pair_keys)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
