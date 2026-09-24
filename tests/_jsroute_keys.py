@@ -58,6 +58,24 @@ def decode_string_literal(raw):
                 return None
             values.append(value)
             continue
+        if escaped in '01234567':
+            # A legacy octal escape, which sloppy mode still reads and a
+            # `\377`-wide digit run bounds. `\0` to `\3` take two further
+            # digits and `\4` to `\7` one, so `\123` is `S` and `\477` is
+            # `'7` — the counts the runtime uses, not a greedy read.
+            digits = escaped
+            room = 2 if escaped in '0123' else 1
+            while (len(digits) <= room
+                   and raw[cursor:cursor + 1] in '01234567'):
+                digits += raw[cursor]
+                cursor += 1
+            values.append(int(digits, 8))
+            continue
+        if escaped in '89':
+            # Not an escape: no legacy octal digit, and the single-escape
+            # table does not carry it. Left undecoded so the key it spells
+            # is unresolvable rather than read as the digit.
+            return None
         values.append(ord(_ESCAPES.get(escaped, escaped)))
     merged = []
     cursor = 0

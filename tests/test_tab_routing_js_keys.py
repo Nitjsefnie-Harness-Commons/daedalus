@@ -5,12 +5,16 @@ A `tab` spelled through a binding or a concatenation reaches the same send
 as the literal spelling, and a key no reader can name leaves its object
 unprovable rather than clean.
 """
+import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
+from _jsroute_keys import decode_string_literal  # noqa: E402
 from test_tab_routing_js import _runtime_and_guard  # noqa: E402
 
 
@@ -57,6 +61,16 @@ def test_computed_tab_keys_match_runtime(tmp):
         ('bound-compared-bracket-write', "const k = 'tab';\n"
          "const p = {};\np[k] == chromeTab;\n"
          "extCmd('focus', { ...p });\n", False, False),
+        ('octal-read', "extCmd('focus', { ['\\164ab']: chromeTab });\n",
+         True, True),
+        ('octal-digits-read', "extCmd('focus', { ['\\164\\141\\142']: "
+         "chromeTab });\n", True, True),
+        ('legal-octal-read', "extCmd('focus', { ['\\164ab']: "
+         "'extension' });\n", False, False),
+        ('octal-write', "const p = {};\np['\\164ab'] = chromeTab;\n"
+         "extCmd('focus', { ...p });\n", True, True),
+        ('legal-octal-write', "const p = {};\np['\\164\\141\\142'] = "
+         "'extension';\nextCmd('focus', { ...p });\n", False, False),
     ]
     path = Path(tmp) / 'computed-key.js'
     observed = [(label, *_runtime_and_guard(source, path))
@@ -112,6 +126,11 @@ def test_a_bracket_write_resolves_a_tracked_member(tmp):
         ('legal-aliased-member', "const p = {};\nconst o = { p };\n"
          "o.p['tab'] = 'extension';\n"
          "extCmd('focus', { ...p });\n", False, False),
+        ('chained-member', "const victim = {};\n"
+         "const b = { c: victim };\n"
+         "const A = { b: { c: {} } };\n"
+         "A.b.c['tab'] = chromeTab;\n"
+         "extCmd('focus', { ...victim });\n", False, False),
     ]
     path = Path(tmp) / 'member-write.js'
     observed = [(label, *_runtime_and_guard(source, path))
@@ -142,6 +161,45 @@ def test_a_tab_value_other_than_extension_is_a_violation(tmp):
         found = js_tab_routing_violations(path, 'value.js')
         assert len(found) == 1, (label, found)
         assert '`tab` in a typed command send' in found[0], (label, found)
+
+
+def test_legacy_octal_escapes_decode_as_the_runtime_does(tmp):
+    r"""A legacy octal escape names the character its digits spell, and
+    the digit count is the runtime's: `\123` is `S` and `\477` is `'7`.
+    The forms are compared against node rather than against a table, so
+    the facets are the runtime's and not a transcription of them.
+
+    `\8` and `\9` are the one deliberate divergence: the runtime reads
+    them as the digits themselves, and a key that can never be `tab` is
+    left undecoded so the object carrying it fails closed.
+    """
+    forms = ['\\0', '\\00', '\\000', '\\0000', '\\07', '\\078', '\\1',
+             '\\12', '\\123', '\\164', '\\164\\141\\142', '\\100',
+             '\\1a', '\\370', '\\377', '\\4', '\\47', '\\477', '\\8',
+             '\\9', '\\x74ab', '\\u{74}ab']
+    script = Path(tmp) / 'decoded.js'
+    script.write_text(
+        'const forms = ' + json.dumps(forms) + ';\n'
+        'const out = {};\n'
+        'for (const form of forms) {\n'
+        '  const value = eval("\'" + form + "\'");\n'
+        '  out[form] = [...value].map(c => c.charCodeAt(0));\n'
+        '}\n'
+        'process.stdout.write(JSON.stringify(out));\n', encoding='utf-8')
+    node = shutil.which('node')
+    assert node, 'node is required to execute JavaScript routing controls'
+    ran = subprocess.run([node, str(script)], capture_output=True, text=True,
+                         timeout=30)
+    assert ran.returncode == 0, (ran.returncode, ran.stdout, ran.stderr)
+    runtime = json.loads(ran.stdout)
+    rejected = {'\\8', '\\9'}
+    for form, codes in runtime.items():
+        value = ''.join(chr(code) for code in codes)
+        decoded = decode_string_literal("'" + form + "'")
+        if form in rejected:
+            assert decoded is None, (form, decoded)
+        else:
+            assert decoded == value, (form, decoded, value)
 
 
 def main():
