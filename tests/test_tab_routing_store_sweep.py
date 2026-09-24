@@ -14,6 +14,9 @@ _UNKNOWN = ('pool = []\n'
             'def unknown():\n'
             '    return pool[0]\n')
 _TABCALL = "box['k']('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+_RELAY = ('def maker():\n    return ' + _LAMBDA + '\n'
+          'def relay(): return maker()\n'
+          'def pair(): return relay(), ordinary\n')
 
 
 def _flow(*lines, invoke=None):
@@ -21,6 +24,11 @@ def _flow(*lines, invoke=None):
     if invoke is not None:
         body.extend(('send = ext_cmd', f'return {invoke}'))
     return '\n'.join(body)
+
+
+def _ext_flow(*lines):
+    """A body whose every sender is the extension one."""
+    return '\n'.join(('send = ext_cmd', _RELAY, *lines))
 
 
 CASES = [
@@ -121,7 +129,59 @@ CASES = [
     ('delete-keeps-pop', _flow(
         'box = {"k": ' + _LAMBDA + '}', 'del box["k"]',
         invoke='(box["k"]() if "k" in box else None)'), (0, 0)),
+    ('issue857-pair-list-dynamic', _flow(
+        _RELAY, 'e = {}; e.update([("k", ordinary), (None, relay())])',
+        'x = e.setdefault("k", relay())', 'y = e.get(None, ordinary)',
+        invoke='x(), y()'), (1, 1)),
+    ('issue857-pair-list-literal', _flow(
+        _RELAY, 'e = {}; e.update([("k", ordinary), (None, relay())])',
+        'x = e.setdefault("k", relay())', invoke='x()'), (0, 0)),
+    ('issue857-update-pairs-defect', _ext_flow(
+        'e = {}; e.update([("k", relay())])',
+        'x = e.setdefault("k", relay())', 'x()'), (1, 1)),
+    ('issue857-setdefault-defect', _ext_flow(
+        'd = {}', 'x = d.setdefault("k", relay())', 'x()'), (1, 1)),
+    ('issue857-pop-direct-defect', _ext_flow(
+        'd = {"k": relay()}', 'd.pop("k")', 'd.get("k", relay())()'),
+     (1, 1)),
+    ('issue857-pop-name-defect', _ext_flow(
+        'd = {"k": relay()}; k = "k"', 'd.pop(k)',
+        'd.get("k", relay())()'), (1, 1)),
 ]
+
+# The shapes issue 857 over-reported, each with the real defect of the same
+# shape: same operator, key kind and receiver kind, the key occupied.
+_ISSUE857 = [
+    ('update-pairs',
+     _flow(_RELAY, 'e = {}; e.update([("k", ordinary)])',
+           'x = e.setdefault("k", relay())', invoke='x()'),
+     _flow(_RELAY, 'e = {}; e.update([("k", relay())])',
+           'x = e.setdefault("k", relay())', invoke='x()')),
+    ('setdefault-int-key',
+     _flow(_RELAY, 'd = {}; d[1] = ordinary',
+           'x = d.setdefault(1, relay())', invoke='x()'),
+     _flow(_RELAY, 'd = {}; d[1] = ordinary',
+           'x = d.setdefault(2, relay())', invoke='x()')),
+    ('pop-via-getd',
+     _flow(_RELAY, 'd = {"k": relay()}', 'def getd(): return d',
+           'getd().pop("k")', invoke='d.get("k", ordinary)()'),
+     _flow(_RELAY, 'd = {"k": relay(), "j": ordinary}',
+           'def getd(): return d', 'getd().pop("j")',
+           invoke='d.get("k", ordinary)()')),
+    ('pop-variable-key',
+     _flow(_RELAY, 'd = {"k": relay()}; k = "k"', 'd.pop(k)',
+           invoke='d.get("k", ordinary)()'),
+     _flow(_RELAY, 'd = {"k": relay(), "j": ordinary}; k = "j"', 'd.pop(k)',
+           invoke='d.get("k", ordinary)()')),
+]
+
+
+def test_issue857_shapes_read_clean_and_their_defects_are_caught(tmp):
+    for label, over_reported, defect in _ISSUE857:
+        actual = _tracked_focus_verdict(tmp, over_reported, counts=True)
+        assert actual == (0, 0), f'{label}: expected (0, 0), got {actual}'
+        actual = _tracked_focus_verdict(tmp, defect, counts=True)
+        assert actual == (1, 1), f'{label}: expected (1, 1), got {actual}'
 
 
 def test_store_form_verdicts(tmp):

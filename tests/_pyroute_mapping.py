@@ -1,6 +1,7 @@
 """Mapping stores, assignment binders and expression resolution for deferred
 routing values."""
 import ast
+import operator
 
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
@@ -24,6 +25,78 @@ def _selected_values(value, key, attribute=False):
             item for name, item in value.items.items()
             if name is DYNAMIC_KEY]
     return []
+
+
+_UNSAFE_LITERAL = object()
+_UNARY_OPERATORS = {ast.UAdd: operator.pos, ast.USub: operator.neg,
+                    ast.Invert: operator.invert}
+
+
+def _literal_value(expr):
+    if isinstance(expr, ast.Constant):
+        return expr.value
+    if isinstance(expr, ast.UnaryOp) and type(expr.op) in _UNARY_OPERATORS:
+        value = _literal_value(expr.operand)
+        if (value is _UNSAFE_LITERAL
+                or type(value) not in (int, float, complex)):
+            return _UNSAFE_LITERAL
+        try:
+            return _UNARY_OPERATORS[type(expr.op)](value)
+        except (ArithmeticError, TypeError, ValueError):
+            return _UNSAFE_LITERAL
+    if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+        values = []
+        for item in expr.elts:
+            value = _literal_value(item.value if isinstance(item, ast.Starred)
+                                   else item)
+            if value is _UNSAFE_LITERAL:
+                return value
+            try:
+                values.extend(value) if isinstance(item, ast.Starred) \
+                    else values.append(value)
+            except TypeError:
+                return _UNSAFE_LITERAL
+        try:
+            return (tuple(values) if isinstance(expr, ast.Tuple) else
+                    values if isinstance(expr, ast.List) else set(values))
+        except (TypeError, ValueError):
+            return _UNSAFE_LITERAL
+    if isinstance(expr, ast.Dict):
+        value = {}
+        for key, item in zip(expr.keys, expr.values):
+            item_value = _literal_value(item)
+            key_value = _literal_value(key) if key is not None else None
+            if item_value is _UNSAFE_LITERAL or key_value is _UNSAFE_LITERAL:
+                return _UNSAFE_LITERAL
+            try:
+                if key is None:
+                    if not isinstance(item_value, dict):
+                        return _UNSAFE_LITERAL
+                    value.update(item_value)
+                else:
+                    value[key_value] = item_value
+            except (TypeError, ValueError):
+                return _UNSAFE_LITERAL
+        return value
+    return _UNSAFE_LITERAL
+
+
+def literal_iterable_cardinality(expr):
+    """Return an exact literal-display length when it is provable."""
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        counts = [literal_iterable_cardinality(item.value)
+                  if isinstance(item, ast.Starred) else 1
+                  for item in expr.elts]
+        return None if any(count is None for count in counts) else sum(counts)
+    if isinstance(expr, (ast.Set, ast.Dict)):
+        value = _literal_value(expr)
+        return None if value is _UNSAFE_LITERAL else len(value)
+    return None
+
+
+def literal_truth(expr):
+    value = _literal_value(expr)
+    return None if value is _UNSAFE_LITERAL else bool(value)
 
 
 def alias_target_pairs(target, value):
@@ -204,8 +277,7 @@ def _setdefault_value(node, state):
     owner = _known_value(node.func.value, state)
     key = node.args[0] if node.args else None
     if (not isinstance(owner, DeferredContainer)
-            or not isinstance(key, ast.Constant)
-            or not isinstance(key.value, str)):
+            or not isinstance(key, ast.Constant)):
         default = _known_value(node.args[1], state) if len(node.args) > 1 \
             else None
         return merge_yielded((default, UNPROVABLE_SENDER)) \
@@ -324,6 +396,32 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
     return sender_resolver(node, state.aliases)
 
 
+def _literal_pair_items(source, state):
+    """Occupancy a syntactic sequence of pairs contributes for its literal
+    keys.
+
+    The deferred container for a literal list carries the display length but
+    not its items, so occupancy is recovered from the source text; every
+    entry the pair loop folded is left as it found it. A pair value that is
+    an unresolvable call is stored unprovable, as a keyword store does.
+    """
+    if not isinstance(source, (ast.List, ast.Tuple, ast.Set)):
+        return {}
+    items = {}
+    for pair in source.elts:
+        if not isinstance(pair, (ast.Tuple, ast.List, ast.Set)) \
+                or len(pair.elts) != 2:
+            continue
+        key = pair.elts[0]
+        if not isinstance(key, ast.Constant) or key.value is None:
+            continue
+        value = _known_value(pair.elts[1], state)
+        if value is None and isinstance(pair.elts[1], ast.Call):
+            value = UNPROVABLE_SENDER
+        items[key.value] = value
+    return items
+
+
 def _source_items(source, state):
     """Items one mapping store contributes; None marks unknown contents."""
     if isinstance(source, ast.Dict):
@@ -346,6 +444,8 @@ def _source_items(source, state):
             return None
         key = pair.items.get(0)
         items[DYNAMIC_KEY if key is None else key] = pair.items.get(1)
+    for key, value in _literal_pair_items(source, state).items():
+        items.setdefault(key, value)
     return items
 
 
@@ -400,7 +500,7 @@ def _apply_setdefault(state, call, owner_name):
             and isinstance(call.args[1], ast.Call):
         _mark_unprovable(state, owner_name)
         return
-    if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+    if (isinstance(key, ast.Constant)
             and (owner is None or isinstance(owner, DeferredContainer))):
         if owner is None:
             owner = DeferredContainer({}, None, 'dict', call)
@@ -417,14 +517,33 @@ def _apply_setdefault(state, call, owner_name):
     _mark_unprovable(state, owner_name)
 
 
+_UNRESOLVED_KEY = object()
+
+
+def _pop_key(call, state):
+    """The literal key one pop names, or _UNRESOLVED_KEY."""
+    if not call.args:
+        return _UNRESOLVED_KEY
+    key = call.args[0]
+    if isinstance(key, ast.Constant):
+        return key.value
+    if isinstance(key, ast.Name):
+        return state.literals.get(key.id, _UNRESOLVED_KEY)
+    return _UNRESOLVED_KEY
+
+
 def _apply_pop(state, call):
     owner = mapping_lookup_owner(call, state)
-    if owner is None or call.func.attr != 'pop' \
-            or not call.args \
-            or not isinstance(call.args[0], ast.Constant):
+    if owner is None or call.func.attr != 'pop':
+        return
+    key = _pop_key(call, state)
+    if key is _UNRESOLVED_KEY:
         return
     items = dict(owner.items)
-    items.pop(call.args[0].value, None)
+    try:
+        items.pop(key, None)
+    except TypeError:
+        return
     replacement = DeferredContainer(
         items, owner.length, owner.kind, owner.identity)
     replace_deferred_storage(state, owner, replacement)
@@ -434,8 +553,12 @@ def apply_deferred_store(statement, state):
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
-        if not isinstance(call.func, ast.Attribute) \
-                or not isinstance(call.func.value, ast.Name):
+        if not isinstance(call.func, ast.Attribute):
+            return
+        if call.func.attr == 'pop':
+            _apply_pop(state, call)
+            return
+        if not isinstance(call.func.value, ast.Name):
             return
         owner_name = call.func.value.id
         owner = state.callables.get(owner_name)
@@ -468,7 +591,13 @@ def apply_deferred_store(statement, state):
     targets = (statement.targets if isinstance(statement, ast.Assign)
                else [statement.target] if not isinstance(
                    statement, ast.Delete) else statement.targets)
+    literal = _literal_value(getattr(statement, 'value', None))
     for target in targets:
+        if isinstance(target, ast.Name):
+            if literal is _UNSAFE_LITERAL:
+                state.literals.pop(target.id, None)
+            else:
+                state.literals[target.id] = literal
         store_deferred_target(
             target, value, state, isinstance(statement, ast.Delete),
             value is None and raw is None
