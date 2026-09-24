@@ -184,6 +184,42 @@ def test_issue857_shapes_read_clean_and_their_defects_are_caught(tmp):
         assert actual == (1, 1), f'{label}: expected (1, 1), got {actual}'
 
 
+# The setdefault key forms around the occupancy lookup: a name bound to a
+# literal is a known key, a name bound to a non-literal is not.
+_ISSUE962 = [
+    ('name-key-occupied', _flow(
+        _RELAY, 'd = {"k": relay()}; key = "k"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('literal-key-occupied', _flow(
+        _RELAY, 'd = {"k": relay()}', 'x = d.setdefault("k", ordinary)',
+        invoke='x()'), (1, 1)),
+    ('name-key-vacant', _flow(
+        _RELAY, 'd = {}; key = "k"', 'x = d.setdefault(key, relay())',
+        invoke='x()'), (1, 1)),
+    ('name-key-non-string', _flow(
+        _RELAY, 'd = {1: relay()}; key = 1',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    # Unresolvable key, deferred default: reported. Unresolvable key,
+    # ordinary default: the stored callable is lost and the call reads
+    # clean — issue 963, pinned at its current verdict.
+    ('name-key-unresolved-relay', _flow(
+        _RELAY, 'd = {"k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, relay())', invoke='x()'), (1, 1)),
+    ('name-key-unresolved-ordinary', _flow(
+        _RELAY, 'd = {"k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
+]
+
+
+def test_issue962_name_bound_setdefault_key(tmp):
+    bad = []
+    for label, body, expected in _ISSUE962:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 def test_store_form_verdicts(tmp):
     bad = []
     for label, body, expected in CASES:
