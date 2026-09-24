@@ -3,6 +3,7 @@
 import ast
 import sys
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -616,7 +617,8 @@ def test_starred_operand_unprovable_seeds_unprovable_sender(tmp):
     # instead. A getattr whose starred operand expands to no provable element
     # list must seed UNPROVABLE_SENDER, so a fail-open expansion that
     # contributed one empty slot could not read the selection clean.
-    call = ast.parse('getattr(h, "missing", *build())').body[0].value
+    call = cast(ast.Expr, ast.parse(
+        'getattr(h, "missing", *build())').body[0]).value
     state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
     seed_selection_value(call, state)
     assert state.evaluated.get(id(call)) == UNPROVABLE_SENDER, (
