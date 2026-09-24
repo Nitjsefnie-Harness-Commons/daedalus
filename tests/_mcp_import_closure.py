@@ -9,19 +9,18 @@ too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. The
 registry is read structurally, so any base mentioning a tracked `sys` or
-registry name is one — `[sys][0].modules`, `sys.__dict__['modules']` — and
-a store that hands it to an unfollowable name is refused too; a star
-import, which binds names no name-based walk can follow, is refused
-outright. Three shapes it cannot follow are ACCEPTED rather than refused,
-and each is a declared limit, not a silent skip: a value reached through a
-call's result, bound to a name or read inline as a base, attribute or
-subscript; a tracked module or the operation delivered as a call ARGUMENT —
-including `sys`, whose registry is reachable only past the argument —
-because the walk follows nothing a call returns or is handed; and an
-INTERPOLATED f-string (`f'import_{which}'`), whose value the walk cannot
-know. A field-less f-string folds to a constant and is refused like any
-other literal. Any accepted shape would leave the closure quietly short of
-the modules that composition can reach.
+registry name is one, and a store that hands it to an unfollowable name is
+refused too; a star import is refused outright. Three shapes it cannot
+follow are ACCEPTED rather than refused, and each is a declared limit, not
+a silent skip: a value reached through a call's result, bound to a name or
+read inline as a base, attribute or subscript; a tracked module or the
+operation delivered as a call ARGUMENT — including `sys`, whose registry is
+reachable only past the argument — because the walk follows nothing a call
+returns or is handed; and a string ASSEMBLED at runtime that the walk
+cannot fold to a constant — an interpolated f-string, a concatenation with
+a name, a `join`, a `.format()`, `%`. A string that DOES fold to a
+constant is refused like any other literal. Any accepted shape would leave
+the closure quietly short of the modules that composition can reach.
 """
 import ast
 from pathlib import Path
@@ -378,52 +377,56 @@ def _looks_the_operation_up(node, bound):
     return isinstance(obj, ast.Name) and obj.id in bound
 
 
-def _mentions_registry(value, bound):
+def _registry_mention(value, bound, stop_at_call=False):
     """True when a registry-carrying name appears anywhere in an expression's
-    own subtree, so a base is read by its children rather than matched.
-
-    The property `_yields_the_operation` already reads for the operation,
-    applied to the registry. Only a name the map bound to `sys` or to the
-    registry counts, so a tracked name that is not those — an
-    `importlib.modules` — is not a mention.
+    own subtree — the property `_yields_the_operation` reads for the
+    operation, applied to the registry. Only a name bound to `sys` or the
+    registry counts, so an `importlib.modules` is not a mention.
+    `stop_at_call` does not follow a call's result, for the one base test
+    that has only the base to consult.
     """
+    if stop_at_call and isinstance(value, ast.Call):
+        return False
     if isinstance(value, ast.Name):
         return bound.get(value.id) in REGISTRY_NAMES
-    return any(_mentions_registry(child, bound)
+    return any(_registry_mention(child, bound, stop_at_call)
                for child in ast.iter_child_nodes(value))
 
 
 def _is_registry(node, bound):
     """The module registry itself, read through the map's tracked names.
 
-    Three ways the grammar spells it, one rule: a name the map bound to the
-    registry is the registry; a `.modules` attribute is the registry when its
-    base MENTIONS a registry-carrying name; and a subscript keyed by the
-    registry's name is the registry when its value mentions one either, which
-    is the `__dict__` route. The base is read structurally, so
-    `[sys][0].modules` and `sys.__dict__['modules']` are the registry
-    exactly as a bare `sys.modules` is.
+    A name bound to the registry is the registry; a `.modules` attribute is
+    it when its base MENTIONS a registry-carrying name; a subscript keyed by
+    the registry's name is it when its value mentions one either (the
+    `__dict__` route). A subscript's KEY is decided by the constant-folder,
+    not its spelling: a key folding to the registry's name is the registry, a
+    key folding to another constant resolves that attribute, and an
+    unreadable key is unresolvable — refused unless the base is a call's
+    result, which the call-result limit covers.
     """
     if isinstance(node, ast.Name):
         return bound.get(node.id) == 'registry'
     if isinstance(node, ast.Attribute) and node.attr == REGISTRY_ATTRIBUTE:
-        return _mentions_registry(node.value, bound)
+        return _registry_mention(node.value, bound)
     if isinstance(node, ast.Subscript):
-        return isinstance(node.slice, ast.Constant) \
-            and node.slice.value == REGISTRY_ATTRIBUTE \
-            and _mentions_registry(node.value, bound)
+        key = _folded_string(node.slice)
+        if key is not None and key != REGISTRY_ATTRIBUTE:
+            return False
+        if key == REGISTRY_ATTRIBUTE:
+            return _registry_mention(node.value, bound)
+        return _registry_mention(node.value, bound, stop_at_call=True)
     return False
 
 
 def _yields_the_registry(value, bound):
-    """True when a store's value can hand the module registry to a name this
-    map cannot follow, the store-side counterpart of `_is_registry`.
+    """True when a store's value can hand the registry to a name this map
+    cannot follow, the store-side counterpart of `_is_registry`.
 
     A bare registry-carrying name IS the thing a store must not hide; a
     `.modules` attribute or a `['modules']` subscript is the registry by
     `_is_registry`; a call is the declared call-result limit; everything else
-    is read by its own children. `m = sys` is the shape: the registry is
-    reachable off `m`, and no later store this walk can see will notice.
+    is read by its children. `m = sys` is the shape.
     """
     if isinstance(value, ast.Name):
         return bound.get(value.id) in REGISTRY_NAMES
@@ -452,11 +455,9 @@ def _refused_string_reads(tree, bound, refuse):
     """A string that NAMES the operation, or a module read by string from
     the registry, reaches the import-by-name operation the way a name does.
 
-    Both are matched against the operation's names, never against a
-    spelling of their own: a string — folded from its parts, so a
-    concatenation of literals is the name it assembles to — equal to one of
-    them reaches the operation whatever mapping reads it, and a registry read
-    names a module the walk cannot resolve.
+    Both are matched against the operation's names, never a spelling of their
+    own, and both go through the one constant-folder, the single authority
+    for a readable string.
     """
     for node in ast.walk(tree):
         folded = _folded_string(node)
@@ -464,8 +465,8 @@ def _refused_string_reads(tree, bound, refuse):
             refuse(node, f'the string {folded!r} names the import-by-name'
                    ' operation, which this scan cannot follow')
         elif _is_registry(node, bound):
-            refuse(node, f'the module registry {ast.unparse(node)} names a'
-                   ' module by string, which this scan cannot resolve')
+            refuse(node, f'a module is read out of the registry by'
+                   f' {ast.unparse(node)}, which this scan cannot resolve')
 
 
 def _import_targets(path, root):
@@ -490,11 +491,13 @@ def _import_targets(path, root):
     the argument — because the walk follows nothing a call returns or is
     handed. An attribute of a known module that is not the
     operation (`importlib.util`) is not a limit but an answer: its own name is
-    not the operation's, so no base can make it one. An INTERPOLATED f-string
-    is the third declared limit: a field-less one folds to a constant and is
-    refused like any other literal, but what interpolates into a
-    `f'import_{which}'` is not knowable statically. A string that NAMES the
-    operation — folded
+    not the operation's, so no base can make it one. A string ASSEMBLED at
+    runtime that the walk cannot fold to a constant is the third declared
+    limit, named by the mechanism rather than one spelling: an interpolated
+    f-string, a concatenation with a name, a `''.join`, a `.format()`, `%`.
+    A string that DOES fold to a constant — a field-less f-string, a
+    concatenation of literals — is refused like any other literal. A string
+    that NAMES the operation — folded
     from its parts, so a concatenation of literals is the name it assembles
     to — and a module read out of the registry by string are refused rather
     than accepted: they reach the operation the way a tracked name does, and
@@ -530,10 +533,9 @@ def _import_targets(path, root):
         elif isinstance(node, ast.Call) and _is_dynamic_import(
                 node.func, bound):
             argument = node.args[0] if node.args else None
-            if isinstance(argument, ast.Constant) \
-                    and isinstance(argument.value, str) \
-                    and not argument.value.startswith('.'):
-                targets |= _resolve_name(argument.value, (), root)
+            folded = _folded_string(argument)
+            if folded is not None and not folded.startswith('.'):
+                targets |= _resolve_name(folded, (), root)
             else:
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '

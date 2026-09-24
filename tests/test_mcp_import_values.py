@@ -437,18 +437,22 @@ def test_a_concatenated_string_that_assembles_the_operation_refuses(_tmp):
         _assert_refusal(_tmp, source, site, 'cannot follow')
 
 
-def test_an_interpolated_fstring_is_the_declared_limit(_tmp):
-    """#969: `f'import_{which}'` is a declared limit.
-
-    A field-less f-string folds to a constant and is refused; an interpolated
-    one assembles a value the walk cannot know, so it is accepted as a
-    disclosed limit, not silently skipped.
-    """
-    scanned = _scans_silently(_tmp, '''
-def load(d, which):
-    return d[f'import_{which}']
-''')
-    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+def test_a_runtime_assembled_string_is_the_declared_limit(_tmp):
+    """#969: a string ASSEMBLED at runtime is the declared limit, by the
+    mechanism not one spelling: every way of assembling the name at runtime
+    (interpolated f-string, concat-with-name, `join`, `.format()`, `%`)
+    cannot be folded to a constant, so each is accepted; a string that DOES
+    fold is refused, not covered here."""
+    for source in (
+            '\ndef load(d, which):\n    return d[f"import_{which}"]\n',
+            '\ndef load(d, which):\n    return d["import_" + which]\n',
+            '\ndef load(d):\n'
+            '    return d["".join(["import_", "module"])]\n',
+            '\ndef load(d, which):\n'
+            '    return d["import_{}".format(which)]\n',
+            '\ndef load(d, which):\n    return d["import_%s" % which]\n'):
+        scanned = _scans_silently(_tmp, source)
+        assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
 
 
 def test_a_mapping_lookup_naming_the_operation_refuses(_tmp):
@@ -661,8 +665,9 @@ def string_keyed_but_ordinary(handle, table, registry):
     attribute_by_name = getattr(handle, 'import_module_alias', None)
     untracked_registry = registry['importlib']
     other_modules = importlib.modules
+    other_dict_key = importlib.__dict__[registry]
     return (by_module_name, by_other_name, attribute_by_name,
-            untracked_registry, other_modules)
+            untracked_registry, other_modules, other_dict_key)
 
 
 def rows_of(handle):
