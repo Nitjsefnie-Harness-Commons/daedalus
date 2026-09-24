@@ -24,10 +24,21 @@ def _selected_values(value, key, attribute=False):
     if attribute and isinstance(value, DeferredClass):
         return [value.methods.get(key)]
     if not attribute and isinstance(value, DeferredContainer):
-        return [value.items.get(key)] + [
-            item for name, item in value.items.items()
-            if name is DYNAMIC_KEY]
+        return _at_position(value, key)
     return []
+
+
+def _at_position(container, index):
+    """Values a container may hold at exact position or key index."""
+    return [container.items.get(index), container.items.get(DYNAMIC_KEY)]
+
+
+def _from_position(container, start):
+    """The join of every value a container may hold at position start or
+    later."""
+    return merge_yielded(
+        item for key, item in container.items.items()
+        if key is DYNAMIC_KEY or key >= start)
 
 
 def alias_target_pairs(target, value):
@@ -43,9 +54,12 @@ def alias_target_pairs(target, value):
             paired.append((nested, merge_yielded(values + unknown)))
         return paired
     if isinstance(value, DeferredContainer):
-        if value.kind not in ('tuple', 'list') or value.length is None:
+        if value.kind not in ('tuple', 'list', 'set'):
             return None
-        items = [value.items.get(index) for index in range(value.length)]
+        if value.length is None:
+            return _unknown_length_pairs(target, value)
+        items = [merge_yielded(_at_position(value, index))
+                 for index in range(value.length)]
     elif isinstance(value, (ast.Tuple, ast.List)):
         items = value.elts
     else:
@@ -66,6 +80,25 @@ def alias_target_pairs(target, value):
         pairs.append((target.elts[star].value, DeferredContainer(
             dict(enumerate(rest)), len(rest), 'list')))
     pairs.extend(zip(target.elts[star + 1:], items[end:]))
+    return pairs
+
+
+def _unknown_length_pairs(target, value):
+    """A target before the star reads its own position; the star and every
+    target after it read the open tail from the star's position."""
+    start = next((index for index, item in enumerate(target.elts)
+                  if isinstance(item, ast.Starred)), len(target.elts))
+    tail = _from_position(value, start)
+    rest = DeferredContainer(
+        {} if tail is None else {DYNAMIC_KEY: tail}, None, 'list')
+    pairs = []
+    for index, item in enumerate(target.elts):
+        if index < start:
+            pairs.append((item, merge_yielded(_at_position(value, index))))
+        elif isinstance(item, ast.Starred):
+            pairs.append((item.value, rest))
+        else:
+            pairs.append((item, tail))
     return pairs
 
 
@@ -113,31 +146,85 @@ def apply_assignment_bindings(targets, value, state, binder):
 
 
 def _display_value(node, state):
+    """Positions after a star of unknown length share the DYNAMIC_KEY slot."""
     items = {}
     index = 0
     for item in node.elts:
-        value = _known_value(item.value if isinstance(item, ast.Starred)
-                             else item, state)
-        if isinstance(item, ast.Starred):
-            if isinstance(value, DeferredContainer):
-                for nested_index in range(value.length or 0):
-                    nested = value.items.get(nested_index)
-                    if nested is not None:
-                        items[index + nested_index] = nested
-                index += value.length or 0
-            else:
-                return merge_yielded(items.values())
+        starred = isinstance(item, ast.Starred)
+        value = _known_value(item.value if starred else item, state)
+        if starred and not isinstance(value, DeferredContainer):
+            count = _literal_count(item.value)
+            if count is None:
+                index = None
+                _fold_dynamic(items, UNPROVABLE_SENDER)
+            elif index is not None:
+                index += count
+        elif starred and value.kind == 'dict':
+            # Unpacking a dict yields its keys, never the modelled values.
+            index = (None if index is None or value.length is None
+                     else index + value.length)
+        elif starred and (index is None or value.length is None):
+            index = None
+            _fold_dynamic(items, _from_position(value, 0))
+        elif starred:
+            for offset in range(value.length):
+                nested = merge_yielded(_at_position(value, offset))
+                if nested is not None:
+                    items[index + offset] = nested
+            index += value.length
+        elif index is None:
+            _fold_dynamic(items, value)
         else:
             if value is not None:
                 items[index] = value
             index += 1
-    if items or isinstance(node, ast.List):
+    starred_any = any(isinstance(item, ast.Starred) for item in node.elts)
+    if isinstance(node, ast.Set) and (items or starred_any):
+        # A set has no positions; equal elements collapse at runtime.
+        joined = merge_yielded(items.values())
+        return DeferredContainer(
+            {} if joined is None else {DYNAMIC_KEY: joined}, None, 'set')
+    if items or isinstance(node, ast.List) or starred_any:
         return DeferredContainer(items, index, type(node).__name__.lower())
     return None
 
 
+def _literal_count(node):
+    """The exact element count of a string literal, or of a tuple, list or
+    set literal of constants; None for anything else."""
+    if isinstance(node, ast.Constant) and isinstance(
+            node.value, (str, bytes)):
+        return len(node.value)
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and all(
+            isinstance(element, ast.Constant) for element in node.elts):
+        values = [element.value for element in node.elts]
+        return len(set(values) if isinstance(node, ast.Set) else values)
+    return None
+
+
+def _fold_dynamic(target, value):
+    """Merge a value into the DYNAMIC_KEY slot, joining on repeat."""
+    target[DYNAMIC_KEY] = merge_yielded(
+        (target.get(DYNAMIC_KEY), value))
+
+
+def _fold_items(target, source):
+    """Fold source mapping items into target, joining DYNAMIC_KEY."""
+    for key, value in source.items():
+        if key is DYNAMIC_KEY:
+            _fold_dynamic(target, value)
+        else:
+            target[key] = value
+
+
+def _dict_length(items, counted=True):
+    """A dict's key count while every key is known, otherwise None."""
+    return len(items) if counted and DYNAMIC_KEY not in items else None
+
+
 def _dict_value(node, state):
     items = {}
+    counted = True
     for key, item in zip(node.keys, node.values):
         if key is not None:
             value = _known_value(item, state)
@@ -145,66 +232,58 @@ def _dict_value(node, state):
             if literal is not _UNRESOLVED_KEY:
                 items[literal] = value
             else:
-                items[DYNAMIC_KEY] = merge_yielded(
-                    (items.get(DYNAMIC_KEY), value))
+                _fold_dynamic(items, value)
             continue
-        if isinstance(item, ast.Dict):
-            nested = _dict_value(item, state)
-            if nested is not None:
-                items.update(nested.items)
-            continue
-        value = _known_value(item, state)
-        if value is None or not isinstance(value, DeferredContainer) \
-                or value.kind != 'dict':
-            return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
-        items.update(value.items)
-    return DeferredContainer(
-        items, len(node.values), 'dict', node)
+        value = (_dict_value(item, state) if isinstance(item, ast.Dict)
+                 else _known_value(item, state))
+        if isinstance(value, DeferredContainer) and value.kind == 'dict':
+            _fold_items(items, value.items)
+            counted = counted and value.length is not None
+        else:
+            _fold_dynamic(items, UNPROVABLE_SENDER)
+    if len(node.keys) == 1 and node.keys[0] is not None:
+        return DeferredContainer(items, 1, 'dict', node)  # one key, unread
+    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
 
 
 def _merge_or_value(node, state):
     """Mapping value of `left | right` from the provable dict sides."""
     items = {}
+    counted = True
     for side in (node.left, node.right):
         if isinstance(side, ast.Dict):
             known = _dict_value(side, state)
         else:
             known = _known_value(side, state)
-            if known is None and isinstance(side, ast.Call):
-                return DeferredContainer(
-                    {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
-        if isinstance(known, str) and sender_value(known) is not None:
-            return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
-            items.update(known.items)
-    if not items: return None
-    return DeferredContainer(items, None, 'dict', node)
+            _fold_items(items, known.items)
+            counted = counted and known.length is not None
+        else:
+            _fold_dynamic(items, UNPROVABLE_SENDER)
+    if not items:
+        return None
+    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
 
 
 def _dict_call_value(node, state):
     """Mapping value of a builtin dict() call, or None when untracked."""
-    if len(node.args) == 1 and not node.keywords:
-        known = _known_value(node.args[0], state)
-        if isinstance(known, DeferredContainer) and known.kind == 'dict':
-            return DeferredContainer(
-                dict(known.items), known.length, 'dict', node)
-        if known is None and isinstance(node.args[0], ast.Call):
-            return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
-        return None
-    if node.args:
-        return DeferredContainer(
-            {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
     items = {}
+    counted = True
+    sources = node.args[:1] + [
+        keyword.value for keyword in node.keywords if keyword.arg is None]
+    for source in sources:
+        known = _source_items(source, state)
+        if known is None:
+            _fold_dynamic(items, UNPROVABLE_SENDER)
+        else:
+            _fold_items(items, known[0])
+            counted = counted and known[1]
     for keyword in node.keywords:
-        if keyword.arg is None:
-            return DeferredContainer(
-                {DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict', node)
-        known = _known_value(keyword.value, state)
-        items[keyword.arg] = known
-    return DeferredContainer(items, len(node.keywords), 'dict', node)
+        if keyword.arg is not None:
+            items[keyword.arg] = _known_value(keyword.value, state)
+    if not items:
+        return None
+    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
 
 
 def _setdefault_value(node, state):
@@ -348,7 +427,7 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 if len(node.args) > 1 else None
             if static_dict and known is not None:
                 return DeferredContainer(
-                    {DYNAMIC_KEY: known}, 1, 'dict', node)
+                    {DYNAMIC_KEY: known}, None, 'dict', node)
     return sender_resolver(node, state.aliases)
 
 
@@ -381,52 +460,71 @@ def _literal_pair_items(source, state):
 
 
 def _source_items(source, state):
-    """Items one mapping store contributes; None marks unknown contents."""
-    if isinstance(source, ast.Dict):
-        container = _dict_value(source, state)
-        if container is None:
-            return {}
-        if not isinstance(container, DeferredContainer): return None
-        return container.items
-    known = _known_value(source, state)
+    """Items one mapping store contributes and whether their keys are all
+    counted; None marks unknown contents."""
+    known = (_dict_value(source, state) if isinstance(source, ast.Dict)
+             else _known_value(source, state))
     if not isinstance(known, DeferredContainer):
         return None
     if known.kind == 'dict':
-        return known.items
-    if known.kind not in ('list', 'tuple'): return None
+        return known.items, known.length is not None
+    if known.kind not in ('list', 'tuple', 'set'): return None
     items = {}
-    for pair in known.items.values():
+    # A pair at an unknown position (every pair of a set) may be any of
+    # the alternatives that slot joins.
+    pairs = [candidate for value in known.items.values()
+             for candidate in (value.values if isinstance(
+                 value, DeferredAlternatives) else (value,))]
+    for pair in pairs:
         if not isinstance(pair, DeferredContainer):
             return None
         if pair.kind not in ('list', 'tuple'):
             return None
-        key = pair.items.get(0)
-        items[DYNAMIC_KEY if key is None else key] = pair.items.get(1)
+        if pair.length != 2 or DYNAMIC_KEY in pair.items:
+            _fold_dynamic(items, _from_position(pair, 0))
+        else:
+            # A modelled key is a callable or a sender, never a key value.
+            _fold_dynamic(items, pair.items.get(1))
     for key, value in _literal_pair_items(source, state).items():
         items.setdefault(key, value)
-    return items
+    return items, len(known.items) == known.length
 
 
 def _mark_unprovable(state, owner_name):
     state.aliases[owner_name] = UNPROVABLE_SENDER
+    owner = state.callables.get(owner_name)
+    if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
+        _replace_container(state, owner_name, owner, dict(owner.items),
+                           unknown_length=True)
 
 
-def _replace_container(state, owner_name, owner, items):
-    replacement = DeferredContainer(
-        items, owner.length, owner.kind, owner.identity)
-    replace_deferred_storage(state, owner, replacement)
+def _container_copy(owner, items, unknown_length=False):
+    """A copy of owner holding items; a dict's length is recounted."""
+    length = owner.length
+    if owner.kind == 'dict':
+        length = _dict_length(
+            items, owner.length is not None and not unknown_length)
+    return DeferredContainer(items, length, owner.kind, owner.identity)
+
+
+def _replace_container(state, owner_name, owner, items,
+                       unknown_length=False):
+    replace_deferred_storage(
+        state, owner, _container_copy(owner, items, unknown_length))
     sync_cells(state, {owner_name})
 
 
 def _apply_mapping_store(state, owner_name, sources, keywords, node):
     """Merge provable items into the owner; unknown sources fail closed."""
     items = {}
+    counted = True
     for source in sources:
         merged = _source_items(source, state)
         if merged is None:
             _mark_unprovable(state, owner_name)
             return
-        items.update(merged)
+        _fold_items(items, merged[0])
+        counted = counted and merged[1]
     for key, value in keywords.items():
         known = _known_value(value, state)
         if known is not None:
@@ -439,14 +537,16 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
         else:
             items[key] = None
     owner = state.callables.get(owner_name)
-    if items:
+    if items or not counted:
         if owner is None:
             owner = DeferredContainer({}, None, 'dict', node)
             state.callables[owner_name] = owner
         elif not isinstance(owner, DeferredContainer):
             return
-        _replace_container(state, owner_name, owner, {
-            **owner.items, **items})
+        combined = dict(owner.items)
+        _fold_items(combined, items)
+        _replace_container(state, owner_name, owner, combined,
+                           unknown_length=not counted)
 
 
 def _apply_setdefault(state, call, owner_name):
@@ -484,16 +584,16 @@ def _pop_key(call, state):
 
 def _apply_pop(state, call):
     owner = mapping_lookup_owner(call, state)
-    if owner is None or call.func.attr != 'pop':
+    if owner is None or call.func.attr != 'pop' or not call.args:
         return
     key = _pop_key(call, state)
-    if key is _UNRESOLVED_KEY:
-        return
     items = dict(owner.items)
-    items.pop(key, None)
-    replacement = DeferredContainer(
-        items, owner.length, owner.kind, owner.identity)
-    replace_deferred_storage(state, owner, replacement)
+    if key is not _UNRESOLVED_KEY:
+        items.pop(key, None)
+    elif owner.kind != 'dict':
+        return
+    replace_deferred_storage(state, owner, _container_copy(
+        owner, items, key is _UNRESOLVED_KEY))
 
 
 def apply_deferred_store(statement, state):
@@ -525,6 +625,11 @@ def apply_deferred_store(statement, state):
     if isinstance(statement, ast.AugAssign):
         if isinstance(statement.op, ast.BitOr) \
                 and isinstance(statement.target, ast.Name):
+            # The rebinding already dropped the name; merge into its dict.
+            held = _known_value(statement.target, state)
+            if isinstance(held, DeferredContainer) and held.kind == 'dict':
+                state.callables[statement.target.id] = held
+                sync_cells(state, {statement.target.id})
             _apply_mapping_store(
                 state, statement.target.id, [statement.value], {},
                 statement)
@@ -578,17 +683,25 @@ def store_deferred_target(target, value, state, removing=False,
         elif not isinstance(owner, DeferredContainer):
             return
         items = dict(owner.items)
-        if value is not None:
-            items[DYNAMIC_KEY if dynamic else literal] = value
+        mapping = owner.kind == 'dict'
+        if dynamic and not removing:
+            if value is not None or unknown_call:
+                _fold_dynamic(items, UNPROVABLE_SENDER
+                              if value is None else value)
+            elif not mapping:
+                return
+        elif value is not None:
+            items[literal] = value
         elif unknown_call:
-            if dynamic:
-                items.setdefault(DYNAMIC_KEY, UNPROVABLE_SENDER)
-            elif items.get(literal) is None:
+            if items.get(literal) is None:
                 items[literal] = UNPROVABLE_SENDER
         elif dynamic:
-            return
+            if not mapping:
+                return
         elif removing:
             items.pop(literal, None)
         else:
             items[literal] = None
-        _replace_container(state, owner_name, owner, items)
+        # A computed key may add or remove an entry: the count is unknown.
+        _replace_container(state, owner_name, owner, items,
+                           unknown_length=dynamic and mapping)

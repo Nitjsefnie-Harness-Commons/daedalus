@@ -515,6 +515,7 @@
 !/tests/test_tab_routing.py
 !/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_comprehension_probe.py
+!/tests/test_tab_routing_dict_lengths.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
 !/tests/test_tab_routing_js_await.py
@@ -528,6 +529,7 @@
 !/tests/test_tab_routing_js_templates.py
 !/tests/test_tab_routing_match.py
 !/tests/test_tab_routing_performance.py
+!/tests/test_tab_routing_positions.py
 !/tests/test_tab_routing_setdefault.py
 !/tests/test_tab_routing_signatures.py
 !/tests/test_tab_routing_starred_arity.py

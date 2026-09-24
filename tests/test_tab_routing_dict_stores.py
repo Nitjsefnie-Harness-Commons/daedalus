@@ -10,10 +10,25 @@ from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 from test_tab_routing_store_sweep import _RELAY, _flow  # noqa: E402
 
 _CALL = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
+_PRE = (
+    "send = ordinary\n"
+    "def maker():\n"
+    "    return lambda: send('_focus', 'focus-tab', "
+    "tab=args.chrome_tab)\n"
+    "def relay(): return maker()\n")
+_PRE_CLEAN = (
+    "send = ordinary\n"
+    "def maker():\n"
+    "    return lambda: ordinary()\n"
+    "def relay(): return maker()\n")
 
 
 def _verdict(tmp, body):
     return _tracked_focus_verdict(tmp, body, counts=True)
+
+
+def _body(store, invoke, prefix=_PRE):
+    return prefix + store + "\nsend = ext_cmd\nreturn " + invoke
 
 
 def test_subscript_store_reports(tmp):
@@ -47,7 +62,8 @@ def test_clean_store_invocation_stays_clean(tmp):
 def test_deleted_holder_copy_invocation_reports(tmp):
     body = ('send = ordinary\nbox = {}\n'
             f'box["k"] = lambda: {_CALL}\n'
-            'send = ext_cmd\ncopy = dict(box)\ndel box\nreturn copy["k"]()')
+            'send = ext_cmd\ncopy = dict(box)\ndel box\n'
+            'return copy["k"]()')
     assert _verdict(tmp, body) == (1, 1)
 
 
@@ -228,6 +244,592 @@ def test_each_setdefault_arm_has_a_discriminating_probe(tmp):
         if actual != expected:
             wrong.append((label, actual, expected))
     assert not wrong, wrong
+
+
+def test_dict_unpack_first_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = {"k": relay(), **args.__dict__}["k"]', 'x()')) == (1, 1)
+
+
+def test_dict_unpack_last_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = {**args.__dict__, "k": relay()}["k"]', 'x()')) == (1, 1)
+
+
+def test_dict_unpack_first_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = {"k": relay(), **args.__dict__}["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_unpack_last_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = {**args.__dict__, "k": relay()}["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_nested_unpack_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = {**{"k": relay()}, **args.__dict__}["k"]', 'x()')) == (1, 1)
+
+
+def test_nested_unpack_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = {**{"k": relay()}, **args.__dict__}["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dynamic_key_merge_reports(tmp):
+    assert _verdict(tmp, _body(
+        'd = {}\nd[str(args.chrome_tab)] = relay()\n'
+        'x = {**d, **args.__dict__}', 'x["323"]()')) == (1, 1)
+
+
+def test_dynamic_key_merge_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'd = {}\nd[str(args.chrome_tab)] = relay()\n'
+        'x = {**d, **args.__dict__}', 'x["323"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_kwargs_unpack_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict(k=relay(), **args.__dict__)["k"]', 'x()')) == (1, 1)
+
+
+def test_dict_kwargs_unpack_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict(k=relay(), **args.__dict__)["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_known_kw_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict({"k": relay()}, other=ordinary)["k"]', 'x()')) == (1, 1)
+
+
+def test_dict_known_kw_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict({"k": relay()}, other=ordinary)["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_local_call_reports(tmp):
+    assert _verdict(tmp, _body(
+        'def opaque_call():\n'
+        '    return {"k": relay()}\n'
+        'x = dict(opaque_call())["k"]', 'x()')) == (1, 1)
+
+
+def test_dict_local_call_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'def opaque_call():\n'
+        '    return {"k": relay()}\n'
+        'x = dict(opaque_call())["k"]', 'x()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_or_known_left_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = {"k": relay()} | vars(args)', 'x["k"]()')) == (1, 1)
+
+
+def test_or_known_left_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = {"k": relay()} | vars(args)', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_or_known_right_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = vars(args) | {"k": relay()}', 'x["k"]()')) == (1, 1)
+
+
+def test_or_known_right_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = vars(args) | {"k": relay()}', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_or_opaque_name_reports(tmp):
+    assert _verdict(tmp, _body(
+        'o = args.__dict__\nx = {"k": relay()} | o', 'x["k"]()')) == (1, 1)
+
+
+def test_or_opaque_name_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'o = args.__dict__\nx = {"k": relay()} | o', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def _opaque(store, held='send'):
+    return (f'send = ext_cmd\nargs.box = {{"k": {held}}}\n{store}\n'
+            'return x["k"]("_focus", "focus-tab", tab=args.chrome_tab)')
+
+
+def test_opaque_part_O1_reports(tmp):
+    assert _verdict(tmp, _opaque('x = {"j": 1, **args.box}')) == (1, 1)
+
+
+def test_opaque_part_O1_clean_is_unprovable(tmp):
+    assert _verdict(tmp, _opaque(
+        'x = {"j": 1, **args.box}', 'ordinary')) == (0, 1)
+
+
+def test_opaque_part_O2_reports(tmp):
+    assert _verdict(tmp, _opaque('x = dict(j=1, **args.box)')) == (1, 1)
+
+
+def test_opaque_part_O2_clean_is_unprovable(tmp):
+    assert _verdict(tmp, _opaque(
+        'x = dict(j=1, **args.box)', 'ordinary')) == (0, 1)
+
+
+def test_opaque_part_O3_reports(tmp):
+    assert _verdict(tmp, _opaque(
+        'o = args.box\nx = {"j": 1} | o')) == (1, 1)
+
+
+def test_opaque_part_O3_clean_is_unprovable(tmp):
+    assert _verdict(tmp, _opaque(
+        'o = args.box\nx = {"j": 1} | o', 'ordinary')) == (0, 1)
+
+
+def test_opaque_part_O6_reports(tmp):
+    assert _verdict(tmp, _opaque('x = {"j": 1} | args.box')) == (1, 1)
+
+
+def test_opaque_part_O6_clean_is_unprovable(tmp):
+    assert _verdict(tmp, _opaque(
+        'x = {"j": 1} | args.box', 'ordinary')) == (0, 1)
+
+
+def _pairs(store, held):
+    return (f'send = ext_cmd\n{store.format(held)}\n'
+            'return x["k"]("_focus", "focus-tab", tab=args.chrome_tab)')
+
+
+def test_dict_call_pair_list_stays_clean(tmp):
+    assert _verdict(tmp, _pairs(
+        'x = dict([("k", {})])', 'ordinary')) == (0, 0)
+
+
+def test_dict_call_pair_list_reports(tmp):
+    assert _verdict(tmp, _pairs(
+        'x = dict([("k", {})])', 'send')) == (1, 1)
+
+
+def test_dict_call_pair_name_stays_clean(tmp):
+    assert _verdict(tmp, _pairs(
+        'p = [("k", {})]\nx = dict(p)', 'ordinary')) == (0, 0)
+
+
+def test_dict_call_pair_name_reports(tmp):
+    assert _verdict(tmp, _pairs(
+        'p = [("k", {})]\nx = dict(p)', 'send')) == (1, 1)
+
+
+def test_dict_call_display_unpack_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict(**{"k": relay()})', 'x["k"]()')) == (1, 1)
+
+
+def test_dict_call_display_unpack_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = dict(**{"k": relay()})', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_call_name_unpack_reports(tmp):
+    assert _verdict(tmp, _body(
+        'b = {"k": relay()}\nx = dict(**b)', 'x["k"]()')) == (1, 1)
+
+
+def test_dict_call_name_unpack_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'b = {"k": relay()}\nx = dict(**b)', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_dict_call_keyword_and_unpack_reports(tmp):
+    assert _verdict(tmp, _body(
+        'b = {"k": relay()}\nx = dict(j=1, **b)', 'x["k"]()')) == (1, 1)
+
+
+def test_dict_call_keyword_and_unpack_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'b = {"k": relay()}\nx = dict(j=1, **b)', 'x["k"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+_DYNAMIC_PAIRS = ('x = dict([(str(args.chrome_tab), relay()), '
+                  '(str(args.flag), ordinary)])')
+
+
+def test_dict_call_dynamic_pair_keys_report(tmp):
+    assert _verdict(tmp, _body(_DYNAMIC_PAIRS, 'x["323"]()')) == (1, 1)
+
+
+def test_dict_call_dynamic_pair_keys_stay_clean(tmp):
+    assert _verdict(tmp, _body(
+        _DYNAMIC_PAIRS, 'x["323"]()', prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def _update_pairs(held):
+    return ('send = ext_cmd\nx = {}\n'
+            f'x.update([(str(args.chrome_tab), {held}), '
+            '(str(args.flag), lambda *a, **k: 0)])\n'
+            'return x["323"]("_focus", "focus-tab", tab=args.chrome_tab)')
+
+
+def test_update_dynamic_pair_keys_report(tmp):
+    assert _verdict(tmp, _update_pairs('send')) == (1, 1)
+
+
+def test_update_dynamic_pair_keys_stay_clean(tmp):
+    assert _verdict(tmp, _update_pairs('ordinary')) == (0, 0)
+
+
+_UPDATE_AFTER_DYNAMIC = ('x = {}\nx[str(args.chrome_tab)] = relay()\n'
+                         'x.update({str(args.flag): ordinary})')
+
+
+def test_update_after_dynamic_store_reports(tmp):
+    assert _verdict(tmp, _body(
+        _UPDATE_AFTER_DYNAMIC, 'x["323"]()')) == (1, 1)
+
+
+def test_update_after_dynamic_store_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        _UPDATE_AFTER_DYNAMIC, 'x["323"]()', prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_display_dynamic_key_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = {str(args.chrome_tab): relay()}', 'x["323"]()')) == (1, 1)
+
+
+def test_display_dynamic_key_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = {str(args.chrome_tab): relay()}', 'x["323"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+_DYNAMIC_AND_OPAQUE = 'x = {str(args.chrome_tab): relay(), **args.__dict__}'
+
+
+def test_display_dynamic_key_beside_opaque_reports(tmp):
+    assert _verdict(tmp, _body(
+        _DYNAMIC_AND_OPAQUE, 'x["323"]()')) == (1, 1)
+
+
+def test_display_dynamic_key_beside_opaque_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        _DYNAMIC_AND_OPAQUE, 'x["323"]()', prefix=_PRE_CLEAN)) == (0, 0)
+
+
+_UNKNOWN_STARS = {
+    'opaque': ('x = [*args.values, relay()]', 'x[2]()'),
+    'dynamic_dict': ('x = [*{str(args.chrome_tab): 1}, relay()]', 'x[1]()'),
+    'dynamic_and_known_dict': (
+        'x = [*{str(args.chrome_tab): 1, "b": 2}, relay()]', 'x[2]()'),
+    'opaque_tuple': ('x = (*args.values, relay())', 'x[2]()'),
+    'known_after_opaque': ('x = [*args.values, *[relay()]]', 'x[2]()'),
+    'stored_dict': ('d = {}\nd[str(args.chrome_tab)] = 1\n'
+                    'x = [*{**d}, relay()]', 'x[1]()'),
+    'stored_dict_tuple': ('d = {}\nd[str(args.chrome_tab)] = 1\n'
+                          'x = (*{**d}, relay())', 'x[1]()'),
+    'stored_dict_direct': ('d = {}\nd[str(args.chrome_tab)] = 1\n'
+                           'x = [*d, relay()]', 'x[1]()'),
+}
+
+
+def _star(tmp, name, prefix=_PRE):
+    store, invoke = _UNKNOWN_STARS[name]
+    return _verdict(tmp, _body(store, invoke, prefix=prefix))
+
+
+def test_after_unknown_star_opaque_reports(tmp):
+    assert _star(tmp, 'opaque') == (1, 1)
+
+
+def test_after_unknown_star_opaque_stays_clean(tmp):
+    assert _star(tmp, 'opaque', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_dynamic_dict_reports(tmp):
+    assert _star(tmp, 'dynamic_dict') == (1, 1)
+
+
+def test_after_unknown_star_dynamic_dict_stays_clean(tmp):
+    assert _star(tmp, 'dynamic_dict', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_dynamic_and_known_dict_reports(tmp):
+    assert _star(tmp, 'dynamic_and_known_dict') == (1, 1)
+
+
+def test_after_unknown_star_dynamic_and_known_dict_stays_clean(tmp):
+    assert _star(tmp, 'dynamic_and_known_dict', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_opaque_tuple_reports(tmp):
+    assert _star(tmp, 'opaque_tuple') == (1, 1)
+
+
+def test_after_unknown_star_opaque_tuple_stays_clean(tmp):
+    assert _star(tmp, 'opaque_tuple', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_known_after_opaque_reports(tmp):
+    assert _star(tmp, 'known_after_opaque') == (1, 1)
+
+
+def test_after_unknown_star_known_after_opaque_stays_clean(tmp):
+    assert _star(tmp, 'known_after_opaque', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_stored_dict_reports(tmp):
+    assert _star(tmp, 'stored_dict') == (1, 1)
+
+
+def test_after_unknown_star_stored_dict_stays_clean(tmp):
+    assert _star(tmp, 'stored_dict', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_stored_dict_tuple_reports(tmp):
+    assert _star(tmp, 'stored_dict_tuple') == (1, 1)
+
+
+def test_after_unknown_star_stored_dict_tuple_stays_clean(tmp):
+    assert _star(tmp, 'stored_dict_tuple', _PRE_CLEAN) == (0, 0)
+
+
+def test_after_unknown_star_stored_dict_direct_reports(tmp):
+    assert _star(tmp, 'stored_dict_direct') == (1, 1)
+
+
+def test_after_unknown_star_stored_dict_direct_stays_clean(tmp):
+    assert _star(tmp, 'stored_dict_direct', _PRE_CLEAN) == (0, 0)
+
+
+_KNOWN_STAR = 'x = [*[relay(), ordinary], ordinary]'
+
+
+def test_display_known_star_indexes_sender_exactly(tmp):
+    assert _verdict(tmp, _body(_KNOWN_STAR, 'x[0]()')) == (1, 1)
+
+
+def test_display_known_star_indexes_ordinary_exactly(tmp):
+    assert _verdict(tmp, _body(_KNOWN_STAR, 'x[1]()')) == (0, 0)
+
+
+def test_display_known_star_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        _KNOWN_STAR, 'x[0]()', prefix=_PRE_CLEAN)) == (0, 0)
+
+
+_IN_PLACE_MERGES = {
+    'dynamic': ('x = {}\nx[str(args.chrome_tab)] = relay()\n'
+                'x |= {str(args.flag): ordinary}', 'x["323"]()'),
+    'opaque': ('x = {"k": relay()}\nx |= vars(args)', 'x["k"]()'),
+    'known': ('x = {"k": relay()}\nx |= {"j": ordinary}', 'x["k"]()'),
+}
+
+
+def _merge(tmp, name, prefix=_PRE):
+    store, invoke = _IN_PLACE_MERGES[name]
+    return _verdict(tmp, _body(store, invoke, prefix=prefix))
+
+
+def test_in_place_merge_dynamic_reports(tmp):
+    assert _merge(tmp, 'dynamic') == (1, 1)
+
+
+def test_in_place_merge_dynamic_stays_clean(tmp):
+    assert _merge(tmp, 'dynamic', _PRE_CLEAN) == (0, 0)
+
+
+def test_in_place_merge_opaque_reports(tmp):
+    assert _merge(tmp, 'opaque') == (1, 1)
+
+
+def test_in_place_merge_opaque_stays_clean(tmp):
+    assert _merge(tmp, 'opaque', _PRE_CLEAN) == (0, 0)
+
+
+def test_in_place_merge_known_reports(tmp):
+    assert _merge(tmp, 'known') == (1, 1)
+
+
+def test_in_place_merge_known_stays_clean(tmp):
+    assert _merge(tmp, 'known', _PRE_CLEAN) == (0, 0)
+
+
+_QUIET = 'def quiet(): return lambda: ordinary()\nd = {}\n'
+_RELAY_STORE = 'd[str(args.chrome_tab)] = relay()\n'
+_QUIET_STORE = 'd[str(args.flag)] = quiet()\n'
+
+
+def test_dynamic_store_then_quiet_store_reports(tmp):
+    assert _verdict(tmp, _body(
+        _QUIET + _RELAY_STORE + _QUIET_STORE, 'd["323"]()')) == (1, 1)
+
+
+def test_dynamic_store_then_quiet_store_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        _QUIET + _RELAY_STORE + _QUIET_STORE, 'd["323"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def test_quiet_store_then_dynamic_store_reports(tmp):
+    assert _verdict(tmp, _body(
+        _QUIET + _QUIET_STORE + _RELAY_STORE, 'd["323"]()')) == (1, 1)
+
+
+def test_quiet_store_then_dynamic_store_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        _QUIET + _QUIET_STORE + _RELAY_STORE, 'd["323"]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+def _unknown_call_store(name, quiet_first):
+    unknown = ('d[str(args.chrome_tab)] = '
+               f'copy.copy(globals()["{name[:4]}" + "{name[4:]}"])\n')
+    stores = _QUIET_STORE + unknown if quiet_first else unknown + _QUIET_STORE
+    call = 'return d["323"]("_focus", "focus-tab", tab=args.chrome_tab)'
+    return 'import copy\n' + _QUIET + stores + call
+
+
+def test_unknown_call_store_after_quiet_reports(tmp):
+    assert _verdict(tmp, _unknown_call_store('ext_cmd', True)) == (1, 1)
+
+
+def test_unknown_call_store_after_quiet_is_unprovable(tmp):
+    assert _verdict(tmp, _unknown_call_store('ordinary', True)) == (0, 1)
+
+
+def test_unknown_call_store_before_quiet_reports(tmp):
+    assert _verdict(tmp, _unknown_call_store('ext_cmd', False)) == (1, 1)
+
+
+def test_unknown_call_store_before_quiet_is_unprovable(tmp):
+    assert _verdict(tmp, _unknown_call_store('ordinary', False)) == (0, 1)
+
+
+_TAB_CALL = '("_focus", "focus-tab", tab=args.chrome_tab)'
+
+
+def test_starred_dict_values_stay_out_of_list(tmp):
+    assert _verdict(tmp, _body(
+        'x = [*{str(args.chrome_tab): relay()}, ordinary]',
+        'x[1]' + _TAB_CALL)) == (0, 0)
+
+
+def test_starred_dict_values_stay_out_of_tuple(tmp):
+    assert _verdict(tmp, _body(
+        'x = (*{str(args.chrome_tab): relay()}, ordinary)',
+        'x[1]' + _TAB_CALL)) == (0, 0)
+
+
+def test_relay_after_starred_dict_reports(tmp):
+    assert _verdict(tmp, _body(
+        'x = [*{str(args.chrome_tab): relay()}, relay()]', 'x[1]()')) \
+        == (1, 1)
+
+
+def test_relay_after_starred_dict_stays_clean(tmp):
+    assert _verdict(tmp, _body(
+        'x = [*{str(args.chrome_tab): relay()}, relay()]', 'x[1]()',
+        prefix=_PRE_CLEAN)) == (0, 0)
+
+
+_MUTATED_COUNTS = {
+    'computed_del': ('d = {"a": 1}\ndel d[str(args.flag) and "a"]\n'
+                     'x = [*d, relay()]', 'x[0]()'),
+    'computed_pop': ('d = {"a": 1}\nd.pop(str(args.flag) and "a")\n'
+                     'x = [*d, relay()]', 'x[0]()'),
+    'update_uncounted': ('d = {}\nd[str(args.chrome_tab)] = 1\ne = {}\n'
+                         'e.update(d)\nx = [*e, relay()]', 'x[1]()'),
+    'merge_uncounted': ('d = {}\nd[str(args.chrome_tab)] = 1\ne = {}\n'
+                        'e |= d\nx = [*e, relay()]', 'x[1]()'),
+    'constant_store': ('d = {}\nd["k"] = 1\nx = [*d, relay()]', 'x[1]()'),
+    'constant_del': ('d = {"a": 1}\ndel d["a"]\nx = [*d, relay()]',
+                     'x[0]()'),
+    'constant_pop': ('d = {"a": 1}\nd.pop("a")\nx = [*d, relay()]',
+                     'x[0]()'),
+    'branch_store': ('d = {}\nif args.flag:\n    d["k"] = 1\n'
+                     'x = [*d, relay()]', 'x[1]()'),
+}
+
+
+def _counted(tmp, name, prefix=_PRE):
+    store, invoke = _MUTATED_COUNTS[name]
+    return _verdict(tmp, _body(store, invoke, prefix=prefix))
+
+
+def test_star_after_computed_del_reports(tmp):
+    assert _counted(tmp, 'computed_del') == (1, 1)
+
+
+def test_star_after_computed_del_stays_clean(tmp):
+    assert _counted(tmp, 'computed_del', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_computed_pop_reports(tmp):
+    assert _counted(tmp, 'computed_pop') == (1, 1)
+
+
+def test_star_after_computed_pop_stays_clean(tmp):
+    assert _counted(tmp, 'computed_pop', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_update_uncounted_reports(tmp):
+    assert _counted(tmp, 'update_uncounted') == (1, 1)
+
+
+def test_star_after_update_uncounted_stays_clean(tmp):
+    assert _counted(tmp, 'update_uncounted', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_merge_uncounted_reports(tmp):
+    assert _counted(tmp, 'merge_uncounted') == (1, 1)
+
+
+def test_star_after_merge_uncounted_stays_clean(tmp):
+    assert _counted(tmp, 'merge_uncounted', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_constant_store_reports(tmp):
+    assert _counted(tmp, 'constant_store') == (1, 1)
+
+
+def test_star_after_constant_store_stays_clean(tmp):
+    assert _counted(tmp, 'constant_store', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_constant_del_reports(tmp):
+    assert _counted(tmp, 'constant_del') == (1, 1)
+
+
+def test_star_after_constant_del_stays_clean(tmp):
+    assert _counted(tmp, 'constant_del', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_constant_pop_reports(tmp):
+    assert _counted(tmp, 'constant_pop') == (1, 1)
+
+
+def test_star_after_constant_pop_stays_clean(tmp):
+    assert _counted(tmp, 'constant_pop', _PRE_CLEAN) == (0, 0)
+
+
+def test_star_after_branch_store_reports(tmp):
+    assert _counted(tmp, 'branch_store') == (1, 1)
+
+
+def test_star_after_branch_store_stays_clean(tmp):
+    assert _counted(tmp, 'branch_store', _PRE_CLEAN) == (0, 0)
 
 
 def main():

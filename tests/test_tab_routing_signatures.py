@@ -13,6 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute_state import FlowState  # noqa: E402
+from _pyroute_storage import join_clean_occupancy  # noqa: E402
 from _pyroute_values import (  # noqa: E402
     DeferredAlternatives, DeferredClass, DeferredContainer,
     DeferredGenerator, DeferredInstance, deferred_signature,
@@ -96,6 +98,47 @@ def test_nested_none_items_survive_top_level_trimming(tmp):
     left, right = _pair({0: occupied}, {0: rebuilt}, length=1)
     assert stored_signature(left, False) != stored_signature(right, False)
     assert stored_signature(left, True) != stored_signature(right, True)
+
+
+def test_dict_length_signs_with_occupancy(tmp):
+    occupied, bare = _pair({'a': 'x', 'k': None}, {'a': 'x'}, kind='dict')
+    bare = DeferredContainer(bare.items, 1, 'dict', bare.identity)
+    assert stored_signature(occupied, False) == stored_signature(bare, False)
+    assert stored_signature(occupied, True) != stored_signature(bare, True)
+    left, right = _pair({0: 'x'}, {0: 'x'}, length=1)
+    right = DeferredContainer(right.items, 2, 'list', right.identity)
+    assert stored_signature(left, False) != stored_signature(right, False)
+
+
+def _state_holding(container):
+    state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    state.callables['d'] = container
+    return state
+
+
+def test_occupancy_join_of_unequal_dict_lengths_is_unknown(tmp):
+    occupied, bare = _pair({'a': 'x', 'k': None}, {'a': 'x'}, kind='dict')
+    bare = DeferredContainer(bare.items, 1, 'dict', bare.identity)
+    joined = join_clean_occupancy(
+        _state_holding(occupied), _state_holding(bare))
+    assert joined.callables['d'].items == {'a': 'x'}
+    assert joined.callables['d'].length is None
+
+
+def test_occupancy_join_of_equal_dict_lengths_keeps_the_length(tmp):
+    left, right = _pair({'a': 'x', 'k': None}, {'a': 'x', 'k': None},
+                        kind='dict')
+    joined = join_clean_occupancy(_state_holding(left), _state_holding(right))
+    assert joined.callables['d'].length == 2
+
+
+def test_occupancy_join_of_equal_items_unequal_lengths_is_unknown(tmp):
+    kept, partner = _pair({'a': 'x'}, {'a': 'x'}, length=1, kind='dict')
+    partner = DeferredContainer(partner.items, None, 'dict', partner.identity)
+    joined = join_clean_occupancy(
+        _state_holding(kept), _state_holding(partner))
+    assert joined.callables['d'].items == {'a': 'x'}
+    assert joined.callables['d'].length is None
 
 
 def main():
