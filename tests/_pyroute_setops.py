@@ -43,8 +43,9 @@ def set_operands(operator, left, right, state):
 
 
 def _elements(value):
-    """The elements one operand contributes, or the uncertainty token for
-    an operand the model cannot read at all."""
+    """The elements one operand contributes. An operand the model cannot
+    resolve contributes the uncertainty token instead of nothing: dropping
+    it would let the result read cleaner than the code."""
     if isinstance(value, DeferredContainer):
         return list(value.items.values())
     return [UNPROVABLE_SENDER]
