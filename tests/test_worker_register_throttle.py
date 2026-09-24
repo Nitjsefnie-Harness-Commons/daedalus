@@ -13,6 +13,10 @@ from _worker_sources import import_scripts_stub  # noqa: E402
 
 REGISTER = 'POST /register'
 SYNC = 'POST /sync-tabs'
+# The recorded boot stream fetch, which every scenario makes once: the
+# worker's GET /stream answered 503. It is declared and asserted like the
+# non-stream routes, so the plan is the requests the real code makes.
+BOOT_STREAM = (503,)
 # Every scenario's recording, from a run of the shipped worker: boot opens the
 # stream, syncs the tab list, then one register post per fired timer. No route
 # is special-cased, so an invented call lands outside the plan and is refused.
@@ -127,10 +131,13 @@ async function run() {
       pending: timers.slice(baseline).filter(timer => timer.pending).length,
       cleared: cleared.slice(baselineClears),
       requests: nonStreamFetches.map(
-        (item) => ({ request: item.request, body: item.body })),
+        (item) => ({ request: item.request, body: item.body,
+                     status: item.status })),
     });
   }
-  return { observations, refused: refusedFetches, badOrigins };
+  return { observations, records: nonStreamFetches, refused: refusedFetches,
+    badOrigins, streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults };
 }
 
 run().then(result => process.stdout.write(JSON.stringify(result)))
@@ -141,15 +148,17 @@ run().then(result => process.stdout.write(JSON.stringify(result)))
 """
 
 
-def _observe(*steps, planned):
+def _observe(*steps, planned, planned_stream=BOOT_STREAM):
     outcome = run_gate(
         require_node(), _REGISTER_HARNESS,
         [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
         plan={'steps': list(steps), 'planned': list(planned)})
-    last = outcome['observations'][-1]
-    assert_gate_clean([r['request'] for r in last['requests']],
-                      outcome['refused'], outcome['badOrigins'],
-                      list(planned))
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=list(planned), planned_stream=list(planned_stream))
     return outcome['observations']
 
 
