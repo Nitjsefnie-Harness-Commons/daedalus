@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Every stop-then-drain of one process object in this tree is bounded.
 
+Not a suite itself — run_tests.py only loads `test_*.py`.
+
 The property: a call that STOPS a process object - `kill`, `terminate` or
 `send_signal` - that is followed, in the same scope and on the same object,
 by a DRAIN of that object - `communicate` or `wait` - carrying no
@@ -21,9 +23,10 @@ read the same way: an assignment, a walrus, a `with ... as` target, and a
 over anything else walks a collection of handles, so it is one of them and
 not the collection, and the guard will not read that as an alias.
 
-Calls are read in the order the scope evaluates them, so a comprehension
-that stops in its condition and drains in its element is read as the
-stop-then-drain it is, rather than as the source order the two appear in.
+Within a scope, calls are read in source order, except that a
+comprehension's element is read after its conditions: the element is
+produced only once the conditions have passed, so
+`[p.wait() for p in procs if p.kill()]` reads as the stop-then-drain it is.
 
 Not recognised, each gap named because the guard claims it:
 
@@ -39,6 +42,11 @@ Not recognised, each gap named because the guard claims it:
   scope can reach. A name bound more than once in its scope, or bound to
   something that is not a receiver, stands for itself instead. A stop and a
   drain that can only be connected through one of those are invisible here.
+* A stop or a drain in an ARGUMENT of a call on that same object. An
+  argument is evaluated before the call it is an argument of, so
+  `proc.communicate(proc.kill())` kills and then drains where source order
+  reads the drain first. Ordering on the expression tree would model that;
+  the sort here does not, and no real site spells it.
 * A computed member is refused rather than read, because an unread name is
   neither "no stop" nor "a bound": `getattr(proc, 'kill')()` and
   `proc['wait']()` are refused outright, and so is `proc[name]()` when the
@@ -58,8 +66,6 @@ from _coverage_scopes import (  # noqa: E402
     _containing_binding_scope, _evaluation_scopes, _scope_shadows)
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
-# The two member sets are the whole spelling surface. A stop asks the
-# process to end; a drain is the read that must end with it.
 _STOPS = frozenset({'kill', 'terminate', 'send_signal'})
 _DRAINS = frozenset({'communicate', 'wait'})
 _STOP = 'stop'
@@ -70,8 +76,10 @@ _PYTHON = '.py'
 
 _COMPREHENSION_SCOPES = (
     ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-# Node kinds that carry no per-parse identity: `ast` shares one instance
-# of each across a whole parse, so they cannot say which tree a node is in.
+# Node kinds that carry no per-parse identity: `ast` shares ONE instance of
+# each across a whole parse, so a set of them matches every expression in
+# the file -- the `_element_ids` sort silently did nothing until these
+# were skipped.
 _SYNTAX_ONLY = (ast.expr_context, ast.operator, ast.unaryop, ast.boolop,
                 ast.cmpop)
 
@@ -92,8 +100,8 @@ def _receiver(node):
 def _binding_of(node):
     """(bound names, value) for every form that binds a name to a value.
 
-    The `=`-less forms bind exactly as an assignment does. A walk that
-    ignored them left a stop on a walrus or `with ... as` target unjoined
+    The `=`-less forms bind exactly as an assignment does, so the walk
+    carries all of them or a stop on one of their targets is unjoined
     from the drain of the object that target names.
     """
     if isinstance(node, ast.Assign):
@@ -116,9 +124,8 @@ def _sequence_receiver(node):
     """The element a loop target binds, or None when it is not readable.
 
     A loop binds each ELEMENT of what it walks, so a target is only the
-    receiver itself when the walked value is a one-element sequence. A
-    target that walks a list of handles is one of them and not the list,
-    and the guard will not read that as an alias.
+    receiver itself when the walked value is a one-element sequence. The
+    collection case is declared in the module docstring.
     """
     if not isinstance(node, (ast.List, ast.Tuple)):
         return None
@@ -298,11 +305,8 @@ def _element_ids(scope):
     A comprehension runs every `if` before it produces its element, so
     source order reads `[p.wait() for p in procs if p.kill()]` backwards.
 
-    Ids rather than nodes, and the syntax-only nodes left out, because `ast`
-    shares ONE `Load` instance across every expression in a parse: a set of
-    nodes then matched every expression in the file and the order never
-    changed. Load contexts and operators carry no per-parse identity, so
-    nothing that carries one is dropped here.
+    Ids rather than nodes, and the syntax-only kinds left out, because
+    neither can say which tree a node is in -- see `_SYNTAX_ONLY`.
     """
     if not isinstance(scope, _COMPREHENSION_SCOPES):
         return frozenset()
@@ -381,8 +385,7 @@ def _tree_violations(root):
 # Every one of the 20 inline sites on this tree, one row each, as
 # (module, the calls as they stand today, the same calls with the
 # drain's `timeout=` removed). The anchor spans the whole drain call, so
-# a wrapped one is replaced whole, and it grows backwards until its
-# text is unique in its file.
+# a wrapped one is replaced whole rather than leaving a continuation.
 _SITES = (
     ('run_tests.py',
      'def _terminate_and_reap(process):\n'
