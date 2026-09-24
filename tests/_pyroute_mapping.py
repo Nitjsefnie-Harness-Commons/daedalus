@@ -6,7 +6,8 @@ from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
-                           _literal_value, _unhashable_key_sender)
+                           _literal_value, _unhashable_key_sender,
+                           literal_iterable_cardinality)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -190,16 +191,12 @@ def _display_value(node, state):
 
 
 def _literal_count(node):
-    """The exact element count of a string literal, or of a tuple, list or
-    set literal of constants; None for anything else."""
+    """The exact element count of a string literal or of a display the
+    literal evaluator can count; None for anything else."""
     if isinstance(node, ast.Constant) and isinstance(
             node.value, (str, bytes)):
         return len(node.value)
-    if isinstance(node, (ast.Tuple, ast.List, ast.Set)) and all(
-            isinstance(element, ast.Constant) for element in node.elts):
-        values = [element.value for element in node.elts]
-        return len(set(values) if isinstance(node, ast.Set) else values)
-    return None
+    return literal_iterable_cardinality(node)
 
 
 def _fold_dynamic(target, value):
