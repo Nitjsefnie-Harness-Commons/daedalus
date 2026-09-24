@@ -81,6 +81,8 @@ def looped(value):
         break
     else:
         raise RuntimeError('in a while else')
+    while True:
+        raise RuntimeError('in a while True')
 
 
 def scoped(value):
@@ -93,6 +95,11 @@ def blocked(values):
     if values is None or not values:
         with values:
             raise RuntimeError('in a with body')
+
+
+def joined(first, second):
+    if not (first and second):
+        raise RuntimeError('a conjunction is one condition')
 '''
 
 # Every raise shape the scan can meet, and the one key each resolves to. The
@@ -110,8 +117,10 @@ GUARD_SHAPE_SITES = {
     ('guard_shapes', 'chained', 'not (value)'),
     ('guard_shapes', 'looped', 'value > 10 or value < -10'),
     ('guard_shapes', 'looped', 'not (value < 0 or value > 100)'),
+    ('guard_shapes', 'looped', 'True'),
     ('guard_shapes', 'scoped', 'value is None'),
     ('guard_shapes', 'blocked', 'values is None or not values'),
+    ('guard_shapes', 'joined', 'not (first and second)'),
 }
 
 SELECT_SHAPES = '''
