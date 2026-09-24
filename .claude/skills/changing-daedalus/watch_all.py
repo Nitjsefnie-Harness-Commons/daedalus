@@ -3,46 +3,46 @@
 
 Both children are read continuously and nothing is dropped. Output is held
 until neither child has produced a line for the debounce window, then the
-whole batch is emitted as a single block — so a burst of twenty CI verdicts
-arrives as one notification instead of twenty.
+whole batch is emitted as a single block - a burst of twenty CI verdicts
+arrives as one notification instead of twenty. stdout carries the batches,
+which is what a Monitor turns into notifications; stderr carries this
+script's own diagnostics and stays off that stream, both children routing
+events to stdout and diagnostics to stderr so the split is preserved rather
+than invented here.
 
 Each child holds the read end of a pipe whose only write end this process
-holds: this process dying is end of file, and the child exits on it, so a
+holds: this process dying is end of file and the child exits on it, so a
 restart never leaves the old pair polling beside the new one - on a hard kill
-as much as on a graceful exit, and without a platform's idea of who a
-parent is. The children each spend one GraphQL query per poll, and a
-rate-limit refusal pauses the child that read it until the reset the API
-reported.
-
-stdout carries the batches, which is what a Monitor turns into notifications.
-stderr carries this script's own diagnostics and stays off that stream --
-both children route events to stdout and diagnostics to stderr, so that
-split is preserved rather than invented here.
+as much as on a graceful exit, and without a platform's idea of who a parent
+is. The children each spend one GraphQL query per poll, and a rate-limit
+refusal pauses the child that read it until the reset the API reported.
 
 A batch of nothing but settled, actionless conclusions (success, skipped,
-neutral, cancelled) is held past the debounce window as well, because a filling
-matrix goes quiet between cells and every partial tally is superseded by the
-next. Such a batch is released when something worth reading arrives — which
-makes it no longer quiet, so the ordinary debounce applies — or when every
-workflow run on that head has concluded, `speed` included. The runs are read
-in one query through the commit's check suites - `repository.object(oid:
-<sha>)` and the workflow run each suite belongs to - never through the
-check-runs list: that list is appended to while a matrix fills, so "every
-check run has concluded" is true early and repeatedly. An unanswerable completion query keeps it holding: a
-failed query must never look like a settled matrix. A batch the `--max-hold`
-cap releases instead is announced as partial, so it never reads as settled.
+neutral, cancelled) is held past the debounce window too: a filling matrix
+goes quiet between cells and every partial tally is superseded by the next.
+Such a batch is released when something worth reading arrives - which makes
+it no longer quiet, so the ordinary debounce applies - or when every workflow
+run on that head has concluded, `speed` included. The runs are read in one
+query through the commit's check suites - `repository.object(oid: <sha>)`
+and the workflow run each suite belongs to - never through the check-runs
+list: that list is appended to while a matrix fills, so "every check run has
+concluded" is true early and repeatedly. An unanswerable completion query
+keeps it holding, because a failed query must never look like a settled
+matrix; a batch the `--max-hold` cap releases instead is announced as
+partial, so it never reads as settled.
 
-This is a true debounce: the window restarts on every arrival, so nothing
-is emitted while either watcher is still producing. `ci_watch.py` chose a
-fixed batching window instead, on the grounds that a true debounce can hold
-a steady trickle indefinitely. That is the accepted trade here: during a
-live CI matrix this stays quiet by design and reports once it settles.
+This is a true debounce: the window restarts on every arrival, so nothing is
+emitted while either watcher is still producing. `ci_watch.py` chose a fixed
+batching window instead, on the grounds that a true debounce can hold a
+steady trickle indefinitely. That is the accepted trade here - during a live
+CI matrix this stays quiet by design and reports once it settles - and
 `ci_watch.py` is therefore run with `--debounce 0`, so the batching happens
 once, here, rather than twice.
 
   python3 -u watch_all.py --once 195 my-branch     # trial both, print, exit
   python3 -u watch_all.py 195 my-branch            # persistent, debounced
 """
+
 import argparse
 import os
 import queue
@@ -60,11 +60,8 @@ HERE = Path(__file__).resolve().parent
 
 
 def _repo_root():
-    """The checkout this script sits in, so logs land beside it.
-
-    The script lives inside the tracked skill directory; its logs must
-    not, or every run drops an untracked file into a directory git is
-    watching.
+    """The checkout this script sits in, so logs land beside it: the script
+    lives inside a tracked directory, and its logs must not.
     """
     found = subprocess.run(
         ['git', '-C', str(HERE), 'rev-parse', '--show-toplevel'],
@@ -79,11 +76,11 @@ LOG_ROOT = _repo_root()
 def default_log(pr, branch):
     """A log path no sibling session shares.
 
-    Several sessions run this script at once, each on its own pull request
-    and branch. One fixed filename would interleave their batches, leave the
-    `full batch in ...` pointer ambiguous, and can mangle a batch outright:
-    a long one exceeds the buffer and splits into several writes, so two
-    writers can interleave inside a single batch rather than between two.
+    Sessions run this at once, each on its own pull request and branch; one
+    fixed filename would interleave their batches, leave the `full batch in
+    ...` pointer ambiguous, and can mangle a batch outright - a long one
+    exceeds the buffer and splits into several writes, so two writers can
+    interleave inside a batch rather than between two.
     """
     slug = re.sub(r'[^A-Za-z0-9]+', '-', f'{pr}-{branch}').strip('-')
     return LOG_ROOT / f'.watch_all-{slug}.log'
@@ -94,9 +91,9 @@ CI_LINE = re.compile(
     r'^\[ci\] CI \S+ (?P<sha>\S+) (?P<name>.+): (?P<concl>\S+)'
     r'(?: (?P<url>\S+))?$')
 
-# Conclusions that carry no action. Counted, never listed: a settled matrix
-# is one fact, and the superseded runs a force-push leaves behind are noise
-# that would otherwise crowd out the line worth reading.
+# Conclusions that carry no action: counted, never listed. A settled matrix
+# is one fact, and the runs a force-push supersedes would crowd out the line
+# worth reading.
 TALLIED = frozenset({'success', 'skipped', 'neutral', 'cancelled'})
 
 MAX_LISTED = 10
@@ -145,12 +142,10 @@ def _condense(batch, limit, log_path):
 
 
 def _batch_is_only_quiet_ci(batch):
-    """Whether a batch holds nothing but settled, actionless CI conclusions.
-
-    A success-only batch is worth holding: the matrix is mid-flight and every
-    partial tally it would emit is superseded by the next one. Anything else —
-    a failure, a comment, a watcher diagnostic — is the line somebody is
-    waiting for, so it falls back to the ordinary debounce.
+    """Whether a batch holds nothing but settled, actionless CI conclusions:
+    such a batch is worth holding, the matrix is mid-flight and every partial
+    tally superseded. Anything else is the line somebody waits for, and falls
+    back to the ordinary debounce.
     """
     for line in batch:
         match = CI_LINE.match(line)
@@ -184,9 +179,9 @@ def _repo_slug():
 def _runs_on(slug, sha):
     """Every workflow run on `sha`, or None when the query fails.
 
-    A rate-limit refusal is not a failed query and is not caught here: it
-    belongs to the wait the caller pauses on, and swallowing it would let a
-    refused hold read as a settled matrix.
+    A rate-limit refusal is not caught here: it belongs to the wait the
+    caller pauses on, and swallowing it would let a refused hold read as a
+    settled matrix.
     """
     owner, name = slug.split('/', 1)
     try:
@@ -256,11 +251,8 @@ def _pump(name, stream, sink, kind):
 def _spawn(argv):
     """The child, and the pipe end this process holds for it.
 
-    The end is held until the child is gone: the child watches the read end
-    for end of file, and end of file is what this process dying looks like
-    from inside it. A child therefore cannot outlive this one, on a hard
-    kill as much as on a graceful exit, and nothing in that depends on how
-    the platform reports a parent id.
+    Held until the child is gone: the child watches the read end for end of
+    file, which is what this process dying looks like from inside it.
     """
     return gh_client.spawn_watched(
         argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -270,11 +262,10 @@ def _spawn(argv):
 def _watchers(pr, branch):
     """The two children. Their liveness pipe is what keeps them from orphaning.
 
-    Not a parent pid: `os.getppid()` is re-parented on POSIX and is the
-    historical creator on Windows, so a pid check protects a child on one
-    platform and not the other. The terminate below is not the guarantee
-    either - a kill of this process runs no `finally` - it only makes a
-    graceful exit immediate.
+    Not a parent pid: `os.getppid()` is re-parented on POSIX and historical
+    on Windows, so a pid check protects a child on one platform and not the
+    other. Nor is the terminate below - a kill runs no `finally` - it only
+    makes a graceful exit immediate.
     """
     return (
         ('comments', [sys.executable, '-u',
