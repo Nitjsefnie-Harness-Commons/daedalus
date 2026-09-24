@@ -331,6 +331,7 @@
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_segments.py
+!/tests/_service_loader.py
 !/tests/_speedharness.py
 !/tests/_stream_fake.py
 !/tests/_tabroute_selections.py
