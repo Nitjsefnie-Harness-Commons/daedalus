@@ -21,7 +21,8 @@ def test_only_admission_events_run_the_gate(_tmp):
         'pull_request_target': {'types': [
             'opened', 'edited', 'reopened', 'ready_for_review']},
     }, ('admission must run on opened, edited and reopened PRs, and on '
-        'ready_for_review so a draft leaves the gate the moment it matters')
+        'ready_for_review so a draft leaves the gate the moment it matters; '
+        'the order is pinned too, and GitHub reads the list as a set')
 
 
 def test_gate_token_has_exactly_the_required_permissions(_tmp):
@@ -37,7 +38,7 @@ def test_each_pull_request_queues_without_cancelling(_tmp):
     }, 'admission must serialize each PR without cancelling repairs'
 
 
-def test_only_one_bounded_runner_job_excludes_bots(_tmp):
+def test_one_bounded_runner_job_excludes_bots_and_drafts(_tmp):
     jobs = _workflow()['jobs']
     assert set(jobs) == {'gate'}, 'admission must have only the gate job'
     job = jobs['gate']
