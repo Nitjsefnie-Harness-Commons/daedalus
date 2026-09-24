@@ -4,13 +4,9 @@
 The GM storage namespace, per-origin byte cap, and per-namespace write queue
 live in the service worker (extension/worker/gm_storage.js), so every content
 frame forwards its GM messages there via chrome.runtime.sendMessage and the
-worker keys the partition on sender.origin. Each harness therefore builds a
-background realm (worker/util.js + worker/gm_storage.js over a fake
-chrome.storage.local) and wires each content frame's runtime.sendMessage to it
-with that frame's own origin as sender.origin. The frames also keep a direct
-chrome.storage.local handle onto the same shared store, so the pre-fix content
-script (which stored in the frame) can be driven against one shared store for
-the cross-tab "before" evidence.
+worker keys the partition on sender.origin. Frames also keep a direct handle
+on the shared store so the pre-fix content script can be driven against it for
+the cross-tab before-evidence.
 """
 import json
 import shutil
