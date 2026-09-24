@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _boundary  # noqa: E402
-import _boundary_env  # noqa: E402
+import _noderun  # noqa: E402
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -247,16 +247,16 @@ def test_node_harness_decodes_utf8_independent_of_locale(tmp):
     del tmp
     node = shutil.which('node')
     assert node, 'node is required to check harness output decoding'
-    original_text_encoding = _boundary_env.subprocess._text_encoding
-    _boundary_env.subprocess._text_encoding = lambda: 'cp1252'
+    original_text_encoding = _noderun.subprocess._text_encoding
+    _noderun.subprocess._text_encoding = lambda: 'cp1252'
     try:
         program = (
             r"process.stdout.write(JSON.stringify("
             r"{name:'joiner\u200Dname'}));")
-        result = _boundary_env.run_node_program(
+        result = _noderun.run_node_program(
             node, program, [], cwd=ROOT)
     finally:
-        _boundary_env.subprocess._text_encoding = original_text_encoding
+        _noderun.subprocess._text_encoding = original_text_encoding
 
     assert result.returncode == 0, result
     assert json.loads(result.stdout) == {'name': 'joiner\u200dname'}
@@ -448,7 +448,7 @@ def test_payload_keeps_harness_source_on_the_second_line(tmp):
     """A serialized payload does not shift program stack locations."""
     node = shutil.which('node')
     assert node, 'node is required to check harness source locations'
-    result = _boundary_env.run_node_program(
+    result = _noderun.run_node_program(
         node, '      missingName;\n', [],
         cwd=ROOT, payload='{}')
 
@@ -534,7 +534,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
     counts = (1, 4, 7, 10)
     measurements = {'HARNESS': {}, 'OBSERVER': {}}
     active = {'label': None, 'count': None}
-    real_run = _boundary_env.subprocess.run
+    real_run = _noderun.subprocess.run
 
     def measured_run(argv, **kwargs):
         del kwargs
@@ -542,7 +542,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
             subprocess.list2cmdline(argv))
         return subprocess.CompletedProcess(argv, 0, '{}', '')
 
-    _boundary_env.subprocess.run = measured_run
+    _noderun.subprocess.run = measured_run
     try:
         for count in counts:
             routes = [
@@ -570,7 +570,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
             _worker_runtime.observe_worker_runtime(
                 details, background_path=Path(tmp) / 'background.js')
     finally:
-        _boundary_env.subprocess.run = real_run
+        _noderun.subprocess.run = real_run
 
     assert all(len(set(values.values())) == 1
                for values in measurements.values()), measurements

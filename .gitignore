@@ -310,6 +310,7 @@
 !/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_transport_probes.py
+!/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_overlap.py
 !/tests/_owned_writes.py

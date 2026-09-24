@@ -54,10 +54,10 @@ _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
 )
 # The runtime observer runs the shipped background, whose boot opens the SSE
-# stream (answered 503) before the observer's synchronous work. It declares no
-# non-stream request, so any bridge post the observed worker invents is
-# refused by the shared gate and fails the suite.
-_BOOT_PLAN = {'planned': [], 'planned_stream': [503]}
+# stream (answered 503) and syncs the tab list before the observer's
+# synchronous work. It declares exactly those two, so any further bridge post
+# the worker invents is refused by the shared gate and fails the suite.
+_BOOT_PLAN = {'planned': ['POST /sync-tabs'], 'planned_stream': [503]}
 
 
 def _worker_sources():
