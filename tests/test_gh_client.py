@@ -182,6 +182,53 @@ class _Clock:
         return 'answered'
 
 
+def _suite_page(runs, has_next=False, cursor=None):
+    return {'data': {'repository': {'commit': {'checkSuites': {
+        'pageInfo': {'hasNextPage': has_next, 'endCursor': cursor},
+        'nodes': [{'workflowRun': run} for run in runs]}}}}}
+
+
+def _run(rid, conclusion='success', started='2026-09-20T10:00:00Z'):
+    return {'databaseId': rid, 'name': f'run {rid}', 'status': 'COMPLETED',
+            'conclusion': conclusion.upper(), 'createdAt': started,
+            'url': f'https://github.com/o/r/runs/{rid}',
+            'workflow': {'databaseId': 11}}
+
+
+def test_a_run_past_the_first_page_is_still_read(tmp):
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'checkSuites': [
+        _suite_page([_run(1)], has_next=True, cursor='CURSOR-1'),
+        _suite_page([_run(2)])]})
+    with fake.activate():
+        runs = mod.workflow_runs('o', 'r', 'a' * 40)
+    assert len(fake.calls()) == 2
+    second = json.loads(fake.calls()[1]['request'])
+    assert second['variables']['after'] == 'CURSOR-1'
+    assert second['variables']['sha'] == 'a' * 40
+    assert [run['id'] for run in runs] == [1, 2]
+    assert runs[0]['status'] == 'completed'
+    assert runs[0]['conclusion'] == 'success'
+    assert runs[0]['workflow_id'] == 11
+
+
+def test_the_suites_of_one_run_collapse_to_that_run(tmp):
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page(
+        [_run(1), _run(1), _run(2)])})
+    with fake.activate():
+        runs = mod.workflow_runs('o', 'r', 'a' * 40)
+    assert [run['id'] for run in runs] == [1, 2]
+
+
+def test_a_sha_with_no_run_yet_reads_as_no_runs(tmp):
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'checkSuites': {
+        'data': {'repository': {'commit': None}}}})
+    with fake.activate():
+        assert mod.workflow_runs('o', 'r', 'a' * 40) == []
+
+
 def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     del tmp
     mod = _client()

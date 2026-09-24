@@ -8,18 +8,23 @@ anything if the result is read, and a green local run on one platform says
 nothing about the other three, so the runner's verdict is the event worth
 being interrupted for.
 
-The head SHA is re-resolved every poll, because a push moves it and the
-checks that matter are the ones on what is there now. A conclusion is
-announced once per (sha, check) pair: a re-run of the same check on the same
-SHA is a new conclusion and is announced again.
+The head SHA and its check runs travel in ONE GraphQL query per poll,
+re-resolved every time because a push moves the head and the checks that
+matter are the ones on what is there now. A conclusion is announced once per
+(sha, check) pair: a re-run of the same check on the same SHA is a new
+conclusion and is announced again.
 
 **Failure and success both announce.** A watcher that only reports green is
 silent through exactly the run you needed to hear about, and silence is
 indistinguishable from a queue that has not started.
 
 stdout is the event channel; everything else is stderr, which Monitor keeps
-in a silent file. Consecutive poll failures escalate to a stdout line,
-because a watcher that has gone blind must not look like a quiet branch.
+in a silent file. A rate-limit refusal is announced once, on stdout, with the
+instant the wait ends, and the poll resumes at that reset rather than at the
+next interval. Consecutive poll failures escalate to a stdout line, because a
+watcher that has gone blind must not look like a quiet branch. With
+`--parent-pid` the watcher exits as soon as that parent is gone, so a
+restarted aggregator never leaves the old pair polling beside the new one.
 
 Conclusions are held for DEBOUNCE_SECONDS and flushed together, because a
 twelve-cell matrix finishing over a couple of minutes is one thing happening,
@@ -39,15 +44,44 @@ fail, the failures go to stderr where they are silent, and the watcher then
 sits quiet forever looking exactly like CI nobody has started.
 """
 import argparse
-import json
-import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gh_client  # noqa: E402
 
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 DEFAULT_INTERVAL = 60
 FAIL_ESCALATE = 5
 DEBOUNCE_SECONDS = 60
+
+TARGET = ('repository', 'ref', 'target')
+CONTEXTS = TARGET + ('statusCheckRollup', 'contexts')
+
+CI_QUERY = f'''query WatchChecks($owner: String!, $name: String!, $ref: String!,
+    $after: String) {{
+  repository(owner: $owner, name: $name) {{
+    ref(qualifiedName: $ref) {{
+      target {{
+        ... on Commit {{
+          oid
+          statusCheckRollup {{
+            contexts(first: {gh_client.PAGE_SIZE}, after: $after) {{
+              pageInfo {{ hasNextPage endCursor }}
+              nodes {{
+                __typename
+                ... on CheckRun {{
+                  databaseId name conclusion detailsUrl
+                }}
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}'''
 
 
 def is_immediate(name):
@@ -56,66 +90,51 @@ def is_immediate(name):
     return lowered == 'speed' or 'coverage' in lowered
 
 
-def _gh(path):
-    """One fresh, fully paginated API read."""
-    proc = subprocess.run(
-        ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate', path],
-        capture_output=True, text=True, timeout=120)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip()[:400])
-    return proc.stdout
+def head_and_checks(repo, branch, seen=None):
+    """The branch's current head and every check run against it.
 
-
-def _decode(payload):
-    """Parse one JSON value, or several concatenated by --paginate."""
-    payload = payload.strip()
-    if not payload:
-        return []
-    decoder = json.JSONDecoder()
-    out = []
-    index = 0
-    while index < len(payload):
-        chunk, index = decoder.raw_decode(payload, index)
-        out.append(chunk)
-        while index < len(payload) and payload[index].isspace():
-            index += 1
-    return out
-
-
-def head_sha(repo, branch):
-    """The branch's current head, re-resolved because a push moves it."""
-    for chunk in _decode(_gh(f'repos/{repo}/branches/{branch}')):
-        commit = chunk.get('commit') if isinstance(chunk, dict) else None
-        if isinstance(commit, dict) and commit.get('sha'):
-            return commit['sha']
-    raise RuntimeError(f'no head sha for {branch}')
-
-
-def check_runs(repo, sha):
-    """Every check run reported against one commit."""
-    runs = []
-    for chunk in _decode(_gh(f'repos/{repo}/commits/{sha}/check-runs')):
-        if isinstance(chunk, dict):
-            runs.extend(chunk.get('check_runs') or [])
-    return runs
+    `seen` is the set of (sha, check, conclusion) keys already announced;
+    the second return value is only the checks that are new since. The head
+    is re-resolved because a push moves it, and a branch that is gone raises
+    rather than answering with an empty surface a quiet matrix could pass
+    for.
+    """
+    owner, name = repo.split('/', 1)
+    pages = gh_client.paginate(
+        CI_QUERY,
+        {'owner': owner, 'name': name, 'ref': f'refs/heads/{branch}',
+         'after': None},
+        [(CONTEXTS, 'after')])
+    commit = gh_client.at(pages[0], TARGET)
+    sha = (commit or {}).get('oid')
+    if not sha:
+        raise RuntimeError(f'no head sha for {branch}')
+    checks = [node for page in pages
+              for node in gh_client.nodes(page, CONTEXTS)
+              if node.get('conclusion')]
+    if seen is None:
+        return sha, checks
+    fresh = []
+    for node in checks:
+        key = (sha, node.get('name'), node.get('databaseId'),
+               node['conclusion'].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        fresh.append(node)
+    return sha, fresh
 
 
 def poll(repo, branch, seen):
     """One pass. Returns (immediate_lines, held_lines) for what is new."""
-    sha = head_sha(repo, branch)
+    sha, checks = head_and_checks(repo, branch, seen)
     immediate = []
     held = []
-    for run in check_runs(repo, sha):
-        conclusion = run.get('conclusion')
-        if not conclusion:
-            continue
-        name = run.get('name')
-        key = (sha, name, run.get('id'), conclusion)
-        if key in seen:
-            continue
-        seen.add(key)
-        line = (f'CI {branch} {sha[:7]} {name}: {conclusion}'
-                f' {run.get("html_url") or ""}')
+    for node in checks:
+        name = node.get('name')
+        conclusion = node['conclusion'].lower()
+        line = (f'CI {branch} {sha[:7]} {name}: {conclusion} '
+                f'{node.get("detailsUrl") or ""}')
         (immediate if is_immediate(name) else held).append(line)
     return immediate, held
 
@@ -128,19 +147,21 @@ def main():
     parser.add_argument('--debounce', type=int, default=DEBOUNCE_SECONDS,
                         help='seconds to batch conclusions before emitting; '
                              'coverage and speed always emit at once')
+    parser.add_argument('--parent-pid', type=int, default=None,
+                        help='exit when this process is gone; watch_all.py '
+                             'passes its own pid so a restart never leaves '
+                             'the old pair polling')
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()
 
     if args.once:
-        sha = head_sha(args.repo, args.branch)
-        runs = check_runs(args.repo, sha)
-        concluded = [r for r in runs if r.get('conclusion')]
+        sha, checks = head_and_checks(args.repo, args.branch)
         print(f'ok head {sha}', file=sys.stderr)
-        print(f'ok {len(runs)} check run(s), {len(concluded)} concluded',
+        print(f'ok {len(checks)} check run(s), {len(checks)} concluded',
               file=sys.stderr)
-        for run in concluded:
-            print(f'  {run.get("name")}: {run.get("conclusion")}',
+        for node in checks:
+            print(f'  {node.get("name")}: {node["conclusion"].lower()}',
                   file=sys.stderr)
         return 0
 
@@ -148,9 +169,12 @@ def main():
     failures = 0
     pending = []
     window_opened = None
+    watcher = gh_client.Watcher(f'CI {args.branch} watcher',
+                                parent_pid=args.parent_pid)
     while True:
         try:
-            immediate, held = poll(args.repo, args.branch, seen)
+            immediate, held = watcher.poll(
+                lambda: poll(args.repo, args.branch, seen))
             failures = 0
             for line in immediate:
                 print(line, flush=True)
@@ -170,7 +194,7 @@ def main():
                 print(line, flush=True)
             pending = []
             window_opened = None
-        time.sleep(args.interval)
+        watcher.sleep(args.interval)
 
 
 if __name__ == '__main__':
