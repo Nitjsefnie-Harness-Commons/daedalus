@@ -33,12 +33,14 @@ The set is derived only as far as a workflow NAMES a file: the suite reads
 every `.github/workflows/*.yml` and requires every tracked file a workflow
 invokes by path or passes to a tool to be listed here (or declared
 carried-by-the-branch), so a gate file added to a workflow later fails the
-suite. The REACH LIMIT is real and stated: `pyrightconfig.json`,
-`pyrightconfig.tests.json`, `setup.cfg`, `eslint.config.js` and
-`pyproject.toml` are read by tool DISCOVERY (a bare `pyright` / `eslint` /
-`pycodestyle` invocation, or a heredoc), never named, so the derivation cannot
-see them; those five are hand-held by the table above, each with its reason. A
-`python3 -m module` invocation is likewise not seen.
+suite. The matcher reaches `python`, `python3`, a versioned `python3.13`, flags
+such as `-u`, and an executable-path step (`./scripts/x.sh`); a `head/`
+checkout prefix is normalised away. The REACH LIMIT is real and stated:
+`pyrightconfig.json`, `pyrightconfig.tests.json`, `setup.cfg`,
+`eslint.config.js` and `pyproject.toml` are read by tool DISCOVERY (a bare
+`pyright` / `eslint` / `pycodestyle` invocation, or a heredoc), never named, so
+the derivation cannot see them; those five are hand-held above, each with its
+reason. A `python3 -m module` invocation is likewise not seen.
 
 THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
 The gate commit is an ancestor of the head IFF the merge base equals the gate
@@ -48,12 +50,12 @@ A compare that cannot be read is NOT evidence of freshness: that head is
 published RED, because that is exactly the case where a stale green is
 waiting to be overwritten.
 
-READING FAILURES. A GLOBAL failure (the open-PR list, a gate-commit lookup,
-the call bound) publishes NOTHING and exits nonzero: an invented verdict is
-worse than a missing one. A PER-HEAD failure (one head's compare unreadable,
-or its write failing) still writes that head's RED verdict where it can, skips
-it loudly where it cannot, and never lets one head's failure abandon the
-rest. All print a loud line to stderr.
+READING FAILURES. A GLOBAL failure (the open-PR list, a gate-commit lookup, the
+call bound, a route that cannot establish its head) publishes NOTHING and exits
+nonzero: an invented verdict is worse than a missing one. A PER-HEAD failure
+(one head's compare unreadable, or its write failing) still writes that head's
+RED verdict where it can, skips it loudly where it cannot, and never lets one
+head's failure abandon the rest. All print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
 commits, one compare, plus one head revalidation, one check-runs listing, a
@@ -92,14 +94,10 @@ GATE_PATTERNS = (
     'requirements-test.txt',
 )
 
-# Deliberately NOT gate-defining, because the branch reads them FROM ITS OWN
-# TREE: the ratchet scripts that read them are already gate-defining above, so
-# a branch carrying an older baseline measures its older tree
-# self-consistently. And every baseline move is permissive (--tighten only
-# lowers; a coverage-floor raise moves the floor up), so a stale branch's
-# recorded baseline can never turn main red by merging. The derivation guard
-# subtracts exactly this tuple: a new such file must be added here with its
-# own reason, never slip through silently.
+# And every baseline move is permissive (--tighten only lowers; a
+# coverage-floor raise moves the floor up), so a stale branch's baseline can
+# never turn main red by merging. The derivation guard subtracts exactly this
+# tuple: a new such file must be added here with its own reason.
 CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',)
 
 _HEX40 = frozenset('0123456789abcdef')
@@ -110,11 +108,10 @@ PER_HEAD_OVERHEAD = 4
 
 DEFAULT_CALL_BUDGET = 1200
 
-# The per-call rate the workflow's timeout is sized against. Measured live:
-# the dry run averaged ~1.2 s per `gh api` call (195 s over ~163 calls). 1.5 s
-# is the conservative figure the timeout must clear: budget * this / 60 is the
-# minutes the worst case needs, and the workflow's timeout-minutes must exceed
-# it. A bound with no assumed rate is not a bound.
+# The per-call rate the workflow's timeout is sized against. Measured live at
+# ~1.2 s/call; 1.5 s is the conservative figure the timeout must clear:
+# budget * this / 60 is the minutes the worst case needs. A bound with no
+# assumed rate is not a bound.
 ASSUMED_SECONDS_PER_CALL = 1.5
 
 
@@ -139,11 +136,8 @@ def _hex40(value):
 
 
 def matches(pattern, path):
-    """Whether `pattern` selects `path`.
-
-    Only the two shapes the set uses: a `/**` suffix (a directory prefix) and
-    an exact path. A path is repository-relative POSIX as git records it, so it
-    never carries a `..` component.
+    """Whether `pattern` selects `path`: a `/**` directory prefix or an exact
+    path. A path is repository-relative POSIX, so it carries no `..`.
     """
     if pattern.endswith('/**'):
         return path.startswith(pattern[:-2])
@@ -171,30 +165,52 @@ def _api(url, *extra):
     return ['gh', 'api', '-H', 'Cache-Control: no-cache', url, *extra]
 
 
+def _request_path(pattern):
+    """The path the commits endpoint understands for `pattern`. GitHub's
+    `commits?path=` is a DIRECTORY-PREFIX filter and does NOT expand a `**`
+    glob: sending `.github/workflows/**` answers `[]` even though the directory
+    has commits. The endpoint is sent the BARE directory; `pattern` keeps its
+    `/**` spelling for the internal matcher, and the two cannot disagree
+    because this is the single translation between them.
+    """
+    if pattern.endswith('/**'):
+        return pattern[:-3]
+    return pattern
+
+
+def _gate_error(pattern, cause):
+    """The GLOBAL failure an unreadable or empty gate lookup raises."""
+    return QueryError(f'the gate commit lookup for {pattern!r} {cause}')
+
+
 def enumerate_gates(read, repository):
     """The newest commit on `main` touching each gate path, as (path, sha).
 
-    One request per path. A path with no commit yet contributes nothing (the
-    API returning `[]` is a real answer). A payload that is not a list at all,
-    or a first entry with no readable sha, is a GLOBAL failure -- never "this
-    path has no commits", which would silently drop a gate and turn every head
-    green.
-    """
+    One request per path, built from `_request_path`. Every failure mode is a
+    GLOBAL failure that NAMES the pattern and is raised, never a silent skip:
+    unreadable, not a list, no readable sha, OR empty. Empty is anomalous (all
+    patterns have commits on main) and treating it as "no commits" would drop a
+    gate and turn every head green -- the exact defect this module prevents."""
+
     gates = []
     for pattern in GATE_PATTERNS:
+        request = _request_path(pattern)
+        target = (f'repos/{repository}/commits?sha={BASE_BRANCH}&per_page=1'
+                  f'&path={quote(request, safe="/.*")}')
         try:
-            payload = _one(read, _api(
-                f'repos/{repository}/commits?sha={BASE_BRANCH}&per_page=1'
-                f'&path={quote(pattern, safe="/.*")}'))
-        except QueryError:
-            return None
+            payload = _one(read, _api(target))
+        except QueryError as error:
+            raise _gate_error(pattern, f'could not be read: {error}') \
+                from error
         if not isinstance(payload, list):
-            return None
+            raise _gate_error(pattern, 'did not decode as a list')
         if not payload:
-            continue
+            cause = (f'(requested as {request!r}) resolved to no commit on '
+                     f'main; refusing to under-count the gate set')
+            raise _gate_error(pattern, cause)
         sha = payload[0].get('sha') if isinstance(payload[0], dict) else None
         if not _hex40(sha):
-            return None
+            raise _gate_error(pattern, 'returned an unreadable sha')
         gates.append((pattern, sha))
     return gates
 
@@ -203,10 +219,9 @@ def merge_base(read, repository, gate, head):
     """The merge base of `gate` and `head`, or None if it cannot be read.
 
     One `compare/<gate>...<head_sha>` request; that spelling resolves a fork
-    head from the base repository (measured against PR 709), so there is no
-    second spelling to try. Returns (merge_base, attempts); each attempt is
-    (request, outcome). A merge base that is not 40 lowercase hex is a shape
-    failure, distinct from the verdict.
+    head (measured against PR 709), so there is no second spelling. Returns
+    (merge_base, attempts); a merge base that is not 40 lowercase hex is a
+    shape failure, distinct from the verdict.
     """
     target = f'repos/{repository}/compare/{gate}...{head["sha"]}'
     try:
@@ -295,11 +310,9 @@ def _existing_check_ids(read, repository, head_sha):
 
 def publish(read, repository, head_sha, conclusion, title, summary,
             details_url):
-    """Write the verdict, PATCHing an existing check or POSTing a new one.
-
-    A failure overwrites a previously published success on the same head: a
-    stale green left in place after a gate lands is the exact hole this issue
-    is about.
+    """Write the verdict, PATCHing an existing check or POSTing a new one. A
+    failure overwrites a previously published success on the same head: a stale
+    green left in place is the exact hole this issue is about.
     """
     ids = _existing_check_ids(read, repository, head_sha)
     if ids is None:
@@ -349,12 +362,10 @@ def required_calls(head_count, gate_count):
 
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
-    """Publish a verdict for each head. Returns (exit_code, published).
-
-    A head whose write fails is skipped loudly and the run continues: one
-    transient failure must not abandon the later heads, which include stale
-    ones waiting for a red. `dry_run` computes and reports but publishes
-    nothing.
+    """Publish a verdict for each head. Returns (exit_code, published). A head
+    whose write fails is skipped loudly and the run continues: one transient
+    failure must not abandon the later heads, which include stale ones waiting
+    for a red. `dry_run` computes and reports but publishes nothing.
     """
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
@@ -446,7 +457,16 @@ def main(argv=None, read=None):
     name = os.environ.get('GITHUB_EVENT_NAME', '')
     if name == 'pull_request_target':
         pr = event.get('pull_request') or {}
-        heads = select_heads([pr]) if pr else []
+        if not isinstance(pr, dict) or not pr.get('head'):
+            # A route that cannot establish WHICH pull request it is deciding
+            # must fail closed. Treating a missing event as "no heads" would
+            # publish nothing and exit 0, i.e. "fresh", and the ruleset would
+            # let it merge -- the silent-pass shape, refused here.
+            print('gate freshness: the pull_request_target event carried no '
+                  'usable pull_request.head; publishing nothing',
+                  file=sys.stderr)
+            return 1
+        heads = select_heads([pr])
     else:
         try:
             pulls = _open_pulls(read, repository)
@@ -462,16 +482,17 @@ def main(argv=None, read=None):
                   'as a list; publishing nothing', file=sys.stderr)
             return 1
         heads = select_heads(pulls)
-    gates = enumerate_gates(read, repository)
-    if gates is None:
-        print('gate freshness: could not read a gate commit on main; '
-              'publishing nothing', file=sys.stderr)
+    try:
+        gates = enumerate_gates(read, repository)
+    except QueryError as error:
+        print(f'gate freshness: {error}; publishing nothing', file=sys.stderr)
         return 1
     code, published = process(read, repository, heads, gates,
                               _details_url(), _call_budget(), dry_run)
     verb = 'would publish' if dry_run else 'published'
     print(f'gate freshness: {verb} {len(published)} verdict(s) for '
-          f'{len(heads)} open pull request(s) based on main')
+          f'{len(heads)} open pull request(s) based on main; resolved '
+          f'{len(gates)}/{len(GATE_PATTERNS)} gate paths')
     return code
 
 

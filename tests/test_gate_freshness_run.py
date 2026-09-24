@@ -158,15 +158,45 @@ def test_the_pull_request_target_route_publishes_for_that_head(tmp):
     assert len(published) == 1, published
 
 
+def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
+    """A route that cannot establish WHICH pull request it is deciding fails
+    closed.
+
+    The pull_request_target route read its head from the event payload. A
+    missing or unparseable event used to become "no heads" -- publishing
+    nothing and exiting 0, i.e. "fresh", which the ruleset would honour. This
+    is the same silent-pass shape its sibling route refuses.
+    """
+    m = _mod()
+    published = []
+
+    def read(argv):
+        if 'POST' in argv or 'PATCH' in argv:
+            published.append(next(t for t in argv if t.startswith('repos/')))
+            return '{}'
+        raise AssertionError('no read should be needed to refuse')
+    for event in ({}, {'pull_request': {}},
+                  {'pull_request': {'number': 7}}):
+        code, err = _run_main_event(tmp, m, read, 'pull_request_target',
+                                    event)
+        assert code == 1, (event, code)
+        assert 'pull_request' in err, err
+    assert published == [], 'a missing event published a verdict'
+
+
 def _run_main(tmp, m, reader, event):
-    """Run main() on a `push` event, capturing stderr; return (code, err).
+    return _run_main_event(tmp, m, reader, 'push', event)
+
+
+def _run_main_event(tmp, m, reader, event_name, event):
+    """Run main() on `event_name`, capturing stderr; return (code, err).
 
     `m` is the caller's module instance: the reader raises that instance's
     QueryError, and main catches the SAME class, so the two must share it.
     """
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
-    os.environ.update({'GITHUB_EVENT_NAME': 'push',
+    os.environ.update({'GITHUB_EVENT_NAME': event_name,
                        'GITHUB_EVENT_PATH': str(event_path),
                        'GITHUB_REPOSITORY': 'o/r'})
     err = io.StringIO()
@@ -399,22 +429,33 @@ def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
 def test_every_read_carries_the_no_cache_header(tmp):
     """Every `gh api` read routes through _api, which adds the header.
 
-    Dropping the header from any call site used to leave the suite green; now
-    one entry drives a full flow and checks each read argv carries it, so the
-    single _api helper is the one place the convention lives.
+    This drives main() END TO END so the two GLOBAL call sites (the open-PR
+    listing and the gate enumeration) are reached too -- a per-head flow only
+    reaches the per-head sites, so a header dropped from a global site used to
+    leave this entry green. Every argv the run issues is recorded and checked.
     """
-    del tmp
     m = _mod()
     published = []
     reads = []
-    gates = {pattern: [G1] for pattern in m.GATE_PATTERNS}
-    base = _flow_read(m, gates, {7: HEAD}, published)
 
     def read(argv):
         reads.append(list(argv))
-        return base(argv)
-    m.process(read, 'o/r', m.select_heads([_pr(7)]),
-              [(p, G1) for p in m.GATE_PATTERNS], RUN)
+        target = next(t for t in argv if t.startswith('repos/'))
+        if '/pulls?state=open' in target:
+            return _encode([_pr(7)])
+        if '/commits?' in target:
+            return _encode([{'sha': G1}])
+        if 'POST' in argv or 'PATCH' in argv:
+            published.append(target)
+            return '{}'
+        return _flow_read(m, {p: [G1] for p in m.GATE_PATTERNS},
+                          {7: HEAD}, published)(argv)
+    _run_main(tmp, m, read, {})
+    # The global sites must actually have been exercised, or the entry would
+    # pass vacuously on a run that never reached them.
+    joined_all = ' '.join(' '.join(a) for a in reads)
+    assert 'state=open' in joined_all, 'the open-PR listing was never read'
+    assert 'commits?sha=main' in joined_all, 'the gate enumeration never ran'
     assert reads, 'no reads were issued'
     for argv in reads:
         joined = ' '.join(argv)
