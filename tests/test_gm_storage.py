@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""GM.setValue and its neighbours: what the page may store, where, and how
-much of it.
+"""GM.setValue and its neighbours: what the page may store, where, how much
+of it, and in what order pages are served.
 
 Page-written GM keys are partitioned by the calling page's origin inside the
 shared chrome.storage.local, and each origin's partition carries its own byte
 budget so a page cannot make the extension's own writes fail. The SUM over
 every origin carries a second budget, because a dozen origins each at their
 own cap are all admitted and the writes that then fail are the extension's own.
+One serial queue serves that sum, and it serves the origins waiting in turns,
+so a page's burst decides only how long its OWN writes wait.
 The Node-VM harnesses live in _gm_harness; these are the pins over them — the
 reserved and invalid-key refusals, the per-origin partition (no origin may
 read, overwrite, list or delete another's key, and a spoofed origin in the
-payload is ignored), both quotas, and that a write Chrome refused rejects
-rather than resolving, since Chrome reports that only through lastError.
+payload is ignored), both quotas, the admission order, and that a write Chrome
+refused rejects rather than resolving, since Chrome reports that only through
+lastError.
 """
 import sys
 from pathlib import Path
@@ -404,6 +407,84 @@ def test_each_cap_refuses_with_its_own_distinguishable_message(tmp):
     assert result['cross']['error'] == ORIGIN_ERROR, result['cross']
     assert AGGREGATE_ERROR != ORIGIN_ERROR, (AGGREGATE_ERROR, ORIGIN_ERROR)
     assert AGGREGATE_ERROR != 'QUOTA_BYTES quota exceeded', AGGREGATE_ERROR
+
+
+def test_one_origins_burst_cannot_starve_another_origins_write(tmp):
+    """A bystander page's write is served inside the flooding page's burst.
+
+    The aggregate cap makes the GM queue one serial section over the whole
+    store, so which pending write that section takes next is the wait one page
+    imposes on every other page. An origin's turn is over when its write
+    commits, so the flood's second write waits behind the bystander's: the
+    bystander lands in the flood's first round, not behind all of it.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['admission']['rotation']
+    order = case['order']
+    assert case['answered'] == case['submitted'] == 6, case
+    assert order == ['f0', 'b', 'f1', 'f2', 'f3', 'f4'], case
+    assert order.count('b') == 1, case
+    assert order.index('b') == 1, case
+    assert order[-1] != 'b', case
+
+
+def test_writes_from_one_origin_commit_in_submission_order(tmp):
+    """One origin alone keeps its own submission order, every write answered.
+
+    The rotation is only consulted when another origin is waiting, so a single
+    origin's own backlog must read exactly as it did before one queue served
+    every origin.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['admission']['singleOrigin']
+    assert case['order'] == ['s0', 's1', 's2', 's3'], case
+    assert case['answered'] == case['submitted'] == 4, case
+
+
+def test_an_origin_that_drained_rejoins_the_rotation_at_the_back(tmp):
+    """A refilled origin waits behind the origins already queued.
+
+    A drained origin has no pending write, so keeping it in the rotation would
+    let it resume the front it held before — and a page could buy itself a
+    place by going quiet and coming back. It leaves the rotation, and its next
+    write enters at the back, behind every write already waiting.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['admission']['rejoin']
+    assert case['answered'] == case['submitted'] == 8, case
+    assert case['order'] == [
+        'a0', 'b0', 'a1', 'a2', 'a3', 'b1', 'c0', 'a4'], case
+    assert case['order'].index('a3') < case['order'].index('a4'), case
+
+
+def test_a_lone_write_runs_at_once_on_an_empty_queue(tmp):
+    """With nothing active and nothing waiting, the first write runs at once.
+
+    The idle start is what makes the queue drain rather than stall, and the
+    second submission is then served behind it, not ahead of it.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['admission']['idle']
+    assert case['order'] == ['i0', 'i1'], case
+    assert case['answered'] == case['submitted'] == 2, case
+
+
+def test_a_storage_callback_entered_twice_still_serialises_writes(tmp):
+    """A second release cannot admit a write beside the one in flight.
+
+    The run's every exit reaches its release exactly once, so a storage
+    callback the worker enters twice cannot start a second read-modify-write
+    over the same store. The three writes are charged so that all three do not
+    fit the aggregate: a second release would admit all three, commit the sum
+    over the cap and answer every page with success. WHICH write is refused is
+    the rotation's business; that exactly one is, is the property.
+    """
+    del tmp
+    case = _gm_two_origin.run_two_origin()['admission']['doubleCallback']
+    assert case['errors'].count(None) == 2, case
+    assert case['errors'].count(AGGREGATE_ERROR) == 1, case
+    assert case['seeded'] + 3 * case['charge'] > case['cap'], case
+    assert case['total'] == case['seeded'] + 2 * case['charge'], case
 
 
 def main():
