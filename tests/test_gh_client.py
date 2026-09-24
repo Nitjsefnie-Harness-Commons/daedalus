@@ -317,9 +317,27 @@ def test_an_absent_or_nonsense_reset_clamps_into_a_bounded_wait(tmp):
     assert 0 < watcher._wait_seconds(mod.RateLimited('x', None)) <= 3600
     assert watcher._wait_seconds(mod.RateLimited('x', now - 5000)) >= 2
     assert watcher._wait_seconds(
-        mod.RateLimited('x', now + 10 ** 9)) == 3600
+        mod.RateLimited('x', now + 10 ** 9)) == mod.MAX_BACKOFF
     assert 0 < watcher._wait_seconds(
         mod.RateLimited('x', now + 30)) <= 31
+
+
+def test_a_reset_beyond_the_hour_is_slept_to_and_not_clamped(tmp):
+    """The pause is slept to the reported reset; the bound is far past one.
+
+    A reset an hour and a half out woke at the old one-hour clamp, was
+    refused again, and printed a second line for one wait. The bound stays
+    - a hostile header must not wedge a watcher - but it bounds an absurd
+    header, not the resets GitHub actually reports.
+    """
+    del tmp
+    mod = _client()
+    watcher = mod.Watcher('w', out=io.StringIO())
+    now = time.time()
+    ninety = watcher._wait_seconds(
+        mod.RateLimited('x', now + 90 * 60), now)
+    assert 89 * 60 <= ninety <= 90 * 60, ninety
+    assert mod.MAX_BACKOFF > 2 * 3600, mod.MAX_BACKOFF
 
 
 def test_a_query_failure_is_not_retried_behind_the_pause(tmp):
