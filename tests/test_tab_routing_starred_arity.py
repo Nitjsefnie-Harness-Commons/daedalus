@@ -49,9 +49,9 @@ def test_starred_operand_arity_is_a_single_fact(tmp):
              for attr, val, want in axes for label, tmpl in rows]
     assert [(label, *run(body)) for label, body, _ in cases] == [
         (label, *want) for label, _, want in cases]
-    guards = [(label, pre + body) for label, body in guards]
-    assert [(label, *run(body)) for label, body in guards] == [
-        (label, 0, 0) for label, _ in guards]
+    sized = [(label, pre + body) for label, body in guards]
+    assert [(label, *run(body)) for label, body in sized] == [
+        (label, 0, 0) for label, _ in sized]
 
 
 def main():
