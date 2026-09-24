@@ -43,6 +43,7 @@ importScripts(
   'worker/segment_mint.js',
   'worker/evaluate.js',
   'worker/stream.js',
+  'worker/gm_storage.js',
   'worker/messaging.js');
 
 // ─── Command dispatch ───

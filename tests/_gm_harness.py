@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Node-VM harnesses for the GM storage boundary in content.js.
+"""Node-VM harnesses for the GM storage boundary.
 
-Three harnesses, all over the shipped extension/content.js and a fake
-chrome.storage.local:
-
-- a single-origin relay harness (content.js + page.js) driving GM through the
-  page's promise API, for the reserved/invalid-key refusals and the ordinary
-  round trip;
-- a failure harness where every storage call reports Chrome's lastError, for
-  the write that must reject rather than resolve;
-- a two-origin isolation harness over one shared store, for the per-origin
-  partition and the per-origin byte quota.
-
-They live here so test_gm_storage.py holds the pins rather than the fixtures.
+The GM storage namespace, per-origin byte cap, and per-namespace write queue
+live in the service worker (extension/worker/gm_storage.js), so every content
+frame forwards its GM messages there via chrome.runtime.sendMessage and the
+worker keys the partition on sender.origin. Each harness therefore builds a
+background realm (worker/util.js + worker/gm_storage.js over a fake
+chrome.storage.local) and wires each content frame's runtime.sendMessage to it
+with that frame's own origin as sender.origin. The frames also keep a direct
+chrome.storage.local handle onto the same shared store, so the pre-fix content
+script (which stored in the frame) can be driven against one shared store for
+the cross-tab "before" evidence.
 """
 import json
 import shutil
@@ -28,18 +26,101 @@ FAILURE_ORIGIN = 'https://storage-failure.example.com'
 ORIGIN_A = 'https://alpha.example.com'
 ORIGIN_B = 'https://beta.example.com'
 
-_STORAGE_RELAY_HARNESS = (r"""
+
+# Shared prelude: build the service-worker realm once per harness. makeStorage
+# receives the worker's chrome.runtime so a failing store can set lastError.
+_PRELUDE = r"""
 const fs = require('fs');
 const vm = require('vm');
 
-const [contentPath, pagePath] = process.argv.slice(1);
-const ORIGIN = 'https://storage-test.example.com';
-const NS = 'gm:' + encodeURIComponent(ORIGIN) + ':';
+function buildBackground(utilPath, gmPath, makeStorage) {
+  const chrome = { runtime: { lastError: null }, storage: { local: null } };
+  chrome.storage.local = makeStorage(chrome.runtime);
+  const context = {
+    chrome, TextEncoder, URL,
+    console: { log() {}, error() {}, warn() {} },
+  };
+  vm.runInNewContext(
+    fs.readFileSync(utilPath, 'utf8'), context, { filename: utilPath });
+  vm.runInNewContext(
+    fs.readFileSync(gmPath, 'utf8'), context, { filename: gmPath });
+  return { handle: context.handleGmStorage, chrome };
+}
+
+// A content frame's chrome: a direct handle on the shared store (the pre-fix
+// content script's path) plus a sendMessage that routes gm-storage to the
+// shared background with sender.origin = this frame's own origin.
+function frameChrome(storage, background, origin) {
+  return {
+    runtime: {
+      lastError: null,
+      onMessage: { addListener() {} },
+      sendMessage(msg, callback) {
+        if (msg && msg.type === 'gm-storage') {
+          background.handle(msg, { origin }, (response) => {
+            if (callback) callback(response);
+          });
+          return;
+        }
+        if (callback) callback(undefined);
+      },
+      getManifest() { return { version: '0.26.1' }; },
+      connect() {
+        return { disconnect() {}, postMessage() {},
+                 onDisconnect: { addListener() {} } };
+      },
+    },
+    storage: { local: storage },
+  };
+}
+"""
+
+
+_STORAGE_RELAY_HARNESS = (_PRELUDE + r"""
+// Single-origin relay: content.js + page.js in one frame over a synchronous
+// fake store and a synchronous background. Drives GM through the page's
+// promise API for the reserved/invalid-key refusals and the ordinary round
+// trip, and through raw dispatch for the keyed-handler pins.
+const [contentPath, pagePath, utilPath, gmPath] = process.argv.slice(1);
+const NS = 'gm:' + encodeURIComponent(
+  'https://storage-test.example.com') + ':';
 const listeners = {};
 const messages = [];
 const posted = [];
 const storageCalls = [];
 const store = Object.create(null);
+
+function storedValues(keys) {
+  const values = {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(store, key)) values[key] =
+      store[key];
+  }
+  return values;
+}
+
+function makeStorage(runtime) {
+  return {
+    get(keys, callback) {
+      storageCalls.push('get');
+      callback(keys === null ? { ...store } : storedValues(keys));
+    },
+    set(values, callback) {
+      storageCalls.push('set');
+      Object.assign(store, values);
+      callback();
+    },
+    remove(keys, callback) {
+      storageCalls.push('remove');
+      for (const key of keys) delete store[key];
+      callback();
+    },
+  };
+}
+
+const background = buildBackground(utilPath, gmPath, makeStorage);
+const chrome = frameChrome(background.chrome.storage.local, background,
+  'https://storage-test.example.com');
 
 const windowObject = {
   addEventListener(type, listener) {
@@ -51,60 +132,18 @@ const windowObject = {
   },
 };
 
-function storedValues(keys) {
-  const values = {};
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(store, key)) values[key] ="""
-                          r""" store[key];
-  }
-  return values;
-}
-
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    sendMessage() {},
-    getManifest() { return { version: '0.18.0' }; },
-    connect() {
-      return {
-        disconnect() {},
-        postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
-    },
-  },
-  storage: {
-    local: {
-      get(keys, callback) {
-        storageCalls.push('get');
-        callback(keys === null ? { ...store } : storedValues(keys));
-      },
-      set(values, callback) {
-        storageCalls.push('set');
-        Object.assign(store, values);
-        callback();
-      },
-      remove(keys, callback) {
-        storageCalls.push('remove');
-        for (const key of keys) delete store[key];
-        callback();
-      },
-    },
-  },
-};
-
 const context = {
   window: windowObject,
   chrome,
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
-  location: { hostname: 'storage-test.example.com', origin: ORIGIN },
+  location: { hostname: 'storage-test.example.com', origin: SINGLE() },
   TextEncoder,
   setInterval: () => 1,
   clearInterval() {},
   setTimeout: () => 1,
   console: { log() {}, error() {} },
 };
+function SINGLE() { return 'https://storage-test.example.com'; }
 vm.runInNewContext(
   fs.readFileSync(contentPath, 'utf8'), context,
   { filename: contentPath });
@@ -183,8 +222,8 @@ async function gmSet(label, key) {
 
 async function main() {
   const gmSetCases = [];
-  for (const key of ['daedalus-server', 'daedalus-hotfixes',"""
-                          r""" 'daedalus-token']) {
+  for (const key of ['daedalus-server', 'daedalus-hotfixes',
+                     'daedalus-token']) {
     gmSetCases.push(await gmSet(`array:${key}`, [key]));
   }
   gmSetCases.push(await gmSet('string:daedalus-server', 'daedalus-server'));
@@ -209,11 +248,10 @@ async function main() {
   }
 
   const ordinaryHandlers = {
-    getValue: dispatch('getValue', 'ordinary', { [NS + 'ordinary']:"""
-                          r""" 'kept' }),
+    getValue: dispatch('getValue', 'ordinary', { [NS + 'ordinary']: 'kept' }),
     setValue: dispatch('setValue', 'ordinary'),
-    deleteValue: dispatch('deleteValue', 'ordinary', { [NS + 'ordinary']:"""
-                          r""" 'remove-me' }),
+    deleteValue: dispatch('deleteValue', 'ordinary',
+      { [NS + 'ordinary']: 'remove-me' }),
   };
 
   reset({
@@ -242,15 +280,11 @@ main().catch((error) => {
 """)
 
 
-_STORAGE_FAILURE_HARNESS = (r"""
-const fs = require('fs');
-const vm = require('vm');
-
-// Every chrome.storage call fails the way Chrome fails one: the callback is
-// invoked exactly as on success, the store is left alone, and the only trace
-// is chrome.runtime.lastError — which Chrome clears once the callback
-// returns, so it is set around the call and cleared after it.
-const [contentPath, pagePath] = process.argv.slice(1);
+_STORAGE_FAILURE_HARNESS = (_PRELUDE + r"""
+// Every chrome.storage call in the background fails the way Chrome fails one:
+// the callback is invoked exactly as on success, the store is left alone, and
+// the only trace is chrome.runtime.lastError.
+const [contentPath, pagePath, utilPath, gmPath] = process.argv.slice(1);
 const FAILURE = 'QUOTA_BYTES quota exceeded';
 const listeners = {};
 const messages = [];
@@ -264,37 +298,25 @@ const windowObject = {
   },
 };
 
-function failing(callback, value) {
-  chrome.runtime.lastError = { message: FAILURE };
-  try {
-    callback(value);
-  } finally {
-    chrome.runtime.lastError = null;
-  }
+function makeStorage(runtime) {
+  const failing = (callback, value) => {
+    runtime.lastError = { message: FAILURE };
+    try {
+      callback(value);
+    } finally {
+      runtime.lastError = null;
+    }
+  };
+  return {
+    get(keys, callback) { failing(callback, {}); },
+    set(values, callback) { failing(callback); },
+    remove(keys, callback) { failing(callback); },
+  };
 }
 
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    sendMessage() {},
-    getManifest() { return { version: '0.18.0' }; },
-    connect() {
-      return {
-        disconnect() {},
-        postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
-    },
-  },
-  storage: {
-    local: {
-      get(keys, callback) { failing(callback, {}); },
-      set(values, callback) { failing(callback); },
-      remove(keys, callback) { failing(callback); },
-    },
-  },
-};
+const background = buildBackground(utilPath, gmPath, makeStorage);
+const chrome = frameChrome(background.chrome.storage.local, background,
+  'https://storage-failure.example.com');
 
 const context = {
   window: windowObject,
@@ -333,10 +355,10 @@ for (const [name, call] of [
   ['listValues', () => windowObject.GM.listValues()],
 ]) {
   settled.push(call().then(
-    (value) => { outcomes[name] = { settled: 'resolved', value: value ??"""
-                            r""" null }; },
-    (error) => { outcomes[name] = { settled: 'rejected', error:"""
-                            r""" String(error && error.message) }; },
+    (value) => { outcomes[name] = { settled: 'resolved', value: value ??
+      null }; },
+    (error) => { outcomes[name] = { settled: 'rejected', error:
+      String(error && error.message) }; },
   ));
 }
 flushMessages();
@@ -347,340 +369,17 @@ Promise.all(settled).then(() => {
 """)
 
 
-_TWO_ORIGIN_HARNESS = (r"""
-const fs = require('fs');
-const vm = require('vm');
-
-// One shared chrome.storage.local — the single extension store — observed
-// through two content-script frames, one per location.origin. Everything the
-// page sends is attacker-controlled, so the origin each frame is served from
-// can only come from that frame's own location.
-const [contentPath] = process.argv.slice(1);
-const ORIGIN_A = 'https://alpha.example.com';
-const ORIGIN_B = 'https://beta.example.com';
-const QUOTA_BYTES = 1048576;
-const store = Object.create(null);
-const storageCalls = [];
-const deferred = [];
-let reqCounter = 0;
-
-// Real chrome.storage callbacks are asynchronous. Deferring them onto a queue
-// that a burst can leave unflushed reproduces the read-modify-write race a
-// synchronous model hides: a setValue only reaches its get→set after a turn,
-// so a burst of setValue calls issued in one turn submits every get before any
-// set commits, and every get reads the same pre-write store.
-function flushDeferred() {
-  while (deferred.length) deferred.shift()();
-}
-
-function storedValues(keys) {
-  const values = {};
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(store, key)) values[key] ="""
-                          r""" store[key];
-  }
-  return values;
-}
-
-const chrome = {
-  runtime: {
-    lastError: null,
-    onMessage: { addListener() {} },
-    sendMessage() {},
-    getManifest() { return { version: '0.18.0' }; },
-    connect() {
-      return {
-        disconnect() {},
-        postMessage() {},
-        onDisconnect: { addListener() {} },
-      };
-    },
-  },
-  storage: {
-    local: {
-      get(keys, callback) {
-        storageCalls.push('get');
-        const data = keys === null ? { ...store } : storedValues(keys);
-        deferred.push(() => callback(data));
-      },
-      set(values, callback) {
-        storageCalls.push('set');
-        Object.assign(store, values);
-        deferred.push(() => callback());
-      },
-      remove(keys, callback) {
-        storageCalls.push('remove');
-        for (const key of keys) delete store[key];
-        deferred.push(() => callback());
-      },
-    },
-  },
-};
-
-function createFrame(origin, hostname) {
-  const listeners = {};
-  const posted = [];
-  const windowObject = {
-    addEventListener(type, listener) {
-      (listeners[type] ||= []).push(listener);
-    },
-    postMessage(message) {
-      posted.push(message);
-    },
-  };
-  const context = {
-    window: windowObject,
-    chrome,
-    navigator: { clipboard: { writeText: () => Promise.resolve() } },
-    location: { origin, hostname },
-    TextEncoder,
-    setInterval: () => 1,
-    clearInterval() {},
-    setTimeout: () => 1,
-    clearTimeout() {},
-    crypto: { randomUUID: () => 'frame-uuid' },
-    console: { log() {}, error() {} },
-  };
-  vm.runInNewContext(
-    fs.readFileSync(contentPath, 'utf8'), context,
-    { filename: contentPath });
-
-  function dispatch(handler, key, value, extra) {
-    const reqId = ++reqCounter;
-    const data = Object.assign({
-      direction: 'daedalus-page-to-bg', reqId, handler, key, value,
-      defaultValue: 'DEFAULT',
-    }, extra || {});
-    for (const listener of (listeners.message || [])) {
-      listener({ source: windowObject, data });
-    }
-    return reqId;
-  }
-
-  function replyFor(reqId) {
-    return posted.find((m) =>
-      m.direction === 'daedalus-bg-to-page' && m.reqId === reqId) || null;
-  }
-
-  function send(handler, key, value, extra) {
-    posted.length = 0;
-    storageCalls.length = 0;
-    const reqId = dispatch(handler, key, value, extra);
-    flushDeferred();
-    const reply = replyFor(reqId);
-    return {
-      error: (reply && reply.error) || null,
-      value: reply ? reply.value : undefined,
-      keys: (reply && reply.keys) || null,
-      calls: [...storageCalls],
-      storeKeys: Object.keys(store).sort(),
-    };
-  }
-
-  // Fire count setValue calls in a single turn with no flush between them,
-  // then flush once, so every get runs before any set commits.
-  function burstWrites(count, prefix, bytes) {
-    posted.length = 0;
-    storageCalls.length = 0;
-    for (let i = 0; i < count; i++) {
-      dispatch('setValue', prefix + i, 'x'.repeat(bytes));
-    }
-    flushDeferred();
-    return [...posted];
-  }
-
-  return { origin, send, burstWrites };
-}
-function resetStore() {
-  for (const key of Object.keys(store)) delete store[key];
-  storageCalls.length = 0;
-}
-
-function nsKey(origin, key) {
-  return 'gm:' + encodeURIComponent(origin) + ':' + key;
-}
-
-function bigString(n) { return 'x'.repeat(n); }
-
-function partitionBytes(origin) {
-  const ns = 'gm:' + encodeURIComponent(origin) + ':';
-  let total = 0;
-  for (const key of Object.keys(store)) {
-    if (!key.startsWith(ns)) continue;
-    total += new TextEncoder().encode(JSON.stringify(store[key])).length;
-  }
-  return total;
-}
-
-function main() {
-  const a = createFrame(ORIGIN_A, 'alpha.example.com');
-  const b = createFrame(ORIGIN_B, 'beta.example.com');
-  const out = {};
-
-  // B must not read A's GM value.
-  resetStore();
-  a.send('setValue', 'secret', 'A-value');
-  const bReadsA = b.send('getValue', 'secret');
-  const aReadsOwn = a.send('getValue', 'secret');
-  out.readIsolation = { bValue: bReadsA.value, aValue: aReadsOwn.value };
-
-  // B must not overwrite A's GM value.
-  resetStore();
-  a.send('setValue', 'shared', 'A-value');
-  b.send('setValue', 'shared', 'B-value');
-  const aAfterOverwrite = a.send('getValue', 'shared');
-  const bAfterOverwrite = b.send('getValue', 'shared');
-  out.overwriteIsolation = {
-    aValue: aAfterOverwrite.value,
-    bValue: bAfterOverwrite.value,
-    storeKeys: aAfterOverwrite.storeKeys,
-  };
-
-  // B's listValues must not name A's GM key.
-  resetStore();
-  a.send('setValue', 'a-only', 'x');
-  const bList = b.send('listValues');
-  const aList = a.send('listValues');
-  out.listIsolation = { bKeys: bList.keys, aKeys: aList.keys };
-
-  // B's deleteValue must not remove A's GM key.
-  resetStore();
-  a.send('setValue', 'a-key', 'A-value');
-  b.send('deleteValue', 'a-key');
-  const aAfterDelete = a.send('getValue', 'a-key');
-  out.deleteIsolation = {
-    aValue: aAfterDelete.value, storeKeys: aAfterDelete.storeKeys };
-
-  // The quota is per origin and ignores the extension's own keys: a large
-  // daedalus-token sits in the store, A's own-partition write still fits, and
-  // A's oversized write is refused without reaching set.
-  resetStore();
-  store['daedalus-token'] = bigString(1500000);
-  const quotaFits = a.send('setValue', 'small', 'tiny');
-  const quotaCross = a.send('setValue', 'huge', bigString(1500000));
-  out.quota = {
-    fitsError: quotaFits.error, fitsCalls: quotaFits.calls,
-    crossError: quotaCross.error, crossCalls: quotaCross.calls,
-    crossStoreKeys: quotaCross.storeKeys,
-  };
-
-  // A page that puts another origin in the payload is served its own.
-  resetStore();
-  a.send('setValue', 'secret', 'A-value');
-  const spoofedRead = b.send('getValue', 'secret', undefined, {
-    origin: ORIGIN_A, hostname: ORIGIN_A, location: { origin: ORIGIN_A } });
-  b.send('setValue', 'spoofed', 'B-value', {
-    origin: ORIGIN_A, hostname: ORIGIN_A });
-  out.spoof = {
-    value: spoofedRead.value,
-    aKeys: a.send('listValues').keys,
-    bKeys: b.send('listValues').keys,
-  };
-
-  // #1: a burst of concurrent setValue calls issued in one turn. With the
-  // cap's read-modify-write unserialized, every get reads the pre-write store
-  // and all twelve pass, overflowing the cap; with per-origin serialization
-  // only the writes that fit are stored and the partition never exceeds it.
-  resetStore();
-  const burstReplies = a.burstWrites(12, 'k', 90000);
-  out.concurrent = {
-    total: partitionBytes(ORIGIN_A),
-    cap: QUOTA_BYTES,
-    stored: burstReplies.filter((m) => !m.error).length,
-    refusals: burstReplies.filter((m) =>
-      m.error === 'gm storage quota exceeded').length,
-  };
-
-  // #2: Chrome's local QUOTA_BYTES is "measured by the JSON stringification of
-  // every value" and its values are JSON-serialisable, so a Map/Set is stored
-  // and charged as {} (2 bytes) — exactly what gmValueBytes measures. A
-  // 100k-entry Map is admitted at a 2-byte charge, and a following value of
-  // cap-100 bytes still fits beside it.
-  resetStore();
-  const hugeMap = new Map();
-  const hugeSet = new Set();
-  for (let i = 0; i < 100000; i++) {
-    hugeMap.set('k' + i, 'v' + i);
-    hugeSet.add('v' + i);
-  }
-  const mapSet = a.send('setValue', 'm', hugeMap);
-  const setSet = a.send('setValue', 's', hugeSet);
-  const fillSet = a.send('setValue', 'z', bigString(QUOTA_BYTES - 100));
-  out.mapSet = {
-    mapError: mapSet.error, mapCalls: mapSet.calls,
-    setError: setSet.error, setCalls: setSet.calls,
-    fillError: fillSet.error, fillCalls: fillSet.calls,
-  };
-
-  // #4: an opaque origin reports "null" and has no owner to name, so every GM
-  // storage handler refuses rather than share a gm:null: partition.
-  const o = createFrame('null', 'opaque');
-  out.opaque = {
-    get: o.send('getValue', 'k').error,
-    set: o.send('setValue', 'k', 'v').error,
-    list: o.send('listValues').error,
-    del: o.send('deleteValue', 'k').error,
-  };
-
-  // A write that fits reaches set and replies with no error.
-  resetStore();
-  const fits = a.send('setValue', 'k', 'small');
-  out.fits = { error: fits.error, calls: fits.calls };
-
-  // A write past the cap is refused and set is never called.
-  resetStore();
-  const cross = a.send('setValue', 'k', bigString(1500000));
-  out.cross = { error: cross.error, calls: cross.calls,
-                storeKeys: cross.storeKeys };
-
-  // A replace is old-out/new-in: a value that only fits because the value it
-  // replaces stops counting.
-  resetStore();
-  a.send('setValue', 'k', bigString(QUOTA_BYTES - 1000));
-  const replaced = a.send('setValue', 'k', bigString(QUOTA_BYTES - 100));
-  out.replace = { error: replaced.error, calls: replaced.calls };
-
-  // A delete frees budget, because the sum is recomputed every write.
-  resetStore();
-  a.send('setValue', 'k', bigString(QUOTA_BYTES - 200));
-  const addRefused = a.send('setValue', 'j', bigString(500));
-  a.send('deleteValue', 'k');
-  const addAccepted = a.send('setValue', 'j', bigString(500));
-  out.deleteFrees = {
-    refusedError: addRefused.error, refusedCalls: addRefused.calls,
-    acceptedError: addAccepted.error, acceptedCalls: addAccepted.calls,
-  };
-
-  // A partition already over the cap refuses every page write, set uncalled.
-  resetStore();
-  store[nsKey(ORIGIN_A, 'over')] = bigString(1500000);
-  const alreadyOver = a.send('setValue', 'anything', 'small');
-  out.alreadyOver = { error: alreadyOver.error, calls: alreadyOver.calls };
-
-  // A value that cannot be JSON.stringify is refused, never reaching set.
-  resetStore();
-  const circular = {};
-  circular.self = circular;
-  const unserialisable = a.send('setValue', 'k', circular);
-  out.unserialisable = { error: unserialisable.error,
-                         calls: unserialisable.calls,
-                         storeKeys: unserialisable.storeKeys };
-
-  return out;
-}
-
-process.stdout.write(JSON.stringify(main()));
-""")
-
-
-def _run_node(harness, with_page):
+def _run_node(harness, content_path=None, with_page=False):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension storage boundary'
-    argv = [node, '-e', harness, str(ROOT / 'extension' / 'content.js')]
-    if with_page:
-        argv.append(str(ROOT / 'extension' / 'page.js'))
+    ext = ROOT / 'extension'
+    argv = [node, '-e', harness,
+            str(content_path or (ext / 'content.js')),
+            str(ext / 'page.js') if with_page else '',
+            str(ext / 'worker' / 'util.js'),
+            str(ext / 'worker' / 'gm_storage.js')]
     result = subprocess.run(
-        argv, cwd=ROOT, capture_output=True, text=True, timeout=60)
+        argv, cwd=ROOT, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -692,7 +391,3 @@ def run_relay():
 
 def run_failure():
     return _run_node(_STORAGE_FAILURE_HARNESS, with_page=True)
-
-
-def run_two_origin():
-    return _run_node(_TWO_ORIGIN_HARNESS, with_page=False)
