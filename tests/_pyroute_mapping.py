@@ -330,8 +330,7 @@ def _setdefault_value(node, state):
         # to no literal probes as None, hashable, and fails the test beside
         # it anyway; the `_UNSAFE_LITERAL` conjunct is the load-bearing one.
         return merge_yielded((*owner.items.values(), default, unusable))
-    if key in owner.items: return owner.items[key]
-    return default
+    return _mapping_lookup(owner, key, default)
 
 
 def _unknown_lookup_default(node, state):
@@ -342,13 +341,15 @@ def _unknown_lookup_default(node, state):
     return _known_value(node.args[1], state)
 
 
+def _mapping_lookup(owner, key, default):
+    if DYNAMIC_KEY not in owner.items: return owner.items.get(key, default)
+    return merge_yielded((*_selected_values(owner, key), default))
+
+
 def _mapping_item_value(node, owner, state):
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
-    if key is not _UNRESOLVED_KEY:
-        if DYNAMIC_KEY not in owner.items:
-            return owner.items.get(key, default)
-        return merge_yielded((*_selected_values(owner, key), default))
+    if key is not _UNRESOLVED_KEY: return _mapping_lookup(owner, key, default)
     return merge_yielded((*owner.items.values(), default))
 
 
