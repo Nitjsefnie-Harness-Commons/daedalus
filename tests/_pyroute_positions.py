@@ -36,10 +36,10 @@ def at_position(container, index):
 
 def from_position(container, start):
     """The join of every value a container may hold at position start or
-    later."""
+    later. A non-int key names no position: storing one raises."""
     return merge_yielded(
         item for key, item in container.items.items()
-        if key is DYNAMIC_KEY or key >= start)
+        if key is DYNAMIC_KEY or isinstance(key, int) and key >= start)
 
 
 def alias_target_pairs(target, value):
