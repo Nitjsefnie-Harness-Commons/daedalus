@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 """The worker's close-tab shape validation and per-tab result contract."""
-import json
-import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 TOKEN = 'close-token'
 SERVER = 'https://bridge.example.com'
+SYNC = 'POST /sync-tabs'
+RESULT = 'POST /result'
+# Every scenario's recording, from a run of the shipped worker: boot opens the
+# stream and syncs the tab list, then the dispatch posts its result. The
+# eval-rejection scenario never posts one. The gate refuses a request outside
+# the plan by status and records it, so an invented call cannot pass here.
+BOOT_RESULT = [SYNC, RESULT]
 
 _CLOSE_TAB_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
 const [backgroundPath, plan] = process.argv.slice(1);
-const resultPayloads = [];
 const removeCalls = [];
 const messageListeners = [];
 const storageStore = {
@@ -102,24 +107,18 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-async function bridgeFetch(target, init = {}) {
-  const url = String(target);
-  if (url.endsWith('/result') && init.method === 'POST') {
-    const item = JSON.parse(init.body);
-    resultPayloads.push({
-      id: item.id,
-      tabId: item.tabId,
-      result: item.result,
-      error: item.error,
-    });
-    return response(200, { ok: true });
-  }
-  if (url.includes('/stream?')) return response(503, { error: 'disabled' });
-  if (/\/(register|sync-tabs|unregister)$/.test(url)) {
-    return response(200, { ok: true });
-  }
-  throw new Error('unexpected fetch: ' + url);
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees.
+const BRIDGE_URL = '__SERVER__';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
 }
+""" + STRICT_FETCH + r"""
 
 const context = vm.createContext({
   chrome,
@@ -156,8 +155,13 @@ async function run() {
   }
   return {
     removes: removeCalls,
-    posted: resultPayloads,
+    posted: resultPosts.map((p) => ({
+      id: p.id, tabId: p.tabId, result: p.result, error: p.error,
+    })),
     outcomes,
+    nonStream: nonStreamFetches.map((i) => i.request),
+    refused: refusedFetches,
+    badOrigins,
   };
 }
 
@@ -170,20 +174,22 @@ run().then((result) => {
 """).replace('__TOKEN__', TOKEN).replace('__SERVER__', SERVER)
 
 
-def _run_close_tab(command, reject=None, fail_query=False):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    plan = {'commands': [command]}
+def _run_close_tab(command, reject=None, fail_query=False, planned=None):
+    plan = {'commands': [command], 'planned': list(planned or BOOT_RESULT)}
     if reject is not None:
         plan['reject'] = reject
     if fail_query:
         plan['failQuery'] = True
-    result = run_node_program(
-        node, _CLOSE_TAB_HARNESS,
-        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT, payload=plan)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    outcome = run_gate(require_node(), _CLOSE_TAB_HARNESS,
+                       [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
+                       plan=plan)
+    assert_gate_clean(outcome['nonStream'], outcome['refused'],
+                      outcome['badOrigins'], plan['planned'])
+    return {
+        'removes': outcome['removes'],
+        'posted': outcome['posted'],
+        'outcomes': outcome['outcomes'],
+    }
 
 
 def _command(**fields):
@@ -252,7 +258,7 @@ def test_wrong_shape_tab_ids_is_rejected_even_with_tab_id(tmp):
 def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
     del tmp
     outcome = _run_close_tab(
-        _command(type='eval', code='1'), fail_query=True)
+        _command(type='eval', code='1'), fail_query=True, planned=[SYNC])
     assert outcome == {
         'removes': [],
         'posted': [],
