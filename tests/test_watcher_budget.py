@@ -480,7 +480,7 @@ def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
-    assert 'run 1: CANCELLED' in done.stdout, done.stdout
+    assert 'run 1: cancelled' in done.stdout, done.stdout
 
 
 def test_the_wait_reads_runs_for_the_pinned_sha_in_one_query(tmp):

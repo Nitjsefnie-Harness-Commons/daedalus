@@ -29,8 +29,15 @@ re-resolving would let a push landing mid-wait silently change the
 subject, and the verdict would describe a commit the caller never asked
 about.
 
-Runs are read through actions/runs?head_sha=, not the check-runs list: the
-check-runs list is appended to while a matrix fills, so "every check run
+A rate-limit refusal is the ONE exception to the exit-3 rule, and it is a
+deliberate one: a refusal is not a failed query, it is a known wait, so the
+wait says once where it is waiting, sleeps until the reset the API reported
+(bounded by its own --timeout) and polls again. Every other failure still
+exits 3 at once, which is what makes a 403 that is really a permission
+refusal stay loud.
+
+Runs are read through the commit's workflow runs, not the check-runs list:
+the check-runs list is appended to while a matrix fills, so "every check run
 has concluded" is true early and repeatedly during a run that is still
 starting jobs.
 
@@ -54,17 +61,18 @@ fail, and the trial proves the query shape on the real repository first.
 exits 0 when the query itself succeeded; only a failed query exits 3.
 """
 import argparse
-import json
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gh_client  # noqa: E402
 
 DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
-GH_TIMEOUT = 120
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
@@ -78,50 +86,10 @@ class RefusingParser(argparse.ArgumentParser):
         self.exit(3, f'{self.prog}: error: {message}\n')
 
 
-class QueryError(RuntimeError):
-    """One failed API read; the caller exits 3 rather than retrying."""
-
-
-def _gh(path):
-    """One fresh, fully paginated API read."""
-    try:
-        proc = subprocess.run(
-            ['gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
-             path],
-            capture_output=True, text=True, timeout=GH_TIMEOUT)
-    except (subprocess.SubprocessError, UnicodeDecodeError, OSError) as exc:
-        raise QueryError(f'gh failed: {exc}') from exc
-    if proc.returncode != 0:
-        raise QueryError(proc.stderr.strip()[:400])
-    return proc.stdout
-
-
-def _decode(payload):
-    """Parse one JSON value, or several concatenated by --paginate."""
-    payload = payload.strip()
-    if not payload:
-        return []
-    decoder = json.JSONDecoder()
-    out = []
-    index = 0
-    while index < len(payload):
-        try:
-            chunk, index = decoder.raw_decode(payload, index)
-        except json.JSONDecodeError as exc:
-            raise QueryError(f'unparseable gh output: {exc}') from exc
-        out.append(chunk)
-        while index < len(payload) and payload[index].isspace():
-            index += 1
-    return out
-
-
 def runs_on(repo, sha):
     """Every workflow run GitHub reports against the pinned SHA."""
-    runs = []
-    for chunk in _decode(_gh(f'repos/{repo}/actions/runs?head_sha={sha}')):
-        if isinstance(chunk, dict):
-            runs.extend(chunk.get('workflow_runs') or [])
-    return runs
+    owner, name = repo.split('/', 1)
+    return gh_client.workflow_runs(owner, name, sha)
 
 
 def _workflow_of(run):
@@ -182,11 +150,18 @@ def print_matrix(runs, sha, out):
         print(f'  {run.get("name")}: {state}{suffix}', file=out, flush=True)
 
 
-def wait(repo, sha, interval, timeout, out):
-    """Poll until a verdict or the bound; returns the exit code."""
+def wait(repo, sha, interval, timeout, out, parent_pid=None):
+    """Poll until a verdict or the bound; returns the exit code.
+
+    A rate-limit refusal does not end the wait: the watcher says once where
+    it is waiting and resumes at the reset, bounded by this wait's own
+    deadline, and the next poll is a poll like any other.
+    """
     deadline = time.monotonic() + timeout
+    watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
+                                parent_pid=parent_pid, deadline=deadline)
     while True:
-        runs = runs_on(repo, sha)
+        runs = watcher.poll(lambda: runs_on(repo, sha))
         state, offenders = verdict(runs)
         print_matrix(runs, sha, out)
         if state == 'acceptable':
@@ -216,7 +191,7 @@ def wait(repo, sha, interval, timeout, out):
                 print(f'wait exceeded {timeout}s on {sha[:12]}: still open: '
                       f'{open_runs}', file=out, flush=True)
             return 2
-        time.sleep(max(0, min(interval, remaining)))
+        watcher.sleep(max(0, min(interval, remaining)))
 
 
 def main(argv=None):
@@ -227,6 +202,8 @@ def main(argv=None):
                         help='seconds between polls')
     parser.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT,
                         help='seconds before the wait gives up with exit 2')
+    parser.add_argument('--parent-pid', type=int, default=None,
+                        help='exit when this process is gone')
     parser.add_argument('--once', action='store_true',
                         help='one trial evaluation: print the matrix to '
                              'stderr, exit 0 unless the query failed')
@@ -241,13 +218,15 @@ def main(argv=None):
     try:
         if not args.once:
             return wait(args.repo, args.sha, args.interval, args.timeout,
-                        sys.stdout)
-        runs = runs_on(args.repo, args.sha)
+                        sys.stdout, args.parent_pid)
+        watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
+                                    parent_pid=args.parent_pid)
+        runs = watcher.poll(lambda: runs_on(args.repo, args.sha))
         print_matrix(runs, args.sha, sys.stderr)
         state, _ = verdict(runs)
         print(f'state: {state}', file=sys.stderr)
         return 0
-    except QueryError as exc:
+    except gh_client.QueryError as exc:
         print(f'query failed: {exc}', file=sys.stderr)
         return 3
 

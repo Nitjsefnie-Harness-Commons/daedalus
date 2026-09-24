@@ -194,15 +194,16 @@ def graphql(query, variables=None):
 
 def nodes(page, path):
     """The nodes of the connection at `path`, empty when it is absent."""
-    return _at(page, path).get('nodes') or []
+    return at(page, path).get('nodes') or []
 
 
 def page_info(page, path):
     """The pageInfo of the connection at `path`, empty when it is absent."""
-    return _at(page, path).get('pageInfo') or {}
+    return at(page, path).get('pageInfo') or {}
 
 
-def _at(page, path):
+def at(page, path):
+    """The object at `path` in one page, empty when any step is absent."""
     node = page
     for key in path:
         node = (node or {}).get(key)

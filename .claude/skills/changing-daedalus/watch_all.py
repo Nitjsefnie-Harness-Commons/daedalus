@@ -6,6 +6,12 @@ until neither child has produced a line for the debounce window, then the
 whole batch is emitted as a single block — so a burst of twenty CI verdicts
 arrives as one notification instead of twenty.
 
+Each child is told this process's pid and exits when it is gone, and they
+are terminated here on the way out, so a restart never leaves the old pair
+polling beside the new one. The children each spend one GraphQL query per
+poll, and a rate-limit refusal pauses the child that read it until the reset
+the API reported.
+
 stdout carries the batches, which is what a Monitor turns into notifications.
 stderr carries this script's own diagnostics and stays off that stream --
 both children route events to stdout and diagnostics to stderr, so that
@@ -35,7 +41,7 @@ once, here, rather than twice.
   python3 -u watch_all.py 195 my-branch            # persistent, debounced
 """
 import argparse
-import json
+import os
 import queue
 import re
 import subprocess
@@ -43,6 +49,9 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gh_client  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 
@@ -172,30 +181,15 @@ def _repo_slug():
 def _runs_on(slug, sha):
     """Every workflow run on `sha`, or None when the query fails.
 
-    `--paginate` joins the object pages with no separator, so the body is
-    decoded value by value.
+    A rate-limit refusal is not a failed query and is not caught here: it
+    belongs to the wait the caller pauses on, and swallowing it would let a
+    refused hold read as a settled matrix.
     """
+    owner, name = slug.split('/', 1)
     try:
-        pages = subprocess.run(
-            ['gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
-             f'repos/{slug}/actions/runs?head_sha={sha}&per_page=100'],
-            capture_output=True, text=True, encoding='utf-8', timeout=120,
-            check=True).stdout
-    except (OSError, subprocess.SubprocessError):
+        return gh_client.workflow_runs(owner, name, sha)
+    except gh_client.QueryError:
         return None
-    decoder = json.JSONDecoder()
-    runs = []
-    index = 0
-    while index < len(pages):
-        if pages[index].isspace():
-            index += 1
-            continue
-        try:
-            page, index = decoder.raw_decode(pages, index)
-            runs.extend(page.get('workflow_runs') or [])
-        except (ValueError, AttributeError):
-            return None
-    return runs
 
 
 def _settled(runs):
@@ -209,16 +203,22 @@ def _settled(runs):
     return all(run.get('status') == 'completed' for run in runs)
 
 
-def _all_concluded(sha):
+def _all_concluded(sha, watcher=None):
     """Whether every workflow run on `sha` has finished, or None.
 
     None keeps the batch held: a failed query must never look settled.
-    Runs rather than check runs for the reason in the module docstring.
+    Runs rather than check runs for the reason in the module docstring. A
+    rate-limit refusal is the exception the watcher pauses on, so with one
+    the query is retried at the reset rather than read as a failure.
     """
     slug = _repo_slug()
     if not (slug and sha):
         return None
-    runs = _runs_on(slug, sha)
+
+    def ask():
+        return _runs_on(slug, sha)
+
+    runs = ask() if watcher is None else watcher.poll(ask)
     if runs is None:
         return None
     return _settled(runs)
@@ -257,13 +257,36 @@ def _spawn(argv):
     return child
 
 
-def _watchers(pr, branch):
+def _watchers(pr, branch, parent_pid=None):
+    """The two children, each told which process armed it.
+
+    The parent pid is what makes an orphan impossible: a child compares it
+    against its own on every tick and while it waits, and exits when the
+    parent is gone. This is redundant with the terminate below on purpose —
+    a kill of this process never runs a `finally`, so neither mechanism
+    alone carries the guarantee.
+    """
+    tell = ['--parent-pid', str(parent_pid)] if parent_pid else []
     return (
         ('comments', [sys.executable, '-u',
-                      str(HERE / 'pr_comment_watch.py'), str(pr)]),
+                      str(HERE / 'pr_comment_watch.py'), str(pr)] + tell),
         ('ci', [sys.executable, '-u',
-                str(HERE / 'ci_watch.py'), branch, '--debounce', '0']),
+                str(HERE / 'ci_watch.py'), branch, '--debounce', '0']
+         + tell),
     )
+
+
+def _terminate(children):
+    """Terminate, a short wait, then kill: the children never outlive us."""
+    for child in children.values():
+        if child.poll() is None:
+            child.terminate()
+    for child in children.values():
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def run_once(pr, branch):
@@ -296,18 +319,32 @@ def _emit(batch, limit, log_path):
 def run(pr, branch, debounce, limit, log_path, max_hold):
     sink = queue.Queue()
     children = {}
-    for name, argv in _watchers(pr, branch):
-        child = _spawn(argv)
-        children[name] = child
-        for kind, stream in (('out', child.stdout), ('err', child.stderr)):
-            thread = threading.Thread(
-                target=_pump, args=(name, stream, sink, kind), daemon=True)
-            thread.start()
+    watcher = gh_client.Watcher('watch_all', out=sys.stderr)
+    try:
+        for name, argv in _watchers(pr, branch, os.getpid()):
+            child = _spawn(argv)
+            children[name] = child
+            print(f'started {name} watcher pid {child.pid}', file=sys.stderr,
+                  flush=True)
+            for kind, stream in (('out', child.stdout),
+                                 ('err', child.stderr)):
+                thread = threading.Thread(
+                    target=_pump, args=(name, stream, sink, kind),
+                    daemon=True)
+                thread.start()
 
-    print(f'watching pr {pr} and branch {branch}; '
-          f'batching until {debounce}s of silence', file=sys.stderr,
-          flush=True)
+        print(f'watching pr {pr} and branch {branch}; '
+              f'batching until {debounce}s of silence', file=sys.stderr,
+              flush=True)
+        return _aggregate(sink, children, watcher, pr, branch, debounce,
+                          limit, log_path, max_hold)
+    finally:
+        _terminate(children)
 
+
+def _aggregate(sink, children, watcher, pr, branch, debounce, limit,
+               log_path, max_hold):
+    """The batching loop, until every child is gone."""
     batch = []
     last = None
     held_since = None
@@ -318,22 +355,25 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
         except queue.Empty:
             pass
         else:
-            # A watcher's stderr is its own diagnostic channel; keep it off
-            # the event stream unless the watcher has actually died, which
-            # must never look the same as a quiet surface.
+            # A watcher's stderr is its own diagnostic channel; keep it
+            # off the event stream unless the watcher has actually died,
+            # which must never look the same as a quiet surface.
             if kind == 'out':
                 batch.append(f'[{name}] {line}')
             else:
-                print(f'[{name}:err] {line}', file=sys.stderr, flush=True)
+                print(f'[{name}:err] {line}', file=sys.stderr,
+                      flush=True)
             last = time.monotonic()
             continue
 
-        if batch and last is not None and time.monotonic() - last >= debounce:
+        if (batch and last is not None
+                and time.monotonic() - last >= debounce):
             held_for = time.monotonic() - (held_since or time.monotonic())
             if _batch_is_only_quiet_ci(batch):
                 sha = _latest_sha(batch)
-                extra = _hold_release(_all_concluded(sha), held_for,
-                                      max_hold, sha)
+                extra = _hold_release(
+                    _all_concluded(sha, watcher), held_for, max_hold,
+                    sha)
                 if extra is None:
                     if held_since is None:
                         held_since = time.monotonic()
@@ -349,7 +389,8 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
         if dead:
             for name in dead:
                 batch.append(
-                    f'[{name}] WATCHER EXITED rc={children[name].returncode}')
+                    f'[{name}] WATCHER EXITED '
+                    f'rc={children[name].returncode}')
                 del children[name]
             if not children:
                 _emit(batch, limit, log_path)
