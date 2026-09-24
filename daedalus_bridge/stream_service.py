@@ -161,9 +161,9 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
         name = path.name
         if name.startswith('.') or not name.endswith('.json'):
             continue  # skip .tmp in-flight writes
-        # Keyed on the names as found rather than on a resolved spelling of
-        # them; `path_safety.same_entry` is the predicate that answers when
-        # two such spellings are one entry.
+        # Keyed on the names as found, so a claim is a claim on what the
+        # directory entry is called rather than on how one caller resolved
+        # the path to it.
         key = command_queue.queue_key(qdir.name, name)
         with command_queue.claimed(key) as owned:
             if not owned:

@@ -32,30 +32,44 @@ def delivery_root(res_dir):
 
 
 def delivery_stripe_key(target_dir):
-    """The byte key one delivery directory is striped on.
+    """The byte key one delivery directory is striped on, or None.
 
     The entry itself, as the filesystem reports it: the device and inode of
     the directory, which every path that reaches that one entry shares. A
-    directory that does not exist has no identity to ask for, so its name is
-    the key -- the best answer available, and the one that errs toward two
-    stripes for one entry only while the entry is still absent.
+    name could not serve here. `realpath` answers with the caller's
+    spelling on every POSIX platform, so `Foo` and `foo` reach one directory
+    on a case-insensitive parent while carrying two different names, and
+    two names take two locks: the serialization the stripe exists to
+    provide, silently absent. An inode is not a spelling and is not
+    something a caller can compute or steer, which is a little more than
+    the per-process secret alone was asked for.
 
-    A name could not serve here, and not only because of case. `realpath`
-    answers with the caller's spelling on every POSIX platform, so `Foo` and
-    `foo` reach one directory on a case-insensitive parent while carrying
-    two different names, and two names take two locks: the serialization the
-    stripe exists to provide, silently absent. An inode is not a spelling
-    and is not something a caller can compute or steer, which is a little
-    more than the per-process secret alone was asked for.
+    None means there is no entry to stripe on. That is not the same as "key
+    it on the name": a name-keyed stripe for a directory that is not there
+    is a stripe the writer of that directory will never take, because a
+    writer creates the entry first and then keys on the entry. Two callers
+    on such stripes are not serialized against each other at all, and a
+    consume arriving on one while a publish holds the other destroys a
+    delivery the publish reported as stored. So the question is refused
+    rather than answered, and the caller that holds None does nothing to
+    the delivery files.
+
+    An entry that exists and reports no inode number is a different case:
+    the entry is there, so it is keyed on its name -- the pre-round
+    behaviour, and over-serialized rather than not at all, which is the
+    direction a mutual-exclusion device may err in.
     """
+    if not isinstance(target_dir, os.PathLike):
+        # The mistake that shipped as the original bug was a caller handing
+        # this a bare name, and a name here is silently resolvable against
+        # the process working directory -- it would take a stripe for a
+        # directory nobody in the request ever named. Refused instead.
+        raise TypeError('delivery stripe takes a directory, not a name')
     try:
         info = os.stat(target_dir)
     except OSError:
-        info = None
-    if info is None or not info.st_ino:
-        # No entry to ask, or a filesystem that reports no inode number --
-        # where every entry would share one identity and every write would
-        # serialize behind every other.
+        return None
+    if not info.st_ino:
         return os.fsencode(os.path.basename(os.fspath(target_dir)))
     return f'{info.st_dev}:{info.st_ino}'.encode()
 
@@ -64,12 +78,13 @@ def delivery_lock_for(target_dir):
     """Return the lock that serializes one target's delivery files.
 
     Keyed on the target directory itself, not on anything a caller spelled:
-    see `delivery_stripe_key` for why a name cannot answer, and for the one
-    case where the name is all there is. Every caller holds the resolved
-    directory before the lock is taken, so no caller has to resolve a name
-    to reach the right stripe.
+    see `delivery_stripe_key` for why a name cannot answer, and for what
+    None means. Every caller holds the resolved directory before the lock
+    is taken, so no caller has to resolve a name to reach the right stripe.
     """
     key = delivery_stripe_key(target_dir)
+    if key is None:
+        return None
     index = stripe_index(key, DELIVERY_LOCK_STRIPES)
     return delivery_locks[index]
 
