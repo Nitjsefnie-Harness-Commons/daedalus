@@ -16,9 +16,8 @@ from pathlib import Path
 import _util
 
 
-def run_node_program(node, program, arguments, *, cwd,
-                     env=_util.child_coverage('scrub'), payload=None,
-                     timeout=30):
+def run_node_program(node, program, arguments, *, cwd, env=None,
+                     payload=None, timeout=30):
     """Run a Node program from a closed, automatically cleaned file.
 
     `env` is where a caller's coverage declaration lands; the terminal
