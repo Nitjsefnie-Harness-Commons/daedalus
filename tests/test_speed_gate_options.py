@@ -70,8 +70,8 @@ def _comparator(*dropped):
     docstring would advertise an option its parser does not declare.
     """
     kept = ''.join(declaration for declaration in _COMPARATOR_OPTIONS
-                  if not any(f"'{name}'" in declaration
-                             for name in dropped))
+                   if not any(f"'{name}'" in declaration
+                              for name in dropped))
     return _COMPARATOR_TEMPLATE.format(declared=kept)
 
 
@@ -257,6 +257,8 @@ def test_a_head_without_the_ratio_flag_runs_and_says_so(tmp):
         'a comparator that cannot write one must not leave it behind')
     assert '::warning::' in result.stdout, result.stdout
     assert '--ratio-file' in result.stdout, result.stdout
+    assert 'so it was not passed' in result.stdout, result.stdout
+    assert 'so they were not passed' not in result.stdout, result.stdout
     assert '--ratio-file' in summary, summary
 
 
@@ -322,6 +324,8 @@ def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
     assert 'no durations' not in result.stderr, result.stderr
     assert '--only' in result.stdout and '::warning::' in result.stdout, (
         result.stdout)
+    assert 'so it was not passed' in result.stdout, result.stdout
+    assert 'so they were not passed' not in result.stdout, result.stdout
     assert '--only' in summary, summary
     recorded = json.loads(
         (workdir / 'reports' / 'head-1' / 'durations.json').read_text(
@@ -391,6 +395,28 @@ def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
         environment = dict(os.environ, COLUMNS=columns)
         extracted = _help_tokens(comparator, environment)
         assert extracted == expected, (columns, sorted(extracted))
+
+
+def test_two_dropped_options_take_the_plural_message(tmp):
+    """The step counts what it dropped, and both messages must be right.
+
+    The count comes from `add` rather than from a word count of the message
+    text, so a drop of one and a drop of two are decided by the same number
+    the step already had. Quoting the list instead would make the count
+    always 1 and every plural read as singular.
+    """
+    workdir = _workdir(tmp, 'two-dropped')
+    _install_comparator(workdir,
+                        _comparator('--ratio-file', '--summary-file'))
+    probe, options = _probe(workdir)
+    assert probe.returncode == 0, (probe.stdout, probe.stderr)
+    result, summary = _run_compare(workdir, options)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    for option in ('--ratio-file', '--summary-file'):
+        assert option in result.stdout, (option, result.stdout)
+    assert 'so they were not passed' in result.stdout, result.stdout
+    assert 'so it was not passed' not in result.stdout, result.stdout
+    assert 'so they were not passed' in summary, summary
 
 
 def test_a_compare_with_no_probed_options_refuses(tmp):

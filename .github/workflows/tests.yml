@@ -1603,10 +1603,12 @@ jobs:
                 exit 1 ;;
             esac
             dropped="$dropped $opt"
+            ndropped=$((ndropped + 1))
           }
 
           args=()
           dropped=""
+          ndropped=0
           if [ -z "$TIME_OPTIONS" ]; then
             echo "::error::head/scripts/ci/time_tests.py was not probed, so the options it takes are unknown."
             exit 1
@@ -1663,7 +1665,7 @@ jobs:
           done
 
           if [ -n "$dropped" ]; then
-            if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
+            if [ "$ndropped" -eq 1 ]; then
               note="this instrument's --help did not list$dropped, so it was not passed"
             else
               note="this instrument's --help did not list$dropped, so they were not passed"
@@ -1722,9 +1724,11 @@ jobs:
                 exit 1 ;;
             esac
             dropped="$dropped $opt"
+            ndropped=$((ndropped + 1))
           }
           args=()
           dropped=""
+          ndropped=0
           if [ -z "$COMPARE_OPTIONS" ]; then
             echo "::error::head/scripts/ci/compare_durations.py was not probed, so the options it takes are unknown."
             exit 1
@@ -1741,7 +1745,7 @@ jobs:
           add --summary-file "$GITHUB_STEP_SUMMARY"
 
           if [ -n "$dropped" ]; then
-            if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
+            if [ "$ndropped" -eq 1 ]; then
               note="this comparator's --help did not list$dropped, so it was not passed"
             else
               note="this comparator's --help did not list$dropped, so they were not passed"
