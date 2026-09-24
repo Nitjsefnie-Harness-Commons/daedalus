@@ -23,9 +23,14 @@ _last_delivery_ts = 0.0
 
 # Refused candidates are retained, so without a record of what was already
 # reported the same object would log a line on every drain pass for as long
-# as a stream stays connected. Bounded like result_store's delivery record:
-# past the bound the oldest entry is forgotten and its next refusal logs
-# again, which keeps the log at one line per candidate per bounded window.
+# as a stream stays connected. Each key pairs the candidate's logical name
+# with the refused object's incarnation (device, inode, change-time): the
+# TTL sweep vacates a queue name by unlinking it without an alias check, so
+# a different object taking that name later must log again, while the same
+# object refused again under the same name must not. Bounded like
+# result_store's delivery record: past the bound the oldest entry is
+# forgotten and its next refusal logs again, which keeps the log at one line
+# per candidate per bounded window.
 _refused_candidates = {}
 _REFUSED_CANDIDATE_LIMIT = 4096
 _refused_lock = threading.Lock()
@@ -42,6 +47,20 @@ def _refusal_once(key, name, reason, secret=''):
     print(f'[STREAM] REFUSED '
           f'{path_safety.redacted(log_safe(name), secret)}: '
           f'{path_safety.redacted(log_safe(reason), secret)}', flush=True)
+
+
+def _forget_vacated(name):
+    """The TTL sweep vacated `name`; forget every refusal recorded there.
+
+    Whatever occupied the name is gone, so its record must not suppress a
+    different object that later takes the name under.
+    """
+    with _refused_lock:
+        for key in [k for k in _refused_candidates if k[0] == name]:
+            del _refused_candidates[key]
+
+
+command_queue.on_name_vacated(_forget_vacated)
 
 
 def register(token, tab):
@@ -144,11 +163,11 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
                 f'queue:{qdir.name}/{name}') as owned:
             if not owned:
                 continue  # another consumer covering this queue has it
-            opened, reason = command_queue.open_command_candidate(path)
+            opened, reason, ident = command_queue.open_command_candidate(path)
             if opened is None:
                 if reason is not None:
                     _refusal_once(
-                        f'queue:{qdir.name}/{name}',
+                        (f'queue:{qdir.name}/{name}', ident),
                         f'q={qdir.name}/{name}', reason, secret=secret)
                 continue  # absent, or refused: never delivered or unlinked
             # Decide with the descriptor open; unlink only once it closes.
@@ -225,12 +244,13 @@ def poll_legacy(cmd_dir, token):
             return 200, {}
         data = {}
         with command_queue.command_fs_lock:
-            opened, reason = command_queue.open_command_candidate(cmd_file)
+            opened, reason, ident = command_queue.open_command_candidate(
+                cmd_file)
             if opened is None:
                 if reason is not None:
-                    _refusal_once(legacy_claim_key(cmd_file.name),
-                                  f'legacy={cmd_file.name}', reason,
-                                  secret=token)
+                    _refusal_once(
+                        (legacy_claim_key(cmd_file.name), ident),
+                        f'legacy={cmd_file.name}', reason, secret=token)
                 return 200, data
             try:
                 with opened:
@@ -271,10 +291,10 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
     with command_queue.claimed(legacy_claim_key(path.name)) as owned:
         if not owned:
             return 0
-        opened, reason = command_queue.open_command_candidate(path)
+        opened, reason, ident = command_queue.open_command_candidate(path)
         if opened is None:
             if reason is not None:
-                _refusal_once(legacy_claim_key(path.name),
+                _refusal_once((legacy_claim_key(path.name), ident),
                               f'legacy={path.name}', reason, secret=secret)
             return 0  # absent, or refused: left in place
         with opened:
