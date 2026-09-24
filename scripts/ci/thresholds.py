@@ -16,7 +16,8 @@ CALIBRATION_GAP = Decimal('1.5')
 _ONE_DECIMAL = Decimal('0.1')
 _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
-_BASELINE_FIELDS = ('module_size_baseline', 'long_line_baseline')
+_BASELINE_FIELDS = (
+    'module_size_baseline', 'long_line_baseline', 'type_error_baseline')
 _TOP_LEVEL_FIELDS = ('schema_version', 'coverage', *_BASELINE_FIELDS)
 _COVERAGE_FIELDS = ('measured', 'floor')
 _FIELD_LABELS = {
@@ -206,6 +207,10 @@ def module_size_baseline(data):
 
 def long_line_baseline(data):
     return dict(normalise(data)['long_line_baseline'])
+
+
+def type_error_baseline(data):
+    return dict(normalise(data)['type_error_baseline'])
 
 
 def _json_ready(value):
