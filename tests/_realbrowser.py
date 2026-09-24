@@ -396,9 +396,19 @@ def _configured_fixture(node, bridge_url, token, worker_target,
         'daedalus-token': token,
         'daedalus-server': bridge_url,
     })
+    # loadConfig() is memoized for the worker's lifetime, so a storage write
+    # reaches the in-memory `config` only through the change-driven onChanged
+    # listener. Awaiting loadConfig() FIRST settles any in-flight boot
+    # generation before the write, so nothing reassigns `config` from a stale
+    # pre-write snapshot afterwards; the write then changes the settled values
+    # and its onChanged is the last writer. The other order let a boot read
+    # slower than this write clobber `config`, after which storage already
+    # held the target, the retries fired no onChanged, and the verdict stayed
+    # false for the whole budget.
     configure = (
-        '(async () => { await chrome.storage.local.set(' + storage
-        + '); await loadConfig(); ensureKeepAlive(); stopStream(); '
+        '(async () => { await loadConfig(); '
+        + 'await chrome.storage.local.set(' + storage
+        + '); ensureKeepAlive(); stopStream(); '
         + 'startStream(); '
         + 'return config.token === ' + json.dumps(token)
         + ' && config.serverUrl === ' + json.dumps(bridge_url)

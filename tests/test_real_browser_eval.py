@@ -48,6 +48,49 @@ def test_hostile_page_eval_matrix_has_descriptive_channels_only(tmp):
     assert matrix['page-promise'].get('result') == 'FORGED-BY-PAGE', matrix
 
 
+def test_worker_configures_under_a_slow_boot_read(tmp):
+    """A boot config read slower than the fixture's write must still pass.
+
+    loadConfig() is memoized for the worker's lifetime, so a storage write
+    reaches the in-memory `config` only through the change-driven onChanged
+    listener. A boot generation whose storage read resolves AFTER the fixture
+    writes reassigns `config` from a stale pre-write snapshot, and because
+    storage already holds the target, the fixture's retries write identical
+    values: no onChanged fires and the readiness verdict stays false. The
+    gate below forces that ordering deterministically by holding the boot
+    generation until the fixture's onChanged has landed, so the stale
+    snapshot always clobbers `config`. The fixture must still configure the
+    worker and yield its tab.
+    """
+    browser_requirements()  # skips honestly where no browser exists
+    slow = Path(tmp) / 'slow-boot-extension'
+    shutil.copytree(EXTENSION_ROOT, slow)
+    config_js = slow / 'worker' / 'config.js'
+    source = config_js.read_text(encoding='utf-8')
+    before = "  ]);\n  config.token = stored['daedalus-token'] || '';"
+    assert before in source, 'the boot config read moved'
+    gate = (
+        '  for (let i = 0; i < 300; i++) {\n'
+        '    if (config.serverUrl) break;\n'
+        '    await new Promise((r) => setTimeout(r, 10));\n'
+        '  }\n'
+    )
+    after = ("  ]);\n" + gate
+             + "  config.token = stored['daedalus-token'] || '';")
+    config_js.write_text(
+        source.replace(before, after), encoding='utf-8')
+
+    token = 'slowbootcfg'
+    with _util.bridge(
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+                      'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
+        with eval_page_server() as pages:
+            with real_extension_page(
+                    tmp, bridge_url, token, pages + '/plain.html',
+                    extension_root=slow) as (_node, _page, tab_id):
+                assert tab_id
+
+
 def test_main_world_transport_failure_and_genuine_null_are_distinct(tmp):
     """A failed injection is an error while evaluated `null` is a value."""
     token = 'mainworldtok'
