@@ -52,6 +52,7 @@ import json
 import shutil
 
 from _noderun import run_node_program
+from _util import child_coverage
 
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
@@ -256,8 +257,10 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
+def run_gate(node, program, arguments, *, cwd, plan,
+             env=child_coverage('scrub'), timeout=30):
     result = run_node_program(node, program, arguments, cwd=cwd,
+                              env=child_coverage('scrub'),
                               payload=plan, timeout=timeout)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
