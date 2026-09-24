@@ -524,6 +524,7 @@
 !/tests/test_tab_routing_js_templates.py
 !/tests/test_tab_routing_match.py
 !/tests/test_tab_routing_performance.py
+!/tests/test_tab_routing_setdefault.py
 !/tests/test_tab_routing_signatures.py
 !/tests/test_tab_routing_store_sweep.py
 !/tests/test_tab_routing_unprovable.py
