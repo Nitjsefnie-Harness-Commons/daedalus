@@ -251,13 +251,15 @@ Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate checks the body when the
 pull request is opened, edited, or reopened, and the moment a draft is marked
 ready for review, and posts one comment naming every failing condition,
-updating that same comment after later edits. A draft is never checked: it
-cannot be merged, and closing one strands the CI its reopen would trigger. The
-gate closes a mergeable pull request only when the body's layout or section
-content fails the template or the Related section names no issue. Fix the claim
-or body on that same pull request; once every condition passes, the gate
-reopens it automatically if it closed it, so there is no need to open a second
-one.
+updating that same comment after later edits. A draft is never checked: closing
+one cancels the CI it is already running, and the reopen that follows strands
+that CI again waiting for approval, so a draft that cannot merge is not worth
+closing. The gate closes a mergeable pull request only when the body's layout
+or section content fails the template or the Related section names no issue.
+Fix the claim or body on that same pull request; once every condition passes,
+the gate reopens it automatically if it closed it, so there is no need to open a
+second one — but a reopen does not bring the cancelled CI back, so push again
+once it has reopened.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
