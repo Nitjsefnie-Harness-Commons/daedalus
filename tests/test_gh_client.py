@@ -71,6 +71,25 @@ def test_a_403_with_a_reset_header_is_a_rate_limit_refusal(tmp):
             raise AssertionError('a 403 with a reset header must refuse')
 
 
+def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
+    """Some refusals carry the rate limit in the body and nowhere else.
+
+    Dropping that clause would turn this into an ordinary failure, and
+    ci_wait would exit 3 at once instead of waiting out the reset.
+    """
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
+        'status': 403, 'headers': {},
+        'body': 'API rate limit exceeded for the account.'}})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited:
+            pass
+        else:
+            raise AssertionError('a body-only rate-limit 403 must refuse')
+
+
 def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
     mod = _client()
     before = time.time()
@@ -292,6 +311,27 @@ def test_a_child_exits_when_the_pipe_this_process_holds_closes(tmp):
     out, err = child.communicate(timeout=60)
     assert child.returncode == 0, (child.returncode, err)
     assert 'slept' not in out, out
+
+
+def test_a_poll_strictly_inside_the_window_still_answers(tmp):
+    """The positive half near the bound: inside the window, it answers.
+
+    A bound that fires early - seconds early, or a stale clock, or `>` for
+    `>=` - must be caught by a poll that completes immediately. The window
+    is two seconds: long enough that an instant poll is nowhere near it,
+    short enough that a bound firing five seconds early is caught.
+    """
+    del tmp
+    mod = _client()
+    watcher = mod.Watcher('w', out=io.StringIO(),
+                          deadline=time.monotonic() + 2)
+    assert watcher.poll(lambda: 'answered') == 'answered'
+    try:
+        watcher.poll(lambda: (_ for _ in ()).throw(mod.QueryError('no')))
+    except mod.QueryError:
+        pass
+    else:
+        raise AssertionError('a failed query inside the window is a failure')
 
 
 def test_a_passed_bound_ends_the_wait_without_another_request(tmp):
