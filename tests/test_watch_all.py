@@ -11,9 +11,14 @@ import _util  # noqa: E402
 
 ROOT = _util.ROOT
 SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'watch_all.py'
-SKILL = SOURCE.parent
-sys.path.insert(0, str(SKILL))
-import gh_client  # noqa: E402
+
+# The shared client is loaded by path, the way the script under test loads
+# it: the skill directory is not an import root, so a plain `import
+# gh_client` here would resolve nothing.
+_CLIENT = _util.load(SOURCE.parent / 'gh_client.py', 'gh_client_here')
+QueryError = getattr(_CLIENT, 'QueryError')
+RateLimited = getattr(_CLIENT, 'RateLimited')
+Watcher = getattr(_CLIENT, 'Watcher')
 
 SHA = 'a' * 40
 
@@ -44,9 +49,9 @@ def _fake_runs(mod, answer, seen=None):
         if isinstance(answer, BaseException):
             raise answer
         return answer
-    mod.gh_client = SimpleNamespace(
-        workflow_runs=workflow_runs, QueryError=gh_client.QueryError,
-        RateLimited=gh_client.RateLimited)
+    setattr(mod, 'gh_client', SimpleNamespace(
+        workflow_runs=workflow_runs, QueryError=QueryError,
+        RateLimited=RateLimited))
 
 
 def test_a_queued_run_holds_even_when_every_check_run_is_complete(tmp):
@@ -94,7 +99,7 @@ def test_an_in_progress_run_is_not_settled(tmp):
 def test_a_failed_query_cannot_look_settled(tmp):
     del tmp
     mod = _watch_all()
-    _fake_runs(mod, gh_client.QueryError('gh failed'))
+    _fake_runs(mod, QueryError('gh failed'))
     assert mod._all_concluded(SHA) is None
     _fake_runs(mod, [])
     assert mod._all_concluded(SHA) is None
@@ -144,9 +149,9 @@ def _fake_runs_in_order(mod, answers, seen=None):
         if isinstance(answer, BaseException):
             raise answer
         return answer
-    mod.gh_client = SimpleNamespace(
-        workflow_runs=workflow_runs, QueryError=gh_client.QueryError,
-        RateLimited=gh_client.RateLimited)
+    setattr(mod, 'gh_client', SimpleNamespace(
+        workflow_runs=workflow_runs, QueryError=QueryError,
+        RateLimited=RateLimited))
 
 
 def test_a_rate_limited_completion_query_waits_rather_than_holding(tmp):
@@ -156,10 +161,10 @@ def test_a_rate_limited_completion_query_waits_rather_than_holding(tmp):
     seen = []
     _fake_runs_in_order(
         mod,
-        [gh_client.RateLimited('rate limited', time.time() + 2),
+        [RateLimited('rate limited', time.time() + 2),
          [_run(1, 'completed', 'success')]], seen)
     out = io.StringIO()
-    assert mod._all_concluded(SHA, gh_client.Watcher('watch_all', out=out))
+    assert mod._all_concluded(SHA, Watcher('watch_all', out=out))
     assert len(seen) == 2, seen
     assert len([line for line in out.getvalue().splitlines()
                 if 'rate limit' in line]) == 1, out.getvalue()
