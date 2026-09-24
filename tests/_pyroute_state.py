@@ -1,10 +1,11 @@
 """Alias-flow state primitives for Python tab-routing analysis."""
 import ast
-import operator
 from dataclasses import dataclass, field
 
 from _pyroute_live import bind_alias_statement
-from _pyroute_mapping import alias_target_pairs, store_deferred_target
+from _pyroute_mapping import (_UNSAFE_LITERAL, _literal_value,
+                              alias_target_pairs, literal_iterable_cardinality,
+                              literal_truth, store_deferred_target)
 from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, is_clean_container,
@@ -37,6 +38,7 @@ class FlowState:
     dict_namespaces: dict = field(default_factory=dict)
     namespace: int = 0
     cells: CellState = field(default_factory=CellState)
+    literals: dict = field(default_factory=dict)
 
     def copy(self):
         return FlowState(
@@ -46,7 +48,7 @@ class FlowState:
             dict(self.callables), set(self.bound), dict(self.dict_origins),
             {scope: {name: keys.copy() for name, keys in values.items()}
              for scope, values in self.dict_namespaces.items()},
-            self.namespace, self.cells.copy())
+            self.namespace, self.cells.copy(), dict(self.literals))
 
 
 def scope_nodes(scope):
@@ -331,78 +333,6 @@ def evaluated_value(value, state):
     return resolve_sender_name(value, state.aliases)
 
 
-_UNSAFE_LITERAL = object()
-_UNARY_OPERATORS = {ast.UAdd: operator.pos, ast.USub: operator.neg,
-                    ast.Invert: operator.invert}
-
-
-def _literal_value(expr):
-    if isinstance(expr, ast.Constant):
-        return expr.value
-    if isinstance(expr, ast.UnaryOp) and type(expr.op) in _UNARY_OPERATORS:
-        value = _literal_value(expr.operand)
-        if (value is _UNSAFE_LITERAL
-                or type(value) not in (int, float, complex)):
-            return _UNSAFE_LITERAL
-        try:
-            return _UNARY_OPERATORS[type(expr.op)](value)
-        except (ArithmeticError, TypeError, ValueError):
-            return _UNSAFE_LITERAL
-    if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
-        values = []
-        for item in expr.elts:
-            value = _literal_value(item.value if isinstance(item, ast.Starred)
-                                   else item)
-            if value is _UNSAFE_LITERAL:
-                return value
-            try:
-                values.extend(value) if isinstance(item, ast.Starred) \
-                    else values.append(value)
-            except TypeError:
-                return _UNSAFE_LITERAL
-        try:
-            return (tuple(values) if isinstance(expr, ast.Tuple) else
-                    values if isinstance(expr, ast.List) else set(values))
-        except (TypeError, ValueError):
-            return _UNSAFE_LITERAL
-    if isinstance(expr, ast.Dict):
-        value = {}
-        for key, item in zip(expr.keys, expr.values):
-            item_value = _literal_value(item)
-            key_value = _literal_value(key) if key is not None else None
-            if item_value is _UNSAFE_LITERAL or key_value is _UNSAFE_LITERAL:
-                return _UNSAFE_LITERAL
-            try:
-                if key is None:
-                    if not isinstance(item_value, dict):
-                        return _UNSAFE_LITERAL
-                    value.update(item_value)
-                else:
-                    value[key_value] = item_value
-            except (TypeError, ValueError):
-                return _UNSAFE_LITERAL
-        return value
-    return _UNSAFE_LITERAL
-
-
-def literal_iterable_cardinality(expr):
-    """Return an exact literal-display length when it is provable."""
-    if isinstance(expr, (ast.Tuple, ast.List)):
-        counts = [literal_iterable_cardinality(item.value)
-                  if isinstance(item, ast.Starred) else 1
-                  for item in expr.elts]
-        return None if any(count is None for count in counts) else sum(counts)
-    if isinstance(expr, (ast.Set, ast.Dict)):
-        value = _literal_value(expr)
-        return None if value is _UNSAFE_LITERAL else len(value)
-    return None
-
-
-def literal_truth(expr):
-    value = _literal_value(expr)
-    return None if value is _UNSAFE_LITERAL else bool(value)
-
-
 def deferred_generator(expr, yielded=None):
     remaining = 1
     for clause in expr.generators:
@@ -502,6 +432,7 @@ def apply_alias_statement(node, state):
         aliases.pop(name, None)
         state.generators.pop(name, None)
         state.callables.pop(name, None)
+        state.literals.pop(name, None)
     sync_cells(state, names)
 
 
@@ -532,7 +463,9 @@ def state_signature(state, occupancy=True):
             tuple(sorted(state.bound)),
             tuple(sorted(state.dict_origins.items())),
             namespaces, state.namespace,
-            cell_state_signature(state.cells, occupancy))
+            cell_state_signature(state.cells, occupancy),
+            tuple(sorted((name, repr(value))
+                         for name, value in state.literals.items())))
 
 
 def dedupe_states(states):
@@ -635,6 +568,7 @@ def callable_state(scope, states, annotations_eager=True):
     aliases = inherited_aliases(states)
     generators = inherited_generators(states)
     callables = inherited_callables(states)
+    literals = {}  # a nested body binds its own names, never the caller's
     builtin_globals = set().union(
         *(state.builtin_globals for state in states))
     inherited_locals = set().union(
@@ -677,7 +611,8 @@ def callable_state(scope, states, annotations_eager=True):
             aliases[parameter.arg] = resolved
     return FlowState(
         dicts, aliases, generators, {}, builtin_globals, builtin_locals,
-        callables, bound, dict_origins, dict_namespaces, id(scope), cells)
+        callables, bound, dict_origins, dict_namespaces, id(scope), cells,
+        literals)
 
 
 def function_allowed_opaque(node):
@@ -695,6 +630,7 @@ def clear_names(states, names):
             state.aliases.pop(name, None)
             state.generators.pop(name, None)
             state.callables.pop(name, None)
+            state.literals.pop(name, None)
         sync_cells(state, names)
 
 
