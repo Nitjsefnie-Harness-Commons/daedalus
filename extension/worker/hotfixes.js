@@ -10,14 +10,12 @@
 
 const HOTFIX_KEY = 'daedalus-hotfixes';
 
-// HOTFIX_QUOTA_BYTES bounds the hotfix record in BYTES, not in fixes. The
-// record is the extension's own state but shares Chrome's `local` area with
-// the token, the seen-delivery ledger and the page-facing GM storage, and a
-// store that passes the area's ceiling is followed by the extension's OTHER
-// writes failing instead. A count cap does not bound it: 160 fixes of 64 KiB
-// is the repro. Chrome measures QUOTA_BYTES as the JSON stringification of
-// every value plus every key's length, so the whole record under one key is
-// the record's JSON bytes plus the key's length.
+// HOTFIX_QUOTA_BYTES bounds the record in BYTES, not in fixes. The record
+// shares Chrome's `local` area with the token, the seen-delivery ledger and
+// the page-facing GM storage, and a count cap does not bound that area: 160
+// fixes of 64 KiB is the repro. Chrome measures QUOTA_BYTES as the JSON
+// stringification of every value plus every key's length, so the record under
+// one key costs its JSON bytes plus the key's length.
 //
 //   Chrome area                 10,485,760
 //   GM_TOTAL_QUOTA_BYTES         5,242,880   (5 MiB, every origin summed)
@@ -25,11 +23,10 @@ const HOTFIX_KEY = 'daedalus-hotfixes';
 //   ------------------------------------------------------------
 //   reserve for the extension    3,145,728   (3 MiB)
 //
-// The reserve is what the extension's own remaining keys spend:
-// daedalus-token, daedalus-server, daedalus-segment-origins and
-// daedalus-seen-dids. The ledger is the largest of those, count-capped at
-// 1000 entries, and a delivery id is `<ms>_<counter>`, so 1000 of them is on
-// the order of 22 KB and the reserve is roughly 140x that term.
+// The reserve spends on daedalus-token, daedalus-server,
+// daedalus-segment-origins and daedalus-seen-dids; the ledger is the largest
+// of those, count-capped at 1000 entries of `<ms>_<counter>`, so ~22 KB
+// against a reserve roughly 140x that term.
 const HOTFIX_QUOTA_BYTES = 2 * 1024 * 1024;
 
 // Replay runs from here rather than from the page relay, because the page
