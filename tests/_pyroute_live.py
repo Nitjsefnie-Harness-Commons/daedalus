@@ -26,7 +26,7 @@ def _constant_getattr(value, state):
     if call is None or not isinstance(call.args[1], ast.Constant):
         return None
     return call.args[1].value if isinstance(call.args[1].value,
-                                             str) else None
+                                            str) else None
 
 
 def _attribute_values(owner):
