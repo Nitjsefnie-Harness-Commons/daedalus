@@ -11,8 +11,7 @@ though it were one element. The merge of every element belongs only to a
 consumer that walks the result, because a walk visits every element, and it
 is kept either way.
 
-These tests pin that contract end to end and at the probe's own boundary, so
-each limb of `comprehension_first` fails a named test when it is deleted.
+These tests pin that contract end to end and at the probe's own boundary.
 """
 import ast
 import sys
@@ -48,9 +47,6 @@ def test_filtered_reversed_comprehension_first_position(tmp):
     cases.append(('filtered-preserving', control, (1, 1)))
     cases.append(('filtered-preserving-clean', control.replace(
         'lambda: send(', 'lambda: ordinary('), (0, 0)))
-    # A consumer that walks the result visits every element, so the merge it
-    # carries must keep reporting; the probe's narrowing is the positional
-    # read only, and must not silence the walk.
     walk = body('send = ext_cmd\n'
                 'for v in [c for c in reversed(pair()) if c]:\n'
                 '    v()', '0')
