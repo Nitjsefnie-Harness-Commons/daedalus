@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -385,6 +386,52 @@ def test_no_keepalive_before_the_clock_reaches_the_interval(tmp):
               keepalive=15, clock=(0.0, 0.0, 0.0, 14.0))
 
     assert sink.keepalives == 0, sink.chunks
+
+
+def test_a_folded_extension_queue_is_not_drained_as_a_tab(tmp):
+    """The extension's own queue is its own, however the parent spells it.
+
+    A case-folding parent gives the extension's queue directory one entry
+    whose name is spelled `Extension`, and the per-tab scan then reads that
+    entry as a tab named `Extension` and drains it a second time. What the
+    second drain takes is a command published between the two drains, so
+    the fixture publishes one there: it is the extension's own command,
+    handed to the background tagged for a tab that does not exist.
+    """
+    route = _load_route('stream_route_folded_extension_queue')
+    cq = route.command_queue
+    root = Path(tmp)
+    cq.enqueue(root, 'tok', 'Extension', {'id': 'queued-for-extension'},
+               command_ttl=90)
+    sink = _FrameSink(on_first_frame=lambda: cq.enqueue(
+        root, 'tok', 'Extension', {'id': 'published-mid-tick'},
+        command_ttl=90))
+
+    with _case_fold.case_folding(root):
+        _one_tick(route, sink, root, 'tok', 'extension')
+
+    assert sink.ids() == ['queued-for-extension'], sink.ids()
+    assert sink.tags() == [None], sink.tags()
+    assert len(list((root / 'tok_Extension').iterdir())) == 1, (
+        'the extension\'s own command was drained as a tab\'s')
+
+
+def test_a_tab_named_like_the_extension_is_a_tab_here(tmp):
+    """The control: where the parent folds nothing, `Extension` is a tab.
+
+    The same fixture without the emulated parent, so the difference the
+    fold case pins is the parent's and not the assertion's.
+    """
+    route = _load_route('stream_route_extension_named_tab')
+    cq = route.command_queue
+    root = Path(tmp)
+    cq.enqueue(root, 'tok', 'Extension', {'id': 'per-tab'}, command_ttl=90)
+    sink = _FrameSink()
+
+    _one_tick(route, sink, root, 'tok', 'extension')
+
+    assert sink.ids() == ['per-tab'], sink.ids()
+    assert sink.tags() == ['Extension'], sink.tags()
 
 
 if __name__ == '__main__':

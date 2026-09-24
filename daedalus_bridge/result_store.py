@@ -34,17 +34,21 @@ def delivery_root(res_dir):
 def delivery_lock_for(target_key):
     r"""Return the lock that serializes one target's delivery files.
 
-    Keyed on the logical target -- the `<token>_<tab>` component that names
-    the directory -- and never on a filesystem spelling. Two `realpath`
-    results for
-    one directory are not obliged to agree: on Windows the `\\?\` prefix
-    survives exactly when a concurrent writer makes the stripping check fail,
-    and a non-strict resolution can leave an 8.3 name, a junction or a mapped
-    drive unresolved where a later call returns the canonical spelling.
-    Normalising the spelling only closes the cases somebody enumerated; the
-    logical key has no spellings to enumerate. A stripe chosen from a spelling
-    puts two callers for the same target on two different locks, which is
-    silently no serialization at all.
+    Keyed on the target entry's own name -- the spelling the resolved
+    delivery directory carries on this filesystem, which every caller holds
+    before the lock is taken. The caller's spelling is not usable: on a
+    case-insensitive filesystem `foo` and `Foo` are two spellings of one
+    directory, so keying on the spelling a caller happened to type puts two
+    callers for the same target on two different locks, which is silently
+    no serialization at all. (An earlier version of this claimed the logical
+    key had no spellings to normalise; there it has exactly the spellings
+    the filesystem gives it.) A resolved name is also past the `\\?\`
+    prefix, the 8.3 alias, the junction and the mapped drive, so one entry
+    is one string again.
+
+    The key is still a name a caller chose, hashed through a per-process
+    secret, so it is neither computable nor steerable offline; what remains
+    discoverable is the timing the acceptance comment above records.
     """
     # A path-like spelling is refused, str or object alike: two spellings of
     # one directory would otherwise choose two stripes and serialize nothing.
@@ -52,10 +56,10 @@ def delivery_lock_for(target_key):
     # `<token>_<tab>` and `unsafe_component` rejects every one of them in
     # either half — so refusing them costs no real key.
     if not isinstance(target_key, str):
-        raise TypeError('delivery stripe key must be the logical target')
+        raise TypeError('delivery stripe key must be an entry name')
     if any(char in path_safety.WINDOWS_INVALID_PATH_CHARS
            for char in target_key):
-        raise TypeError('delivery stripe key must be the logical target')
+        raise TypeError('delivery stripe key must be an entry name')
     key = os.fsencode(target_key)
     index = stripe_index(key, DELIVERY_LOCK_STRIPES)
     return delivery_locks[index]
@@ -92,12 +96,17 @@ def delivery_result_paths(res_dir, token, tab, did):
     root = delivery_root(res_dir)
     key = path_safety.derived_component(result_key(token, tab))
     delivery_dir = path_safety.under(root, key, secret=token)
-    # The stripe is keyed on `key`, so the resolved directory must be the
-    # one-to-one namespace entry that key names, not an alias to another one.
+    # The stripe is keyed on the entry's own name, so the resolved directory
+    # must be the one-to-one namespace entry that key names -- under the
+    # spelling this filesystem gives it, which is not always the spelling the
+    # caller used -- and not an alias standing in for another entry.
     alias_attempts = []
     parent_matches = path_safety.same_path(
         delivery_dir.parent, root, alias_attempts)
-    if not parent_matches or delivery_dir.name != key:
+    if (not parent_matches
+            or not path_safety.same_entry(
+                delivery_dir.parent, key, delivery_dir.name,
+                deny_symlink=True)):
         path_safety.log_path_refusal(
             'alias', root, (key,), alias_attempts, secret=token)
         raise ValueError('delivery target is an alias')
