@@ -189,27 +189,42 @@ def test_setdefault_unresolved_value_survives_to_the_call(tmp):
 # container that is not a dict both keep the unprovable sender; the dict the
 # key misses and the dict the key hits are clean, so a guard that reported
 # there would be the over-report, and the unhashable key is the one input
-# the runtime rejects before it returns anything.
+# the runtime rejects before it returns anything. The last three rows spell
+# the key in the call rather than through a name, because that is the only
+# shape that tells an unevaluable key EXPRESSION from a literal the runtime
+# cannot hash: both resolve to no literal here, and only the second is a
+# report. The value sits in the `send` position, where the guard reads it as
+# the sender of the routed call below.
 _SETDEFAULT_ARMS = [
-    ('arm-owner-unreadable', 'd = pool[0]\nkey = "k" + ""', True),
-    ('arm-non-dict-unresolved', 'd = [ordinary]\nkey = "k" + ""', True),
-    ('arm-non-dict-literal', 'd = [ordinary]\nkey = "a"', False),
+    ('arm-owner-unreadable', 'd = pool[0]\nkey = "k" + ""',
+     'd.setdefault(key, ordinary)', True),
+    ('arm-non-dict-unresolved', 'd = [ordinary]\nkey = "k" + ""',
+     'd.setdefault(key, ordinary)', True),
+    ('arm-non-dict-literal', 'd = [ordinary]\nkey = "a"',
+     'd.setdefault(key, ordinary)', False),
     ('arm-dict-unresolved-miss', 'd = {"a": ordinary}\nkey = "k" + ""',
-     False),
-    ('arm-dict-unhashable', 'd = {"a": ordinary}\nkey = [1]', True),
+     'd.setdefault(key, ordinary)', False),
+    ('arm-dict-unhashable', 'd = {"a": ordinary}\nkey = [1]',
+     'd.setdefault(key, ordinary)', True),
+    ('arm-direct-concat-key', 'd = {}',
+     'd.setdefault("k" + "", ordinary)', False),
+    ('arm-direct-fstring-key', 'd = {}',
+     'd.setdefault(f"k", ordinary)', False),
+    ('arm-direct-fstring-occupied', 'd = {"a": ordinary}',
+     'd.setdefault(f"k", ordinary)', False),
 ]
 
 
 def test_each_setdefault_arm_has_a_discriminating_probe(tmp):
     wrong = []
-    for label, body, expected in _SETDEFAULT_ARMS:
+    for label, body, call, expected in _SETDEFAULT_ARMS:
         setup = ''.join(f'    {line}\n' for line in body.splitlines())
         source = Path(tmp) / f'{label}.py'
         source.write_text(
             'def ordinary(*a, **k):\n'
             '    return 0\n'
             f'def probe():\n{setup}'
-            '    send = d.setdefault(key, ordinary)\n'
+            f'    send = {call}\n'
             '    return send("_focus", "focus-tab", tab=5)\n',
             encoding='utf-8')
         actual = bool(py_tab_routing_violations(source, source.name))
