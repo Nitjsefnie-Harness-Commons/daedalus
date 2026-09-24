@@ -11,9 +11,16 @@ from daedalus_cli import ambiguous_request_carrier
 def json_nests_deeper_than(raw, limit):
     """True when `raw` opens more than `limit` unclosed containers at once.
 
-    A scan of the bytes rather than a parse: the answer has to be settled
+    A count of the bytes rather than a parse: the answer has to be settled
     before json.loads builds anything, and before the interpreter's own
-    recursion limit gets to decide it — which it did, differently per version.
+    recursion limit gets to decide it — which it did, differently per
+    version.
+
+    The opener count comes first, at C speed, and is an upper bound on the
+    true depth: every container that opens contributes one opener, and an
+    opener inside a string literal only inflates the count. A total at or
+    below the limit therefore admits the body without the walk, and only a
+    total above it reaches `_opens_past_limit`, which stays exact.
 
     Bytes rather than text, so a hostile body is never decoded to be measured.
     Only ASCII structure counts, and a UTF-8 continuation byte is never an
@@ -22,9 +29,16 @@ def json_nests_deeper_than(raw, limit):
     opens nothing, and a `\\"` inside one does not close it.
 
     Malformed input is not this function's problem — a body with more closers
-    than openers drives the count negative and json.loads rejects it on its
-    own terms. This answers one question only.
+    than openers drives the scan's depth negative and json.loads rejects it
+    on its own terms.
     """
+    if raw.count(b'{') + raw.count(b'[') <= limit:
+        return False
+    return _opens_past_limit(raw, limit)
+
+
+def _opens_past_limit(raw, limit):
+    """The exact per-byte scan, reached only above the opener bound."""
     depth = 0
     in_string = False
     escaped = False

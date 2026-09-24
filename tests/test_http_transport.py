@@ -390,6 +390,47 @@ def test_json_nests_deeper_than_accepts_a_wide_sequence_of_objects(_tmp):
     assert not json_body.json_nests_deeper_than(b'[' + b'{}' * 60 + b']', 2)
 
 
+def test_a_shallow_body_is_admitted_without_the_per_byte_walk(_tmp):
+    """A body whose opener count cannot pass the bound never walks.
+
+    The walk is a module-private function so a test can observe whether
+    it ran; the fast path counts openers at C speed and consults the
+    walk only when the count says the body might exceed the bound. The
+    count is an upper bound on the true depth, so a total at or below
+    the limit cannot hide a body that nests past it.
+    """
+    assert hasattr(json_body, '_opens_past_limit'), 'the walk is not a name'
+    with mock.patch.object(
+            json_body, '_opens_past_limit', create=True) as walk:
+        # A body with no openers at all, a body with none of the bracket
+        # bytes, and a body whose opener count EQUALS the limit: all take
+        # the fast path.
+        assert not json_body.json_nests_deeper_than(b'', 2)
+        assert not json_body.json_nests_deeper_than(b'1', 2)
+        assert not json_body.json_nests_deeper_than(b'[[]]', 2)
+    assert not walk.called, walk.call_args_list
+
+
+def test_a_body_past_the_opener_bound_still_walks_its_bytes(_tmp):
+    """One opener past the bound reaches the walk, which settles the answer.
+
+    The shortcut may not settle the answer by delegating to nothing: a
+    sentinel that answers the real question records the calls, and the
+    openers a string literal inflates must reach it too.
+    """
+    real = getattr(json_body, '_opens_past_limit', None)
+    with mock.patch.object(json_body, '_opens_past_limit',
+                           side_effect=real, create=True) as walk:
+        assert json_body.json_nests_deeper_than(b'[[[1]]]', 2)
+        # Six openers, a real depth of 1: the walk runs and over-admits
+        # work, never answers.
+        assert not json_body.json_nests_deeper_than(b'{"a": "[[[[["}', 2)
+    assert walk.call_count == 2, walk.call_args_list
+    assert walk.call_args_list[0][0] == (b'[[[1]]]', 2), walk.call_args_list
+    assert walk.call_args_list[1][0] == (b'{"a": "[[[[["}', 2), \
+        walk.call_args_list
+
+
 def test_json_object_remembers_a_repeated_authority_carrier(_tmp):
     once = json_body.JSONObject([('token', 'a'), ('id', 'x')])
     twice = json_body.JSONObject([('token', 'a'), ('token', 'a')])
