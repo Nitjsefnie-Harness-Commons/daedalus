@@ -18,7 +18,8 @@ from _pyroute_values import (EAGER_ITERABLE_CALLS as _EAGER_ITERABLE_CALLS,
                              payload_key, sender_value, sync_cells)
 from _pyroute_live import (clear_expression_cache, live_expression_value,
                            seed_then_resolve)
-from _pyroute_mapping import apply_deferred_store as store_deferred_value
+from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
+                             literal_pair_keys)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
@@ -364,15 +365,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     for argument in node.args:
                         ordered = materialized_order(
                             consumer, argument, current)
-                        if ordered is not None:
-                            append_deferred(consumed_values, ordered)
-                            current, _ = consume_iterable(
-                                argument, current, exhaust=True)
-                            continue
+                        keys = literal_pair_keys(argument, current)
                         current, yielded = consume_iterable(
                             argument, current, exhaust=True)
-                        yielded = materialize_deferred(consumer, yielded, node)
-                        append_deferred(consumed_values, yielded)
+                        if ordered is None:
+                            ordered = materialize_deferred(
+                                consumer, yielded, node, keys)
+                        append_deferred(consumed_values, ordered)
                 elif consumer in _PARTIAL_ITERABLE_CALLS and node.args:
                     current, yielded = consume_iterable(
                         node.args[0], current, exhaust=False)
