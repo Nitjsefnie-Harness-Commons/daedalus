@@ -22,7 +22,7 @@ import json
 # this module and _stream_fake do not import each other.
 from _noderun import run_node_program  # noqa: F401,E501 pylint: disable=W0611
 from _stream_fake import STRICT_FETCH
-from _worker_sources import import_scripts_stub
+from _worker_sources import STREAM_RESPONSE, import_scripts_stub
 
 BRIDGE = 'https://initial.example.com'
 REPLACEMENT = 'https://replacement.example.com'
@@ -397,29 +397,12 @@ const badOrigins = [];
 // reads plan lazily, and its splice-time contract check only needs a
 // `planned` array, which every plan here carries.
 let plan = ALL_PLANS[scenario] || { planned: [] };
-function streamResponse(answer) {
-  if (answer === 'hang') {
-    // A connected 200 whose body never yields a chunk: the live-but-idle
-    // stream the watchdog treats as open. The fetch RESOLVES (so the worker's
-    // stream loop arms its watchdog) but read() never settles.
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => ({
-          read: () => new Promise(() => {}),
-          cancel: () => Promise.resolve(),
-        }),
-      },
-    };
-  }
-  return response(answer, { error: 'disabled' });
-}
 // The gate builds a declared {stream: N} answer through the harness's chunk
 // factory; this is the harness that models the relay's chunked body.
 function chunkedResponse(count) {
   return streamingResponse(count);
 }
+""" + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
 // The scenarios read the gate's records, not a second fake: a projection of
 // nonStreamFetches into the {kind, url, token, id, error} rows the worker-
