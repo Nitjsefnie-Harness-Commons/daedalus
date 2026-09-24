@@ -330,6 +330,65 @@ _POP_THEN_READ = [
         invoke='x()'), (1, 1)),
 ]
 
+# The pop direction's over-reports on a key the guard cannot evaluate. Each
+# was measured at the pre-wave-2 head and at this one, where all four read
+# the same, so they predate every wave here; the runtime sends nothing in
+# any of them. The attribution is by mechanism, not by resemblance: an
+# f-string is the expression #967's setdefault rows carry, and a
+# concatenation is #963's, whether it reaches the pop directly, through a
+# rebind or through a name bound to it.
+_POP_DIRECTION = [
+    ('known-defect-967-pop-fstring-name', _flow(
+        _RELAY, f'{_STRING_D}; key = f"k"', 'd.pop(key, None)',
+        invoke='d.get("k", ordinary)()'), (0, 1)),
+    ('known-defect-967-rebind-to-fstring', _flow(
+        _RELAY, 'k = "k"; k = f"k"', _STRING_D, 'd.pop(k, None)',
+        invoke='d.get("k", ordinary)()'), (0, 1)),
+    ('known-defect-963-rebind-to-nonliteral-name', _flow(
+        _RELAY, 'k = "k"; j = "k" + ""; k = j', _STRING_D, 'd.pop(k, None)',
+        invoke='d.get("k", ordinary)()'), (0, 1)),
+    ('known-defect-963-pop-concat', _flow(
+        _RELAY, 'k = "k"; k = "k" + ""', _STRING_D, 'd.pop(k, None)',
+        invoke='d.get("k", ordinary)()'), (0, 1)),
+]
+
+
+def test_rebinding_drops_the_first_literal(tmp):
+    bad = []
+    for label, body, expected in _REBINDING:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+def test_unusable_key_reads_unprovable(tmp):
+    quiet = []
+    for label, binding in _UNUSABLE_KEYS:
+        source = Path(tmp) / f'{label}.py'
+        source.write_text(
+            'def ordinary(*a, **k):\n'
+            '    return 0\n'
+            'def probe():\n'
+            '    d = {"k": 1}\n'
+            f'    {binding}\n'
+            '    send = d.setdefault(key, ordinary)\n'
+            '    return send("_focus", "focus-tab", tab=5)\n',
+            encoding='utf-8')
+        if not py_tab_routing_violations(source, source.name):
+            quiet.append(label)
+    assert not quiet, quiet
+
+
+def test_pop_direction_known_defects(tmp):
+    bad = []
+    for label, body, expected in _POP_DIRECTION:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 def test_pop_then_read_resolves_one_key(tmp):
     bad = []
     for label, body, expected in _POP_THEN_READ:
