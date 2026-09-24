@@ -20,6 +20,11 @@ _seq_counter = itertools.count(1)
 _cmd_events = {}  # {token: threading.Event}
 _cmd_events_lock = threading.Lock()
 
+# Set by the stream service, which owns the refusal registry, so the TTL
+# sweep can retire a queue name whose occupant it unlinked. None when nothing
+# registered, so the queue module stands alone.
+_name_vacated = None
+
 
 def command_target_names(token, tab=''):
     """Return the checked queue directory and bounded legacy filename."""
@@ -75,17 +80,49 @@ def _candidate_refusal(opened, named):
     return None
 
 
+def _identity(stat_result):
+    """The object incarnation a stat result names.
+
+    The inode alone does not identify an object: a filesystem may hand a
+    freed inode straight back to the next object created at the name, which
+    is exactly what the TTL sweep makes room for. The inode change time
+    completes the identity for a replacement written after the clock ticked,
+    and `utime` cannot backdate it. It is not a generation on its own — a
+    coarse-grained clock gives two objects created in the same tick one
+    value — so the sweep retires the name it vacates (`on_name_vacated`) and
+    that event, not this field, decides the last case.
+    """
+    return (stat_result.st_dev, stat_result.st_ino, stat_result.st_ctime_ns)
+
+
+def _name_identity(path):
+    """The identity of whatever object currently occupies `path`, or None.
+
+    A refusal that never opened a descriptor still needs an identity, so a
+    later object appearing at the same name is not mistaken for this one.
+    """
+    try:
+        return _identity(os.lstat(path))
+    except OSError:
+        return None
+
+
 def open_command_candidate(path):
     """Open one command candidate through a descriptor checked against its
     name.
 
-    Returns ``(stream, None)``, or ``(None, reason)`` when the candidate must
-    not be delivered. Refused: a symlinked name, an object that is not a
-    regular file or is named more than once, and a name that stopped naming
-    the object the descriptor was opened on. A symlinked name is refused
-    where the platform offers ``O_NOFOLLOW`` — a broken one included, since
-    the open refuses the link before looking at its target — and elsewhere
-    the open follows the link and the identity check refuses what it named.
+    Returns ``(stream, None, ident)``, or ``(None, reason, ident)`` when the
+    candidate must not be delivered. `ident` is the object incarnation
+    ``(device, inode, change-time)`` the decision is about, so a caller that
+    records a refusal once per object can tell this object from a later one
+    occupying the same name; it is None only when neither the descriptor nor
+    the name can be stat'd. Refused: a symlinked name, an object that is not
+    a regular file or is named more than once, and a name that stopped
+    naming the object the descriptor was opened on. A symlinked name is
+    refused where
+    the platform offers ``O_NOFOLLOW`` — a broken one included, since the
+    open refuses the link before looking at its target — and elsewhere the
+    open follows the link and the identity check refuses what it named.
     Both spellings refuse, so a linked name delivers nothing either way; a
     platform without ``O_NOFOLLOW`` reports a broken link as absence.
     ``reason`` is ``None`` only when the name named nothing at all, which is
@@ -108,25 +145,40 @@ def open_command_candidate(path):
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
-        return None, None
+        return None, None, None
     except OSError as error:
-        return None, f'cannot open: {log_safe(error)}'
+        # The open itself was refused — a symlinked name where the platform
+        # offers O_NOFOLLOW, or any object that would not open. There is no
+        # descriptor to stat, so the name's own lstat carries the identity.
+        return None, f'cannot open: {log_safe(error)}', _name_identity(path)
     try:
         opened = os.fstat(fd)
         named = os.lstat(path)
     except OSError as error:
         os.close(fd)
-        return None, f'cannot check: {log_safe(error)}'
+        return None, f'cannot check: {log_safe(error)}', _name_identity(path)
     reason = _candidate_refusal(opened, named)
     if reason is not None:
         os.close(fd)
-        return None, reason
+        return None, reason, _identity(opened)
     try:
-        return os.fdopen(fd, 'rb'), None
+        return os.fdopen(fd, 'rb'), None, _identity(opened)
     except OSError as error:
         # io.open closes a descriptor it could not wrap, so there is nothing
         # left to close here.
-        return None, f'cannot read: {log_safe(error)}'
+        return None, f'cannot read: {log_safe(error)}', _identity(opened)
+
+
+def on_name_vacated(callback):
+    """Register `callback`, called with a queue name's logical key when the
+    TTL sweep vacates that name by unlinking its child.
+
+    The sweep is the one moment that knows a queue name is free, and a
+    replacement object can be indistinguishable from the recorded one (see
+    `_identity`), so the registry retires the name here rather than guess.
+    """
+    global _name_vacated
+    _name_vacated = callback
 
 
 def remove_expired(path, now, ttl, legacy=False):
@@ -148,7 +200,7 @@ def remove_expired(path, now, ttl, legacy=False):
             if (path.name.startswith('.')
                     or not path.name.endswith(('.json', '.json.tmp'))):
                 return
-            opened, _ = open_command_candidate(path)
+            opened, _, _ = open_command_candidate(path)
             if opened is None:
                 return
             # A parse failure means a writer may still hold the file mid-write;
@@ -157,6 +209,9 @@ def remove_expired(path, now, ttl, legacy=False):
             with opened:
                 json.loads(opened.read().decode('utf-8'))
         path.unlink()
+        if not legacy and _name_vacated is not None:
+            # A queue entry expires by name, so unlinking it frees the name.
+            _name_vacated(f'queue:{path.parent.name}/{path.name}')
     except (OSError, json.JSONDecodeError, RecursionError, ValueError):
         # A file that cannot be read or removed is reconsidered on the next
         # pass; nothing downstream depends on this call having acted.
@@ -260,7 +315,7 @@ def _live_duplicate(qdir, cmd, command_ttl):
         name = path.name
         if name.startswith('.') or not name.endswith('.json'):
             continue  # skip .tmp in-flight writes
-        opened, _ = open_command_candidate(path)
+        opened, _, _ = open_command_candidate(path)
         if opened is None:
             continue
         with opened:
