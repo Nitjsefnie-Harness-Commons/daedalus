@@ -37,6 +37,9 @@ MERGE_DISAGREE = ('def choose():\n'
 # A dict whose key the guard cannot fold, so it lives under DYNAMIC_KEY.
 DYNKEY = 'd = {}\nd[chr(ord("z"))] = relay()\n'
 DYNKEY_ORD = 'd = {}\nd[chr(ord("z"))] = ordinary\n'
+# A dict carrying both the literal key "z" and a distinct dynamic key: the
+# shared fold pairs "z" to the dynamic value too, so the read fails closed.
+DYN_OTHER = 'd = {}\nd["z"] = ordinary\nd[chr(ord("q"))] = relay()\n'
 # The assignment binder's hole, with a tab-accepting mystery so the row moves
 # to (1, 1) under a shared-hole fix; the routed-lambda form would not.
 ASSIGN_HOLE = (PREFIX + ROUTED
@@ -76,14 +79,12 @@ def _rows():
     unprovable position the runtime does not reach; a row whose comment says
     `known gap` pins a measured limitation this round did not close."""
     r = [
-        # The issue's reported spelling and its clean twin.
         ('issue-sequence', case('list(pair())', '[x, y]', 'x()'), (1, 1), ''),
         ('issue-twin', case('list(pair())', '[x, y]', 'y()'), (0, 0), ''),
         ('tuple-pattern', case('pair()', '(x, y)', 'x()'), (1, 1), ''),
         ('bare-capture', case('relay()', 'v', 'v()'), (1, 1), ''),
         ('bare-value', case('relay()', 'v', 'ordinary()'), (0, 0), ''),
         ('wildcard', case('relay()', '_', 'ordinary()'), (0, 0), ''),
-        # A star binds the remaining items as a real container.
         ('star-prefix',
          case('[ordinary, relay()]', '[x, *rest]', 'rest[0]()'), (1, 1), ''),
         ('star-suffix', case('[relay(), ordinary]', '[*rest, y]',
@@ -99,33 +100,26 @@ def _rows():
          (0, 0), 'F1'),
         ('bare-star-prefix', case('[relay(), 1]', '[x, *_]', 'x()'),
          (1, 1), 'F1'),
-        # A nested capture pairs with the nested position, not the top one.
         ('nested', case('[pair()]', '[[x, y]]', 'x()'), (1, 1), ''),
         ('nested-twin', case('[pair()]', '[[x, y]]', 'y()'), (0, 0), ''),
-        # `sub as name` binds both the sub-pattern and the name.
         ('pattern-as-name', case('pair()', '[a, b] as whole', 'a()'),
          (1, 1), ''),
         ('sub-as-name-in-sequence', case('[pair()]', '[[a, b] as inner]',
                                          'a()'), (1, 1), ''),
-        # A guard clause does not change the binding.
         ('guard', case('list(pair())', '[x, y]', 'x()', ' if args.flag'),
          (1, 1), ''),
         ('guard-twin', case('list(pair())', '[x, y]', 'y()', ' if args.flag'),
          (0, 0), ''),
-        # A wildcard holds its position without binding.
         ('wildcard-position', case('[ordinary, relay()]', '[_, x]', 'x()'),
          (1, 1), ''),
         ('wildcard-position-twin', case('[relay(), ordinary]', '[_, x]',
                                         'x()'), (0, 0), ''),
-        # A case that cannot match leaves its captures unpaired.
         ('cannot-match-length', case('(relay(), ordinary, ordinary)', '[x, y]',
                                      'x()'), (0, 0), ''),
         ('cannot-match-nested', case('[relay(), ordinary]', '[[a], b]',
                                      'a()'), (0, 0), ''),
-        # A merge the subject does not decide reports, fail-closed.
         ('merge-undecided', case('choose()', '[x, y]', 'x()',
                                  extra=MERGE_SEQ), (1, 1), ''),
-        # A mapping pattern pairs a literal key; `**rest` is the remainder.
         ('mapping-key', case('{"k": relay()}', '{"k": v}', 'v()'), (1, 1), ''),
         ('mapping-cannot-match', case('{"j": relay()}', '{"k": v}', 'v()'),
          (0, 0), ''),
@@ -150,11 +144,10 @@ def _rows():
                                      'x()'), (0, 1),
          'F3 fail-closed: x is ambiguous, the runtime took the other '
          'alternative'),
-        # A value pattern that the subject cannot satisfy binds nothing.
+        # A value pattern the guard cannot prove the subject does not satisfy
+        # binds nothing; in a sequence slot it fails closed (seq-value-in-seq).
         ('value-as-capture', case('relay()', '5 as v', 'v()'), (0, 0), 'F5'),
-        # The singleton half of the same value-test rule (N3).
         ('none-as-capture', case('relay()', 'None as v', 'v()'), (0, 0), 'N3'),
-        # A singleton binds nothing and reads clean.
         ('singleton', case('relay()', 'None', 'ordinary()'), (0, 0), 'F6'),
         # Pins this arm's known limitation: a class capture names an
         # attribute reached through the subject's class, which the binder
@@ -168,18 +161,12 @@ def _rows():
         ('attr-key-known-gap', case('{"j": relay()}', '{K.k: v}', 'v()',
                                     extra=ATTR_KEY), (1, 0),
          'known gap: attribute key unresolved'),
-        # N2: the unresolvable-key marker fires on a live dict subject when
-        # the slot is called with a tab keyword; the v() twin stays clean.
         ('attr-key-tab', case('{"j": routed}', '{K.k: v}', 'v(tab=0)',
                               extra=ATTR_KEY + ROUTED), (1, 1), 'N2'),
         ('attr-key-tab-twin', case('{"j": routed}', '{K.k: v}', 'v()',
                                    extra=ATTR_KEY + ROUTED), (0, 0), 'N2'),
-        # N1: a provably-dead case (mapping pattern over a sequence subject)
-        # reads clean, because the subject test is hoisted above the loop.
         ('attr-key-cannot-match', case('[1, 2]', '{K.k: v}', 'v(tab=0)',
                                        extra=ATTR_KEY), (0, 0), 'N1'),
-        # F2a: an undecidable match position binds unprovable, so a tab-
-        # keyword call through it is reported; the v() twin stays clean.
         ('hole-tab', case('[relay(), mystery, ordinary]', '[a, b, c]',
                           'b(tab=0)', extra=ROUTED + HOLE), (1, 1), 'F2a'),
         ('hole-twin', case('[relay(), mystery, ordinary]', '[a, b, c]',
@@ -189,14 +176,18 @@ def _rows():
         # so the row reads (1, 1) under a shared-hole fix and discriminates.
         ('assignment-hole-known-gap', ASSIGN_HOLE, (1, 0),
          'known gap: assignment binder hole, filed #1010'),
-        # C1: a dynamic-keyed subject folds the DYNAMIC_KEY entry into the
-        # lookup, so a literal-key read must not read "no such key".
         ('dynkey-match', case('d', '{"z": v}', 'v()', extra=DYNKEY),
          (1, 1), 'C1'),
         ('dynkey-twin', case('d', '{"z": v}', 'ordinary()',
                              extra=DYNKEY_ORD), (0, 0), 'C1'),
-        # I1-spec: a listed key no branch carries means the case cannot run,
-        # so `**rest` is not paired either.
+        # The shared fold also pairs a literal key to a *distinct* dynamic
+        # key, so this fails closed — the same (0, 1) the **rest arm and the
+        # subscript read give, so the routes agree.
+        ('dynother-match', case('d', '{"z": v}', 'v()', extra=DYN_OTHER),
+         (0, 1), 'C1 fail-closed: distinct dynamic key folds in'),
+        ('dynother-twin', case('d', '{"z": v}', 'ordinary()',
+                               extra=DYN_OTHER.replace('relay()', 'ordinary')),
+         (0, 0), 'C1'),
         ('map-rest-kw', case('{"k": relay()}', '{"n": z, **r}',
                              'r["k"]()'), (0, 0), 'I1spec'),
         # I2 / code-M2: branches disagree (benign first, routed second), so
@@ -206,7 +197,6 @@ def _rows():
         ('merge-discriminating', case('choose()', '{"k": v}', 'v()',
                                       extra=ROUTED + MERGE_DISAGREE),
          (0, 1), 'I2 fail-closed: branches disagree, runtime took benign'),
-        # I3: a star binds a real remaining-items container.
         ('star-alone-container', case('[relay(), ordinary]', '[*rest]',
                                       'rest[0]()'), (1, 1), 'I3'),
         # Section 6: a value pattern over a position the guard cannot
