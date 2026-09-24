@@ -92,10 +92,9 @@ def twin(value):
 def test_two_sites_under_one_predicate_name_a_remedy_that_moves_the_key(_tmp):
     """Two sites the predicate keys name the remedy the predicate can take.
 
-    The bare re-raise carries no message of its own, so a text key could only
-    be restored by distinct messages, which it cannot be given; keyed on the
-    `if`, the remedy is a predicate of its own. The refusal fires only while
-    the bare re-raise takes that key, so this dies with that clause.
+    The bare re-raise carries no message, so a text key could only be
+    restored by distinct messages, which it cannot be given. The refusal
+    fires only while it takes the `if`'s key, so this dies with that clause.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(
@@ -166,8 +165,7 @@ def test_a_compound_condition_hides_in_no_nested_statement(_tmp):
     """A `try` under the deciding `if` does not hide its `or`.
 
     The shape issue 570 planted in the real tools: the raise is wrapped in a
-    `try` that decides nothing, so the condition that refuses is the `if`'s
-    whatever depth the raise sits at.
+    `try` that decides nothing.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(_tmp)
     try:
@@ -191,8 +189,8 @@ def armed(first, second, third):
 def test_an_or_in_an_outer_test_still_refuses_the_inner_site(_tmp):
     """The innermost statement names the key; every statement decides the `or`.
 
-    A two-`if` chain is the ordinary elif spelling: the inner test is the
-    condition, and the outer one still carries two conditions of its own.
+    A two-`if` chain is the elif spelling: the inner test is the condition,
+    and the outer one still carries two conditions of its own.
     """
     sites, module = _mcp_guard_floor.guard_shape_probe(
         _tmp, OUTER_OR_SHAPES, 'outer_or_shapes')
@@ -225,8 +223,8 @@ def matched(value):
 def test_a_raise_under_a_match_case_is_refused(_tmp):
     """A `match` case decides the raise and the floor cannot read its test.
 
-    Downgrading it to the raise's own text would leave the case a site no
-    tool's key can answer for, so the scan refuses instead.
+    Keying it on the raise's own text would leave the case a site no tool's
+    key can answer for, so the scan refuses instead.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(_tmp, MATCH_SHAPES, 'match_shapes')
@@ -250,9 +248,8 @@ def guarded(value):
 def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
     """A construct dropped from the table refuses the scan (issue 570).
 
-    The plant takes the construct out of the classification the parsed
-    fixture's own node names, so the refusal is what a future statement form
-    meets: refused, never keyed on the raise's own text.
+    The class comes off the node the parsed fixture's own tree produced, so
+    the plant cannot miss the statement it means.
     """
     path = Path(_tmp) / 'unclassified_shapes.py'
     path.write_text(UNCLASSIFIED_SHAPES, encoding='utf-8')
@@ -276,9 +273,8 @@ def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
 def test_an_or_in_a_negated_test_still_refuses(_tmp):
     """Each loop shape records the test it read, and the else reads it whole.
 
-    The `while` else is decided by the test its key negates, so the `or` the
-    refusal names is the test's; the constant test beside it keys on `True`
-    and carries no `or`.
+    A `while` else is decided by the test its key negates, so the `or` it
+    names is the test's; the constant test beside it keys on `True`.
     """
     sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
     looped = {key: or_test for (_file, _line), (key, or_test)
@@ -295,8 +291,7 @@ def test_an_or_in_a_negated_test_still_refuses(_tmp):
 
 # One source per statement the walk reads as deciding nothing, each with its
 # raise as the direct child of that statement, so removing the entry leaves
-# the walk no other ancestor to read. The `if` around it carries an `or`, so
-# the key also shows the guard reaching the raise THROUGH the construct.
+# the walk no other ancestor to read.
 TRANSPARENT_SOURCES = {
     'AsyncFor': '''
 async def blocked(values):
@@ -358,11 +353,10 @@ def blocked(values):
 def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
     """Each entry the walk is transparent through is a control, not a name.
 
-    The construct comes off the node its own parse produced, and the same
-    source is read twice: shipped, where the whole site is the surrounding
-    `if`'s — key and `or` test, the loops' iterables carrying an `or` of
-    their own that is not read — and with its own entry gone, where the
-    walk can no longer classify it and refuses.
+    The same source is read twice: shipped, where the whole site is the
+    surrounding `if`'s — key and `or` test, the loops' iterables carrying
+    an `or` of their own that is not read — and with its own entry gone,
+    where the walk can no longer classify it and refuses.
     """
     for name, source in TRANSPARENT_SOURCES.items():
         path = Path(_tmp) / f'{name.lower()}_shapes.py'
@@ -392,8 +386,7 @@ def test_a_conjunction_is_one_condition(_tmp):
     """A test spelled `not (a and b)` decides the raise once, like any other.
 
     The `or` refusal exists because one witness cannot answer for two
-    conditions; a conjunction is one, so reading it as two would refuse
-    guards the accounting never had trouble with.
+    conditions; a conjunction is one condition.
     """
     sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
     joined = {key: or_test for (_file, _line), (key, or_test)
@@ -413,18 +406,17 @@ def twin(value):
 def test_two_raises_on_one_line_are_refused(_tmp):
     """A traceback names the line, not the statement.
 
-    The two raises are unguarded and spell distinct messages, so no other
-    refusal produces this red: sharing one physical line is the only shape
-    at fault, and the scan refuses it rather than collapsing the sites. The
-    remedy names both halves, because splitting the line only restores the
-    scan while each raise keeps a condition of its own.
+    The two raises are unguarded and spell distinct messages, so sharing one
+    physical line is the only shape at fault. The remedy names no further
+    requirement: asking each raise for a condition of its own would change
+    when these two fire.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(_tmp, TWIN_SHAPES, 'twin_shapes')
     except AssertionError as raised:
         assert 'twin_shapes:3' in str(raised), raised
         assert 'one raise per line' in str(raised), raised
-        assert 'condition of its own' in str(raised), raised
+        assert 'condition of its own' not in str(raised), raised
     else:
         raise AssertionError('two raises on one line were collapsed, not '
                              'refused')
