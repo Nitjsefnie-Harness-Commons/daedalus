@@ -422,11 +422,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
                 iterated=iterated)
     if isinstance(node, ast.DictComp):
         value = state.evaluated.get(id(node.value))
-        iterated = state.evaluated.get(iterated_key(node))
-        if (is_deferred_value(value) or sender_value(value) is not None
-                or iterated is not None):
-            return SpreadContainer(
-                {DYNAMIC_KEY: value}, None, 'dict', node, iterated=iterated)
+        if is_deferred_value(value) or sender_value(value) is not None:
+            return SpreadContainer({DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
         if isinstance(node.slice, ast.Slice):
