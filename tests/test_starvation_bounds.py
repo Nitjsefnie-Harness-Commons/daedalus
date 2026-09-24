@@ -306,38 +306,104 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
         outcome)
 
 
+# The modules the two harness children are launched through: `_stream_fake`
+# holds the gate's file and `node -e` launchers, `_noderun` the file launcher
+# they forward to. The guard resolves the launcher each harness actually calls
+# (by the callee at its own call site) and follows that call graph, so the
+# verdict is bound to the operation the harness performs, not to one function
+# name.
+_LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
+_LAUNCH_ATTRS = frozenset({
+    'run', 'Popen', 'call', 'check_call', 'check_output'})
+
+
+def _launcher_functions(trees):
+    """Every function the launcher modules define, by name."""
+    functions = {}
+    for tree in trees.values():
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.setdefault(node.name, node)
+    return functions
+
+
+def _harness_launchers(harness_tree, functions):
+    """Launcher names a harness actually calls, read off its own call sites."""
+    reached = set()
+    for node in ast.walk(harness_tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in functions):
+            reached.add(node.func.id)
+    return reached
+
+
+def _bounded_launches(launcher_names, functions):
+    """Launch sites reachable from `launcher_names` that carry a `timeout=`.
+
+    Follows the call graph across the launcher modules, so a bound on any
+    function the child's launcher actually reaches is found — not just one
+    spelled in the entry function. An unresolvable name is reported, not
+    skipped.
+    """
+    found = []
+    seen = set()
+    work = list(launcher_names)
+    while work:
+        name = work.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        function = functions.get(name)
+        if function is None:
+            found.append((name, 'unresolved route'))
+            continue
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in _LAUNCH_ATTRS
+                    and any(k.arg == 'timeout' for k in node.keywords)):
+                found.append((name, node.lineno))
+            if isinstance(node.func, ast.Name) and node.func.id in functions:
+                work.append(node.func.id)
+    return found
+
+
 def test_the_harness_children_run_without_a_wall_timeout(tmp):
     """The Surface D runners launch their children with no timeout=.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. The runner sources are parsed
-    and every keyword argument named `timeout` is refused — at a launch and
-    at a communicate alike.
+    starvation rejection this branch removes. The question is bound to the
+    operation, not to a function name: from each harness's own call sites the
+    guard resolves which launcher the child is actually launched through, then
+    follows that launcher's call graph across `_stream_fake.py` and
+    `_noderun.py` and refuses any launch on the path that carries a `timeout=`.
+    A harness that swapped `run_inline_gate` for `run_gate`, or that reached a
+    bounded helper, is caught by this path, not by an enumeration of names. An
+    unresolvable launcher is a violation, not a skip.
 
-    The guard also reads the shared `node -e` launcher itself: the two
-    harnesses delegate to `run_inline_gate` in `_stream_fake.py`, so a bound
-    there is what would actually wrap these children. Parsing only the
-    harness files left the verdict invariant to the property — removing the
-    bound from the launcher could not turn this red — so `run_inline_gate` is
-    walked too and any `timeout=` in it is refused. `run_gate` (the file
-    launcher) is left alone: it bounds the oracle and starvation children by
-    their own budgets, which is a different scenario.
+    Named blind spot: a wall bound written in the harness's own JavaScript —
+    inside a spliced program string — is invisible here, because this guard
+    reads Python `ast` and the bound it cannot see lives in JavaScript. The
+    guard's input language is not the language the property lives in; that gap
+    is named, not papered over, the same way the cross-file duplicate check's
+    blindness to string-literal JavaScript is named in `_worker_sources.py`.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
+    trees = {name: ast.parse((tests_dir / name).read_text(encoding='utf-8'))
+             for name in _LAUNCHER_MODULES}
+    functions = _launcher_functions(trees)
     for name in ('_relayharness.py', '_cdpharness.py'):
         tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
+        # A Python-level `timeout=` anywhere in the harness is refused.
         sites = [node.lineno for node in ast.walk(tree)
                  if isinstance(node, ast.keyword) and node.arg == 'timeout']
         assert not sites, (name, sites)
-    launcher = ast.parse(
-        (tests_dir / '_stream_fake.py').read_text(encoding='utf-8'))
-    inline = next(node for node in ast.walk(launcher)
-                  if isinstance(node, ast.FunctionDef)
-                  and node.name == 'run_inline_gate')
-    sites = [node.lineno for node in ast.walk(inline)
-             if isinstance(node, ast.keyword) and node.arg == 'timeout']
-    assert not sites, ('_stream_fake.py::run_inline_gate', sites)
+        launchers = _harness_launchers(tree, functions)
+        assert launchers, (name, 'no launcher call resolved from the harness')
+        bounded = _bounded_launches(launchers, functions)
+        assert not bounded, (name, sorted(launchers), bounded)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):
