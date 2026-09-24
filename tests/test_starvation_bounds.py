@@ -23,13 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _repo  # noqa: E402
 import _util  # noqa: E402
 import test_cli  # noqa: E402
+from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import (  # noqa: E402
     chrome_stub, import_scripts_stub)
 
-# The coverage guard cannot prove `_repo.ROOT` is the checkout root through
-# run_gate, so this call site declares the child environment explicitly.
+# The starvation scenarios run with the freeze/thaw budget of their own (see
+# _FREEZE_RUN_TIMEOUT_S); the harness children the wall-timeout guard names do
+# not, and run_gate/run_inline_gate leave the child's environment to the one
+# scrubbed constant those launchers name.
 _ENV = _util.child_coverage('scrub')
 
 
@@ -234,7 +237,7 @@ def _starve_run(mode):
     outcome = run_gate(
         require_node(), _CDP_STARVE_HARNESS,
         [str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=_repo.ROOT, plan={'planned': list(BOOT_PLAN)}, env=_ENV,
+        cwd=ROOT, plan={'planned': list(BOOT_PLAN)},
         timeout=_FREEZE_RUN_TIMEOUT_S)
     assert_gate_clean(
         contract_faults=outcome['contractFaults'],
@@ -307,9 +310,18 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     """The Surface D runners launch their children with no timeout=.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. The runner sources are
-    parsed and every keyword argument named `timeout` is refused — at a
-    launch and at a communicate alike.
+    starvation rejection this branch removes. The runner sources are parsed
+    and every keyword argument named `timeout` is refused — at a launch and
+    at a communicate alike.
+
+    The guard also reads the shared `node -e` launcher itself: the two
+    harnesses delegate to `run_inline_gate` in `_stream_fake.py`, so a bound
+    there is what would actually wrap these children. Parsing only the
+    harness files left the verdict invariant to the property — removing the
+    bound from the launcher could not turn this red — so `run_inline_gate` is
+    walked too and any `timeout=` in it is refused. `run_gate` (the file
+    launcher) is left alone: it bounds the oracle and starvation children by
+    their own budgets, which is a different scenario.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
@@ -318,6 +330,14 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
         sites = [node.lineno for node in ast.walk(tree)
                  if isinstance(node, ast.keyword) and node.arg == 'timeout']
         assert not sites, (name, sites)
+    launcher = ast.parse(
+        (tests_dir / '_stream_fake.py').read_text(encoding='utf-8'))
+    inline = next(node for node in ast.walk(launcher)
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == 'run_inline_gate')
+    sites = [node.lineno for node in ast.walk(inline)
+             if isinstance(node, ast.keyword) and node.arg == 'timeout']
+    assert not sites, ('_stream_fake.py::run_inline_gate', sites)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):
