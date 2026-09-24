@@ -114,8 +114,9 @@ def test_the_docstring_justifies_every_pattern(tmp):
 
 # ---- derive the set from the workflows (the guard) ----
 
-_EXECUTED = re.compile(r'python3? +([\w./-]+\.py)\b'
-                       r'|(?<![\w.-])([./][\w./-]+\.(?:sh|py))\b')
+_EXECUTED = re.compile(
+    r'python3?(?:\.\d+)? +(?:-[A-Za-z]+ +)*([\w./-]+\.py)\b'
+    r'|(?<![\w.-])([./][\w./-]+\.(?:sh|py))\b')
 _FLAG_VALUE = re.compile(
     r'--(?:rcfile|config|requirement|project|input|file)[= ]+([^\s\'"]+)'
     r'|(?<!\w)-r[= ]+([^\s\'"]+)')
@@ -249,6 +250,31 @@ def test_a_gate_invoked_by_path_outside_scripts_ci_is_caught(tmp):
     assert 'scripts/version_gate.sh' in used, used
 
 
+def test_flagged_and_versioned_python_invocations_are_reached(tmp):
+    """`python3 -u PATH` and `python3.13 PATH` are seen, not just `python3`.
+
+    The REACH LIMIT names only the five discovery-read config files and
+    `python3 -m module`; a flagged or versioned interpreter is a path the
+    matcher must reach, or the code sees fewer real invocations than the
+    sentence admits -- the same overclaim that licensed the Critical.
+    """
+    for spelling in ('python3 -u scripts/lint_gate.py',
+                     'python3.13 scripts/lint_gate.py',
+                     'python scripts/lint_gate.py'):
+        base = Path(tmp) / spelling.replace(' ', '_').replace('.', '_')
+        (base / 'scripts').mkdir(parents=True)
+        (base / 'scripts' / 'lint_gate.py').write_text('# gate\n',
+                                                       encoding='utf-8')
+        workflows = base / '.github' / 'workflows'
+        workflows.mkdir(parents=True)
+        (workflows / 'probe.yml').write_text(
+            f'jobs:\n  gate:\n    steps:\n      - run: {spelling}\n',
+            encoding='utf-8')
+        used = _workflow_gate_files(
+            workflows, base=base, tracked={'scripts/lint_gate.py'})
+        assert 'scripts/lint_gate.py' in used, (spelling, used)
+
+
 def test_a_generated_untracked_requirements_file_is_not_required(tmp):
     """A file a job generates at run time is not a TRACKED gate file.
 
@@ -344,30 +370,93 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
 
 # ---- gate commit enumeration ----
 
-def _enumeration_read(commits):
+def _commits_read(m, commits=None, raise_for=None, live_shaped=False,
+                  asked=None):
+    """A `commits?path=` reader. `live_shaped` mimics the real endpoint:
+    a path carrying a glob answers [] (GitHub does not expand **), a bare
+    path or exact file answers a commit. `commits` overrides per-path."""
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         if '/commits?' not in target:
             raise AssertionError(target)
-        pattern = target.split('path=')[1]
-        return _encode([{'sha': s} for s in commits.get(pattern, [])])
+        request = target.split('path=')[1]
+        if asked is not None:
+            asked.append(request)
+        if raise_for is not None and raise_for(request):
+            raise m.QueryError('HTTP 500')
+        if commits is not None and request in commits:
+            return _encode([{'sha': s} for s in commits[request]])
+        if live_shaped and '*' in request:
+            return _encode([])
+        return _encode([{'sha': G1}])
     return read
 
 
-def test_enumerate_gates_reads_one_commit_per_path(tmp):
+def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
     del tmp
     m = _mod()
-    read = _enumeration_read({'.pylintrc': [G1], 'setup.cfg': [G2]})
-    gates = m.enumerate_gates(read, 'o/r')
-    assert sorted(gates) == sorted([('.pylintrc', G1), ('setup.cfg', G2)])
+    asked = []
+    gates = m.enumerate_gates(_commits_read(m, asked=asked), 'o/r')
+    assert len(gates) == len(m.GATE_PATTERNS)
+    assert len(asked) == len(m.GATE_PATTERNS)
 
 
-def test_a_gate_path_with_no_commits_contributes_nothing(tmp):
-    """The API returning [] for a path is not an error."""
+def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
+    """The SHAPE the endpoint accepts, not a well-formed string.
+
+    GitHub's `commits?path=` is a directory-prefix filter and does NOT expand a
+    `**` glob. A lexical "is the request well-formed" check would have passed
+    while the string meant nothing to the API. This pins that no glob reaches
+    the endpoint, that the two directory patterns arrive as their BARE
+    directory, and that an exact pattern is sent unchanged.
+    """
     del tmp
     m = _mod()
-    read = _enumeration_read({'.pylintrc': [G1], 'eslint.config.js': []})
-    assert m.enumerate_gates(read, 'o/r') == [('.pylintrc', G1)]
+    asked = []
+    m.enumerate_gates(_commits_read(m, asked=asked), 'o/r')
+    assert asked, 'no gate path was looked up'
+    for request in asked:
+        assert '*' not in request, request
+    assert '.github/workflows' in asked, asked
+    assert 'scripts/ci' in asked, asked
+    # an exact pattern is sent unchanged
+    for exact in ('.pylintrc', 'setup.cfg', 'run_tests.py',
+                  'requirements-dev.txt', 'requirements-test.txt',
+                  'pyrightconfig.json', 'pyrightconfig.tests.json',
+                  'eslint.config.js', 'pyproject.toml', '.gitleaks.toml',
+                  'scripts/check_versions.py'):
+        assert exact in asked, exact
+
+
+def test_a_live_shaped_endpoint_resolves_every_pattern(tmp):
+    """Against a fake that answers [] for a glob, the run still resolves all
+    thirteen -- because the request never carries a glob. Reverting the
+    translation makes the two directory patterns ask as `**`, the fake answers
+    [], and the run refuses: the motivating case is caught here."""
+    del tmp
+    m = _mod()
+    gates = m.enumerate_gates(_commits_read(m, live_shaped=True), 'o/r')
+    assert len(gates) == len(m.GATE_PATTERNS), gates
+
+
+def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
+    """An empty answer is anomalous, not "no commits": refuse loudly.
+
+    Every pattern in the set has commits on main. A silent skip here would
+    under-count the set and turn a stale head green -- the exact defect this
+    module exists to prevent -- so an empty answer is a GLOBAL failure that
+    names the pattern.
+    """
+    del tmp
+    m = _mod()
+    read = _commits_read(m, commits={'eslint.config.js': []})
+    try:
+        m.enumerate_gates(read, 'o/r')
+    except m.QueryError as error:
+        assert 'eslint.config.js' in str(error), str(error)
+        assert 'no commit' in str(error), str(error)
+        return
+    raise AssertionError('an empty gate-path answer was not refused')
 
 
 def test_enumeration_unreadable_is_a_global_failure(tmp):
@@ -376,17 +465,27 @@ def test_enumeration_unreadable_is_a_global_failure(tmp):
 
     def read(_argv):
         raise m.QueryError('HTTP 500')
-    assert m.enumerate_gates(read, 'o/r') is None
+    try:
+        m.enumerate_gates(read, 'o/r')
+    except m.QueryError as error:
+        assert 'gate commit' in str(error), str(error)
+        return
+    raise AssertionError('an unreadable gate lookup was not refused')
 
 
 def test_a_non_list_enumeration_payload_is_a_global_failure(tmp):
-    """A payload that is not a list is not 'no commits' -- it drops a gate."""
+    """A payload that decodes to a non-list is not 'no commits'."""
     del tmp
     m = _mod()
-    for bad in ('not-a-list', 42, {'error': 'rate limited'}):
+    for bad in (42, {'error': 'rate limited'}, '"a string"'):
         def read(_argv, shape=bad):
             return _encode(shape)
-        assert m.enumerate_gates(read, 'o/r') is None, bad
+        try:
+            m.enumerate_gates(read, 'o/r')
+        except m.QueryError as error:
+            assert 'list' in str(error), str(error)
+            continue
+        raise AssertionError(f'a non-list payload {bad!r} was not refused')
 
 
 # ---- verdicts over many gate commits ----
