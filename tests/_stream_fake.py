@@ -21,9 +21,10 @@ function accountRequest(request) {
 
 // The count keys on the route alone, so a scenario that legitimately posts
 // one route to two bridges can declare it once each. The ORIGIN is gated
-// separately and first: a target the plan does not name — a foreign bridge,
-// or a relative URL that names no bridge — is refused before it can spend a
-// declared route's allowance.
+// separately and first, and a refusal there is NOT recorded in
+// `nonStreamFetches`: it must spend no declared route's allowance, or the
+// legitimate request that follows it would be refused on the foreign
+// one's account. It is reported in `badOrigins` instead.
 function originOf(url) {
   const match = String(url).match(/^https?:\/\/[^/]+/);
   return match ? match[0] : '(no origin)';
@@ -61,7 +62,6 @@ async function bridgeFetch(target, init = {}) {
   }
   const origin = originOf(url);
   if (!permittedOrigins().includes(origin)) {
-    nonStreamFetches.push({ request, refused: true });
     badOrigins.push(origin);
     return response(599, { ok: false, error: 'origin not permitted' });
   }
