@@ -44,7 +44,7 @@
     "tests/_jsroute_source.py": 3,
     "tests/_mcp_guard_floor.py": 3,
     "tests/_pyroute.py": 1,
-    "tests/_pyroute_mapping.py": 2,
+    "tests/_pyroute_mapping.py": 1,
     "tests/_pyroute_values.py": 3,
     "tests/_realbrowser_pages.py": 1,
     "tests/_token_policy.py": 1,
