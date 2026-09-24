@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No tracked test module publishes a credential into its own environment.
+"""No test module publishes a credential into its own environment.
 
 Seven modules wrote into the suite process's `os.environ` at import and never
 restored it: the credential and the child's MCP port, for consumers that did
@@ -15,12 +15,13 @@ in a FRESH interpreter: this process has already imported the modules that
 matter, so an in-process before/after would snapshot an installed helper and
 read green whatever it did. The structural half reads every `tests/*.py` in
 the worktree for a write into the process environment that the module body
-executes at import, so an EIGHTH site fails here rather than waiting for a
-successor to sweep for it. Every site that scan admits is classified below,
-and an unclassified one is a failure: a list of these seven paths with no
-classification behind it would pass by construction on a site nobody has met
-yet. `_sites()` states the exact grammar it recognises, and the shapes it
-cannot see are named there rather than left for the next reader to assume.
+can execute at import, so an EIGHTH site fails here rather than waiting for
+a successor to sweep for it. Every site that scan admits is classified
+below, and an unclassified one is a failure: a list of these seven paths
+with no classification behind it would pass by construction on a site
+nobody has met yet. `_sites()` states the exact grammar it recognises, and
+the shapes it cannot see are named there rather than left for the next
+reader to assume.
 """
 import ast
 import json
@@ -43,6 +44,11 @@ CREDENTIAL_PREFIXES = ('DAEDALUS_',)
 # `except*` parses to its own node on 3.11+; the scan reads either as the
 # block it is, and a Python that has never heard of it is not this tree's.
 _TRY = (ast.Try, getattr(ast, 'TryStar', ast.Try))
+
+# The statements the scan does not descend into, because a module import
+# does not run their bodies. A list of what is refused, so that a statement
+# type nobody thought of is read rather than passed.
+_NOT_AT_IMPORT = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 # The modules this branch took the publication out of, each with the names it
 # published. The runtime half imports every row; the structural half requires
@@ -247,44 +253,62 @@ def _is_environ(node, scope, depth=2):
 
 
 def _is_main_guard(node):
+    """Whether this `if` is the `if __name__ == '__main__':` guard.
+
+    Exactly that spelling: `type(...) is ast.Eq` over the single comparison
+    against `'__main__'`. A `!=` guard, an `in` guard or a guard with an
+    `else` are not this statement's body — the first two run in every
+    importer and the `else` runs in every importer — so a check that
+    matched them would skip a write that happens.
+    """
     if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
         return False
-    left = node.test.left
-    return (isinstance(left, ast.Name) and left.id == '__name__'
-            and any(isinstance(operand, ast.Constant)
-                    and operand.value == '__main__'
-                    for operand in node.test.comparators))
+    test = node.test
+    return (len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)
+            and isinstance(test.left, ast.Name) and test.left.id == '__name__'
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == '__main__')
 
 
-def _bodies(node):
-    """The statement blocks a module-level statement runs at import."""
-    if isinstance(node, ast.If):
-        return [node.body, node.orelse]
-    if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
-        return [node.body, node.orelse]
-    if isinstance(node, (ast.With, ast.AsyncWith)):
-        return [node.body]
-    if isinstance(node, _TRY):
-        return ([node.body, node.orelse, node.finalbody]
-                + [handler.body for handler in node.handlers])
-    return []
+def _child_statements(node):
+    """The statements directly inside a statement, in source order.
+
+    Not every container for statements IS a statement: a `match` arm, an
+    `except` handler and a `case` guard are not, and their bodies are. So
+    the walk passes through a non-statement until it reaches a statement
+    one, and leaves descending into a statement to the caller's recursion.
+    """
+    found = []
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.stmt):
+            found.append(child)
+        else:
+            found.extend(_child_statements(child))
+    return found
 
 
 def _executed_statements(body):
-    """Every statement the module body runs when it is imported.
+    """Every statement the module body can run when it is imported.
 
-    A statement inside a module-level `if`, `try`, loop or `with` runs at
-    import too, so those blocks are read; one inside a function or a class
-    body runs per call, and one under `if __name__ == '__main__'` runs only
-    when the file is the program rather than an import, so neither is read.
+    The recursion names what does NOT run at import and refuses those:
+    a function, a lambda's scope and a class body, which run per call or
+    per definition rather than at import, and the body of the `__main__`
+    guard, which runs only when the file is the program. Every other
+    statement is reached, whatever its type: a branch, a handler, a loop,
+    a `with`, a `match` arm. The guard's `else` is reached like any other,
+    because an importer runs it.
     """
     found = []
     for node in body:
-        if _is_main_guard(node):
+        if isinstance(node, _NOT_AT_IMPORT):
             continue
         found.append(node)
-        for nested in _bodies(node):
-            found.extend(_executed_statements(nested))
+        guard = _is_main_guard(node)
+        for child in _child_statements(node):
+            if guard and any(child is skipped for skipped in node.body):
+                continue
+            found.extend(_executed_statements([child]))
     return found
 
 
@@ -324,9 +348,12 @@ def _written_names(node, scope, bindings):
                 return _key_names(target.slice, bindings)
         return ()
     if isinstance(node, ast.AugAssign):
-        if (isinstance(node.target, ast.Subscript)
-                and _is_environ(node.target.value, scope)):
-            return _key_names(node.target.slice, bindings)
+        if isinstance(node.target, ast.Subscript):
+            if _is_environ(node.target.value, scope):
+                return _key_names(node.target.slice, bindings)
+            return ()
+        if _is_environ(node.target, scope):
+            return _key_names(node.value, bindings)
         return ()
     if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)):
         return ()
@@ -341,31 +368,73 @@ def _written_names(node, scope, bindings):
     return ()
 
 
-def _sites(source):
-    """Every write into the environment the module body runs at import.
+def _bound_names(node):
+    """The names a statement binds, with the value each is given."""
+    if isinstance(node, ast.Assign):
+        return [(target.id, node.value) for target in node.targets
+                if isinstance(target, ast.Name)]
+    if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+            and node.value is not None):
+        return [(node.target.id, node.value)]
+    return []
 
-    The grammar, which the docstring above and the failure message both
-    claim: a statement of the module body, or of a module-level `if` (other
-    than the `__main__` guard), `try`, loop or `with`; writing through
-    `os.environ`, an `import os as ...` alias, a `from os import environ`
-    name, or a module-level name bound to any of those; by subscript
-    assignment or augmented assignment, or by `setdefault`, `set`,
-    `__setitem__` or `update` (positional or `**keyword`).
+
+def _bindings(statements):
+    """What each module-level name first holds, in source order.
+
+    First-wins, because the order a module body actually runs in is not
+    knowable from its text. A name bound twice is read here as its FIRST
+    binding, which closes both directions at once: a name that ends up
+    holding a plain dict gets no environment write invented for it, and a
+    name that WAS the environment when the write happened keeps the write
+    even if something rebinds the name afterwards. The cost is named in
+    `_sites()`: a name bound inside a branch is decided by source order,
+    not by which branch runs.
+
+    Every binding form is taken — each name target of an assignment,
+    chained targets included, and the target of an annotated assignment —
+    so a new shape is a new case in `_bound_names` only if it is not a
+    target at all.
+    """
+    bound = {}
+    for node in statements:
+        for name, value in _bound_names(node):
+            bound.setdefault(name, value)
+    return bound
+
+
+def _sites(source):
+    """Every write into the environment the module body can run at import.
+
+    The grammar, which the module docstring and the failure message both
+    claim. POSITION: any statement the module body reaches on import —
+    its own, or one nested anywhere inside it, whatever statement type that
+    is — except a function, a lambda's scope or a class body, and the body
+    of an `if __name__ == '__main__':` guard. RECEIVER: `os.environ`, an
+    `import os as ...` alias, a `from os import environ` name, or a
+    module-level name whose FIRST binding is any of those. WRITE: a
+    subscript assignment, an augmented assignment (the subscript's key, or
+    the value's names when the whole mapping is the target), or
+    `setdefault`, `set`, `__setitem__` or `update` — positionally or by
+    `**keyword`.
 
     Not read, and named here so nobody assumes otherwise: a write inside a
     function, a lambda or a class body; a rebind of `os.environ` itself,
-    which replaces the mapping rather than writing into it; a call reached
-    through a computed receiver such as `getattr(os, 'environ')`; and a
-    published mapping built by a call rather than spelled as a literal.
-    A name the scan cannot read is reported as unreadable, never as absent,
-    so it is classified rather than passed.
+    which replaces the mapping rather than writing into it; a receiver
+    reached by computation, such as `getattr(os, 'environ')` or
+    `__import__('os').environ`; a mapping that merely CONTAINS the
+    environment, as `CFG['env'][...]` does; a write the module delegates to
+    a helper it calls; a published mapping built by a call rather than
+    spelled as a literal; and a deletion (`del e[...]`, `pop`, `clear`),
+    which removes a name rather than publishing one.
+
+    A name this scan cannot read is reported as unreadable, never as
+    absent, so it is classified rather than passed.
     """
     tree = ast.parse(source)
     statements = _executed_statements(tree.body)
     modules, environs = _imports(statements)
-    bindings = {node.targets[0].id: node.value for node in statements
-                if isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)}
+    bindings = _bindings(statements)
     scope = (modules, environs, bindings)
     found = []
     for node in statements:
@@ -411,11 +480,12 @@ def test_no_unclassified_module_publishes_at_import(_tmp):
 
     This is the half that outlives today's seven rows. A module the table
     has never met fails here with its file and line, so the sweep is this
-    control's job and not a successor's. The grammar is `_sites()`'s: a
-    statement of the module body, or of a module-level `if` (other than the
-    `__main__` guard), `try`, loop or `with`, writing through `os.environ`
-    or an alias of it by subscript, `|=`, `setdefault`, `set`,
-    `__setitem__` or `update`.
+    control's job and not a successor's. The grammar is `_sites()`'s, and it
+    is two denylists rather than two lists: a statement is read unless it
+    is a function, a class body or the `__main__` guard's, and a name is
+    read as the environment when it resolves to the environment rather than
+    when it is spelled a way this file happens to know. So a statement type
+    or a binding form nobody has met is read, not passed.
     """
     unclassified, republished = [], []
     for path in _tests_modules():
