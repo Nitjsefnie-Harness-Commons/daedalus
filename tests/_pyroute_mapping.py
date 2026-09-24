@@ -350,19 +350,25 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
 
 def _literal_pair_items(source, state):
     """Occupancy a syntactic sequence of pairs contributes for its literal
-    keys.
+    keys, by position, and whether a modelled position is that pair's own.
 
     The deferred container for a literal list carries the display length but
-    not its items, so occupancy is recovered from the source text; every
-    entry the pair loop folded is left as it found it, and a key the shared
-    resolver folds is stored under that key the way every other store
-    writes one. A pair value that is an unresolvable call is stored
-    unprovable, as a keyword store does.
+    not its items, so occupancy is recovered from the source text, by the
+    position each pair is written at; a key the shared resolver folds is
+    stored under that key the way every other store writes one, and a pair
+    the loop could name no key for still joins the unknown-key slot. A pair
+    value that is an unresolvable call is stored unprovable, as a keyword
+    store does. A star splices the display's positions, so the entries are
+    still folded beside the dynamic slot but no position names the pair it
+    sits at.
     """
+    entries, aligned = {}, True
     if not isinstance(source, (ast.List, ast.Tuple, ast.Set)):
-        return {}
-    items = {}
-    for pair in source.elts:
+        return entries, False
+    for position, pair in enumerate(source.elts):
+        if isinstance(pair, ast.Starred):
+            aligned = False
+            continue
         if not isinstance(pair, (ast.Tuple, ast.List, ast.Set)) \
                 or len(pair.elts) != 2:
             continue
@@ -372,8 +378,52 @@ def _literal_pair_items(source, state):
         value = _known_value(pair.elts[1], state)
         if value is None and isinstance(pair.elts[1], ast.Call):
             value = UNPROVABLE_SENDER
-        items[key] = value
-    return items
+        entries[position] = (key, value)
+    return entries, aligned
+
+
+def literal_pair_keys(source, states):
+    """The keys the pairs an iterable argument yields fold to, in yield
+    order, or an empty tuple when the yield cannot be matched to the text.
+
+    A generator's element is one pair in every state. A literal sequence
+    qualifies when every state models the same container, so the order
+    the pairs are yielded in is the order the display holds them, and
+    when every pair the display modelled folds a key: a pair the display
+    modelled nothing is absent from the yield, and one whose key the fold
+    cannot resolve has no place in the key list, so either passes no key
+    at all and the store keeps every pair in the unknown-key slot. A star
+    splices the display's positions and never qualifies.
+    """
+    element = isinstance(source, ast.GeneratorExp)
+    if element:
+        source = source.elt
+    else:
+        modelled = _known_value(source, states[0]) if states else None
+        if not isinstance(modelled, DeferredContainer) or any(
+                _known_value(source, state) is not modelled
+                for state in states):
+            return ()
+    if not isinstance(source, (ast.List, ast.Tuple, ast.Set)):
+        return ()
+    keys = ()
+    for state in states:
+        entries, aligned = _literal_pair_items(source, state)
+        if not aligned:
+            return ()
+        if element:
+            if 0 not in entries:
+                return ()
+            folded = (entries[0][0],)
+        else:
+            if any(position not in entries for position in modelled.items):
+                return ()
+            folded = tuple(entries[position][0]
+                           for position in modelled.items)
+        if keys and folded != keys:
+            return ()
+        keys = folded
+    return keys
 
 
 def _source_items(source, state):
@@ -387,21 +437,26 @@ def _source_items(source, state):
         return known.items, known.length is not None
     if known.kind not in ('list', 'tuple', 'set'): return None
     items = {}
-    # A slot holding alternatives may hold any one of them as its pair.
-    pairs = [candidate for value in known.items.values()
-             for candidate in (value.values if isinstance(
-                 value, DeferredAlternatives) else (value,))]
-    for pair in pairs:
-        if not isinstance(pair, DeferredContainer):
-            return None
-        if pair.kind not in ('list', 'tuple'):
-            return None
-        if pair.length != 2 or DYNAMIC_KEY in pair.items:
-            _fold_dynamic(items, from_position(pair, 0))
-        else:
-            # A modelled key is a callable or a sender, never a key value.
-            _fold_dynamic(items, pair.items.get(1))
-    for key, value in _literal_pair_items(source, state).items():
+    entries, aligned = _literal_pair_items(source, state)
+    for position, value in known.items.items():
+        # A slot holding alternatives may hold any one of them as its pair.
+        for pair in (value.values if isinstance(
+                value, DeferredAlternatives) else (value,)):
+            if not isinstance(pair, DeferredContainer):
+                return None
+            if pair.kind not in ('list', 'tuple'):
+                return None
+            if aligned and position in entries \
+                    and pair.length == 2 and DYNAMIC_KEY not in pair.items:
+                # A pair whose key the source folds is stored under that
+                # key below, so its value is not an unknown-key entry.
+                continue
+            if pair.length != 2 or DYNAMIC_KEY in pair.items:
+                _fold_dynamic(items, from_position(pair, 0))
+            else:
+                # A modelled key is a callable or a sender, never a key.
+                _fold_dynamic(items, pair.items.get(1))
+    for key, value in entries.values():
         items.setdefault(key, value)
     return items, len(known.items) == known.length
 

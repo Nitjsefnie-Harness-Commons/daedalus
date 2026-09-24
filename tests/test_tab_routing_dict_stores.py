@@ -59,6 +59,75 @@ def test_clean_store_invocation_stays_clean(tmp):
     assert _verdict(tmp, body) == (0, 0)
 
 
+_KEYREADER = 'def key(): return _args.flag'
+_PAIR_STORE = 'e = {}; e.update([("k", ordinary), (None, relay())])'
+
+
+def _folded_pair_key_rows():
+    """One row per foldable key class, each reading a key the stored entry
+    provably cannot be selected for: a store that parks the value in the
+    unknown-key slot over-reports it, `(0, 1)` against the `(0, 0)` here."""
+    classes = [(f'pair-{name}-key', _flow(
+        _RELAY, f'e = {{}}; e.update([("k", ordinary), ({key}, relay())])',
+        'x = e.get("k", ordinary)', invoke='x()'), (0, 0))
+        for name, key in (('true', 'True'), ('false', 'False'),
+                          ('int', '7'), ('negative-int', '-1'),
+                          ('tuple', '(1, 2)'))]
+    return [(f'pair-none-key-{name}', _flow(
+        _RELAY, _PAIR_STORE, f'x = {read}', invoke='x()'), expected)
+        for name, read, expected in (
+            ('get', 'e.get("k", ordinary)', (0, 0)),
+            ('index', 'e["k"]', (0, 0)),
+            ('setdefault', 'e.setdefault("k", ordinary)', (0, 0)),
+            ('read', 'e.get(None, ordinary)', (1, 1)))] + classes
+
+
+# A pair key the shared resolver folds is stored under that key, the way
+# the subscript store already stores one (issue 1025).
+# `pair-none-key-read` reads the None key itself, so a store that dropped
+# the entry rather than filing it under its key would fail it; the last
+# three rows keep the unknown-key slot where a key the fold cannot
+# resolve still belongs, and pin the rule per pair: the first mixed row
+# reads "k" while the unreadable pair's value is ordinary, so a leaked
+# None entry would show as a violation, and the second gives that pair a
+# relay, so clearing the slot wholesale would read clean.
+_FOLDED_PAIR_KEYS = _folded_pair_key_rows() + [
+    ('pair-none-key-tuple-source', _flow(
+        _RELAY, 'e = {}; e.update((("k", ordinary), (None, relay())))',
+        'x = e.get("k", ordinary)', invoke='x()'), (0, 0)),
+    ('pair-none-key-dict-call', _flow(
+        _RELAY, 'e = dict([("k", ordinary), (None, relay())])',
+        'x = e.get("k", ordinary)', invoke='x()'), (0, 0)),
+    ('pair-none-key-ior', _flow(
+        _RELAY, 'e = {}; e |= [("k", ordinary), (None, relay())]',
+        'x = e.get("k", ordinary)', invoke='x()'), (0, 0)),
+    ('pair-mixed-unreadable-ordinary', _flow(
+        _RELAY, _KEYREADER,
+        'e = {}; e.update([("k", ordinary), (None, relay()),'
+        ' (key(), ordinary)])', 'x = e.get("k", ordinary)',
+        invoke='x()'), (0, 0)),
+    ('pair-mixed-unreadable-relay', _flow(
+        _RELAY, _KEYREADER,
+        'e = {}; e.update([("k", ordinary), (None, relay()),'
+        ' (key(), relay())])', 'x = e.get("k", ordinary)',
+        invoke='x()'), (0, 1)),
+    ('pair-unreadable-key', _flow(
+        _RELAY, _KEYREADER,
+        'e = {}; e.update([("k", ordinary), (key(), relay())])',
+        'x = e.get("k", ordinary)', invoke='x()'), (0, 1)),
+]
+
+
+def test_folded_pair_key_stores_under_their_own_key(tmp):
+    bad = []
+    for label, body, expected in _FOLDED_PAIR_KEYS:
+        actual = _verdict(tmp, body)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+
 def test_deleted_holder_copy_invocation_reports(tmp):
     body = ('send = ordinary\nbox = {}\n'
             f'box["k"] = lambda: {_CALL}\n'
