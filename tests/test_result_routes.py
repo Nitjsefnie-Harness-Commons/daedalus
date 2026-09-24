@@ -400,6 +400,33 @@ def test_a_zero_delivery_cap_evicts_nothing(tmp):
     assert kept == ['nocap-1.json', 'nocap-2.json'], kept
 
 
+def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
+    """A `consume=1` read with no `delivery` finds the slot's own delivery
+    copy through the root it was handed, and removes it there.
+
+    Resolving that lookup from configuration looks for the copy in the
+    configured tree, does not find it, and leaves the copy under the passed
+    root behind for eviction.
+    """
+    routes = _load('fixture_result_routes_compatroot')
+    root = Path(tmp) / 'compat-results'
+    root.mkdir(parents=True)
+    assert root != RES_DIR, 'the fixture made the roots equal'
+    token, did = 'compatroottok', 'compatroot-1'
+    status, payload = routes.accept_result(
+        root, tmp, token,
+        {'tabId': '2', 'value': 'paired', '_did': did}, DELIVERY_CAP)
+    assert (status, payload) == (200, {'ok': True})
+    delivery = root / 'deliveries' / f'{token}_2' / f'{did}.json'
+    assert _read(delivery)['value'] == 'paired', delivery
+    # The compatibility consume: `consume=1` and no `delivery` parameter.
+    status, consumed = routes.fetch_result(
+        root, token, {'tab': ['2'], 'consume': ['1']})
+    assert status == 200 and consumed.get('value') == 'paired', consumed
+    assert not (root / f'{token}_2.json').exists()
+    assert not delivery.exists(), 'the delivery copy under this root stayed'
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='resultroutes_')
