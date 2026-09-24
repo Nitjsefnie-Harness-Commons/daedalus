@@ -210,8 +210,9 @@ def _dict_value(node, state):
     for key, item in zip(node.keys, node.values):
         if key is not None:
             value = _known_value(item, state)
-            if isinstance(key, ast.Constant):
-                items[key.value] = value
+            literal = _usable_key(_literal_value(key))
+            if literal is not _UNRESOLVED_KEY:
+                items[literal] = value
             continue
         if isinstance(item, ast.Dict):
             nested = _dict_value(item, state)
@@ -275,23 +276,30 @@ def _dict_call_value(node, state):
 _UNRESOLVED_KEY = object()
 
 
+def _usable_key(value):
+    """The value when it can also be a dict key, else _UNRESOLVED_KEY."""
+    if value is _UNSAFE_LITERAL:
+        return _UNRESOLVED_KEY
+    try:
+        hash(value)
+    except TypeError:
+        return _UNRESOLVED_KEY
+    return value
+
+
 def _literal_key(node, state):
     """The literal key one mapping lookup names, or _UNRESOLVED_KEY.
 
-    A constant is its own key and a name carries the literal it was bound
-    to; anything else, and any name bound to no literal, stays unresolved.
+    A name carries the literal it was bound to and any other expression is
+    read through the same literal evaluator, so a constant, a tuple and a
+    unary-minus literal are all their own keys. An f-string, a
+    concatenation and every other expression the evaluator cannot fold, a
+    name bound to no literal, and a literal that cannot be a dict key all
+    stay unresolved.
     """
-    if isinstance(node, ast.Constant):
-        key = node.value
-    elif isinstance(node, ast.Name):
-        key = state.literals.get(node.id, _UNRESOLVED_KEY)
-    else:
-        return _UNRESOLVED_KEY
-    try:
-        hash(key)
-    except TypeError:
-        return _UNRESOLVED_KEY
-    return key
+    if isinstance(node, ast.Name):
+        return _usable_key(state.literals.get(node.id, _UNSAFE_LITERAL))
+    return _usable_key(_literal_value(node))
 
 
 def _setdefault_value(node, state):

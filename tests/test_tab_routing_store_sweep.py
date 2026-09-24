@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute import py_tab_routing_violations  # noqa: E402
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 
 _CALL = "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"
@@ -220,6 +221,38 @@ _ISSUE962 = [
 def test_issue962_name_bound_setdefault_key(tmp):
     bad = []
     for label, body, expected in _ISSUE962:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+# The literal key forms around that lookup. A tuple and a unary-minus
+# literal are keys the shared evaluator folds, on either side of the store;
+# an f-string is not folded by it, so both f-string rows stay unresolved and
+# read clean, as issue 967 records. The label carries that, so the row
+# cannot be read as a claim that a clean verdict is correct.
+_ISSUE967 = [
+    ('tuple-key-by-name', _flow(
+        _RELAY, 'd = {(1, 2): relay()}; key = (1, 2)',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('tuple-key-literal', _flow(
+        _RELAY, 'd = {(1, 2): relay()}',
+        'x = d.setdefault((1, 2), ordinary)', invoke='x()'), (1, 1)),
+    ('unaryminus-key-by-name', _flow(
+        _RELAY, 'd = {-1: relay()}; key = -1',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('known-defect-967-fstring-key-by-name', _flow(
+        _RELAY, 'd = {"k": relay()}; key = f"k"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
+    ('known-defect-967-fstring-key-interpolated', _flow(
+        _RELAY, 'd = {"k": relay()}; key = f"{\'k\'}"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
+]
+
+def test_issue967_literal_key_forms(tmp):
+    bad = []
+    for label, body, expected in _ISSUE967:
         actual = _tracked_focus_verdict(tmp, body, counts=True)
         if actual != expected:
             bad.append((label, actual, expected))
