@@ -38,6 +38,7 @@ const [backgroundPath, plan] = process.argv.slice(1);
 
 const messageListeners = [];
 const alarmListeners = [];
+const storageListeners = [];
 const storageStore = { 'daedalus-server': 'https://bridge.example.com' };
 // A hold on boot's FIRST storage read — the config get for
 // ['daedalus-token', 'daedalus-server']. Holding it parks boot's generation
@@ -85,10 +86,12 @@ function eventTarget(listeners = null) {
 
 async function bridgeFetch(target) {
   const url = String(target);
-  // A refusal, not a catch-all success: startStream records a retry and
-  // stops. No assertion reads the stream, but nothing is answered 200 here
+  // The stream stays unanswered, as a live SSE connection does: the fetch
+  // never settles, so a boot that reaches startStream cannot spin on the
+  // retry loop (a 503 would, forever, and the watchdog interval is inert
+  // here). No assertion reads the stream, but nothing is answered 200 here
   // that a plan did not place.
-  if (url.includes('/stream?')) return { ok: false, status: 503, body: null };
+  if (url.includes('/stream?')) return new Promise(() => {});
   if (url.endsWith('/result')) return response(200, { ok: true });
   return response(200, { ok: true });
 }
@@ -103,6 +106,12 @@ const chrome = {
           // Hold only the FIRST config get (boot's); a second generation's
           // get resolves immediately, modelling a fast independent read.
           if (plan.holdConfig && !configHold) {
+            return new Promise((resolve) => { configHold = { resolve }; });
+          }
+          // holdIfNotHeld parks every config get AFTER boot's first, so a
+          // planted extra generation is caught mid-read rather than racing
+          // a resolved one, while boot itself still completes.
+          if (plan.holdIfNotHeld && configGets > 1 && !configHold) {
             return new Promise((resolve) => { configHold = { resolve }; });
           }
           if (plan.failConfigAlways
@@ -129,7 +138,7 @@ const chrome = {
         for (const key of [].concat(keys)) delete storageStore[key];
       },
     },
-    onChanged: eventTarget(),
+    onChanged: eventTarget(storageListeners),
   },
   tabs: {
     onUpdated: eventTarget(),
@@ -244,6 +253,60 @@ async function run() {
     outcome.createdAlarms = createdAlarms.slice();
     outcome.keepAliveArms = keepAliveArms.slice();
     outcome.warnings = warnings.slice();
+    outcome.finalToken = vm.runInContext('config.token', context);
+  } else if (plan.scenario === 'boot-success') {
+    // A normal boot: the config read resolves, so boot's .then runs (the
+    // fresh install mints and stores a token) and the .finally arms the
+    // heartbeat. The alarm must carry its name and its period; it is the
+    // only path that restarts the stream once the worker is killed.
+    outcome.createdAlarms = createdAlarms.slice();
+    outcome.mintedTokens = mintedTokens.slice();
+    outcome.finalToken = vm.runInContext('config.token', context);
+  } else if (plan.scenario === 'token-cleared') {
+    // Boot minted and stored a token. The operator then empties the options
+    // token field and saves, which is what options.js does with the trimmed
+    // field: it writes 'daedalus-token': '' and renders "Not configured".
+    // That write lands in storage and reaches the worker through onChanged,
+    // so a heartbeat tick arrives with config.token === '' and the
+    // listener's `if (!config.token) await loadConfig()` is live. The memo
+    // holds boot's resolved generation, so the tick joins it: no config
+    // read, no second mint, the extension stays unconfigured. A generation
+    // started here (the base's behaviour) would re-read the empty token and
+    // mint a fresh one behind the operator; holdIfNotHeld parks that read
+    // mid-flight so the extra generation is observed rather than raced.
+    // loadConfig is wrapped, inside the context, with a call counter so the
+    // absence below is not vacuous: the tick is PROVEN to have reached
+    // loadConfig, and the memo is what answered it without a read. The wrap
+    // runs as its own script so the replacement is the global every caller
+    // resolves, and it is installed after boot's call, so the count it
+    // records is the tick's alone.
+    vm.runInContext(
+      'globalThis.countedLoadConfig = loadConfig;'
+      + 'globalThis.loadConfigCalls = 0;'
+      + 'globalThis.loadConfig = function () {'
+      + '  globalThis.loadConfigCalls += 1;'
+      + '  return globalThis.countedLoadConfig();'
+      + '};',
+      context);
+    await chrome.storage.local.set({ 'daedalus-token': '' });
+    for (const listener of storageListeners) {
+      listener({ 'daedalus-token': { newValue: '' } }, 'local');
+    }
+    const getsBeforeTick = configGets;
+    for (const listener of alarmListeners) {
+      listener({ name: 'daedalus-heartbeat' });
+    }
+    await settle();
+    outcome.loadConfigCalls = vm.runInContext(
+      'globalThis.loadConfigCalls', context);
+    outcome.getsAfterClear = configGets - getsBeforeTick;
+    // Release any parked extra generation and let it run to its token
+    // branch, so a re-mint is observed as well as counted: getsAfterClear
+    // catches the read, mintedTokens catches the credential.
+    openConfig();
+    await settle();
+    outcome.mintedTokens = mintedTokens.slice();
+    outcome.storedToken = storageStore['daedalus-token'];
     outcome.finalToken = vm.runInContext('config.token', context);
   }
   return outcome;
@@ -363,6 +426,60 @@ def test_a_failed_heartbeat_config_read_is_reported_and_skips_the_tick(tmp):
         '[Daedalus] boot config read failed; heartbeat will retry',
         '[Daedalus] heartbeat config read failed; next tick will retry',
     ], outcome
+
+
+def test_a_cleared_token_stays_cleared_and_is_not_re_minted(tmp):
+    """A token the operator cleared must stay cleared.
+
+    The options page writes whatever is in its trimmed token field, and an
+    emptied field renders as "Not configured": clearing is a deliberate
+    operator action, not an accidental erase. So after the clear the memo
+    must keep serving boot's resolved generation to the heartbeat tick that
+    arrives with an empty token — a fresh generation here would re-read the
+    empty token and auto-generate a fresh browser-control credential behind
+    the operator, the base's behaviour. This test is the control that
+    forbids it: it fails the moment anything clears the memo on success or
+    on a token change.
+    """
+    del tmp
+    outcome = _run({'scenario': 'token-cleared', 'holdIfNotHeld': True})
+    # The clear reached both stores: what the options page wrote is what the
+    # worker holds, so the "not configured" state is a fact here, not an
+    # inference.
+    assert outcome['storedToken'] == '', outcome
+    assert outcome['finalToken'] == '', outcome
+    # The tick's loadConfig joined the memo: it was called exactly once
+    # (boot's own call predates the wrap, so this count is the tick's alone,
+    # and the absence below is not vacuous) and no config read ran after the
+    # clear. A generation started instead would be counted here, even held
+    # mid-read.
+    assert outcome['loadConfigCalls'] == 1, outcome
+    assert outcome['getsAfterClear'] == 0, outcome
+    # Nothing was minted after the clear. The list is exact, so its length
+    # is pinned with it: exactly the one token boot generated before the
+    # clear, and no replacement.
+    assert outcome['mintedTokens'] == ['relay-1'], outcome
+
+
+def test_a_successful_boot_arms_the_heartbeat(tmp):
+    """A normal, resolved boot must still arm the heartbeat alarm.
+
+    The branch moved the alarm's create into boot's .finally so a failed
+    config read would still leave a retry path. The .finally runs on the
+    success path too, and that preserved arming is what restarts the stream
+    after the worker is killed — the common case, which nothing else in the
+    suite pins. Arming only in the .catch survives every test here; this one
+    does not. The alarm must be created with its name and its period.
+    """
+    del tmp
+    outcome = _run({'scenario': 'boot-success', 'noToken': True})
+    # The alarm exists, by name and period — this is the assertion that
+    # kills the catch-only arming.
+    assert outcome['createdAlarms'] == [
+        {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
+    # The success path itself ran: the fresh install minted its token, so
+    # the arming is observed on a resolved read, never a rejected one.
+    assert outcome['mintedTokens'] == ['relay-1'], outcome
 
 
 def main():
