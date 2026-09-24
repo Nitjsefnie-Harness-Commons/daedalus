@@ -318,6 +318,7 @@
 !/tests/_repo.py
 !/tests/_segments.py
 !/tests/_speedharness.py
+!/tests/_stream_fake.py
 !/tests/_tabroute_selections.py
 !/tests/_teardown.py
 !/tests/_token_mask.py
