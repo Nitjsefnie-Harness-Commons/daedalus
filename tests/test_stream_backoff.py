@@ -25,6 +25,11 @@ TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
 NEW_TOKEN = 'tok-2'
 NEW_BRIDGE = 'https://other.example.com'
+# The one non-stream request every stream connect and the boot make, and
+# the result a dispatched command posts. Scenarios declare how many of
+# each their recording shows, so an extra or a dropped call is refused.
+SYNC = 'POST /sync-tabs'
+RESULT = 'POST /result'
 
 
 _STREAM_HARNESS = r"""
@@ -32,6 +37,7 @@ const fs = require('fs');
 const vm = require('vm');
 
 const [backgroundPath, plan] = process.argv.slice(1);
+const BRIDGE_URL = 'https://bridge.example.com';
 
 const messageListeners = [];
 const alarmListeners = [];
@@ -39,6 +45,8 @@ const changeListeners = [];
 const connectListeners = [];
 const streamFetches = [];
 const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
 const timeoutTimers = [];
 const intervalTimers = [];
 let nextTimerId = 0;
@@ -175,6 +183,26 @@ function streamResponse(answer) {
   return { ok: false, status: answer, body: null };
 }
 
+// A planned request is one the scenario's recorded run declared. The
+// scenario carries its own multiset so a repeated call is planned only as
+// often as the recording shows it happening. A request beyond the declared
+// count is refused with a non-ok status and recorded, so the run's Python
+// assertion and the worker's own outcome both see it.
+function accountRequest(request) {
+  const seen = nonStreamFetches.filter((i) => i.request === request).length;
+  const planned = (plan.planned || []).filter((i) => i === request).length;
+  const refused = seen >= planned;
+  nonStreamFetches.push({ request, refused });
+  if (refused) refusedFetches.push(request);
+  return refused;
+}
+
+// A declaration names a route, not a host: the resumed-bridge scenario
+// legitimately talks to two hosts on the same route.
+function requestKey(url, init) {
+  return (init.method || 'GET') + ' ' + url.replace(/^https?:\/\/[^/]+/, '');
+}
+
 async function bridgeFetch(target, init = {}) {
   const url = String(target);
   if (url.includes('/stream?')) {
@@ -190,15 +218,22 @@ async function bridgeFetch(target, init = {}) {
     }
     return streamResponse(next);
   }
+  const request = requestKey(url, init);
   if (/\/(register|sync-tabs|unregister)$/.test(url)) {
-    return response(200, { ok: true });
+    return accountRequest(request)
+      ? response(599, { ok: false, error: 'unplanned request' })
+      : response(200, { ok: true });
   }
   if (url.endsWith('/result') && init.method === 'POST') {
     const payload = JSON.parse(init.body);
     resultPosts.push({ did: payload._did || null });
-    return response(200, { ok: true });
+    return accountRequest('POST /result')
+      ? response(599, { ok: false, error: 'unplanned request' })
+      : response(200, { ok: true });
   }
-  return response(200, { ok: true });
+  return accountRequest(request)
+    ? response(599, { ok: false, error: 'unplanned request' })
+    : response(200, { ok: true });
 }
 
 const chrome = {
@@ -316,9 +351,13 @@ async function nextRetryDelay(fetchCount) {
 }
 
 async function run() {
-  vm.runInContext(
-    fs.readFileSync(backgroundPath, 'utf8'), context,
-    { filename: backgroundPath });
+  // The fake-probe drives bridgeFetch directly; loading the worker would
+  // only spend the plan's allowance on the worker's own boot request.
+  if (plan.scenario !== 'fake-probe') {
+    vm.runInContext(
+      fs.readFileSync(backgroundPath, 'utf8'), context,
+      { filename: backgroundPath });
+  }
   await settle();
   const outcome = {};
   if (plan.scenario === 'backoff') {
@@ -451,8 +490,20 @@ async function run() {
   } else if (plan.scenario === 'boot-ledger') {
     await settle();
     outcome.fetches = streamFetches.length;
+  } else if (plan.scenario === 'fake-probe') {
+    // Pins the fake itself: a planned route answers 200, an unplanned
+    // one answers 599 and both are recorded — without a worker path in
+    // between, so what is refused is the fake's own decision.
+    const planned = await bridgeFetch(
+      BRIDGE_URL + plan.plannedRoute, { method: 'POST' });
+    const unplanned = await bridgeFetch(
+      BRIDGE_URL + plan.unplannedRoute, { method: 'POST' });
+    outcome.plannedStatus = planned.status;
+    outcome.unplannedStatus = unplanned.status;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
+  outcome.nonStream = nonStreamFetches.map((item) => item.request);
+  outcome.refused = refusedFetches;
   return outcome;
 }
 
@@ -466,7 +517,13 @@ run().then((result) => {
 
 
 def _run(plan):
-    """Drive the worker under Node with one plan and read back."""
+    """Drive the worker under Node with one plan and read back.
+
+    The oracle is two-sided: the fake refuses any non-stream request the
+    plan did not declare (a 599 that the worker sees and the recording
+    keeps), and this compares the observed sequence with the declaration
+    so a scenario that stops making a planned request is also caught.
+    """
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'
     result = run_node_program(
@@ -474,19 +531,27 @@ def _run(plan):
         cwd=ROOT, payload=plan)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    outcome = json.loads(result.stdout)
+    assert outcome['refused'] == [], (
+        'unplanned bridge request(s) the scenario did not declare:',
+        outcome['refused'], outcome)
+    assert sorted(outcome['nonStream']) == sorted(plan.get('planned', [])), (
+        'non-stream requests differ from the scenario declaration:',
+        outcome['nonStream'], plan.get('planned', []))
+    return outcome
 
 
 def test_consecutive_refusals_back_off_exponentially(tmp):
     del tmp
-    outcome = _run({'scenario': 'backoff'})
+    outcome = _run({'scenario': 'backoff', 'planned': [SYNC]})
     assert outcome['delays'] == [
         1000, 2000, 4000, 8000, 16000, 32000, 60000], outcome
 
 
 def test_a_connected_stream_resets_the_backoff(tmp):
     del tmp
-    outcome = _run({'scenario': 'reset', 'statuses': [503, 'ok', 503]})
+    outcome = _run({'scenario': 'reset', 'statuses': [503, 'ok', 503],
+                    'planned': [SYNC, SYNC]})
     assert outcome['delays'] == [1000, 1000, 1000], outcome
 
 
@@ -494,7 +559,8 @@ def test_an_auth_refusal_stops_the_reconnect(tmp):
     """A wrong credential is not transient: stop until it is replaced."""
     del tmp
     for status in (401, 400):
-        outcome = _run({'scenario': 'stop', 'statuses': [status]})
+        outcome = _run({'scenario': 'stop', 'statuses': [status],
+                        'planned': [SYNC, SYNC]})
         assert outcome['answered'] == [status], (status, outcome)
         assert outcome['fetches'] == 1, (status, outcome)
         assert outcome['pendingTimers'] == 0, (status, outcome)
@@ -505,7 +571,8 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
     """The refused attempt's watchdog does not tick into the stop."""
     del tmp
     for status in (401, 400):
-        outcome = _run({'scenario': 'stop', 'statuses': [status]})
+        outcome = _run({'scenario': 'stop', 'statuses': [status],
+                        'planned': [SYNC, SYNC]})
         assert outcome['intervals'] == [
             {'delay': 20000, 'cleared': False},
             {'delay': 5000, 'cleared': True}], (status, outcome)
@@ -514,7 +581,8 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
 def test_a_silent_stream_reconnects_through_the_backoff(tmp):
     """The watchdog counts as a failed attempt, not a free reconnect."""
     del tmp
-    outcome = _run({'scenario': 'watchdog', 'statuses': ['silent']})
+    outcome = _run({'scenario': 'watchdog', 'statuses': ['silent'],
+                    'planned': [SYNC, SYNC]})
     assert outcome['fetchesAfterWatchdog'] == 0, outcome
     assert outcome['scheduled'] == [1000], outcome
 
@@ -523,14 +591,16 @@ def test_a_killed_connection_counts_toward_the_backoff(tmp):
     """A non-abort reader failure counts once from its connect reset."""
     del tmp
     outcome = _run(
-        {'scenario': 'killed', 'statuses': ['ok', 'kill', 'kill']})
+        {'scenario': 'killed', 'statuses': ['ok', 'kill', 'kill'],
+         'planned': [SYNC, SYNC, SYNC, SYNC]})
     assert outcome['delays'] == [1000, 2000, 2000], outcome
 
 
 def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
     """A good connection keeps its EOF retry at the flat 1 s scale."""
     del tmp
-    outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503]})
+    outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503],
+                    'planned': [SYNC, SYNC]})
     assert outcome['delays'] == [1000, 1000], outcome
 
 
@@ -538,7 +608,7 @@ def test_rejected_connects_grow_to_the_cap(tmp):
     """An unreachable bridge never connects, so the counter only grows."""
     del tmp
     outcome = _run({'scenario': 'unreachable',
-                    'statuses': ['down'] * 6})
+                    'statuses': ['down'] * 6, 'planned': [SYNC]})
     assert outcome['delays'] == [
         2000, 4000, 8000, 16000, 32000, 60000], outcome
 
@@ -546,7 +616,8 @@ def test_rejected_connects_grow_to_the_cap(tmp):
 def test_a_new_token_resumes_connecting(tmp):
     del tmp
     outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
-                    'field': 'daedalus-token', 'value': NEW_TOKEN})
+                    'field': 'daedalus-token', 'value': NEW_TOKEN,
+                    'planned': [SYNC, SYNC]})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
@@ -556,7 +627,8 @@ def test_a_new_token_resumes_connecting(tmp):
 def test_a_new_bridge_url_resumes_connecting(tmp):
     del tmp
     outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
-                    'field': 'daedalus-server', 'value': NEW_BRIDGE})
+                    'field': 'daedalus-server', 'value': NEW_BRIDGE,
+                    'planned': [SYNC, SYNC]})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -568,7 +640,8 @@ def test_a_connected_stream_reopens_the_stopped_pair(tmp):
     del tmp
     outcome = _run({'scenario': 'reopen',
                     'statuses': [401, 'ok', 503],
-                    'changes': [NEW_TOKEN, TOKEN]})
+                    'changes': [NEW_TOKEN, TOKEN],
+                    'planned': [SYNC, SYNC]})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok', 503], outcome
     assert outcome['returnedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -580,7 +653,8 @@ def test_a_keepalive_connect_during_the_ledger_read_starts_no_stream(tmp):
     ledger, and boot then opens a second stream over it."""
     del tmp
     outcome = _run({'scenario': 'ledger-window', 'trigger': 'connect',
-                    'holdLedger': True, 'statuses': ['silent']})
+                    'holdLedger': True, 'statuses': ['silent'],
+                    'planned': [SYNC, SYNC]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
 
@@ -589,7 +663,8 @@ def test_a_heartbeat_alarm_during_the_ledger_read_starts_no_stream(tmp):
     """The heartbeat alarm races boot the same way a port connect does."""
     del tmp
     outcome = _run({'scenario': 'ledger-window', 'trigger': 'alarm',
-                    'holdLedger': True, 'statuses': ['silent']})
+                    'holdLedger': True, 'statuses': ['silent'],
+                    'planned': [SYNC, SYNC, SYNC]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
 
@@ -601,7 +676,8 @@ def test_boot_opens_the_stream_once_with_the_ledger_loaded(tmp):
     del tmp
     outcome = _run({'scenario': 'ledger-window', 'holdLedger': True,
                     'deliver': 'commands',
-                    'statuses': ['ledger-commands']})
+                    'statuses': ['ledger-commands'],
+                    'planned': [SYNC, SYNC, RESULT]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['dispatchedDids'] == ['did-new'], outcome
@@ -613,7 +689,7 @@ def test_a_failed_ledger_read_still_opens_the_stream(tmp):
     boot start must go through."""
     del tmp
     outcome = _run({'scenario': 'boot-ledger', 'failLedger': True,
-                    'statuses': ['silent']})
+                    'statuses': ['silent'], 'planned': [SYNC, SYNC]})
     assert outcome['fetches'] == 1, outcome
 
 
@@ -622,7 +698,7 @@ def test_a_worker_without_a_stored_ledger_still_opens_the_stream(tmp):
     once the read has answered empty, and never lock the stream out."""
     del tmp
     outcome = _run({'scenario': 'boot-ledger', 'noLedger': True,
-                    'statuses': ['silent']})
+                    'statuses': ['silent'], 'planned': [SYNC, SYNC]})
     assert outcome['fetches'] == 1, outcome
 
 
@@ -632,10 +708,30 @@ def test_a_post_boot_token_change_still_reconnects_after_the_gate(tmp):
     del tmp
     outcome = _run({'scenario': 'ledger-window', 'trigger': 'token-change',
                     'holdLedger': True, 'statuses': ['silent'],
-                    'field': 'daedalus-token', 'value': NEW_TOKEN})
+                    'field': 'daedalus-token', 'value': NEW_TOKEN,
+                    'planned': [SYNC, SYNC]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
+
+
+def test_the_fake_refuses_an_unplanned_request(tmp):
+    """The fake's own oracle: a planned route answers 200, an unplanned
+    route answers 599, and both land in the recording."""
+    del tmp
+    node = shutil.which('node')
+    assert node, 'node is required to execute the worker'
+    result = run_node_program(
+        node, _STREAM_HARNESS, [str(EXTENSION_ROOT / 'background.js')],
+        cwd=ROOT,
+        payload={'scenario': 'fake-probe', 'planned': [SYNC],
+                 'plannedRoute': '/sync-tabs', 'unplannedRoute': '/tabs'})
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    outcome = json.loads(result.stdout)
+    assert outcome['plannedStatus'] == 200, outcome
+    assert outcome['unplannedStatus'] == 599, outcome
+    assert outcome['refused'] == ['POST /tabs'], outcome
 
 
 def main():
