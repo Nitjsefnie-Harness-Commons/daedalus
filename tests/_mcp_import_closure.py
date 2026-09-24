@@ -31,6 +31,13 @@ REGISTRY_NAMES = ('sys', 'registry')
 # attribute or as the key of a module namespace.
 REGISTRY_ATTRIBUTE = 'modules'
 
+# The noun each refusal names, so the store and default paths word one thing
+# the same way.
+_HIDDEN_NOUN = {
+    'operation': 'the import-by-name operation',
+    'registry': 'the module registry',
+}
+
 # The remedy every refusal names, and the principle it rests on.
 CLOSURE_TAIL = ('; import it normally or pass an absolute constant, because '
                 'an import closure that silently skips a module it cannot '
@@ -202,17 +209,28 @@ class _BindingWalk(ast.NodeVisitor):
             'maps to the import-by-name operation, to a value it cannot '
             'follow')
 
+    def _hidden(self, values):
+        """Which thing these values hide: the operation, the registry, or
+        neither. The store path (`_leaf`) and the default path (`_defaults`)
+        both route through this, so the two grammars cannot drift."""
+        if any(value is not None and _yields_the_operation(value, self.bound)
+               for value in values):
+            return 'operation'
+        if any(value is not None and _yields_the_registry(value, self.bound)
+               for value in values):
+            return 'registry'
+        return None
+
     def _leaf(self, node, target, values):
         """One store, offered the values it can receive.
 
         A target the pairing could not read is offered all of them: any one
         of them may land in any one leaf, so the refusal cannot name which.
         """
-        if any(value is not None and _yields_the_operation(value, self.bound)
-               for value in values):
+        hidden = self._hidden(values)
+        if hidden == 'operation':
             self._alias(node)
-        elif any(value is not None and _yields_the_registry(value, self.bound)
-                 for value in values):
+        elif hidden == 'registry':
             self._registry_alias(node)
         elif isinstance(target, ast.Name) and target.id in self.bound:
             self._rebind(node, target.id)
@@ -245,24 +263,25 @@ class _BindingWalk(ast.NodeVisitor):
         else:
             self._paired(node, target, expression)
 
-    def _refuse_default(self, node, name, default):
-        """Refuse a default that hands the operation to its parameter.
+    def _refuse_default(self, node, name, default, hidden):
+        """Refuse a default that hands the operation or the registry to its
+        parameter.
 
         The message names the offending parameter, not the whole
         definition, so a maintainer reads one line in the traceback.
         """
         self.refuse(
-            node, f'parameter {name}={ast.unparse(default)} binds the '
-            'import-by-name operation to a name this scan cannot follow')
+            node, f'parameter {name}={ast.unparse(default)} binds '
+            f'{_HIDDEN_NOUN[hidden]} to a name this scan cannot follow')
 
     def _defaults(self, node, names, defaults):
         """A parameter default binds its parameter. A parameter with no
         default is a fresh name, and one that shadows a tracked name leaves
         the map's answer standing on the conservative side."""
         for name, default in zip(names, defaults):
-            if default is not None \
-                    and _yields_the_operation(default, self.bound):
-                self._refuse_default(node, name, default)
+            hidden = self._hidden([default])
+            if hidden is not None:
+                self._refuse_default(node, name, default, hidden)
 
     def _positional_defaults(self, node):
         args = node.args
