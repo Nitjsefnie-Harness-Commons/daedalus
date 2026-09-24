@@ -136,7 +136,7 @@ CASES = [
         invoke='x(), y()'), (1, 1)),
     ('issue857-pair-list-literal', _flow(
         _RELAY, 'e = {}; e.update([("k", ordinary), (None, relay())])',
-        'x = e.setdefault("k", relay())', invoke='x()'), (0, 0)),
+        'x = e.setdefault("k", relay())', invoke='x()'), (0, 1)),
     ('issue857-update-pairs-defect', _ext_flow(
         'e = {}; e.update([("k", relay())])',
         'x = e.setdefault("k", relay())', 'x()'), (1, 1)),
