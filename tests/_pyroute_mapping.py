@@ -113,8 +113,7 @@ def _display_value(node, state):
         # A set has no positions; equal elements collapse at runtime.
         joined = merge_yielded(items.values())
         return DeferredContainer(
-            {} if joined is None else {DYNAMIC_KEY: joined},
-            None if starred_any or len(node.elts) > 1 else 1, 'set')
+            {} if joined is None else {DYNAMIC_KEY: joined}, None, 'set')
     if items or isinstance(node, ast.List) or starred_any:
         return DeferredContainer(items, index, type(node).__name__.lower())
     return None
