@@ -7,6 +7,7 @@ the floor directly, which is the only way its detection is banked. The
 import closure that decides which modules it scans is driven in
 test_mcp_import_closure.py.
 """
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -124,6 +125,114 @@ def test_an_or_nested_in_the_test_is_refused(_tmp):
     else:
         raise AssertionError('an or nested in the test was reached, not '
                              'refused')
+
+
+def test_a_compound_condition_hides_in_no_nested_statement(_tmp):
+    """A `try` under the deciding `if` does not hide its `or`.
+
+    The shape issue 570 planted in the real tools: the raise is wrapped in a
+    `try` that decides nothing, so the condition that refuses is the `if`'s
+    whatever depth the raise sits at.
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(_tmp)
+    try:
+        _mcp_guard_floor.reachable_guards(sites, [module.nested.__code__])
+    except AssertionError as raised:
+        assert 'guard_shapes.nested' in str(raised), raised
+        assert 'split' in str(raised), raised
+    else:
+        raise AssertionError('a compound condition under a try was reached, '
+                             'not refused')
+
+
+OUTER_OR_SHAPES = '''
+def armed(first, second, third):
+    if first or second:
+        if third:
+            raise ValueError('refused')
+'''
+
+
+def test_an_or_in_an_outer_test_still_refuses_the_inner_site(_tmp):
+    """The innermost statement names the key; every statement decides the `or`.
+
+    A two-`if` chain is the ordinary elif spelling: the inner test is the
+    condition, and the outer one still carries two conditions of its own.
+    """
+    sites, module = _mcp_guard_floor.guard_shape_probe(
+        _tmp, OUTER_OR_SHAPES, 'outer_or_shapes')
+    assert _mcp_guard_floor.guard_keys(sites) == [
+        ('outer_or_shapes', 'armed', 'third')], sites
+    try:
+        _mcp_guard_floor.reachable_guards(sites, [module.armed.__code__])
+    except AssertionError as raised:
+        assert 'outer_or_shapes.armed' in str(raised), raised
+        assert 'split' in str(raised), raised
+    else:
+        raise AssertionError('a compound condition in an outer test was '
+                             'reached, not refused')
+
+
+MATCH_SHAPES = '''
+def matched(value):
+    match value:
+        case 0:
+            raise ValueError('zero')
+        case _:
+            if value:
+                raise ValueError('truthy')
+'''
+
+
+def test_a_raise_under_a_match_case_is_refused(_tmp):
+    """A `match` case decides the raise and the floor cannot read its test.
+
+    Downgrading it to the raise's own text would leave the case a site no
+    tool's key can answer for, so the scan refuses instead.
+    """
+    try:
+        _mcp_guard_floor.guard_shape_probe(_tmp, MATCH_SHAPES, 'match_shapes')
+    except AssertionError as raised:
+        assert 'match_shapes:5' in str(raised), raised
+        assert 'match_case' in str(raised), raised
+        assert 'classify' in str(raised), raised
+    else:
+        raise AssertionError('a match-case raise was keyed instead of refused')
+
+
+UNCLASSIFIED_SHAPES = '''
+def guarded(value):
+    try:
+        raise ValueError('refused')
+    except ValueError:
+        pass
+'''
+
+
+def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
+    """A construct dropped from the table refuses the scan (issue 570).
+
+    The plant takes the construct out of the classification the parsed
+    fixture's own node names, so the refusal is what a future statement form
+    meets: refused, never keyed on the raise's own text.
+    """
+    path = Path(_tmp) / 'unclassified_shapes.py'
+    path.write_text(UNCLASSIFIED_SHAPES, encoding='utf-8')
+    planted = next(node for node in ast.walk(ast.parse(UNCLASSIFIED_SHAPES))
+                   if isinstance(node, ast.Try))
+    cases = tuple(node for node in _mcp_guard_floor.TRANSPARENT_STATEMENTS
+                  if node is not planted.__class__)
+    assert ast.Try not in cases, 'the plant did not apply'
+    with mock.patch.object(
+            _mcp_guard_floor, 'TRANSPARENT_STATEMENTS', cases):
+        try:
+            _mcp_guard_floor.tool_guards([path], Path(_tmp))
+        except AssertionError as refused:
+            assert 'unclassified_shapes:4' in str(refused), refused
+            assert 'Try' in str(refused), refused
+        else:
+            raise AssertionError('an unclassified construct was keyed instead '
+                                 'of refused')
 
 
 TWIN_SHAPES = '''
