@@ -326,6 +326,12 @@ def _setdefault_value(node, state):
         unusable = UNPROVABLE_SENDER if probe is not None \
             and probe is not _UNSAFE_LITERAL \
             and _usable_key(probe) is _UNRESOLVED_KEY else None
+        # The `is not None` conjunct is kept as a choice, not a
+        # requirement: it is redundant, because a name bound to no literal
+        # probes as None, which is hashable and so already fails the test
+        # below, and dropping it changes no verdict. Its neighbour is not
+        # so lucky — `_UNSAFE_LITERAL` is unresolvable for a different
+        # reason, and the arm-table probes cover that.
         return merge_yielded((*owner.items.values(), default, unusable))
     if key in owner.items: return owner.items[key]
     return default
