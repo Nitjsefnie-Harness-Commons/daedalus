@@ -16,6 +16,9 @@ from _jsread import (js_bracket_end, js_expression_end,  # noqa: E402
 from _jsroute_calls import (discover_invocations,  # noqa: E402
                             parameter_bindings, routing_events,
                             sender_candidate_bindings)
+from _jsroute_tab import (UNPROVABLE as _JS_UNPROVABLE,  # noqa: E402
+                          UNRESOLVED as _JS_UNRESOLVED,
+                          is_extension_literal, tab_key, tab_write)
 from _jsroute_timeline import (  # noqa: E402
     FunctionTimeline, InvocationReplay, body_death_index,
     declaration_records, function_reference, lexical_limits)
@@ -34,12 +37,6 @@ from _jsroute_operations import (discover_operations,  # noqa: E402
 from _jsroute_receiver import ReceiverIndex  # noqa: E402
 
 
-# A name whose object exists but whose contents this scanner cannot prove.
-# Distinct from an unknown name (a parameter, an import): unknown is silence,
-# unprovable is a claim that something happened here and was not followed.
-_JS_UNPROVABLE = object()
-
-
 def js_tab_routing_violations(path, rel, work=None):
     """The dashboard side of the same contract: the fields object of an
     extCmd call, and a runCommand object carrying `type`, may contain `tab`
@@ -50,13 +47,16 @@ def js_tab_routing_violations(path, rel, work=None):
     functions; inline object literals; names initialized by object literals;
     aliases of such names; ternary initializers whose branches both resolve;
     `Object.assign` writes; same-name direct property writes; tracked object
-    spreads; literal computed keys; the third extCmd options argument; and a
-    same-file helper return. Sender and callable aliases follow lexical
-    bindings and optional states; known calls replay captured writes.
+    spreads; computed keys the reader can name, whether a literal, a
+    concatenation of literals or a name bound to one; the third extCmd
+    options argument; and a same-file helper return. Sender and callable
+    aliases follow lexical bindings and optional states; known calls replay
+    captured writes.
 
-    Escaped objects, unresolved sender arguments, and unseen helper mutations
-    are unprovable. Unseen parameter or import names stay unknown, and a
-    simple alias to one inherits that silence.
+    Escaped objects, unresolved sender arguments, key positions no reader
+    can name, and unseen helper mutations are unprovable. Unseen parameter
+    or import names stay unknown, and a simple alias to one inherits that
+    silence.
 
     A replayed body is bounded at the first await it owns: a write or call
     written after it is unprovable at a synchronous call position, and
@@ -68,17 +68,23 @@ def js_tab_routing_violations(path, rel, work=None):
     body_at = source_index.body_at
     violations = []
     senders = ('extCmd', 'extcmd', 'runCommand')
-
     line_of = source_index.line_of
+    # `computed_key` is filled in once the receiver index that resolves a
+    # name to the literal it is bound to exists; a computed key read
+    # before then resolves to nothing, which reads as unresolved.
+    tab_context = {'mask': mask, 'text': text, 'computed_key': None,
+                   'unprovable': _JS_UNPROVABLE, 'line_of': line_of}
 
-    def is_extension_literal(value):
-        return value is not None and re.fullmatch(
-            r'["\']extension["\']', value)
+    def entry_key(left, right):
+        return tab_key(text, left, right, tab_context)
 
     def object_state(obj_start, named, depth):
         """Resolve relevant state from a literal and tracked object spreads."""
         state = {}
-        for key, value, off in js_object_entries(mask, text, obj_start):
+        for key, value, off in js_object_entries(
+                mask, text, obj_start, entry_key):
+            if key is _JS_UNRESOLVED:
+                return _JS_UNPROVABLE
             if key is None:
                 spread = value.strip()
                 if spread.startswith('{'):
@@ -425,6 +431,8 @@ def js_tab_routing_violations(path, rel, work=None):
     invocation_resolution['receivers'] = ReceiverIndex(
         mask, text, {'end': pair_end, 'start': pair_start}, bindings,
         invocation_resolution, invocation_reader, senders, work)
+    tab_context['computed_key'] = invocation_resolution[
+        'receivers'].computed_key
     carries = set()
     for match in bindings:
         expression_end = js_expression_end(mask, match.end())
@@ -583,17 +591,7 @@ def js_tab_routing_violations(path, rel, work=None):
                     if re.fullmatch(r'[\w$]+', arg) and arg in named:
                         named[arg] = _JS_UNPROVABLE
             else:
-                name = m.group(1)
-                eq = mask.index('=', m.start())
-                semi = mask.find(';', eq)
-                semi = len(mask) if semi == -1 else semi
-                state = named.get(name)
-                if state is _JS_UNPROVABLE:
-                    continue
-                if state is None:
-                    state = {}
-                state['tab'] = (line_of(m.start()), text[eq + 1:semi].strip())
-                named[name] = state
+                tab_write(named, kind, m, tab_context)
         name_progress[(depth, floor)] = (limit, cursor, named)
         return named
 

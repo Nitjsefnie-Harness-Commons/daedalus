@@ -91,6 +91,30 @@ def source_key(text, left, right, computed_key=None):
     return raw if re.fullmatch(r'[\w$]+', raw) else None
 
 
+_CONCATENATED = re.compile(
+    r'\s*' + _QUOTED + r'(?:\s*\+\s*' + _QUOTED + r')*\s*')
+_QUOTED_SPAN = re.compile(_QUOTED)
+
+
+def static_key(text, left, right, computed_key=None):
+    """The key one property position carries, or None when the reader
+    cannot name it. `source_key` reads a whole literal or a name bound to
+    one; this also folds a concatenation of literals, so `'ta' + 'b'`
+    names the key `tab` rather than no key at all."""
+    raw = text[left:right].strip()
+    if raw.startswith('[') and raw.endswith(']'):
+        raw = raw[1:-1].strip()
+    if _CONCATENATED.fullmatch(raw):
+        parts = []
+        for found in _QUOTED_SPAN.finditer(raw):
+            decoded = decode_string_literal(found.group(0))
+            if decoded is None:
+                return None
+            parts.append(decoded)
+        return ''.join(parts)
+    return source_key(text, left, right, computed_key)
+
+
 def head_left(mask, text, cursor):
     """Start of the blanked or whitespace run ending at `cursor`."""
     start = cursor
