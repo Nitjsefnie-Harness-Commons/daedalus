@@ -151,6 +151,51 @@ def test_a_non_int_key_on_a_sequence_does_not_crash(tmp):
     assert verdicts == dict.fromkeys(_UNTAKEN_KEY_STORES, (0, 0)), verdicts
 
 
+_OPAQUE = 'x = [quiet(), relay(), *args.values]'
+_SHIFTED = {
+    'opaque_star_del': (_OPAQUE, 'del x[0]', 'x[0]()'),
+    'literal_star_pop': ('x = [quiet(), relay(), *"ab"]', 'x.pop(0)',
+                         'x[0]()'),
+    'generator_star_del': ('x = [quiet(), relay(), *(i for i in [1])]',
+                           'del x[0]', 'x[0]()'),
+    'computed_del': (_OPAQUE, 'del x[int(args.flag) - 1]', 'x[0]()'),
+    'slice_del': (_OPAQUE, 'del x[:1]', 'x[0]()'),
+    'dunder_delitem': (_OPAQUE, 'x.__delitem__(0)', 'x[0]()'),
+    'computed_pop': (_OPAQUE, 'x.pop(int(args.flag) - 1)', 'x[0]()'),
+    'remove': ('q = quiet()\nx = [q, relay(), *args.values]', 'x.remove(q)',
+               'x[0]()'),
+    'slice_store': (_OPAQUE, 'x[0:1] = []', 'x[0]()'),
+    'insert': ('x = [relay(), *args.values]', 'x.insert(0, quiet())',
+               'x[1]()'),
+    'reverse': ('x = [quiet(), relay(), *args.values[:0]]', 'x.reverse()',
+                'x[0]()'),
+    'sort': ('r = relay()\nx = [quiet(), r, *args.values[:0]]',
+             'x.sort(key=lambda f: f is not r)', 'x[0]()'),
+}
+
+
+def _shifted(tmp, prefix):
+    return {name: _verdict(tmp, prefix + _QUIET + store + '\n' + mutate
+                           + _SL + read)
+            for name, (store, mutate, read) in _SHIFTED.items()}
+
+
+def test_a_shifted_star_display_reports(tmp):
+    verdicts = _shifted(tmp, _PRE)
+    assert verdicts == dict.fromkeys(_SHIFTED, (1, 1)), verdicts
+
+
+def test_a_shifted_star_display_stays_clean(tmp):
+    verdicts = _shifted(tmp, _PRE_CLEAN)
+    assert verdicts == dict.fromkeys(_SHIFTED, (0, 0)), verdicts
+
+
+def test_a_shifted_plain_list_keeps_its_positions(tmp):
+    """Issue 980: a list with no star keeps the positions it recorded."""
+    assert _verdict(tmp, _PRE + _QUIET + 'x = [quiet(), relay(), ordinary]'
+                    '\ndel x[0]' + _SL + 'x[0]()') == (1, 0)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='seqreads_')
 

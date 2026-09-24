@@ -8,6 +8,7 @@ with a clean subset.
 import ast
 
 from _pyroute_keys import _literal_key
+from _pyroute_storage import replace_deferred_storage
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredContainer,
                              DeferredGenerator, _known_value,
@@ -163,7 +164,50 @@ def sequence_method_value(node, state):
     if not isinstance(owner, DeferredContainer) or owner.kind == 'dict':
         return None
     if node.func.attr == 'copy':
-        return DeferredContainer(
-            dict(owner.items), owner.length, owner.kind, node)
+        return DeferredContainer(dict(owner.items), owner.length, owner.kind,
+                                 node, owner.star_display)
     index = _literal_key(node.args[0], state) if node.args else -1
     return merge_yielded(at_position(owner, index))
+
+
+_SHIFTING_METHODS = ('pop', 'remove', 'insert', 'reverse', 'sort',
+                     '__delitem__')
+
+
+def _shifted_names(statement):
+    """Names a statement may shift the positions of in place: a subscript
+    delete, a slice store, or a shifting method (pop only with an index)."""
+    if isinstance(statement, ast.Delete):
+        targets = statement.targets
+    elif isinstance(statement, ast.Assign):
+        targets = [target for target in statement.targets
+                   if isinstance(target, ast.Subscript)
+                   and isinstance(target.slice, ast.Slice)]
+    elif isinstance(statement, ast.Expr) \
+            and isinstance(statement.value, ast.Call):
+        func = statement.value.func
+        shifting = isinstance(func, ast.Attribute) \
+            and func.attr in _SHIFTING_METHODS \
+            and (statement.value.args or func.attr != 'pop')
+        targets = [func] if shifting else []
+    else:
+        return set()
+    return {target.value.id for target in targets
+            if isinstance(target, (ast.Subscript, ast.Attribute))
+            and isinstance(target.value, ast.Name)}
+
+
+def drop_shifted_positions(statement, state):
+    """A list from a display with a star of unknown count loses its exact
+    positions to a mutation that may shift them: every item joins the
+    DYNAMIC_KEY slot, the fail-closed read that display had on main."""
+    for name in _shifted_names(statement):
+        owner = state.callables.get(name)
+        if not isinstance(owner, DeferredContainer) \
+                or not owner.star_display:
+            continue
+        joined = merge_yielded(owner.items.values())
+        replace_deferred_storage(state, owner, DeferredContainer(
+            {} if joined is None else {DYNAMIC_KEY: joined}, None,
+            owner.kind, owner.identity, True))
+        sync_cells(state, {name})
