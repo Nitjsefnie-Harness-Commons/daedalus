@@ -225,8 +225,8 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
 def legacy_claim_key(name):
     """The logical claim key one legacy command file is consumed under.
 
-    The same key a refused legacy file is recorded and retired under, so it
-    comes from `command_queue`, which owns the format.
+    The same key a refused legacy file is recorded and retired under; the
+    format is owned by `command_queue`.
     """
     return command_queue.legacy_key(name)
 
