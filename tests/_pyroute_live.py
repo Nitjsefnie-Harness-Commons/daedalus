@@ -31,7 +31,9 @@ def _constant_getattr(value, state):
 
 def _attribute_values(owner):
     """Every deferred value an owner carries, for a name that cannot be
-    resolved to one attribute."""
+    resolved to one attribute. The alternatives arm is defensive: no owner
+    that reaches this with a dynamic name is a DeferredAlternatives in the
+    current model, so it is not covered by a table row."""
     if isinstance(owner, DeferredAlternatives):
         return [item for value in owner.values
                 for item in _attribute_values(value)]
@@ -43,11 +45,15 @@ def _attribute_values(owner):
 
 
 def _selection_value(value, state):
-    """The value a plain getattr call selects: the named attribute when the
-    owner carries it, else the default, and every value the owner carries
-    when the name is not a provable string constant. A non-string constant
-    name and an absent name without a default raise before any call, so they
-    select nothing."""
+    """The value a plain getattr call resolves to, within what the model can
+    prove: the named attribute when it resolves to a tracked value, else the
+    default in the 3-argument form; and every value the owner carries when the
+    name is not a provable string constant.
+
+    The model records no occupancy, so an attribute it does not track reads as
+    absent and the default is selected instead (daedalus issue 978). A
+    non-string constant name cannot match the model's string keys, so it
+    resolves to nothing."""
     call = _plain_getattr(value, state)
     if call is None:
         return None
@@ -57,8 +63,6 @@ def _selection_value(value, state):
         selected = merge_yielded(_selected_values(owner, name, attribute=True))
         if selected is not None:
             return selected
-        if len(call.args) < 3:
-            return None
     elif not isinstance(call.args[1], ast.Constant):
         selected = merge_yielded(_attribute_values(owner))
     else:
