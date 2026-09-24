@@ -81,12 +81,12 @@ class RateLimited(RuntimeError):
 
 
 def _executable():
-    """The `gh` to run: the fake in the suites, the real one everywhere else."""
+    """The `gh` to run: the fake in the suites, the real one elsewhere."""
     return os.environ.get('DAEDALUS_GH') or 'gh'
 
 
 def _parse(text):
-    """(status, headers, body) from a `-i` response, split at the blank line."""
+    """(status, headers, body) from a `-i` response."""
     parts = re.split(r'\r?\n\r?\n', text, maxsplit=1)
     if len(parts) != 2:
         raise QueryError('no header block in the gh response')
@@ -150,7 +150,7 @@ def _graphql_refusal(payload):
 
 
 def _call(query, variables):
-    """One `gh api graphql`, with the payload on stdin and headers asked for."""
+    """One `gh api graphql`, payload on stdin, headers asked for."""
     payload = json.dumps({'query': query, 'variables': variables or {}})
     try:
         proc = subprocess.run(
