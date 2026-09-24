@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import (BRIDGE_ENV, TMP_SEG_ROOT, TOK, mint_job,  # noqa: E402
-                       post_segment, seg_job)
+from _segments import (BRIDGE_ENV, TMP_SEG_ROOT, TOK,  # noqa: E402
+                       isolated_env, mint_job, post_segment, seg_job)
 
 # `[SEGMENT-TIMING] <job> stored=<n> <phase>=<ms>... parts=<ms> total=<ms>`
 TIMING_LINE = re.compile(
@@ -611,7 +611,6 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
 
 def _alt(tmp, name):
     """Two genuinely different roots, and the modules that take one."""
-    os.environ['DAEDALUS_DIR'] = str(Path(tmp))
     configured = Path(tmp) / 'segments'
     passed = Path(tmp) / 'passed-segments'
     configured.mkdir(parents=True)
@@ -622,6 +621,7 @@ def _alt(tmp, name):
             configured, passed)
 
 
+@isolated_env
 def test_two_writes_under_a_passed_root_never_count_the_directory(tmp):
     """A trusted record is read, not recounted, and a stale mark in the
     other tree does not untrust this one. Resolving the record or its mark
@@ -634,7 +634,6 @@ def test_two_writes_under_a_passed_root_never_count_the_directory(tmp):
         passed, 'recounttok', {'job': job}, jobs.JobQuotas(9, 8, 256))
     assert status == 200, (status, minted)
     sig = minted['sig']
-    # A stale mark in the configured tree must not untrust this one.
     (configured / f'.{job}.json.dirty').write_text('', encoding='utf-8')
     store = routes.segment_store
     real_recount = store.recount
@@ -666,6 +665,7 @@ def test_two_writes_under_a_passed_root_never_count_the_directory(tmp):
     assert record['stored_count'] == 3, record
 
 
+@isolated_env
 def test_a_refused_write_keeps_its_recount_in_the_passed_root(tmp):
     """The recount an untrusted record forces is written back to the record
     under the passed root, even when this request is then refused on the
