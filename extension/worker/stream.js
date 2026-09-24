@@ -43,8 +43,8 @@ const _SEEN_DID_MAX = 1000;
 const _SEEN_DID_KEY = 'daedalus-seen-dids';
 // No stream opens before the dedup-ledger read has completed, so a
 // keepalive connect or a heartbeat alarm cannot outrun boot's loadConfig;
-// boot always starts the stream once the read is done. A failed read
-// still opens the gate.
+// boot calls startStream once the read is done, and the call may still
+// stay idle for its own reasons. A failed read still opens the gate.
 let _ledgerReady = false;
 
 async function _loadSeenDids() {
