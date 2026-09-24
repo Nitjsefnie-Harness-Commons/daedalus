@@ -12,6 +12,10 @@ cannot tell a report from a silent merge. The negative space is pinned in
 the same module: a key the guard cannot fold but the runtime CAN hash — an
 unbound name, a concatenation, an f-string — must keep reading exactly as
 it reads today, or the discriminator has been widened rather than reused.
+
+The starred arm of a display value is not a read at all: a starred operand
+in a sequence literal carries a value, not a key, so the discriminator's
+term must stay off that arm too.
 """
 import sys
 from pathlib import Path
@@ -48,6 +52,15 @@ _NEGATIVE = [
     ('unbound-name', ''),
     ('concat', 'key = "k" + ""'),
     ('fstring', 'key = f"k"'),
+]
+
+# The starred-positional merge of a sequence literal is a value, not a key:
+# an unhashable value reaches it and reads exactly as it reads today, or
+# the discriminator's term has been over-applied to the starred arm. A set
+# is the row that reaches that arm at all — a list or a dict literal folds
+# to a deferred container and is merged by position instead.
+_STARRED = [
+    ('starred-unhashable-set', 'key = {1, 2}', '[*key]'),
 ]
 
 # The same unhashable keys written inline at the call, where no name
@@ -102,6 +115,12 @@ def test_a_hashable_unresolvable_key_still_reads_clean(tmp):
     dirty = [label for label, binding, expression in _rows(
         _NEGATIVE, _READ_FORMS) if _reported(
             tmp, label, binding, expression)]
+    assert not dirty, dirty
+
+
+def test_a_starred_unhashable_operand_still_reads_clean(tmp):
+    dirty = [label for label, binding, expression in _STARRED if _reported(
+        tmp, label, binding, expression)]
     assert not dirty, dirty
 
 
