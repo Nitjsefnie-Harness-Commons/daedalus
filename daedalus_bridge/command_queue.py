@@ -89,10 +89,12 @@ def _identity(stat_result):
     a best-effort second discriminator — a replacement written after the
     clock ticked usually differs on it — but it is not a generation: a
     coarse-grained clock gives two objects created in the same tick one
-    value, and it moves on an external `utime`. Where it cannot separate two
-    objects the sweep retires the name it vacates (`on_name_vacated`), and
-    that event, not this field, decides the last case. It is kept because it
-    is the only thing left to separate two replacements when no retire runs.
+    value, and an outside `utime`/`chmod` on a refused candidate bumps it,
+    which re-logs that same object once more (a log line, never a delivery
+    or an unlink). Where ctime cannot separate two objects the sweep retires
+    the name it vacates (`on_name_vacated`), and that event, not this field,
+    decides the last case. It is kept because it is the only thing left to
+    separate two replacements when no retire runs.
     """
     return (stat_result.st_dev, stat_result.st_ino, stat_result.st_ctime_ns)
 

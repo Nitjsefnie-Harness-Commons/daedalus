@@ -26,11 +26,15 @@ _last_delivery_ts = 0.0
 # as a stream stays connected. Each key pairs the candidate's logical name
 # with the refused object's incarnation (device, inode, change-time): the
 # TTL sweep vacates a queue name by unlinking it without an alias check, so
-# a different object taking that name later must log again, while the same
-# object refused again under the same name must not. Bounded like
-# result_store's delivery record: past the bound the oldest entry is
-# forgotten and its next refusal logs again, which keeps the log at one line
-# per candidate per bounded window.
+# a different object taking that name later must log again, and the same
+# object re-refused under the same name stays silent unless an outside
+# `utime`/`chmod` on the candidate bumps its change time — that re-logs it
+# once more. It is a duplicate log line only: never a delivery, never an
+# unlink, and it needs a writer outside the bridge, which never touches a
+# command candidate's timestamps. Bounded like result_store's delivery
+# record: past the bound the oldest entry is forgotten and its next refusal
+# logs again, which keeps the log at one line per candidate per bounded
+# window.
 _refused_candidates = {}
 _REFUSED_CANDIDATE_LIMIT = 4096
 _refused_lock = threading.Lock()
