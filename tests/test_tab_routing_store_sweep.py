@@ -335,24 +335,24 @@ _POP_THEN_READ = [
         invoke='x()'), (1, 1)),
 ]
 
-# The pop direction's over-reports on a key the guard cannot evaluate. Each
-# was measured at the pre-wave-2 head and at this one, where all four read
-# the same, so they predate every wave here; the runtime sends nothing in
-# any of them. The attribution is by mechanism, not by resemblance: an
-# f-string is the expression #967's setdefault rows carry, and a
-# concatenation is #963's, whether it reaches the pop directly, through a
-# rebind or through a name bound to it.
+# The pop direction's over-reports on a key the guard cannot evaluate: the
+# removal is not applied, so the guard still holds the key the program
+# removed and reports on the read-back. All four are that one arm, however
+# the key is spelled or reached, and the runtime sends nothing in any of
+# them. Each was measured at the pre-wave-2 head and at this one, where all
+# four read the same, so they predate every wave here. #1018 tracks this
+# arm, which is a different operation from the setdefault read.
 _POP_DIRECTION = [
-    ('known-defect-967-pop-fstring-name', _flow(
+    ('known-defect-1018-pop-fstring-name', _flow(
         _RELAY, f'{_STRING_D}; key = f"k"', 'd.pop(key, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
-    ('known-defect-967-rebind-to-fstring', _flow(
+    ('known-defect-1018-rebind-to-fstring', _flow(
         _RELAY, 'k = "k"; k = f"k"', _STRING_D, 'd.pop(k, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
-    ('known-defect-963-rebind-to-nonliteral-name', _flow(
+    ('known-defect-1018-rebind-to-concat', _flow(
         _RELAY, 'k = "k"; j = "k" + ""; k = j', _STRING_D, 'd.pop(k, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
-    ('known-defect-963-pop-concat', _flow(
+    ('known-defect-1018-pop-concat', _flow(
         _RELAY, 'k = "k"; k = "k" + ""', _STRING_D, 'd.pop(k, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
 ]
