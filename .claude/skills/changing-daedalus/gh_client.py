@@ -26,11 +26,14 @@ back as its own `after`, one `gh` invocation per page, so nothing is missed.
 `gh` in front of a watcher on a platform where a bare `gh` name does not
 resolve.
 """
+import importlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -43,6 +46,11 @@ MAX_BACKOFF = 3600
 DEFAULT_BACKOFF = 60
 SLEEP_SLICE = 1.0
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
+# Where the pipe the child watches for its parent's death is named. Its own
+# name, not the bridge's: the watchers must import with no bridge beside
+# them, and a process may legitimately run a bridge child and a watcher
+# child at once without the two watching each other.
+PARENT_WATCH_ENV = 'DAEDALUS_WATCH_PARENT_FD'
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 
 RUNS_QUERY = f'''query WatchRuns(
@@ -316,12 +324,98 @@ def workflow_runs(owner, name, sha):
     return [run for run in runs if run]
 
 
-def check_parent(parent_pid):
-    """Exit the process when the parent that armed it is gone.
+def _exit_at_eof(descriptor):
+    """Exit when the pipe reports end of file, which is the parent's death."""
+    try:
+        while os.read(descriptor, 1):
+            pass
+    finally:
+        os._exit(0)
 
-    `os.getppid()` is re-parented on POSIX and resolved per call on Windows,
-    so one comparison covers every platform these suites run on; a
-    process-group kill would cover only the POSIX ones.
+
+def spawn_watched(argv, env=None, **popen):
+    """Start a child that exits when this process disappears.
+
+    One pipe per child, and the guarantee it carries is the same on every
+    platform: the child holds the read end, this process holds the only
+    write end, and this process dying closes the last copy, which the
+    child reads as end of file. Nothing in the check depends on how the
+    platform reports a parent id, so nothing in it is a POSIX assumption -
+    a process-group kill, and a parent pid compared with `os.getppid()`,
+    both fail on Windows, where the parent id is historical and does not
+    change when the parent dies.
+
+    The handle travels to the child as a number in the environment: a file
+    descriptor on POSIX, passed with `pass_fds`; the inherited HANDLE's own
+    value on Windows, marked inheritable for the launch, which the child
+    wraps back into a descriptor with `msvcrt`.
+
+    Returns the child and the write end to hold until it is done with.
+    """
+    read_fd, write_fd = os.pipe()
+    child_env = dict(os.environ if env is None else env)
+    if os.name == 'nt':
+        msvcrt = importlib.import_module('msvcrt')
+        read_handle = msvcrt.get_osfhandle(read_fd)
+        inheritable = os.set_handle_inheritable
+        inheritable(read_handle, True)
+        startup = subprocess.STARTUPINFO()
+        startup.lpAttributeList = {'handle_list': [read_handle]}
+        child_env[PARENT_WATCH_ENV] = str(read_handle)
+    else:
+        child_env[PARENT_WATCH_ENV] = str(read_fd)
+    try:
+        try:
+            if os.name == 'nt':
+                child = subprocess.Popen(argv, env=child_env,
+                                         startupinfo=startup, **popen)
+            else:
+                child = subprocess.Popen(argv, env=child_env,
+                                         pass_fds=(read_fd,), **popen)
+        finally:
+            if os.name == 'nt':
+                inheritable(read_handle, False)
+            os.close(read_fd)
+    except BaseException:
+        os.close(write_fd)
+        raise
+    return child, write_fd
+
+
+def watch_parent():
+    """Exit this process when the one that started it disappears.
+
+    A watcher blocked on a poll interval is a watcher that cannot notice
+    anything, so the check is not a tick: a daemon thread sits on the
+    inherited pipe and ends the process at end of file, which is what the
+    parent's death looks like from inside the child. A watcher started by
+    hand has no pipe and is left alone.
+    """
+    raw = os.environ.get(PARENT_WATCH_ENV)
+    if raw is None:
+        return
+    try:
+        descriptor = int(raw)
+        if os.name == 'nt':
+            msvcrt = importlib.import_module('msvcrt')
+            descriptor = msvcrt.open_osfhandle(descriptor, os.O_RDONLY)
+        if not stat.S_ISFIFO(os.fstat(descriptor).st_mode):
+            raise ValueError('descriptor is not a pipe')
+    except (OSError, ValueError) as exc:
+        raise SystemExit(
+            f'{PARENT_WATCH_ENV} must name an inherited pipe') from exc
+    threading.Thread(target=_exit_at_eof, args=(descriptor,),
+                     name='parent-watch', daemon=True).start()
+
+
+def check_parent(parent_pid):
+    """Exit the process when the parent it was told about is gone.
+
+    A second signal beside the pipe, for a watcher that was given a pid
+    rather than armed by `spawn_watched`. `os.getppid()` is re-parented
+    when the parent dies on POSIX, and is the historical creator on
+    Windows - which is why the pipe, not this, is what carries the
+    guarantee there.
     """
     if parent_pid and os.getppid() != parent_pid:
         raise SystemExit(0)

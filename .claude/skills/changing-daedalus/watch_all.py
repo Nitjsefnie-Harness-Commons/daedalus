@@ -251,10 +251,17 @@ def _pump(name, stream, sink, kind):
 
 
 def _spawn(argv):
-    child = subprocess.Popen(
-        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding='utf-8', errors='replace')
-    return child
+    """The child, and the pipe end this process holds for it.
+
+    The end is held until the child is gone: the child watches the read end
+    for end of file, and end of file is what this process dying looks like
+    from inside it. A child therefore cannot outlive this one, on a hard
+    kill as much as on a graceful exit, and nothing in that depends on how
+    the platform reports a parent id.
+    """
+    return gh_client.spawn_watched(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        encoding='utf-8', errors='replace')
 
 
 def _watchers(pr, branch, parent_pid=None):
@@ -266,18 +273,21 @@ def _watchers(pr, branch, parent_pid=None):
     a kill of this process never runs a `finally`, so neither mechanism
     alone carries the guarantee.
     """
-    tell = ['--parent-pid', str(parent_pid)] if parent_pid else []
     return (
         ('comments', [sys.executable, '-u',
-                      str(HERE / 'pr_comment_watch.py'), str(pr)] + tell),
+                      str(HERE / 'pr_comment_watch.py'), str(pr)]),
         ('ci', [sys.executable, '-u',
-                str(HERE / 'ci_watch.py'), branch, '--debounce', '0']
-         + tell),
+                str(HERE / 'ci_watch.py'), branch, '--debounce', '0']),
     )
 
 
-def _terminate(children):
-    """Terminate, a short wait, then kill: the children never outlive us."""
+def _terminate(children, pipes):
+    """Terminate, a short wait, then kill; the children never outlive us.
+
+    Terminating them first is what makes a graceful exit immediate; the
+    pipes are closed after, so a child that ignored the terminate would
+    still see this process go.
+    """
     for child in children.values():
         if child.poll() is None:
             child.terminate()
@@ -287,6 +297,8 @@ def _terminate(children):
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=5)
+    for descriptor in pipes:
+        os.close(descriptor)
 
 
 def run_once(pr, branch):
@@ -319,11 +331,13 @@ def _emit(batch, limit, log_path):
 def run(pr, branch, debounce, limit, log_path, max_hold):
     sink = queue.Queue()
     children = {}
+    pipes = []
     watcher = gh_client.Watcher('watch_all', out=sys.stderr)
     try:
-        for name, argv in _watchers(pr, branch, os.getpid()):
-            child = _spawn(argv)
+        for name, argv in _watchers(pr, branch):
+            child, pipe_end = _spawn(argv)
             children[name] = child
+            pipes.append(pipe_end)
             print(f'started {name} watcher pid {child.pid}', file=sys.stderr,
                   flush=True)
             for kind, stream in (('out', child.stdout),
@@ -339,7 +353,7 @@ def run(pr, branch, debounce, limit, log_path, max_hold):
         return _aggregate(sink, children, watcher, pr, branch, debounce,
                           limit, log_path, max_hold)
     finally:
-        _terminate(children)
+        _terminate(children, pipes)
 
 
 def _aggregate(sink, children, watcher, pr, branch, debounce, limit,
