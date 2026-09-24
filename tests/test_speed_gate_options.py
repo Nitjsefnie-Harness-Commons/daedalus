@@ -30,11 +30,10 @@ _COMPARATOR = 'head/scripts/ci/compare_durations.py'
 _INSTRUMENT = 'head/scripts/ci/time_tests.py'
 _PROBE = 'Probe the head scripts for options'
 
-# The comparator's option set, one declaration per option so a fixture can
-# drop any named one. The body reads every attribute through `getattr`, so a
-# fixture that omits an option RUNS rather than raising: a comparator that
-# crashes still exits 1, and a control that only checks the exit code cannot
-# tell that refusal from the crash a dropped option would produce.
+# One declaration per option, so a fixture can drop any named one. The body
+# reads every argument through `getattr` and RUNS without the ones a fixture
+# omits: a fixture that crashed would exit 1, which an exit-code-only control
+# cannot tell from the refusal a dropped option should produce.
 _COMPARATOR_TEMPLATE = '''#!/usr/bin/env python3
 """A comparator with a chosen argparse surface."""
 import argparse
@@ -76,18 +75,16 @@ def _comparator(*dropped):
     return _COMPARATOR_TEMPLATE.format(declared=kept)
 
 
-# Exactly the surface that stood before 64aa98dd added `--ratio-file`, which
-# is what a head predating that commit runs against this workflow.
+# Exactly the surface that stood before 64aa98dd added `--ratio-file`.
 _OLD_COMPARATOR = _comparator('--ratio-file')
-# The required option the drop path must not swallow.
+# The option the drop path must not swallow.
 _HEADLESS_COMPARATOR = _comparator('--head')
 # The only fixture on which exact-token and substring matching disagree:
 # `--base-label` is offered, `--base` is not, and `--base` is a prefix of it.
 _LABEL_ONLY_COMPARATOR = _comparator('--base')
 
-# The instrument's options in the order the step passes them. As with the
-# comparator, the body reads through `getattr` so a fixture missing an option
-# runs instead of raising.
+# In the order the step passes them; the body reads through `getattr` for the
+# reason the comparator template does.
 _INSTRUMENT_TEMPLATE = '''#!/usr/bin/env python3
 """A timing instrument with a chosen argparse surface."""
 import argparse
@@ -142,8 +139,8 @@ def _instrument(selection=False, dropped=()):
     return _INSTRUMENT_TEMPLATE.format(declared=declared)
 
 
-# One suite per report file, timed on both sides, so the real comparator has a
-# shared set to sum and a ratio to record.
+# Two timed tests per report file, so the real comparator has a shared set to
+# sum and a ratio to record.
 _DURATIONS = {'tests': {'test_one_slow': 1.0, 'test_two_slow': 2.0}}
 
 
@@ -346,8 +343,8 @@ def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
     assert recorded['only'] == ['test_speed*.py'], recorded
 
 
-# Each script and the step that calls it. Both are checked by one test: a
-# control on one call site and an assumption on the other is a gap.
+# Both sites in one test: a control on one and an assumption on the other
+# is a gap, not a proof.
 _CALL_SITES = (
     ('compare_durations.py', 'Compare'),
     ('time_tests.py', 'Run both suites, interleaved'),
@@ -374,11 +371,13 @@ def test_every_option_a_script_declares_reaches_its_step(tmp):
 
 
 def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
-    """The probe's one assumption, checked rather than assumed.
+    """The width assumption of the probe's own extraction, checked.
 
-    argparse wraps its usage line to the terminal, so a regex over a
+    argparse wraps its usage line to the terminal, so a pattern over a
     rendered help could read a truncated option at one width and the whole
-    of it at another.
+    of it at another. The pattern is the workflow's own, read out of the
+    probe step and handed to the same grep the probe uses, so this covers
+    the workflow's regex rather than a copy that could drift from it.
     """
     del tmp
     comparator = ROOT / 'scripts' / 'ci' / 'compare_durations.py'
@@ -474,16 +473,36 @@ def _declared_options(script):
     return set(re.findall(r"add_argument\(\s*'(--[a-z][a-z0-9-]*)'", source))
 
 
+def _probe_pattern():
+    """The probe step's own extraction pattern, read out of the workflow.
+
+    Read rather than copied: a copy is a second thing to keep in step with
+    the first, and a control built on one keeps passing when the workflow's
+    own pattern is changed or truncated.
+    """
+    step = workflow_script(_tests_yml(), 'timed', _PROBE)
+    found = re.search(r"grep -oE '([^']+)'", step)
+    assert found, 'the probe step has no grep -oE extraction pattern'
+    return found.group(1)
+
+
 def _help_tokens(script, environment):
-    """The option tokens a rendered `--help` carries, at one width."""
+    """The option tokens the PROBE'S OWN reduction finds, at one width.
+
+    The pattern is read from the workflow and run under the same shell the
+    probe runs under, so this exercises the workflow's extraction. `grep -o`
+    keeps the leading whitespace its pattern matched; the probe's `tr -d ' '`
+    is what strips it, and the set drops the repeats the usage line adds.
+    """
     completed = subprocess.run(
         ['python3', str(script), '--help'], capture_output=True,
         check=True, timeout=120, env=environment)
-    # The same reduction the probe's shell does: match with the leading
-    # whitespace, then strip it, so a token cannot arrive padded.
-    return {token.replace(' ', '')
-            for token in re.findall(r'(?:^|\s)-{1,2}[a-z][a-z0-9-]+',
-                                    completed.stdout.decode('utf-8'))}
+    reduced = subprocess.run(
+        [_util.workflow_bash(), '-c', 'grep -oE "$1"', 'sh',
+         _probe_pattern()],
+        input=completed.stdout, capture_output=True, check=True, timeout=120)
+    return {line.replace(' ', '')
+            for line in reduced.stdout.decode('utf-8').splitlines()}
 
 
 def main():

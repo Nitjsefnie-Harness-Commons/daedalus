@@ -1510,14 +1510,12 @@ jobs:
         if: steps.baseline.outputs.point != ''
         # This job's TEXT comes from the merge ref while its SCRIPTS come
         # from head/, and the two are trees of different ages. A flag the
-        # merge ref's text carries can be one head/ cannot parse, and the
-        # cell then dies on a branch whose own changes had nothing to do
-        # with speed. Each script is therefore asked what it takes, and each
-        # caller below passes only what it advertised.
+        # text carries can be one head/ cannot parse, and the cell then
+        # dies on a branch whose own changes had nothing to do with speed.
         #
         # An unreadable --help is a refusal, never a skip: it is also what a
-        # head predating the script itself looks like, and "we could not
-        # find out" must not read as "there is nothing to pass".
+        # head predating the script itself looks like, so "we could not find
+        # out" must not read as "there is nothing to pass".
         run: |
           probe() {
             script="$1"
@@ -1589,13 +1587,11 @@ jobs:
         # reports on BOTH sides, so it checks for them explicitly rather than
         # trusting an exit code it ignores.
         run: |
-          # The instrument comes from head/ while this text comes from the
-          # merge ref, so a selection flag the text carries can be one the
-          # head's parser refuses — and that refusal exits before any report
-          # is written, which the MISSING guard below reports as a setup
-          # failure rather than as the flag mismatch it is. A dropped
-          # selection means this cell times MORE suites than the matrix
-          # slice, so it says so rather than losing the slice in silence.
+          # A selection flag the head's parser refuses exits before any
+          # report is written, which the MISSING guard below reports as a
+          # setup failure rather than as the flag mismatch it is. Dropping
+          # the selection times MORE suites than the matrix slice, not
+          # fewer, so the step says so rather than losing the slice quietly.
           REQUIRED="--tree --python --out"
           add() { opt="$1"; shift
             case " $TIME_OPTIONS " in
@@ -1710,13 +1706,11 @@ jobs:
         # test; any other regression, or an accepted test past its bound,
         # still fails this cell.
         run: |
-          # The comparator comes from head/ and this text from the merge
-          # ref, so a flag here can be one that parser refuses. Matching is
-          # by exact token, never by substring: --base is a prefix of
-          # --base-label, and a prefix match would hand a head the wrong
-          # flag's argument. What a dropped option costs is named rather
-          # than assumed: without --ratio-file the cell records no ratio,
-          # and without --summary-file it reports nothing to the run.
+          # Matching is by exact token, never by substring: --base is a
+          # prefix of --base-label, and a prefix match would hand a head the
+          # wrong flag's argument. What a dropped option costs is named
+          # rather than assumed: without --ratio-file the cell records no
+          # ratio, and without --summary-file it reports nothing to the run.
           REQUIRED="--base --head"
           add() { opt="$1"; shift
             case " $COMPARE_OPTIONS " in
