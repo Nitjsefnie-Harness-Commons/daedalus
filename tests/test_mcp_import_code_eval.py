@@ -92,6 +92,38 @@ def call():
 ''')
 
 
+def test_a_from_builtins_import_reaches_the_builtin(_tmp):
+    """`from builtins import eval` binds the builtin itself, not a shadow.
+
+    The module-bound rule must not read a from-builtins import as a local;
+    the unaliased and the aliased spelling both reach the builtin, the same
+    from-import grammar the import operation is recognised through.
+    """
+    for source, site in (
+            ('''
+from builtins import eval
+
+
+def load(name):
+    return eval('importlib.import_module')(name)
+''', 6),
+            ('''
+from builtins import eval as run
+
+
+def load(name):
+    return run('importlib.import_module')(name)
+''', 6),
+            ('''
+from builtins import compile
+
+
+def load():
+    return compile('importlib.import_module', 'f', 'eval')
+''', 6)):
+        _assert_refusal(_tmp, source, site, 'code-evaluating')
+
+
 def test_a_function_local_shadow_is_not_the_code_evaluating_builtin(_tmp):
     """A `def exec` shadows the builtin only inside its function; a
     parameter and a closure do the same. Each is pinned so a shadow test
