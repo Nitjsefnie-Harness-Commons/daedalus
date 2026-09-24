@@ -77,3 +77,28 @@ __CONTEXT__.importScripts = (...sourceNames) => {
 };
 """.replace('__CONTEXT__', context_name).replace(
         '__TRACE_REGISTRATION__', trace_registration)
+
+
+# The VM context the message-driven worker harnesses share: the strict gate's
+# `fetch`, the browser APIs the worker's own modules assume, inert timers and
+# a deterministic id source. One copy, so the harnesses that dispatch
+# commands through it cannot drift from each other.
+RELAY_CONTEXT = r"""
+const context = vm.createContext({
+  chrome,
+  fetch: bridgeFetch,
+  crypto: { randomUUID: () => 'relay-1' },
+  AbortController,
+  TextDecoder,
+  URL,
+  performance,
+  atob,
+  btoa,
+  setTimeout: () => 1,
+  clearTimeout() {},
+  setInterval: () => 1,
+  clearInterval() {},
+  console: { log() {}, warn() {}, error() {} },
+});
+""" + import_scripts_stub('context') + r"""
+"""

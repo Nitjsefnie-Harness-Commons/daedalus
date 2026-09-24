@@ -8,11 +8,13 @@ sampler gap at one doubled interval, so a frozen stretch is charged at most
 that cap — and the test-side queue and CLI waits are bounded by poll
 attempts. Each control below was watched failing against the wall-clock
 code it replaces, for the defect's own reason.
+
+The worker-bound scenarios run the shipped worker in a Node VM with the
+shared bridge gate in place: every mode declares the exact requests its
+boot makes, and a request outside the plan is refused by status and
+recorded, so an invented fetch fails the scenario.
 """
 import ast
-import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
@@ -21,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _repo  # noqa: E402
 import _util  # noqa: E402
 import test_cli  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 
@@ -28,9 +32,14 @@ _SAMPLE_MS = 100
 _CREDIT_CAP_MS = 2 * _SAMPLE_MS
 _SETTLE_BUDGET_MS = 10000
 
-# Declared for the node child: _repo is not a recognized root owner, so the
-# launch's cwd does not prove itself and the environment audit requires this.
-_STARVE_ENV = _util.child_coverage('scrub')
+BRIDGE = 'https://starve.example.com'
+SYNC = 'POST /sync-tabs'
+# Every mode's recording, from a run of the shipped worker: boot opens the
+# stream and syncs the tab list, and nothing after that touches the bridge.
+# The boot stream fetch is answered 503 and is declared and asserted like
+# the accounted routes.
+BOOT_PLAN = [SYNC]
+BOOT_STREAM = [503]
 
 # The guard's serviced budget and the sampler interval live in cdp.js; the
 # numbers here only say what a control waits through.
@@ -41,7 +50,8 @@ _CDP_STARVE_HARNESS = (
 const fs = require('fs');
 const vm = require('vm');
 
-const [backgroundPath, mode] = process.argv.slice(1);
+// run_node_program pushes the payload as an object literal, last, not text.
+const [backgroundPath, mode, plan] = process.argv.slice(1);
 const fakeTimers = mode !== 'freeze';
 const released = [];
 const timers = [];
@@ -64,12 +74,28 @@ function response(status, data) {
   };
 }
 
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees.
+const BRIDGE_URL = '__BRIDGE__';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+// The stream stays unanswered, as a live SSE connection does: the fetch
+// never settles, so a boot that reaches startStream cannot spin on the
+// retry loop.
+function streamResponse() {
+  return new Promise(() => {});
+}
+""" + STRICT_FETCH + r"""
+
 const chrome = {
   storage: {
     local: {
       get: async () => ({
         'daedalus-token': 'starve-token',
-        'daedalus-server': 'test-bridge',
+        'daedalus-server': '__BRIDGE__',
       }),
       set: async () => {},
       remove: async () => {},
@@ -128,15 +154,7 @@ const chrome = {
 
 const context = vm.createContext({
   chrome,
-  fetch: async (target, init = {}) => {
-    if (String(target).endsWith('/result') && init.method === 'POST') {
-      return response(200, { ok: true });
-    }
-    if (String(target).includes('/stream?')) {
-      return new Promise(() => {});
-    }
-    return response(200, { ok: true });
-  },
+  fetch: bridgeFetch,
   crypto: { randomUUID: () => 'starve-id' },
   AbortController,
   TextDecoder,
@@ -163,6 +181,18 @@ const context = vm.createContext({
 
 function delay() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+// Read at write time, not at load time: the arrays are filled by the fetches
+// the drive below makes.
+function gateReport() {
+  return {
+    records: nonStreamFetches,
+    refused: refusedFetches,
+    badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
+  };
 }
 
 async function drive() {
@@ -198,7 +228,8 @@ async function drive() {
       }
     }, 0);
     await pending.catch(() => {});
-    process.stdout.write(JSON.stringify({ mode, outcome, value }));
+    process.stdout.write(JSON.stringify(Object.assign(
+      { mode, outcome, value }, gateReport())));
     return;
   }
   let survivedTheFreeze = null;
@@ -220,15 +251,16 @@ async function drive() {
   }
   await delay();
   await delay();
-  process.stdout.write(JSON.stringify(
-    { mode, outcome, value, released, fires, survivedTheFreeze }));
+  process.stdout.write(JSON.stringify(Object.assign(
+    { mode, outcome, value, released, fires, survivedTheFreeze },
+    gateReport())));
 }
 
 drive().catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;
 });
-""")
+""").replace('__BRIDGE__', BRIDGE)
 
 # An outer backstop, not a bound on awaited work: the freeze control's child
 # spends its budget in one deliberate busy-wait, so a wedged child is the
@@ -237,16 +269,23 @@ _FREEZE_RUN_TIMEOUT_S = 60
 
 
 def _starve_run(mode):
-    """Drive the settlement guard in a node child under one starvation mode."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the CDP settlement guard'
-    result = subprocess.run(
-        [node, '-e', _CDP_STARVE_HARNESS,
-         str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=_repo.ROOT, env=_STARVE_ENV, capture_output=True, text=True,
+    """Drive the settlement guard in a node child under one starvation mode.
+
+    The mode's declared requests are checked against what the gate recorded,
+    so a request outside the plan is refused by status and fails here.
+    """
+    outcome = run_gate(
+        require_node(), _CDP_STARVE_HARNESS,
+        [str(_repo.ROOT / 'extension' / 'background.js'), mode],
+        cwd=_repo.ROOT, plan={'planned': list(BOOT_PLAN)},
         timeout=_FREEZE_RUN_TIMEOUT_S)
-    assert result.returncode == 0, (result.returncode, result.stderr)
-    return json.loads(result.stdout)
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=list(BOOT_PLAN), planned_stream=list(BOOT_STREAM))
+    return outcome
 
 
 def test_a_cdp_settlement_needing_one_turn_after_a_freeze_still_settles(

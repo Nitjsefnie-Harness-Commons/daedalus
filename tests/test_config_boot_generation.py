@@ -14,23 +14,27 @@ token the shared config ends up holding. No wall-clock margin: the interleaving
 is driven by releasing the held read and draining microtasks, never a timeout.
 
 The assertions are exact counts and exact list contents (with their lengths),
-so none of them can pass vacuously over an empty collection, and none of the
-observed values pass through the bridge `fetch` fake.
+so none of them can pass vacuously over an empty collection. Every scenario
+declares the bridge requests it makes and the shared gate refuses anything
+else, so a request the worker invents is recorded and fails the scenario
+rather than answering 200 to nobody.
 """
-import json
-import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
+BRIDGE = 'https://bridge.example.com'
+SYNC = 'POST /sync-tabs'
 
-_HARNESS = r"""
+
+_HARNESS = (r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -39,7 +43,7 @@ const [backgroundPath, plan] = process.argv.slice(1);
 const messageListeners = [];
 const alarmListeners = [];
 const storageListeners = [];
-const storageStore = { 'daedalus-server': 'https://bridge.example.com' };
+const storageStore = { 'daedalus-server': '__BRIDGE__' };
 // A hold on boot's FIRST storage read — the config get for
 // ['daedalus-token', 'daedalus-server']. Holding it parks boot's generation
 // with config.token still '', the window a restart's alarm lands in. One
@@ -84,15 +88,21 @@ function eventTarget(listeners = null) {
   };
 }
 
-async function bridgeFetch(target) {
-  const url = String(target);
-  // The stream stays unanswered, as a live SSE connection does: the fetch
-  // never settles, so a boot that reaches startStream cannot spin on the
-  // retry loop (a 503 would, forever).
-  if (url.includes('/stream?')) return new Promise(() => {});
-  if (url.endsWith('/result')) return response(200, { ok: true });
-  return response(200, { ok: true });
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees.
+const BRIDGE_URL = '__BRIDGE__';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+// The stream stays unanswered, as a live SSE connection does: the fetch
+// never settles, so a boot that reaches startStream cannot spin on the
+// retry loop (a 503 would, forever).
+function streamResponse() {
+  return new Promise(() => {});
 }
+""" + STRICT_FETCH + r"""
 
 const chrome = {
   storage: {
@@ -307,7 +317,13 @@ async function run() {
     outcome.storedToken = storageStore['daedalus-token'];
     outcome.finalToken = vm.runInContext('config.token', context);
   }
-  return outcome;
+  return Object.assign(outcome, {
+    records: nonStreamFetches,
+    refused: refusedFetches,
+    badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
+  });
 }
 
 run().then((result) => {
@@ -316,19 +332,42 @@ run().then((result) => {
   process.stderr.write((error.stack || String(error)) + '\n');
   process.exitCode = 1;
 });
-"""
+""").replace('__BRIDGE__', BRIDGE)
+
+# Each scenario's declared bridge requests, from a recording of the shipped
+# worker driven through a permissive recorder: a boot that gets past its
+# config read opens the stream and syncs the tab list, and a scenario whose
+# config read fails (or is held, so boot's continuation never runs) makes no
+# bridge request at all. Those scenarios declare none, which is a stronger
+# statement than a blocklist: the gate proves no request of any kind was made.
+SCENARIO_PLANS = {
+    'boot-generation': ((), ()),
+    'config-retry': ((), ()),
+    'heartbeat-failed-read': ((), ()),
+    'token-cleared': ((SYNC,), (503,)),
+    'boot-success': ((SYNC,), (503,)),
+}
 
 
 def _run(plan):
-    """Drive the worker under Node with one plan and read back."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    result = run_node_program(
-        node, _HARNESS, [str(EXTENSION_ROOT / 'background.js')],
-        cwd=ROOT, payload=plan)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    """Drive the worker under Node with one plan and read back.
+
+    The scenario's declared requests are checked against what the gate
+    recorded, so a request the worker invents outside the plan is refused by
+    status and fails here.
+    """
+    planned, planned_stream = SCENARIO_PLANS[plan['scenario']]
+    outcome = run_gate(
+        require_node(), _HARNESS,
+        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
+        plan=dict(plan, planned=list(planned)))
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=list(planned), planned_stream=list(planned_stream))
+    return outcome
 
 
 def test_a_heartbeat_alarm_during_the_config_read_joins_boot(tmp):
