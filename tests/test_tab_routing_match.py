@@ -28,6 +28,15 @@ HOLE = 'mystery = locals()["make_routed"]()\n'
 MERGE_SEQ = ('def choose():\n'
              '    if args.flag: return pair()\n'
              '    return (relay(),)\n')
+# A dict merge whose branches disagree: the first is benign, the second
+# routed. Reading only the first branch would stay clean, so a row over this
+# moves under a first-branch-only mutant (I2 / code-M2).
+MERGE_DISAGREE = ('def choose():\n'
+                  '    if args.flag: return {"k": ordinary}\n'
+                  '    return {"k": routed}\n')
+# A dict whose key the guard cannot fold, so it lives under DYNAMIC_KEY.
+DYNKEY = 'd = {}\nd[chr(ord("z"))] = relay()\n'
+DYNKEY_ORD = 'd = {}\nd[chr(ord("z"))] = ordinary\n'
 # The assignment binder's hole, with a tab-accepting mystery so the row moves
 # to (1, 1) under a shared-hole fix; the routed-lambda form would not.
 ASSIGN_HOLE = (PREFIX + ROUTED
@@ -61,6 +70,8 @@ def case(subject, pattern, call, guard='', extra=''):
 def _rows():
     """(label, body, expected) triples. Every reported spelling has a clean
     twin and every clean twin has a row that would move if the element moved.
+    The guard-only cost row has no runtime twin (its call is a TypeError), so
+    it is the one reported row without one.
     A row whose comment says `fail-closed` records the guard reporting an
     unprovable position the runtime does not reach; a row whose comment says
     `known gap` pins a measured limitation this round did not close."""
@@ -79,7 +90,9 @@ def _rows():
                              'rest[0]()'), (1, 1), ''),
         ('star-twin', case('[ordinary, relay()]', '[x, *rest]', 'x()'),
          (0, 0), ''),
-        # A bare star binds nothing, holds its position, and must not crash.
+        # A bare star occupies its position and binds nothing; the name guard
+        # that stops a `None` star name reaching a name-set is what pins the
+        # round-0 crash (the target placeholder beside it is inert).
         ('bare-star', case('[relay(), 1]', '[handler, *_]', 'handler()'),
          (1, 1), 'F1'),
         ('bare-star-alone', case('[relay(), 1]', '[*_]', 'ordinary()'),
@@ -145,10 +158,10 @@ def _rows():
         ('singleton', case('relay()', 'None', 'ordinary()'), (0, 0), 'F6'),
         # Pins this arm's known limitation: a class capture names an
         # attribute reached through the subject's class, which the binder
-        # does not model, so it reads clean. Tracked in issue 951.
+        # does not model, so it reads clean. Filed as issue 1003.
         ('class-capture-known-gap', case('C(relay())', 'C(fn)', 'fn()',
                                          extra=CLASS), (1, 0),
-         'known gap: class pattern unmodelled'),
+         'known gap: class pattern unmodelled, issue 1003'),
         # A key the guard cannot resolve leaves the slot unprovable; the
         # unprovable marker catches a `tab=`-keyword call, so the routed
         # lambda form reads clean here too (same limitation as the hole).
@@ -175,7 +188,49 @@ def _rows():
         # filed separately (value-model change). The mystery is tab-accepting
         # so the row reads (1, 1) under a shared-hole fix and discriminates.
         ('assignment-hole-known-gap', ASSIGN_HOLE, (1, 0),
-         'known gap: assignment binder hole, filed'),
+         'known gap: assignment binder hole, filed #1010'),
+        # C1: a dynamic-keyed subject folds the DYNAMIC_KEY entry into the
+        # lookup, so a literal-key read must not read "no such key".
+        ('dynkey-match', case('d', '{"z": v}', 'v()', extra=DYNKEY),
+         (1, 1), 'C1'),
+        ('dynkey-twin', case('d', '{"z": v}', 'ordinary()',
+                             extra=DYNKEY_ORD), (0, 0), 'C1'),
+        # I1-spec: a listed key no branch carries means the case cannot run,
+        # so `**rest` is not paired either.
+        ('map-rest-kw', case('{"k": relay()}', '{"n": z, **r}',
+                             'r["k"]()'), (0, 0), 'I1spec'),
+        # I2 / code-M2: branches disagree (benign first, routed second), so
+        # reading only the first branch would read clean; the row moves under
+        # a first-branch-only mutant. Fail-closed: runtime takes the benign
+        # branch, the guard cannot decide, so it reports.
+        ('merge-discriminating', case('choose()', '{"k": v}', 'v()',
+                                      extra=ROUTED + MERGE_DISAGREE),
+         (0, 1), 'I2 fail-closed: branches disagree, runtime took benign'),
+        # I3: a star binds a real remaining-items container.
+        ('star-alone-container', case('[relay(), ordinary]', '[*rest]',
+                                      'rest[0]()'), (1, 1), 'I3'),
+        # Section 6: a value pattern over a position the guard cannot
+        # compare fails closed; runtime 0, reported. Disclosed, not suppressed.
+        ('seq-value-in-seq', case('[relay(), ordinary]', '[x, 5]', 'x()'),
+         (0, 1), 'section-6 fail-closed: guard cannot prove 5 != position'),
+        # Clean twins for reported rows that lacked one.
+        ('star-suffix-twin', case('[relay(), ordinary]', '[*rest, y]',
+                                  'y()'), (0, 0), ''),
+        ('pattern-as-name-twin', case('pair()', '[a, b] as whole', 'b()'),
+         (0, 0), ''),
+        ('sub-as-name-twin', case('[pair()]', '[[a, b] as inner]', 'b()'),
+         (0, 0), ''),
+        ('merge-undecided-twin', case('choose()', '[x, y]', 'y()',
+                                      extra=MERGE_SEQ), (0, 0), ''),
+        ('mapping-key-twin', case('{"k": relay()}', '{"k": v}',
+                                  'ordinary()'), (0, 0), ''),
+        ('mapping-rest-twin', case('{"a": 1, "k": relay()}',
+                                   '{"a": z, **rest}',
+                                   'ordinary()'), (0, 0), ''),
+        ('mapping-merge-twin', case('choose()', '{"k": v}', 'ordinary()',
+                                    extra=MERGE_DICT), (0, 0), ''),
+        ('bare-star-twin', case('[relay(), 1]', '[handler, *_]',
+                                'ordinary()'), (0, 0), ''),
     ]
     return r
 

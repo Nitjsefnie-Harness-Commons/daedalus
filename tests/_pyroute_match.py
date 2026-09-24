@@ -16,19 +16,25 @@ merge subject pairs to the merge of its branches, and a key the guard cannot
 resolve leaves the slot unprovable rather than silent. A pattern that
 provably cannot match the subject (a sequence of the wrong arity, a value
 pattern over a deferred subject) leaves its names unpaired. A class pattern
-or a value pattern that binds nothing leaves its names cleared and unpaired:
-that is this arm's measured limitation, tracked in issue 951, and the
-fail-closed alternative false-positives on
-`test_destructured_and_walrus_alias_boundaries`.
+is the one form this binder does not model: its captures name an attribute
+reached through the subject's class, so it is left cleared and unpaired. That
+is this arm's measured limitation, filed as issue 1003, and the fail-closed
+alternative false-positives on `test_destructured_and_walrus_alias_boundaries`.
+
+The merge rows depend on the shared `merge_yielded` agreement rule and
+`alias_target_pairs`' cross-branch merge; `merge-discriminating` is the row
+that moves under a first-branch-only or first-wins rewrite of this arm.
 """
 import ast
 
-from _pyroute_mapping import (_UNRESOLVED_KEY, alias_target_pairs,
-                              apply_assignment_bindings, _literal_key)
+from _pyroute_mapping import (_UNRESOLVED_KEY, _literal_key,
+                              _selected_values, alias_target_pairs,
+                              apply_assignment_bindings)
 from _pyroute_state import (UNPROVABLE_SENDER, FlowState, bind_alias_target,
                             clear_names, dedupe_states, rebound_names)
-from _pyroute_values import (DeferredAlternatives, DeferredContainer,
-                             _known_value, is_deferred_value, merge_yielded)
+from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
+                             DeferredContainer, _known_value,
+                             is_deferred_value, merge_yielded)
 
 
 _STORE = ast.Store()
@@ -102,26 +108,43 @@ def _mapping_branches(value):
     return [value]
 
 
+def _key_possible(literal, branches):
+    """Whether any branch carries the key, literally or folded from a dynamic
+    entry. A branch that lacks the key and holds no dynamic entry provably
+    does not have it, so a mapping pattern naming it cannot run."""
+    return any(literal in branch.items or DYNAMIC_KEY in branch.items
+               for branch in branches)
+
+
 def _bind_mapping(pattern, value, state):
     """Pair a mapping pattern's keys, and `**rest`, to the subject. A
     resolvable literal key pairs to the value the subject carries under it,
-    across a merge subject; a key the guard cannot resolve leaves the slot
-    unprovable; a subject that is not a mapping, or a key it does not carry,
-    cannot match, so the case leaves its names unpaired."""
+    across a merge subject, read through the shared `_selected_values` so a
+    dynamic-keyed subject folds into the lookup; a key the guard cannot
+    resolve leaves the slot unprovable; a subject that is not a mapping
+    cannot match; and a listed key no branch carries means the case cannot
+    run, so no capture — not even `**rest` — is paired."""
     branches = _mapping_branches(value)
     if not all(isinstance(branch, DeferredContainer)
                and branch.kind == 'dict' for branch in branches):
         return  # the subject is not a mapping; the case cannot match
+    resolved = []
     for key, sub in zip(pattern.keys, pattern.patterns):
         literal = _literal_key(key, state)
         if literal is _UNRESOLVED_KEY:
-            _unprovable(sub, state)
+            resolved.append((sub, None))
             continue
-        holders = [branch.items.get(literal) for branch in branches
-                   if literal in branch.items]
-        if not holders:
-            continue  # no branch carries the key; the case cannot match
-        _merge_bind(sub, holders, state)
+        if not _key_possible(literal, branches):
+            return  # a listed key no branch carries; the case cannot run
+        resolved.append((sub, [
+            held for branch in branches
+            for held in _selected_values(branch, literal)
+            if held is not None]))
+    for sub, holders in resolved:
+        if holders is None:
+            _unprovable(sub, state)
+        else:
+            _merge_bind(sub, holders, state)
     if pattern.rest:
         rests = []
         for branch in branches:
