@@ -25,6 +25,15 @@ ROUTED = ('def routed(tab=None):\n'
           '        if tab is not None else None\n'
           'def make_routed():\n    return routed\n')
 HOLE = 'mystery = locals()["make_routed"]()\n'
+MERGE_SEQ = ('def choose():\n'
+             '    if args.flag: return pair()\n'
+             '    return (relay(),)\n')
+# The assignment binder's hole, with a tab-accepting mystery so the row moves
+# to (1, 1) under a shared-hole fix; the routed-lambda form would not.
+ASSIGN_HOLE = (PREFIX + ROUTED
+               + 'mystery = locals()["make_routed"]()\n'
+               + 'a, b, c = [relay(), mystery, ordinary]\n'
+               + 'send = ext_cmd\nb(tab=0)')
 
 
 def guard_only_verdict(tmp, body):
@@ -42,7 +51,6 @@ def guard_only_verdict(tmp, body):
     mutated = Path(tmp) / 'guard_only.py'
     mutated.write_text(ast.unparse(tree) + '\n', encoding='utf-8')
     return len(py_tab_routing_violations(mutated, mutated.name))
-
 
 
 def case(subject, pattern, call, guard='', extra=''):
@@ -65,8 +73,8 @@ def _rows():
         ('bare-value', case('relay()', 'v', 'ordinary()'), (0, 0), ''),
         ('wildcard', case('relay()', '_', 'ordinary()'), (0, 0), ''),
         # A star binds the remaining items as a real container.
-        ('star-prefix', case('[ordinary, relay()]', '[x, *rest]',
-                            'rest[0]()'), (1, 1), ''),
+        ('star-prefix',
+         case('[ordinary, relay()]', '[x, *rest]', 'rest[0]()'), (1, 1), ''),
         ('star-suffix', case('[relay(), ordinary]', '[*rest, y]',
                              'rest[0]()'), (1, 1), ''),
         ('star-twin', case('[ordinary, relay()]', '[x, *rest]', 'x()'),
@@ -102,21 +110,21 @@ def _rows():
         ('cannot-match-nested', case('[relay(), ordinary]', '[[a], b]',
                                      'a()'), (0, 0), ''),
         # A merge the subject does not decide reports, fail-closed.
-        ('merge-undecided', case('choose()', '[x, y]', 'x()', extra=
-                                 'def choose():\n    if args.flag: return '
-                                 'pair()\n    return (relay(),)\n'),
-         (1, 1), ''),
+        ('merge-undecided', case('choose()', '[x, y]', 'x()',
+                                 extra=MERGE_SEQ), (1, 1), ''),
         # A mapping pattern pairs a literal key; `**rest` is the remainder.
         ('mapping-key', case('{"k": relay()}', '{"k": v}', 'v()'), (1, 1), ''),
         ('mapping-cannot-match', case('{"j": relay()}', '{"k": v}', 'v()'),
          (0, 0), ''),
-        ('mapping-rest', case('{"a": 1, "k": relay()}', '{"a": z, **rest}',
-                               'rest["k"]()'), (1, 1), ''),
+        ('mapping-rest',
+         case('{"a": 1, "k": relay()}', '{"a": z, **rest}', 'rest["k"]()'),
+         (1, 1), ''),
         # A merge subject pairs the key to the merge of its branches.
-        ('mapping-merge', case('choose()', '{"k": v}', 'v()', extra=
-                               MERGE_DICT), (1, 1), 'F4'),
-        ('mapping-merge-2', case('choose()', '{"k": v}', 'v()', extra=
-                                 MERGE_DICT_B), (1, 1), 'F4'),
+        ('mapping-merge',
+         case('choose()', '{"k": v}', 'v()', extra=MERGE_DICT), (1, 1), 'F4'),
+        ('mapping-merge-2',
+         case('choose()', '{"k": v}', 'v()', extra=MERGE_DICT_B), (1, 1),
+         'F4'),
         # An or-pattern: agreeing alternatives keep the value; disagreeing
         # ones leave the position unprovable (never last-write-wins).
         ('or-agree-routed', case('[relay()]', '[x] | [x]', 'x()'), (1, 1),
@@ -126,9 +134,9 @@ def _rows():
         ('or-swap-routed', case('[ordinary, relay()]', '[x, y] | [y, x]',
                                 'y()'), (1, 1), 'F3'),
         ('or-swap-fail-closed', case('[ordinary, relay()]', '[x, y] | [y, x]',
-                                     'x()'), (0, 1), 'F3 fail-closed: x is '
-                                     'ambiguous, the runtime took the other '
-                                     'alternative'),
+                                     'x()'), (0, 1),
+         'F3 fail-closed: x is ambiguous, the runtime took the other '
+         'alternative'),
         # A value pattern that the subject cannot satisfy binds nothing.
         ('value-as-capture', case('relay()', '5 as v', 'v()'), (0, 0), 'F5'),
         # The singleton half of the same value-test rule (N3).
@@ -164,12 +172,10 @@ def _rows():
         ('hole-twin', case('[relay(), mystery, ordinary]', '[a, b, c]',
                            'b()', extra=ROUTED + HOLE), (0, 0), 'F2a'),
         # The assignment binder's hole is pre-existing and unfixed here; it is
-        # filed separately (value-model change). This row pins the current
-        # false green so the gap is visible, not silent.
-        ('assignment-hole-known-gap', PREFIX +
-         'mystery = locals()["relay"]()\n'
-         'a, b, c = [relay(), mystery, ordinary]\nsend = ext_cmd\nb()',
-         (1, 0), 'known gap: assignment binder hole, filed'),
+        # filed separately (value-model change). The mystery is tab-accepting
+        # so the row reads (1, 1) under a shared-hole fix and discriminates.
+        ('assignment-hole-known-gap', ASSIGN_HOLE, (1, 0),
+         'known gap: assignment binder hole, filed'),
     ]
     return r
 
@@ -188,7 +194,6 @@ def test_guard_only_cost_rows(tmp):
                 for label, body, _ in rows]
     expected = [(label, value) for label, _, value in rows]
     assert observed == expected, observed
-
 
 
 def test_match_capture_pairing(tmp):
