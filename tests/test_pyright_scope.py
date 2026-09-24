@@ -119,9 +119,14 @@ def test_the_two_configs_agree_outside_their_deliberate_differences(tmp):
     main = _config()
     tests = _tests_config()
     deliberate = {'include', 'exclude', 'extraPaths'}
+    # A sentinel, not `dict.get`'s default of None, so a key that is absent
+    # from one config and present-and-null in the other reads as a
+    # disagreement: `None` on both sides would otherwise satisfy "identical"
+    # whether the key is missing from both or null in one.
+    absent = object()
     shared = (set(main) | set(tests)) - deliberate
     mismatched = sorted(key for key in shared
-                        if main.get(key) != tests.get(key))
+                        if main.get(key, absent) != tests.get(key, absent))
     assert not mismatched, (
         f'the two checker configs disagree on {mismatched}; every key '
         f'other than {sorted(deliberate)} must stay byte-identical, so the '
