@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Deferred callable bodies remain reachable through binders and joins."""
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute_state import FlowState  # noqa: E402
+from _pyroute_targets import materialized_order  # noqa: E402
+from _pyroute_values import DeferredContainer  # noqa: E402
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 
 
@@ -470,6 +474,10 @@ def test_materialized_container_destructuring(tmp):
         ('slice-reversed', 'x, y = pair()[::-1]', 'y()', 'x()'),
         ('slice-open', 'x, y = pair()[:]', 'x()', 'y()'),
         ('star', 'x, *rest = list(pair())', 'x()', 'rest[0]()'),
+        ('alternatives', 'def choose():\n'
+         '    if args.flag: return list(pair())\n'
+         '    return tuple(pair())\n'
+         'x, y = list(choose())', 'x()', 'y()'),
     ]
     cases = []
     for label, store, bad, good in shapes:
@@ -513,6 +521,135 @@ def test_with_tuple_target_pairs_enter_result(tmp):
             'lambda: send(', 'lambda: ordinary('), (0, 0)),
     ]
     verdicts(tmp, cases)
+
+
+def test_with_name_target_pairs_enter_result(tmp):
+    """`with ... as x` pairs the __enter__ result to the name whole, the way
+    the assignment binder pairs a single-name target."""
+    store = ('class C:\n'
+             '    def __enter__(self): return relay()\n'
+             '    def __exit__(self, *a): pass\n'
+             'def ctx(): return C()\n'
+             'with ctx() as x:\n'
+             '    pass\n')
+    called = body(store, 'x()')
+    cases = [
+        ('with-name-called', called, (1, 1)),
+        ('with-name-discarded', body(store, '0'), (0, 0)),
+        ('with-name-clean', called.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
+def test_with_enter_send_is_reported(tmp):
+    """A send inside __enter__ reaches ext_cmd when the with statement runs
+    with send already rebound; the walk that reads __enter__'s return value
+    is what reports it, and its clean counterpart stays clean."""
+    enter = ('send = ext_cmd\n'
+             'class C:\n'
+             '    def __enter__(self):\n'
+             '        send("_focus", "focus-tab", tab=args.chrome_tab)\n'
+             '        return 1\n'
+             '    def __exit__(self, *a): pass\n'
+             'def ctx(): return C()\n'
+             'with ctx() as x:\n    pass\n')
+    plain = enter.replace('send("_focus"', 'ordinary("_focus"')
+    verdicts(tmp, [
+        ('enter-send', body(enter, '0'), (1, 1)),
+        ('enter-plain', body(plain, '0'), (0, 0)),
+    ])
+
+
+def test_reversed_producer_comprehension(tmp):
+    """A comprehension does not reorder: its element at output index i is the
+    producer's element at index i, so an order-reversing producer's routed
+    element lands at index 1 and index 0 reads clean. x[1] stays the tracked
+    false green of #948; the order-preserving rows are the regression set."""
+    reversing = ['reversed(pair())', 'list(reversed(pair()))',
+                 'pair()[::-1]']
+    preserving = ['pair()', 'list(pair())', 'tuple(pair())', 'pair()[:]',
+                  'list(list(pair()))']
+    cases = []
+    for index, producer in enumerate(reversing):
+        store = f'x = [c for c in {producer}]'
+        first = body(store, 'x[0]()')
+        cases.append((f'reversing-{index}-first', first, (0, 0)))
+        cases.append((f'reversing-{index}-routed', body(store, 'x[1]()'),
+                      (1, 0)))
+        cases.append((f'reversing-{index}-clean', first.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    for index, producer in enumerate(preserving):
+        store = f'x = [c for c in {producer}]'
+        routed = body(store, 'x[0]()')
+        cases.append((f'preserving-{index}-routed', routed, (1, 1)))
+        cases.append((f'preserving-{index}-other', body(store, 'x[1]()'),
+                      (0, 0)))
+        cases.append((f'preserving-{index}-clean', routed.replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)))
+    verdicts(tmp, cases)
+
+
+def test_reversed_producer_comprehension_consumers(tmp):
+    """A consumer that walks a comprehension's result visits every element,
+    so the routed element must still be reported there; the result's own
+    positional reads stay exact."""
+    loop = ('send = ext_cmd\n'
+            'for v in [c for c in reversed(pair())]:\n    v()')
+    loop_pair = ('send = ext_cmd\n'
+                 'for v in [c for c in pair()]:\n    v()')
+    nested = 'x = [d for c in reversed(pair()) for d in [c]]'
+    nested_pair = 'x = [d for c in pair() for d in [c]]'
+    cases = [
+        ('loop-reversed', body(loop, '0'), (1, 1)),
+        ('loop-preserving', body(loop_pair, '0'), (1, 1)),
+        ('loop-reversed-clean', body(loop, '0').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+        ('nested-first', body(nested, 'x[0]()'), (0, 0)),
+        ('nested-routed', body(nested, 'x[1]()'), (1, 0)),
+        ('nested-preserving', body(nested_pair, 'x[0]()'), (1, 1)),
+        ('nested-clean', body(nested, 'x[0]()').replace(
+            'lambda: send(', 'lambda: ordinary('), (0, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
+def test_shadowed_materializer_names(tmp):
+    """A name that shadows list or reversed is not the builtin, so its call
+    gets no ordered pairing: the shadow decides the element order at runtime,
+    not the builtin the spelling matches."""
+    cases = [
+        ('shadowed-list', body(
+            'list = lambda seq: seq[::-1]\nx, y = list(pair())', 'x()'),
+         (0, 0)),
+        ('shadowed-list-other', body(
+            'list = lambda seq: seq[::-1]\nx, y = list(pair())', 'y()'),
+         (1, 1)),
+        ('shadowed-reversed', body(
+            'reversed = list\nx, y = reversed(pair())', 'y()'), (0, 0)),
+        ('shadowed-reversed-clean', body(
+            'reversed = list\nx, y = reversed(pair())', 'x()').replace(
+                'lambda: send(', 'lambda: ordinary('), (0, 0)),
+    ]
+    verdicts(tmp, cases)
+
+
+def test_materialized_order_only_for_order_preserving_consumers(_tmp):
+    """list and tuple re-kind a container without reordering or dropping an
+    element, so their result keeps the operand's indices; every other eager
+    consumer destroys order or does not yield a positional container."""
+    node = ast.parse('pair()').body[0].value
+    container = DeferredContainer({0: 'first', 1: 'second'}, 2, 'tuple')
+    state = FlowState({}, {}, {}, {id(node): container}, set(), set(),
+                      {}, set())
+    for consumer in ('list', 'tuple'):
+        ordered = materialized_order(consumer, node, [state])
+        assert ordered is not None, consumer
+        assert ordered.kind == consumer, consumer
+        assert ordered.items == {0: 'first', 1: 'second'}, consumer
+    for consumer in ('dict', 'frozenset', 'max', 'min', 'set', 'sorted',
+                     'sum'):
+        assert materialized_order(consumer, node, [state]) is None, consumer
 
 
 def main():
