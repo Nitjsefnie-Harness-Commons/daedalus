@@ -367,39 +367,39 @@ def _opaque(store, held='send'):
             'return x["k"]("_focus", "focus-tab", tab=args.chrome_tab)')
 
 
-def test_opaque_part_O1_reports(tmp):
+def test_opaque_part_display_unpack_reports(tmp):
     assert _verdict(tmp, _opaque('x = {"j": 1, **args.box}')) == (1, 1)
 
 
-def test_opaque_part_O1_clean_is_unprovable(tmp):
+def test_opaque_part_display_unpack_clean_is_unprovable(tmp):
     assert _verdict(tmp, _opaque(
         'x = {"j": 1, **args.box}', 'ordinary')) == (0, 1)
 
 
-def test_opaque_part_O2_reports(tmp):
+def test_opaque_part_dict_call_unpack_reports(tmp):
     assert _verdict(tmp, _opaque('x = dict(j=1, **args.box)')) == (1, 1)
 
 
-def test_opaque_part_O2_clean_is_unprovable(tmp):
+def test_opaque_part_dict_call_unpack_clean_is_unprovable(tmp):
     assert _verdict(tmp, _opaque(
         'x = dict(j=1, **args.box)', 'ordinary')) == (0, 1)
 
 
-def test_opaque_part_O3_reports(tmp):
+def test_opaque_part_or_name_reports(tmp):
     assert _verdict(tmp, _opaque(
         'o = args.box\nx = {"j": 1} | o')) == (1, 1)
 
 
-def test_opaque_part_O3_clean_is_unprovable(tmp):
+def test_opaque_part_or_name_clean_is_unprovable(tmp):
     assert _verdict(tmp, _opaque(
         'o = args.box\nx = {"j": 1} | o', 'ordinary')) == (0, 1)
 
 
-def test_opaque_part_O6_reports(tmp):
+def test_opaque_part_or_attribute_reports(tmp):
     assert _verdict(tmp, _opaque('x = {"j": 1} | args.box')) == (1, 1)
 
 
-def test_opaque_part_O6_clean_is_unprovable(tmp):
+def test_opaque_part_or_attribute_clean_is_unprovable(tmp):
     assert _verdict(tmp, _opaque(
         'x = {"j": 1} | args.box', 'ordinary')) == (0, 1)
 
