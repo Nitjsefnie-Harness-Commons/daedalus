@@ -79,10 +79,7 @@ def _reads_timeout(node):
 
 
 def _wait_timeout_keyword(source):
-    """The `timeout` keyword of the suite's process.wait, or None.
-
-    The suite's wait is the one whose bound reads the `timeout` parameter;
-    the waits in _terminate_and_reap pass the constant 10, so they are not
+    """The waits in _terminate_and_reap pass the constant 10, so they are not
     the anchor."""
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
@@ -99,9 +96,7 @@ def _wait_timeout_keyword(source):
 
 
 def _scale_suite_wait(source, factor):
-    """Return `source` with the suite wait handed `timeout * factor`.
-
-    The anchor is located by ast so an ordinary edit cannot retire it; a
+    """The anchor is located by ast so an ordinary edit cannot retire it; a
     miss blames the anchor, not the guarded behaviour."""
     keyword = _wait_timeout_keyword(source)
     assert keyword is not None, (
@@ -112,6 +107,7 @@ def _scale_suite_wait(source, factor):
     node = keyword.value
     row = node.lineno - 1
     raw = lines[row].encode()
+    # The splice assumes a one-line value; a multi-line value would corrupt it.
     lines[row] = (raw[:node.col_offset] + f'timeout * {factor}'.encode()
                   + raw[node.end_col_offset:]).decode()
     return ''.join(lines)
@@ -164,19 +160,19 @@ def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
 
 
 def test_the_timeout_record_names_the_bound_the_wait_was_given(tmp):
-    # The record must name the applied 1.0 s, not the configured 2.0 s.
+    factor = 0.5
     root = _sandbox(tmp, {'test_staller.py': _STALLING_SUITE})
     runner = root / 'run_tests.py'
     mutated = _scale_suite_wait(
-        runner.read_bytes().decode(), 0.5)
+        runner.read_bytes().decode(), factor)
     applied = _wait_timeout_keyword(mutated)
     assert applied is not None, (
         'the rewritten runner has no process.wait bound to the timeout '
         'parameter: the MUTATION ANCHOR changed shape')
-    expected = ast.parse('timeout * 0.5', mode='eval').body
+    expected = ast.parse(f'timeout * {factor}', mode='eval').body
     assert ast.dump(applied.value) == ast.dump(expected), (
         'the MUTATION did not apply: the suite wait bound is '
-        f'{ast.dump(applied.value)}, not timeout * 0.5')
+        f'{ast.dump(applied.value)}, not timeout * {factor}')
     runner.write_bytes(mutated.encode('utf-8'))
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
@@ -185,7 +181,8 @@ def test_the_timeout_record_names_the_bound_the_wait_was_given(tmp):
     staller_block = _suite_block(result.stdout, 'test_staller.py')
     assert 'SUITE TIMED OUT' in staller_block, (result.stdout,
                                                 result.stderr)
-    assert _timeout_record(1.0) in staller_block, result.stdout
+    assert _timeout_record(_OVERRUN_BOUND_S * factor) in staller_block, (
+        result.stdout)
     assert _timeout_record(_OVERRUN_BOUND_S) not in staller_block, (
         result.stdout)
 
