@@ -170,11 +170,15 @@ def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
     The two headers name instants an hour apart, so the value the refusal
     carries says which one was read; a window around the runner's own clock
     would say only how fast this machine got here, which is a claim a
-    loaded windows leg decides.
+    loaded windows leg decides. The delay is 37 because that is not a value
+    any default in this client carries: 60 is the absent-reset backoff and 90
+    is the other control's fixture, so a client that read the header's
+    presence and answered with either of them would be told apart from one
+    that read its value.
     """
     mod = _client()
     now = 1790266796.5
-    retry_after = 60
+    retry_after = 37
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
         'status': 429, 'headers': {
             'Retry-After': str(retry_after),
