@@ -326,11 +326,11 @@ def _unknown_lookup_default(node, state):
 
 def _mapping_item_value(node, owner, state):
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
-    key = node.args[0] if node.args else None
-    if isinstance(key, ast.Constant):
+    key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
+    if key is not _UNRESOLVED_KEY:
         if DYNAMIC_KEY not in owner.items:
-            return owner.items.get(key.value, default)
-        return merge_yielded((*_selected_values(owner, key.value), default))
+            return owner.items.get(key, default)
+        return merge_yielded((*_selected_values(owner, key), default))
     return merge_yielded((*owner.items.values(), default))
 
 

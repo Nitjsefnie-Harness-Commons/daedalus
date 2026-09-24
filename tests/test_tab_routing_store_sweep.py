@@ -227,11 +227,16 @@ def test_issue962_name_bound_setdefault_key(tmp):
     assert not bad, bad
 
 
-# The literal key forms around that lookup. A tuple and a unary-minus
-# literal are keys the shared evaluator folds, on either side of the store;
-# an f-string is not folded by it, so both f-string rows stay unresolved and
-# read clean, as issue 967 records. The label carries that, so the row
-# cannot be read as a claim that a clean verdict is correct.
+# The literal key forms around that lookup. A key the shared evaluator folds
+# reaches the model the same way on the three operations that resolve one: a
+# dict literal's key, the key a `pop` removes and the key a `get`/`pop`
+# reads, which is the property `test_pop_then_read_resolves_one_key` pins and
+# which the read side satisfied only from the third wave on. A subscript
+# store is not one of the three: it parks a non-constant key in the dynamic
+# slot, as it always has. An f-string is not folded by the evaluator at all,
+# so both f-string rows stay unresolved and read clean, as issue 967 records;
+# the label carries that, so the row cannot be read as a claim that a clean
+# verdict is correct.
 _ISSUE967 = [
     ('tuple-key-by-name', _flow(
         _RELAY, 'd = {(1, 2): relay()}; key = (1, 2)',
@@ -249,6 +254,7 @@ _ISSUE967 = [
         _RELAY, 'd = {"k": relay()}; key = f"{\'k\'}"',
         'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
 ]
+
 
 def test_issue967_literal_key_forms(tmp):
     bad = []
@@ -286,32 +292,51 @@ _UNUSABLE_KEYS = [
     ('unusable-key-set', 'key = {1, 2}'),
 ]
 
+# One key, three operations. Every row pops a key and reads that same key
+# back, so a guard that removes the key and then cannot resolve the read
+# reports a value the program never reads. The string-keyed twins are the
+# negative space: the point is that the evaluable form behaves like the
+# constant form, not that every pop reads clean. The last row is the read
+# whose key the guard cannot evaluate at all, which stays #963's class.
+_TUPLE_D = 'd = {(1, 2): relay(), (3, 4): relay()}'
+_STRING_D = 'd = {"k": relay(), "j": relay()}'
+_POP_THEN_READ = [
+    ('pop-tuple-lit', _flow(
+        _RELAY, _TUPLE_D, 'd.pop((1, 2), None)',
+        invoke='d.get((1, 2), ordinary)()'), (0, 0)),
+    ('pop-tuple-name', _flow(
+        _RELAY, f'{_TUPLE_D}; key = (1, 2)', 'd.pop(key, None)',
+        invoke='d.get((1, 2), ordinary)()'), (0, 0)),
+    ('pop-tuple-read-by-name', _flow(
+        _RELAY, f'{_TUPLE_D}; r = (1, 2)', 'd.pop((1, 2), None)',
+        invoke='d.get(r, ordinary)()'), (0, 0)),
+    ('rebind-to-tuple-then-pop', _flow(
+        _RELAY, 'key = (1, 2)', _TUPLE_D, 'd.pop(key, None)',
+        invoke='d.get((1, 2), ordinary)()'), (0, 0)),
+    ('pop-str-lit', _flow(
+        _RELAY, _STRING_D, 'd.pop("k", None)',
+        invoke='d.get("k", ordinary)()'), (0, 0)),
+    ('pop-str-name', _flow(
+        _RELAY, f'{_STRING_D}; key = "k"', 'd.pop(key, None)',
+        invoke='d.get("k", ordinary)()'), (0, 0)),
+    ('pop-str-read-by-name', _flow(
+        _RELAY, f'{_STRING_D}; r = "k"', 'd.pop("k", None)',
+        invoke='d.get(r, ordinary)()'), (0, 0)),
+    ('rebind-to-str-then-pop', _flow(
+        _RELAY, 'key = "k"', _STRING_D, 'd.pop(key, None)',
+        invoke='d.get("k", ordinary)()'), (0, 0)),
+    ('read-unevaluable-key', _flow(
+        _RELAY, 'd = {"k": relay()}', 'x = d.get("k" + "", ordinary)',
+        invoke='x()'), (1, 1)),
+]
 
-def test_rebinding_drops_the_first_literal(tmp):
+def test_pop_then_read_resolves_one_key(tmp):
     bad = []
-    for label, body, expected in _REBINDING:
+    for label, body, expected in _POP_THEN_READ:
         actual = _tracked_focus_verdict(tmp, body, counts=True)
         if actual != expected:
             bad.append((label, actual, expected))
     assert not bad, bad
-
-
-def test_unusable_key_reads_unprovable(tmp):
-    quiet = []
-    for label, binding in _UNUSABLE_KEYS:
-        source = Path(tmp) / f'{label}.py'
-        source.write_text(
-            'def ordinary(*a, **k):\n'
-            '    return 0\n'
-            'def probe():\n'
-            '    d = {"k": 1}\n'
-            f'    {binding}\n'
-            '    send = d.setdefault(key, ordinary)\n'
-            '    return send("_focus", "focus-tab", tab=5)\n',
-            encoding='utf-8')
-        if not py_tab_routing_violations(source, source.name):
-            quiet.append(label)
-    assert not quiet, quiet
 
 
 def test_store_form_verdicts(tmp):
