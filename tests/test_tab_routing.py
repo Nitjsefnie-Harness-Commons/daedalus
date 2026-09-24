@@ -10,8 +10,8 @@ import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _pyroute import (dict_assignments, payload_keys,  # noqa: E402
                       py_tab_routing_violations)
-from _pyroute_selections import SELECTION_PRE, SELECTIONS  # noqa: E402
 from _pyroute_state import literal_iterable_cardinality  # noqa: E402
+from _tabroute_selections import SELECTION_PRE, SELECTIONS  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 
