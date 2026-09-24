@@ -402,9 +402,9 @@ def _configured_fixture(node, bridge_url, token, worker_target,
     # generation before the write, so nothing reassigns `config` from a stale
     # pre-write snapshot afterwards; the write then changes the settled values
     # and its onChanged is the last writer. The other order let a boot read
-    # slower than this write clobber `config`, after which storage already
-    # held the target, the retries fired no onChanged, and the verdict stayed
-    # false for the whole budget.
+    # slower than this write clobber `config`, after which the serverUrl never
+    # recovered (storage already held the target, so no onChanged re-fired for
+    # it) and the verdict stayed false for the whole budget.
     configure = (
         '(async () => { await loadConfig(); '
         + 'await chrome.storage.local.set(' + storage
