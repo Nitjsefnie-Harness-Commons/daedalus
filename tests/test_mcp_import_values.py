@@ -323,27 +323,63 @@ def load(name):
 ''', 6, 'cannot read statically')
 
 
-def test_a_string_literal_naming_the_operation_is_the_declared_limit(_tmp):
-    """`sys.modules['importlib'].import_module` is a declared limit.
+def test_a_string_literal_naming_the_operation_is_refused(_tmp):
+    """A string that NAMES the operation is refused the way a name is.
 
-    The walk tracks names, not strings, so an operation reached through a
-    string literal that NAMES it — `sys.modules['importlib']` or
-    `importlib.__dict__['import_module']` — is accepted, not refused. This
-    is a DISCLOSED limit, not a silent hole: the module's opening claim
-    names it, and this case pins that it is still accepted, so a future
-    change that starts refusing it is a deliberate one that reopens the
-    disclosure. The mechanism is not recognised here on purpose.
+    The map tracks names, so a string literal was a hole of the same size:
+    `sys.modules['importlib']` names a module by string that the walk cannot
+    resolve, and `.__dict__['import_module']` names the operation's own
+    attribute by string the way a dotted attribute does. Neither is a
+    spelling the closure may skip, so each is refused at its own site.
     """
-    scanned = _scans_silently(_tmp, '''
+    _assert_refusal(_tmp, '''
 import sys
 
 
 def load(name):
     loader = sys.modules['importlib'].import_module
+    return loader(name)
+''', 6, 'cannot resolve')
+    _assert_refusal(_tmp, '''
+def load(name):
     other = __import__('importlib').__dict__['import_module']
-    return loader(name), other
-''')
-    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+    return other
+''', 3, 'cannot follow')
+
+
+def test_a_registry_read_that_reaches_no_operation_still_refuses(_tmp):
+    """The unresolvable module itself is refused, not only the operation
+    read off it — the same fail-closed posture the tail states."""
+    _assert_refusal(_tmp, '''
+import sys
+
+
+def version():
+    return sys.modules['json'].__version__
+''', 6, 'cannot resolve')
+
+
+def test_the_registry_arrives_under_every_import_grammar(_tmp):
+    """`import sys as s` and `from sys import modules` bind the registry,
+    so a spelling test on the literal `sys.modules` would miss both."""
+    for source, site in (
+            ('\nimport sys as s\n\n\ndef load():\n'
+             '    return s.modules["json"]\n', 6),
+            ('\nfrom sys import modules\n\n\ndef load():\n'
+             '    return modules["json"]\n', 6),
+            ('\nfrom sys import modules as reg\n\n\ndef load():\n'
+             '    return reg["json"]\n', 6)):
+        _assert_refusal(_tmp, source, site, 'cannot resolve')
+
+
+def test_a_mapping_lookup_naming_the_operation_refuses(_tmp):
+    """A `.get` or a `dict.get` names the operation by string the same way
+    a subscript does; the refusal names the string's own site."""
+    for source, site in (
+            ('\ndef load(table):\n    return table.get("import_module")\n', 3),
+            ('\ndef load(namespace):\n'
+             '    return dict.get(namespace, "__import__")\n', 3)):
+        _assert_refusal(_tmp, source, site, 'cannot follow')
 
 
 def test_the_operation_delivered_as_a_call_argument_is_the_declared_limit(
@@ -375,13 +411,15 @@ use(importlib.import_module)
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
     """The refusals are scoped to the import-by-name operation.
 
-    A name rebound to an ordinary object, and a `getattr` for an ordinary
-    attribute, are ordinary code; refusing them would refuse the closure's
-    modules for writing Python. Every store form and every value shape the
-    walk now reads appears here bound to an ordinary value — including the
-    deferred-delivery shapes and the two declared limits — because the
-    structural fix is only safe while ordinary code stays silent: an
-    over-broad classifier is caught by name in this one case.
+    A name rebound to an ordinary object, a `getattr` for an ordinary
+    attribute, an ordinary dict-subscript keyed by a string that is NOT the
+    operation's name, and a module registry reached by a name the map does
+    not track are all ordinary code; refusing them would refuse the
+    closure's modules for writing Python. Every store form and every value
+    shape the walk now reads appears here bound to an ordinary value —
+    including the deferred-delivery shapes — because the structural fix is
+    only safe while ordinary code stays silent: an over-broad classifier is
+    caught by name in this one case.
     """
     _write_tree(Path(_tmp), {'composition.py': '''
 import contextlib
@@ -456,7 +494,8 @@ def shapes(handle, flag, table):
     table['k'] = handle
     return (conditional, choice, compared, indexed, starred, listed, counted,
             nested, joined, made, grown, renamed, submodules, loaded,
-            rows_of(handle), attribute_bases(handle, flag, table))
+            rows_of(handle), attribute_bases(handle, flag, table),
+            string_keyed_but_ordinary(handle, table, table))
 
 
 def load_ordinary(handle):
@@ -481,6 +520,16 @@ def attribute_bases(handle, flag, table):
     returned = load_ordinary(handle).import_module
     keyed = table[handle].import_module
     return (looked_up, listed, chosen, combined, returned, keyed)
+
+
+def string_keyed_but_ordinary(handle, table, registry):
+    """A string that does NOT name the operation is an ordinary read."""
+    by_module_name = {'importlib': handle}['importlib']
+    by_other_name = table.get('import_module_alias', None)
+    attribute_by_name = getattr(handle, 'import_module_alias', None)
+    untracked_registry = registry['importlib']
+    return (by_module_name, by_other_name, attribute_by_name,
+            untracked_registry)
 
 
 def rows_of(handle):
