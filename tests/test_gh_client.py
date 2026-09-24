@@ -278,6 +278,22 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     assert clock.at[1] >= clock.at[0] + 3, clock.at
 
 
+def test_a_child_exits_when_the_pipe_this_process_holds_closes(tmp):
+    del tmp
+    mod = _client()
+    child, pipe_end = mod.spawn_watched(
+        [sys.executable, '-c',
+         'import sys, time; sys.path.insert(0, sys.argv[1]);'
+         ' import gh_client; gh_client.watch_parent();'
+         ' time.sleep(5); print("slept")',
+         str(SKILL)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True)
+    os.close(pipe_end)
+    out, err = child.communicate(timeout=60)
+    assert child.returncode == 0, (child.returncode, err)
+    assert 'slept' not in out, out
+
+
 def test_a_passed_bound_ends_the_wait_without_another_request(tmp):
     del tmp
     mod = _client()
