@@ -316,7 +316,7 @@ def test_survivor_X7c_rest_restar_stays_clean(tmp):
 
 
 def test_callable_key_in_a_pair_of_unknown_length_does_not_crash(tmp):
-    # The callable key itself is not modelled (a known miss on main too).
+    # A callable used as a dict key is not modelled: issue 1012.
     assert _run(tmp, 'd = dict([(relay(), *' + _K2 + ')])\nx = [*d]'
                 + _SL + 'x[0]()') == (1, 0)
 
@@ -333,7 +333,7 @@ def _callable_key(tmp, name, clean=False):
 
 
 def test_callable_key_in_a_tuple_pair_does_not_crash(tmp):
-    # The callable key itself is not modelled (a known miss on main too).
+    # A callable used as a dict key is not modelled: issue 1012.
     assert _callable_key(tmp, 'tuple_pair') == (1, 0)
 
 
@@ -342,7 +342,7 @@ def test_callable_key_in_a_tuple_pair_stays_clean(tmp):
 
 
 def test_callable_key_in_a_list_pair_does_not_crash(tmp):
-    # The callable key itself is not modelled (a known miss on main too).
+    # A callable used as a dict key is not modelled: issue 1012.
     assert _callable_key(tmp, 'list_pair') == (1, 0)
 
 
@@ -351,7 +351,7 @@ def test_callable_key_in_a_list_pair_stays_clean(tmp):
 
 
 def test_callable_key_in_a_update_pair_does_not_crash(tmp):
-    # The callable key itself is not modelled (a known miss on main too).
+    # A callable used as a dict key is not modelled: issue 1012.
     assert _callable_key(tmp, 'update_pair') == (1, 0)
 
 
