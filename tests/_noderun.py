@@ -16,9 +16,17 @@ from pathlib import Path
 import _util
 
 
-def run_node_program(node, program, arguments, *, cwd, payload=None,
+def run_node_program(node, program, arguments, *, cwd,
+                     env=_util.child_coverage('scrub'), payload=None,
                      timeout=30):
-    """Run a Node program from a closed, automatically cleaned file."""
+    """Run a Node program from a closed, automatically cleaned file.
+
+    `env` is where a caller's coverage declaration lands; the terminal
+    launch below owns the environment the child actually runs with. The
+    coverage guard reads `env=` as a static declaration at every level,
+    so no threaded parameter can carry it — the value that reaches the
+    child is the `child_coverage('scrub')` call at the subprocess below.
+    """
     with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
         program_path = Path(directory) / 'program.js'
         prologue = 'process.argv.splice(1, 1);'

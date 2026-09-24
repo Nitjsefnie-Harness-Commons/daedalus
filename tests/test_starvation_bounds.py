@@ -27,6 +27,10 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import import_scripts_stub  # noqa: E402
 
+# The coverage guard cannot prove `_repo.ROOT` is the checkout root through
+# run_gate, so this call site declares the child environment explicitly.
+_ENV = _util.child_coverage('scrub')
+
 
 _SAMPLE_MS = 100
 _CREDIT_CAP_MS = 2 * _SAMPLE_MS
@@ -277,7 +281,7 @@ def _starve_run(mode):
     outcome = run_gate(
         require_node(), _CDP_STARVE_HARNESS,
         [str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=_repo.ROOT, plan={'planned': list(BOOT_PLAN)},
+        cwd=_repo.ROOT, plan={'planned': list(BOOT_PLAN)}, env=_ENV,
         timeout=_FREEZE_RUN_TIMEOUT_S)
     assert_gate_clean(
         contract_faults=outcome['contractFaults'],
