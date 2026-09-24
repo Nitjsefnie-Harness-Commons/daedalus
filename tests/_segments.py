@@ -2,13 +2,11 @@
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
-`BRIDGE_ENV` is the environment every bridge child of these suites carries:
-the credential the suites' requests present, applied per spawn, because
-`_util.bridge()` strips every inherited `DAEDALUS_*` variable before applying
-its own settings and the caller's `env=`. Nothing here writes to the suite
-process's own `os.environ`: a suite reads the credential from the Python
-name `TOK` and hands `BRIDGE_ENV` to the child it spawns, and the module
-leaves the suite process's environment exactly as it found it.
+`BRIDGE_ENV` is what every bridge child of these suites carries, applied
+per spawn because `_util.bridge()` strips every inherited `DAEDALUS_*`
+variable before applying the caller's `env=`. Nothing here writes to the
+suite process's own environment: a suite reads the credential from `TOK` and
+hands `BRIDGE_ENV` to the child it spawns.
 """
 import functools
 import sys
@@ -18,12 +16,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
-
-# Keep the bridge child's MCP side-thread off the fixed port 8086: several
-# bridges run per suite, and the second one to bind 8086 would only log a
-# crash, but port 0 removes the collision entirely. `_util.bridge()` sets
-# `DAEDALUS_MCP_PORT` on the child's own environment for every spawn, so
-# nothing has to be published here to reach it.
 
 TOK = 'segtok'
 
