@@ -332,7 +332,8 @@ def test_a_planned_throw_answers_by_throwing_and_is_still_recorded(tmp):
     assert outcome['statuses'] == ['throw: Failed to fetch'], outcome
     assert outcome['records'] == [
         {'request': OTHER, 'url': BRIDGE + '/other', 'refused': False,
-         'body': {}, 'auth': None, 'status': 'throw'}], outcome
+         'body': {}, 'auth': None, 'signal': None, 'status': 'throw'}], (
+             outcome)
     assert outcome['refused'] == [], outcome
 
 

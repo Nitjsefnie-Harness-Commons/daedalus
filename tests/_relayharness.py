@@ -8,14 +8,30 @@ which channel took the source, what the page was able to answer with, and
 which invocation each result belonged to.
 """
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _repo import EXTENSION_ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
+from _util import child_coverage  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
+
+# The coverage guard cannot prove EXTENSION_ROOT is the checkout root
+# through the inline driver, so this call site declares its child env.
+_ENV = child_coverage('scrub')
+
+_BRIDGE = (
+    str(EXTENSION_ROOT / 'background.js'),
+    str(EXTENSION_ROOT / 'content.js'),
+    str(EXTENSION_ROOT / 'page.js'),
+)
+SYNC = 'POST /sync-tabs'
+REGISTER = 'POST /register'
+RESULT = 'POST /result'
+RELAY_HOST = 'https://example.com'
+SLOW = 'GET ' + RELAY_HOST + '/slow'
 
 
 _EVAL_RELAY_OVERLAP_HARNESS = (
@@ -25,6 +41,11 @@ const vm = require('vm');
 
 const [backgroundPath, contentPath, pagePath, orderText, mode = 'overlap',
   relayHostname = '', cdpText = ''] = process.argv.slice(1);
+// The plan rides last on the command line; the inline driver appends it as
+// JSON text, so read it here and parse only when it arrived as text.
+const gatePlanArg = process.argv[process.argv.length - 1];
+const plan = typeof gatePlanArg === 'string'
+  ? JSON.parse(gatePlanArg) : gatePlanArg;
 const cdpEnabled = cdpText === '1' || cdpText === 'midflight';
 const cdpFailsMidFlight = cdpText === 'midflight';
 let cdpSideEffects = 0;
@@ -35,9 +56,7 @@ const backgroundListeners = [];
 const contentListeners = [];
 const windowListeners = [];
 const windowMessages = [];
-const postedResults = [];
 const evalResolvers = {};
-const slowSignals = [];
 let relaySequence = 0;
 
 function response(status, data) {
@@ -58,12 +77,36 @@ function eventTarget(listeners = null) {
   };
 }
 
+const BRIDGE_URL = 'https://bridge.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+
+function streamResponse(answer) {
+  if (answer === 'hang') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+          cancel: () => Promise.resolve(),
+        }),
+      },
+    };
+  }
+  return response(answer, { error: 'disabled' });
+}
+""" + STRICT_FETCH + r"""
+
 const backgroundChrome = {
   storage: {
     local: {
       get: async () => ({
         'daedalus-token': 'eval-token',
-        'daedalus-server': 'test-bridge',
+        'daedalus-server': BRIDGE_URL,
       }),
       set: async () => {},
       remove: async () => {},
@@ -172,28 +215,7 @@ const backgroundChrome = {
 
 const backgroundContext = vm.createContext({
   chrome: backgroundChrome,
-  fetch: async (target, init = {}) => {
-    const url = String(target);
-    if (url.includes('/slow')) {
-      // Never settles on its own. The only way out is the AbortSignal, which
-      // is the whole question: a relay whose abort reaches nothing leaves this
-      // request running until its timeout.
-      slowSignals.push(init.signal);
-      return new Promise((_resolve, reject) => {
-        init.signal.addEventListener('abort', () => {
-          const error = new Error('aborted');
-          error.name = 'AbortError';
-          reject(error);
-        });
-      });
-    }
-    if (url.endsWith('/result') && init.method === 'POST') {
-      postedResults.push(JSON.parse(init.body));
-      return response(200, { ok: true });
-    }
-    if (url.includes('/stream?')) return response(503, { error: 'disabled' });
-    return response(200, { ok: true });
-  },
+  fetch: bridgeFetch,
   crypto: { randomUUID: () => 'relay-' + (++relaySequence) },
   AbortController,
   TextDecoder,
@@ -321,12 +343,12 @@ async function run() {
         chromeTab: 7,
         _did: 'did-' + shape,
       };
-      const before = postedResults.length;
+      const before = resultPosts.length;
       await vm.runInContext('dispatchCommand(command)', backgroundContext);
       await waitFor(
-        () => postedResults.length === before + 1,
+        () => resultPosts.length === before + 1,
         'injection result for ' + shape);
-      const posted = postedResults[before];
+      const posted = resultPosts[before];
       outcomes[shape] = {
         hasResult: Object.prototype.hasOwnProperty.call(posted, 'result'),
         result: posted.result === undefined ? null : posted.result,
@@ -353,11 +375,11 @@ async function run() {
       _did: 'did-poisoned',
     };
     await vm.runInContext('dispatchCommand(command)', backgroundContext);
-    await waitFor(() => postedResults.length === 1, 'poisoned eval result');
+    await waitFor(() => resultPosts.length === 1, 'poisoned eval result');
     return {
-      result: postedResults[0].result,
-      world: postedResults[0].world,
-      deliveryId: postedResults[0]._did || null,
+      result: resultPosts[0].result,
+      world: resultPosts[0].world,
+      deliveryId: resultPosts[0]._did || null,
       scriptingCalls,
     };
   }
@@ -372,12 +394,12 @@ async function run() {
       _did: 'did-midflight',
     };
     await vm.runInContext('dispatchCommand(command)', backgroundContext);
-    await waitFor(() => postedResults.length === 1, 'mid-flight eval result');
+    await waitFor(() => resultPosts.length === 1, 'mid-flight eval result');
     return {
-      result: postedResults[0].result === undefined
-        ? null : postedResults[0].result,
-      error: postedResults[0].error,
-      world: postedResults[0].world || null,
+      result: resultPosts[0].result === undefined
+        ? null : resultPosts[0].result,
+      error: resultPosts[0].error,
+      world: resultPosts[0].world || null,
       cdpSideEffects,
       scriptingCalls,
     };
@@ -403,11 +425,11 @@ async function run() {
       _did: 'did-marker',
     };
     await vm.runInContext('dispatchCommand(command)', backgroundContext);
-    await waitFor(() => postedResults.length === 1, 'forged page result');
+    await waitFor(() => resultPosts.length === 1, 'forged page result');
     return {
-      result: postedResults[0].result,
-      world: postedResults[0].world,
-      deliveryId: postedResults[0]._did || null,
+      result: resultPosts[0].result,
+      world: resultPosts[0].world,
+      deliveryId: resultPosts[0]._did || null,
     };
   }
 
@@ -422,18 +444,24 @@ async function run() {
       + ' ontimeout: function() { abortProbe.timeout = true; },'
       + ' onabort: function() { abortProbe.abort = true; },'
       + '})', relayContext);
-    await waitFor(() => slowSignals.length === 1, 'the relayed"""
+    // The gate's record for the relayed request carries its own AbortSignal,
+    // so the abort test reads the signal the request really carried rather
+    // than a bespoke array the wrapper kept beside the gate.
+    const slowRecord = () => nonStreamFetches.find(
+      (r) => r.url.includes('/slow'));
+    await waitFor(() => Boolean(slowRecord()), 'the relayed"""
     r""" fetch to start');
     const inFlight = vm.runInContext('_fetchControllers.size',"""
     r""" backgroundContext);
     vm.runInContext('abortProbe.handle.abort()', relayContext);
     vm.runInContext('abortProbe.handle.abort()', relayContext);
-    await waitFor(() => slowSignals[0].aborted, 'the fetch to be cancelled');
+    await waitFor(() => slowRecord().signal.aborted,
+      'the fetch to be cancelled');
     await delay();
     await delay();
     return {
       inFlight,
-      aborted: slowSignals[0].aborted,
+      aborted: slowRecord().signal.aborted,
       onabort: Boolean(relayContext.abortProbe.abort),
       onload: Boolean(relayContext.abortProbe.load),
       onerror: Boolean(relayContext.abortProbe.error),
@@ -473,7 +501,7 @@ async function run() {
     return {
       pageEvalMessages: windowMessages.filter(
         (message) => message.direction === 'daedalus-eval').length,
-      results: postedResults.map((item) => ({
+      results: resultPosts.map((item) => ({
         result: item.result,
         deliveryId: item._did || null,
       })),
@@ -509,7 +537,7 @@ async function run() {
   for (const owner of completionOrder) {
     evalResolvers[owner]();
     await waitFor(
-      () => postedResults.some((item) => item.result === owner),
+      () => resultPosts.some((item) => item.result === owner),
       'page result for ' + owner);
   }
 
@@ -523,7 +551,7 @@ async function run() {
 
   return {
     relayIds: evalMessages.map((message) => message.relayId || null),
-    results: postedResults.map((item) => ({
+    results: resultPosts.map((item) => ({
       result: item.result,
       deliveryId: item._did || null,
     })),
@@ -531,6 +559,15 @@ async function run() {
 }
 
 run().then((result) => {
+  // Carry the gate's own record beside the mode's specific answer, so the
+  // Python side compares the whole recorded list against the declared plan.
+  result.gate = {
+    records: nonStreamFetches,
+    refused: refusedFetches,
+    badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
+  };
   process.stdout.write(JSON.stringify(result));
 }).catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
@@ -539,69 +576,70 @@ run().then((result) => {
 """)
 
 
-def _run_harness_child(*args):
-    """Run one overlap-harness child and parse its one JSON answer.
+def _observe(plan, *args):
+    """Drive one relay mode under a plan and read back its answer.
 
-    No wall bound here: the children bound themselves by attempt counts
+    Every request the mode makes is accounted against `plan`, and the whole
+    recorded list is compared through the shared gate's check, so an
+    undeclared, missing or extra request is loud even when the worker
+    swallowed it. No wall bound: the child bounds itself by attempt counts
     (see waitFor in the harness above), so a genuine deadlock surfaces as a
-    hung job under the runner's own suite ceiling, which is the preferred
-    failure mode.
+    hung job under the runner's own suite ceiling.
     """
-    node = shutil.which('node')
-    assert node, 'node is required to execute the extension eval relay'
-    proc = subprocess.Popen(
-        [node, '-e', _EVAL_RELAY_OVERLAP_HARNESS, *args],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    out, err = proc.communicate()
-    assert proc.returncode == 0, (proc.returncode, out, err)
-    return json.loads(out)
+    outcome = run_inline_gate(
+        require_node(), _EVAL_RELAY_OVERLAP_HARNESS, list(args),
+        cwd=EXTENSION_ROOT, plan=plan, env=_ENV)
+    gate = outcome.pop('gate')
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(plan['planned']), planned_stream=list(plan['statuses']))
+    return outcome
+
+
+def _one_result(count=1):
+    """The recording every single-result relay mode makes.
+
+    Boot opens the stream (503) and syncs the tab list, the content
+    script's boot registers the tab, and each dispatched eval posts one
+    result — all recorded, all declared here, none special-cased.
+    """
+    return {'planned': [SYNC, REGISTER] + [RESULT] * count, 'statuses': [503]}
 
 
 def run_eval_relay_overlap(order):
-    return _run_harness_child(
-        str(ROOT / 'extension' / 'background.js'),
-        str(ROOT / 'extension' / 'content.js'),
-        str(ROOT / 'extension' / 'page.js'), json.dumps(order))
+    return _observe(_one_result(2), *_BRIDGE, json.dumps(order))
 
 
 def run_eval_same_tab_preemption():
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'preemption')
+    return _observe(_one_result(1), *_BRIDGE, '[]', 'preemption')
 
 
 def run_gm_abort():
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'gm-abort')
+    plan = {
+        'planned': [SYNC, REGISTER, SLOW],
+        'statuses': [503],
+        'relayHosts': [RELAY_HOST],
+        'answers': {SLOW: {'hang': True}},
+    }
+    return _observe(plan, *_BRIDGE, '[]', 'gm-abort')
 
 
 def run_eval_relay_marker(hostname):
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'marker', hostname)
+    return _observe(_one_result(1), *_BRIDGE, '[]', 'marker', hostname)
 
 
 def run_eval_after_cdp_fails_mid_flight():
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'midflight', '', 'midflight')
+    return _observe(_one_result(1), *_BRIDGE, '[]', 'midflight', '',
+                    'midflight')
 
 
 def run_eval_with_poisoned_page_globals(cdp_available):
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'poisoned', '',
-        '1' if cdp_available else '0')
+    return _observe(_one_result(1), *_BRIDGE, '[]', 'poisoned', '',
+                    '1' if cdp_available else '0')
 
 
 def run_main_world_injection_shapes():
-    return _run_harness_child(
-        str(EXTENSION_ROOT / 'background.js'),
-        str(EXTENSION_ROOT / 'content.js'),
-        str(EXTENSION_ROOT / 'page.js'), '[]', 'injection-shapes')
+    return _observe(_one_result(8), *_BRIDGE, '[]', 'injection-shapes')
