@@ -3,9 +3,9 @@
 `_literal_value` folds the literal forms a program writes. `_usable_key`
 keeps only what can also be a dict key, and `_literal_key` names the one a
 lookup resolves. `_unhashable_key_sender` is the discriminator for the one
-unresolved key the runtime cannot hash at all: a literal list, a tuple of
-one, a dict or a set, spelled bound to a name or written inline at the
-call. Every other key the evaluator cannot fold is hashable and the
+unresolved key the runtime cannot hash at all: a literal list, a tuple
+containing one, a dict or a set, spelled bound to a name or written inline
+at the call. Every other key the evaluator cannot fold is hashable and the
 program routes it fine, so those stay unresolved and silent.
 """
 import ast
