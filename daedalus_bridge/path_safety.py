@@ -123,8 +123,8 @@ def log_path_refusal(kind, root, parts, attempts, secret=''):
     every rendered string it appears in — the root, the parts and the
     resolved attempts — is shortened to the prefix the stream connect line
     already prints. That prefix is the same by-design residual that line
-    prints as token[:8], so the clear-text-logging alert this print earns
-    is tracked and dispositioned on the Security tab (issue 890). Empty
+    prints as token[:8]; alert 125 is a false positive, dismissed on the
+    Security tab: only a prefix, never the credential (issue 890). Empty
     by default and byte-identical without it, so a call site that carries
     no credential renders exactly as before.
     """
