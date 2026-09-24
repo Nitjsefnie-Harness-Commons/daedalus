@@ -1,11 +1,12 @@
 """Mapping stores, assignment binders and expression resolution for deferred
 routing values."""
 import ast
-import operator
 
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
+from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
+                           _literal_value, _usable_key)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -27,78 +28,6 @@ def _selected_values(value, key, attribute=False):
             item for name, item in value.items.items()
             if name is DYNAMIC_KEY]
     return []
-
-
-_UNSAFE_LITERAL = object()
-_UNARY_OPERATORS = {ast.UAdd: operator.pos, ast.USub: operator.neg,
-                    ast.Invert: operator.invert}
-
-
-def _literal_value(expr):
-    if isinstance(expr, ast.Constant):
-        return expr.value
-    if isinstance(expr, ast.UnaryOp) and type(expr.op) in _UNARY_OPERATORS:
-        value = _literal_value(expr.operand)
-        if (value is _UNSAFE_LITERAL
-                or type(value) not in (int, float, complex)):
-            return _UNSAFE_LITERAL
-        try:
-            return _UNARY_OPERATORS[type(expr.op)](value)
-        except (ArithmeticError, TypeError, ValueError):
-            return _UNSAFE_LITERAL
-    if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
-        values = []
-        for item in expr.elts:
-            value = _literal_value(item.value if isinstance(item, ast.Starred)
-                                   else item)
-            if value is _UNSAFE_LITERAL:
-                return value
-            try:
-                values.extend(value) if isinstance(item, ast.Starred) \
-                    else values.append(value)
-            except TypeError:
-                return _UNSAFE_LITERAL
-        try:
-            return (tuple(values) if isinstance(expr, ast.Tuple) else
-                    values if isinstance(expr, ast.List) else set(values))
-        except (TypeError, ValueError):
-            return _UNSAFE_LITERAL
-    if isinstance(expr, ast.Dict):
-        value = {}
-        for key, item in zip(expr.keys, expr.values):
-            item_value = _literal_value(item)
-            key_value = _literal_value(key) if key is not None else None
-            if item_value is _UNSAFE_LITERAL or key_value is _UNSAFE_LITERAL:
-                return _UNSAFE_LITERAL
-            try:
-                if key is None:
-                    if not isinstance(item_value, dict):
-                        return _UNSAFE_LITERAL
-                    value.update(item_value)
-                else:
-                    value[key_value] = item_value
-            except (TypeError, ValueError):
-                return _UNSAFE_LITERAL
-        return value
-    return _UNSAFE_LITERAL
-
-
-def literal_iterable_cardinality(expr):
-    """Return an exact literal-display length when it is provable."""
-    if isinstance(expr, (ast.Tuple, ast.List)):
-        counts = [literal_iterable_cardinality(item.value)
-                  if isinstance(item, ast.Starred) else 1
-                  for item in expr.elts]
-        return None if any(count is None for count in counts) else sum(counts)
-    if isinstance(expr, (ast.Set, ast.Dict)):
-        value = _literal_value(expr)
-        return None if value is _UNSAFE_LITERAL else len(value)
-    return None
-
-
-def literal_truth(expr):
-    value = _literal_value(expr)
-    return None if value is _UNSAFE_LITERAL else bool(value)
 
 
 def alias_target_pairs(target, value):
@@ -277,34 +206,6 @@ def _dict_call_value(node, state):
         items[keyword.arg] = known
     return DeferredContainer(items, len(node.keywords), 'dict', node)
 
-
-_UNRESOLVED_KEY = object()
-
-
-def _usable_key(value):
-    """The value when it can also be a dict key, else _UNRESOLVED_KEY."""
-    if value is _UNSAFE_LITERAL:
-        return _UNRESOLVED_KEY
-    try:
-        hash(value)
-    except TypeError:
-        return _UNRESOLVED_KEY
-    return value
-
-
-def _literal_key(node, state):
-    """The literal key one mapping lookup names, or _UNRESOLVED_KEY.
-
-    A name carries the literal it was bound to and any other expression is
-    read through the same literal evaluator, so a constant, a tuple and a
-    unary-minus literal are all their own keys. An f-string, a
-    concatenation and every other expression the evaluator cannot fold, a
-    name bound to no literal, and a literal that cannot be a dict key all
-    stay unresolved.
-    """
-    if isinstance(node, ast.Name):
-        return _usable_key(state.literals.get(node.id, _UNSAFE_LITERAL))
-    return _usable_key(_literal_value(node))
 
 
 def _setdefault_value(node, state):
