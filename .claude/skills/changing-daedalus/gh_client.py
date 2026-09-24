@@ -39,10 +39,15 @@ from datetime import datetime, timezone
 
 GH_TIMEOUT = 120
 PAGE_SIZE = 100
-# A reset already in the past must not become a hot loop, and a reset far in
-# the future must not become a hang; an absent one is a plain minute.
+# The floor stops a reset already in the past from becoming a hot loop, and
+# the ceiling is the bound on ONE pause's total wait: a reset the API
+# reports is inside the hour, so six hours is far past anything real and
+# bounds only an absurd header. Past the ceiling the pause ends and the next
+# refusal is a new pause with its own line; the point of the bound is that a
+# hostile header cannot wedge a watcher, not that the reported reset is cut
+# short. An absent reset is a plain minute.
 MIN_BACKOFF = 2
-MAX_BACKOFF = 3600
+MAX_BACKOFF = 6 * 3600
 DEFAULT_BACKOFF = 60
 SLEEP_SLICE = 1.0
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
