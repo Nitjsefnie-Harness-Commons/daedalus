@@ -428,6 +428,7 @@ function makeContext() {
     crypto: { randomUUID: () => 'relay-' + (++relaySequence) },
     AbortController,
     TextDecoder,
+    TextEncoder,
     URL,
     performance,
     btoa,

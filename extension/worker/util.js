@@ -1,6 +1,6 @@
 /* exported _hasNativeToBase64, bytesToBase64, gmResponseLimit */
 /* exported readBoundedBody, bridgeAuth, bridgeHeaders, _fetchTimings */
-/* exported _recordTiming, _serializer, canonicalOrigin */
+/* exported _recordTiming, _serializer, canonicalOrigin, storageEntryBytes */
 
 // Fast base64 encode. Prefers native Uint8Array.prototype.toBase64 (TC39,
 // Chrome 137+, Node 25+). Falls back to chunked String.fromCharCode.apply
@@ -102,6 +102,23 @@ function _serializer() {
     tail = run.then(() => {}, () => {});
     return run;
   };
+}
+
+// ─── Storage accounting ───
+
+// Chrome's local QUOTA_BYTES is "as measured by the JSON stringification of
+// every value plus every key's length", so one entry's charge is the value's
+// JSON byte length PLUS the byte length of the key it lives under. A long key
+// holding a tiny value is a real quota consumer, and a measure that dropped
+// the key term would let a writer pass Chrome's whole area. Every byte cap in
+// the worker measures through this one function, so the "they sum below the
+// area" arithmetic in their comments is a fact about bytes rather than a
+// convention.
+function storageEntryBytes(storageKey, value) {
+  const json = JSON.stringify(value);
+  if (typeof json !== 'string') throw new Error('not serialisable');
+  return new TextEncoder().encode(json).length
+    + new TextEncoder().encode(storageKey).length;
 }
 
 // ─── Origin canonicalization ───
