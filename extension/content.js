@@ -22,6 +22,34 @@ function storageError() {
   return (chrome.runtime.lastError && chrome.runtime.lastError.message) || '';
 }
 const KEYED_STORAGE_HANDLERS = new Set(['getValue', 'setValue', 'deleteValue']);
+
+// Page-written GM keys live under a namespace derived from the origin Chrome
+// reports for this document (`location.origin`) and never from the message —
+// a page controls every field it posts but not its own location. So two
+// origins cannot read, overwrite, list or delete each other's GM keys, and the
+// extension's own `daedalus-` keys sit outside every page's partition.
+//
+// GM_QUOTA_BYTES bounds one origin's partition. Chrome's documented `local`
+// cap is 10 MB and the extension asks for no `unlimitedStorage`, so a page
+// that filled the shared area would make the extension's own writes fail; one
+// origin is capped at 1 MB, at most a tenth of the area, leaving 9 MB of
+// headroom for the extension's state and other origins. The sum is recomputed
+// from the values actually stored on every write — never an accumulator — so a
+// delete frees budget and a value the page did not count still counts.
+const GM_QUOTA_BYTES = 1024 * 1024;
+
+function gmNamespace() {
+  return 'gm:' + encodeURIComponent(location.origin) + ':';
+}
+
+// The UTF-8 byte length of a value as Chrome would store it, or a throw when
+// the value cannot be serialised, so an unmeasured write is never admitted.
+function gmValueBytes(value) {
+  const json = JSON.stringify(value);
+  if (typeof json !== 'string') throw new Error('not serialisable');
+  return new TextEncoder().encode(json).length;
+}
+
 // One entry per in-flight GM.xmlhttpRequest: the page's request id to
 // the id the service worker files its AbortController under. Deleted when
 // the request settles and when it is cancelled, so an abort arriving after
@@ -106,19 +134,45 @@ window.addEventListener('message', (e) => {
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'openInTab' }, '*');
     });
   } else if (msg.handler === 'getValue') {
-    chrome.storage.local.get([msg.key], (data) => {
+    const storeKey = gmNamespace() + msg.key;
+    chrome.storage.local.get([storeKey], (data) => {
       const err = storageError();
       if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'getValue', error: err }, '*');
-      const val = data[msg.key] !== undefined ? data[msg.key] : msg.defaultValue;
+      const val = data[storeKey] !== undefined ? data[storeKey] : msg.defaultValue;
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'getValue', value: val }, '*');
     });
   } else if (msg.handler === 'setValue') {
-    chrome.storage.local.set({ [msg.key]: msg.value }, () => {
+    const storeKey = gmNamespace() + msg.key;
+    let incoming;
+    try {
+      incoming = gmValueBytes(msg.value);
+    } catch {
+      return window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
+        handler: 'setValue', error: 'value could not be measured' }, '*');
+    }
+    // Recompute this origin's stored total before the write. The key being
+    // written is skipped so a replace charges the new value only, and keys
+    // outside the namespace — the extension's own — never charge the page.
+    chrome.storage.local.get(null, (data) => {
       const err = storageError();
-      window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+      if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+      const namespace = gmNamespace();
+      let stored = 0;
+      for (const key of Object.keys(data)) {
+        if (!key.startsWith(namespace) || key === storeKey) continue;
+        stored += gmValueBytes(data[key]);
+      }
+      if (stored + incoming > GM_QUOTA_BYTES) {
+        return window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
+          handler: 'setValue', error: 'gm storage quota exceeded' }, '*');
+      }
+      chrome.storage.local.set({ [storeKey]: msg.value }, () => {
+        const err = storageError();
+        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+      });
     });
   } else if (msg.handler === 'deleteValue') {
-    chrome.storage.local.remove([msg.key], () => {
+    chrome.storage.local.remove([gmNamespace() + msg.key], () => {
       const err = storageError();
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'deleteValue', error: err }, '*');
     });
@@ -126,11 +180,14 @@ window.addEventListener('message', (e) => {
     chrome.storage.local.get(null, (data) => {
       const err = storageError();
       if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'listValues', error: err }, '*');
-      // The reserved keys are filtered here too. Blocking reads while still
-      // listing the names tells a page exactly what to go after and confirms a
-      // bridge is configured; the namespace has to be invisible, not just
-      // unreadable.
-      const keys = Object.keys(data).filter((k) => !RESERVED_KEY.test(k));
+      // Only this origin's partition is listed, and the extension's own keys
+      // carry no namespace, so they are invisible rather than merely
+      // unreadable — a list that named them would tell a page what to go
+      // after and confirm a bridge is configured.
+      const namespace = gmNamespace();
+      const keys = Object.keys(data)
+        .filter((k) => k.startsWith(namespace))
+        .map((k) => k.slice(namespace.length));
       window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'listValues', keys }, '*');
     });
   } else if (msg.handler === 'setClipboard') {
