@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 "Two-origin GM storage isolation + quota harness (service-worker realm)."
-import json
 import sys
 from pathlib import Path
 
@@ -8,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _gm_harness import _PRELUDE, _run_node  # noqa: E402
 
 
-_TWO_ORIGIN_HARNESS = (_PRELUDE + r"""
+_TWO_ORIGIN_HARNESS = _PRELUDE + r"""
 // One shared chrome.storage.local — the single extension store — observed
 // through content-script frames and ONE service-worker realm. Each frame
 // forwards gm-storage to that background with sender.origin = its own origin,
@@ -370,7 +369,7 @@ function nsKey(origin, key) {
 }
 
 process.stdout.write(JSON.stringify(main()));
-""")
+"""
 
 
 def run_two_origin(content_path=None):
