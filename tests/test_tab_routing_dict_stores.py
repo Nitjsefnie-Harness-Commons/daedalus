@@ -94,6 +94,17 @@ _SETDEFAULT_UNRESOLVED = [
     ('setdefault-resolvable-miss', _flow(
         _RELAY, 'd = {"a": relay()}', 'x = d.setdefault("k", ordinary)',
         invoke='x()'), (0, 0)),
+    # The key spelled in place rather than through a name, so the probe
+    # reads the key EXPRESSION rather than a name's absent literal. Both
+    # spellings here evaluate to no literal at all, which is not the same
+    # as a literal the runtime cannot hash, and a guard that cannot tell
+    # them apart reports a healthy program.
+    ('setdefault-concat-direct-vacant', _flow(
+        _RELAY, 'd = {}', 'x = d.setdefault("k" + "", ordinary)',
+        invoke='x()'), (0, 0)),
+    ('setdefault-fstring-direct-vacant', _flow(
+        _RELAY, 'd = {}', 'x = d.setdefault(f"k", ordinary)',
+        invoke='x()'), (0, 0)),
 ]
 
 
@@ -197,8 +208,7 @@ def test_each_setdefault_arm_has_a_discriminating_probe(tmp):
         source.write_text(
             'def ordinary(*a, **k):\n'
             '    return 0\n'
-            'def probe():\n'
-            + setup +
+            f'def probe():\n{setup}'
             '    send = d.setdefault(key, ordinary)\n'
             '    return send("_focus", "focus-tab", tab=5)\n',
             encoding='utf-8')
@@ -206,7 +216,6 @@ def test_each_setdefault_arm_has_a_discriminating_probe(tmp):
         if actual != expected:
             wrong.append((label, actual, expected))
     assert not wrong, wrong
-
 
 
 def main():
