@@ -15,23 +15,23 @@ from pathlib import Path
 
 import _util
 
-# The one environment every Node child in this tree runs with: the parent's
-# copy with the coverage collector's names stripped, so a child inheriting
-# them cannot record paths that vanish with the temporary tree. It is bound
-# once here and named at the launch below, which is the level that actually
-# sets it — a threaded `env=` parameter would be a declaration the value
-# never reaches, and the coverage guard reads `env=` as a static name.
-_CHILD_ENV = _util.child_coverage('scrub')
-
 
 def run_node_program(node, program, arguments, cwd, payload=None, timeout=30):
     """Run a Node program from a closed, automatically cleaned file.
 
     `cwd` is positional so a caller that forwards its own `cwd` (the shared
-    gate's `run_gate`) neither names a `cwd=` keyword the coverage guard
-    would read as an undeclared launch nor needs to restate the environment:
-    both the guard's static check and the child's real environment are
-    satisfied by the one `_CHILD_ENV` above.
+    gate's `run_gate`) neither names a `cwd=` keyword the coverage guard would
+    read as an undeclared launch nor has to restate the environment.
+
+    The child runs with `child_coverage('scrub')` evaluated **here, at
+    launch**, not snapshotted at import. A module-level snapshot cannot be
+    correct for a value chosen per call: `test_js_coverage.py` sets
+    `os.environ['NODE_V8_COVERAGE']` per test to point at its own dumps
+    directory, and an import-time snapshot would send the child to the wrong
+    directory. Scrubbing at launch keeps the coverage collector's names out of
+    the child (the guard's static check reads this `env=` declaration, which a
+    direct call satisfies) while letting a per-call value reach the child — a
+    per-call value is the whole point.
     """
     with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
         program_path = Path(directory) / 'program.js'
@@ -43,5 +43,5 @@ def run_node_program(node, program, arguments, cwd, payload=None, timeout=30):
             prologue + program, encoding='utf-8')
         return subprocess.run(
             [node, str(program_path), *arguments], cwd=cwd,
-            env=_CHILD_ENV, capture_output=True,
+            env=_util.child_coverage('scrub'), capture_output=True,
             text=True, encoding='utf-8', timeout=timeout)
