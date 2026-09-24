@@ -5,6 +5,7 @@ ordered operand, so both are recognised here and both hand that operand to
 `ordered_container` the way an order-preserving consumer does.
 """
 import ast
+from typing import cast
 
 from _pyroute_containers import ordered_container
 from _pyroute_values import _known_value
@@ -38,7 +39,8 @@ def _static_slice(node):
     step = _static_bound(node.step)
     if _DYNAMIC_BOUND in (lower, upper, step):
         return None
-    return slice(lower, upper, step)
+    return slice(cast(int | None, lower), cast(int | None, upper),
+                 cast(int | None, step))
 
 
 def _unshadowed_single_arg(node, name, state):

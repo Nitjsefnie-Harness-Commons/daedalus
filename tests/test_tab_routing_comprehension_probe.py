@@ -16,6 +16,7 @@ These tests pin that contract end to end and at the probe's own boundary.
 import ast
 import sys
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -63,7 +64,8 @@ def _ordered_operand():
 def _ordered_probe():
     """A state whose comprehension iterable models a two-element ordered
     container, and a `check` that records findings the probe will discard."""
-    node = ast.parse('[c for c in src]').body[0].value
+    node = cast(ast.ListComp, cast(
+        ast.Expr, ast.parse('[c for c in src]').body[0]).value)
     source = node.generators[0].iter
     state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
     violations = []
@@ -206,7 +208,8 @@ def test_comprehension_probe_refuses_a_fork(_tmp):
     len(outputs) != 1 half of the early return lets the probe keep only the
     first state, write a value derived from one branch of a two-branch
     answer, and collapse the discarded branch silently."""
-    node = ast.parse('x = [c for c in seq]').body[0].value
+    node = cast(ast.ListComp, cast(
+        ast.Assign, ast.parse('x = [c for c in seq]').body[0]).value)
     generator = node.generators[0]
     ordered = DeferredContainer({0: 'routed'}, 1, 'list')
     other = DeferredContainer({0: 'other'}, 1, 'list')
@@ -259,7 +262,8 @@ def test_comprehension_probe_clears_a_stale_iterated_slot(_tmp):
 def test_set_comprehension_is_probed(_tmp):
     """A set comprehension is probed like a list one, so the merge a walker
     must see is recorded beside its element value."""
-    source = ast.parse('{c for c in src}').body[0].value
+    source = cast(ast.SetComp, cast(
+        ast.Expr, ast.parse('{c for c in src}').body[0]).value)
     iterable = source.generators[0].iter
     state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
 
