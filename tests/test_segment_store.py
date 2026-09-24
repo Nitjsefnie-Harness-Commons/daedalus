@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _segments import isolated_env  # noqa: E402
 
 
 def _probe(tmp, script, extra_env=None):
@@ -627,7 +628,6 @@ def test_a_capability_authorizes_only_under_the_root_holding_it(tmp):
 
 def _alt(tmp, name):
     """Two genuinely different roots, and the modules that take one."""
-    os.environ['DAEDALUS_DIR'] = str(Path(tmp))
     configured = Path(tmp) / 'segments'
     passed = Path(tmp) / 'passed-segments'
     configured.mkdir(parents=True)
@@ -638,6 +638,7 @@ def _alt(tmp, name):
             configured, passed)
 
 
+@isolated_env
 def test_a_status_read_under_a_passed_root_authorizes_its_own_job(tmp):
     """A status read checks the capability against the record under the
     root it was handed. Resolving that record from configuration finds no
@@ -658,6 +659,7 @@ def test_a_status_read_under_a_passed_root_authorizes_its_own_job(tmp):
     assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
 
 
+@isolated_env
 def test_a_job_lookup_under_a_passed_root_reads_its_own_record(tmp):
     """A lookup answers about the record under the passed root: the owner
     gets its own capability back and another token a 409. Resolving that
