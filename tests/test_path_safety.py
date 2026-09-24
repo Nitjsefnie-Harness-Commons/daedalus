@@ -501,43 +501,77 @@ def test_under_refuses_with_the_credential_redacted(tmp):
 _STRIPE_PROBE = r"""
 import json
 import os
+import sys
+from pathlib import Path
 
 from daedalus_bridge import result_store
 
-# The stripe is keyed on the target entry's own name, which every caller
-# holds in its resolved directory before the lock is taken: the `\\?\`
-# prefix, the 8.3 alias, the junction and the mapped drive are all already
-# behind it, and a case-insensitive parent's spelling of the entry is the
-# one string every caller for that directory agrees on.
-# One entry name selects one stripe, and a filesystem path is refused
-# outright: keying on a path spelling is what silently removed the
-# serialization.
-key = result_store.result_key('tok', 'tab')
-same_lock = (result_store.delivery_lock_for(key)
-             is result_store.delivery_lock_for(key))
+root = Path(sys.argv[1]) / 'deliveries'
+(root / 'tok_real').mkdir(parents=True)
+(root / 'tok_absent').mkdir(parents=True)
 
-refused = False
-try:
-    result_store.delivery_lock_for(
-        os.path.join('C:' + os.sep, 'x', 'results', 'deliveries', 'tok_tab'))
-except TypeError:
-    refused = True
-
-# The directory this target names is spelled from the same key, so the lock
-# cannot drift from the directory it guards.
-import pathlib
-refused_path = False
-try:
-    result_store.delivery_lock_for(pathlib.Path('tok_tab'))
-except TypeError:
-    refused_path = True
+# The stripe is keyed on the entry, so the key is not the name: two targets
+# whose names differ must not key alike, and a target whose name happens to
+# collide with another's must not either.
+present = result_store.delivery_stripe_key(root / 'tok_real')
+absent = result_store.delivery_stripe_key(root / 'tok_absent')
+same_lock = (result_store.delivery_lock_for(root / 'tok_real')
+             is result_store.delivery_lock_for(root / 'tok_real'))
+# An absent target has no entry to ask, so its name is the key -- and that is
+# stable, which is all the read paths need from it.
+absent_stable = (
+    result_store.delivery_lock_for(root / 'tok_absent')
+    is result_store.delivery_lock_for(root / 'tok_absent'))
 
 print('STRIPE ' + json.dumps({
     'same_lock': same_lock,
-    'refused_str_path': refused,
-    'refused_path_object': refused_path,
+    'absent_stable': absent_stable,
+    'present_is_not_the_name': present != b'tok_real',
+    'present_differs_from_absent': present != absent,
 }))
 """
+
+
+def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
+    """The stripe is the entry's, asked of the filesystem, not spelled.
+
+    `result_store.delivery_lock_for` takes a delivery directory and keys on
+    what the filesystem reports about it, so the property it can promise is
+    the one an identity can: one entry, one stripe, and an entry nobody can
+    merge with another by spelling its name differently. It cannot promise
+    that the key is a name at all -- on a case-insensitive parent two names
+    reach one entry, and the only string both callers agree on is the
+    entry's own identity, which is what this selector now asks for. The
+    folded pair itself is pinned where a folding parent is available
+    (`test_result_routes.test_a_folded_target_is_one_directory_and_one_stripe`)
+    and the two-names-one-entry case on any host
+    (`test_delivery_stripes.test_two_names_for_one_entry_take_one_stripe`).
+
+    The two path-shaped arguments this probe used to be refused are gone
+    with the contract they pinned: a path is what the function takes now, so
+    refusing one would refuse every real key. What replaced them is the
+    check that matters -- the key is not the name.
+    """
+    docroot = Path(tmp) / 'docroot'
+    docroot.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        'DAEDALUS_DIR': str(docroot),
+        'DAEDALUS_PORT': '0',
+        'PYTHONDONTWRITEBYTECODE': '1',
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', _STRIPE_PROBE, str(docroot)],
+        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith('STRIPE ')]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    answer = json.loads(marked[0][len('STRIPE '):])
+    assert answer['same_lock'] is True, answer
+    assert answer['absent_stable'] is True, answer
+    assert answer['present_is_not_the_name'] is True, answer
+    assert answer['present_differs_from_absent'] is True, answer
 
 
 def main():
@@ -634,48 +668,6 @@ def test_containment_survives_two_spellings_of_one_root(tmp):
     # And the backstop still refuses a real escape under the same spelling,
     # which is the half a looser comparison would have given away.
     assert answer['escape'] == 'refused', answer
-
-
-def test_delivery_stripe_is_keyed_on_the_entry_name(tmp):
-    """One entry must select one stripe, and a path must not choose one.
-
-    `result_store.delivery_lock_for` chooses a stripe from a hash of the
-    target directory's own name, the spelling the resolved path carries on
-    this filesystem. Every caller for one directory holds that string, so
-    two callers for the same target cannot take two different locks and
-    leave the serialization the stripe exists to provide silently absent --
-    which is not a 400 anybody sees, but a lost update.
-
-    Keyed on a path instead, the `\\?\\` prefix, the 8.3 alias, the junction
-    and the mapped drive are each a second spelling, and so is a caller's
-    `foo` against the `Foo` a case-insensitive parent already holds. The
-    paired pins are that the folded pair takes one stripe
-    (`test_result_routes.test_a_folded_tab_spelling_is_one_delivery_stripe`)
-    and that a path-shaped key is refused rather than hashed into one.
-    """
-    docroot = Path(tmp) / 'docroot'
-    docroot.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env.update({
-        'DAEDALUS_DIR': str(docroot),
-        'DAEDALUS_PORT': '0',
-        'PYTHONDONTWRITEBYTECODE': '1',
-    })
-    proc = subprocess.run(
-        [sys.executable, '-c', _STRIPE_PROBE],
-        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-    marked = [line for line in proc.stdout.splitlines()
-              if line.startswith('STRIPE ')]
-    assert len(marked) == 1, (proc.stdout, proc.stderr)
-    answer = json.loads(marked[0][len('STRIPE '):])
-    assert answer['same_lock'] is True, answer
-    # A path reaching this function is the regression that mattered, so it is
-    # refused rather than quietly hashed into some stripe. Both spellings are
-    # asserted: the one that actually shipped was a str, so refusing only path
-    # OBJECTS would leave the original bug uncaught.
-    assert answer['refused_path_object'] is True, answer
-    assert answer['refused_str_path'] is True, answer
 
 
 if __name__ == '__main__':

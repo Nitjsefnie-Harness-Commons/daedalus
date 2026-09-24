@@ -4,6 +4,7 @@ import itertools
 import os
 import sys
 import zlib
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
@@ -59,15 +60,58 @@ def _names(count):
     return [f'candidate-{number:06d}' for number in range(count)]
 
 
-def test_same_key_is_stable_and_server_reuses_lock(tmp):
+def test_same_directory_is_stable_and_server_reuses_lock(tmp):
     stripes = _load_stripes('delivery_stripes_stable')
     key = os.fsencode('stripe-token_tab-01')
     assert stripes.stripe_index(key, 64) == stripes.stripe_index(key, 64)
 
     result_store = _load_result_store(tmp)
-    target_key = result_store.result_key('stripe-token', 'tab-01')
-    assert (result_store.delivery_lock_for(target_key)
-            is result_store.delivery_lock_for(target_key))
+    target = Path(tmp) / 'results' / 'deliveries' / 'stripe-token_tab-01'
+    target.mkdir(parents=True)
+    assert (result_store.delivery_lock_for(target)
+            is result_store.delivery_lock_for(target))
+
+
+def test_two_names_for_one_entry_take_one_stripe(tmp):
+    """One entry is one stripe, whichever path names it.
+
+    The property the stripe exists on, pinned where a case-insensitive
+    parent is not available: two paths that reach the same entry take the
+    same lock. A symlink is the case-sensitive host's own way of putting two
+    names on one entry, and it is the shape the fold fixtures reach by
+    another route -- `os.stat` follows it, as it follows a parent's case
+    folding, so the entry is what both names reach.
+    """
+    result_store = _load_result_store(tmp)
+    deliveries = Path(tmp) / 'results' / 'deliveries'
+    real = deliveries / 'stripe-token_real'
+    real.mkdir(parents=True)
+    alias = deliveries / 'stripe-token_alias'
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    assert (result_store.delivery_lock_for(real)
+            is result_store.delivery_lock_for(alias))
+
+
+def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
+    """The control: on a case-sensitive parent they are two entries.
+
+    The same two names with the host's own filesystem, which keeps them
+    apart: two inodes, two keys, and no merging of two tabs' results. The
+    folded verdict above and this one together are what make the difference
+    the parent's rather than the assertion's.
+    """
+    result_store = _load_result_store(tmp)
+    deliveries = Path(tmp) / 'results' / 'deliveries'
+    upper = deliveries / 'stripe-token_Foo'
+    lower = deliveries / 'stripe-token_foo'
+    upper.mkdir(parents=True)
+    lower.mkdir(parents=True)
+    assert (result_store.delivery_stripe_key(upper)
+            != result_store.delivery_stripe_key(lower))
+    assert os.stat(upper).st_ino != os.stat(lower).st_ino
 
 
 def test_server_wiring_rejects_crc_collisions(tmp):
@@ -88,12 +132,15 @@ def test_server_wiring_rejects_crc_collisions(tmp):
         for tab in tabs
     }
     assert len(crc_stripes) == 1
+    # These targets do not exist, so each is striped on the name it would be
+    # created under; with 64 stripes and 128 names an accidental one-stripe
+    # result is impossible in practice, so the keyed mapping is what is
+    # being measured.
     locks = [
-        result_store.delivery_lock_for(result_store.result_key(token, tab))
+        result_store.delivery_lock_for(
+            result_store.result_key(token, tab))
         for tab in tabs
     ]
-    # With 64 stripes and 128 names, an accidental one-stripe result is
-    # impossible in practice; the server must use the keyed mapping.
     assert any(lock is not locks[0] for lock in locks[1:])
 
 

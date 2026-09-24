@@ -24,7 +24,6 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 _BASE = tempfile.mkdtemp(prefix='resultroutes_base_')
@@ -427,115 +426,154 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
     assert not delivery.exists(), 'the delivery copy under this root stayed'
 
 
-def test_a_folded_tab_spelling_is_one_delivery_stripe(tmp):
-    """Two spellings of one target take the stripe of the one directory.
+@contextlib.contextmanager
+def _recorded_locks(store):
+    """Record each stripe acquisition as (directory, key, lock id).
 
-    The first result spells its tab `Foo` and creates the directory; the
-    second spells it `foo` and reaches that same directory. The stripe is
-    the serialization one target's deliveries need, and two spellings of
-    one directory taking two locks is no serialization at all -- a lost
-    update nobody sees, which is why it is pinned here and not as a 400.
+    All three, because each answers a different question. The directory is
+    what the caller named; the key is what the stripe is decided on, and it
+    is the half that is exact -- two keys can share one of 64 stripes by
+    chance, so a lock count alone would let a mutation that keys on the
+    caller's spelling through once in sixty-four runs; and the lock identity
+    is the consequence, which one key always produces.
     """
-    routes = _load('fixture_result_routes_folded_stripe')
-    store = routes.result_store
-    token = 'foldstriptok'
-    keys = []
+    seen = []
     real_lock_for = store.delivery_lock_for
+    real_key_for = store.delivery_stripe_key
 
-    def recording_lock_for(target_key):
-        keys.append(target_key)
-        return real_lock_for(target_key)
+    def recording_lock_for(target_dir):
+        lock = real_lock_for(target_dir)
+        seen.append((target_dir, real_key_for(target_dir), id(lock)))
+        return lock
 
     store.delivery_lock_for = recording_lock_for
     try:
-        with _case_fold.case_folding(RES_DIR):
-            first = routes.accept_result(
-                RES_DIR, tmp, token,
-                {'tabId': 'Foo', 'id': 'one', '_did': '1700000000000_a'},
-                DELIVERY_CAP)
-            second = routes.accept_result(
-                RES_DIR, tmp, token,
-                {'tabId': 'foo', 'id': 'two', '_did': '1700000000000_b'},
-                DELIVERY_CAP)
+        yield seen
     finally:
         store.delivery_lock_for = real_lock_for
+
+
+def _one_stripe(seen):
+    """The directories named, the distinct keys, and the stripes reached."""
+    return ([Path(d).name for d, _k, _l in seen],
+            len({key for _d, key, _l in seen}),
+            len({lock for _d, _k, lock in seen}))
+
+
+def _folding_parent(tmp):
+    """A real case-insensitive parent, or the reason this run has none.
+
+    The scenario this suite cannot emulate honestly: a second caller that
+    spells a target the other way has to CREATE and OPEN the files under
+    that spelling, and name resolution is not the only thing a folding
+    parent changes -- `open()` folds too, and no amount of patching
+    `os.stat` makes a case-sensitive box fold an `open`. So the end-to-end
+    fixtures run against a real one, named by the environment, and skip
+    where there is none. The properties that ARE queries -- does the parent
+    fold, does the guard accept, does one entry mean one stripe -- are
+    emulated instead, by `tests/_case_fold.py`.
+    """
+    root = os.environ.get('DAEDALUS_CASE_FOLD_ROOT')
+    if not root or not os.path.isdir(root):
+        _util.skip('no case-folding parent named by DAEDALUS_CASE_FOLD_ROOT')
+    probe = Path(root) / 'daedalus-case-fold-probe'
+    probe.mkdir(exist_ok=True)
+    try:
+        variant = str(probe).replace('case-fold-probe', 'CASE-FOLD-PROBE')
+        if not os.path.exists(variant):
+            _util.skip(f'{root} does not fold case')
+    finally:
+        probe.rmdir()
+    return Path(root)
+
+
+def _folding_token(root, name):
+    """A fresh subdirectory of the real folding parent to work in."""
+    target = root / name
+    if target.exists():
+        _util.skip(f'{target} is already there from an earlier run')
+    target.mkdir(parents=True)
+    return target
+
+
+def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
+    """Two spellings of one tab: one directory, one stripe, on a real parent.
+
+    The filed scenario end to end, on a parent that actually folds: a
+    delivery for `Foo` creates the directory, a delivery for `foo` reaches
+    the same entry, and the two take one stripe at every site that locks the
+    target -- the POST, the delivery read and the compatibility consume.
+    """
+    root = _folding_parent(tmp)
+    work = _folding_token(root, tmp.rsplit('/', 1)[-1])
+    routes = _load('fixture_result_routes_real_fold')
+    store = routes.result_store
+    res_dir, cmd_dir = work / 'results', work / 'commands'
+    cmd_dir.mkdir(parents=True)
+    token = 'realfoldtok'
+    with _recorded_locks(store) as seen:
+        first = routes.accept_result(
+            res_dir, cmd_dir, token,
+            {'tabId': 'Foo', 'id': 'one', '_did': '1700000000000_a'},
+            DELIVERY_CAP)
+        second = routes.accept_result(
+            res_dir, cmd_dir, token,
+            {'tabId': 'foo', 'id': 'two', '_did': '1700000000000_b'},
+            DELIVERY_CAP)
+        landed = sorted(path.name for path in (
+            res_dir / 'deliveries' / f'{token}_Foo').iterdir())
+        read = routes.fetch_result(
+            res_dir, token, {'tab': ['foo'], 'delivery': ['1700000000000_b']})
+        kept = routes.fetch_result(
+            res_dir, token,
+            {'tab': ['Foo'], 'consume': ['1'],
+             'expected': ['1700000000000_not_this_one']})
+        consumed = routes.fetch_result(
+            res_dir, token, {'tab': ['foo'], 'consume': ['1']})
+    names, keys, stripes = _one_stripe(seen)
     assert first == (200, {'ok': True}), first
     assert second == (200, {'ok': True}), second
-    assert keys == [f'{token}_Foo', f'{token}_Foo'], keys
-    assert _read(_delivery(token, 'Foo', '1700000000000_b'))['id'] == 'two'
+    assert read[0] == 200 and read[1].get('id') == 'two', read
+    assert kept == (200, {'consumed': False}), kept
+    assert consumed[0] == 200 and consumed[1].get('id') == 'two', consumed
+    assert not (res_dir / 'deliveries' / f'{token}_Foo' / (
+        '1700000000000_b.json')).exists(), 'the consumed copy stayed'
+    # One entry on disk, both results in it, and one key for the lot.
+    assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
+        f'{token}_Foo'], sorted(
+            p.name for p in (res_dir / 'deliveries').iterdir())
+    assert landed == ['1700000000000_a.json', '1700000000000_b.json'], (
+        landed)
+    # Two spellings reached it, which is the divergence the fixture exists
+    # to drive, and one key and one lock came out the other side.
+    assert set(names) == {f'{token}_Foo', f'{token}_foo'}, names
+    assert keys == 1, seen
+    assert stripes == 1, seen
 
 
-def _folded_stored_delivery(routes, token, did, tab='Foo'):
-    """Store one delivery under the spelling `tab`, on a folding parent."""
-    with _case_fold.case_folding(RES_DIR):
-        return routes.accept_result(
-            RES_DIR, RES_DIR.parent, token,
-            {'tabId': tab, 'id': 'stored', '_did': did}, DELIVERY_CAP)
+def test_the_post_hands_the_stripe_an_entry_not_a_name(tmp):
+    """What the folded fixture above composes with, on any filesystem.
 
-
-def test_a_folded_delivery_read_takes_the_entry_stripe(tmp):
-    """A delivery read takes the stripe of the entry it resolved to.
-
-    The read finds its target by delivery id, and the directory it found
-    answers with the spelling the filesystem holds, not the spelling the
-    store would have derived from the tab -- so the stripe it takes has to
-    be the entry's or a consumer and a writer of one directory can hold two
-    different locks.
+    The stripe is keyed on the directory, so what a route hands it has to be
+    the directory and not a name it derived: this pins the call shape, which
+    is the half of the property a case-sensitive host can see. The other
+    half -- one entry, one stripe -- is pinned where a folding parent is
+    available.
     """
-    routes = _load('fixture_result_routes_folded_fetch')
+    routes = _load('fixture_result_routes_lock_shape')
     store = routes.result_store
-    token, did = 'foldfetchtok', '1700000000000_c'
-    stored = _folded_stored_delivery(routes, token, did)
-    keys = []
-    real_lock_for = store.delivery_lock_for
-
-    def recording_lock_for(target_key):
-        keys.append(target_key)
-        return real_lock_for(target_key)
-
-    store.delivery_lock_for = recording_lock_for
-    try:
-        with _case_fold.case_folding(RES_DIR):
-            status, payload = routes.fetch_result(
-                RES_DIR, token, {'tab': ['foo'], 'delivery': [did]})
-    finally:
-        store.delivery_lock_for = real_lock_for
+    token = 'shapetok'
+    with _recorded_locks(store) as seen:
+        stored = routes.accept_result(
+            RES_DIR, tmp, token,
+            {'tabId': 'shapetab', 'id': 'one', '_did': '1700000000000_c'},
+            DELIVERY_CAP)
+    names, keys, stripes = _one_stripe(seen)
     assert stored == (200, {'ok': True}), stored
-    assert status == 200 and payload.get('id') == 'stored', (status, payload)
-    assert keys == [f'{token}_Foo'], keys
-
-
-def test_a_folded_compat_consume_takes_the_entry_stripe(tmp):
-    """A compatibility consume takes the stripe of the entry it found.
-
-    The consume discovers its owner by delivery id rather than by tab, so
-    the entry it discovered is the only spelling it has -- the one the
-    filesystem holds, which is what the writer of that entry locked.
-    """
-    routes = _load('fixture_result_routes_folded_compat')
-    store = routes.result_store
-    token, did = 'foldcompatok', '1700000000000_d'
-    stored = _folded_stored_delivery(routes, token, did)
-    keys = []
-    real_lock_for = store.delivery_lock_for
-
-    def recording_lock_for(target_key):
-        keys.append(target_key)
-        return real_lock_for(target_key)
-
-    store.delivery_lock_for = recording_lock_for
-    try:
-        with _case_fold.case_folding(RES_DIR):
-            status, payload = routes.fetch_result(
-                RES_DIR, token, {'tab': ['foo'], 'consume': ['1']})
-    finally:
-        store.delivery_lock_for = real_lock_for
-    assert stored == (200, {'ok': True}), stored
-    # A compatibility consume without `expected` answers the body it deleted.
-    assert status == 200 and payload.get('deliveryId') == did, (
-        status, payload)
-    assert not _delivery(token, 'Foo', did).exists(), 'the copy stayed'
-    assert keys == [f'{token}_Foo'], keys
+    assert seen and all(isinstance(d, Path) for d, _k, _l in seen), seen
+    assert names == [f'{token}_shapetab'], names
+    assert keys == 1 and stripes == 1, seen
+    assert Path(seen[0][0]).is_dir(), seen
 
 
 def main():
