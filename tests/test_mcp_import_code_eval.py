@@ -48,6 +48,22 @@ def _assert_silent(_tmp, source):
     assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
 
 
+def _refused_with_code_eval(_tmp, source, label=''):
+    """The scan refuses this composition because a code-evaluating builtin
+    is hidden by a store. With no import-by-name operation and no registry
+    in the source, that is the only refusal it can produce, so the refusal
+    IS the evidence the code-eval axis reached this store form."""
+    _write_tree(Path(_tmp), {'composition.py': source})
+    try:
+        _mcp_import_closure.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert 'code-evaluating' in str(raised), raised
+    else:
+        raise AssertionError(
+            f'a code-evaluating builtin was silently hidden in {label}')
+
+
 def test_a_program_naming_the_operation_refuses_the_scan(_tmp):
     """The issue's own spelling: a constant program that reaches the
     import-by-name operation. The program is read by the one folder, so it
@@ -185,6 +201,76 @@ def test_a_store_hiding_a_code_evaluating_builtin_refuses(_tmp):
 def load():
     loader = eval
     return loader('importlib')
+''', 3, 'code-evaluating')
+
+
+# Every store form the import-by-name operation axis already reaches, each
+# hiding a code-evaluating builtin and nothing else. This is the pin that
+# says the code-eval axis rides the SAME store grammar: a form missing here
+# is a store the walk follows for the operation but not for the builtin.
+EVERY_STORE_FORM = (
+    ('assign', 'x = eval\n'),
+    ('annassign', 'x: object = eval\n'),
+    ('augassign', 'x = 0\nx += eval\n'),
+    ('walrus', 'while (x := eval):\n    break\n'),
+    ('for', 'for x in (eval,):\n    pass\n'),
+    ('async-for',
+     'async def f():\n    async for x in (eval,):\n        pass\n'),
+    ('comprehension', '_ = [x for x in (eval,)]\n'),
+    ('with', 'with eval as x:\n    pass\n'),
+    ('async-with',
+     'async def f():\n    async with eval as x:\n        pass\n'),
+    ('attribute-store', 'class C:\n    def f(self):\n        self.x = eval\n'),
+    ('tuple-unpack', '(x,) = (eval,)\n'),
+    ('list-unpack', '[x] = [eval]\n'),
+    ('starred-unpack', '(x, *rest) = (eval, 1)\n'),
+    ('positional-default', 'def f(x=eval):\n    pass\n'),
+    ('keyword-default', 'def f(*, x=eval):\n    pass\n'),
+    ('lambda-default', 'f = lambda x=eval: x\n'),
+)
+
+
+def test_every_store_form_the_operation_reaches_also_reaches_the_builtin(_tmp):
+    """The code-eval store axis is the SAME grammar as the operation axis.
+
+    `x = eval` was refused while `def f(x=eval)` scanned silent, because the
+    new check was bolted onto the assignment store instead of the shared
+    `_hidden` decision the default path also routes through. Every form the
+    operation store axis already reached is listed here; the code-eval axis
+    must reach each one, so a store form nobody enumerates is a finding.
+    """
+    for label, source in EVERY_STORE_FORM:
+        _refused_with_code_eval(_tmp, source, label)
+
+
+def test_a_code_evaluating_builtin_nested_in_a_container_refuses(_tmp):
+    """A builtin in a container is as hidden as a bare one.
+
+    The operation store recogniser recurses into a value's children, so
+    `{'m': importlib.import_module}` is refused; the code-eval recogniser
+    did not, and `{'e': eval}` was silent. The store recogniser now reads a
+    value the same recursive way on both axes.
+    """
+    for source in (
+            "d = {'e': eval}\n",
+            "d = [eval]\n",
+            "d = (eval,)\n",
+            "d = {eval}\n",
+            "import builtins\n\n\nd = {'e': builtins.eval}\n",
+            "d = {'e': eval, 'other': 1}\n"):
+        _refused_with_code_eval(_tmp, source)
+
+
+def test_a_field_less_f_string_program_is_refused(_tmp):
+    """A field-less f-string is the constant it looks like.
+
+    The program is readable without knowing any runtime value, so the
+    folder must read it; a redundant `f` prefix is otherwise a one-character
+    evasion of the pinned repro.
+    """
+    _assert_refusal(_tmp, '''
+def load(name):
+    return eval(f'importlib.import_module')(name)
 ''', 3, 'code-evaluating')
 
 
