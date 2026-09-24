@@ -30,40 +30,64 @@ _COMPARATOR = 'head/scripts/ci/compare_durations.py'
 _INSTRUMENT = 'head/scripts/ci/time_tests.py'
 _PROBE = 'Probe the head scripts for options'
 
-# The comparator exactly as it stood before 64aa98dd added `--ratio-file`.
-# Same parser, same required pair, no ratio file — which is what a head that
-# predates that commit actually runs against this workflow. Its description
-# names no option, because the real script's help named none: the probe
-# reduces the whole rendered help, prose included.
-_OLD_COMPARATOR = '''#!/usr/bin/env python3
-"""A comparator as it stood before a deciding ratio was recorded."""
+# The comparator's option set, one declaration per option so a fixture can
+# drop any named one. The body reads every attribute through `getattr`, so a
+# fixture that omits an option RUNS rather than raising: a comparator that
+# crashes still exits 1, and a control that only checks the exit code cannot
+# tell that refusal from the crash a dropped option would produce.
+_COMPARATOR_TEMPLATE = '''#!/usr/bin/env python3
+"""A comparator with a chosen argparse surface."""
 import argparse
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--base', nargs='+', required=True)
-    parser.add_argument('--head', nargs='+', required=True)
-    parser.add_argument('--max-regression', type=float, default=0.30)
-    parser.add_argument('--base-label', default='baseline')
-    parser.add_argument('--summary-file')
-    parser.add_argument('--accept')
-    parser.add_argument('--require-measurements', action='store_true')
-    args = parser.parse_args()
-    print('compared {} against {}'.format(args.base, args.head))
+{declared}    args = parser.parse_args()
+    print('compared {{}} against {{}}'.format(
+        getattr(args, 'base', None), getattr(args, 'head', None)))
 
 
 main()
 '''
 
-# The same comparator with one required option left out, for the refusal the
-# required path is there to produce.
-_HEADLESS_COMPARATOR = _OLD_COMPARATOR.replace(
-    "    parser.add_argument('--head', nargs='+', required=True)\n", '')
+_COMPARATOR_OPTIONS = (
+    "    parser.add_argument('--base', nargs='+', required=True)\n",
+    "    parser.add_argument('--head', nargs='+', required=True)\n",
+    "    parser.add_argument('--max-regression', type=float, default=0.30)\n",
+    "    parser.add_argument('--base-label', default='baseline')\n",
+    "    parser.add_argument('--summary-file')\n",
+    "    parser.add_argument('--ratio-file')\n",
+    "    parser.add_argument('--accept')\n",
+    "    parser.add_argument('--require-measurements', "
+    "action='store_true')\n",
+)
 
-# A timing instrument reduced to what it took before 44d6ad0e added the
-# selection options. It records what it parsed, so a test can prove the flag
-# reached the parser rather than only the command line.
+
+def _comparator(*dropped):
+    """A real comparator missing the named options, crash-proof on the rest.
+
+    Its description names no option, because the probe reduces the whole
+    rendered help, prose included: a fixture that mentioned one in its
+    docstring would advertise an option its parser does not declare.
+    """
+    kept = ''.join(declaration for declaration in _COMPARATOR_OPTIONS
+                  if not any(f"'{name}'" in declaration
+                             for name in dropped))
+    return _COMPARATOR_TEMPLATE.format(declared=kept)
+
+
+# Exactly the surface that stood before 64aa98dd added `--ratio-file`, which
+# is what a head predating that commit runs against this workflow.
+_OLD_COMPARATOR = _comparator('--ratio-file')
+# The required option the drop path must not swallow.
+_HEADLESS_COMPARATOR = _comparator('--head')
+# The only fixture on which exact-token and substring matching disagree:
+# `--base-label` is offered, `--base` is not, and `--base` is a prefix of it.
+_LABEL_ONLY_COMPARATOR = _comparator('--base')
+
+# The instrument's options in the order the step passes them. As with the
+# comparator, the body reads through `getattr` so a fixture missing an option
+# runs instead of raising.
 _INSTRUMENT_TEMPLATE = '''#!/usr/bin/env python3
 """A timing instrument with a chosen argparse surface."""
 import argparse
@@ -73,37 +97,54 @@ import os
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tree', required=True)
-    parser.add_argument('--python', required=True)
-    parser.add_argument('--out', required=True)
-{extra}    args = parser.parse_args()
-    os.makedirs(args.out, exist_ok=True)
-    record = {{'tree': args.tree, 'only': getattr(args, 'only', None),
+{declared}    args = parser.parse_args()
+    out = getattr(args, 'out', None)
+    if out is None:
+        print('nothing to time')
+        return
+    os.makedirs(out, exist_ok=True)
+    record = {{'tree': getattr(args, 'tree', None),
+              'only': getattr(args, 'only', None),
               'except': getattr(args, 'except_globs', None)}}
-    with open(os.path.join(args.out, 'durations.json'), 'w',
+    with open(os.path.join(out, 'durations.json'), 'w',
               encoding='utf-8') as handle:
         json.dump(record, handle)
-    print('timed {{}}'.format(args.tree))
+    print('timed {{}}'.format(record['tree']))
 
 
 main()
 '''
 
-_SELECTION_ARGS = (
-    "    parser.add_argument('--only', nargs='+', metavar='GLOB')\n"
-    "    parser.add_argument('--except', nargs='+', dest='except_globs',\n"
-    "                        metavar='GLOB')\n"
+_INSTRUMENT_OPTIONS = (
+    ('--tree', "    parser.add_argument('--tree', required=True)\n"),
+    ('--python', "    parser.add_argument('--python', required=True)\n"),
+    ('--out', "    parser.add_argument('--out', required=True)\n"),
+    ('--only', "    parser.add_argument('--only', nargs='+', "
+     "metavar='GLOB')\n"),
+    ('--except', "    parser.add_argument('--except', nargs='+',\n"
+     "                        dest='except_globs', "
+     "metavar='GLOB')\n"),
 )
+
+
+def _instrument(selection=False, dropped=()):
+    """A real instrument with the named options missing.
+
+    `selection` adds the two options 44d6ad0e introduced, so one pair of
+    fixtures carries both the current and the pre-44d6ad0e surface.
+    """
+    names = ['--tree', '--python', '--out']
+    if selection:
+        names += ['--only', '--except']
+    declarations = dict(_INSTRUMENT_OPTIONS)
+    declared = ''.join(declarations[name] for name in names
+                       if name not in dropped)
+    return _INSTRUMENT_TEMPLATE.format(declared=declared)
+
 
 # One suite per report file, timed on both sides, so the real comparator has a
 # shared set to sum and a ratio to record.
 _DURATIONS = {'tests': {'test_one_slow': 1.0, 'test_two_slow': 2.0}}
-
-
-def _instrument(selection):
-    """A real instrument carrying the selection options, or none."""
-    return _INSTRUMENT_TEMPLATE.format(
-        extra=_SELECTION_ARGS if selection else '')
 
 
 def _workdir(tmp, name):
@@ -246,6 +287,26 @@ def test_a_head_with_no_comparator_refuses_rather_than_skips(tmp):
         probe.stdout, probe.stderr)
 
 
+def test_an_option_is_matched_exactly_and_never_by_substring(tmp):
+    """`--base` is a prefix of `--base-label`, and only one of them is here.
+
+    Every other fixture declares `--base` exactly when it declares
+    `--base-label`, so exact-token and substring matching agree on all of
+    them and the cheaper reading is unpinned. This is the one fixture where
+    they disagree: the step must refuse `--base` by name, not pass it
+    because a longer option shares its prefix.
+    """
+    workdir = _workdir(tmp, 'label-only')
+    _install_comparator(workdir, _LABEL_ONLY_COMPARATOR)
+    probe, options = _probe(workdir)
+    assert probe.returncode == 0, (probe.stdout, probe.stderr)
+    assert '--base-label' in options['compare_options'], options
+    result, _summary = _run_compare(workdir, options)
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert '::error::--base is required' in result.stdout, result.stdout
+    assert 'unrecognized arguments' not in result.stderr, result.stderr
+
+
 def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
     """Both directions of the negotiation, read off the parsed values.
 
@@ -255,7 +316,7 @@ def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
     """
     workdir = _workdir(tmp, 'old-instrument')
     _install_comparator(workdir)
-    _install_instrument(workdir, _instrument(False))
+    _install_instrument(workdir, _instrument())
     probe, options = _probe(workdir)
     assert probe.returncode == 0, (probe.stdout, probe.stderr)
     result, summary = _run_timing(workdir, options)
@@ -272,7 +333,7 @@ def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
 
     workdir = _workdir(tmp, 'current-instrument')
     _install_comparator(workdir)
-    _install_instrument(workdir, _instrument(True))
+    _install_instrument(workdir, _instrument(selection=True))
     probe, options = _probe(workdir)
     assert probe.returncode == 0, (probe.stdout, probe.stderr)
     result, summary = _run_timing(workdir, options)
@@ -285,22 +346,31 @@ def test_the_timing_step_drops_and_keeps_its_selection_flags(tmp):
     assert recorded['only'] == ['test_speed*.py'], recorded
 
 
-def test_every_option_the_comparator_declares_reaches_the_command(tmp):
+# Each script and the step that calls it. Both are checked by one test: a
+# control on one call site and an assumption on the other is a gap.
+_CALL_SITES = (
+    ('compare_durations.py', 'Compare'),
+    ('time_tests.py', 'Run both suites, interleaved'),
+)
+
+
+def test_every_option_a_script_declares_reaches_its_step(tmp):
     """The invariant that stops the negotiation rotting in silence.
 
-    An option added to the script but never wired into the step would
-    otherwise degrade quietly, forever. `--help` is excluded because
-    argparse adds it implicitly and the step must never pass it.
+    An option added to a script but never wired into the step that calls it
+    would otherwise degrade quietly, forever. `--help` is excluded because
+    argparse adds it implicitly and no step may pass it.
     """
     del tmp
-    declared = _declared_comparator_options()
-    assert declared, 'no add_argument calls were read from the comparator'
-    compare = '\n'.join(_job_section(_tests_yml(), 'timed')).partition(
-        '- name: Compare\n')[2]
-    compare = compare.partition('- name:')[0]
-    wired = set(re.findall(r'^\s*add (--[a-z][a-z0-9-]*)', compare,
-                           re.MULTILINE))
-    assert declared - {'--help'} == wired, (declared, wired)
+    section = '\n'.join(_job_section(_tests_yml(), 'timed'))
+    for script, step_name in _CALL_SITES:
+        declared = _declared_options(script)
+        assert declared, f'no add_argument calls were read from {script}'
+        block = section.partition(f'- name: {step_name}\n')[2]
+        block = block.partition('- name:')[0]
+        wired = set(re.findall(r'^\s*add (--[a-z][a-z0-9-]*)', block,
+                               re.MULTILINE))
+        assert declared - {'--help'} == wired, (script, declared, wired)
 
 
 def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
@@ -313,10 +383,11 @@ def test_the_help_extraction_reproduces_the_parser_at_every_width(tmp):
     del tmp
     comparator = ROOT / 'scripts' / 'ci' / 'compare_durations.py'
     # `--help` is the one token the parser adds implicitly rather than
-    # declares. `-h` is absent because argparse brackets it in the usage
-    # line and the probe's regex only matches a token the whitespace
-    # introduces — and no caller ever passes it.
-    expected = _declared_comparator_options() | {'--help'}
+    # declares. `-h` is absent because the regex body `[a-z][a-z0-9-]+`
+    # needs two characters after the dash and the options line spells it
+    # `-h,` — not because of the usage line, where it is bracketed too —
+    # and no caller ever passes it.
+    expected = _declared_options('compare_durations.py') | {'--help'}
     for columns in ('40', '60', '80', '200'):
         environment = dict(os.environ, COLUMNS=columns)
         extracted = _help_tokens(comparator, environment)
@@ -340,20 +411,66 @@ def test_a_compare_with_no_probed_options_refuses(tmp):
 
 
 def test_a_required_option_the_head_does_not_offer_stops_the_step(tmp):
-    """The required path is a refusal; the drop path must not swallow it."""
+    """The required path is a refusal; the drop path must not swallow it.
+
+    The fixture runs cleanly without `--head`, so a step that dropped it
+    exits 0 and is caught here. A fixture that raised instead would exit 1
+    as well, and this control could not tell the refusal from the crash.
+    """
     workdir = _workdir(tmp, 'headless-comparator')
     _install_comparator(workdir, _HEADLESS_COMPARATOR)
     probe, options = _probe(workdir)
     assert probe.returncode == 0, (probe.stdout, probe.stderr)
     result, _summary = _run_compare(workdir, options)
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert '--head' in result.stdout, result.stdout
+    assert '::error::--head is required' in result.stdout, result.stdout
+    assert 'Traceback' not in result.stdout + result.stderr, (
+        result.stdout, result.stderr)
+    assert 'unrecognized arguments' not in result.stderr, result.stderr
 
 
-def _declared_comparator_options():
-    """The comparator's options, read from its own parser declarations."""
-    source = (ROOT / 'scripts' / 'ci' / 'compare_durations.py').read_text(
-        encoding='utf-8')
+def test_the_timing_step_refuses_a_required_option_it_is_not_given(tmp):
+    """The instrument side of the required refusal, which the step owns.
+
+    A head whose instrument does not take `--tree` cannot be timed at all,
+    so the step names the option and stops. The fixture runs cleanly
+    without it, so a step that dropped it would exit 0 here.
+    """
+    workdir = _workdir(tmp, 'treeless-instrument')
+    _install_comparator(workdir)
+    _install_instrument(workdir, _instrument(
+        selection=True, dropped=('--tree',)))
+    probe, options = _probe(workdir)
+    assert probe.returncode == 0, (probe.stdout, probe.stderr)
+    result, _summary = _run_timing(workdir, options)
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert '::error::--tree is required' in result.stdout, result.stdout
+    assert 'Traceback' not in result.stdout + result.stderr, (
+        result.stdout, result.stderr)
+
+
+def test_the_timing_step_with_no_probed_options_refuses(tmp):
+    """The instrument side of the never-probed refusal.
+
+    The comparator's arm is controlled by
+    `test_a_compare_with_no_probed_options_refuses`; controlling one call
+    site and assuming the other leaves half the mechanism unpinned.
+    """
+    workdir = _workdir(tmp, 'no-probe-timing')
+    _install_comparator(workdir)
+    _install_instrument(workdir, _instrument(selection=True))
+    result, _summary = _run_timing(workdir, {'time_options': ''})
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert '::error::' in result.stdout, result.stdout
+    assert _INSTRUMENT in result.stdout, result.stdout
+    assert 'unknown' in result.stdout, result.stdout
+    assert 'Traceback' not in result.stdout + result.stderr, (
+        result.stdout, result.stderr)
+
+
+def _declared_options(script):
+    """One script's options, read from its own parser declarations."""
+    source = (ROOT / 'scripts' / 'ci' / script).read_text(encoding='utf-8')
     return set(re.findall(r"add_argument\(\s*'(--[a-z][a-z0-9-]*)'", source))
 
 
