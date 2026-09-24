@@ -190,10 +190,11 @@ def test_a_shifted_star_display_stays_clean(tmp):
     assert verdicts == dict.fromkeys(_SHIFTED, (0, 0)), verdicts
 
 
-def test_a_shifted_plain_list_keeps_its_positions(tmp):
-    """Issue 980: a list with no star keeps the positions it recorded."""
+def test_a_shifted_plain_list_reports(tmp):
+    """Issue 980: a delete shifts a list with no star too, so the position the
+    model recorded is the one before the mutation and the read fails closed."""
     assert _verdict(tmp, _PRE + _QUIET + 'x = [quiet(), relay(), ordinary]'
-                    '\ndel x[0]' + _SL + 'x[0]()') == (1, 0)
+                    '\ndel x[0]' + _SL + 'x[0]()') == (1, 1)
 
 
 def main():
