@@ -32,12 +32,8 @@ def _client():
 
 
 def _windows_text(text):
-    """What a text-mode stdout on Windows writes for `text`.
-
-    Python's Windows stdout translates every `\n` to `\r\n`, so a line
-    ending the caller already spelled `\r\n` leaves as `\r\r\n`. The
-    fake's response goes through such a stream, and so can any `gh` answer
-    relayed through one.
+    """What a Windows text-mode stdout writes: every `\n` translated, so a
+    `\r\n` the caller already spelled leaves as `\r\r\n`.
     """
     return text.replace('\n', '\r\n')
 
@@ -101,15 +97,9 @@ def test_a_403_whose_only_evidence_is_the_body_is_still_a_refusal(tmp):
 
 
 def test_a_retranslated_header_block_still_yields_its_values(tmp):
-    """A header block re-translated by a Windows text stream still parses.
-
-    The four controls that read their reset from the body pass on Windows
-    while every one that reads a header fails: the answer's `\r\n` line
-    endings are translated a second time on the way out, so the blank line
-    that ends the block is no longer the byte pair the split looks for, the
-    header lines fall into the body, and a reported reset arrives as no
-    reset at all - a 60-second default instead of the wait the API asked
-    for.
+    """A re-translated header block still yields its values. Without that,
+    the block ends early, the header lines fall into the body, and a
+    reported reset arrives as no reset - a 60-second default instead.
     """
     del tmp
     mod = _client()
@@ -126,12 +116,8 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
 
 
 def test_a_header_reset_survives_a_windows_text_stream_end_to_end(tmp):
-    """The whole chain, with the bytes a Windows stdout really delivers.
-
-    The fake re-translates its own response when asked, so this drives a
-    real `gh` process, the real request and the real parse over the byte
-    sequence the failing platform produces, and reads the reset the fixture
-    wrote into the header.
+    """The whole chain over the bytes a Windows stdout really delivers: a
+    real `gh` process, the real request, the real parse.
     """
     mod = _client()
     reset = int(time.time()) + 120
@@ -205,13 +191,9 @@ def test_a_graphql_retry_after_is_honoured_when_no_reset_is_reported(tmp):
 
 
 def test_a_slow_install_cannot_move_the_measured_retry_after(tmp):
-    """The offset is read at the call, so setup time cannot shift it.
-
-    `before` used to be taken before the fake is installed, whose launcher
-    self-test is a subprocess: a second of setup inside a one-second window
-    is the whole margin, and on a Windows coverage leg the install takes
-    longer than that. Measuring beside the call is what makes the control's
-    claim - and the same claim is what the offset is for.
+    """The offset is read at the call, so setup time cannot shift it:
+    `before` once sat before the fake's install, a subprocess, and a second
+    of that is the whole margin of a one-second window.
     """
     mod = _client()
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {

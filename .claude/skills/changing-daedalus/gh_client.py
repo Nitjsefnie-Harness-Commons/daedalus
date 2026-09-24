@@ -111,12 +111,9 @@ def _executable():
 def _parse(text):
     """(status, headers, body) from a `-i` response.
 
-    Read line by line rather than split at the first blank-line byte pair:
-    a Windows text stream re-translates the `\r\n` the answer already
-    carried, so each ending arrives as `\r\r\n` and the blank line is two
-    near-empty lines. A byte-pair split cuts inside the block, the header
-    lines fall into the body, and a reported reset arrives as no reset at
-    all - a fixed default instead of the wait the API asked for.
+    Line by line, not split at the first blank-line byte pair: a re-
+    translated ending carries two `\r`s, and a byte-pair split cuts inside
+    the block, so the header lines land in the body.
     """
     lines = text.split('\n')
     headers = {}
@@ -187,14 +184,10 @@ def _graphql_refusal(payload):
 def _call(query, variables):
     """One `gh api graphql`, payload on stdin, headers asked for.
 
-    The answer is read as bytes and decoded here rather than through a
-    text-mode read. A text-mode read translates line endings again on a
-    Windows relay: the `\r\n` the producer already spelled arrives as
-    `\r\r\n`, and the universal-newline reader turns each `\r` into a
-    line of its own - a blank line after every real line, which cuts the
-    header block short and takes the reported rate-limit reset with it. The
-    parse reads the endings as they came, so the block survives whatever
-    the relay did to them.
+    The answer is read as bytes and decoded here: a text-mode read
+    translates line endings a second time on a Windows relay, and each
+    re-translated `\r` becomes a blank line of its own - which ends the
+    header block early and takes the reported reset with it.
     """
     payload = json.dumps({'query': query,
                           'variables': variables or {}}).encode('utf-8')

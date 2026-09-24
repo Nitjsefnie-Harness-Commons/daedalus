@@ -149,9 +149,7 @@ def main(argv):
         text = _render(status, headers, text)
     if os.environ.get('DAEDALUS_FAKE_GH_CRLF'):
         # What a Windows text stream does to a response that already spells
-        # its line endings: every \n is translated a second time. Asking
-        # for it here is how a Linux run hands the client the bytes that
-        # platform produces.
+        # its line endings: a Linux run can hand the client those bytes.
         text = text.replace('\n', '\r\n')
     sys.stdout.write(text + '\n')
     if status >= 400:
