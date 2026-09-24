@@ -275,6 +275,7 @@
 !/tests/_fake_gh.py
 !/tests/_frontend.py
 !/tests/_ghexpr.py
+!/tests/_gm_harness.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
