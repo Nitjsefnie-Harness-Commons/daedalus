@@ -16,8 +16,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
+from _boundary_env import ENVIRONMENT  # noqa: E402
+from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
+
+_QUERY_TIMING_PROBE = ENVIRONMENT + r"""
+async function probe() {
+  let called = 0;
+  chrome.tabs.query({}, () => { called++; });
+  const synchronous = called;
+  await new Promise((resolve) => setImmediate(resolve));
+  return { synchronous, afterMicrotask: called };
+}
+probe().then((result) => {
+  process.stdout.write(JSON.stringify(result));
+}).catch((error) => {
+  process.stderr.write((error.stack || String(error)) + '\n');
+  process.exitCode = 1;
+});
+"""
 
 
 def test_v8_coverage_attributes_the_shipped_background_script(tmp):
@@ -44,6 +62,26 @@ def test_v8_coverage_attributes_the_shipped_background_script(tmp):
     shipped_url = background_path.resolve().as_uri()
     shipped = [url for url in urls if url == shipped_url]
     assert shipped, urls
+
+
+def test_the_tabs_query_callback_is_delivered_on_a_microtask(tmp):
+    """Chrome delivers the callback asynchronously; the double must too.
+
+    `registerAllTabs` reads the tab list from the callback, so a double that
+    invokes it inline models the call but not its timing, and a real ordering
+    defect that depends on the callback landing after the caller's turn would
+    pass here. This drives the REAL `chrome.tabs.query` double and records
+    whether the callback had fired by the end of the synchronous turn.
+    """
+    del tmp
+    result = run_node_program(
+        shutil.which('node'), _QUERY_TIMING_PROBE,
+        [str(EXTENSION_ROOT / 'background.js'), 'query-timing'],
+        cwd=ROOT)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    observed = json.loads(result.stdout)
+    assert observed == {'synchronous': 0, 'afterMicrotask': 1}, observed
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):

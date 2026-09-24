@@ -229,9 +229,13 @@ const chrome = {
           .map((tab) => ({ ...tab }))
         : [{ id: 7, url: 'https://page.example.com' }];
       // registerAllTabs reads the result from a callback; the rest of the
-      // worker awaits the promise. Chrome honours both, so the double does
-      // too — otherwise the whole POST /sync-tabs boot path never runs.
-      if (typeof callback === 'function') callback(modeled);
+      // worker awaits the promise. Chrome honours both, and delivers the
+      // callback on a microtask, so the double does too — otherwise a double
+      // that models the call but not its timing lets an ordering defect
+      // through.
+      if (typeof callback === 'function') {
+        queueMicrotask(() => callback(modeled));
+      }
       if (scenario === 'route' && Object.keys(query).length === 0) {
         return new Promise((resolve) => {
           tabQueryResolver = resolve;
@@ -394,6 +398,21 @@ const badOrigins = [];
 // `planned` array, which every plan here carries.
 let plan = ALL_PLANS[scenario] || { planned: [] };
 function streamResponse(answer) {
+  if (answer === 'hang') {
+    // A connected 200 whose body never yields a chunk: the live-but-idle
+    // stream the watchdog treats as open. The fetch RESOLVES (so the worker's
+    // stream loop arms its watchdog) but read() never settles.
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+          cancel: () => Promise.resolve(),
+        }),
+      },
+    };
+  }
   return response(answer, { error: 'disabled' });
 }
 // The gate builds a declared {stream: N} answer through the harness's chunk
@@ -408,10 +427,14 @@ function chunkedResponse(count) {
 const resultPayloads = resultPosts;
 function bridgeRequests() {
   return nonStreamFetches.map((record) => {
-    // The record carries the full target URL, so the origin is the one the
-    // request actually went to (the route scenario rotates the bridge), not a
-    // reconstruction that would always name BRIDGE_URL.
-    const url = record.url;
+    const space = record.request.indexOf(' ');
+    const target = record.request.slice(space + 1);
+    // A relay key is the full URL; a bridge key is the bare path the gate
+    // recorded, so it gets the bridge origin back. No scenario posts to a
+    // second bridge, so this reconstructs the initial origin today; the
+    // record's own `url` field (pinned by the oracle) is the faithful
+    // source if one ever does.
+    const url = /^https?:\/\//.test(target) ? target : BRIDGE_URL + target;
     const body = record.body || {};
     return {
       kind: url.endsWith('/result') ? 'result'

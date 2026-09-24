@@ -53,6 +53,21 @@ function response(status, data) {
 }
 
 function streamResponse(answer) {
+  // The gate routes every stream answer through this factory, so a harness
+  // that serves 'hang' models the connected-but-idle body here. The hang test
+  // reds if this factory stops building it.
+  if (answer === 'hang') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+          cancel: () => Promise.resolve(),
+        }),
+      },
+    };
+  }
   return response(answer, { error: 'disabled' });
 }
 

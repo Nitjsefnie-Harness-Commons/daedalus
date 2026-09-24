@@ -200,21 +200,9 @@ async function bridgeFetch(target, init = {}) {
     if (next === 'down') {
       throw new TypeError('Failed to fetch');
     }
-    if (next === 'hang') {
-      // A connected 200 whose body never yields a chunk: the live-but-idle
-      // stream a watchdog must treat as open. The fetch RESOLVES (so the
-      // worker's stream loop arms its watchdog) but read() never settles.
-      return {
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => ({
-            read: () => new Promise(() => {}),
-            cancel: () => Promise.resolve(),
-          }),
-        },
-      };
-    }
+    // Every stream answer, including a declared 'hang', is built by the
+    // harness's streamResponse — the gate hardcodes none of them, so a
+    // defective factory is observable on every path it serves.
     return streamResponse(next);
   }
   const request = requestKey(url, init);
