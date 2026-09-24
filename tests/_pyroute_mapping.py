@@ -157,6 +157,52 @@ def _dict_value(node, state):
     return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
 
 
+_SET_OPERATORS = (ast.BitOr, ast.BitAnd, ast.BitXor, ast.Sub)
+
+
+def _operand_value(side, state):
+    if isinstance(side, ast.Dict):
+        return _dict_value(side, state)
+    return _known_value(side, state)
+
+
+def _set_operands(operator, left, right, state):
+    """The two operand values when this is a set operation, else None.
+
+    Classification is by operand KIND, not by spelling: a mapping operand
+    keeps the merge that already handles it, and an operation over a set
+    is one whatever the other side proves itself to be."""
+    if not isinstance(operator, _SET_OPERATORS):
+        return None
+    operands = tuple(_operand_value(side, state) for side in (left, right))
+    kinds = {value.kind for value in operands
+             if isinstance(value, DeferredContainer)}
+    if 'set' not in kinds or 'dict' in kinds:
+        return None
+    return operands
+
+
+def _fold_set_operation(operator, operands, node):
+    """The set a set operation's result must still hold.
+
+    Soundness per operator: `A | B`, `A ^ B` and `A & B` are subsets of
+    `A | B` and `A - B` a subset of `A`, so the fold joins both operands
+    for the first three and the left alone for the last -- the most
+    precise each rule permits. A set has no positions and equal elements
+    collapse at runtime, so the elements join one dynamic slot. An operand
+    the model cannot resolve contributes the uncertainty token instead of
+    nothing: dropping it would let the result read cleaner than the code."""
+    sides = operands[:1] if isinstance(operator, ast.Sub) else operands
+    items = {}
+    for value in sides:
+        if isinstance(value, DeferredContainer):
+            for element in value.items.values():
+                _fold_dynamic(items, element)
+        else:
+            _fold_dynamic(items, UNPROVABLE_SENDER)
+    return DeferredContainer(items, None, 'set', node)
+
+
 def _merge_or_value(node, state):
     """Mapping value of `left | right` from the provable dict sides."""
     items = {}
@@ -297,8 +343,12 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             value = merge_yielded(_selected_values(owner, key))
         if value is not None:
             return value
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _merge_or_value(node, state)
+    if isinstance(node, ast.BinOp):
+        operands = _set_operands(node.op, node.left, node.right, state)
+        if operands is not None:
+            return _fold_set_operation(node.op, operands, node)
+        if isinstance(node.op, ast.BitOr):
+            return _merge_or_value(node, state)
     if isinstance(node, ast.Attribute):
         owner = _known_value(node.value, state)
         value = merge_yielded(
@@ -536,6 +586,15 @@ def apply_deferred_store(statement, state):
             _apply_setdefault(state, call, owner_name)
         return
     if isinstance(statement, ast.AugAssign):
+        operands = (_set_operands(statement.op, statement.target,
+                                  statement.value, state)
+                    if isinstance(statement.target, ast.Name) else None)
+        if operands is not None:
+            # The rebinding already dropped the name; bind it to the fold.
+            state.callables[statement.target.id] = _fold_set_operation(
+                statement.op, operands, statement)
+            sync_cells(state, {statement.target.id})
+            return
         if isinstance(statement.op, ast.BitOr) \
                 and isinstance(statement.target, ast.Name):
             # The rebinding already dropped the name; merge into its dict.
