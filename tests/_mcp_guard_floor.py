@@ -11,12 +11,15 @@ sites that exist in the source; a guard deleted together with its declaration
 is invisible to it, and for a guard nothing else pins, that deletion is
 invisible everywhere. Reach is lexical — closure cells, defaults,
 `__wrapped__`, module globals — so a site reached any other way is refused by
-the pin run, not missed. The `or` refusal reads the `if` test a raise sits
-DIRECTLY under: a raise reached through `try`, `while` or `else` bodies, or
-a test spelled `not (a and b)`, is one site like any other. A refusal
-written as `return {'error': ...}` — the
-convention at daedalus_mcp/tools_css.py `unblock_requests` — never raises and
-is off this floor.
+the pin run, not missed. A site's condition is the innermost statement that
+decides whether the raise runs, and every statement deciding it feeds the
+`or` refusal, so a compound condition hides in no `try`, `with` or `else`
+body; a statement the walk does not classify — a `match` case, whose pattern
+is not a test expression — refuses the scan instead of naming a site. A
+refusal written as `return {'error': ...}` — the
+convention at daedalus_mcp/tools_css.py `unblock_requests` — never raises
+and an `assert` states an invariant rather than refusing an argument; both
+are off this floor.
 """
 import ast
 import collections
@@ -52,6 +55,38 @@ def handler(text):
         return int(text)
     except ValueError:
         raise RuntimeError('re-raised from a handler') from None
+
+
+def nested(value):
+    if value < 0 or value > 10:
+        try:
+            raise ValueError('refused inside a try')
+        finally:
+            pass
+
+
+def chained(value):
+    if value is None:
+        pass
+    elif value:
+        raise RuntimeError('in an elif')
+    else:
+        raise RuntimeError('in an else chain')
+
+
+def looped(value):
+    while value > 10:
+        raise RuntimeError('in a while body')
+    while value < 0:
+        break
+    else:
+        raise RuntimeError('in a while else')
+
+
+def scoped(value):
+    class Nested:
+        if value is None:
+            raise RuntimeError('in a class body')
 '''
 
 # Every raise shape the scan can meet, and the one key each resolves to. The
@@ -60,10 +95,16 @@ def handler(text):
 GUARD_SHAPE_SITES = {
     ('guard_shapes', '', "raise ValueError('at module level')"),
     ('guard_shapes', 'guard', 'value < 1'),
-    ('guard_shapes', 'guard', "raise RuntimeError('in an else')"),
+    ('guard_shapes', 'guard', 'not (value)'),
     ('guard_shapes', 'guard', "raise RuntimeError('guarded by nothing')"),
     ('guard_shapes', 'handler',
      "raise RuntimeError('re-raised from a handler') from None"),
+    ('guard_shapes', 'nested', 'value < 0 or value > 10'),
+    ('guard_shapes', 'chained', 'value'),
+    ('guard_shapes', 'chained', 'not (value)'),
+    ('guard_shapes', 'looped', 'value > 10'),
+    ('guard_shapes', 'looped', 'not (value < 0)'),
+    ('guard_shapes', 'scoped', 'value is None'),
 }
 
 SELECT_SHAPES = '''
@@ -92,21 +133,84 @@ def _enclosing_function(node, parents):
 
 
 def _unguarded_text(node):
-    """Names a raise no `if` body holds. A bare re-raise unparses to `raise`
-    wherever it stands, so it carries its line rather than colliding."""
+    """Names a raise no statement in its chain decides. A bare re-raise
+    unparses to `raise` wherever it stands, so it carries its line rather
+    than colliding."""
     if node.exc is None:
         return f'bare raise at line {node.lineno}'
     return ast.unparse(node)
 
 
+# Enclosing statements that do not decide whether a raise runs: a try and its
+# handlers, else and finally; a with; a class body, a scope rather than a
+# condition; an except handler, which the try already covers; and a loop,
+# whose iterable the caller does not set. A form in neither this table nor the
+# controlling predicates below is refused, so the next statement Python adds
+# fails the scan instead of quietly keying a site on the raise's own text.
+TRANSPARENT_STATEMENTS = (
+    ast.AsyncFor, ast.AsyncWith, ast.ClassDef, ast.ExceptHandler, ast.For,
+    ast.Try, ast.TryStar, ast.With,
+)
+
+
+def _controlling_test(statement, child, module, lineno):
+    """The test deciding whether `child` runs inside `statement`, as
+    (test, negated); None when the statement decides nothing.
+
+    `negated` marks the branch a test does not guard — an `else`, an `elif`
+    chain's terminal, a `while`'s else — where the raise runs once the test
+    is false. An `or` anywhere in a loop's iterable is not read, because the
+    caller does not set it.
+    """
+    if isinstance(statement, (ast.If, ast.While)):
+        return statement.test, child in statement.orelse
+    if isinstance(statement, TRANSPARENT_STATEMENTS):
+        return None
+    # A `match` case carries no line of its own; the raise's line names it.
+    where = getattr(statement, 'lineno', None)
+    at = f' (line {where})' if where is not None else ''
+    raise AssertionError(
+        f'{module}:{lineno}: a raise under {type(statement).__name__!r}{at} '
+        'is decided by a construct the floor cannot read; classify it as a '
+        'transparent statement in TRANSPARENT_STATEMENTS or as a '
+        'controlling predicate in _controlling_test, or refuse the raise')
+
+
+def _raise_condition(node, parents, module):
+    """The condition key and `or` flag one raise carries.
+
+    The walk reads the chain of enclosing statements up to the enclosing
+    function: the innermost statement that decides the raise names the key,
+    and every statement in the chain that decides it feeds the `or` flag, so
+    a compound condition hides in no nesting. A chain that decides nothing
+    keys on the raise's own text.
+    """
+    key = None
+    or_guard = False
+    child = node
+    parent = parents.get(node)
+    while parent is not None and not isinstance(
+            parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+        found = _controlling_test(parent, child, module, node.lineno)
+        if found is not None:
+            test, negated = found
+            or_guard = or_guard or _contains_or(test)
+            if key is None:
+                key = (f'not ({ast.unparse(test)})' if negated
+                       else ast.unparse(test))
+        child = parent
+        parent = parents.get(parent)
+    return key or _unguarded_text(node), or_guard
+
+
 def _module_guard_sites(path, root):
     """Every raise site one module spells, keyed by (file, line).
 
-    Each value is ((module, function, condition), or_guard). Two shapes a
-    site key cannot tell apart are refused here instead of collapsed: two
-    raises on one physical line — a traceback names the line, not the
-    statement — and two sites in one function spelling one condition, whose
-    remedy is distinct messages.
+    Each value is ((module, function, condition), or_guard), read from the
+    statements enclosing the raise. Two shapes a site key cannot tell apart
+    are refused here instead of collapsed: two raises on one physical line —
+    a traceback names the line, not the statement — and two sites in one
+    function spelling one condition, whose remedy is distinct messages.
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
     parents = {child: node for node in ast.walk(tree)
@@ -124,13 +228,7 @@ def _module_guard_sites(path, root):
     sites = {}
     spelled = set()
     for node in raises:
-        guard = parents.get(node)
-        if isinstance(guard, ast.If) and node in guard.body:
-            condition = ast.unparse(guard.test)
-            or_guard = _contains_or(guard.test)
-        else:
-            condition = _unguarded_text(node)
-            or_guard = False
+        condition, or_guard = _raise_condition(node, parents, module)
         key = (module, _enclosing_function(node, parents), condition)
         if key in spelled:
             raise AssertionError(
@@ -233,9 +331,10 @@ def reachable_guards(sites, codes):
     """The raise sites a tool's own code objects can raise from, as their
     keys. A reached site refusing on an `or` test is refused by the floor:
     split it into one raise per condition, because one witness cannot answer
-    for two conditions on one line. The `or` test read is the one a raise
-    sits DIRECTLY under — a raise reached through `try`, `while` or `else`
-    bodies, or a test spelled `not (a and b)`, is one site like any other."""
+    for two conditions on one line. The `or` test read is the whole chain of
+    statements deciding the raise, so wrapping it in a `try`, a `with` or an
+    `else` body does not hide it, and a test spelled `not (a and b)` is one
+    site like any other."""
     reached = {}
     for code in codes:
         filename = str(Path(code.co_filename).resolve())
