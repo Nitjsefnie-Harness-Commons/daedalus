@@ -21,11 +21,7 @@ import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK, next_stream_data,  # noqa: E402
                      put_command, read_stream_data, stream_response)
-
-
-def _load_queue(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'command_queue.py', name=name)
+from _command_candidates import _load_queue  # noqa: E402
 
 
 def _set_mtime(path, stamp):
