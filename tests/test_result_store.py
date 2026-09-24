@@ -306,12 +306,22 @@ def test_the_store_needs_no_bridge_configuration(tmp):
     assert answer['file'] == expected_file, (answer, expected_file)
 
 
+def _folded_and_exact(store, res_dir):
+    """The two spellings' delivery paths, the way `paths` ordered them."""
+    folded, _folded_file = store.delivery_result_paths(
+        res_dir, 'foldtoken', 'foo', '123_1')
+    exact, _exact_file = store.delivery_result_paths(
+        res_dir, 'foldtoken', 'Foo', '123_1')
+    return folded, exact
+
+
 def test_a_folded_spelling_names_the_same_target(tmp):
     """A name the parent folds onto another spelling is that target.
 
-    The directory was created under the spelling `Foo`, so a delivery for
-    the tab `foo` resolves to the entry `Foo` names. Two spellings of one
-    directory are one target, not one target and an alias to it.
+    The directory exists under the spelling `Foo`, and the parent resolves
+    `foo` to the same entry. `realpath` answers with the caller's spelling
+    either way -- only `ntpath` canonicalises case -- so what makes them one
+    target is the parent, and the only way to see that is to ask it.
     """
     store = _util.load(
         _util.ROOT / 'daedalus_bridge' / 'result_store.py',
@@ -319,13 +329,68 @@ def test_a_folded_spelling_names_the_same_target(tmp):
     res_dir = Path(tmp) / 'results'
     on_disk = res_dir / 'deliveries' / 'foldtoken_Foo'
     on_disk.mkdir(parents=True)
-    with _case_fold.case_folding(res_dir):
-        folded, _folded_file = store.delivery_result_paths(
-            res_dir, 'foldtoken', 'foo', '123_1')
-        exact, _exact_file = store.delivery_result_paths(
-            res_dir, 'foldtoken', 'Foo', '123_1')
-    assert folded == exact == on_disk, (folded, exact, on_disk)
-    assert folded.name == 'foldtoken_Foo', folded.name
+    with _case_fold.case_folding(res_dir) as root:
+        folded, exact = _folded_and_exact(store, res_dir)
+        one_entry = os.path.samefile(folded, exact)
+        listed = sorted(p.name for p in (res_dir / 'deliveries').iterdir())
+        # The two paths are spelled differently, which is what POSIX
+        # `realpath` does here, and they are one entry, which is what the
+        # parent does. Both answers are read inside the emulation, because
+        # outside it the host's own filesystem is the one being asked.
+        assert folded.name == 'foldtoken_foo', folded.name
+        assert exact.name == 'foldtoken_Foo', exact.name
+        assert one_entry, (folded, exact, root)
+    assert listed == ['foldtoken_Foo'], listed
+
+
+def test_on_a_case_sensitive_parent_the_two_spellings_are_two_targets(tmp):
+    """The control: where the parent folds nothing, `Foo` and `foo` differ.
+
+    Same fixture, no emulated parent, and the guard answers the same way for
+    both -- it refuses an alias, and a target that does not exist is not an
+    alias -- while the two names are two entries that the parent will keep
+    apart. This is the half that makes the folded verdict above a property
+    of the parent rather than of the assertion.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_case_sensitive_target')
+    res_dir = Path(tmp) / 'results'
+    (res_dir / 'deliveries' / 'foldtoken_Foo').mkdir(parents=True)
+    folded, exact = _folded_and_exact(store, res_dir)
+    assert folded.name == 'foldtoken_foo', folded.name
+    assert exact.name == 'foldtoken_Foo', exact.name
+    assert folded != exact, (folded, exact)
+    # The parent holds one entry and no spelling of it, which is the whole
+    # difference: the other spelling is not a name this parent resolves.
+    assert not os.path.lexists(folded), folded
+    assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
+        'foldtoken_Foo']
+
+
+def _symlinked_alias(tmp, name):
+    """One real directory and a symlink standing in for it, as the tree."""
+    res_dir = Path(tmp) / 'results'
+    real = res_dir / 'deliveries' / f'{name}_real'
+    real.mkdir(parents=True)
+    alias = res_dir / 'deliveries' / f'{name}_ext'
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+    return res_dir, real, alias
+
+
+def _refused_alias(store, res_dir, token, tab):
+    """Whether the store refused, and what its one refusal line said."""
+    output = io.StringIO()
+    refused = False
+    with contextlib.redirect_stdout(output):
+        try:
+            store.delivery_result_paths(res_dir, token, tab, '123_1')
+        except ValueError:
+            refused = True
+    return refused, output.getvalue()
 
 
 def test_a_folded_spelling_does_not_admit_a_symlinked_alias(tmp):
@@ -334,30 +399,91 @@ def test_a_folded_spelling_does_not_admit_a_symlinked_alias(tmp):
     The refusal is the guard the folded case relaxes, so the alias it exists
     to catch is pinned under the relaxation too: `samefile` follows a
     symlink, and a name that stands in for a sibling directory is not the
-    entry it names, whichever spelling the parent would report for it.
+    entry it names, whichever spelling the parent would resolve it to.
     """
     store = _util.load(
         _util.ROOT / 'daedalus_bridge' / 'result_store.py',
         'fixture_folded_alias')
-    res_dir = Path(tmp) / 'results'
-    real = res_dir / 'deliveries' / 'aliascredential_real'
-    real.mkdir(parents=True)
-    alias = res_dir / 'deliveries' / 'aliascredential_ext'
-    try:
-        alias.symlink_to(real, target_is_directory=True)
-    except (OSError, NotImplementedError) as why:
-        _util.skip(f'this filesystem will not hold a symlink: {why}')
-    output = io.StringIO()
-    refused = False
-    with _case_fold.case_folding(res_dir), contextlib.redirect_stdout(output):
-        try:
-            store.delivery_result_paths(
-                res_dir, 'aliascredential', 'ext', '123_1')
-        except ValueError:
-            refused = True
-    assert refused, output.getvalue()
-    assert output.getvalue().count('kind=alias') == 1, output.getvalue()
+    res_dir, real, _alias = _symlinked_alias(tmp, 'aliascredential')
+    with _case_fold.case_folding(res_dir):
+        refused, output = _refused_alias(
+            store, res_dir, 'aliascredential', 'ext')
+    assert refused, output
+    assert output.count('kind=alias') == 1, output
     assert not list(real.iterdir()), list(real.iterdir())
+
+
+def test_a_symlinked_alias_is_refused_without_a_folding_parent(tmp):
+    """The control: the same symlink, on a parent that folds nothing.
+
+    The exclusion is not a consequence of the folded case, and this is the
+    half of the pair that says so: identical fixture, no emulated parent,
+    identical verdict.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_case_sensitive_alias')
+    res_dir, real, _alias = _symlinked_alias(tmp, 'aliascredential')
+    refused, output = _refused_alias(
+        store, res_dir, 'aliascredential', 'ext')
+    assert refused, output
+    assert output.count('kind=alias') == 1, output
+    assert not list(real.iterdir()), list(real.iterdir())
+
+
+def test_the_guard_accepts_a_canonicalizing_resolver(tmp):
+    """The relaxed branch, reached by injecting the Windows resolver.
+
+    `realpath` is `posixpath.realpath` on every POSIX platform: it resolves
+    symlinks and never learns an entry's on-disk case, so
+    `delivery_dir.name` is the caller's spelling and the exact-case
+    comparison passes by itself. On Windows `ntpath.realpath` answers
+    through `_getfinalpathname` with the on-disk spelling, and that is the
+    case the relaxation exists for, and no POSIX host can produce it: the
+    resolver is injected here, over a parent that folds case, which is the
+    pair a Windows or vfat parent is.
+
+    What is asserted is the guard's verdict given that pair, not what
+    POSIX's `realpath` does: the host's own answers are pinned by the two
+    fixtures above, and the folding half is pinned against a real vfat in
+    `test_result_routes`. The symlink half of this branch needs no injection
+    — the host's resolver does return a different name for it.
+    """
+    store = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'result_store.py',
+        'fixture_canonical_resolver')
+    res_dir = Path(tmp) / 'results'
+    on_disk = res_dir / 'deliveries' / 'canontok_Foo'
+    on_disk.mkdir(parents=True)
+    real_realpath = os.path.realpath
+    stored = {}
+
+    def canonical_realpath(path):
+        """Answer with the on-disk spelling, as `ntpath.realpath` would."""
+        resolved = real_realpath(path)
+        name = os.path.basename(resolved)
+        if name == 'canontok_foo':
+            stored['injected'] = True
+            return resolved[:-len('canontok_foo')] + 'canontok_Foo'
+        return resolved
+
+    output = io.StringIO()
+    os.path.realpath = canonical_realpath
+    try:
+        with _case_fold.case_folding(res_dir), \
+                contextlib.redirect_stdout(output):
+            paths = store.delivery_result_paths(
+                res_dir, 'canontok', 'foo', '123_1')
+    except ValueError:
+        accepted = False
+    else:
+        accepted = True
+    finally:
+        os.path.realpath = real_realpath
+    assert stored.get('injected'), 'the resolver was never asked the case'
+    assert accepted, output.getvalue()
+    assert output.getvalue() == '', output.getvalue()
+    assert paths[0].name == 'canontok_Foo', paths[0].name
 
 
 def main():
