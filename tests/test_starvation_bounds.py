@@ -25,7 +25,8 @@ import _util  # noqa: E402
 import test_cli  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    chrome_stub, import_scripts_stub)
 
 # The coverage guard cannot prove `_repo.ROOT` is the checkout root through
 # run_gate, so this call site declares the child environment explicitly.
@@ -64,6 +65,19 @@ let clockMs = 0;
 let clockStep = 100;
 let fires = 0;
 
+// The inspector command this scenario drives; the shared release bookkeeping
+// lives in the chrome stub. This handles the rest.
+async function sendCommand(_target, method, params) {
+  if (method === 'Runtime.evaluate') {
+    return { result: { value: 1 } };
+  }
+  if (method === 'Runtime.awaitPromise'
+      && params.promiseObjectId === 'pending-original') {
+    return new Promise((resolve) => { pendingResolve = resolve; });
+  }
+  return {};
+}
+
 function eventTarget() {
   return { addListener() {} };
 }
@@ -94,68 +108,7 @@ function streamResponse() {
 }
 """ + STRICT_FETCH + r"""
 
-const chrome = {
-  storage: {
-    local: {
-      get: async () => ({
-        'daedalus-token': 'starve-token',
-        'daedalus-server': '__BRIDGE__',
-      }),
-      set: async () => {},
-      remove: async () => {},
-    },
-    onChanged: eventTarget(),
-  },
-  tabs: {
-    onUpdated: eventTarget(),
-    onCreated: eventTarget(),
-    onRemoved: eventTarget(),
-    query(_query, callback) {
-      const tabs = [{ id: 7, url: '', title: 'Page' }];
-      if (callback) {
-        callback(tabs);
-        return undefined;
-      }
-      return Promise.resolve(tabs);
-    },
-  },
-  debugger: {
-    onEvent: eventTarget(),
-    onDetach: eventTarget(),
-    attach: async () => {},
-    detach: async () => {},
-    sendCommand: async (_target, method, params) => {
-      if (method === 'Runtime.releaseObject') {
-        released.push(params.objectId);
-        if (params.objectId === 'pending-original' && pendingResolve) {
-          const resolve = pendingResolve;
-          pendingResolve = null;
-          setImmediate(() => resolve({
-            result: { objectId: 'pending-late' },
-          }));
-        }
-        return {};
-      }
-      if (method === 'Runtime.evaluate') {
-        return { result: { value: 1 } };
-      }
-      if (method === 'Runtime.awaitPromise'
-          && params.promiseObjectId === 'pending-original') {
-        return new Promise((resolve) => { pendingResolve = resolve; });
-      }
-      return {};
-    },
-  },
-  scripting: { executeScript: async () => [{ result: false }] },
-  runtime: {
-    onMessage: eventTarget(),
-    onConnect: eventTarget(),
-    getPlatformInfo() {},
-    getManifest: () => ({ version: '0.18.0' }),
-  },
-  alarms: { onAlarm: eventTarget(), create() {} },
-};
-
+""" + chrome_stub("'starve-token'", 'BRIDGE_URL', 'sendCommand') + r"""
 const context = vm.createContext({
   chrome,
   fetch: bridgeFetch,
