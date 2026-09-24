@@ -53,12 +53,14 @@ def test_deleted_holder_copy_invocation_reports(tmp):
 
 # The setdefault read of a key the evaluator cannot fold. The runtime
 # resolves the key and returns the stored value, so a guard that named only
-# the default reads clean on a path that reaches the sender. The PIN rows
-# vary one property each — the two spellings differ only in the key
-# expression, the two orders only in the relay's position — so neither pair
-# is satisfiable by a spelling-only or a position-only rule, and the relay
+# the default reads clean on a path that reaches the sender. The rows vary
+# one property each — the two spellings differ only in the key expression,
+# the two orders only in the relay's position — so neither pair is
+# satisfiable by a spelling-only or a position-only rule, and the relay
 # sits second because a one-item store cannot tell "every item" from "the
-# first". The twins hold the same shape with clean data and must not move.
+# first". `relay-last` is the pin; `relay-first` is a variance control and
+# passes under a first-item-only rule by design. The twins hold the same
+# shape with clean data and must not move.
 _SETDEFAULT_UNRESOLVED = [
     ('setdefault-concat-relay-last', _flow(
         _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
