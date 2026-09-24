@@ -26,9 +26,9 @@ _STALLING_SUITE = (
 )
 
 # Models a bystander a loaded runner could not start in time: the sleep
-# exceeds any bound this file uses, so it is killed on every machine, and
-# its own output carries a FAILED: line the pin must not read. The decoy
-# is not asserted; that parse is pinned by the helper's own test.
+# exceeds any bound here, so it is killed on any machine, and its output
+# carries a FAILED: line the pin must not read. The decoy is not asserted;
+# the parse is pinned by test_a_suites_own_failed_line_is_not_the_aggregate.
 _SLOW_PASSING_SUITE = (
     'import json, os, time\n'
     "print('FAILED: my own subtest', flush=True)\n"
