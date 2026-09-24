@@ -7,9 +7,14 @@ module still carries. A recorded number is never raised by hand and no
 entry is ever added by hand: fix the type error in the named test module.
 A stale entry goes away rather than being kept: --tighten drops one whose
 file has no type error left, and an entry naming a file that is gone is
-deleted by hand. A run that analyses no test module, or fewer than the
-tracked count, is a broken scope rather than a clean one: check that
-pyrightconfig.tests.json includes the tests directory.
+deleted by hand. A run that analyses no test module, or a count that
+differs from the tracked one in either direction, is a broken scope
+rather than a clean one: fewer means pyrightconfig.tests.json reaches
+fewer test modules than the tree tracks, more means it reaches a test
+module the tree has not tracked yet, and a config that could not be
+read falls back to a default scope; check the config is present,
+parses, includes the tests directory, and that every test file is
+tracked.
 
   python3 scripts/ci/type_error_baseline.py
   python3 scripts/ci/type_error_baseline.py --tighten
@@ -40,9 +45,13 @@ STALE_ENTRY_REMEDY = (
     'whose file has no type error left, and an entry naming a file that '
     'is gone is deleted by hand.')
 SCOPE_REMEDY = (
-    'A run that analyses no test module, or fewer than the tracked count, '
-    'is a broken scope rather than a clean one: check that '
-    f'{CONFIG_NAME} includes the tests directory.')
+    'A run that analyses no test module, or a count that differs from the '
+    'tracked one in either direction, is a broken scope rather than a clean '
+    f'one: fewer means {CONFIG_NAME} reaches fewer test modules than the '
+    'tree tracks, more means it reaches a test module the tree has not '
+    'tracked yet, and a config that could not be read falls back to a '
+    'default scope; check the config is present, parses, includes the tests '
+    'directory, and that every test file is tracked.')
 REMEDY_FOR = {
     'unanalysed': SCOPE_REMEDY,
     'grown': FIX_REMEDY,
@@ -65,10 +74,23 @@ def _pyright_report(root):
         ['pyright', '-p', str(root / CONFIG_NAME), '--outputjson'],
         cwd=str(root), capture_output=True, text=True, timeout=600)
     try:
-        return json.loads(result.stdout)
+        return json.loads(result.stdout), result.stderr.strip()
     except json.JSONDecodeError:
         raise ValueError(
             f'pyright produced no report: {result.stderr.strip()}') from None
+
+
+def _rel_key(raw, root):
+    """Return the repo-relative key `raw` names, raising ValueError outside.
+
+    ``git ls-files`` spells every tracked path with forward slashes on every
+    host, so the diagnostic set must agree with that spelling. Normalise the
+    separators first, then relativise: this yields the same forward-slash key
+    for the same file whichever separator the producer used, on every host,
+    rather than letting a ``str(Path)`` rendering pick the host's own.
+    """
+    posix = str(raw).replace('\\', '/')
+    return Path(posix).relative_to(root).as_posix()
 
 
 def _errors_by_file(report, root):
@@ -77,7 +99,7 @@ def _errors_by_file(report, root):
         if diagnostic.get('severity') != 'error':
             continue
         try:
-            rel = str(Path(diagnostic['file']).relative_to(root))
+            rel = _rel_key(diagnostic['file'], root)
         except (KeyError, ValueError):
             continue
         counts[rel] = counts.get(rel, 0) + 1
@@ -85,19 +107,24 @@ def _errors_by_file(report, root):
 
 
 def analyse(root=ROOT):
-    """Return pyright's analysed count and every tracked module's errors."""
-    report = _pyright_report(root)
+    """Return pyright's analysed count, tracked errors, and its stderr."""
+    report, stderr = _pyright_report(root)
     errored = _errors_by_file(report, root)
     tracked = tracked_test_modules(root)
     counts = {rel: errored.get(rel, 0) for rel in tracked}
-    return report['summary']['filesAnalyzed'], counts
+    try:
+        analysed = report['summary']['filesAnalyzed']
+    except (KeyError, TypeError):
+        raise ValueError(
+            'pyright report carries no analysed-count summary') from None
+    return analysed, counts, stderr
 
 
 def violations(counts, analysed, expected, baseline):
     """Classify the analysed scope and every counted module's standing."""
     found = {'unanalysed': (), 'grown': {}, 'over': {}, 'missing': [],
              'graduated': []}
-    if analysed != expected:
+    if analysed != expected or expected == 0:
         found['unanalysed'] = (analysed, expected)
     for rel, count in sorted(counts.items()):
         recorded = baseline.get(rel)
@@ -127,13 +154,15 @@ def tightened(baseline, counts):
     return updated
 
 
-def refuse(found):
+def refuse(found, diagnostic=''):
     remedies = []
     for kind, detail in found.items():
         if detail:
             print(f'{kind}: {detail}', file=sys.stderr)
             if REMEDY_FOR[kind] not in remedies:
                 remedies.append(REMEDY_FOR[kind])
+    if diagnostic:
+        print(f'pyright: {diagnostic}', file=sys.stderr)
     for remedy in remedies:
         print(remedy, file=sys.stderr)
     return 1
@@ -157,11 +186,11 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         baseline = thresholds.type_error_baseline(data)
-        analysed, counts = analyse(args.root)
+        analysed, counts, stderr = analyse(args.root)
         found = violations(counts, analysed, len(counts), baseline)
         if args.tighten:
             if found['unanalysed']:
-                return refuse({'unanalysed': found['unanalysed']})
+                return refuse({'unanalysed': found['unanalysed']}, stderr)
             updated = tightened(baseline, counts)
             if updated is None:
                 print('no test module lost a type error')
@@ -175,7 +204,7 @@ def main(argv=None):
             print(f'{analysed} test modules analysed, within the '
                   'type-error policy')
             return 0
-        return refuse(found)
+        return refuse(found, stderr)
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1
