@@ -269,6 +269,7 @@
 !/tests/_dashnode.py
 !/tests/_deliveries.py
 !/tests/_drain.py
+!/tests/_drain_scan.py
 !/tests/_evalpages.py
 !/tests/_frontend.py
 !/tests/_ghexpr.py
