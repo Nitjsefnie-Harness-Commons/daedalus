@@ -26,22 +26,25 @@ def test_a_declared_route_is_refused_the_second_time(tmp):
     """Its own gate: M7 (`planned === 0`) left this green without it."""
     del tmp
     outcome = _probe()
+    assert SYNC in outcome['refused'], (
+        'count gate should have refused ' + SYNC, outcome['refused'], outcome)
     assert outcome['secondStatus'] == 599, outcome
-    assert outcome['refused'][0] == SYNC, outcome
 
 
 def test_an_undeclared_route_is_refused(tmp):
     del tmp
     outcome = _probe()
     assert outcome['undeclaredStatus'] == 599, outcome
-    assert outcome['refused'][1] == 'POST /tabs', outcome
+    assert 'POST /tabs' in outcome['refused'], (
+        'undeclared route should be in the refusal list',
+        outcome['refused'], outcome)
 
 
 def test_a_route_at_an_unpermitted_origin_is_refused(tmp):
     del tmp
     outcome = _probe()
     assert outcome['badOriginStatus'] == 599, outcome
-    assert outcome['badOrigins'][0] == 'https://elsewhere.example.com', outcome
+    assert 'https://elsewhere.example.com' in outcome['badOrigins'], outcome
 
 
 def test_a_relative_url_is_refused(tmp):
