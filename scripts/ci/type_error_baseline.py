@@ -96,31 +96,50 @@ def analyse(root=ROOT):
 
 
 def violations(counts, analysed, expected, baseline):
-    return {
-        'unanalysed': () if analysed == expected else (analysed, expected),
-        'grown': {rel: (counts[rel], recorded)
-                  for rel, recorded in baseline.items()
-                  if rel in counts and counts[rel] > recorded},
-        'over': {rel: count for rel, count in counts.items()
-                 if rel not in baseline and count > 0},
-        'missing': sorted(rel for rel in baseline if rel not in counts),
-        'graduated': sorted(rel for rel in baseline
-                            if rel in counts and counts[rel] == 0),
-    }
+    """Classify the analysed scope and every counted module's standing."""
+    found = {'unanalysed': (), 'grown': {}, 'over': {}, 'missing': [],
+             'graduated': []}
+    if analysed != expected:
+        found['unanalysed'] = (analysed, expected)
+    for rel, count in sorted(counts.items()):
+        recorded = baseline.get(rel)
+        if recorded is None:
+            if count > 0:
+                found['over'][rel] = count
+        elif count > recorded:
+            found['grown'][rel] = (count, recorded)
+        elif count == 0:
+            found['graduated'].append(rel)
+    found['missing'] = sorted(set(baseline) - set(counts))
+    return found
 
 
 def tightened(baseline, counts):
     """Return a lowered baseline mapping, or ``None`` when unchanged."""
-    updated = dict(baseline)
-    for rel, recorded in baseline.items():
-        if rel not in counts:
-            continue
-        current = counts[rel]
-        if current == 0:
-            del updated[rel]
-        elif current < recorded:
-            updated[rel] = current
-    return updated if updated != baseline else None
+    lowers = {rel: counts[rel]
+              for rel, recorded in baseline.items()
+              if rel in counts and 0 < counts[rel] < recorded}
+    drops = {rel for rel, recorded in baseline.items()
+             if rel in counts and counts[rel] == 0}
+    if not lowers and not drops:
+        return None
+    updated = {rel: recorded for rel, recorded in baseline.items()
+               if rel not in drops}
+    updated.update(lowers)
+    return updated
+
+
+def refuse(found):
+    """Print each violation and its remedy to stderr, and refuse."""
+    remedies = []
+    for kind, detail in found.items():
+        if detail:
+            print(f'{kind}: {detail}', file=sys.stderr)
+            if REMEDY_FOR[kind] not in remedies:
+                remedies.append(REMEDY_FOR[kind])
+    for remedy in remedies:
+        print(remedy, file=sys.stderr)
+    return 1
 
 
 def _parser():
@@ -142,7 +161,10 @@ def main(argv=None):
         data = thresholds.load(args.thresholds)
         baseline = thresholds.type_error_baseline(data)
         analysed, counts = analyse(args.root)
+        found = violations(counts, analysed, len(counts), baseline)
         if args.tighten:
+            if found['unanalysed']:
+                return refuse({'unanalysed': found['unanalysed']})
             updated = tightened(baseline, counts)
             if updated is None:
                 print('no test module lost a type error')
@@ -152,20 +174,11 @@ def main(argv=None):
             print('tightened the type-error baseline')
             return 0
 
-        found = violations(counts, analysed, len(counts), baseline)
         if not any(found.values()):
             print(f'{analysed} test modules analysed, within the '
                   'type-error policy')
             return 0
-        remedies = []
-        for kind, detail in found.items():
-            if detail:
-                print(f'{kind}: {detail}', file=sys.stderr)
-                if REMEDY_FOR[kind] not in remedies:
-                    remedies.append(REMEDY_FOR[kind])
-        for remedy in remedies:
-            print(remedy, file=sys.stderr)
-        return 1
+        return refuse(found)
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1

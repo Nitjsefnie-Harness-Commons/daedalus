@@ -200,6 +200,20 @@ def test_tighten_reports_nothing_moved(tmp):
     assert 'no test module lost a type error' in done.stdout, done.stdout
 
 
+def test_tighten_refuses_a_broken_scope_and_writes_nothing(tmp):
+    """--tighten may not record a baseline measured by a broken scope."""
+    repo, target = _repo(
+        tmp, 'tighten-scope', {'tests/typed.py': _typed(2)},
+        _document({'tests/typed.py': 5}), config=_config(exclude=('tests',)))
+    before = target.read_bytes()
+    red = _gate(repo, target, '--tighten')
+    assert red.returncode != 0, (red.stdout, red.stderr)
+    assert 'unanalysed' in red.stderr, red.stderr
+    assert _normalised(_policy().SCOPE_REMEDY) in _normalised(red.stderr), \
+        red.stderr
+    assert target.read_bytes() == before
+
+
 def _normalised(text):
     return ' '.join(text.lower().split())
 
