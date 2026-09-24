@@ -144,6 +144,22 @@ def test_an_unknown_key_store_reopens_the_exact_prefix(tmp):
                     + 'x[0]()') == (1, 1)
 
 
+_UNTAKEN_KEY_STORES = {
+    'string_key_restarred': ("x[\'k\'] = relay()", 'y = [*x]'),
+    'string_key_unpacked': ("x[\'k\'] = relay()", 'a, *b = x'),
+    'none_key_restarred': ('x[None] = relay()', 'y = [ordinary, *x]'),
+}
+
+
+def test_a_non_int_key_on_a_sequence_does_not_crash(tmp):
+    """The store raises at runtime, so only an untaken path holds it."""
+    verdicts = {name: _verdict(tmp, _PRE + 'x = [*args.values]\n'
+                               'if args.flag is None:\n    ' + store + '\n'
+                               + read + _SL + '0')
+                for name, (store, read) in _UNTAKEN_KEY_STORES.items()}
+    assert verdicts == dict.fromkeys(_UNTAKEN_KEY_STORES, (0, 0)), verdicts
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='seqreads_')
 
