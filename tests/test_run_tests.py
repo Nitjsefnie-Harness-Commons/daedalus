@@ -69,12 +69,21 @@ def _suite_block(stdout, name):
     return rest.split('\n=== ', 1)[0]
 
 
-def _scale_suite_wait(source, factor):
-    """Return `source` with the suite wait handed `timeout * factor`.
+def _reads_timeout(node):
+    """Whether `node` reads the `timeout` parameter, bare or as an operand."""
+    if isinstance(node, ast.Name):
+        return node.id == 'timeout'
+    if isinstance(node, ast.BinOp):
+        return _reads_timeout(node.left) or _reads_timeout(node.right)
+    return False
 
-    The anchor is located by ast so an ordinary edit cannot retire it; a
-    miss blames the anchor, not the guarded behaviour."""
-    target = None
+
+def _wait_timeout_keyword(source):
+    """The `timeout` keyword of the suite's process.wait, or None.
+
+    The suite's wait is the one whose bound reads the `timeout` parameter;
+    the waits in _terminate_and_reap pass the constant 10, so they are not
+    the anchor."""
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
@@ -84,19 +93,27 @@ def _scale_suite_wait(source, factor):
                 and func.value.id == 'process'):
             continue
         for keyword in node.keywords:
-            if (keyword.arg == 'timeout'
-                    and isinstance(keyword.value, ast.Name)
-                    and keyword.value.id == 'timeout'):
-                target = keyword.value
-    assert target is not None, (
-        'no process.wait(timeout=timeout) call: the MUTATION ANCHOR changed '
-        'shape, so this control proves nothing until it is re-derived from '
-        'the runner source')
+            if keyword.arg == 'timeout' and _reads_timeout(keyword.value):
+                return keyword
+    return None
+
+
+def _scale_suite_wait(source, factor):
+    """Return `source` with the suite wait handed `timeout * factor`.
+
+    The anchor is located by ast so an ordinary edit cannot retire it; a
+    miss blames the anchor, not the guarded behaviour."""
+    keyword = _wait_timeout_keyword(source)
+    assert keyword is not None, (
+        'no process.wait bound to the timeout parameter: the MUTATION ANCHOR '
+        'changed shape, so this control proves nothing until it is derived '
+        'again from the runner source')
     lines = source.splitlines(keepends=True)
-    row = target.lineno - 1
+    node = keyword.value
+    row = node.lineno - 1
     raw = lines[row].encode()
-    lines[row] = (raw[:target.col_offset] + f'timeout * {factor}'.encode()
-                  + raw[target.end_col_offset:]).decode()
+    lines[row] = (raw[:node.col_offset] + f'timeout * {factor}'.encode()
+                  + raw[node.end_col_offset:]).decode()
     return ''.join(lines)
 
 
@@ -152,9 +169,15 @@ def test_the_timeout_record_names_the_bound_the_wait_was_given(tmp):
     runner = root / 'run_tests.py'
     mutated = _scale_suite_wait(
         runner.read_bytes().decode(), 0.5)
-    assert 'wait(timeout=timeout * 0.5)' in mutated, mutated
-    assert 'wait(timeout=timeout)' not in mutated, mutated
-    runner.write_text(mutated, encoding='utf-8')
+    applied = _wait_timeout_keyword(mutated)
+    assert applied is not None, (
+        'the rewritten runner has no process.wait bound to the timeout '
+        'parameter: the MUTATION ANCHOR changed shape')
+    expected = ast.parse('timeout * 0.5', mode='eval').body
+    assert ast.dump(applied.value) == ast.dump(expected), (
+        'the MUTATION did not apply: the suite wait bound is '
+        f'{ast.dump(applied.value)}, not timeout * 0.5')
+    runner.write_bytes(mutated.encode('utf-8'))
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
     assert result.returncode == 1, (result.returncode, result.stdout,
