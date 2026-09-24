@@ -472,6 +472,10 @@ if (scenario === 'worker-sources') process.stdout.write('[]');
 else if (scenario === 'worker-bindings') {{
   process.stdout.write(JSON.stringify({{
     sources: {{}}, shared: {{ loaded: [], error: null }},
+    gate: {{
+      contractFaults: [], records: [], refused: [], badOrigins: [],
+      streamAnswered: [],
+    }},
   }}));
 }} else process.stdout.write('{{}}');
 """
