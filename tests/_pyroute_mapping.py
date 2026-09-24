@@ -311,14 +311,24 @@ def _setdefault_value(node, state):
     """The stored-or-existing item one setdefault call evaluates to."""
     owner = _known_value(node.func.value, state)
     key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
+    default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     if (not isinstance(owner, DeferredContainer)
-            or key is _UNRESOLVED_KEY):
-        default = _known_value(node.args[1], state) if len(node.args) > 1 \
-            else None
+            or (key is _UNRESOLVED_KEY and owner.kind != 'dict')):
         return merge_yielded((default, UNPROVABLE_SENDER)) \
             if default is not None else None
+    if key is _UNRESOLVED_KEY:
+        # A key the runtime cannot hash raises before the call returns, so
+        # the call is unprovable; one only too complex to fold names every
+        # stored item, as a plain read of the same shape does.
+        source = node.args[0] if node.args else None
+        probe = state.literals.get(source.id) if isinstance(
+            source, ast.Name) else _literal_value(source)
+        unusable = UNPROVABLE_SENDER if probe is not None \
+            and probe is not _UNSAFE_LITERAL \
+            and _usable_key(probe) is _UNRESOLVED_KEY else None
+        return merge_yielded((*owner.items.values(), default, unusable))
     if key in owner.items: return owner.items[key]
-    return _known_value(node.args[1], state) if len(node.args) > 1 else None
+    return default
 
 
 def _unknown_lookup_default(node, state):

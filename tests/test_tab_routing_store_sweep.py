@@ -207,14 +207,15 @@ _ISSUE962 = [
         _RELAY, 'd = {1: relay()}; key = 1',
         'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
     # Unresolvable key, deferred default: reported. Unresolvable key,
-    # ordinary default: the stored callable is lost and the call reads
-    # clean — issue 963, pinned at its current verdict.
+    # ordinary default: reported too, because the runtime resolves the key,
+    # selects the stored callable and returns that, so the stored value is
+    # the one the call reaches.
     ('name-key-unresolved-relay', _flow(
         _RELAY, 'd = {"k": relay()}; key = "k" + ""',
         'x = d.setdefault(key, relay())', invoke='x()'), (1, 1)),
-    ('known-defect-963-name-key-unresolved-ordinary', _flow(
+    ('name-key-unresolved-ordinary', _flow(
         _RELAY, 'd = {"k": relay()}; key = "k" + ""',
-        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
 ]
 
 
@@ -235,9 +236,9 @@ def test_issue962_name_bound_setdefault_key(tmp):
 # matrix, and a presence test is the one operation that consults no
 # occupancy at all: the guard reads both arms of the `if`, so a resolved
 # membership could only ever remove a report. An f-string is not folded by
-# the evaluator, so both f-string rows stay unresolved and read clean, as
-# issue 967 records; the label carries that, so the row cannot be read as a
-# claim that a clean verdict is correct.
+# the evaluator, so both f-string rows stay unresolved; unresolved is not
+# clean, and a setdefault read of an unresolved key reports because the
+# runtime resolves the key and selects the stored callable.
 _ISSUE967 = [
     ('tuple-key-by-name', _flow(
         _RELAY, 'd = {(1, 2): relay()}; key = (1, 2)',
@@ -248,12 +249,12 @@ _ISSUE967 = [
     ('unaryminus-key-by-name', _flow(
         _RELAY, 'd = {-1: relay()}; key = -1',
         'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
-    ('known-defect-967-fstring-key-by-name', _flow(
+    ('fstring-key-by-name', _flow(
         _RELAY, 'd = {"k": relay()}; key = f"k"',
-        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
-    ('known-defect-967-fstring-key-interpolated', _flow(
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('fstring-key-interpolated', _flow(
         _RELAY, 'd = {"k": relay()}; key = f"{\'k\'}"',
-        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
 ]
 
 
@@ -272,14 +273,17 @@ def test_issue967_literal_key_forms(tmp):
 # guard that keeps the first binding resolves the key it must not know. The
 # pop row is the false-green discriminator and the setdefault row the
 # over-report one: a guard keeping the first binding turns the pair into
-# `(1, 0)` and `(1, 1)`.
+# `(1, 0)` and `(1, 1)`. The setdefault row rebinds to a callable, which the
+# runtime cannot hash, so the program raises before the call returns and the
+# runtime sends nothing; the guard reports the unreadable call rather than
+# the healthy verdict `(0, 0)` a usable key would earn.
 _REBINDING = [
     ('pop-rebound-to-non-literal', _flow(
         _RELAY, 'd = {"k": relay(), "j": relay()}; k = "k"; k = relay()',
         'd.pop(k, None)', invoke='d.get("k", ordinary)()'), (1, 1)),
     ('setdefault-rebound-to-non-literal', _flow(
         _RELAY, 'd = {"k": relay()}; k = "k"; k = relay()',
-        'x = d.setdefault(k, ordinary)', invoke='x()'), (0, 0)),
+        'x = d.setdefault(k, ordinary)', invoke='x()'), (0, 1)),
 ]
 
 # A key the runtime rejects is a key the guard must read unprovable rather
@@ -404,17 +408,16 @@ def test_pop_then_read_resolves_one_key(tmp):
 # The three evaluable forms must agree operation-for-operation with the
 # string constant, and the two the evaluator cannot fold must agree with
 # each other, because both take the unresolved arm. The labels name the
-# forms whose verdicts are known defects, not the operations.
+# forms, not the operations.
 _KEY_FORMS = {
     'str-const': ([], '"k"', '"k"'),
     'tuple-lit': ([], '(1, 2)', '(1, 2)'),
     'name-lit': (['r = "k"'], 'r', 'r'),
-    'known-defect-963-form-name-nonliteral': (['r = "k" + ""'], 'r', 'r'),
-    'known-defect-967-form-fstring': ([], 'f"k"', 'f"k"'),
+    'name-concat': (['r = "k" + ""'], 'r', 'r'),
+    'fstring': ([], 'f"k"', 'f"k"'),
 }
 _EVALUABLE_FORMS = ('str-const', 'tuple-lit', 'name-lit')
-_UNRESOLVED_FORMS = ('known-defect-963-form-name-nonliteral',
-                     'known-defect-967-form-fstring')
+_UNRESOLVED_FORMS = ('name-concat', 'fstring')
 
 # What each operation reads, per key form. An occupied store holds the
 # relay under the key, so a read of that key is a defect the guard must
@@ -459,12 +462,12 @@ _KEY_EXPECTED = {
 # The evaluator cannot fold either of these, so the guard reads the key as
 # absent on every operation: a read reports because the store's contents
 # are not known to miss it, and a removal is not applied, so what the
-# program removed the guard still holds. The setdefault read is issue
-# 963's known defect; the rest are the consistency of the unresolved arm.
+# program removed the guard still holds. A setdefault read reports for the
+# same reason, and names the stored item as well as the default.
 _UNRESOLVED_EXPECTED = {
     'get-read': (1, 1), 'subscript-read': (1, 1),
     'subscript-store+get': (1, 1), 'subscript-store+read': (1, 1),
-    'setdefault-read': (1, 0), 'setdefault-store+get': (1, 1),
+    'setdefault-read': (1, 1), 'setdefault-store+get': (1, 1),
     'pop+get': (0, 1), 'del+get': (0, 1), 'del+presence': (0, 1),
     'presence+get': (1, 1), 'clean-store+get': (0, 1),
     'clean-subscript-store+get': (0, 1), 'clean-setdefault+get': (0, 1),
@@ -628,6 +631,96 @@ def test_key_form_matrix_and_operation_independence(tmp):
            for operation, (verdict, expected) in sorted(entries.items())
            if verdict != expected]
     assert not bad, bad
+
+
+# The setdefault read of a key the evaluator cannot fold. The runtime
+# resolves the key, finds the stored relay and returns that, so the stored
+# value is the value the call reaches; a guard that named only the default
+# reads clean on a path that reaches the sender. The PIN rows vary one
+# property each: the two spellings differ only in the key expression, and
+# the two orders differ only in the position of the relay, so neither pair
+# can be satisfied by a spelling-only or a position-only rule. The relay
+# sits in the SECOND position, because a one-item store cannot tell "every
+# item" from "the first". The twins hold the same shape with clean data —
+# an empty store, a store the key misses, and a call with no default — and
+# must not move. The controls are the arms the change leaves alone.
+_SETDEFAULT_UNRESOLVED = [
+    ('setdefault-concat-relay-last', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('setdefault-concat-relay-first', _flow(
+        _RELAY, 'd = {"k": relay(), "a": ordinary}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('setdefault-fstring-relay-last', _flow(
+        _RELAY, 'd = {"a": ordinary, "k": relay()}; key = f"k"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 1)),
+    ('setdefault-concat-vacant', _flow(
+        _RELAY, 'd = {}; key = "k" + ""',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (0, 0)),
+    ('setdefault-concat-miss', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = "b" + ""',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (0, 0)),
+    ('setdefault-fstring-vacant', _flow(
+        _RELAY, 'd = {}; key = f"k"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (0, 0)),
+    ('setdefault-fstring-miss', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = f"b"',
+        'x = d.setdefault(key, ordinary)', invoke='x()'), (0, 0)),
+    ('setdefault-concat-no-default', _flow(
+        _RELAY, 'd = {"a": ordinary}; key = "a" + ""',
+        'x = d.setdefault(key)', invoke='x()'), (0, 0)),
+    ('setdefault-unreadable-owner', _flow(
+        _RELAY, 'pool = [{"k": relay()}]\ndef build():\n    return pool[0]',
+        'd = build()\nkey = "k" + ""\nx = d.setdefault(key, ordinary)',
+        invoke='x()'), (1, 1)),
+    ('setdefault-resolvable-miss', _flow(
+        _RELAY, 'd = {"a": relay()}', 'x = d.setdefault("k", ordinary)',
+        invoke='x()'), (0, 0)),
+]
+
+
+def test_setdefault_unresolved_key_names_every_stored_item(tmp):
+    bad = []
+    for label, body, expected in _SETDEFAULT_UNRESOLVED:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+# One arm of the same lookup per row, with a default the guard models, so a
+# row is refused by that arm alone. The owner the model cannot read and the
+# container that is not a dict both keep the unprovable sender; the dict the
+# key misses and the dict the key hits are clean, so a guard that reported
+# there would be the over-report, and the unhashable key is the one input
+# the runtime rejects before it returns anything.
+_SETDEFAULT_ARMS = [
+    ('arm-owner-unreadable', 'd = pool[0]\nkey = "k" + ""', True),
+    ('arm-non-dict-unresolved', 'd = [ordinary]\nkey = "k" + ""', True),
+    ('arm-non-dict-literal', 'd = [ordinary]\nkey = "a"', False),
+    ('arm-dict-unresolved-miss', 'd = {"a": ordinary}\nkey = "k" + ""',
+     False),
+    ('arm-dict-unhashable', 'd = {"a": ordinary}\nkey = [1]', True),
+]
+
+
+def test_each_setdefault_arm_has_a_discriminating_probe(tmp):
+    wrong = []
+    for label, body, expected in _SETDEFAULT_ARMS:
+        setup = ''.join(f'    {line}\n' for line in body.splitlines())
+        source = Path(tmp) / f'{label}.py'
+        source.write_text(
+            'def ordinary(*a, **k):\n'
+            '    return 0\n'
+            'def probe():\n'
+            + setup +
+            '    send = d.setdefault(key, ordinary)\n'
+            '    return send("_focus", "focus-tab", tab=5)\n',
+            encoding='utf-8')
+        actual = bool(py_tab_routing_violations(source, source.name))
+        if actual != expected:
+            wrong.append((label, actual, expected))
+    assert not wrong, wrong
 
 
 def test_store_form_verdicts(tmp):
