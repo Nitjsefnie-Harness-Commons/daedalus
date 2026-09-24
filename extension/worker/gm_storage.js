@@ -3,12 +3,15 @@
 
 // ─── Page-facing GM storage, served in the service-worker realm ───
 //
-// The GM key namespace, the per-origin byte cap, and the per-namespace write
-// queue all live here, in the one realm per extension. A content script cannot
-// host them: every top-level tab of the same origin is a separate content-
-// script instance with a separate module scope, so two tabs each read the
-// store before the other's write committed and each computed its sum against
-// the same pre-write snapshot. Here one queue per namespace is real.
+// The GM key namespace, both byte caps — one over a single origin's partition
+// and one over their sum — and the write queue all live here, in the one realm
+// per extension. A content script cannot host them: every top-level tab of the
+// same origin is a separate content-script instance with a separate module
+// scope, so two tabs each read the store before the other's write committed
+// and each computed its sum against the same pre-write snapshot. The cap over
+// the sum is a read-modify-write over the WHOLE store, so the queue is one
+// queue for every origin: keyed by namespace, two origins would each read the
+// same pre-write store and each pass the aggregate check.
 //
 // The origin is sender.origin — Chrome's own report of the calling document.
 // Neither the page's message payload nor the content script's location is
@@ -26,8 +29,25 @@ const RESERVED_KEY = /^daedalus-/;
 // delete frees budget and a value the page did not count still counts.
 const GM_QUOTA_BYTES = 1024 * 1024;
 
+// GM_TOTAL_QUOTA_BYTES bounds the SUM over every origin, which the per-origin
+// cap cannot: a dozen origins at their own 1 MB are all admitted, they overrun
+// the 10 MB area, and the writes that then fail are the extension's own. Half
+// the area is the sum, and half is reserve: 5 MB of GM + 2 MB of hotfixes
+// (HOTFIX_QUOTA_BYTES) + 3 MB of reserve = the 10 MB Chrome caps `local` at.
+// Chrome's own enforcement stays the backstop — the extension asks for no
+// `unlimitedStorage`, so a browser cap is still there under this one. The 3 MB
+// reserve spends on the extension's own four keys — daedalus-token,
+// daedalus-server, daedalus-segment-origins, daedalus-seen-dids — of which
+// the ledger is the largest term: count-capped at 1000 entries, and a delivery
+// id is `<ms>_<counter>`, so 1000 of them is on the order of 22 KB and the
+// reserve is roughly 140x that term. Only `gm:` keys are summed: the
+// extension's own keys are what the reserve pays for, not page budget.
+const GM_TOTAL_QUOTA_BYTES = 5 * 1024 * 1024;
+
+const GM_KEY_PREFIX = 'gm:';
+
 function gmNamespace(origin) {
-  return 'gm:' + encodeURIComponent(origin) + ':';
+  return GM_KEY_PREFIX + encodeURIComponent(origin) + ':';
 }
 
 function _jsonBytes(value) {
@@ -45,22 +65,21 @@ function gmEntryBytes(storageKey, value) {
   return _jsonBytes(value) + new TextEncoder().encode(storageKey).length;
 }
 
-// Per-namespace write queue. chrome.storage has no compare-and-swap, so the
-// cap's get → sum → set is a read-modify-write: concurrent setValue calls for
-// one origin would each read the store before any set committed and each pass.
-// Runs go one at a time, in submission order, each reading the store only after
-// the previous write's set callback has committed it. The run's every exit —
-// each storage callback and the synchronous issuance — reaches done exactly
-// once, including a throw, so a failure releases the origin and is reported
-// to the page instead of wedging the queue.
-const _gmWriteQueues = new Map();
+// The one GM write queue. chrome.storage has no compare-and-swap, so the
+// caps' get → sum → set is a read-modify-write: concurrent setValue calls
+// would each read the store before any set committed and each pass. The cap
+// over the sum is over the WHOLE store, so the queue is one for every origin —
+// keyed by namespace, two different origins would each read the same pre-write
+// store and each pass the aggregate check. Runs go one at a time, in
+// submission order, each reading the store only after the previous write's set
+// callback has committed it. The run's every exit — each storage callback and
+// the synchronous issuance — reaches done exactly once, including a throw, so
+// a failure releases the queue and is reported to the page instead of wedging
+// it.
+const _gmWriteQueue = { active: false, waiting: [] };
 
-function _enqueue(namespace, run) {
-  let queue = _gmWriteQueues.get(namespace);
-  if (!queue) {
-    queue = { active: false, waiting: [] };
-    _gmWriteQueues.set(namespace, queue);
-  }
+function _enqueue(run) {
+  const queue = _gmWriteQueue;
   const advance = () => {
     queue.active = true;
     let finished = false;
@@ -89,21 +108,32 @@ function _gmSetValue(origin, key, value, sendResponse) {
   } catch (e) {
     return sendResponse({ error: 'value could not be measured' });
   }
-  _enqueue(namespace, (done) => {
+  _enqueue((done) => {
     try {
       chrome.storage.local.get(null, (data) => {
         try {
           const err = _storageError();
           if (err) { sendResponse({ error: err }); return done(); }
+          // Both caps exclude the key being written, so a replace is charged
+          // its delta: the entry it replaces stops counting and the incoming
+          // one is added below. The aggregate is the same measure summed over
+          // every gm: key — the page-owned set by construction, since a GM key
+          // is the prefix plus the origin plus the page's key, and no
+          // extension key carries it.
           let stored = 0;
+          let total = 0;
           for (const storedKey of Object.keys(data)) {
-            if (!storedKey.startsWith(namespace) || storedKey === storeKey) {
-              continue;
-            }
-            stored += gmEntryBytes(storedKey, data[storedKey]);
+            if (storedKey === storeKey) continue;
+            const bytes = gmEntryBytes(storedKey, data[storedKey]);
+            if (storedKey.startsWith(namespace)) stored += bytes;
+            if (storedKey.startsWith(GM_KEY_PREFIX)) total += bytes;
           }
           if (stored + incoming > GM_QUOTA_BYTES) {
             sendResponse({ error: 'gm storage quota exceeded' });
+            return done();
+          }
+          if (total + incoming > GM_TOTAL_QUOTA_BYTES) {
+            sendResponse({ error: 'gm storage total quota exceeded' });
             return done();
           }
         } catch (e) {

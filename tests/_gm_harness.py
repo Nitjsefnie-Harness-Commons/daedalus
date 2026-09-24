@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Node-VM harnesses for the GM storage boundary.
 
-The GM storage namespace, per-origin byte cap, and per-namespace write queue
-live in the service worker (extension/worker/gm_storage.js), so every content
-frame forwards its GM messages there via chrome.runtime.sendMessage and the
-worker keys the partition on sender.origin. Frames also keep a direct handle
-on the shared store so the pre-fix content script can be driven against it for
-the cross-tab before-evidence.
+The GM storage namespace, the per-origin and aggregate byte caps, and the
+single GM write queue live in the service worker
+(extension/worker/gm_storage.js), so every content frame forwards its GM
+messages there via chrome.runtime.sendMessage and the worker keys the
+partition on sender.origin. Frames also keep a direct handle on the shared
+store so the pre-fix content script can be driven against it for the cross-tab
+before-evidence.
 """
 import json
 import shutil
@@ -40,7 +41,16 @@ function buildBackground(utilPath, gmPath, makeStorage) {
     fs.readFileSync(utilPath, 'utf8'), context, { filename: utilPath });
   vm.runInNewContext(
     fs.readFileSync(gmPath, 'utf8'), context, { filename: gmPath });
-  return { handle: context.handleGmStorage, chrome };
+  // The production caps, read back out of the module's own scope: a test
+  // boundary derived from them moves with the constant rather than restating
+  // it, and a cap the module does not declare reads null — so its absence is
+  // itself observable instead of being papered over with a local copy.
+  const constants = vm.runInNewContext(
+    '({ GM_QUOTA_BYTES: typeof GM_QUOTA_BYTES === "number"' +
+    ' ? GM_QUOTA_BYTES : null, GM_TOTAL_QUOTA_BYTES:' +
+    ' typeof GM_TOTAL_QUOTA_BYTES === "number"' +
+    ' ? GM_TOTAL_QUOTA_BYTES : null })', context);
+  return { handle: context.handleGmStorage, chrome, constants };
 }
 
 // A content frame's chrome: a direct handle on the shared store (the pre-fix
