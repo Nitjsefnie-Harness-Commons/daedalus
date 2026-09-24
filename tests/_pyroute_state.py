@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from _pyroute_live import bind_alias_statement, invalidate_mutated_length
-from _pyroute_mapping import (_UNSAFE_LITERAL, _literal_value,
-                              alias_target_pairs, literal_iterable_cardinality,
-                              literal_truth, store_deferred_target)
+from _pyroute_keys import (_UNSAFE_LITERAL, _literal_value,
+                           literal_iterable_cardinality, literal_truth)
+from _pyroute_mapping import alias_target_pairs, store_deferred_target
 from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, is_clean_container,
