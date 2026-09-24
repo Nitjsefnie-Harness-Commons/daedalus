@@ -8,6 +8,7 @@ which is what makes the before/after comparison one method rather than two.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -133,12 +134,17 @@ def _until(predicate, what, timeout=45):
 class _Child:
     """A watcher process with both of its streams drained."""
 
-    def __init__(self, argv, env):
+    def __init__(self, argv, env, interruptible=False):
         self.argv = argv
+        # Its own process group on Windows, so a graceful stop can be
+        # delivered to it alone: the shared console would take the test
+        # with it.
+        group = (subprocess.CREATE_NEW_PROCESS_GROUP
+                 if interruptible and sys.platform.startswith('win') else 0)
         self.proc = subprocess.Popen(
             argv, env=_util.child_coverage('scrub', environment=env),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding='utf-8', errors='replace')
+            encoding='utf-8', errors='replace', creationflags=group)
         self.out = []
         self.err = []
         for stream, sink in ((self.proc.stdout, self.out),
@@ -203,11 +209,14 @@ def _pid_alive(pid):
     except PermissionError:
         return True
     state = Path(f'/proc/{pid}/stat')
-    if state.exists():
-        # An orphan nobody has reaped yet is a corpse, not a survivor.
+    if not state.exists():
+        return True          # a POSIX host with no procfs to consult
+    try:
         text = state.read_text(encoding='utf-8', errors='replace')
-        return text.rsplit(')', 1)[-1].split()[0] != 'Z'
-    return True
+    except OSError:
+        return False         # it exited between the two checks
+    # An orphan nobody has reaped yet is a corpse, not a survivor.
+    return text.rsplit(')', 1)[-1].split()[0] != 'Z'
 
 
 def _measure(tmp, name, args, fake, tick=TICK, calls=MEASURED_CALLS):
@@ -471,6 +480,100 @@ def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
     assert 'wait exceeded' in done.stdout, done.stdout
     calls = [call['request'][:60] for call in fake.calls()]
     assert len(calls) <= 2, len(calls)
+
+
+def test_a_review_whose_inline_comments_overflow_is_followed_once(tmp):
+    """A review repeated across pages is one review, not two.
+
+    A page list that re-sends a connection it has already finished - which
+    a server does when a cursor is not honoured - must not buy a second
+    follow-up query for the same review's inline comments; the quota this
+    branch is about is spent per query.
+    """
+    review = _review(1, comments=[_comment(10, inline=True)])
+    review['id'] = 'REV1'
+    review['comments'] = {'pageInfo': {'hasNextPage': True, 'endCursor': 'I'},
+                          'nodes': [_comment(10, inline=True)]}
+    page_one = pr_page(reviews=[review])
+    page_one['data']['repository']['pullRequest']['comments']['pageInfo'] = {
+        'hasNextPage': True, 'endCursor': 'C'}
+    page_two = pr_page(reviews=[review], conversation=[_comment(20)])
+    answers = dict(_idle_answers())
+    answers['reviews(first: 100'] = [page_one, page_two]
+    answers['on PullRequestReview'] = {'data': {'node': {'comments': {
+        'pageInfo': {'hasNextPage': False, 'endCursor': None},
+        'nodes': [_comment(11, inline=True)]}}}}
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = subprocess.run(
+        [sys.executable, '-u', str(SKILL / 'pr_comment_watch.py'),
+         PR, '--once'], env=fake.env(), capture_output=True, text=True,
+        encoding='utf-8', errors='replace', timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert 'ok 5 existing item(s) readable' in done.stderr, done.stderr
+    follow_ups = fake.calls('on PullRequestReview')
+    assert len(follow_ups) == 1, len(follow_ups)
+
+
+def test_the_review_line_keeps_the_uppercase_state(tmp):
+    """The REST field was uppercase; the event line must not change that."""
+    answers = dict(_idle_answers())
+    answers['reviews(first: 100'] = pr_page(reviews=[_review(1)])
+    fake = _fake_gh.FakeGh(tmp, answers)
+    child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
+    try:
+        _until(lambda: [line for line in child.out if ' review from ' in line],
+               'the review announcement')
+        line = [row for row in child.out if ' review from ' in row][0]
+        assert 'state=APPROVED' in line, line
+    finally:
+        child.stop()
+
+
+def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
+    """`N check run(s), M concluded` must be two different numbers again."""
+    page = ci_page([_check(1, 'pylint')])
+    contexts = page['data']['repository']['ref']['target'][
+        'statusCheckRollup']['contexts']['nodes']
+    contexts.append({'__typename': 'CheckRun', 'databaseId': 2,
+                     'name': 'pyright', 'conclusion': None,
+                     'detailsUrl': 'https://github.com/o/r/runs/2'})
+    answers = dict(_idle_answers())
+    answers['statusCheckRollup'] = page
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = subprocess.run(
+        [sys.executable, '-u', str(SKILL / 'ci_watch.py'), BRANCH, '--once'],
+        env=fake.env(), capture_output=True, text=True, encoding='utf-8',
+        errors='replace', timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert 'ok 2 check run(s), 1 concluded' in done.stderr, done.stderr
+
+
+def test_a_graceful_exit_leaves_no_children_behind(tmp):
+    """The teardown path, which a hard kill never reaches."""
+    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
+                     PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
+                     '--debounce', '1', '--max-hold', '5'], fake.env(),
+                    interruptible=True)
+    try:
+        _until(lambda: len([line for line in parent.err
+                            if 'watcher pid' in line]) == 2,
+               'both children to announce their pid')
+        pids = [int(line.rsplit(' ', 1)[-1]) for line in parent.err
+                if 'watcher pid' in line]
+        _wait_for_calls(fake, 2)
+        assert all(_pid_alive(pid) for pid in pids), pids
+        if sys.platform.startswith('win'):
+            parent.proc.send_signal(
+                getattr(signal, 'CTRL_BREAK_EVENT'))
+        else:
+            parent.proc.send_signal(signal.SIGINT)
+        parent.proc.wait(timeout=60)
+        _until(lambda: not any(_pid_alive(pid) for pid in pids),
+               f'children {pids} to leave with a graceful exit')
+        assert not any(_pid_alive(pid) for pid in pids), pids
+    finally:
+        parent.stop()
 
 
 def test_a_plain_refusal_still_exits_three_at_once(tmp):
