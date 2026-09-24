@@ -167,6 +167,49 @@ def test_origin_is_taken_from_location_not_the_message(tmp):
     assert case['bKeys'] == ['spoofed'], case
 
 
+def test_concurrent_setvalue_calls_never_exceed_the_cap(tmp):
+    """A burst of setValue in one turn cannot overflow the partition.
+
+    chrome.storage's get -> sum -> set is a read-modify-write; concurrent
+    calls issued in a single turn each read the pre-write store, so writes
+    for one origin are serialized. Twelve 90,000-byte writes: only those
+    that fit are stored, and the partition total never exceeds the cap.
+    """
+    del tmp
+    case = _gm_harness.run_two_origin()['concurrent']
+    assert case['total'] <= case['cap'], case
+    assert case['refusals'] >= 1, case
+
+
+def test_map_and_set_are_charged_by_json_form(tmp):
+    """A Map/Set is charged its JSON form, matching Chrome's QUOTA_BYTES.
+
+    Chrome's local quota is "measured by the JSON stringification of every
+    value" and its values are JSON-serialisable, so a 100k-entry Map is
+    stored and charged as {} (2 bytes), not as a structured clone. The Map
+    and Set are admitted and a following cap-100 value still fits beside
+    them, which it would not if either were charged by its entries.
+    """
+    del tmp
+    case = _gm_harness.run_two_origin()['mapSet']
+    assert case['mapError'] is None, case
+    assert case['mapCalls'] == ['get', 'set'], case
+    assert case['setError'] is None, case
+    assert case['setCalls'] == ['get', 'set'], case
+    assert case['fillError'] is None, case
+    assert case['fillCalls'] == ['get', 'set'], case
+
+
+def test_an_opaque_origin_refuses_gm_storage(tmp):
+    """location.origin "null" has no owner, so every GM handler refuses."""
+    del tmp
+    case = _gm_harness.run_two_origin()['opaque']
+    assert case == {
+        'get': 'opaque origin', 'set': 'opaque origin',
+        'list': 'opaque origin', 'del': 'opaque origin',
+    }, case
+
+
 def test_a_write_that_fits_reaches_set_and_replies_without_error(tmp):
     """A small write reaches set and the reply carries no error."""
     del tmp

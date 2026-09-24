@@ -361,7 +361,17 @@ const ORIGIN_B = 'https://beta.example.com';
 const QUOTA_BYTES = 1048576;
 const store = Object.create(null);
 const storageCalls = [];
+const deferred = [];
 let reqCounter = 0;
+
+// Real chrome.storage callbacks are asynchronous. Deferring them onto a queue
+// that a burst can leave unflushed reproduces the read-modify-write race a
+// synchronous model hides: a setValue only reaches its get→set after a turn,
+// so a burst of setValue calls issued in one turn submits every get before any
+// set commits, and every get reads the same pre-write store.
+function flushDeferred() {
+  while (deferred.length) deferred.shift()();
+}
 
 function storedValues(keys) {
   const values = {};
@@ -390,17 +400,18 @@ const chrome = {
     local: {
       get(keys, callback) {
         storageCalls.push('get');
-        callback(keys === null ? { ...store } : storedValues(keys));
+        const data = keys === null ? { ...store } : storedValues(keys);
+        deferred.push(() => callback(data));
       },
       set(values, callback) {
         storageCalls.push('set');
         Object.assign(store, values);
-        callback();
+        deferred.push(() => callback());
       },
       remove(keys, callback) {
         storageCalls.push('remove');
         for (const key of keys) delete store[key];
-        callback();
+        deferred.push(() => callback());
       },
     },
   },
@@ -434,9 +445,7 @@ function createFrame(origin, hostname) {
     fs.readFileSync(contentPath, 'utf8'), context,
     { filename: contentPath });
 
-  function send(handler, key, value, extra) {
-    posted.length = 0;
-    storageCalls.length = 0;
+  function dispatch(handler, key, value, extra) {
     const reqId = ++reqCounter;
     const data = Object.assign({
       direction: 'daedalus-page-to-bg', reqId, handler, key, value,
@@ -445,8 +454,20 @@ function createFrame(origin, hostname) {
     for (const listener of (listeners.message || [])) {
       listener({ source: windowObject, data });
     }
-    const reply = posted.find((m) =>
+    return reqId;
+  }
+
+  function replyFor(reqId) {
+    return posted.find((m) =>
       m.direction === 'daedalus-bg-to-page' && m.reqId === reqId) || null;
+  }
+
+  function send(handler, key, value, extra) {
+    posted.length = 0;
+    storageCalls.length = 0;
+    const reqId = dispatch(handler, key, value, extra);
+    flushDeferred();
+    const reply = replyFor(reqId);
     return {
       error: (reply && reply.error) || null,
       value: reply ? reply.value : undefined,
@@ -456,7 +477,19 @@ function createFrame(origin, hostname) {
     };
   }
 
-  return { origin, send };
+  // Fire count setValue calls in a single turn with no flush between them,
+  // then flush once, so every get runs before any set commits.
+  function burstWrites(count, prefix, bytes) {
+    posted.length = 0;
+    storageCalls.length = 0;
+    for (let i = 0; i < count; i++) {
+      dispatch('setValue', prefix + i, 'x'.repeat(bytes));
+    }
+    flushDeferred();
+    return [...posted];
+  }
+
+  return { origin, send, burstWrites };
 }
 function resetStore() {
   for (const key of Object.keys(store)) delete store[key];
@@ -468,6 +501,16 @@ function nsKey(origin, key) {
 }
 
 function bigString(n) { return 'x'.repeat(n); }
+
+function partitionBytes(origin) {
+  const ns = 'gm:' + encodeURIComponent(origin) + ':';
+  let total = 0;
+  for (const key of Object.keys(store)) {
+    if (!key.startsWith(ns)) continue;
+    total += new TextEncoder().encode(JSON.stringify(store[key])).length;
+  }
+  return total;
+}
 
 function main() {
   const a = createFrame(ORIGIN_A, 'alpha.example.com');
@@ -532,6 +575,51 @@ function main() {
     value: spoofedRead.value,
     aKeys: a.send('listValues').keys,
     bKeys: b.send('listValues').keys,
+  };
+
+  // #1: a burst of concurrent setValue calls issued in one turn. With the
+  // cap's read-modify-write unserialized, every get reads the pre-write store
+  // and all twelve pass, overflowing the cap; with per-origin serialization
+  // only the writes that fit are stored and the partition never exceeds it.
+  resetStore();
+  const burstReplies = a.burstWrites(12, 'k', 90000);
+  out.concurrent = {
+    total: partitionBytes(ORIGIN_A),
+    cap: QUOTA_BYTES,
+    stored: burstReplies.filter((m) => !m.error).length,
+    refusals: burstReplies.filter((m) =>
+      m.error === 'gm storage quota exceeded').length,
+  };
+
+  // #2: Chrome's local QUOTA_BYTES is "measured by the JSON stringification of
+  // every value" and its values are JSON-serialisable, so a Map/Set is stored
+  // and charged as {} (2 bytes) — exactly what gmValueBytes measures. A
+  // 100k-entry Map is admitted at a 2-byte charge, and a following value of
+  // cap-100 bytes still fits beside it.
+  resetStore();
+  const hugeMap = new Map();
+  const hugeSet = new Set();
+  for (let i = 0; i < 100000; i++) {
+    hugeMap.set('k' + i, 'v' + i);
+    hugeSet.add('v' + i);
+  }
+  const mapSet = a.send('setValue', 'm', hugeMap);
+  const setSet = a.send('setValue', 's', hugeSet);
+  const fillSet = a.send('setValue', 'z', bigString(QUOTA_BYTES - 100));
+  out.mapSet = {
+    mapError: mapSet.error, mapCalls: mapSet.calls,
+    setError: setSet.error, setCalls: setSet.calls,
+    fillError: fillSet.error, fillCalls: fillSet.calls,
+  };
+
+  // #4: an opaque origin reports "null" and has no owner to name, so every GM
+  // storage handler refuses rather than share a gm:null: partition.
+  const o = createFrame('null', 'opaque');
+  out.opaque = {
+    get: o.send('getValue', 'k').error,
+    set: o.send('setValue', 'k', 'v').error,
+    list: o.send('listValues').error,
+    del: o.send('deleteValue', 'k').error,
   };
 
   // A write that fits reaches set and replies with no error.
