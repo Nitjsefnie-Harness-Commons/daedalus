@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""The bridge fake's own refusal oracle, separate from the worker.
+"""The bridge fake's own refusal oracle, driven without the worker.
 
-tests/test_stream_backoff.py's fake answers an unmodelled non-stream
-request with a 599 and records it. This suite pins that property by
-driving the fake directly — a planned route answers 200, an unplanned one
-answers 599, and both land in the recording — so the oracle is proven
-without a worker path in between.
+The harness is test_stream_backoff's; a declared route must answer 200
+and an undeclared one 599.
 """
 import sys
 from pathlib import Path
