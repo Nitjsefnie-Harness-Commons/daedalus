@@ -372,6 +372,85 @@ def test_the_registry_arrives_under_every_import_grammar(_tmp):
         _assert_refusal(_tmp, source, site, 'cannot resolve')
 
 
+def test_a_registry_read_through_any_base_spelling_refuses(_tmp):
+    """A1 and A2: the base is read structurally, not matched for a bare Name.
+
+    `[sys][0].modules` and `sys.__dict__['modules']` are the registry exactly
+    as a bare `sys.modules` is; a base the walk cannot resolve cannot be the
+    ground on which a readable attribute rests.
+    """
+    for source, site in (
+            ('\nimport sys\n\n\ndef load(key):\n'
+             '    return [sys][0].modules[key]\n', 6),
+            ('\nimport sys\n\n\ndef load(key):\n'
+             '    return sys.__dict__["modules"][key]\n', 6)):
+        _assert_refusal(_tmp, source, site, 'cannot resolve')
+
+
+def test_a_registry_handed_to_a_name_by_a_store_refuses(_tmp):
+    """A3: a store that hides the registry behind a name is refused at the
+    store, since no later read the walk can see will notice it."""
+    _assert_refusal(_tmp, '''
+import sys
+
+m = sys
+
+
+def load(key):
+    return m.modules[key]
+''', 4, 'cannot follow')
+
+
+def test_a_star_import_refuses_the_scan(_tmp):
+    """A4: a star import binds names no name-based walk can follow."""
+    _assert_refusal(_tmp, '''
+from sys import *
+
+
+def load(key):
+    return modules[key]
+''', 2, 'cannot follow')
+
+
+def test_the_registry_bound_by_a_dotted_import_alias_refuses(_tmp):
+    """A5: `import sys.modules as r` binds the registry itself, not `sys`."""
+    _assert_refusal(_tmp, '''
+import sys.modules as registry
+
+
+def load(key):
+    return registry[key]
+''', 6, 'cannot resolve')
+
+
+def test_a_concatenated_string_that_assembles_the_operation_refuses(_tmp):
+    """#969: `'import_' + 'module'` folds to one name, so Facet B reads it.
+
+    A concatenation of string constants is never an unprovable name, only an
+    unfolded one, so it belongs in the class that refuses a whole literal
+    rather than in the declared limits.
+    """
+    for source, site in (
+            ('\ndef load(d):\n    return d["import_" + "module"]\n', 3),
+            ('\ndef load(m):\n'
+             '    return getattr(m, "import_" + "module")\n', 3)):
+        _assert_refusal(_tmp, source, site, 'cannot follow')
+
+
+def test_an_interpolated_fstring_is_the_declared_limit(_tmp):
+    """#969: `f'import_{which}'` is a declared limit.
+
+    A field-less f-string folds to a constant and is refused; an interpolated
+    one assembles a value the walk cannot know, so it is accepted as a
+    disclosed limit, not silently skipped.
+    """
+    scanned = _scans_silently(_tmp, '''
+def load(d, which):
+    return d[f'import_{which}']
+''')
+    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+
+
 def test_a_mapping_lookup_naming_the_operation_refuses(_tmp):
     """A `.get` or a `dict.get` names the operation by string the same way
     a subscript does; the refusal names the string's own site."""
@@ -528,8 +607,9 @@ def string_keyed_but_ordinary(handle, table, registry):
     by_other_name = table.get('import_module_alias', None)
     attribute_by_name = getattr(handle, 'import_module_alias', None)
     untracked_registry = registry['importlib']
+    other_modules = importlib.modules
     return (by_module_name, by_other_name, attribute_by_name,
-            untracked_registry)
+            untracked_registry, other_modules)
 
 
 def rows_of(handle):
