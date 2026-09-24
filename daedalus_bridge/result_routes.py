@@ -85,13 +85,15 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     try:
         if delivery_dir is not None:
             assert delivery_file is not None
-            # The directory exists before the stripe is chosen, so the stripe
-            # is keyed on this target's own entry even for a first delivery:
-            # a target created here and a concurrent one naming it the other
-            # way round would otherwise each key on a name, and take two
-            # locks for the one directory they are about to share.
+            # The directory is created before the stripe is chosen, because
+            # there is no stripe for a directory that is not there: a POST
+            # that asked first would be refused one, and the first delivery
+            # for a target would go out with no mutual exclusion against the
+            # second one -- which is a delivery a consume could then take.
             delivery_dir.mkdir(parents=True, exist_ok=True)
-            with result_store.delivery_lock_for(delivery_dir):
+            stripe = result_store.delivery_lock_for(delivery_dir)
+            assert stripe is not None, 'the directory was created just now'
+            with stripe:
                 with result_store.result_lock:
                     duplicate = result_store.delivery_recorded(did)
                 if not duplicate:
@@ -185,7 +187,14 @@ def fetch_result(res_dir, token, params):
     try:
         if delivery:
             assert delivery_dir is not None
-            with result_store.delivery_lock_for(delivery_dir):
+            stripe = result_store.delivery_lock_for(delivery_dir)
+            if stripe is None:
+                # No target directory, so no delivery file to read and none
+                # to consume. Answering pending is what the read of an absent
+                # file answers anyway, and a delivery published under this id
+                # in the next moment belongs to the next request.
+                return 200, {'pending': True}
+            with stripe:
                 with result_store.result_lock:
                     response, _ = result_store.read_result_file(
                         res_file, consume, expected)
@@ -247,7 +256,18 @@ def fetch_result(res_dir, token, params):
                     break
                 changed = False
                 assert candidate_dir is not None
-                with result_store.delivery_lock_for(candidate_dir):
+                stripe = result_store.delivery_lock_for(candidate_dir)
+                if stripe is None:
+                    # No directory, so no delivery copy to remove. The slot
+                    # consume below is the generation-checked one and does
+                    # not need the stripe; leaving the copy is what the
+                    # generation check would decide anyway.
+                    with result_store.result_lock:
+                        response, _result_delivery = (
+                            result_store.read_result_file(
+                                res_file, True, expected))
+                    break
+                with stripe:
                     with result_store.result_lock:
                         current, _current_delivery = (
                             result_store.read_result_file(

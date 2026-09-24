@@ -498,6 +498,7 @@
 !/tests/test_result_command_write_retry.py
 !/tests/test_result_routes.py
 !/tests/test_result_store.py
+!/tests/test_result_stripe.py
 !/tests/test_run_tests.py
 !/tests/test_runner_refuses_unawaited.py
 !/tests/test_screenshot_quality.py
