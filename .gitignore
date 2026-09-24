@@ -516,6 +516,7 @@
 !/tests/test_tab_routing.py
 !/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_comprehension_probe.py
+!/tests/test_tab_routing_dict_construction.py
 !/tests/test_tab_routing_dict_lengths.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
