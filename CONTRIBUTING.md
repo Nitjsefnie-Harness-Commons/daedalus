@@ -249,12 +249,15 @@ was wrong.
 
 Claim the issue before you start, then name it in the pull request's
 **Related Issues and Pull Requests** section. The gate checks the body when the
-pull request is opened, edited, or reopened and posts one comment naming every
-failing condition, updating that same comment after later edits. It closes the
-pull request only when the body's layout or section content fails the template
-or the Related section names no issue. Fix the claim or body on that same pull
-request; once every condition passes, the gate reopens it automatically if it
-closed it, so there is no need to open a second one.
+pull request is opened, edited, or reopened, and the moment a draft is marked
+ready for review, and posts one comment naming every failing condition,
+updating that same comment after later edits. A draft is never checked: it
+cannot be merged, and closing one strands the CI its reopen would trigger. The
+gate closes a mergeable pull request only when the body's layout or section
+content fails the template or the Related section names no issue. Fix the claim
+or body on that same pull request; once every condition passes, the gate
+reopens it automatically if it closed it, so there is no need to open a second
+one.
 
 The workflow calls the
 [`Nitjsefnie-Actions/pr-gate`](https://github.com/Nitjsefnie-Actions/pr-gate)
