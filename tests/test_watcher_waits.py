@@ -435,7 +435,7 @@ def _reintroductions():
     for clock_label, clock_setup, signature, read in CLOCK_BINDINGS:
         for form_label, form, bound in BINDING_FORMS:
             for shape_label, shape in COMPARISON_SHAPES:
-                label = (f'{clock_label} / {form_label} / {shape_label}')
+                label = f'{clock_label} / {form_label} / {shape_label}'
                 yield label, _source(clock_setup, signature, read, form,
                                      bound, shape)
 
@@ -446,7 +446,7 @@ def _source(clock_setup, signature, read, form, bound, shape):
     body = [form.format(read=read, bound=bound),
             'began = time.monotonic()', 'holder = _Holder()', 'state = {}',
             'while predicate():',
-            '    if {}:'.format(shape.format(read=read, bound=bound)),
+            f'    if {shape.format(read=read, bound=bound)}:',
             "        raise AssertionError(what)"]
     wait = [f'def test_a_wait(tmp{signature}):'] + _indent(body)
     if form.startswith('nonlocal'):
