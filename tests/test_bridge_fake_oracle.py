@@ -27,10 +27,10 @@ NO_ORIGIN = '(no origin)'
 # The probe's outcome, whole. The list is compared by equality so the count
 # is pinned: five requests were seen even though the plan declares three,
 # because the probe deliberately over- and mis-addresses requests.
-EXPECTED_STATUSES = [200, 599, 599, 599, 599, 200, 200]
+EXPECTED_STATUSES = [200, 599, 599, 599, 599, 200, 200, 599, 599]
 EXPECTED_NON_STREAM = [SYNC, SYNC, TABS, OTHER, RESULT]
 EXPECTED_REFUSED = [SYNC, TABS]
-EXPECTED_BAD_ORIGINS = [ELSEWHERE, NO_ORIGIN]
+EXPECTED_BAD_ORIGINS = [ELSEWHERE, NO_ORIGIN, ELSEWHERE, NO_ORIGIN]
 
 _ORACLE_HARNESS = r"""
 const [plan] = process.argv.slice(1);
@@ -69,6 +69,9 @@ async function run() {
     nonStream: nonStreamFetches.map((i) => i.request),
     refused: refusedFetches,
     badOrigins,
+    records: nonStreamFetches,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
     bodies: nonStreamFetches.map(
       (i) => ({ request: i.request, body: i.body })),
     resultPosts,
@@ -100,6 +103,8 @@ def _probe_plan():
             {'method': 'POST', 'url': BRIDGE + '/result',
              'body': {'id': 'r1', 'tabId': 'extension', 'result': 1,
                       '_did': 'did-1'}},
+            {'method': 'GET', 'url': ELSEWHERE + '/stream?tab=x'},
+            {'method': 'GET', 'url': '/stream?tab=x'},
         ],
     }
 
@@ -157,6 +162,23 @@ def test_an_unpermitted_origin_spends_no_route_allowance(tmp):
     assert outcome['refused'] == EXPECTED_REFUSED, outcome
 
 
+def test_a_foreign_origin_stream_url_is_refused_and_recorded(tmp):
+    """The stream URL is the one request derived from runtime config, so the
+    origin gate must run before the stream branch: a foreign-origin stream
+    is refused, not silently answered, and is recorded in badOrigins."""
+    del tmp
+    outcome = _probe()
+    assert outcome['statuses'][7] == 599, outcome
+    assert outcome['badOrigins'] == EXPECTED_BAD_ORIGINS, outcome
+
+
+def test_a_relative_stream_url_is_refused_and_recorded(tmp):
+    del tmp
+    outcome = _probe()
+    assert outcome['statuses'][8] == 599, outcome
+    assert outcome['badOrigins'] == EXPECTED_BAD_ORIGINS, outcome
+
+
 def test_every_request_is_recorded_in_the_whole_list(tmp):
     """Whole-list equality pins the count: five seen, three declared."""
     del tmp
@@ -195,8 +217,101 @@ def test_a_scenario_matching_its_plan_passes_the_whole_list_check(tmp):
     outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
                        plan=plan)
     assert outcome['statuses'] == [200, 200, 200], outcome
-    assert_gate_clean(outcome['nonStream'], outcome['refused'],
-                      outcome['badOrigins'], plan['planned'])
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=plan['planned'], planned_stream=[])
+
+
+# ---- assert_gate_clean's own controls -------------------------------------
+# Each drives the helper directly with a record that carries one specific
+# defect and requires it to be rejected. A weakening of the helper that lets
+# its defect through makes the matching control fail, so these are the
+# controls the four re-mutations must each turn red.
+
+def _record(request, status=200):
+    return {'request': request, 'status': status}
+
+
+def _must_reject(**overrides):
+    kwargs = {
+        'contract_faults': [],
+        'records': [_record(SYNC)],
+        'refused': [],
+        'bad_origins': [],
+        'stream_answered': [],
+        'planned': [SYNC],
+        'planned_stream': [],
+    }
+    kwargs.update(overrides)
+    try:
+        assert_gate_clean(**kwargs)
+    except AssertionError:
+        return
+    raise AssertionError(
+        f'assert_gate_clean accepted a wrong record: {overrides}')
+
+
+def test_assert_gate_clean_accepts_a_matching_record(tmp):
+    del tmp
+    assert_gate_clean(
+        contract_faults=[], records=[_record(SYNC)], refused=[],
+        bad_origins=[], stream_answered=[], planned=[SYNC],
+        planned_stream=[])
+
+
+def test_assert_gate_clean_rejects_a_missing_entry_of_a_declared_route(tmp):
+    """Declared twice, recorded once: sets match, counts do not. Catches a
+    membership (`set == set`) weakening, the docstring's rejected option."""
+    del tmp
+    _must_reject(records=[_record(SYNC)], planned=[SYNC, SYNC])
+
+
+def test_assert_gate_clean_rejects_a_different_route_at_the_same_count(tmp):
+    """Two declared, two recorded, different routes. Catches a count-only
+    (`len == len`) weakening, which this fixture satisfies."""
+    del tmp
+    _must_reject(records=[_record(SYNC), _record(TABS)],
+                 planned=[SYNC, OTHER])
+
+
+def test_assert_gate_clean_rejects_an_extra_undeclared_route(tmp):
+    del tmp
+    _must_reject(records=[_record(SYNC), _record(TABS)], planned=[SYNC])
+
+
+def test_assert_gate_clean_rejects_a_bad_origin(tmp):
+    """Catches deleting the `bad_origins == []` assertion."""
+    del tmp
+    _must_reject(bad_origins=[ELSEWHERE])
+
+
+def test_assert_gate_clean_rejects_a_refused_request(tmp):
+    """Catches deleting the `refused == []` assertion."""
+    del tmp
+    _must_reject(refused=[SYNC])
+
+
+def test_assert_gate_clean_rejects_a_wrong_stream_list(tmp):
+    """Catches deleting or weakening the whole-list stream comparison."""
+    del tmp
+    _must_reject(stream_answered=[503], planned_stream=[])
+    _must_reject(stream_answered=[503, 503], planned_stream=[503])
+    _must_reject(stream_answered=[200], planned_stream=[503])
+
+
+def test_assert_gate_clean_rejects_an_unanswered_request(tmp):
+    """A request the gate recorded but never answered (a missing `response`)
+    leaves status null, and must be rejected."""
+    del tmp
+    _must_reject(records=[{'request': SYNC, 'status': None}])
+
+
+def test_assert_gate_clean_rejects_a_contract_fault(tmp):
+    del tmp
+    _must_reject(contract_faults=['streamResponse'])
 
 
 def main():

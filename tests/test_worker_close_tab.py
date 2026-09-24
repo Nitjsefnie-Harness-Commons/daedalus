@@ -20,6 +20,10 @@ RESULT = 'POST /result'
 # eval-rejection scenario never posts one. The gate refuses a request outside
 # the plan by status and records it, so an invented call cannot pass here.
 BOOT_RESULT = [SYNC, RESULT]
+# The recorded boot stream fetch, which every scenario makes once: the
+# worker's GET /stream answered 503. Declared and asserted like the
+# non-stream routes, so the plan is the requests the real code makes.
+BOOT_STREAM = (503,)
 
 _CLOSE_TAB_HARNESS = (r"""
 const fs = require('fs');
@@ -159,9 +163,11 @@ async function run() {
       id: p.id, tabId: p.tabId, result: p.result, error: p.error,
     })),
     outcomes,
-    nonStream: nonStreamFetches.map((i) => i.request),
+    records: nonStreamFetches,
     refused: refusedFetches,
     badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
   };
 }
 
@@ -174,7 +180,8 @@ run().then((result) => {
 """).replace('__TOKEN__', TOKEN).replace('__SERVER__', SERVER)
 
 
-def _run_close_tab(command, reject=None, fail_query=False, planned=None):
+def _run_close_tab(command, reject=None, fail_query=False, planned=None,
+                   planned_stream=BOOT_STREAM):
     plan = {'commands': [command], 'planned': list(planned or BOOT_RESULT)}
     if reject is not None:
         plan['reject'] = reject
@@ -183,8 +190,12 @@ def _run_close_tab(command, reject=None, fail_query=False, planned=None):
     outcome = run_gate(require_node(), _CLOSE_TAB_HARNESS,
                        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
                        plan=plan)
-    assert_gate_clean(outcome['nonStream'], outcome['refused'],
-                      outcome['badOrigins'], plan['planned'])
+    assert_gate_clean(
+        contract_faults=outcome['contractFaults'],
+        records=outcome['records'], refused=outcome['refused'],
+        bad_origins=outcome['badOrigins'],
+        stream_answered=outcome['streamAnswered'],
+        planned=plan['planned'], planned_stream=list(planned_stream))
     return {
         'removes': outcome['removes'],
         'posted': outcome['posted'],
