@@ -3,6 +3,7 @@
 import ast
 import sys
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -641,15 +642,16 @@ def test_materialized_order_only_for_order_preserving_consumers(_tmp):
     projects each item into a key, so its result is not a positional pairing
     of the operand's own elements. dict preserves insertion order, so order
     alone is not what excludes it: the projection is."""
-    node = ast.parse('pair()').body[0].value
+    node = cast(ast.Expr, ast.parse('pair()').body[0]).value
     container = DeferredContainer({0: 'first', 1: 'second'}, 2, 'tuple')
     state = FlowState({}, {}, {}, {id(node): container}, set(), set(),
                       {}, set())
     for consumer in ('list', 'tuple'):
         ordered = materialized_order(consumer, node, [state])
         assert ordered is not None, consumer
-        assert ordered.kind == consumer, consumer
-        assert ordered.items == {0: 'first', 1: 'second'}, consumer
+        materialized = cast(DeferredContainer, ordered)
+        assert materialized.kind == consumer, consumer
+        assert materialized.items == {0: 'first', 1: 'second'}, consumer
     for consumer in ('dict', 'frozenset', 'max', 'min', 'set', 'sorted',
                      'sum'):
         assert materialized_order(consumer, node, [state]) is None, consumer

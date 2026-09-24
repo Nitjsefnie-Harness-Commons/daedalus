@@ -29,6 +29,7 @@ accepted shape leaves the closure quietly short.
 """
 import ast
 from pathlib import Path
+from typing import cast
 
 import _mcp_code_eval
 
@@ -120,7 +121,8 @@ def _dynamic_callees(tree):
         elif isinstance(node, ast.ImportFrom):
             if not node.level:
                 names = {'importlib': DYNAMIC_ATTRIBUTES,
-                         'builtins': ('__import__',)}.get(node.module, ())
+                         'builtins': ('__import__',)}.get(
+                             cast(str, node.module), ())
                 for alias in node.names:
                     if alias.name in names:
                         bound[alias.asname or alias.name] = 'by name'
@@ -349,7 +351,7 @@ class _BindingWalk(ast.NodeVisitor):
         self.generic_visit(node)
         self._each(node, node.target, node.iter)
 
-    visit_AsyncFor = visit_For
+    visit_AsyncFor = visit_For  # type: ignore[assignment]
 
     def _comprehension(self, node):
         self.generic_visit(node)
@@ -369,7 +371,7 @@ class _BindingWalk(ast.NodeVisitor):
             if item.optional_vars is not None:
                 self._paired(node, item.optional_vars, item.context_expr)
 
-    visit_AsyncWith = visit_With
+    visit_AsyncWith = visit_With  # type: ignore[assignment]
 
     def visit_ExceptHandler(self, node):
         self.generic_visit(node)
@@ -386,7 +388,7 @@ class _BindingWalk(ast.NodeVisitor):
         self._positional_defaults(node)
         self._keyword_defaults(node)
 
-    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
     def visit_Lambda(self, node):
         self.generic_visit(node)
@@ -515,7 +517,9 @@ def _folded_string(node):
     if isinstance(node, ast.JoinedStr) and all(
             isinstance(part, ast.Constant) and isinstance(part.value, str)
             for part in node.values):
-        return ''.join(part.value for part in node.values)
+        return ''.join(
+            part.value for part in node.values
+            if isinstance(part, ast.Constant) and isinstance(part.value, str))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left = _folded_string(node.left)
         right = _folded_string(node.right)

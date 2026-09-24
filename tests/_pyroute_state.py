@@ -1,6 +1,7 @@
 """Alias-flow state primitives for Python tab-routing analysis."""
 import ast
 from dataclasses import dataclass, field
+from typing import cast
 
 from _pyroute_live import bind_alias_statement
 from _pyroute_mapping import (_UNSAFE_LITERAL, _literal_value,
@@ -425,7 +426,7 @@ def apply_alias_statement(node, state):
     elif not isinstance(node, ast.AnnAssign) or node.value is not None:
         bind_builtin_names(state, names)
         state.bound.update(names)
-    if type(node) in (ast.Assign, ast.AnnAssign) and node.value is not None:
+    if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
         bind_alias_statement(node, state, bind_alias_target)
         return
     for name in names:
@@ -450,7 +451,7 @@ def state_signature(state, occupancy=True):
         (scope, name, *payload_state_signature(keys))
         for scope, values in state.dict_namespaces.items()
         for name, keys in values.items()))
-    generators = tuple(sorted((name, *value_signature(value)[1:])
+    generators = tuple(sorted((name, *cast(tuple, value_signature(value))[1:])
                               for name, value in state.generators.items()))
     evaluated = tuple((key, value_signature(value)) for key, value in
                       sorted(state.evaluated.items()) if value is not None

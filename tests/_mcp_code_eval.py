@@ -12,6 +12,7 @@ import eval` binds the builtin itself and is not a shadow.
 """
 import ast
 import symtable
+from typing import TypeGuard
 
 
 # The builtins that evaluate a program; one set reads every direct reach.
@@ -160,7 +161,7 @@ def denotes_code_eval(node, bound, scopes):
     return False
 
 
-def _is_plain_lambda(func):
+def _is_plain_lambda(func: ast.expr) -> TypeGuard[ast.Lambda]:
     """Whether this lambda is callable with NO arguments, so a zero-argument
     call to it returns its body. A REQUIRED positional or keyword-only
     parameter (no default) blocks such a call; a vararg, a kwarg and a
