@@ -17,6 +17,7 @@ def test_only_admission_events_run_the_gate(_tmp):
     workflow = _workflow()
     assert set(workflow) == {
         'name', 'on', 'permissions', 'concurrency', 'jobs'}, workflow
+    assert workflow['name'] == 'pr gate', workflow
     assert workflow['on'] == {
         'pull_request_target': {'types': [
             'opened', 'edited', 'reopened', 'ready_for_review']},
