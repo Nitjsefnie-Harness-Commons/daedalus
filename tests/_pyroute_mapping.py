@@ -451,8 +451,11 @@ def _source_items(source, state):
             else:
                 # A modelled key is a callable or a sender, never a key.
                 _fold_dynamic(items, pair.items.get(1))
+    # The last pair written at a key is the one the dict holds, `1` and
+    # `True` being one key there; the dynamic slot is the only entry
+    # above, and a folded key is never that slot.
     for key, value in entries.values():
-        items.setdefault(key, value)
+        items[key] = value
     return items, len(known.items) == known.length
 
 

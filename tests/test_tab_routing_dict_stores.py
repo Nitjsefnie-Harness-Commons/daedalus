@@ -127,6 +127,44 @@ def test_folded_pair_key_stores_under_their_own_key(tmp):
     assert not bad, bad
 
 
+# A pair sequence that repeats a key holds the LAST pair's value, the way
+# every dict store at runtime does; `1 == True` makes those one entry
+# there too. The relay-last rows are the true positives a first-write
+# merge dropped, the relay-first row is the false positive it kept.
+_REPEATED_PAIR_KEYS = [
+    ('pair-dup-str-relay-last', _flow(
+        _RELAY, 'e = {}; e.update([("a", ordinary), ("a", relay())])',
+        'x = e.get("a", ordinary)', invoke='x()'), (1, 1)),
+    ('pair-dup-str-relay-first', _flow(
+        _RELAY, 'e = {}; e.update([("a", relay()), ("a", ordinary)])',
+        'x = e.get("a", ordinary)', invoke='x()'), (0, 0)),
+    ('pair-dup-int-relay-last', _flow(
+        _RELAY, 'e = {}; e.update([(1, ordinary), (1, relay())])',
+        'x = e.get(1, ordinary)', invoke='x()'), (1, 1)),
+    ('pair-dup-none-relay-last', _flow(
+        _RELAY, 'e = {}; e.update([(None, ordinary), (None, relay())])',
+        'x = e.get(None, ordinary)', invoke='x()'), (1, 1)),
+    ('pair-collision-1-then-true', _flow(
+        _RELAY, 'e = {}; e.update([(1, ordinary), (True, relay())])',
+        'x = e.get(True, ordinary)', invoke='x()'), (1, 1)),
+    ('pair-collision-true-then-1', _flow(
+        _RELAY, 'e = {}; e.update([(True, ordinary), (1, relay())])',
+        'x = e.get(True, ordinary)', invoke='x()'), (1, 1)),
+    ('pair-dup-str-tuple-source', _flow(
+        _RELAY, 'e = {}; e.update((("a", ordinary), ("a", relay())))',
+        'x = e.get("a", ordinary)', invoke='x()'), (1, 1)),
+]
+
+
+def test_repeated_pair_key_keeps_the_last_pairs_value(tmp):
+    bad = []
+    for label, body, expected in _REPEATED_PAIR_KEYS:
+        actual = _verdict(tmp, body)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 def test_deleted_holder_copy_invocation_reports(tmp):
     body = ('send = ordinary\nbox = {}\n'
             f'box["k"] = lambda: {_CALL}\n'
