@@ -232,10 +232,8 @@ def _measure(tmp, name, args, fake, tick=TICK, calls=MEASURED_CALLS):
 
 
 def _base_answers():
-    """Answers for the REST surfaces the base watchers read.
-
-    The first fragments are the specific paths: `pulls/195` alone is a
-    substring of all three comment surfaces.
+    """Answers for the REST surfaces the base watchers read; the specific
+    paths come first, `pulls/195` alone matching all three comment surfaces.
     """
     return {
         'pulls/195/reviews': json.dumps(
@@ -259,11 +257,9 @@ def _base_answers():
 
 
 def _idle_answers():
-    """One idle pull request, answerable by this tree and by the base.
-
-    The same fixture set serves both, which is what makes the before/after
-    measurement one method: a base watcher answers from the REST surfaces and
-    spends four and two requests per poll, exactly as it did in production.
+    """One idle pull request, answerable by this tree and by the base, which
+    is what makes the before/after one method: a base watcher answers from
+    the REST surfaces and spends four and two requests per poll, as it did.
     """
     return {
         'reviews(first: 100': pr_page(),
@@ -307,7 +303,7 @@ def _base_script(directory, name):
 
 
 def test_the_hourly_cost_of_an_idle_watch_is_two_queries(tmp):
-    """The branch's own watchers, measured through the whole poll surface."""
+    """The branch's watchers, measured through the whole poll surface."""
     after = {}
     for name, args in (('pr_comment_watch.py', [PR]),
                        ('ci_watch.py', [BRANCH])):
@@ -461,11 +457,10 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
 
 
 def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
-    """A limit that outlives the bound ends the wait; it does not spin.
-
-    The refusal here is never lifted, so the only way out is the wait's own
-    --timeout. The call count is the point: a wait that keeps polling after
-    its bound has passed is hammering the API that is refusing it.
+    """A limit that outlives the bound ends the wait; it does not spin. The
+    refusal is never lifted, so the only way out is the wait's own --timeout,
+    and the call count is the point: a wait that keeps polling past its bound
+    is hammering the API refusing it.
     """
     far = datetime.now(timezone.utc) + timedelta(hours=2)
     reset_at = far.strftime(STAMP)
@@ -480,12 +475,10 @@ def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
 
 
 def test_a_review_whose_inline_comments_overflow_is_followed_once(tmp):
-    """A review repeated across pages is one review, not two.
-
-    A page list that re-sends a connection it has already finished - which
-    a server does when a cursor is not honoured - must not buy a second
-    follow-up query for the same review's inline comments; the quota this
-    branch is about is spent per query.
+    """A review repeated across pages is one review, not two: a page list
+    that re-sends a connection it has finished - as a server does when a
+    cursor is not honoured - must not buy a second follow-up query for the
+    same review's inline comments. The quota is spent per query.
     """
     review = _review(1, comments=[_comment(10, inline=True)])
     review['id'] = 'REV1'
@@ -512,7 +505,7 @@ def test_a_review_whose_inline_comments_overflow_is_followed_once(tmp):
 
 
 def test_the_review_line_keeps_the_uppercase_state(tmp):
-    """The REST field was uppercase; the event line must not change that."""
+    """The REST review state was uppercase; the line must stay that way."""
     answers = dict(_idle_answers())
     answers['reviews(first: 100'] = pr_page(reviews=[_review(1)])
     fake = _fake_gh.FakeGh(tmp, answers)
@@ -527,7 +520,7 @@ def test_the_review_line_keeps_the_uppercase_state(tmp):
 
 
 def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
-    """`N check run(s), M concluded` must be two different numbers again."""
+    """`N check run(s), M concluded` are two numbers again, not one twice."""
     page = ci_page([_check(1, 'pylint')])
     contexts = page['data']['repository']['ref']['target'][
         'statusCheckRollup']['contexts']['nodes']

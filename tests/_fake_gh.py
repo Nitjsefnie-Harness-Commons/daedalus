@@ -1,24 +1,22 @@
 """An executable double for `gh`, and the environment that puts it on PATH.
 
-The pull-request watchers shell out to `gh`, so a `gh` earlier on PATH is a
-complete seam: every watcher suite can then drive real watcher processes with
-no network anywhere. Each call is answered from a JSON fixture file and
-appended to a call log, which is what makes the request budget measurable:
-the log, not a claim, is the number.
+The watchers shell out to `gh`, so a `gh` earlier on PATH is a complete seam:
+every watcher suite drives real watcher processes with no network in the loop.
+Each call is answered from a JSON fixture file and appended to a call log,
+which is what makes the request budget measurable - the log, not a claim, is
+the number.
 
-The launcher is written per platform rather than assumed. A POSIX shell script
-named `gh` is executable on Linux and macOS and is nothing at all on Windows,
+The launcher is written per platform rather than assumed. A POSIX shell
+script named `gh` is executable on Linux and macOS and is nothing on Windows,
 where a bare program name resolves only to `gh.exe`; the Windows launcher is
-therefore a `.bat` and the client is pointed at it by an absolute path
-(`DAEDALUS_GH`). Either way the launcher finds this file relative to itself,
-so a tree that moves still runs, and `install` proves the launcher executes
-before a suite trusts it.
-
-The fake mirrors how real `gh api -i` behaves: the status line, the header
-block and the body on stdout, `gh: ... (HTTP NNN)` on stderr, and exit 1
-whenever the status is an error -- including the rate-limit refusals the
-watchers must recognise, which real `gh` reports the same way.
+a `.bat` the client is pointed at by absolute path (`DAEDALUS_GH`). Either
+way the launcher finds this file relative to itself, so a tree that moves
+still runs, and an install proves the launcher executes before a suite trusts
+it. The fake mirrors real `gh api -i`: status line, header block and body on
+stdout, `gh: ... (HTTP NNN)` on stderr, exit 1 for any error status,
+rate-limit refusals included.
 """
+
 import contextlib
 import json
 import os
@@ -36,9 +34,9 @@ REASONS = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden',
            404: 'Not Found', 429: 'Too Many Requests',
            500: 'Internal Server Error'}
 
-# `gh` answers a REST path as its final argument and a GraphQL request on
-# stdin; the fixture fragments are matched against whichever one this call
-# carries, so the same answers file serves the tree and a base commit.
+# A REST path arrives as the final argument and a GraphQL request on stdin;
+# fragments are matched against whichever, so one answers file serves this
+# tree and a base commit's scripts.
 GRAPHQL_MARK = 'graphql'
 
 
@@ -88,7 +86,7 @@ def _fixture(answers, request):
 
     Successive pages of one connection are a list, consumed in order and the
     last repeated, so a two-page answer needs no counter that could race
-    between two watcher processes. The count is taken before this call is
+    between two watcher processes; the count is taken before this call is
     logged, so the first request gets the first page.
     """
     for fragment, answer in answers.items():
@@ -105,10 +103,9 @@ def _fixture(answers, request):
 def _response(answer):
     """(status, headers, body) from one fixture answer.
 
-    A bare string, or a JSON object naming none of the response fields, is
-    a 200 whose body is that value - the shape most fixtures use. The file
-    is data, so each field is checked for the type the renderer needs
-    rather than assumed.
+    A bare string, or a JSON object naming none of the response fields, is a
+    200 whose body is that value - the shape most fixtures use. The file is
+    data, so each field is checked for the type the renderer needs.
     """
     spec = (answer if isinstance(answer, dict)
             and set(answer) & {'status', 'headers', 'body'}
@@ -145,9 +142,9 @@ def main(argv):
         return 1
     status, headers, body = _response(response)
     text = body if isinstance(body, str) else json.dumps(body)
-    # `gh api` prints headers only when asked; the base scripts never ask,
-    # and a header block on their stdout is exactly the unparseable answer a
-    # base watcher would have met in the wild.
+    # Headers only when asked; the base scripts never ask, and a header
+    # block on their stdout is the unparseable answer a base watcher would
+    # have met in the wild.
     if '-i' in argv or '--include' in argv:
         text = _render(status, headers, text)
     sys.stdout.write(text + '\n')
@@ -160,8 +157,8 @@ def main(argv):
 class FakeGh:
     """One installed fake: a launcher, an answers file and a call log.
 
-    The launcher is proved executable by `install`, so a suite never learns
-    about a platform difference from a watcher that silently could not start.
+    The launcher is proved executable here, so a suite never learns about a
+    platform difference from a watcher that silently could not start.
     """
 
     def __init__(self, directory, answers=None):
@@ -170,9 +167,9 @@ class FakeGh:
         self.answers_path = self.dir / 'answers.json'
         self.log = self.dir / 'calls.jsonl'
         self.launcher = self.dir / ('gh.bat' if WINDOWS else 'gh')
-        # The stub is copied beside the launcher rather than referenced from
-        # where this module happens to live, so an install that moves keeps
-        # working and the launcher holds no absolute path into this tree.
+        # Copied beside the launcher, not referenced from where this module
+        # lives: an install that moves keeps working and the launcher holds
+        # no absolute path into this tree.
         shutil.copy(HERE / '_fake_gh.py', self.dir / '_fake_gh.py')
         if WINDOWS:
             self.launcher.write_text(

@@ -7,50 +7,29 @@ Intended to be armed as a persistent watcher, normally through the
     python3 pr_comment_watch.py <pr-number>
 
 A pull request has three comment surfaces and a review is not a comment, so
-all three are polled, together with the pull request's own lifecycle state.
-They travel in ONE GraphQL query per poll — state, reviews, the inline
-comments on each review, and the conversation — because four unconditional
-REST reads a minute is what exhausted the account's primary rate limit with
-several watchers running. Read or unread state is still never consulted: it
-is delivery bookkeeping, not evidence about whether a thread has been dealt
-with. Every query is no-cache, and every connection is followed to its last
-page.
+all three are polled together with the pull request's lifecycle state, in ONE
+GraphQL query per poll - state, reviews, the inline comments on each review,
+and the conversation - because four unconditional REST reads a minute is what
+exhausted the account's primary rate limit with several watchers running.
+Every query is no-cache, every connection is followed to its last page, and
+read/unread state is never consulted: it is delivery bookkeeping, not
+evidence about whether a thread has been dealt with.
 
 The lifecycle state is watched because a transition is a thing that happened
-to the work: leaving draft opens it to reviewers, and a close or a merge
-decides it. It is announced on the same terms as a comment — the state found
-on the first pass is announced, since a session that did not perform the
-transition has not handled it either.
+to the work: leaving draft opens it to reviewers, a close or a merge decides
+it. It is announced on the same terms as a comment - the state found on the
+first pass is announced, since a session that did not perform the transition
+has not handled it either - and so is every item that already exists when
+the watcher is armed. An edit counts as an event for the same reason: a bot
+that posts one comment per pull request and edits it on every push carries
+its real content in the edits, so a watcher keyed only on arrival goes silent
+exactly when the number it reports changes.
 
-An edit counts as an event, not as something already handled. A comment that
-rewrites itself in place is the case that motivates this: a bot that posts
-one comment per pull request and edits it on every push carries its real
-content in the edits, so a watcher keyed only on arrival goes silent exactly
-when the number it reports changes. Each item is fingerprinted by its update
-timestamp AND a digest of its body, because the two fail in different
-directions -- a review carries no update timestamp at all, and a timestamp
-can move without the text changing.
-
-stdout is the event channel (Monitor turns each line into a notification);
-everything else goes to stderr, which Monitor keeps in a silent file. A
-rate-limit refusal is announced once, on stdout, with the instant the wait
-ends: it is a known wait, not a poll failure, and retrying it every interval
-is what kept the primary limit at zero. Nothing is seeded away on the first
-pass: an item that already exists when the watcher is armed is still
-something this session has not handled, so it is announced.
-
-A failure is never silent. Poll errors are reported to stderr, and a run of
-them escalates to a stdout line, because a watcher that has stopped being
-able to see the pull request must not look the same as a quiet pull request.
-Started by `watch_all.py`, the watcher holds the read end of a pipe whose
-only write end the aggregator holds, and exits when that goes - so a
-restarted aggregator never leaves the old pair polling beside the new one.
-
-Run with --once before arming the Monitor. A polling loop is never armed
-without one trial cycle: an unsupported flag or a renamed endpoint makes every
-fetch fail, and because the failures go to stderr the watcher then sits silent
-forever and looks exactly like a pull request nobody has commented on.
+The channels, the rate-limit pause, the escalation, the parent's pipe and
+the --once trial are the same contract for both children and are stated in
+SKILL.md beside this script.
 """
+
 import argparse
 import hashlib
 import sys
@@ -143,9 +122,8 @@ def pr_state(node):
     """The lifecycle state, as one word.
 
     Ordered by which fact outranks which: a merged pull request is also
-    closed, and a closed one keeps whatever draft flag it carried, so
-    reading the draft flag first would report a pull request closed months
-    ago as a draft.
+    closed and a closed one keeps its draft flag, so reading the draft flag
+    first would report a pull request closed months ago as a draft.
     """
     if node.get('mergedAt'):
         return 'merged'
@@ -197,12 +175,9 @@ def _announce(pr, seen, announce, kind, item):
 
 
 def _inline_comments(pr, seen, announce, review):
-    """Every inline comment on one review, past the first hundred if any.
-
-    A review's comments are a connection of their own, so a review with more
-    than a page of them is followed with one further query rather than
-    silently truncated — the no-item-is-missed guarantee the paginated REST
-    list gave.
+    """Every inline comment on one review, past the first hundred if any: a
+    review's comments are a connection of their own, so a review with more
+    than a page of them is followed rather than silently truncated.
     """
     announced = 0
     connection = review.get('comments') or {}

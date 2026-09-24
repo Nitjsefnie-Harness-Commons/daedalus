@@ -3,47 +3,31 @@
 
     python3 -u ci_watch.py <branch>
 
-Armed as a Monitor beside `pr_comment_watch.py`. Pushing early only buys
-anything if the result is read, and a green local run on one platform says
-nothing about the other three, so the runner's verdict is the event worth
-being interrupted for.
+Armed as a Monitor beside `pr_comment_watch.py`: a green local run on one
+platform says nothing about the other three, so the runner's verdict is the
+event worth being interrupted for. The head SHA and its check runs travel in
+ONE GraphQL query per poll, re-resolved every time because a push moves the
+head; a conclusion is announced once per (sha, check) pair, so a re-run of
+the same check is announced again. **Failure and success both announce**: a
+watcher that only reports green is silent through exactly the run you needed
+to hear about, and silence is indistinguishable from a queue that has not
+started.
 
-The head SHA and its check runs travel in ONE GraphQL query per poll,
-re-resolved every time because a push moves the head and the checks that
-matter are the ones on what is there now. A conclusion is announced once per
-(sha, check) pair: a re-run of the same check on the same SHA is a new
-conclusion and is announced again.
+Conclusions are held for DEBOUNCE_SECONDS and flushed together: a twelve-cell
+matrix finishing over a couple of minutes is one thing happening, not nine,
+and Monitor turns each line into its own interruption. The window opens on
+the first held conclusion and closes a minute later - a batching window,
+not a true debounce, which would restart on every arrival and hold a steady
+trickle indefinitely. `coverage`, `diff-coverage` and `speed` skip the window
+entirely: the slow jobs everything waits on arrive alone rather than in a
+burst, so batching them only delays the line that says the wait is over, and
+the blind-watcher escalation is immediate for the same reason.
 
-**Failure and success both announce.** A watcher that only reports green is
-silent through exactly the run you needed to hear about, and silence is
-indistinguishable from a queue that has not started.
-
-stdout is the event channel; everything else is stderr, which Monitor keeps
-in a silent file. A rate-limit refusal is announced once, on stdout, with the
-instant the wait ends, and the poll resumes at that reset rather than at the
-next interval. Consecutive poll failures escalate to a stdout line, because a
-watcher that has gone blind must not look like a quiet branch. Started by
-`watch_all.py`, the watcher holds the read end of a pipe whose only write
-end the aggregator holds, and exits when that goes - so a restarted
-aggregator never leaves the old pair polling beside the new one.
-
-Conclusions are held for DEBOUNCE_SECONDS and flushed together, because a
-twelve-cell matrix finishing over a couple of minutes is one thing happening,
-not nine, and Monitor turns each line into its own interruption. The window
-opens when the first held conclusion arrives and closes a minute later — it is
-a batching window rather than a true debounce, which would restart on every
-arrival and could hold a steady trickle indefinitely.
-
-`coverage`, `diff-coverage` and `speed` skip the window entirely. They are the
-slow jobs everything else waits on, they arrive alone rather than in a burst,
-so batching them buys nothing and only delays the line that says the wait is
-over. The blind-watcher escalation is immediate for the same reason.
-
-Run with --once before arming it. A polling loop is never armed without one
-trial cycle: an unsupported flag or a renamed endpoint makes every fetch
-fail, the failures go to stderr where they are silent, and the watcher then
-sits quiet forever looking exactly like CI nobody has started.
+The channels, the rate-limit pause, the escalation, the parent's pipe and
+the --once trial are the same contract for both children and are stated in
+SKILL.md beside this script.
 """
+
 import argparse
 import sys
 import time
