@@ -1,9 +1,10 @@
 """A shared, pre-staged index, so a scratch need not re-add the tree.
 
 `git ls-files` answers from the index alone, so a copy reaches the same
-enumeration with no loose objects present. The one template add that
-replaces the per-scratch staging runs unbounded, so it either finishes or
-Git reports its own failure, never a wall-clock verdict.
+enumeration with no loose objects present. Every git launch here — the
+one template add that replaces the per-scratch staging, and the
+per-scratch `git init` — runs unbounded, so each either finishes or Git
+reports its own failure, never a wall-clock verdict.
 """
 import subprocess
 import sys
@@ -45,6 +46,11 @@ def _template():
 
 
 def install(root):
-    """Make `root` a repo whose index enumerates the whole test tree."""
+    """Make `root` a repo whose index enumerates the whole test tree.
+
+    The enumeration is a frozen snapshot of the checkout taken at first
+    use, so a file written into the scratch after `install` is not
+    listed; under the per-scratch add it would have been.
+    """
     _git(root, 'init', '-q')
     (root / '.git' / 'index').write_bytes(_template())
