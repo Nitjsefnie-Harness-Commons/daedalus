@@ -51,12 +51,17 @@ def _symlink(link, target):
         _util.skip('this filesystem will not hold a symlink')
 
 
+def _refusals(captured):
+    return [line for line in captured.getvalue().splitlines()
+            if '[STREAM] REFUSED' in line]
+
+
 def test_a_plain_candidate_opens_and_reads(tmp):
     queue = _load_queue('aliased_plain_candidate')
     path = Path(tmp) / 'tok.json'
     _write_command(path, 'plain')
 
-    stream, reason = queue.open_command_candidate(path)
+    stream, reason, _ = queue.open_command_candidate(path)
     assert stream is not None, reason
     try:
         assert reason is None, reason
@@ -75,7 +80,7 @@ def test_a_hard_linked_object_is_refused_and_left_in_place(tmp):
     _write_command(first, 'aliased')
     _hard_link(first, second)
 
-    stream, reason = queue.open_command_candidate(first)
+    stream, reason, _ = queue.open_command_candidate(first)
     if stream is not None:
         stream.close()
 
@@ -91,7 +96,7 @@ def test_a_symlinked_name_is_refused_without_following_it(tmp):
     link = Path(tmp) / 'tok_dup.json'
     _symlink(link, outside)
 
-    stream, reason = queue.open_command_candidate(link)
+    stream, reason, _ = queue.open_command_candidate(link)
     if stream is not None:
         stream.close()
 
@@ -105,7 +110,8 @@ def test_a_symlinked_name_is_refused_without_following_it(tmp):
 def test_a_missing_name_is_absent(tmp):
     queue = _load_queue('aliased_missing_candidate')
 
-    stream, reason = queue.open_command_candidate(Path(tmp) / 'absent.json')
+    stream, reason, _ = queue.open_command_candidate(
+        Path(tmp) / 'absent.json')
 
     assert stream is None, 'a missing name produced a stream'
     assert reason is None, 'absence is not a refusal'
@@ -116,7 +122,7 @@ def test_a_broken_symlink_names_nothing(tmp):
     link = Path(tmp) / 'tok.json'
     _symlink(link, Path(tmp) / 'never-written')
 
-    stream, reason = queue.open_command_candidate(link)
+    stream, reason, _ = queue.open_command_candidate(link)
     if stream is not None:
         stream.close()
 
@@ -195,7 +201,7 @@ def test_a_directory_named_like_an_entry_is_refused(tmp):
     entry.parent.mkdir(parents=True)
     entry.mkdir()
 
-    stream, reason = queue.open_command_candidate(entry)
+    stream, reason, _ = queue.open_command_candidate(entry)
     if stream is not None:
         stream.close()
 
@@ -343,6 +349,161 @@ def test_a_retained_legacy_candidate_logs_its_refusal_once(tmp):
                 if '[STREAM] REFUSED' in line]
     assert frames == [], frames
     assert len(refusals) == 1, refusals
+
+
+def test_a_swept_queue_name_refused_again_for_a_different_object(tmp):
+    """G1: the once-registry keys the refused object, not only its name.
+
+    The queue sweep vacates a name by unlinking it without an alias check, so
+    a different refused object can appear at a name the registry already
+    recorded. That object must log its own refusal.
+    """
+    service = _load_service('aliased_swept_name_refusal')
+    queue = service.command_queue
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    victim = qdir / '0001_000001.json'
+    # A hard-linked object is refused under both of its names; the sweep
+    # frees the name by unlinking it, and a filesystem may hand the freed
+    # inode straight back to whatever takes the name next.
+    twin = qdir / '0002_000002.json'
+    _write_command(twin, 'aliased')
+    _hard_link(twin, victim)
+
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=frames.append)
+    first = _refusals(captured)
+    assert any(victim.name in line for line in first), first
+
+    aged = time.time() - 160
+    os.utime(victim, (aged, aged))
+    queue.collect_expired(Path(tmp) / 'commands', 90)
+    assert not victim.exists(), 'the sweep did not vacate the name'
+    qdir.mkdir(exist_ok=True)
+
+    # A DIFFERENT object — a directory named like an entry — takes the name.
+    victim.mkdir()
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=frames.append)
+    second = _refusals(captured)
+
+    assert frames == [], frames
+    assert any(victim.name in line for line in second), (
+        f'a different object at a swept name logged nothing: {second!r}')
+
+
+def test_a_replaced_queue_symlink_refused_again_for_its_name(tmp):
+    """G6: a refusal with no open descriptor still carries an identity.
+
+    A symlinked name is refused by the O_NOFOLLOW open itself on POSIX, so
+    there is no descriptor to stat; elsewhere the open follows the link and
+    the identity check refuses what it named. Either way a DIFFERENT symlink
+    taking the same name must log again.
+    """
+    service = _load_service('aliased_replaced_symlink_refusal')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    entry = qdir / '0001_000001.json'
+    target_a = Path(tmp) / 'a.json'
+    target_b = Path(tmp) / 'b.json'
+    _write_command(target_a, 'a')
+    _write_command(target_b, 'b')
+    _symlink(entry, target_a)
+
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=frames.append)
+    first = _refusals(captured)
+    assert first, 'the first symlinked name logged no refusal'
+
+    # Stage the replacement while the first link still holds its inode, then
+    # move it into place, so the two inodes cannot coincide.
+    staged = qdir / 'staged'
+    _symlink(staged, target_b)
+    entry.unlink()
+    os.replace(staged, entry)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=frames.append)
+    second = _refusals(captured)
+
+    assert frames == [], frames
+    assert second, 'a replaced symlink at the same name logged nothing'
+
+
+def test_a_replaced_legacy_symlink_refused_again_for_its_name(tmp):
+    """G6 on the legacy drain: the same no-descriptor identity."""
+    service = _load_service('aliased_replaced_legacy_symlink')
+    entry = Path(tmp) / 'tok_dup.json'
+    target_a = Path(tmp) / 'a.json'
+    target_b = Path(tmp) / 'b.json'
+    _write_command(target_a, 'a')
+    _write_command(target_b, 'b')
+    _symlink(entry, target_a)
+
+    frames = []
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_legacy_file(
+            entry, 'dup', command_ttl=100, frame_writer=frames.append)
+    first = _refusals(captured)
+    assert first, 'the first legacy symlink logged no refusal'
+
+    staged = Path(tmp) / 'staged'
+    _symlink(staged, target_b)
+    entry.unlink()
+    os.replace(staged, entry)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_legacy_file(
+            entry, 'dup', command_ttl=100, frame_writer=frames.append)
+    second = _refusals(captured)
+
+    assert frames == [], frames
+    assert second, 'a replaced legacy symlink logged nothing'
+
+
+def test_poll_refuses_again_a_replaced_candidate_under_its_name(tmp):
+    """G6 on poll: its once-registry entry is keyed like the drains'."""
+    service = _load_service('aliased_poll_replaced_candidate')
+    cq = service.command_queue
+    cmd_dir = Path(tmp)
+    _, legacy = cq.command_target_names('tok')
+    entry = cmd_dir / legacy
+    twin = Path(tmp) / 'twin.json'
+    _write_command(twin, 'aliased')
+    _hard_link(twin, entry)
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        answer = service.poll_legacy(cmd_dir, 'tok')
+    first = _refusals(captured)
+    assert answer == (200, {}), answer
+    assert first, 'the first aliased poll logged no refusal'
+
+    # The name is vacated; the twin keeps the original object allocated, so
+    # the replacement below cannot reuse its inode.
+    entry.unlink()
+    entry.mkdir()
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        answer = service.poll_legacy(cmd_dir, 'tok')
+    second = _refusals(captured)
+
+    assert answer == (200, {}), answer
+    assert second, 'a replaced candidate at the same name logged nothing'
 
 
 def test_sweep_leaves_an_aliased_legacy_pair_for_a_later_pass(tmp):
