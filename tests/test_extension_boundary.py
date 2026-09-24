@@ -131,6 +131,11 @@ def test_result_route_snapshot_covers_retries_and_side_operations(tmp):
     assert actual == {
         'requests': [
             {
+                'kind': 'request',
+                'url': 'https://initial.example.com/sync-tabs',
+                'token': 'initial-token',
+            },
+            {
                 'kind': 'upload',
                 'url': 'https://initial.example.com/upload',
                 'token': 'initial-token',
