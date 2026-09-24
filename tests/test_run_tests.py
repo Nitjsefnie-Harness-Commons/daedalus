@@ -28,8 +28,7 @@ _STALLING_SUITE = (
 # Models a bystander a loaded runner could not start in time: the sleep
 # exceeds any bound this file uses, so it is killed on every machine, and
 # its own output carries a FAILED: line the pin must not read. The decoy
-# is not asserted; test_a_suites_own_failed_line_is_not_the_aggregate
-# pins the parse.
+# is not asserted; that parse is pinned by the helper's own test.
 _SLOW_PASSING_SUITE = (
     'import json, os, time\n'
     "print('FAILED: my own subtest', flush=True)\n"
@@ -63,6 +62,12 @@ def _timeout_record(bound):
     return f'SUITE TIMED OUT after {float(bound)} s (returncode '
 
 
+def _suite_block(stdout, name):
+    """The block the runner printed for `name`, or '' when it printed none."""
+    _, _, rest = stdout.partition(f'=== {name} ===\n')
+    return rest.split('\n=== ', 1)[0]
+
+
 def _failed_suites(stdout):
     """The suites the aggregate named as failed, or [] when it named none.
 
@@ -90,8 +95,9 @@ def test_an_overrunning_suite_is_named_and_the_run_reports_it(tmp):
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
     assert result.returncode == 1, (result.returncode, result.stdout)
-    # The runner's own record, naming the bound it applied.
-    assert _timeout_record(_OVERRUN_BOUND_S) in result.stdout, result.stdout
+    # The runner's own record, in the stalled suite's own block.
+    staller_block = _suite_block(result.stdout, 'test_staller.py')
+    assert _timeout_record(_OVERRUN_BOUND_S) in staller_block, result.stdout
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     assert '=== test_passer.py ===' in result.stdout, result.stdout
 
@@ -102,7 +108,8 @@ def test_the_staller_is_named_when_the_bystander_misses_the_bound_too(tmp):
     result = _run_sandbox(
         root, {'DAEDALUS_SUITE_TIMEOUT': str(_OVERRUN_BOUND_S)})
     assert result.returncode == 1, (result.returncode, result.stdout)
-    assert _timeout_record(_OVERRUN_BOUND_S) in result.stdout, result.stdout
+    staller_block = _suite_block(result.stdout, 'test_staller.py')
+    assert _timeout_record(_OVERRUN_BOUND_S) in staller_block, result.stdout
     assert 'test_staller.py' in _failed_suites(result.stdout), result.stdout
     assert '=== test_passer.py ===' in result.stdout, result.stdout
 
