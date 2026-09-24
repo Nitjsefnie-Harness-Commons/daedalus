@@ -300,6 +300,7 @@
 !/tests/_owned_writes.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
+!/tests/_pyroute_indexing.py
 !/tests/_pyroute_live.py
 !/tests/_pyroute_mapping.py
 !/tests/_pyroute_state.py
