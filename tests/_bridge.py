@@ -5,12 +5,13 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 `BRIDGE_ENV` is the environment every bridge child of these suites carries:
 the credential the suites' requests present, applied per spawn, because
 `_util.bridge()` strips every inherited `DAEDALUS_*` variable before applying
-its own settings and the caller's `env=`. The `os.environ` writes below keep
-serving the suite process's own in-process consumers of the credential.
+its own settings and the caller's `env=`. Nothing here writes to the suite
+process's own `os.environ`: a suite reads the credential from the Python
+name `TOK` and hands `BRIDGE_ENV` to the child it spawns, and the module
+leaves the suite process's environment exactly as it found it.
 """
 import http.client
 import json
-import os
 import socket
 import sys
 import time
@@ -21,8 +22,9 @@ import _util  # noqa: E402
 
 # Keep the bridge child's MCP side-thread off the fixed port 8086: several
 # bridges run per suite, and the second one to bind 8086 would only log a
-# crash, but port 0 removes the collision entirely.
-os.environ.setdefault('DAEDALUS_MCP_PORT', '0')
+# crash, but port 0 removes the collision entirely. `_util.bridge()` sets
+# `DAEDALUS_MCP_PORT` on the child's own environment for every spawn, so
+# nothing has to be published here to reach it.
 
 TOK = 'httptok'
 PNG = b'\x89PNG\r\n\x1a\n' + b'not-really-a-png-but-the-bridge-does-not-care'
@@ -31,7 +33,6 @@ PNG = b'\x89PNG\r\n\x1a\n' + b'not-really-a-png-but-the-bridge-does-not-care'
 # the suites' requests present, with `TOKEN` cleared so an ambient one-off
 # override cannot shadow it.
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-os.environ.update(BRIDGE_ENV)
 
 
 def put_command(base, payload):
