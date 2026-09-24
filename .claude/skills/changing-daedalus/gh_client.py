@@ -43,17 +43,22 @@ MAX_BACKOFF = 3600
 DEFAULT_BACKOFF = 60
 SLEEP_SLICE = 1.0
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
+ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 
 RUNS_QUERY = f'''query WatchRuns(
-    $owner: String!, $name: String!, $sha: String!, $after: String) {{
+    $owner: String!, $name: String!, $sha: GitObjectID!, $after: String) {{
   repository(owner: $owner, name: $name) {{
-    commit(oid: $sha) {{
-      checkSuites(first: {PAGE_SIZE}, after: $after) {{
-        pageInfo {{ hasNextPage endCursor }}
-        nodes {{
-          workflowRun {{
-            databaseId name status conclusion createdAt url
-            workflow {{ databaseId path }}
+    object(oid: $sha) {{
+      ... on Commit {{
+        checkSuites(first: {PAGE_SIZE}, after: $after) {{
+          pageInfo {{ hasNextPage endCursor }}
+          nodes {{
+            status conclusion createdAt
+            workflowRun {{
+              databaseId createdAt url
+              file {{ path }}
+              workflow {{ databaseId name }}
+            }}
           }}
         }}
       }}
@@ -137,8 +142,8 @@ def _graphql_refusal(payload):
         reset = rate.get('resetAt') or extensions.get('resetAt')
         if reset:
             try:
-                stamp = datetime.fromisoformat(str(reset).replace('Z',
-                                                                 '+00:00'))
+                iso = str(reset).replace('Z', '+00:00')
+                stamp = datetime.fromisoformat(iso)
                 return True, stamp.timestamp()
             except ValueError:
                 pass
@@ -161,8 +166,8 @@ def _call(query, variables):
     except (subprocess.SubprocessError, OSError) as exc:
         raise QueryError(f'gh failed: {exc}') from exc
     if not proc.stdout.strip():
-        raise QueryError(proc.stderr.strip()[:400] or
-                         f'gh exited {proc.returncode} with no output')
+        detail = proc.stderr.strip()[:400] or f'gh exited {proc.returncode}'
+        raise QueryError(detail)
     return proc
 
 
@@ -174,8 +179,8 @@ def graphql(query, variables=None):
     if refused:
         raise RateLimited(f'HTTP {status}: {body.strip()[:200]}', resume)
     if proc.returncode != 0 or status >= 400:
-        raise QueryError((proc.stderr or body).strip()[:400] or
-                         f'HTTP {status}')
+        detail = (proc.stderr or body).strip()[:400] or f'HTTP {status}'
+        raise QueryError(detail)
     try:
         payload = json.loads(body)
     except ValueError as exc:
@@ -233,24 +238,47 @@ def paginate(query, variables, connections):
             return pages
 
 
-def _run_from_node(node):
-    """One workflow run, in the field shape the verdict logic already reads.
+def _suite_run(suite):
+    """The workflow run a check suite belongs to, or None without one."""
+    return (suite or {}).get('workflowRun')
 
-    GraphQL speaks in enums and node ids; the callers read `status` as
-    `completed` and group by a workflow id, so the run is translated once
-    here rather than in every caller.
+
+def _run_status(states):
+    """`completed` only when every suite of the run is."""
+    if all(state == 'COMPLETED' for state in states):
+        return 'completed'
+    return next(state.lower() for state in states if state != 'COMPLETED')
+
+
+def _run_from_suites(suites):
+    """One workflow run, from the check suites it created.
+
+    A workflow run has no status or conclusion of its own in the GraphQL
+    schema — the state lives on the suites, one per job — so the run's
+    state is read off its suites: completed only when every one of them is,
+    and the first conclusion that is not an acceptable one otherwise. The
+    fields are the ones the verdict logic already reads, so it is unchanged
+    by where they came from.
     """
-    workflow = node.get('workflow') or {}
-    created = node.get('createdAt')
+    runs = [run for run in (_suite_run(suite) for suite in suites) if run]
+    if not runs:
+        return None
+    first = min(runs, key=lambda run: run.get('createdAt') or '')
+    workflow = first.get('workflow') or {}
+    states = [(suite.get('status') or '').upper() for suite in suites]
+    conclusions = [(suite.get('conclusion') or '').lower()
+                   for suite in suites]
     return {
-        'id': node.get('databaseId'),
-        'name': node.get('name'),
-        'status': (node.get('status') or '').lower() or None,
-        'conclusion': (node.get('conclusion') or '').lower() or None,
-        'run_started_at': created,
-        'created_at': created,
-        'workflow_id': workflow.get('databaseId') or workflow.get('path'),
-        'html_url': node.get('url'),
+        'id': first.get('databaseId'),
+        'name': workflow.get('name'),
+        'status': _run_status(states),
+        'conclusion': next((value for value in conclusions
+                            if value not in ACCEPTABLE), 'success'),
+        'run_started_at': first.get('createdAt'),
+        'created_at': first.get('createdAt'),
+        'workflow_id': (workflow.get('databaseId')
+                        or (first.get('file') or {}).get('path')),
+        'html_url': first.get('url'),
     }
 
 
@@ -259,22 +287,23 @@ def workflow_runs(owner, name, sha):
 
     Runs are read through the commit's check suites rather than the
     check-runs list, for the reason `ci_wait.py` documents: that list is
-    appended to while a matrix fills. A workflow run that created no suite
-    is not visible here; every run that started jobs is, and the suites of
-    one run collapse to it, which is the same run the REST list returns.
+    appended to while a matrix fills. A run whose jobs have not started has
+    no suite yet, and reads as no runs at all — which is a wait, never a
+    pass. The suites of one run collapse to that run, so a run is one entry
+    here exactly as the REST list returned it.
     """
     pages = paginate(
         RUNS_QUERY,
         {'owner': owner, 'name': name, 'sha': sha, 'after': None},
-        [(('repository', 'commit', 'checkSuites'), 'after')])
-    runs = {}
+        [(('repository', 'object', 'checkSuites'), 'after')])
+    by_suite = {}
     for page in pages:
-        for suite in nodes(page, ('repository', 'commit', 'checkSuites')):
-            run = (suite or {}).get('workflowRun')
+        for suite in nodes(page, ('repository', 'object', 'checkSuites')):
+            run = _suite_run(suite)
             if run:
-                mapped = _run_from_node(run)
-                runs[mapped['id']] = mapped
-    return list(runs.values())
+                by_suite.setdefault(run.get('databaseId'), []).append(suite)
+    runs = [_run_from_suites(suites) for suites in by_suite.values()]
+    return [run for run in runs if run]
 
 
 def check_parent(parent_pid):

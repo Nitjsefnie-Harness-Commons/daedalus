@@ -183,24 +183,31 @@ class _Clock:
         return 'answered'
 
 
-def _suite_page(runs, has_next=False, cursor=None):
-    return {'data': {'repository': {'commit': {'checkSuites': {
+def _suite_page(suites, has_next=False, cursor=None):
+    return {'data': {'repository': {'object': {'checkSuites': {
         'pageInfo': {'hasNextPage': has_next, 'endCursor': cursor},
-        'nodes': [{'workflowRun': run} for run in runs]}}}}}
+        'nodes': list(suites)}}}}}
 
 
-def _run(rid, conclusion='success', started='2026-09-20T10:00:00Z'):
-    return {'databaseId': rid, 'name': f'run {rid}', 'status': 'COMPLETED',
-            'conclusion': conclusion.upper(), 'createdAt': started,
-            'url': f'https://github.com/o/r/runs/{rid}',
-            'workflow': {'databaseId': 11}}
+def _suite(rid, conclusion: str | None = 'SUCCESS',
+           status='COMPLETED', workflow=11, name=None,
+           started='2026-09-20T10:00:00Z'):
+    """One check suite, the way the live schema reports a workflow's jobs."""
+    return {'status': status, 'conclusion': conclusion,
+            'createdAt': started,
+            'workflowRun': {
+                'databaseId': rid, 'createdAt': started,
+                'url': f'https://github.com/o/r/actions/runs/{rid}',
+                'file': {'path': '.github/workflows/ci.yml'},
+                'workflow': {'databaseId': workflow,
+                             'name': name or f'workflow {workflow}'}}}
 
 
 def test_a_run_past_the_first_page_is_still_read(tmp):
     mod = _client()
     fake = _fake_gh.FakeGh(tmp, {'checkSuites': [
-        _suite_page([_run(1)], has_next=True, cursor='CURSOR-1'),
-        _suite_page([_run(2)])]})
+        _suite_page([_suite(1)], has_next=True, cursor='CURSOR-1'),
+        _suite_page([_suite(2)])]})
     with fake.activate():
         runs = mod.workflow_runs('o', 'r', 'a' * 40)
     assert len(fake.calls()) == 2
@@ -210,13 +217,33 @@ def test_a_run_past_the_first_page_is_still_read(tmp):
     assert [run['id'] for run in runs] == [1, 2]
     assert runs[0]['status'] == 'completed'
     assert runs[0]['conclusion'] == 'success'
+    assert runs[0]['name'] == 'workflow 11'
     assert runs[0]['workflow_id'] == 11
 
 
-def test_the_suites_of_one_run_collapse_to_that_run(tmp):
+def test_the_jobs_of_one_run_collapse_to_the_run(tmp):
+    mod = _client()
+    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page([
+        _suite(1, 'SUCCESS', 'COMPLETED', started='2026-09-20T10:00:00Z'),
+        _suite(1, 'FAILURE', 'COMPLETED', started='2026-09-20T10:01:00Z')])})
+    with fake.activate():
+        runs = mod.workflow_runs('o', 'r', 'a' * 40)
+    assert len(runs) == 1
+    assert runs[0]['conclusion'] == 'failure'
+    assert runs[0]['status'] == 'completed'
+    fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page([
+        _suite(1, 'SUCCESS', 'COMPLETED', started='2026-09-20T10:00:00Z'),
+        _suite(1, None, 'IN_PROGRESS',
+               started='2026-09-20T10:01:00Z')])})
+    with fake.activate():
+        runs = mod.workflow_runs('o', 'r', 'a' * 40)
+    assert runs[0]['status'] == 'in_progress'
+
+
+def test_the_same_run_twice_in_one_page_is_one_run(tmp):
     mod = _client()
     fake = _fake_gh.FakeGh(tmp, {'checkSuites': _suite_page(
-        [_run(1), _run(1), _run(2)])})
+        [_suite(1), _suite(1), _suite(2)])})
     with fake.activate():
         runs = mod.workflow_runs('o', 'r', 'a' * 40)
     assert [run['id'] for run in runs] == [1, 2]

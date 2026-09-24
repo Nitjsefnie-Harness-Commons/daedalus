@@ -102,24 +102,30 @@ def _fixture(answers, request):
     return None, None
 
 
-def _render(response):
-    """One `-i` style response: status line, headers, blank line, body.
+def _response(answer):
+    """(status, headers, body) from one fixture answer.
 
-    A bare string or a JSON object that names none of the response fields is
-    a 200 whose body is that value, which is the shape most fixtures use.
+    A bare string, or a JSON object naming none of the response fields, is
+    a 200 whose body is that value - the shape most fixtures use. The file
+    is data, so each field is checked for the type the renderer needs
+    rather than assumed.
     """
-    if isinstance(response, str):
-        response = {'body': response}
-    elif not set(response) & {'status', 'headers', 'body'}:
-        response = {'body': response}
-    status = int(response.get('status', 200))
-    reason = REASONS.get(status, 'Status')
-    lines = [f'HTTP/2.0 {status} {reason}']
-    for name, value in (response.get('headers') or {}).items():
+    spec = (answer if isinstance(answer, dict)
+            and set(answer) & {'status', 'headers', 'body'}
+            else {'body': answer})
+    status = spec.get('status', 200)
+    headers = spec.get('headers') or {}
+    body = spec.get('body', '')
+    return (status if isinstance(status, int) else 200,
+            headers if isinstance(headers, dict) else {}, body)
+
+
+def _render(status, headers, text):
+    """The `-i` shape: status line, headers, blank line, body."""
+    lines = [f'HTTP/2.0 {status} {REASONS.get(status, "Status")}']
+    for name, value in headers.items():
         lines.append(f'{name}: {value}')
-    body = response.get('body', {})
-    text = body if isinstance(body, str) else json.dumps(body)
-    return '\r\n'.join(lines) + '\r\n\r\n' + text + '\n', status, text
+    return '\r\n'.join(lines) + '\r\n\r\n' + text
 
 
 def main(argv):
@@ -137,15 +143,16 @@ def main(argv):
     if response is None:
         sys.stderr.write(f'fake gh: no fixture carries {request[:200]!r}\n')
         return 1
-    text, status, body = _render(response)
+    status, headers, body = _response(response)
+    text = body if isinstance(body, str) else json.dumps(body)
     # `gh api` prints headers only when asked; the base scripts never ask,
     # and a header block on their stdout is exactly the unparseable answer a
     # base watcher would have met in the wild.
-    if '-i' not in argv and '--include' not in argv:
-        text = body + '\n'
-    sys.stdout.write(text)
+    if '-i' in argv or '--include' in argv:
+        text = _render(status, headers, text)
+    sys.stdout.write(text + '\n')
     if status >= 400:
-        sys.stderr.write(f'gh: {body.strip()[:200]} (HTTP {status})\n')
+        sys.stderr.write(f'gh: {text.strip()[:200]} (HTTP {status})\n')
         return 1
     return 0
 
