@@ -147,6 +147,12 @@ CASES = [
     ('issue857-pop-name-defect', _ext_flow(
         'd = {"k": relay()}; k = "k"', 'd.pop(k)',
         'd.get("k", relay())()'), (1, 1)),
+
+    # A pop that names an ABSENT key is the discriminator between resolving
+    # the key and erasing or marking the container: `j` still holds a relay.
+    ('issue857-pop-absent-key', _flow(
+        _RELAY, 'd = {"k": relay(), "j": relay()}; k = "zz"',
+        'd.pop(k, None)', invoke='d.get("j", ordinary)()'), (1, 1)),
 ]
 
 # The shapes issue 857 over-reported, each with the real defect of the same
