@@ -396,8 +396,7 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         "send = lambda *a, **k: b.ext_cmd(*a, **k)",
         "send, other = b.ext_cmd, None", "[send, other] = [b.ext_cmd, None]",
         "([send], other) = ([b.ext_cmd], None)",
-        "send, *other = b.ext_cmd, None",
-        "send, other = wrap(b.ext_cmd)",
+        "send, *other = b.ext_cmd, None", "send, other = wrap(b.ext_cmd)",
         "send = b.ext_cmd\n    other, send = send, None\n"
         "    return await other('x', 'y', tab=tab)",
         "send = b.ext_cmd\n    send, other = wrap(send)",
@@ -417,8 +416,7 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         "send = b.get\n    @(send := b.ext_cmd)\n"
         "    def inner(other=send):\n        return await other(tab=tab)",
         "return await (send := b.ext_cmd)('x', 'y', tab=tab)",
-        "(send := b.ext_cmd)",
-        "[(send := b.ext_cmd) for _ in values]",
+        "(send := b.ext_cmd)", "[(send := b.ext_cmd) for _ in values]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*()]]",
         "send = b.get\n    [(send := b.ext_cmd) for _ in [None, *()]]",
         "send = b.ext_cmd\n    [(send := b.get) for _ in [*{}]]",
@@ -434,8 +432,7 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         _generator_flow('get', 'ext_cmd', 'if flag: list(gen)'),
         _generator_flow('ext_cmd', 'get', 'if flag: list(gen)'),
         "if flag:\n        send = b.ext_cmd\n"
-        "    else:\n        send = b.get",
-        "if flag:\n        send = b.get\n"
+        "    else:\n        send = b.get", "if flag:\n        send = b.get\n"
         "    else:\n        send = b.ext_cmd",
         _generator_flow('ext_cmd', 'get', 'for _ in gen: pass',
                         'send = b.ext_cmd', 'list(gen)'),
@@ -527,12 +524,10 @@ def test_destructured_and_walrus_alias_boundaries(tmp):
         _generator_flow('get', 'ext_cmd', 'for _ in gen: pass',
                         'else: send = b.get', 'list(gen)'),
         _generator_flow('get', 'ext_cmd', 'for _ in gen: pass',
-                        'list(gen)', iterable='()'),
-        "send = b.get\n"
+                        'list(gen)', iterable='()'), "send = b.get\n"
         "    gen = ((send := b.ext_cmd) async for _ in values)\n"
         "    async for _ in gen: pass\n    send = b.get\n"
-        "    async for _ in gen: pass",
-        "list = b.get\n    send = b.get\n"
+        "    async for _ in gen: pass", "list = b.get\n    send = b.get\n"
         "    gen = ((send := b.ext_cmd) for _ in (1,))\n    list(gen)",
         _generator_flow('get', 'ext_cmd', 'list = b.get', 'list(gen)'),
         _generator_flow('get', 'ext_cmd',
@@ -625,12 +620,10 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
     reversions = [
         ('py', "class Tabs:\n    async def focus(self, tab):\n"
                "        return await _ext_cmd('x', 'y', tab=tab)\n"),
-        ('py', "async def f(chrome_tab):\n"
-               "    fields = {}\n"
+        ('py', "async def f(chrome_tab):\n" "    fields = {}\n"
                "    fields['tab'] = str(chrome_tab)\n"
                "    return await _ext_cmd('_ss', 'screenshot', **fields)\n"),
-        cmd_case('args',
-                 "cmd = {'id': '_ss', 'type': 'screenshot', 'tab':"
+        cmd_case('args', "cmd = {'id': '_ss', 'type': 'screenshot', 'tab':"
                  " 'extension'}", 'cmd["tab"] = int(args.chrome_tab)'),
         ('py', "async def f(t):\n"
                "    extra = {'tab': str(t)}\n"
@@ -775,6 +768,13 @@ _SELECTIONS = [
      '{"k": relay()}\nx = getattr(c, "box")', 'x["k"]()', True),
     ('sighting-control-attr', 'class C: pass\nc = C(); c.box = '
      '{"k": relay()}\nx = c.box', 'x["k"]()', True),
+    ('select-constant-index', 'x = (relay(), ext_cmd)[1]', 'x()',
+     (True, False)),
+    ('rebound-getattr', 'getattr = lambda *a: ordinary\nclass H: pass\n'
+     'h = H(); h.fn = relay()\nx = getattr(h, "fn")', 'x()', False),
+    ('getattr-keywords', 'class H: pass\nh = H(); h.fn = relay()\n'
+     'try:\n    x = getattr(h, "fn", None, bad=1)\nexcept TypeError:\n'
+     '    x = ordinary', 'x()', False),
 ]
 
 
