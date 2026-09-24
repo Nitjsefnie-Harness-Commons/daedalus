@@ -421,28 +421,28 @@ _UNRESOLVED_FORMS = ('known-defect-963-form-name-nonliteral',
 # report; a removal of it is clean; a clean store holds `ordinary` under
 # it, so a read of it is clean and a read of an absent key is not.
 _KEY_OPERATIONS = [
-    ('get-read', ('',), '{store}\nx = d.get({key}, ordinary)', 'x()'),
-    ('subscript-read', ('',), '{store}\nx = d[{key}]', 'x()'),
-    ('subscript-store+get', ('',), 'd = {{}}\nd[{key}] = relay()\n'
+    ('get-read', '{store}\nx = d.get({key}, ordinary)', 'x()'),
+    ('subscript-read', '{store}\nx = d[{key}]', 'x()'),
+    ('subscript-store+get', 'd = {{}}\nd[{key}] = relay()\n'
      'x = d.get({key}, ordinary)', 'x()'),
-    ('subscript-store+read', ('',), 'd = {{}}\nd[{key}] = relay()\n'
+    ('subscript-store+read', 'd = {{}}\nd[{key}] = relay()\n'
      'x = d[{key}]', 'x()'),
-    ('setdefault-read', ('',), '{store}\nx = d.setdefault({key}, ordinary)',
+    ('setdefault-read', '{store}\nx = d.setdefault({key}, ordinary)',
      'x()'),
-    ('setdefault-store+get', ('',), 'd = {{}}\nd.setdefault({key}, relay())\n'
+    ('setdefault-store+get', 'd = {{}}\nd.setdefault({key}, relay())\n'
      'x = d.get({key}, ordinary)', 'x()'),
-    ('pop+get', ('',),
+    ('pop+get',
      '{store}\nd.pop({key}, None)\nx = d.get({key}, ordinary)', 'x()'),
-    ('del+get', ('',), '{store}\ndel d[{key}]\nx = d.get({key}, ordinary)',
+    ('del+get', '{store}\ndel d[{key}]\nx = d.get({key}, ordinary)',
      'x()'),
-    ('del+presence', ('',), '{store}\ndel d[{key}]',
+    ('del+presence', '{store}\ndel d[{key}]',
      '(d.get({key}, ordinary)() if {key} in d else None)'),
-    ('presence+get', ('',), '{store}',
+    ('presence+get', '{store}',
      '(d.get({key}, ordinary)() if {key} in d else None)'),
-    ('clean-store+get', ('',), '{clean}\nx = d.get({key}, relay())', 'x()'),
-    ('clean-subscript-store+get', ('',), 'd = {{}}\nd[{key}] = ordinary\n'
+    ('clean-store+get', '{clean}\nx = d.get({key}, relay())', 'x()'),
+    ('clean-subscript-store+get', 'd = {{}}\nd[{key}] = ordinary\n'
      'x = d.get({key}, relay())', 'x()'),
-    ('clean-setdefault+get', ('',), 'd = {{}}\nd.setdefault({key}, ordinary)\n'
+    ('clean-setdefault+get', 'd = {{}}\nd.setdefault({key}, ordinary)\n'
      'x = d.get({key}, relay())', 'x()'),
 ]
 
@@ -476,7 +476,7 @@ def _key_matrix_rows():
     for form, (bind, key, literal) in _KEY_FORMS.items():
         expected = (_UNRESOLVED_EXPECTED if form in _UNRESOLVED_FORMS
                     else _KEY_EXPECTED)
-        for operation, _unused, shape, invoke in _KEY_OPERATIONS:
+        for operation, shape, invoke in _KEY_OPERATIONS:
             store = f'd = {{{literal}: relay()}}'
             clean = f'd = {{{literal}: ordinary}}'
             body = _flow(_RELAY, *bind, shape.format(
@@ -522,17 +522,66 @@ def test_pair_list_key_forms(tmp):
     assert not bad, bad
 
 
+# The `literals` term in `state_signature` decides whether two paths that
+# bind one name to different literals collapse at a dedupe point. Without it
+# they do, and the path whose key selected a relay is the one dropped: these
+# two bodies read `(1, 0)` with the term removed and `(1, 1)` with it, and
+# nothing else in the suite notices the difference.
+_SIGNATURE_TERM = [
+    ('branch-binds-two-literals', _flow(
+        _RELAY, 'd = {"a": ordinary, "b": relay()}',
+        'if not args.flag:\n    k = "a"\nelse:\n    k = "b"',
+        'x = d.get(k, ordinary)', invoke='x()'), (1, 1)),
+    ('loop-rebinds-one-literal', _flow(
+        _RELAY, 'd = {"a": ordinary, "b": relay()}; k = "a"',
+        'while args.flag:\n    k = "b"\n    break',
+        'x = d.get(k, ordinary)', invoke='x()'), (1, 1)),
+]
+
+# A subscript read whose key the guard cannot resolve names every item of a
+# dict, because no position is known. With the all-items arm removed the
+# read finds nothing and the stored relay reads clean, which is why this row
+# exists beside the route assertion the yielded-sender suite keeps.
+_SUBSCRIPT_UNRESOLVED = [
+    ('subscript-unresolvable-key', _flow(
+        _RELAY, 'd = {"k": relay()}', 'x = d["k" + ""]',
+        invoke='x()'), (1, 1)),
+]
+
+
+def test_signature_term_separates_two_literal_bindings(tmp):
+    bad = []
+    for label, body, expected in _SIGNATURE_TERM:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+def test_unresolvable_subscript_read_names_every_item(tmp):
+    bad = []
+    for label, body, expected in _SUBSCRIPT_UNRESOLVED:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 def test_key_form_matrix_and_operation_independence(tmp):
     """The matrix measured, and the property read off the measurement.
 
     The property is that an evaluable key form behaves as the string
     constant does on every operation, and that the two forms the evaluator
-    cannot fold behave as each other do. Both are checked against measured
-    verdicts, never against the table, so a site that stops resolving one
-    form reds this test on the divergence rather than on a cell. The
-    string-constant column is also anchored to the ideal, so a cell that is
-    wrong for every form cannot pass by being the reference they are
-    compared with.
+    cannot fold behave as each other do. Three checks run on the MEASURED
+    verdicts: the evaluable forms against the string constant, the two
+    unevaluable forms against each other, and the string-constant column
+    against the recorded ideal. The first two are comparisons between
+    measured columns, never against the table, so a site that stops
+    resolving one form reds this test on the divergence rather than on a
+    cell; the third is the anchor, so a cell that is wrong for every form
+    cannot pass by being the reference the others are compared with. A
+    fourth check, every cell against its own recorded expectation, closes
+    the test.
     """
     measured, cells = {}, {}
     for label, body, expected in _KEY_MATRIX:
