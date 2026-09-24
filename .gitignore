@@ -41,6 +41,7 @@
 !/eslint.config.js
 !/pyproject.toml
 !/pyrightconfig.json
+!/pyrightconfig.tests.json
 !/requirements-dev.txt
 !/requirements-test.txt
 !/run_tests.py
@@ -232,6 +233,7 @@
 !/scripts/ci/speed_summary.py
 !/scripts/ci/thresholds.py
 !/scripts/ci/time_tests.py
+!/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/workflow_yaml_scan.py
 !/scripts/ci/yamlanchor.py
@@ -516,6 +518,7 @@
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
 !/tests/test_timing_selection.py
+!/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py
 !/tests/test_upload_races.py
 !/tests/test_upload_routes.py
