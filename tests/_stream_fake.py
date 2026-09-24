@@ -7,7 +7,10 @@ A harness that splices `STRICT_FETCH` must define, before the splice:
 
   plan        the scenario's object. `planned` lists the `"METHOD /path"`
               keys it declares; `hosts` optionally narrows the permitted
-              origins and `statuses` queues the stream branch's answers.
+              origins, `statuses` queues the stream branch's answers, and
+              `answers` optionally maps a declared key to the answer the
+              scenario planned for it — `{status, body}`, or `{throw: msg}`
+              for a bridge the scenario models as unreachable.
   BRIDGE_URL  the default permitted origin.
   response(status, data)  plain response factory.
   streamResponse(answer)  response factory for the stream branch.
@@ -21,13 +24,18 @@ that check a missing name throws a `ReferenceError` the worker's stream
 loop swallows, so the omission would leave the suite green.
 
 The gate answers a request only while the plan declares it, refuses
-everything else with status 599, and records every request it sees. The
-origin is checked first — the stream URL is the one request a worker
-derives from runtime config, so a foreign-origin or relative stream is
-refused and recorded like any other. A request refused for its origin
-spends no route allowance, so the next legitimate request on that route
-still answers 200. The Python helpers below drive a spliced harness and pin
-a scenario's recorded traffic against the plan it declared.
+everything else with status 599, and records every request it sees. A
+declared request is answered 200 `{ok: true}` unless `plan.answers` names a
+status, body or throw for its key — so a scenario can model a bridge's own
+error answer, and a declared throw models an unreachable bridge. A planned
+answer never applies to a request past its declared count: that
+one is refused by status whatever the plan says. The origin is checked
+first — the stream URL is the one request a worker derives from runtime
+config, so a foreign-origin or relative stream is refused and recorded like
+any other. A request refused for its origin spends no route allowance, so
+the next legitimate request on that route still answers 200. The Python
+helpers below drive a spliced harness and pin a scenario's recorded traffic
+against the plan it declared.
 """
 import json
 import shutil
@@ -42,6 +50,9 @@ if (typeof plan === 'undefined') {
   gateContractFaults.push('plan');
 } else if (!Array.isArray(plan.planned)) {
   gateContractFaults.push('plan.planned');
+} else if (plan.answers !== undefined
+  && (typeof plan.answers !== 'object' || Array.isArray(plan.answers))) {
+  gateContractFaults.push('plan.answers');
 }
 if (typeof BRIDGE_URL === 'undefined') gateContractFaults.push('BRIDGE_URL');
 if (typeof response !== 'function') gateContractFaults.push('response');
@@ -62,9 +73,10 @@ if (typeof badOrigins === 'undefined') gateContractFaults.push('badOrigins');
 
 // A request is planned as often as the recording shows; beyond that it is
 // refused and recorded. No route is special-cased, so a new one is caught.
-// The parsed body rides along so a harness reads the worker's request
-// without wrapping its own fetch. The entry is returned so bridgeFetch can
-// stamp the answer status on it only after the answer really was built.
+// The parsed body and the Authorization header ride along so a harness reads
+// the worker's request without wrapping its own fetch. The entry is returned
+// so bridgeFetch can stamp the answer status on it only after the answer
+// really was built.
 function accountRequest(request, init) {
   const seen = nonStreamFetches.filter((i) => i.request === request).length;
   const planned = (plan.planned || []).filter((i) => i === request).length;
@@ -73,10 +85,18 @@ function accountRequest(request, init) {
   if (init && init.body) {
     try { body = JSON.parse(init.body); } catch (_) { body = init.body; }
   }
-  const entry = { request, refused, body, status: null };
+  const auth = (init && init.headers && init.headers.Authorization) || null;
+  const entry = { request, refused, body, auth, status: null };
   nonStreamFetches.push(entry);
   if (refused) refusedFetches.push(request);
   return entry;
+}
+
+// What the scenario planned for this key, or null for the default answer.
+function plannedAnswer(request) {
+  const answers = plan.answers || {};
+  return Object.prototype.hasOwnProperty.call(answers, request)
+    ? answers[request] : null;
 }
 
 function originOf(url) {
@@ -123,10 +143,22 @@ async function bridgeFetch(target, init = {}) {
     resultPosts.push({ ...payload, did: payload._did || null });
   }
   const entry = accountRequest(request, init);
-  const status = entry.refused ? 599 : 200;
-  const answer = response(status, status === 200
-    ? { ok: true }
-    : { ok: false, error: 'more often than declared' });
+  if (entry.refused) {
+    entry.status = 599;
+    return response(599, { ok: false, error: 'more often than declared' });
+  }
+  const planned = plannedAnswer(request);
+  if (planned && planned.throw) {
+    // A scenario that models an unreachable bridge declares the throw; the
+    // record carries it, so a worker that swallows it still shows the call.
+    entry.status = 'throw';
+    throw new TypeError(planned.throw);
+  }
+  const status = planned && planned.status !== undefined
+    ? planned.status : 200;
+  const body = planned && planned.body !== undefined
+    ? planned.body : { ok: true };
+  const answer = response(status, body);
   // Stamped only after the answer was built: a missing `response` throws
   // here, and the record must show a request that was never answered.
   entry.status = status;
@@ -141,9 +173,9 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan):
+def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
     result = run_node_program(node, program, arguments, cwd=cwd,
-                              payload=plan)
+                              payload=plan, timeout=timeout)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
