@@ -16,8 +16,8 @@ is refused, as is a store hiding it in a name. Three shapes it cannot
 follow are ACCEPTED as declared limits: a value reached through a call's
 result, a tracked module or the operation handed as a call ARGUMENT
 (`use(sys)`), and a value the walk cannot fold to a constant — whether an
-import name or a program. A value that DOES fold is refused. Any accepted
-shape leaves the closure quietly short.
+import name or a program. Any accepted shape leaves the closure quietly
+short.
 """
 import ast
 import symtable
@@ -126,36 +126,27 @@ class _Scopes:
     """Which names one reference resolves to, so a builtin is told apart
     from a same-named local.
 
-    Built on `symtable` — Python's own binding grammar — so the answer is a
-    property (no enclosing scope binds the name), not a list of shadow
-    spellings: a name no scope binds is the builtin, which is what keeps the
-    MCP tool named `exec` an ordinary function. A scope the walk cannot line
-    up with the resolver's errs toward the builtin, so a correlation miss
-    refuses.
+    Built on `symtable` — Python's own binding grammar — so a name no scope
+    binds is the builtin, not a matched list of shadow spellings; that is
+    what keeps the MCP tool named `exec` ordinary. A scope the walk cannot
+    line up with the resolver's errs toward the builtin and refuses.
     """
     _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                     ast.Lambda)
 
     def __init__(self, tree, source, filename):
         self._root = symtable.symtable(source, filename, 'exec')
-        self._root_binds = self._bound(self._root)
-        self._symbols_by_table = {}
+        self._root_binds = {symbol.get_name() for symbol
+                            in self._root.get_symbols()
+                            if symbol.is_assigned() or symbol.is_imported()
+                            or symbol.is_parameter() or symbol.is_namespace()}
         self._scope_of = {}
+        self._from_builtins = set()
         self._walk(tree, self._root)
 
     @staticmethod
-    def _bound(table):
-        return {symbol.get_name() for symbol in table.get_symbols()
-                if symbol.is_assigned() or symbol.is_imported()
-                or symbol.is_parameter() or symbol.is_namespace()}
-
-    def _symbols(self, table):
-        found = self._symbols_by_table.get(id(table))
-        if found is None:
-            found = {symbol.get_name(): symbol
-                     for symbol in table.get_symbols()}
-            self._symbols_by_table[id(table)] = found
-        return found
+    def _symbols(table):
+        return {symbol.get_name(): symbol for symbol in table.get_symbols()}
 
     @staticmethod
     def _match(table, name, line):
@@ -166,6 +157,13 @@ class _Scopes:
 
     def _walk(self, node, table):
         self._scope_of[id(node)] = table
+        if isinstance(node, ast.ImportFrom) and node.module == 'builtins' \
+                and not node.level:
+            # A from-builtins import binds the builtin ITSELF, so the
+            # module-bound rule must not read it as a shadow.
+            self._from_builtins.update(
+                alias.asname or alias.name for alias in node.names
+                if alias.name in CODE_EVAL_BUILTINS)
         if isinstance(node, self._SCOPE_NODES):
             name = 'lambda' if isinstance(node, ast.Lambda) else node.name
             child = self._match(table, name, node.lineno)
@@ -174,17 +172,20 @@ class _Scopes:
         for child in ast.iter_child_nodes(node):
             self._walk(child, table)
 
+    def is_code_evaluating(self, node):
+        """The name is a code-evaluating builtin at `node`'s own scope: an
+        unshadowed builtin name, or one bound by a from-builtins import."""
+        return node.id in self._from_builtins or (
+            node.id in CODE_EVAL_BUILTINS and self.is_builtin(node))
+
     def is_builtin(self, node):
-        """The name is a code-evaluating builtin at `node`'s own scope."""
+        """The name is an unshadowed builtin at `node`'s own scope."""
         table = self._scope_of.get(id(node))
-        if table is None:
-            return True
-        symbol = self._symbols(table).get(node.id)
+        symbol = self._symbols(table).get(node.id) if table else None
         if symbol is None:
             return True
         if symbol.is_local() or symbol.is_free():
             return False
-        # A global is the builtin only when the module leaves it unbound.
         return node.id not in self._root_binds
 
 
@@ -196,12 +197,11 @@ def _denotes_code_eval(node, bound, scopes):
     """The code-evaluating builtin this node evaluates to, or nothing.
 
     A bare name is the builtin only where no enclosing scope binds it
-    (`scopes`); the module attribute and the constant `getattr` are the two
-    direct routes a module hands an attribute out through — the forms the
-    import operation is also recognised through, so both share one grammar.
+    (`scopes`); the module attribute and the constant `getattr` are the
+    same routes the import operation is recognised through.
     """
     if isinstance(node, ast.Name):
-        return node.id in CODE_EVAL_BUILTINS and scopes.is_builtin(node)
+        return scopes.is_code_evaluating(node)
     if isinstance(node, ast.Attribute):
         return node.attr in CODE_EVAL_BUILTINS and _names_builtins(
             node.value, bound)
