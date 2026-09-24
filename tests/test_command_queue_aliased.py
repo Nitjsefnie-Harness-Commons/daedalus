@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Aliased command names deliver nothing and are read through one descriptor.
+"""Aliased command names deliver nothing, and a refusal logs once per object.
 
-A command candidate is opened through a descriptor checked against the name it
-was found under, so two names for one object are not two delivery targets and
-a name that stopped naming the object behind it is refused. The queue drain,
-the legacy drain, poll and the expiry sweep share that helper, and a refused
-candidate is left in place rather than unlinked.
+The queue drain, the legacy drain and poll open each candidate through one
+descriptor (what a candidate IS, and how it is refused, is in
+``test_command_queue_candidates``) and share the refusal registry: a retained,
+refused candidate logs its ``[STREAM] REFUSED`` line once per object, not once
+per drain pass. The key is the candidate's logical name paired with the
+object's incarnation, and the expiry sweep retires a name it vacates so a
+different object taking that name logs again.
 """
 import contextlib
 import io
@@ -63,80 +65,6 @@ def _drain_refusals(service, qdir, frames):
         service.drain_queue(
             qdir, None, None, command_ttl=100, frame_writer=frames.append)
     return _refusals(captured)
-
-
-def test_a_plain_candidate_opens_and_reads(tmp):
-    queue = _load_queue('aliased_plain_candidate')
-    path = Path(tmp) / 'tok.json'
-    _write_command(path, 'plain')
-
-    stream, reason, _ = queue.open_command_candidate(path)
-    assert stream is not None, reason
-    try:
-        assert reason is None, reason
-        assert json.loads(stream.read().decode('utf-8')) == {
-            'id': 'plain', 'code': '1'}
-    finally:
-        stream.close()
-
-    assert path.exists(), 'opening consumed the candidate'
-
-
-def test_a_hard_linked_object_is_refused_and_left_in_place(tmp):
-    queue = _load_queue('aliased_hard_linked_candidate')
-    first = Path(tmp) / 'tok_dup.json'
-    second = Path(tmp) / 'tok_other.json'
-    _write_command(first, 'aliased')
-    _hard_link(first, second)
-
-    stream, reason, _ = queue.open_command_candidate(first)
-    if stream is not None:
-        stream.close()
-
-    assert stream is None, 'an object named twice was opened for delivery'
-    assert reason, 'the refusal carries its reason'
-    assert first.exists() and second.exists(), 'a refusal unlinked a name'
-
-
-def test_a_symlinked_name_is_refused_without_following_it(tmp):
-    queue = _load_queue('aliased_symlink_candidate')
-    outside = Path(tmp) / 'outside.json'
-    _write_command(outside, 'outside')
-    link = Path(tmp) / 'tok_dup.json'
-    _symlink(link, outside)
-
-    stream, reason, _ = queue.open_command_candidate(link)
-    if stream is not None:
-        stream.close()
-
-    assert stream is None, 'a symlinked name was followed'
-    assert reason, 'the refusal carries its reason'
-    assert link.is_symlink(), 'a refusal unlinked the name'
-    assert json.loads(outside.read_text(encoding='utf-8')) == {
-        'id': 'outside', 'code': '1'}
-
-
-def test_a_missing_name_is_absent(tmp):
-    queue = _load_queue('aliased_missing_candidate')
-
-    stream, reason, _ = queue.open_command_candidate(
-        Path(tmp) / 'absent.json')
-
-    assert stream is None, 'a missing name produced a stream'
-    assert reason is None, 'absence is not a refusal'
-
-
-def test_a_broken_symlink_names_nothing(tmp):
-    queue = _load_queue('aliased_broken_symlink_candidate')
-    link = Path(tmp) / 'tok.json'
-    _symlink(link, Path(tmp) / 'never-written')
-
-    stream, reason, _ = queue.open_command_candidate(link)
-    if stream is not None:
-        stream.close()
-
-    assert stream is None, (stream, reason)
-    assert link.is_symlink(), 'a refusal unlinked the name'
 
 
 def test_queue_drain_leaves_a_hard_linked_pair_undelivered(tmp):
@@ -202,29 +130,6 @@ def test_poll_answers_empty_for_a_hard_linked_legacy_name(tmp):
 
     assert answer == (200, {}), answer
     assert first.exists() and second.exists(), 'a refusal unlinked a name'
-
-
-def test_a_directory_named_like_an_entry_is_refused(tmp):
-    queue = _load_queue('aliased_directory_candidate')
-    entry = Path(tmp) / 'tok' / '0000000000001_000001.json'
-    entry.parent.mkdir(parents=True)
-    entry.mkdir()
-
-    stream, reason, _ = queue.open_command_candidate(entry)
-    if stream is not None:
-        stream.close()
-
-    # Refusal and retention are the contract on every platform. Which arm
-    # names the reason is not: a POSIX open returns a descriptor for a
-    # directory and the regular-file check refuses it, while Windows refuses
-    # the open itself.
-    assert stream is None, 'a directory was opened for delivery'
-    assert reason, 'the refusal carries no reason'
-    if os.name == 'nt':
-        assert reason.startswith('cannot open'), reason
-    else:
-        assert reason == 'candidate is not a regular file', reason
-    assert entry.is_dir(), 'a refusal removed the candidate'
 
 
 def test_queue_drain_leaves_a_directory_entry_alone(tmp):
@@ -693,6 +598,94 @@ def test_a_stream_admitted_before_the_name_reads_nothing_outside(tmp):
         finally:
             response.close()
             conn.close()
+
+
+def test_a_swept_legacy_name_refused_again_for_a_different_object(tmp):
+    """The legacy half of the retire, on the constant-identity stand-in.
+
+    A refused legacy object is retained by the sweep, but a parseable one at
+    the same name is unlinked, which frees the name. With `_identity`
+    constant, only the retire lets a later refused object there log, so this
+    row fails while the `not legacy` carve-out stands.
+    """
+    service = _load_service('aliased_legacy_retire_pinned')
+    queue = service.command_queue
+    entry = Path(tmp) / 'tok_dup.json'
+    real_identity = queue._identity
+    queue._identity = lambda stat_result: (0, 0, 0)
+    try:
+        frames = []
+
+        def drain():
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                service.drain_legacy_file(
+                    entry, 'dup', command_ttl=100,
+                    frame_writer=frames.append)
+            return _refusals(captured)
+
+        _write_command(entry, 'aliased')
+        _hard_link(entry, Path(tmp) / 'twin.json')
+        assert drain(), 'the aliased legacy file logged no refusal'
+
+        # A parseable object at the name is unlinked by the sweep, freeing it.
+        entry.unlink()
+        _write_command(entry, 'later')
+        os.utime(entry, (0, 0))
+        queue.collect_expired(Path(tmp), 90)
+        assert not entry.exists(), 'the sweep did not free the name'
+
+        _write_command(entry, 'aliased')
+        _hard_link(entry, Path(tmp) / 'twin2.json')
+        second = drain()
+    finally:
+        queue._identity = real_identity
+
+    assert frames == [], frames
+    assert second, f'a swept legacy name did not log again: {second!r}'
+
+
+def test_a_raising_retire_callback_does_not_kill_the_sweeper(tmp):
+    """A callback that breaks its no-raise contract cannot stop the sweep."""
+    service = _load_service('aliased_retire_raising')
+    queue = service.command_queue
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = cmd_dir / 'tok'
+    qdir.mkdir(parents=True)
+    entries = [qdir / f'000{i}_00000{i}.json' for i in (1, 2)]
+    for entry in entries:
+        _write_command(entry, entry.name)
+        os.utime(entry, (0, 0))
+
+    def boom(name):
+        raise TypeError('the retire callback must not raise')
+
+    real = queue._name_vacated
+    queue._name_vacated = boom
+    try:
+        queue.collect_expired(cmd_dir, 90)  # must not propagate
+    finally:
+        queue._name_vacated = real
+    assert all(not entry.exists() for entry in entries)
+
+
+def test_the_refusal_key_separates_a_changed_change_time(tmp):
+    """ctime is a key component: identities differing only in it are 2 keys."""
+    service = _load_service('aliased_ctime_component')
+    queue = service.command_queue
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    victim = qdir / '0001_000001.json'
+    _write_command(victim, 'x')
+    st = os.lstat(victim)
+    base = queue._identity(st)
+    assert base[2] == st.st_ctime_ns, base
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        for bumped in (base, base[:2] + (base[2] + 1,)):
+            service._refusal_once((f'queue:tok/{victim.name}', bumped),
+                                  'q=x', 'synthetic')
+    assert len(_refusals(captured)) == 2, _refusals(captured)
 
 
 if __name__ == '__main__':

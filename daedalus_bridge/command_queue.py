@@ -85,12 +85,14 @@ def _identity(stat_result):
 
     The inode alone does not identify an object: a filesystem may hand a
     freed inode straight back to the next object created at the name, which
-    is exactly what the TTL sweep makes room for. The inode change time
-    completes the identity for a replacement written after the clock ticked,
-    and `utime` cannot backdate it. It is not a generation on its own — a
+    is exactly what the TTL sweep makes room for. The inode change time is
+    a best-effort second discriminator — a replacement written after the
+    clock ticked usually differs on it — but it is not a generation: a
     coarse-grained clock gives two objects created in the same tick one
-    value — so the sweep retires the name it vacates (`on_name_vacated`) and
-    that event, not this field, decides the last case.
+    value, and it moves on an external `utime`. Where it cannot separate two
+    objects the sweep retires the name it vacates (`on_name_vacated`), and
+    that event, not this field, decides the last case. It is kept because it
+    is the only thing left to separate two replacements when no retire runs.
     """
     return (stat_result.st_dev, stat_result.st_ino, stat_result.st_ctime_ns)
 
@@ -100,6 +102,11 @@ def _name_identity(path):
 
     A refusal that never opened a descriptor still needs an identity, so a
     later object appearing at the same name is not mistaken for this one.
+    It returns None only when neither the descriptor nor the name could be
+    stat'd — an unopenable, unstattable name (EACCES and a name that cannot
+    be lstat'd). Two different such objects at one name then share the
+    `(name, None)` key, so the second is suppressed: a residual gap, narrowed
+    to that unstattable case, in the same suppression class this key fixes.
     """
     try:
         return _identity(os.lstat(path))
@@ -119,10 +126,10 @@ def open_command_candidate(path):
     the name can be stat'd. Refused: a symlinked name, an object that is not
     a regular file or is named more than once, and a name that stopped
     naming the object the descriptor was opened on. A symlinked name is
-    refused where
-    the platform offers ``O_NOFOLLOW`` — a broken one included, since the
-    open refuses the link before looking at its target — and elsewhere the
-    open follows the link and the identity check refuses what it named.
+    refused where the platform offers ``O_NOFOLLOW`` — a broken one
+    included, since the open refuses the link before looking at its target —
+    and elsewhere the open follows the link and the identity check refuses
+    what it named.
     Both spellings refuse, so a linked name delivers nothing either way; a
     platform without ``O_NOFOLLOW`` reports a broken link as absence.
     ``reason`` is ``None`` only when the name named nothing at all, which is
@@ -169,13 +176,31 @@ def open_command_candidate(path):
         return None, f'cannot read: {log_safe(error)}', _identity(opened)
 
 
-def on_name_vacated(callback):
-    """Register `callback`, called with a queue name's logical key when the
-    TTL sweep vacates that name by unlinking its child.
+def queue_key(dir_name, name):
+    """The logical key one queue entry is recorded and retired under."""
+    return f'queue:{dir_name}/{name}'
 
-    The sweep is the one moment that knows a queue name is free, and a
-    replacement object can be indistinguishable from the recorded one (see
-    `_identity`), so the registry retires the name here rather than guess.
+
+def legacy_key(name):
+    """The logical key one legacy command file is recorded and retired
+    under."""
+    return f'legacy:{name}'
+
+
+def on_name_vacated(callback):
+    """Register `callback`, called with a name's logical key when the TTL
+    sweep vacates that name by unlinking its child (queue entry or legacy
+    file).
+
+    The sweep is the one moment that knows a name is free, and a replacement
+    object can be indistinguishable from the recorded one (see `_identity`),
+    so the registry retires the name here rather than guess.
+
+    Contract: the callback runs INSIDE the sweep, holding the
+    non-reentrant `command_fs_lock`, so it must not re-enter that lock (a
+    self-deadlock in a daemon thread nothing monitors) and must not raise.
+    The call site guards it anyway, so a raising callback cannot kill the
+    sweeper, but the sweeper cannot rely on that to keep working.
     """
     global _name_vacated
     _name_vacated = callback
@@ -209,9 +234,18 @@ def remove_expired(path, now, ttl, legacy=False):
             with opened:
                 json.loads(opened.read().decode('utf-8'))
         path.unlink()
-        if not legacy and _name_vacated is not None:
-            # A queue entry expires by name, so unlinking it frees the name.
-            _name_vacated(f'queue:{path.parent.name}/{path.name}')
+        if _name_vacated is not None:
+            # A queue entry expires by name and a parseable legacy file is
+            # unlinked, so in both namespaces the unlink frees the name; the
+            # registry retires it so a later object there is not suppressed.
+            # The callback runs under command_fs_lock; guard it so a raising
+            # callback cannot kill the sweeper (see on_name_vacated).
+            key = (legacy_key(path.name) if legacy
+                   else queue_key(path.parent.name, path.name))
+            try:
+                _name_vacated(key)
+            except Exception:  # pylint: disable=broad-except
+                pass
     except (OSError, json.JSONDecodeError, RecursionError, ValueError):
         # A file that cannot be read or removed is reconsidered on the next
         # pass; nothing downstream depends on this call having acted.
