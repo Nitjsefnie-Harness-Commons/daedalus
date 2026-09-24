@@ -684,7 +684,8 @@ _DAEDALUS_BASELINE = {k: os.environ[k] for k in os.environ
 
 def test_z_the_decorated_controls_restore_the_environment(_tmp):
     """The `@isolated_env` controls above hand the environment back,
-    absence included; `test_z_` runs after both by name order."""
+    absence included. The baseline is captured at import, so a leak is
+    seen only once a decorated control has run; `test_z_` sorts last."""
     now = {k: os.environ[k] for k in os.environ if k.startswith('DAEDALUS_')}
     assert now == _DAEDALUS_BASELINE, (
         f'leaked {sorted(now.items())} '
