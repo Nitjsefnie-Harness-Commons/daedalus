@@ -337,29 +337,6 @@ def test_a_query_failure_is_not_retried_behind_the_pause(tmp):
     assert not out.getvalue().strip(), out.getvalue()
 
 
-def test_the_parent_check_passes_while_the_parent_is_there(tmp):
-    del tmp
-    mod = _client()
-    assert mod.check_parent(os.getppid()) is None
-    mod.check_parent(None)
-    child = subprocess.run(
-        [sys.executable, '-c',
-         'import sys; sys.path.insert(0, sys.argv[1]);'
-         ' import gh_client; gh_client.check_parent(1)',
-         str(SKILL)], capture_output=True, text=True, timeout=60)
-    assert child.returncode == 0, (child.returncode, child.stderr)
-    # The sleep it waits on is a parent check in a loop, so a gone parent is
-    # noticed while the watcher is waiting rather than at the next poll.
-    sleeper = subprocess.run(
-        [sys.executable, '-c',
-         'import sys; sys.path.insert(0, sys.argv[1]);'
-         ' import gh_client; gh_client.Watcher("w", parent_pid=1).sleep(5);'
-         ' print("slept")',
-         str(SKILL)], capture_output=True, text=True, timeout=60)
-    assert sleeper.returncode == 0, (sleeper.returncode, sleeper.stderr)
-    assert 'slept' not in sleeper.stdout, sleeper.stdout
-
-
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ghclient_')
 

@@ -42,7 +42,8 @@ something this session has not handled, so it is announced.
 A failure is never silent. Poll errors are reported to stderr, and a run of
 them escalates to a stdout line, because a watcher that has stopped being
 able to see the pull request must not look the same as a quiet pull request.
-With `--parent-pid` the watcher exits as soon as that parent is gone, so a
+Started by `watch_all.py`, the watcher holds the read end of a pipe whose
+only write end the aggregator holds, and exits when that goes - so a
 restarted aggregator never leaves the old pair polling beside the new one.
 
 Run with --once before arming the Monitor. A polling loop is never armed
@@ -268,10 +269,6 @@ def main():
     parser.add_argument('pr', help='pull request number')
     parser.add_argument('--repo', default=DEFAULT_REPO)
     parser.add_argument('--interval', type=int, default=DEFAULT_INTERVAL)
-    parser.add_argument('--parent-pid', type=int, default=None,
-                        help='exit when this process is gone; watch_all.py '
-                             'passes its own pid so a restart never leaves '
-                             'the old pair polling')
     parser.add_argument('--once', action='store_true',
                         help='one trial cycle to stderr, then exit')
     args = parser.parse_args()
@@ -290,8 +287,7 @@ def main():
 
     seen = {}
     failures = 0
-    watcher = gh_client.Watcher(f'PR {args.pr} watcher',
-                                parent_pid=args.parent_pid)
+    watcher = gh_client.Watcher(f'PR {args.pr} watcher')
     while True:
         try:
             watcher.poll(
