@@ -279,7 +279,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     Dropping the bound also drops the only hang-guard on a wedged local
     clone; the issue's remedy accepts a hang surfacing as run_tests.py's
     900-second suite bound ("SUITE TIMED OUT") instead of any wall-clock
-    margin here. The audit sees this file alone, accepts only a plain
+    margin here. The audit sees this file and `tests/_scratch_index.py`,
+    which is the only other module that launches git, accepts only a plain
     `import subprocess`, resolves every binding derived from the module
     to a fixpoint (parameter defaults, for-targets, class bodies,
     with-targets and def returns included), and follows
@@ -305,10 +306,11 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     configs too.
     """
     del tmp
-    refusals = _launch_refusals(
-        Path(__file__).read_text(encoding='utf-8'),
-        'tests/test_repo_layout.py')
-    assert not refusals, '\n'.join(refusals)
+    for name in ('test_repo_layout.py', '_scratch_index.py'):
+        refusals = _launch_refusals(
+            Path(__file__).with_name(name).read_text(encoding='utf-8'),
+            f'tests/{name}')
+        assert not refusals, '\n'.join(refusals)
     for label, snippet, limb in LAUNCH_REFUSAL_ROWS:
         row_refusals = _launch_refusals(snippet, label)
         assert len(row_refusals) == 1 and limb in row_refusals[0], (
