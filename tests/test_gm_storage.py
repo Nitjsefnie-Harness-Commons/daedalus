@@ -173,8 +173,7 @@ def test_concurrent_setvalue_calls_never_exceed_the_cap(tmp):
 
     chrome.storage's get -> sum -> set is a read-modify-write; concurrent
     calls issued in a single turn each read the pre-write store, so writes
-    for one origin are serialized. Twelve 90,000-byte writes: only those
-    that fit are stored, and the partition total never exceeds the cap.
+    for one origin are serialized.
     """
     del tmp
     case = _gm_two_origin.run_two_origin()['concurrent']
@@ -188,8 +187,7 @@ def test_cross_tab_same_origin_burst_cannot_exceed_the_cap(tmp):
     Each tab is a separate content-script instance over one shared store and
     the one service-worker realm, all dispatching a setValue in a single turn.
     A queue kept per content-script instance would let every tab read the
-    store before any write committed; the worker's per-namespace queue admits
-    only the writes that fit, so the partition never exceeds the cap.
+    store before any write committed.
     """
     del tmp
     case = _gm_two_origin.run_two_origin()['crossTab']
@@ -202,8 +200,7 @@ def test_key_length_is_charged_against_the_cap(tmp):
 
     Chrome charges QUOTA_BYTES as the JSON stringification of every value plus
     every key's length, so a run of long-key items is refused once the cap is
-    reached — the test's own partitionBytes charges the storage key, so it
-    agrees with the cap rather than the cap agreeing with itself.
+    reached.
     """
     del tmp
     case = _gm_two_origin.run_two_origin()['keyLength']
@@ -226,9 +223,7 @@ def test_map_and_set_are_charged_by_json_form(tmp):
 
     Chrome's local quota is "measured by the JSON stringification of every
     value" and its values are JSON-serialisable, so a 100k-entry Map is
-    stored and charged as {} (2 bytes), not as a structured clone. The Map
-    and Set are admitted and a following cap-100 value still fits beside
-    them, which it would not if either were charged by its entries.
+    stored and charged as {} (2 bytes), not as a structured clone.
     """
     del tmp
     case = _gm_two_origin.run_two_origin()['mapSet']
