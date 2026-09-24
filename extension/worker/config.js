@@ -10,9 +10,16 @@ let config = { token: '', serverUrl: DEFAULT_SERVER };
 // while the first is still parked on its storage read (config.token is ''), so
 // the generation is memoized: a second caller joins the first one's result
 // instead of starting a second generation that races it to auto-generate a
-// token. The memo lives for the worker's lifetime — chrome.storage.onChanged
-// below updates config in place and never re-reads, and a worker restart
-// re-imports this module with fresh state — so it is never cleared on success.
+// token. The memo lives for the worker's lifetime: chrome.storage.onChanged
+// below updates config in place, so a token CHANGED to a new value needs no
+// re-read, and a worker restart re-imports this module with fresh state. A
+// token CLEARED to '' is the case that makes never clearing on success
+// deliberate rather than incidental — the options page writes whatever its
+// trimmed field holds and renders the empty one as "Not configured", so a
+// cleared token is an operator saying "not configured" and must stay cleared.
+// A fresh generation would re-read the empty token and auto-generate a new
+// browser-control credential behind that operator. So the memo is never
+// cleared on success.
 let _configPromise = null;
 
 function loadConfig() {
