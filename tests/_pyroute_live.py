@@ -11,14 +11,20 @@ from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
 _LIVE_UNRESOLVED = object()
 
 
-def _plain_getattr(value, state):
-    """The unbound getattr call of arity 2 or 3 without keywords, or None."""
+def _getattr_call(value, state):
+    """The unbound keyword-free getattr call, or None."""
     if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-            and value.func.id == 'getattr'):
+            and value.func.id == 'getattr'
+            and not value.keywords
+            and value.func.id not in state.bound):
         return None
-    if value.keywords or len(value.args) not in (2, 3):
-        return None
-    return None if value.func.id in state.bound else value
+    return value
+
+
+def _plain_getattr(value, state):
+    """The unbound getattr call of arity 2 or 3, or None."""
+    call = _getattr_call(value, state)
+    return call if call is not None and len(call.args) in (2, 3) else None
 
 
 def _constant_getattr(value, state):
@@ -60,10 +66,9 @@ def _has_starred_arg(value, state):
     """Whether an unbound getattr call fills an argument in a starred
     position, so its positional list must be spliced rather than read
     plainly."""
-    return (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-            and value.func.id == 'getattr' and not value.keywords
-            and value.func.id not in state.bound
-            and any(isinstance(arg, ast.Starred) for arg in value.args))
+    call = _getattr_call(value, state)
+    return call is not None and any(
+        isinstance(arg, ast.Starred) for arg in call.args)
 
 
 def _expand_starred_args(value, state):
@@ -92,11 +97,12 @@ def _argument_value(entry, state):
 
 def _argument_name(entry):
     """The string constant an argument position names, or None when the
-    position is not a provable string (a dynamic name)."""
+    position is not a provable string (a dynamic name). A spliced position is
+    never one: the model keeps only sender markers, normalized to
+    UNPROVABLE_SENDER, and filters a benign string out."""
     is_value, payload = entry
     if is_value:
-        return (payload if isinstance(payload, str)
-                and payload != UNPROVABLE_SENDER else None)
+        return None
     if isinstance(payload, ast.Constant) and isinstance(payload.value, str):
         return payload.value
     return None
@@ -107,11 +113,11 @@ def _starred_selection(value, state):
     UNPROVABLE_SENDER when a starred operand's elements cannot be proved.
 
     Each starred operand is spliced into the positional argument list, so the
-    owner, name and default are read as if written plainly. A name the splice
-    cannot read as a string joins the dynamic-name arm (every value the owner
-    carries). A starred operand resolving to no provable element list hides
-    the call's arity, so no position can be read and the whole selection stays
-    unprovable."""
+    owner and default are read as if written plainly. A spliced name is never
+    a readable plain string (see _argument_name), so it always joins the
+    dynamic-name arm (every value the owner carries). A starred operand
+    resolving to no provable element list hides the call's arity, so no
+    position can be read and the whole selection stays unprovable."""
     args = _expand_starred_args(value, state)
     if args is None:
         return UNPROVABLE_SENDER

@@ -129,8 +129,8 @@ SELECTIONS = [
     ('getattr-arity-four', 'class H: pass\nh = H(); h.fn = relay()\n'
      'try:\n    x = getattr(h, "fn", None, None)\nexcept TypeError:\n'
      '    x = ordinary', 'x()', False),
-    # Value-axis control for the starred-argument-list shape: a clean attribute
-    # stays clean. A value control, never a shape control.
+    # Value-axis control for the starred-argument-list shape: the owner carries
+    # no tracked value, so it is clean by emptiness, not by a clean value.
     ('getattr-star-args-clean-value', 'class H: pass\nh = H(); '
      'h.clean = ordinary\npair = (h, "clean")\nx = getattr(*pair)', 'x()',
      False),
@@ -142,8 +142,38 @@ SELECTIONS = [
     ('getattr-star-owner (977)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()\nowners = (h,)\nx = getattr(*owners, "ext_cmd")',
      'x()', True),
+    # A spliced owner with a tracked clean attribute beside the sender: the
+    # literal name read picks the clean attribute (0), while a name the splice
+    # cannot read takes the dynamic arm and reports the sender (1).
+    ('getattr-star-owner-clean-name (977)', 'def cleanrelay():\n'
+     '    return lambda: ordinary()\nclass H: pass\nh = H(); '
+     'h.clean = cleanrelay()\nh.ext_cmd = relay()\n'
+     'owners = (h,)\nx = getattr(*owners, "clean")', 'x()', False),
     ('getattr-star-default (977)', 'class H: pass\nh = H()\n'
      'vals = (relay(),)\nx = getattr(h, "missing", *vals)', 'x()', True),
+    # The spliced form of the present-name false positive: a tracked clean
+    # callable beside a sender, the name arriving through the splice so the
+    # dynamic arm reports a selection runtime never produces. Also 978.
+    ('getattr-star-args-fp-clean-name (978)', 'def cleanrelay():\n'
+     '    return lambda: ordinary()\nclass H: pass\nh = H(); '
+     'h.clean = cleanrelay()\nh.ext_cmd = relay()\n'
+     'pair = (h, "clean")\nx = getattr(*pair)', 'x()', (False, True)),
+    # A class owner (methods) and an alternatives owner, so the widened spliced
+    # class is not held at one owner kind.
+    ('getattr-star-class-owner (977)', 'class H:\n    ext_cmd = relay()\n'
+     'owners = (H,)\nx = getattr(*owners, "ext_cmd")', 'x()', True),
+    ('getattr-star-alternatives-owner (977)', 'class H: pass\na = H(); '
+     'a.ext_cmd = relay()\nb = H(); b.ext_cmd = relay()\n'
+     'def pick(flag):\n    return a if flag else b\n'
+     'owner = pick(int(args.flag))\nowners = (owner,)\n'
+     'x = getattr(*owners, "ext_cmd")', 'x()', True),
+    # The spliced arity bound: a four-argument splice leaves the 2-or-3
+    # selection and runtime raises TypeError. A bound widened to len(args) < 2
+    # would read this shape.
+    ('getattr-star-arity-four (977)', 'class H: pass\nh = H(); '
+     'h.ext_cmd = relay()\nvals = (h, "ext_cmd", None, None)\n'
+     'try:\n    x = getattr(*vals)\nexcept TypeError:\n'
+     '    x = ordinary', 'x()', False),
     # ---- Excluded shapes: each a labelled tripwire. -----------------------
     # Direct-invocation form, no alias binding. Tracked by daedalus issue 979.
     ('getattr-direct-invoke-const (979)', 'class H: pass\nh = H(); '
