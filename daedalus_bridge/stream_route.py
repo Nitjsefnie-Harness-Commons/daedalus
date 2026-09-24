@@ -109,7 +109,12 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
                             or not entry.name.startswith(prefix)):
                         continue
                     sub = entry.name[len(prefix):]
-                    if sub in ('extension', 'dashboard'):
+                    # The extension's and the dashboard's own queues, under
+                    # whatever spelling this filesystem gives the entry.
+                    if any(
+                            path_safety.same_entry(
+                                cmd_dir, entry.name, f'{prefix}{reserved}')
+                            for reserved in ('extension', 'dashboard')):
                         continue
                     delivered += stream_service.drain_queue(
                         entry, sub, killed_event, command_ttl=command_ttl,

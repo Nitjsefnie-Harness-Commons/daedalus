@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 from _service_loader import _load_service  # noqa: E402
 
@@ -572,6 +573,59 @@ def test_the_legacy_delivered_line_carries_no_full_token(tmp):
     line = output.getvalue()
     assert 'tok-verify' not in line, line
     assert 'tok-veri…' in line, line
+
+
+def test_legacy_extension_drain_skips_its_own_folded_name(tmp):
+    """The extension's and the dashboard's own files are their own.
+
+    A case-folding parent gives each of those files one entry under a
+    spelling of its own, and comparing the caller's spelling to the name on
+    disk calls a tab's file theirs. Delivering either here hands the
+    background a second copy of a command it already answered without a tag.
+    """
+    service = _load_service('stream_service_legacy_extension_fold')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    tab = command_dir / 'tok_42.json'
+    extension = command_dir / 'tok_Extension.json'
+    dashboard = command_dir / 'tok_Dashboard.json'
+    tab.write_text('{"id":"tab"}', encoding='utf-8')
+    extension.write_text('{"id":"extension"}', encoding='utf-8')
+    dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
+    frames = []
+
+    with _case_fold.case_folding(command_dir):
+        delivered = service.drain_legacy_ext(
+            command_dir, 'tok', None,
+            extension_legacy_name='tok_extension.json',
+            command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 1, delivered
+    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+    assert extension.exists(), extension
+    assert dashboard.exists(), dashboard
+
+
+def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
+    """The control: where the parent folds nothing, it is a tab's file."""
+    service = _load_service('stream_service_legacy_extension_nofold')
+    command_dir = Path(tmp) / 'commands'
+    command_dir.mkdir()
+    tab = command_dir / 'tok_42.json'
+    extension = command_dir / 'tok_Extension.json'
+    tab.write_text('{"id":"tab"}', encoding='utf-8')
+    extension.write_text('{"id":"extension"}', encoding='utf-8')
+    frames = []
+
+    delivered = service.drain_legacy_ext(
+        command_dir, 'tok', None,
+        extension_legacy_name='tok_extension.json',
+        command_ttl=100, frame_writer=frames.append)
+
+    assert delivered == 2, delivered
+    assert frames == [
+        {'id': 'tab', 'chromeTab': '42'},
+        {'id': 'extension', 'chromeTab': 'Extension'}], frames
 
 
 if __name__ == '__main__':

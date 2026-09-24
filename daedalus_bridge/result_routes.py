@@ -85,8 +85,7 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     try:
         if delivery_dir is not None:
             assert delivery_file is not None
-            with result_store.delivery_lock_for(
-                    result_store.result_key(token, tab_id)):
+            with result_store.delivery_lock_for(delivery_dir.name):
                 with result_store.result_lock:
                     duplicate = result_store.delivery_recorded(did)
                 if not duplicate:
@@ -181,8 +180,7 @@ def fetch_result(res_dir, token, params):
     try:
         if delivery:
             assert delivery_dir is not None
-            with result_store.delivery_lock_for(
-                    result_store.result_key(token, delivery_tab)):
+            with result_store.delivery_lock_for(delivery_dir.name):
                 with result_store.result_lock:
                     response, _ = result_store.read_result_file(
                         res_file, consume, expected)
@@ -230,7 +228,7 @@ def fetch_result(res_dir, token, params):
                         )
                     break
                 try:
-                    candidate_dir, candidate_file, candidate_tab = (
+                    candidate_dir, candidate_file, _candidate_tab = (
                         result_store.find_delivery_result(
                             res_dir, token, tab, preview_delivery))
                 except ValueError:
@@ -243,8 +241,8 @@ def fetch_result(res_dir, token, params):
                         )
                     break
                 changed = False
-                with result_store.delivery_lock_for(
-                        result_store.result_key(token, candidate_tab)):
+                assert candidate_dir is not None
+                with result_store.delivery_lock_for(candidate_dir.name):
                     with result_store.result_lock:
                         current, _current_delivery = (
                             result_store.read_result_file(
