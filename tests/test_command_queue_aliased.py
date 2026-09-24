@@ -514,6 +514,9 @@ def test_poll_refuses_again_a_replaced_candidate_under_its_name(tmp):
     first = _refusals(captured)
     assert answer == (200, {}), answer
     assert first, 'the first aliased poll logged no refusal'
+    # Pin the poll producer's own spelling, so a drift here is caught here.
+    recorded = {key[0] for key in service._refused_candidates}
+    assert recorded == {f'legacy:{legacy}'}, recorded
 
     # The name is vacated; the twin keeps the original object allocated, so
     # the replacement below cannot reuse its inode.
@@ -646,40 +649,45 @@ def test_a_swept_legacy_name_refused_again_for_a_different_object(tmp):
 
 
 def test_a_raising_retire_callback_does_not_kill_the_sweeper(tmp):
-    """A callback that breaks its no-raise contract cannot stop the sweep."""
+    """A callback that breaks its no-raise contract cannot stop the sweep.
+
+    The guard is `except Exception`, so it covers every class a callback can
+    raise, not just one. This drives a TypeError and a RuntimeError — the
+    latter sits outside the sweep's own narrow `except` tuple, so a guard
+    narrowed to a single class would let it escape and kill the daemon.
+    """
     service = _load_service('aliased_retire_raising')
     queue = service.command_queue
     cmd_dir = Path(tmp) / 'commands'
     qdir = cmd_dir / 'tok'
-    qdir.mkdir(parents=True)
     entries = [qdir / f'000{i}_00000{i}.json' for i in (1, 2)]
-    for entry in entries:
-        _write_command(entry, entry.name)
-        os.utime(entry, (0, 0))
-
-    def boom(name):
-        raise TypeError('the retire callback must not raise')
-
     real = queue._name_vacated
-    queue._name_vacated = boom
-    try:
-        queue.collect_expired(cmd_dir, 90)  # must not propagate
-    finally:
-        queue._name_vacated = real
+    for exc in (TypeError, RuntimeError):
+        qdir.mkdir(parents=True, exist_ok=True)  # a sweep may rmdir the dir
+        for entry in entries:
+            _write_command(entry, entry.name)
+            os.utime(entry, (0, 0))
+
+        def boom(name, exc=exc):
+            raise exc('the retire callback must not raise')
+        queue._name_vacated = boom
+        try:
+            queue.collect_expired(cmd_dir, 90)  # must not propagate
+        finally:
+            queue._name_vacated = real
     assert all(not entry.exists() for entry in entries)
 
 
 def test_the_refusal_key_separates_a_changed_change_time(tmp):
     """ctime is a key component: identities differing only in it are 2 keys."""
     service = _load_service('aliased_ctime_component')
-    queue = service.command_queue
     qdir = Path(tmp) / 'commands' / 'tok'
     qdir.mkdir(parents=True)
     victim = qdir / '0001_000001.json'
     _write_command(victim, 'x')
-    st = os.lstat(victim)
-    base = queue._identity(st)
-    assert base[2] == st.st_ctime_ns, base
+    base = service.command_queue._identity(os.lstat(victim))
+    assert len(base) == 3, f'identity must carry st_ctime_ns: {base!r}'
+    assert base[2] == os.lstat(victim).st_ctime_ns, f'ctime: {base!r}'
     captured = io.StringIO()
     with contextlib.redirect_stdout(captured):
         for bumped in (base, base[:2] + (base[2] + 1,)):
