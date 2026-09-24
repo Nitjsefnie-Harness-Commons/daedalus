@@ -391,7 +391,7 @@ def delete_builtin_names(state, names):
 
 def apply_alias_statement(node, state):
     aliases = state.aliases
-    invalidate_mutated_length(node, state)
+    rebound = invalidate_mutated_length(node, state)
     if isinstance(node, ast.ImportFrom):
         for imported in node.names:
             local = imported.asname or imported.name
@@ -431,10 +431,9 @@ def apply_alias_statement(node, state):
         bind_alias_statement(node, state, bind_alias_target)
         return
     for name in names:
-        aliases.pop(name, None)
-        state.generators.pop(name, None)
-        state.callables.pop(name, None)
-        state.literals.pop(name, None)
+        for store in (aliases, state.generators, state.callables,
+                      state.literals): store.pop(name, None)
+    if rebound is not None: state.callables[rebound[0]] = rebound[1]
     sync_cells(state, names)
 
 
