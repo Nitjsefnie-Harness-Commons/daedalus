@@ -23,11 +23,7 @@ from _bridge import (BRIDGE_ENV, TOK, framer, put_command,  # noqa: E402
                      stream_response)
 from _command_candidates import (  # noqa: E402
     _hard_link, _load_queue, _symlink, _write_command)
-
-
-def _load_service(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'stream_service.py', name=name)
+from _service_loader import _load_service  # noqa: E402
 
 
 def _refusals(captured):
