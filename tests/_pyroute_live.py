@@ -1,12 +1,13 @@
 """Resolve deferred expression values against live flow state."""
 import ast
 
-from _pyroute_mapping import (_selected_values, apply_assignment_bindings)
+from _pyroute_mapping import (_selected_values, apply_assignment_bindings,
+                             resolve_expression_value)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
                              DeferredClass, DeferredContainer,
                              DeferredInstance, _known_value,
                              deferred_expression_value, is_deferred_value,
-                             merge_yielded)
+                             merge_yielded, reachable_callables)
 
 _LIVE_UNRESOLVED = object()
 
@@ -173,7 +174,30 @@ def seed_selection_value(value, state):
                                    for child in ast.walk(value))
                  if is_deferred_value(item)]
         if parts:
-            state.evaluated[id(value)] = merge_yielded([cached, *parts])
+            carriers = (reachable_callables(DeferredAlternatives(tuple(parts)))
+                        if selected == UNPROVABLE_SENDER else ())
+            state.evaluated[id(value)] = merge_yielded(
+                [cached, *parts, *carriers])
+
+
+def seed_unprovable_selection(value, state):
+    """Bind a selection the model cannot resolve to the deferred callables its
+    operands carry, so every route that binds the result to a name keeps a
+    callable to follow at a later call through it. Only the fail-closed
+    verdict is widened: a provable selection is left to the ordinary resolver,
+    so a selection the model reads cleanly keeps reading cleanly."""
+    if _selection_value(value, state) != UNPROVABLE_SENDER:
+        return
+    seed_selection_value(value, state)
+
+
+def seed_then_resolve(node, state, *args):
+    """Widen an unprovable selection's carriers, then resolve the expression
+    the ordinary way. Every expression flows through here, so a selection the
+    model cannot resolve keeps a callable to follow however it is later bound.
+    """
+    seed_unprovable_selection(node, state)
+    return resolve_expression_value(node, state, *args)
 
 
 def bind_alias_statement(node, state, binder):
