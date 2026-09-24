@@ -60,12 +60,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _scratch_index  # noqa: E402
 from _coverage_memo import analysed  # noqa: E402
 from _coverage_scopes import (  # noqa: E402
     _containing_binding_scope, _evaluation_scopes, _scope_shadows)
 from _owned_writes import copy_test_tree  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
-import _scratch_index  # noqa: E402
 _STOPS = frozenset({'kill', 'terminate', 'send_signal'})
 _DRAINS = frozenset({'communicate', 'wait'})
 _STOP = 'stop'
