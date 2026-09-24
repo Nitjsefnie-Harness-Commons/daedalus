@@ -72,13 +72,11 @@ def join_clean_occupancy(kept, other):
         items = {key: item for key, item in owner.items.items()
                  if item is not None or key in partner.items}
         length = owner.length if owner.length == partner.length else None
-        prefix = min(owner.exact_prefix, partner.exact_prefix)
-        if len(items) == len(owner.items) and length == owner.length \
-                and prefix == owner.exact_prefix:
+        if len(items) == len(owner.items) and length == owner.length:
             continue
         if joined is kept:
             joined = kept.copy()
         replace_deferred_storage(joined, owner, DeferredContainer(
-            items, length, owner.kind, owner.identity, prefix))
+            items, length, owner.kind, owner.identity))
         sync_cells(joined, {name})
     return joined

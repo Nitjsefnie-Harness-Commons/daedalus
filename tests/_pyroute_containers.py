@@ -51,8 +51,7 @@ def ordered_container(value, kind, order=None):
             or value.kind not in ('tuple', 'list')):
         return None
     if order is None:
-        return DeferredContainer(dict(value.items), value.length, kind,
-                                 exact_prefix=value.exact_prefix)
+        return DeferredContainer(dict(value.items), value.length, kind)
     if value.length is None:
         joined = merge_yielded(value.items.values())
         return DeferredContainer(
