@@ -73,11 +73,20 @@ function settleOrPending(promise) {
   let rejected = null;
   try { await held; } catch (error) { rejected = error.name; }
   // Without a signal: a hang that can never settle is refused, not leaked.
-  const unsignalable = await bridgeFetch(RELAY + '/other', { method: 'GET' });
+  // Race it against one event-loop turn so a broken refusal (an answer that
+  // never settles) reports 'pending' here instead of emptying the loop and
+  // dying with an empty stdout the runner cannot read — the same channel as
+  // every other gate refusal.
+  const unsignalableAnswer = bridgeFetch(RELAY + '/other', { method: 'GET' });
+  const unsignalable = await Promise.race([
+    unsignalableAnswer,
+    new Promise((resolve) => setImmediate(() => resolve('pending'))),
+  ]);
   process.stdout.write(JSON.stringify({
     beforeAbort,
     rejected,
-    unsignalableStatus: unsignalable.status,
+    unsignalableStatus: unsignalable === 'pending'
+      ? 'pending' : unsignalable.status,
     records: nonStreamFetches,
     refused: refusedFetches,
   }));

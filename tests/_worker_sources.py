@@ -79,6 +79,28 @@ __CONTEXT__.importScripts = (...sourceNames) => {
         '__TRACE_REGISTRATION__', trace_registration)
 
 
+# The stream answer factory the eval-relay and CDP harnesses share: a declared
+# 'hang' is a connected 200 whose reader never settles, and every other answer
+# is the harness's plain `response`. One copy — the cross-file duplicate check
+# cannot see JavaScript inside a Python string, so a copied factory would not
+# be caught; sharing it here is what keeps the two from drifting.
+STREAM_RESPONSE = r"""
+function streamResponse(answer) {
+  if (answer === 'hang') {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () => new Promise(() => {}),
+          cancel: () => Promise.resolve(),
+        }),
+      },
+    };
+  }
+  return response(answer, { error: 'disabled' });
+}
+"""
 # The VM context the message-driven worker harnesses share: the strict gate's
 # `fetch`, the browser APIs the worker's own modules assume, inert timers and
 # a deterministic id source. One copy, so the harnesses that dispatch
@@ -113,9 +135,13 @@ def chrome_stub(token, server, send_command):
     here once and cannot drift — the same one-copy rule as `RELAY_CONTEXT`
     above. A caller supplies only what is genuinely its own: the token and
     server it hands the worker, and a `send_command` async function for the
-    methods its scenario drives. That function closes over the harness's own
-    `released` array and `pendingResolve`; the shared release bookkeeping
-    uses the same two names.
+    methods its scenario drives.
+
+    The stub text closes over two free variables — `released` (an array the
+    caller owns) and `pendingResolve` (a `let` the caller owns) — because the
+    shared `Runtime.releaseObject` bookkeeping pushes to and reassigns them.
+    A caller must define both with exactly these names before the stub runs,
+    and its own `send_command` closes over the same two.
     """
     template = r"""
 const chrome = {
