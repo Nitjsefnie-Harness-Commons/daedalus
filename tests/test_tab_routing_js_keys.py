@@ -120,13 +120,24 @@ def test_a_bracket_write_resolves_a_tracked_member(tmp):
         ('aliased-under-another-name', "const p = {};\nconst q = {};\n"
          "const o = { p: q };\no.p['tab'] = chromeTab;\n"
          "extCmd('focus', { ...q });\n", True, True),
+        ('flat-member', "const victim = {};\nconst o = { p: victim };\n"
+         "o.p['tab'] = chromeTab;\n"
+         "extCmd('focus', { ...victim });\n", True, True),
+        ('chained-member', "const victim = {};\n"
+         "const A = { b: { c: victim } };\n"
+         "A.b.c['tab'] = chromeTab;\n"
+         "extCmd('focus', { ...victim });\n", True, True),
+        ('deep-chained-member', "const victim = {};\n"
+         "const A = { b: { c: { d: victim } } };\n"
+         "A.b.c.d['tab'] = chromeTab;\n"
+         "extCmd('focus', { ...victim });\n", True, True),
         ('unrelated-member', "const p = {};\nconst q = { p: {} };\n"
          "q.p['tab'] = chromeTab;\n"
          "extCmd('focus', { type: 'focus' });\n", False, False),
         ('legal-aliased-member', "const p = {};\nconst o = { p };\n"
          "o.p['tab'] = 'extension';\n"
          "extCmd('focus', { ...p });\n", False, False),
-        ('chained-member', "const victim = {};\n"
+        ('decoy-chained-member', "const victim = {};\n"
          "const b = { c: victim };\n"
          "const A = { b: { c: {} } };\n"
          "A.b.c['tab'] = chromeTab;\n"
