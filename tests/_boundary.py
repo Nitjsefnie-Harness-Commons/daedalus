@@ -19,9 +19,10 @@ from _boundary_env import (  # noqa: E402
     ENVIRONMENT, SCENARIO_PLANS, run_node_program)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _boundary_scenarios import SCENARIOS  # noqa: E402
+from _hotfix_quota_scenario import HOTFIX_SCENARIOS  # noqa: E402
 from _stream_fake import assert_gate_clean  # noqa: E402
 
-HARNESS = ENVIRONMENT + SCENARIOS
+HARNESS = ENVIRONMENT + SCENARIOS + HOTFIX_SCENARIOS
 
 
 def _run(scenario, background_path=None, payload=None):

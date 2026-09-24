@@ -283,6 +283,7 @@
 !/tests/_ghexpr.py
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
+!/tests/_hotfix_quota_scenario.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
