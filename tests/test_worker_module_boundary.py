@@ -53,6 +53,11 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
 _WORKER_REDECLARATION_EXCEPTIONS = (
     # Add one reviewed intentional top-level redeclaration per line.
 )
+# The runtime observer runs the shipped background, whose boot opens the SSE
+# stream (answered 503) before the observer's synchronous work. It declares no
+# non-stream request, so any bridge post the observed worker invents is
+# refused by the shared gate and fails the suite.
+_BOOT_PLAN = {'planned': [], 'planned_stream': [503]}
 
 
 def _worker_sources():
@@ -74,7 +79,10 @@ def _runtime_observations(watched_by_source=None):
             'probes': globals_ | _directive_names(source, 'exported'),
             'watched': watched_by_source.get(relative, ()),
         })
-    observed = observe_worker_runtime(details)
+    # The shipped background's boot opens the stream and syncs the tab list;
+    # declared on the shared gate so an invented request is refused.
+    observed = observe_worker_runtime(
+        details, plan=_BOOT_PLAN)
     return {
         Path(path).relative_to(ROOT).as_posix(): details
         for path, details in observed['sources'].items()

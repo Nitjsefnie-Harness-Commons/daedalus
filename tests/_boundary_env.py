@@ -7,6 +7,12 @@ tell: storage that hands back a structured clone, a debugger that counts its
 attachments, a fetch whose body arrives one chunk at a time, and a second
 context standing in for the worker Chrome restarts after idle suspension.
 The scenarios that drive it are in _boundary.
+
+Bridge traffic goes through the shared gate (`_stream_fake.STRICT_FETCH`):
+each scenario declares the requests it makes, the gate answers only those and
+refuses (and records) everything else, and the scenario reads that record.
+`SCENARIO_PLANS` is that declaration, one entry per scenario, injected below
+and read back by the runners in _boundary to `assert_gate_clean`.
 """
 
 import json
@@ -15,7 +21,83 @@ import tempfile
 from pathlib import Path
 
 import _util
+from _stream_fake import STRICT_FETCH
 from _worker_sources import import_scripts_stub
+
+BRIDGE = 'https://initial.example.com'
+REPLACEMENT = 'https://replacement.example.com'
+RELAY = 'https://big.example.com'
+RESULT = 'POST /result'
+UPLOAD = 'POST /upload'
+
+_UPLOAD_OK = {'status': 200, 'body': {'path': 'capture.png', 'size': 4}}
+_UPLOAD_REJECT = {'status': 400, 'body': {'error': 'invalid path component'}}
+# route: the config module retries a 5xx, so the first /result is refused and
+# the retry and the sibling command's result answer 200. A per-attempt
+# sequence, not one answer for the route.
+_ROUTE_RESULTS = [
+    {'status': 503, 'body': {'error': 'retry'}},
+    {'status': 200},
+    {'status': 200},
+]
+
+
+def _blob(chunks):
+    return 'GET ' + RELAY + '/blob?chunks=' + str(chunks)
+
+
+# Every scenario's declaration, recorded from a run of the shipped worker on
+# the pre-change tree (a temporary recorder in the old bridgeFetch, five runs
+# each, all stable). Boot opens the stream; a restarted context opens it
+# again, so a restart scenario declares two stream fetches. A request the
+# worker invents is outside the plan and is refused and recorded by the gate.
+SCENARIO_PLANS = {
+    # worker-sources returns the loader trace before its own loadConfig, but
+    # background.js's boot still opens the stream, so the drained gate records
+    # that one fetch.
+    'worker-sources': {'planned': [], 'planned_stream': [503]},
+    # The runtime observer's default: a stub background (the binding controls)
+    # makes no bridge request. A caller observing the SHIPPED background must
+    # pass its own plan (the boot stream fetch); omitting it is a loud
+    # mismatch, not a silent pass.
+    'worker-bindings': {'planned': [], 'planned_stream': []},
+    'capability-routes': {'planned': [], 'planned_stream': [503]},
+    'unknown-command': {'planned': [RESULT], 'planned_stream': [503]},
+    'capacity': {'planned': [RESULT], 'planned_stream': [503]},
+    'expiry': {'planned': [RESULT], 'planned_stream': [503]},
+    # stream-timers replaces context.fetch after the boot stream fetch, so only
+    # the boot fetch is gated; see the report for what that cannot see.
+    'stream-timers': {'planned': [], 'planned_stream': [503]},
+    'clear-partitioned': {'planned': [RESULT], 'planned_stream': [503]},
+    'unblock-zero': {'planned': [RESULT], 'planned_stream': [503]},
+    'hotfix-race': {'planned': [RESULT, RESULT], 'planned_stream': [503]},
+    'net-capture': {'planned': [RESULT] * 4, 'planned_stream': [503]},
+    'dedup-restart': {'planned': [RESULT], 'planned_stream': [503, 503]},
+    'block-rule-restart': {'planned': [RESULT] * 4,
+                           'planned_stream': [503, 503]},
+    'screenshot-target': {'planned': [UPLOAD, RESULT], 'planned_stream': [503],
+                          'answers': {UPLOAD: _UPLOAD_OK}},
+    'screenshot-reject': {'planned': [UPLOAD, RESULT],
+                          'planned_stream': [503],
+                          'answers': {UPLOAD: _UPLOAD_REJECT}},
+    'route': {
+        'planned': [UPLOAD, RESULT, RESULT, RESULT],
+        'planned_stream': [503, 503],
+        # the config rotates to a second bridge, which is a bridge host (the
+        # boot stream is fetched from it), not a relay origin.
+        'hosts': [BRIDGE, REPLACEMENT],
+        'answers': {UPLOAD: _UPLOAD_OK, RESULT: _ROUTE_RESULTS},
+    },
+    'fetch-bound': {
+        'planned': [_blob(n) for n in (8, 9, 12, 1)],
+        'planned_stream': [503],
+        # big.example.com is the GM relay target, not a bridge: a permitted
+        # non-bridge origin, keyed on the full URL so it cannot collide with a
+        # bridge request to the same path.
+        'relayHosts': [RELAY],
+        'answers': {_blob(n): {'stream': n} for n in (8, 9, 12, 1)},
+    },
+}
 
 
 def run_node_program(node, program, arguments, *, cwd, payload=None,
@@ -36,7 +118,8 @@ def run_node_program(node, program, arguments, *, cwd, payload=None,
 
 
 ENVIRONMENT = (
-    r"""
+    'const ALL_PLANS = ' + json.dumps(SCENARIO_PLANS) + ';\n'
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -46,11 +129,8 @@ const changeListeners = [];
 const detachListeners = [];
 const sentMessages = [];
 const timers = [];
-const requests = [];
-const resultPayloads = [];
 const rules = [];
 const createdTabs = [];
-const uploadedData = [];
 const windowTabs = [
   { id: 7, windowId: 3, active: true, url: 'about:blank#active' },
   { id: 8, windowId: 3, active: false, url: 'about:blank#target' },
@@ -66,7 +146,6 @@ const storageStore = {
 let captureResolver;
 let tabQueryResolver;
 let nextTimerId = 0;
-let resultAttempts = 0;
 let attachCalls = 0;
 let detachCalls = 0;
 const workerSourcePaths = new WeakMap();
@@ -301,37 +380,53 @@ function streamingResponse(chunkCount) {
   };
 }
 
-async function bridgeFetch(target, init = {}) {
-  const url = String(target);
-  if (url.startsWith('https://big.example.com/')) {
-    return streamingResponse(Number(new URL(url).searchParams.get('chunks')));
-  }
-  if (url.endsWith('/upload') && init.method === 'POST') {
-    const payload = JSON.parse(init.body);
-    requests.push({
-      kind: 'upload', url, token: payload.token, id: payload.id,
-    });
-    uploadedData.push(payload.data);
-    if (scenario === 'screenshot-reject') {
-      return response(400, { error: 'invalid path component' });
-    }
-    return response(200, { path: 'capture.png', size: 4 });
-  }
-  if (url.endsWith('/result') && init.method === 'POST') {
-    const payload = JSON.parse(init.body);
-    resultPayloads.push(payload);
-    requests.push({
-      kind: 'result', url, token: payload.token, id: payload.id,
-      error: payload.error,
-    });
-    resultAttempts++;
-    if (scenario === 'route' && resultAttempts === 1) {
-      return response(503, { error: 'retry' });
-    }
-    return response(200, { ok: true });
-  }
-  if (url.includes('/stream?')) return response(503, { error: 'disabled' });
-  return response(200, { ok: true });
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared, refuses everything else by status, and records every
+// request it sees; the scenarios read that record.
+const BRIDGE_URL = 'https://initial.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+// A `let` so the runtime observer (OBSERVER = ENVIRONMENT + observer code) can
+// substitute its own plan for a call whose background is a stub; the gate
+// reads plan lazily, and its splice-time contract check only needs a
+// `planned` array, which every plan here carries.
+let plan = ALL_PLANS[scenario] || { planned: [] };
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
+}
+// The gate builds a declared {stream: N} answer through the harness's chunk
+// factory; this is the harness that models the relay's chunked body.
+function chunkedResponse(count) {
+  return streamingResponse(count);
+}
+""" + STRICT_FETCH + r"""
+// The scenarios read the gate's records, not a second fake: a projection of
+// nonStreamFetches into the {kind, url, token, id, error} rows the worker-
+// behaviour assertions consume, and the relay upload bodies they inspect.
+const resultPayloads = resultPosts;
+function bridgeRequests() {
+  return nonStreamFetches.map((record) => {
+    const space = record.request.indexOf(' ');
+    const target = record.request.slice(space + 1);
+    // A relay key is the full URL; a bridge key is the bare path the gate
+    // recorded, so it gets the bridge origin back for the full URL the
+    // worker-behaviour assertions compare.
+    const url = /^https?:\/\//.test(target) ? target : BRIDGE_URL + target;
+    const body = record.body || {};
+    return {
+      kind: url.endsWith('/result') ? 'result'
+        : (url.endsWith('/upload') ? 'upload' : 'request'),
+      url, token: body.token, id: body.id, error: body.error,
+    };
+  });
+}
+function uploadBodies() {
+  return nonStreamFetches
+    .filter((record) => record.request.endsWith(' /upload'))
+    .map((record) => record.body);
 }
 
 let relaySequence = 0;
