@@ -355,5 +355,35 @@ def test_a_name_bound_twice_leaves_an_unbounded_drain_unread(tmp):
 """) == []
 
 
+def test_no_drain_takes_its_own_stop_as_an_argument(tmp):
+    """The declared nested-argument gap is watched, not merely observed.
+
+    The docstring discloses that `proc.communicate(proc.kill())` reads
+    drain-first and is not caught. A disclosure with no control decays into
+    a claim nobody watches, so this fails the moment the shape is written.
+    """
+    del tmp
+    violations = scan._tree_argument_stops(ROOT)
+    assert not violations, '\n'.join(violations)
+
+
+def test_the_nested_argument_tripwire_catches_a_planted_shape(tmp):
+    """The tripwire is load-bearing: planted into a real module, it fires."""
+    root = Path(tmp, 'argument')
+    scan._scratch_git_tree(root)
+    relative = 'tests/test_bridge_startup.py'
+    target = root / relative
+    source = target.read_text(encoding='utf-8')
+    needle = '        proc.terminate()\n        proc.wait(timeout=10)'
+    assert source.count(needle) == 1, relative
+    shaped = ('        proc.communicate(proc.terminate())\n'
+              '        proc.wait(timeout=10)')
+    target.write_text(source.replace(needle, shaped, 1),
+                      encoding='utf-8')
+    found = scan._tree_argument_stops(root)
+    assert any(entry.startswith(relative + ':') for entry in found), (
+        relative, found)
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(dict(locals()))))
