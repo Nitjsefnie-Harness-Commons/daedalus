@@ -290,6 +290,7 @@
 !/tests/_jsroute_sweep_grammar.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_refusal_rows.py
+!/tests/_mcp_code_eval.py
 !/tests/_mcp_guard_floor.py
 !/tests/_mcp_import_closure.py
 !/tests/_mcp_load.py
