@@ -489,6 +489,7 @@
 !/tests/test_static_guard_regressions.py
 !/tests/test_static_routes.py
 !/tests/test_stream_backoff.py
+!/tests/test_stream_fake_oracle.py
 !/tests/test_stream_lifecycle.py
 !/tests/test_stream_registration.py
 !/tests/test_stream_route.py

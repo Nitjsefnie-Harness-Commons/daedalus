@@ -25,11 +25,12 @@ TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
 NEW_TOKEN = 'tok-2'
 NEW_BRIDGE = 'https://other.example.com'
-# The one non-stream request every stream connect and the boot make, and
-# the result a dispatched command posts. Scenarios declare how many of
-# each their recording shows, so an extra or a dropped call is refused.
+# Every stream connect and the boot re-register the tab list, and a
+# dispatched command posts its result. Each scenario declares the count
+# its recording shows, so an extra or dropped call is refused.
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
+TWO = [SYNC, SYNC]
 
 
 _STREAM_HARNESS = r"""
@@ -183,11 +184,9 @@ function streamResponse(answer) {
   return { ok: false, status: answer, body: null };
 }
 
-// A planned request is one the scenario's recorded run declared. The
-// scenario carries its own multiset so a repeated call is planned only as
-// often as the recording shows it happening. A request beyond the declared
-// count is refused with a non-ok status and recorded, so the run's Python
-// assertion and the worker's own outcome both see it.
+// A request is planned only as often as the scenario's recording shows
+// it happening; beyond that it is refused with a non-ok status and
+// recorded. No route is special-cased, so a new one cannot slip through.
 function accountRequest(request) {
   const seen = nonStreamFetches.filter((i) => i.request === request).length;
   const planned = (plan.planned || []).filter((i) => i === request).length;
@@ -219,17 +218,9 @@ async function bridgeFetch(target, init = {}) {
     return streamResponse(next);
   }
   const request = requestKey(url, init);
-  if (/\/(register|sync-tabs|unregister)$/.test(url)) {
-    return accountRequest(request)
-      ? response(599, { ok: false, error: 'unplanned request' })
-      : response(200, { ok: true });
-  }
   if (url.endsWith('/result') && init.method === 'POST') {
     const payload = JSON.parse(init.body);
     resultPosts.push({ did: payload._did || null });
-    return accountRequest('POST /result')
-      ? response(599, { ok: false, error: 'unplanned request' })
-      : response(200, { ok: true });
   }
   return accountRequest(request)
     ? response(599, { ok: false, error: 'unplanned request' })
@@ -344,6 +335,10 @@ async function settle() {
 
 async function nextRetryDelay(fetchCount) {
   await waitFor(() => streamFetches.length >= fetchCount, 'stream fetch');
+  return nextRetryTimer();
+}
+
+async function nextRetryTimer() {
   await waitFor(() => timeoutTimers.length > 0, 'retry timer');
   const timer = timeoutTimers.shift();
   timer.callback();
@@ -352,7 +347,7 @@ async function nextRetryDelay(fetchCount) {
 
 async function run() {
   // The fake-probe drives bridgeFetch directly; loading the worker would
-  // only spend the plan's allowance on the worker's own boot request.
+  // only spend the plan's allowance on its boot request.
   if (plan.scenario !== 'fake-probe') {
     vm.runInContext(
       fs.readFileSync(backgroundPath, 'utf8'), context,
@@ -360,15 +355,10 @@ async function run() {
   }
   await settle();
   const outcome = {};
-  if (plan.scenario === 'backoff') {
+  if (plan.scenario === 'backoff' || plan.scenario === 'reset') {
+    const rounds = plan.scenario === 'backoff' ? 7 : 3;
     const delays = [];
-    for (let round = 1; round <= 7; round++) {
-      delays.push(await nextRetryDelay(round));
-    }
-    outcome.delays = delays;
-  } else if (plan.scenario === 'reset') {
-    const delays = [];
-    for (let round = 1; round <= 3; round++) {
+    for (let round = 1; round <= rounds; round++) {
       delays.push(await nextRetryDelay(round));
     }
     outcome.delays = delays;
@@ -420,26 +410,15 @@ async function run() {
     outcome.scheduled = timeoutTimers.map((item) => item.delay);
   } else if (plan.scenario === 'killed') {
     const delays = [];
-    await waitFor(() => timeoutTimers.length > 0, 'eof timer');
-    let timer = timeoutTimers.shift();
-    delays.push(timer.delay);
-    timer.callback();
+    delays.push(await nextRetryTimer());
     await waitFor(() => streamFetches.length >= 2, 'killed fetch');
-    await waitFor(() => timeoutTimers.length > 0, 'kill retry');
-    timer = timeoutTimers.shift();
-    delays.push(timer.delay);
-    timer.callback();
+    delays.push(await nextRetryTimer());
     await waitFor(() => streamFetches.length >= 3, 'killed fetch two');
-    await waitFor(() => timeoutTimers.length > 0, 'kill retry two');
-    timer = timeoutTimers.shift();
-    delays.push(timer.delay);
+    delays.push(await nextRetryTimer());
     outcome.delays = delays;
   } else if (plan.scenario === 'eof-data') {
     const delays = [];
-    await waitFor(() => timeoutTimers.length > 0, 'eof timer');
-    let timer = timeoutTimers.shift();
-    delays.push(timer.delay);
-    timer.callback();
+    delays.push(await nextRetryTimer());
     await waitFor(() => streamFetches.length >= 2, 'next fetch');
     await waitFor(() => timeoutTimers.length > 0, 'next retry');
     delays.push(timeoutTimers[0].delay);
@@ -447,21 +426,17 @@ async function run() {
   } else if (plan.scenario === 'unreachable') {
     const delays = [];
     for (let round = 0; round < 6; round++) {
-      await waitFor(() => timeoutTimers.length > 0, 'retry timer');
-      const timer = timeoutTimers.shift();
-      delays.push(timer.delay);
-      timer.callback();
+      delays.push(await nextRetryTimer());
     }
     outcome.delays = delays;
   } else if (plan.scenario === 'ledger-window') {
     if (plan.trigger === 'connect') {
-      for (const listener of connectListeners) {
-        listener({
-          name: 'keepalive',
-          onMessage: eventTarget(),
-          onDisconnect: eventTarget(),
-        });
-      }
+      const port = {
+        name: 'keepalive',
+        onMessage: eventTarget(),
+        onDisconnect: eventTarget(),
+      };
+      for (const listener of connectListeners) listener(port);
     }
     if (plan.trigger === 'alarm') {
       for (const listener of alarmListeners) {
@@ -491,15 +466,11 @@ async function run() {
     await settle();
     outcome.fetches = streamFetches.length;
   } else if (plan.scenario === 'fake-probe') {
-    // Pins the fake itself: a planned route answers 200, an unplanned
-    // one answers 599 and both are recorded — without a worker path in
-    // between, so what is refused is the fake's own decision.
-    const planned = await bridgeFetch(
-      BRIDGE_URL + plan.plannedRoute, { method: 'POST' });
-    const unplanned = await bridgeFetch(
-      BRIDGE_URL + plan.unplannedRoute, { method: 'POST' });
-    outcome.plannedStatus = planned.status;
-    outcome.unplannedStatus = unplanned.status;
+    // Pins the fake itself, with no worker path in between, so what is
+    // refused is the fake's own decision.
+    const post = (route) => bridgeFetch(BRIDGE_URL + route, { method: 'POST' });
+    outcome.plannedStatus = (await post(plan.plannedRoute)).status;
+    outcome.unplannedStatus = (await post(plan.unplannedRoute)).status;
   }
   outcome.answered = streamFetches.map((item) => item.answered);
   outcome.nonStream = nonStreamFetches.map((item) => item.request);
@@ -516,14 +487,8 @@ run().then((result) => {
 """
 
 
-def _run(plan):
-    """Drive the worker under Node with one plan and read back.
-
-    The oracle is two-sided: the fake refuses any non-stream request the
-    plan did not declare (a 599 that the worker sees and the recording
-    keeps), and this compares the observed sequence with the declaration
-    so a scenario that stops making a planned request is also caught.
-    """
+def _drive(plan):
+    """Run the harness under Node with one plan and return its outcome."""
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'
     result = run_node_program(
@@ -531,7 +496,17 @@ def _run(plan):
         cwd=ROOT, payload=plan)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
-    outcome = json.loads(result.stdout)
+    return json.loads(result.stdout)
+
+
+def _run(plan):
+    """Drive the worker under Node with one plan and read back.
+
+    The oracle is two-sided: the fake refuses any non-stream request the
+    plan did not declare, and this also requires the observed sequence to
+    match the declaration, so a dropped planned request is caught too.
+    """
+    outcome = _drive(plan)
     assert outcome['refused'] == [], (
         'unplanned bridge request(s) the scenario did not declare:',
         outcome['refused'], outcome)
@@ -551,7 +526,7 @@ def test_consecutive_refusals_back_off_exponentially(tmp):
 def test_a_connected_stream_resets_the_backoff(tmp):
     del tmp
     outcome = _run({'scenario': 'reset', 'statuses': [503, 'ok', 503],
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['delays'] == [1000, 1000, 1000], outcome
 
 
@@ -560,7 +535,7 @@ def test_an_auth_refusal_stops_the_reconnect(tmp):
     del tmp
     for status in (401, 400):
         outcome = _run({'scenario': 'stop', 'statuses': [status],
-                        'planned': [SYNC, SYNC]})
+                        'planned': TWO})
         assert outcome['answered'] == [status], (status, outcome)
         assert outcome['fetches'] == 1, (status, outcome)
         assert outcome['pendingTimers'] == 0, (status, outcome)
@@ -572,7 +547,7 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
     del tmp
     for status in (401, 400):
         outcome = _run({'scenario': 'stop', 'statuses': [status],
-                        'planned': [SYNC, SYNC]})
+                        'planned': TWO})
         assert outcome['intervals'] == [
             {'delay': 20000, 'cleared': False},
             {'delay': 5000, 'cleared': True}], (status, outcome)
@@ -582,7 +557,7 @@ def test_a_silent_stream_reconnects_through_the_backoff(tmp):
     """The watchdog counts as a failed attempt, not a free reconnect."""
     del tmp
     outcome = _run({'scenario': 'watchdog', 'statuses': ['silent'],
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['fetchesAfterWatchdog'] == 0, outcome
     assert outcome['scheduled'] == [1000], outcome
 
@@ -592,7 +567,7 @@ def test_a_killed_connection_counts_toward_the_backoff(tmp):
     del tmp
     outcome = _run(
         {'scenario': 'killed', 'statuses': ['ok', 'kill', 'kill'],
-         'planned': [SYNC, SYNC, SYNC, SYNC]})
+         'planned': [SYNC] * 4})
     assert outcome['delays'] == [1000, 2000, 2000], outcome
 
 
@@ -600,7 +575,7 @@ def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
     """A good connection keeps its EOF retry at the flat 1 s scale."""
     del tmp
     outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503],
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['delays'] == [1000, 1000], outcome
 
 
@@ -617,7 +592,7 @@ def test_a_new_token_resumes_connecting(tmp):
     del tmp
     outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
                     'field': 'daedalus-token', 'value': NEW_TOKEN,
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
@@ -628,7 +603,7 @@ def test_a_new_bridge_url_resumes_connecting(tmp):
     del tmp
     outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
                     'field': 'daedalus-server', 'value': NEW_BRIDGE,
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -641,7 +616,7 @@ def test_a_connected_stream_reopens_the_stopped_pair(tmp):
     outcome = _run({'scenario': 'reopen',
                     'statuses': [401, 'ok', 503],
                     'changes': [NEW_TOKEN, TOKEN],
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok', 503], outcome
     assert outcome['returnedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -654,7 +629,7 @@ def test_a_keepalive_connect_during_the_ledger_read_starts_no_stream(tmp):
     del tmp
     outcome = _run({'scenario': 'ledger-window', 'trigger': 'connect',
                     'holdLedger': True, 'statuses': ['silent'],
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
 
@@ -689,7 +664,7 @@ def test_a_failed_ledger_read_still_opens_the_stream(tmp):
     boot start must go through."""
     del tmp
     outcome = _run({'scenario': 'boot-ledger', 'failLedger': True,
-                    'statuses': ['silent'], 'planned': [SYNC, SYNC]})
+                    'statuses': ['silent'], 'planned': TWO})
     assert outcome['fetches'] == 1, outcome
 
 
@@ -698,7 +673,7 @@ def test_a_worker_without_a_stored_ledger_still_opens_the_stream(tmp):
     once the read has answered empty, and never lock the stream out."""
     del tmp
     outcome = _run({'scenario': 'boot-ledger', 'noLedger': True,
-                    'statuses': ['silent'], 'planned': [SYNC, SYNC]})
+                    'statuses': ['silent'], 'planned': TWO})
     assert outcome['fetches'] == 1, outcome
 
 
@@ -709,29 +684,10 @@ def test_a_post_boot_token_change_still_reconnects_after_the_gate(tmp):
     outcome = _run({'scenario': 'ledger-window', 'trigger': 'token-change',
                     'holdLedger': True, 'statuses': ['silent'],
                     'field': 'daedalus-token', 'value': NEW_TOKEN,
-                    'planned': [SYNC, SYNC]})
+                    'planned': TWO})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
-
-
-def test_the_fake_refuses_an_unplanned_request(tmp):
-    """The fake's own oracle: a planned route answers 200, an unplanned
-    route answers 599, and both land in the recording."""
-    del tmp
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    result = run_node_program(
-        node, _STREAM_HARNESS, [str(EXTENSION_ROOT / 'background.js')],
-        cwd=ROOT,
-        payload={'scenario': 'fake-probe', 'planned': [SYNC],
-                 'plannedRoute': '/sync-tabs', 'unplannedRoute': '/tabs'})
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    outcome = json.loads(result.stdout)
-    assert outcome['plannedStatus'] == 200, outcome
-    assert outcome['unplannedStatus'] == 599, outcome
-    assert outcome['refused'] == ['POST /tabs'], outcome
 
 
 def main():
