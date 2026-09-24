@@ -27,11 +27,18 @@ always runs the tests it brings with it.
   requirements-test.txt     the tools the gates install and run
 
 A file the branch carries itself is deliberately NOT here; see
-CARRIED_BY_THE_BRANCH below. The set is derived, not trusted: the suite reads
-every `.github/workflows/*.yml` and requires every tracked file those
-workflows execute or pass to a tool to be listed here (or declared
+CARRIED_BY_THE_BRANCH below.
+
+The set is derived only as far as a workflow NAMES a file: the suite reads
+every `.github/workflows/*.yml` and requires every tracked file a workflow
+invokes by path or passes to a tool to be listed here (or declared
 carried-by-the-branch), so a gate file added to a workflow later fails the
-suite.
+suite. The REACH LIMIT is real and stated: `pyrightconfig.json`,
+`pyrightconfig.tests.json`, `setup.cfg`, `eslint.config.js` and
+`pyproject.toml` are read by tool DISCOVERY (a bare `pyright` / `eslint` /
+`pycodestyle` invocation, or a heredoc), never named, so the derivation cannot
+see them; those five are hand-held by the table above, each with its reason. A
+`python3 -m module` invocation is likewise not seen.
 
 THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
 The gate commit is an ancestor of the head IFF the merge base equals the gate
@@ -50,9 +57,11 @@ rest. All print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
 commits, one compare, plus one head revalidation, one check-runs listing, a
-second head revalidation, and one write: G + 4. The run refuses LOUDLY --
-publishing nothing, exiting nonzero -- if the worst case exceeds the call
-budget, rather than truncating the head set, which is the silent-pass shape.
+second head revalidation, and one write: G + PER_HEAD_OVERHEAD. The run refuses
+LOUDLY -- publishing nothing, exiting nonzero -- if the worst case exceeds the
+call budget, rather than truncating the head set, which is the silent-pass
+shape. The budget is a CALL count; the workflow's timeout is sized against it
+at ASSUMED_SECONDS_PER_CALL (below), and a test pins that relation.
 """
 import json
 import os
@@ -100,6 +109,13 @@ _HEX40 = frozenset('0123456789abcdef')
 PER_HEAD_OVERHEAD = 4
 
 DEFAULT_CALL_BUDGET = 1200
+
+# The per-call rate the workflow's timeout is sized against. Measured live:
+# the dry run averaged ~1.2 s per `gh api` call (195 s over ~163 calls). 1.5 s
+# is the conservative figure the timeout must clear: budget * this / 60 is the
+# minutes the worst case needs, and the workflow's timeout-minutes must exceed
+# it. A bound with no assumed rate is not a bound.
+ASSUMED_SECONDS_PER_CALL = 1.5
 
 
 class QueryError(RuntimeError):
@@ -149,6 +165,12 @@ def _one(read, argv):
         raise QueryError(f'unparseable gh output: {error}') from error
 
 
+def _api(url, *extra):
+    """The one `gh api` call shape. Every read routes through here so the
+    `Cache-Control: no-cache` convention has a single site to hold."""
+    return ['gh', 'api', '-H', 'Cache-Control: no-cache', url, *extra]
+
+
 def enumerate_gates(read, repository):
     """The newest commit on `main` touching each gate path, as (path, sha).
 
@@ -161,10 +183,9 @@ def enumerate_gates(read, repository):
     gates = []
     for pattern in GATE_PATTERNS:
         try:
-            payload = _one(read, [
-                'gh', 'api', '-H', 'Cache-Control: no-cache',
+            payload = _one(read, _api(
                 f'repos/{repository}/commits?sha={BASE_BRANCH}&per_page=1'
-                f'&path={quote(pattern, safe="/.*")}'])
+                f'&path={quote(pattern, safe="/.*")}'))
         except QueryError:
             return None
         if not isinstance(payload, list):
@@ -189,8 +210,7 @@ def merge_base(read, repository, gate, head):
     """
     target = f'repos/{repository}/compare/{gate}...{head["sha"]}'
     try:
-        payload = _one(read, [
-            'gh', 'api', '-H', 'Cache-Control: no-cache', target])
+        payload = _one(read, _api(target))
     except QueryError as error:
         return None, [(target, f'failed: {error}')]
     sha = None
@@ -244,9 +264,7 @@ def head_verdict(read, repository, head, gates):
 def current_head(read, repository, number):
     """The pull request's current head sha, or None if it cannot be read."""
     try:
-        payload = _one(read, [
-            'gh', 'api', '-H', 'Cache-Control: no-cache',
-            f'repos/{repository}/pulls/{number}'])
+        payload = _one(read, _api(f'repos/{repository}/pulls/{number}'))
     except QueryError:
         return None
     head = payload.get('head') if isinstance(payload, dict) else None
@@ -256,15 +274,13 @@ def current_head(read, repository, number):
 
 def _existing_check_ids(read, repository, head_sha):
     """The ids of this check already on `head_sha`, filtered server-side."""
-    listing = [
-        'gh', 'api', '--method', 'GET', '-H', 'Cache-Control: no-cache',
-        '--paginate',
+    listing = _api(
         f'repos/{repository}/commits/{head_sha}/check-runs'
         f'?filter=all&per_page=100',
-        '--jq', (f'.check_runs[] | select(.name == "{NAME}" and '
-                 f'.external_id == "{EXTERNAL_ID}" and '
-                 f'.app.slug == "{APP_SLUG}") | .id'),
-    ]
+        '--method', 'GET', '--paginate', '--jq',
+        (f'.check_runs[] | select(.name == "{NAME}" and '
+         f'.external_id == "{EXTERNAL_ID}" and '
+         f'.app.slug == "{APP_SLUG}") | .id'))
     try:
         raw = read(listing)
     except QueryError:
@@ -299,11 +315,11 @@ def publish(read, repository, head_sha, conclusion, title, summary,
     ]
     if ids:
         for check_id in ids:
-            read(['gh', 'api', '-X', 'PATCH',
-                  f'repos/{repository}/check-runs/{check_id}'] + fields)
+            read(_api(f'repos/{repository}/check-runs/{check_id}',
+                      '-X', 'PATCH', *fields))
     else:
-        read(['gh', 'api', '-X', 'POST', f'repos/{repository}/check-runs',
-              '-f', f'head_sha={head_sha}'] + fields)
+        read(_api(f'repos/{repository}/check-runs', '-X', 'POST',
+                  '-f', f'head_sha={head_sha}', *fields))
 
 
 def _pr_head(pr):
@@ -416,10 +432,9 @@ def _event():
 
 
 def _open_pulls(read, repository):
-    return _one(read, [
-        'gh', 'api', '-H', 'Cache-Control: no-cache', '--paginate',
+    return _one(read, _api(
         f'repos/{repository}/pulls?state=open&base={BASE_BRANCH}'
-        f'&per_page=100'])
+        f'&per_page=100', '--paginate'))
 
 
 def main(argv=None, read=None):
@@ -439,7 +454,14 @@ def main(argv=None, read=None):
             print('gate freshness: could not read the open pull request list; '
                   f'publishing nothing: {error}', file=sys.stderr)
             return 1
-        heads = select_heads(pulls if isinstance(pulls, list) else [])
+        if not isinstance(pulls, list):
+            # A non-list answer at HTTP 200 (an error object) is not "no open
+            # pull requests": it publishes zero verdicts and exits 0, which is
+            # the silent-pass shape. Refuse, as enumerate_gates refuses.
+            print('gate freshness: the open pull request list did not decode '
+                  'as a list; publishing nothing', file=sys.stderr)
+            return 1
+        heads = select_heads(pulls)
     gates = enumerate_gates(read, repository)
     if gates is None:
         print('gate freshness: could not read a gate commit on main; '
