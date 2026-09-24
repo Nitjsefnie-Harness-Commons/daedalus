@@ -95,7 +95,18 @@ function dispatchCommand(receivedCommand) {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'daedalus-heartbeat') {
     // Ensure config is loaded (race: alarm can fire before loadConfig resolves on worker restart)
-    if (!config.token) await loadConfig();
+    if (!config.token) {
+      try {
+        await loadConfig();
+      } catch (err) {
+        // Chrome discards what an onAlarm listener returns, so a rejection
+        // here escapes unhandled: report it and skip the tick. The next tick
+        // retries, and the memo already cleared.
+        console.warn('[Daedalus] heartbeat config read failed; '
+          + 'next tick will retry', err);
+        return;
+      }
+    }
     ensureKeepAlive();
     registerAllTabs();
     // Restart stream if dead

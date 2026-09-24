@@ -50,6 +50,8 @@ let tokenWrites = 0;
 let uuidCalls = 0;
 const mintedTokens = [];
 const createdAlarms = [];
+const warnings = [];
+const keepAliveArms = [];
 
 // Settle boot's held config read with a FRESH-INSTALL result: no
 // 'daedalus-token' key, so config.js's `|| ''` leaves config.token empty and
@@ -103,7 +105,8 @@ const chrome = {
           if (plan.holdConfig && !configHold) {
             return new Promise((resolve) => { configHold = { resolve }; });
           }
-          if (plan.failConfigFirst && configGets === 1) {
+          if (plan.failConfigAlways
+            || (plan.failConfigFirst && configGets === 1)) {
             throw new Error('config read failed');
           }
         }
@@ -170,9 +173,10 @@ const context = vm.createContext({
   btoa,
   setTimeout: (cb) => { setImmediate(cb); return 0; },
   clearTimeout() {},
-  setInterval: () => 0,
+  setInterval: (cb, ms) => { keepAliveArms.push(ms); return 0; },
   clearInterval() {},
-  console: { log() {}, warn() {}, error() {} },
+  console: { log() {}, warn(...args) { warnings.push(String(args[0])); },
+    error() {} },
 });
 """ + import_scripts_stub('context') + r"""
 
@@ -225,6 +229,22 @@ async function run() {
     outcome.tokenWrites = tokenWrites;
     outcome.finalToken = vm.runInContext('config.token', context);
     outcome.createdAlarms = createdAlarms.slice();
+  } else if (plan.scenario === 'heartbeat-failed-read') {
+    // Boot's read failed and its finally armed the alarm, so a restart tick
+    // reaches the listener with no token and the memo cleared: the listener's
+    // own loadConfig starts a fresh generation, which fails too
+    // (failConfigAlways). Chrome discards what an onAlarm listener returns, so
+    // nothing downstream of the await can handle that rejection.
+    for (const listener of alarmListeners) {
+      listener({ name: 'daedalus-heartbeat' });
+    }
+    await settle();
+    outcome.configGets = configGets;
+    outcome.uuidCalls = uuidCalls;
+    outcome.createdAlarms = createdAlarms.slice();
+    outcome.keepAliveArms = keepAliveArms.slice();
+    outcome.warnings = warnings.slice();
+    outcome.finalToken = vm.runInContext('config.token', context);
   }
   return outcome;
 }
@@ -309,6 +329,40 @@ def test_a_failed_boot_config_read_still_arms_the_heartbeat(tmp):
                     'noToken': True})
     assert outcome['createdAlarms'] == [
         {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
+
+
+def test_a_failed_heartbeat_config_read_is_reported_and_skips_the_tick(tmp):
+    """The heartbeat's config read must not escape the alarm listener.
+
+    Boot's read failed and its finally armed the alarm, so a restart tick
+    reaches the listener with no token and a cleared memo: the listener's own
+    loadConfig starts a fresh generation, which fails too. Chrome discards
+    what an onAlarm listener returns, so an unhandled rejection here abandons
+    the tick and surfaces only as service-worker console noise. The failure
+    must be reported once and the tick skipped; the next tick retries, which
+    it already does.
+    """
+    del tmp
+    outcome = _run({'scenario': 'heartbeat-failed-read',
+                    'failConfigFirst': True, 'failConfigAlways': True})
+    # The listener ran its OWN generation: boot's failed read (1) plus the
+    # heartbeat's fresh read (2). A failed read never reaches the token
+    # branch, so nothing was minted and no credential was written.
+    assert outcome['configGets'] == 2, outcome
+    assert outcome['uuidCalls'] == 0, outcome
+    assert outcome['finalToken'] == '', outcome
+    # The tick was skipped: the only alarm is boot's. An empty keep-alive list
+    # is the one assertion here that could read as vacuous, so it is the one
+    # with a recorded mutant behind it — a catch that falls through instead of
+    # returning arms it, and the mutant fails.
+    assert outcome['createdAlarms'] == [
+        {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
+    assert outcome['keepAliveArms'] == [], outcome
+    # Reported once per failed read: boot's and the heartbeat's, one line each.
+    assert outcome['warnings'] == [
+        '[Daedalus] boot config read failed; heartbeat will retry',
+        '[Daedalus] heartbeat config read failed; next tick will retry',
+    ], outcome
 
 
 def main():
