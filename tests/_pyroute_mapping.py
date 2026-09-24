@@ -207,7 +207,6 @@ def _dict_call_value(node, state):
     return DeferredContainer(items, len(node.keywords), 'dict', node)
 
 
-
 def _setdefault_value(node, state):
     """The stored-or-existing item one setdefault call evaluates to."""
     owner = _known_value(node.func.value, state)
