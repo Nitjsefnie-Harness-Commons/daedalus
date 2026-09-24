@@ -80,25 +80,30 @@ def test_two_sites_spelling_one_condition_are_refused(_tmp):
 
 SHARED_PREDICATE_SHAPES = '''
 def twin(value):
-    while value:
-        raise ValueError('neg')
-        raise RuntimeError('pos')
+    if value is not None:
+        try:
+            return int(value)
+        except ValueError:
+            raise
+        raise RuntimeError('unreachable')
 '''
 
 
 def test_two_sites_under_one_predicate_name_a_remedy_that_moves_the_key(_tmp):
     """Two sites the predicate keys name the remedy the predicate can take.
 
-    The two raises already carry different messages, so the remedy a text
-    key answers with cannot restore this one: the key is the `while`'s test,
-    and only a condition of its own for the second raise moves it. A bare
-    re-raise makes the same point — it cannot be given a message at all.
+    The bare re-raise carries no message of its own, so a text key could only
+    be restored by distinct messages, which it cannot be given; keyed on the
+    `if`, the remedy is a predicate of its own. The refusal fires only while
+    the bare re-raise takes that key, so this dies with that clause.
     """
     try:
         _mcp_guard_floor.guard_shape_probe(
             _tmp, SHARED_PREDICATE_SHAPES, 'shared_predicate_shapes')
     except AssertionError as raised:
         assert 'shared_predicate_shapes.twin' in str(raised), raised
+        assert "controlling predicate 'value is not None'" in str(raised), (
+            raised)
         assert 'one raise per condition' in str(raised), raised
         assert 'distinct messages' not in str(raised), raised
     else:
@@ -269,11 +274,11 @@ def test_a_construct_the_walk_does_not_classify_is_refused(_tmp):
 
 
 def test_an_or_in_a_negated_test_still_refuses(_tmp):
-    """A `while` else is decided by the test the key negates.
+    """Each loop shape records the test it read, and the else reads it whole.
 
-    The key reads `not (test)`, so an `or` read from the negation alone is
-    not the one that decides anything; the test carries it, and the refusal
-    has to name the test for the author to act on it.
+    The `while` else is decided by the test its key negates, so the `or` the
+    refusal names is the test's; the constant test beside it keys on `True`
+    and carries no `or`.
     """
     sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
     looped = {key: or_test for (_file, _line), (key, or_test)
@@ -284,6 +289,7 @@ def test_an_or_in_a_negated_test_still_refuses(_tmp):
             'value > 10 or value < -10',
         ('guard_shapes', 'looped', 'not (value < 0 or value > 100)'):
             'value < 0 or value > 100',
+        ('guard_shapes', 'looped', 'True'): '',
     }, looped
 
 
@@ -295,7 +301,7 @@ TRANSPARENT_SOURCES = {
     'AsyncFor': '''
 async def blocked(values):
     if values is None or not values:
-        async for value in values:
+        async for value in values or []:
             raise ValueError('refused')
 ''',
     'AsyncWith': '''
@@ -321,7 +327,7 @@ def blocked(values):
     'For': '''
 def blocked(values):
     if values is None or not values:
-        for value in values:
+        for value in values or []:
             raise ValueError('refused')
 ''',
     'Try': '''
@@ -352,12 +358,11 @@ def blocked(values):
 def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
     """Each entry the walk is transparent through is a control, not a name.
 
-    The construct comes off the node its own parse produced, so the plant
-    cannot miss the statement it means, and the same source is read twice:
-    shipped, where it keys on the surrounding `if`, and with its own entry
-    gone, where the walk can no longer classify it and refuses. An entry no
-    suite observes would leave both reads identical, which is what this
-    refuses.
+    The construct comes off the node its own parse produced, and the same
+    source is read twice: shipped, where the whole site is the surrounding
+    `if`'s — key and `or` test, the loops' iterables carrying an `or` of
+    their own that is not read — and with its own entry gone, where the
+    walk can no longer classify it and refuses.
     """
     for name, source in TRANSPARENT_SOURCES.items():
         path = Path(_tmp) / f'{name.lower()}_shapes.py'
@@ -367,9 +372,10 @@ def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
         cases = tuple(node for node in _mcp_guard_floor.TRANSPARENT_STATEMENTS
                       if node is not construct.__class__)
         assert construct.__class__ not in cases, f'{name}: plant did not apply'
-        assert _mcp_guard_floor.guard_keys(
-            _mcp_guard_floor.tool_guards([path], Path(_tmp))) == [
-                (path.stem, 'blocked', 'values is None or not values')], name
+        assert list(_mcp_guard_floor.tool_guards(
+            [path], Path(_tmp)).values()) == [
+                ((path.stem, 'blocked', 'values is None or not values'),
+                 'values is None or not values')], name
         with mock.patch.object(
                 _mcp_guard_floor, 'TRANSPARENT_STATEMENTS', cases):
             try:
@@ -380,6 +386,22 @@ def test_every_transparent_statement_is_pinned_by_its_own_plant(_tmp):
                 raise AssertionError(
                     f'{name} is transparent by name only: with its entry gone '
                     'the walk still reads it, so nothing observes the entry')
+
+
+def test_a_conjunction_is_one_condition(_tmp):
+    """A test spelled `not (a and b)` decides the raise once, like any other.
+
+    The `or` refusal exists because one witness cannot answer for two
+    conditions; a conjunction is one, so reading it as two would refuse
+    guards the accounting never had trouble with.
+    """
+    sites, _module = _mcp_guard_floor.guard_shape_probe(_tmp)
+    joined = {key: or_test for (_file, _line), (key, or_test)
+              in sites.items() if key[1] == 'joined'}
+
+    assert joined == {
+        ('guard_shapes', 'joined', 'not (first and second)'): '',
+    }, joined
 
 
 TWIN_SHAPES = '''
