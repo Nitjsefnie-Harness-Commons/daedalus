@@ -6,8 +6,7 @@ from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
-                           _literal_value, _unhashable_key_sender,
-                           literal_iterable_cardinality)
+                           _literal_value, _unhashable_key_sender)
 from _pyroute_positions import (alias_target_pairs, at_position,
                                 from_position, sequence_method_value)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
@@ -89,12 +88,8 @@ def _display_value(node, state):
                     items[index] = value
                 index += 1
         elif not isinstance(value, DeferredContainer):
-            count = _literal_count(item.value)
-            if count is None:
-                index = None
-                _fold_dynamic(items, UNPROVABLE_SENDER)
-            elif index is not None:
-                index += count
+            index = None
+            _fold_dynamic(items, UNPROVABLE_SENDER)
         elif value.kind == 'dict':
             # Unpacking a dict yields its keys, never the modelled values.
             index = (None if index is None or value.length is None
@@ -117,15 +112,6 @@ def _display_value(node, state):
     if items or isinstance(node, ast.List) or starred_any:
         return DeferredContainer(items, index, type(node).__name__.lower())
     return None
-
-
-def _literal_count(node):
-    """The exact element count of a string literal or of a display the
-    literal evaluator can count; None for anything else."""
-    if isinstance(node, ast.Constant) and isinstance(
-            node.value, (str, bytes)):
-        return len(node.value)
-    return literal_iterable_cardinality(node)
 
 
 def _fold_dynamic(target, value):
