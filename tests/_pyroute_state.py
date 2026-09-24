@@ -4,8 +4,7 @@ import operator
 from dataclasses import dataclass, field
 
 from _pyroute_live import bind_alias_statement
-from _pyroute_mapping import (alias_target_pairs, apply_assignment_bindings,
-                              store_deferred_target)
+from _pyroute_mapping import alias_target_pairs, store_deferred_target
 from _pyroute_storage import join_clean_occupancy
 from _pyroute_values import (CellState, DeferredGenerator,
                              cell_state_signature, is_clean_container,

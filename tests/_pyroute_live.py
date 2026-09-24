@@ -9,19 +9,30 @@ from _pyroute_values import (UNPROVABLE_SENDER, _known_value,
 _LIVE_UNRESOLVED = object()
 
 
+def _constant_getattr(value, state):
+    """The constant attribute name of a plain getattr call, or None."""
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+            and value.func.id == 'getattr'):
+        return None
+    if value.keywords or len(value.args) not in (2, 3):
+        return None
+    if value.func.id in state.bound or not isinstance(
+            value.args[1], ast.Constant):
+        return None
+    return value.args[1].value if isinstance(value.args[1].value,
+                                             str) else None
+
+
 def seed_selection_value(value, state):
     """Seed the evaluated cache so an unprovable selection never reads
     clean: a constant-name getattr resolves like the attribute it names,
     and a maybe-sender keeps the deferred values it carries."""
     cached = state.evaluated.get(id(value))
-    if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
-            and value.func.id == 'getattr' and value.func.id not in state.bound
-            and not value.keywords and len(value.args) in (2, 3)
-            and isinstance(value.args[1], ast.Constant)
-            and isinstance(value.args[1].value, str)):
+    name = _constant_getattr(value, state)
+    if name is not None:
         owner = _known_value(value.args[0], state)
         selected = merge_yielded(
-            _selected_values(owner, value.args[1].value, attribute=True))
+            _selected_values(owner, name, attribute=True))
         if selected is not None:
             state.evaluated[id(value)] = selected
             cached = selected
