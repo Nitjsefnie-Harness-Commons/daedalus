@@ -361,7 +361,11 @@ def _scan(relative, source, keeps):
 
 
 def _analyze(relative, source, keeps=None):
-    """The module's violations; the memo keys this on content, not path."""
+    """The module's violations; the memo keys on analyser, path and source.
+
+    A mutated copy is keyed on its own content, so it cannot be served the
+    answer for the file it was copied from.
+    """
     return analysed(_scan, relative, source,
                     [] if keeps is None else keeps)
 
@@ -373,6 +377,33 @@ def _python_sources(root):
                   key=lambda path: path.as_posix())
 
 
+def _tree_argument_stops(root):
+    """Drains taking their own receiver's stop as an argument.
+
+    The disclosure above calls this absent and unread; this keeps it so.
+    """
+    found = []
+    for path in _python_sources(root):
+        relative = path.relative_to(root).as_posix()
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=relative)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in _DRAINS):
+                continue
+            receiver = ast.unparse(node.func.value)
+            for argument in (*node.args, *(k.value for k in node.keywords)):
+                for inner in ast.walk(argument):
+                    if (isinstance(inner, ast.Call)
+                            and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr in _STOPS
+                            and ast.unparse(inner.func.value) == receiver):
+                        found.append(f'{relative}:{node.lineno}: '
+                                     f'{ast.unparse(node)} argument-stopped')
+    return found
+
+
 def _tree_violations(root):
     violations = []
     for path in _python_sources(root):
@@ -382,10 +413,9 @@ def _tree_violations(root):
     return violations
 
 
-# Every one of the 20 inline sites on this tree, one row each, as
-# (module, the calls as they stand today, the same calls with the
-# drain's `timeout=` removed). The anchor spans the whole drain call, so
-# a wrapped one is replaced whole rather than leaving a continuation.
+# All 20 inline sites, one row each, as (module, the calls as they stand,
+# the same with the drain's `timeout=` removed). The anchor spans the whole
+# drain call, so a wrapped one is replaced whole.
 _SITES = (
     ('run_tests.py',
      'def _terminate_and_reap(process):\n'
@@ -598,8 +628,8 @@ _SITES = (
 )
 
 
-# A real unbounded drain with no stop before it, as (module, the drain):
-# the control against a scan that reads a drain on its own.
+# A real unbounded drain with no stop before it: the control against a
+# scan that reads a drain on its own, as (module, the drain).
 _UNBOUNDED_WITHOUT_STOP = (
     ('scripts/ci/time_tests.py', 'child.wait()'),
     ('tests/_cdpharness.py', 'proc.communicate()'),
@@ -607,10 +637,9 @@ _UNBOUNDED_WITHOUT_STOP = (
 )
 
 
-# The binding forms that carry an alias without an `=`: a walrus target, a
-# `for` target and a `with ... as` target, planted into a REAL converted site
-# as (form, module, the calls as they stand, the aliased form with the
-# drain's bound removed). The stop is on the alias, the drain on the receiver.
+# The alias-carrying forms without an `=` -- a walrus, a `for` target and a
+# `with ... as` -- planted into a real site as (form, module, calls as they
+# stand, aliased form, bound removed). Stop on the alias, drain on the target.
 #
 # Each site is chosen so the planted drain has exactly ONE stop on that
 # receiver before it -- the one being aliased. A site with an earlier stop
