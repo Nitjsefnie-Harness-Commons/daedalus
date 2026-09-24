@@ -135,6 +135,7 @@ _LITERAL_STARS = {
     'constant_tuple_in_tuple': ('x = (*(1, 2), {})', 2),
     'duplicate_constant_set': ('x = (*{{1, 1.0, True}}, {})', 1),
     'bytes_in_list': ('x = [*b"ab", {}]', 2),
+    'plain_tuple_in_list': ('x = [*(ordinary, ordinary), {}]', 2),
 }
 
 
@@ -245,6 +246,19 @@ def test_star_bytes_in_list_relay_reports(tmp):
 
 def test_star_bytes_in_list_relay_stays_clean(tmp):
     assert _literal(tmp, 'bytes_in_list', 'relay()', '()',
+                    clean=True) == (0, 0)
+
+
+def test_star_plain_tuple_in_list_counts_exactly(tmp):
+    assert _literal(tmp, 'plain_tuple_in_list', 'ordinary', _T) == (0, 0)
+
+
+def test_star_plain_tuple_in_list_relay_reports(tmp):
+    assert _literal(tmp, 'plain_tuple_in_list', 'relay()', '()') == (1, 1)
+
+
+def test_star_plain_tuple_in_list_relay_stays_clean(tmp):
+    assert _literal(tmp, 'plain_tuple_in_list', 'relay()', '()',
                     clean=True) == (0, 0)
 
 
