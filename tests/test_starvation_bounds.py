@@ -313,8 +313,12 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
 # verdict is bound to the operation the harness performs, not to one function
 # name.
 _LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
+# A call that can impose a deadline: a `subprocess` launcher (which takes
+# `timeout=`) or a `Popen` wait method (`communicate`/`wait`, which is how
+# `subprocess.run`'s own timeout is implemented).
 _LAUNCH_ATTRS = frozenset({
     'run', 'Popen', 'call', 'check_call', 'check_output'})
+_DEADLINE_METHODS = frozenset({'communicate', 'wait'})
 
 
 def _launcher_functions(trees):
@@ -327,6 +331,59 @@ def _launcher_functions(trees):
     return functions
 
 
+def _subprocess_aliases(trees):
+    """Names bound to a `subprocess` launcher, so an alias is not a blind spot.
+
+    `from subprocess import run as _r` and `import subprocess as sp` both
+    reach the canonical launchers; the walk resolves them to a fixpoint so an
+    aliased or module-aliased launcher is recognised as deadline-capable rather
+    than treated as an unknown name.
+    """
+    launches = set()
+    modules = set()
+    for tree in trees.values():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == 'subprocess':
+                        modules.add(alias.asname or 'subprocess')
+            elif (isinstance(node, ast.ImportFrom)
+                  and node.module == 'subprocess'):
+                for alias in node.names:
+                    if alias.name in _LAUNCH_ATTRS:
+                        launches.add(alias.asname or alias.name)
+    return launches, modules
+
+
+def _deadline_faults(call, launches, modules):
+    """Why `call` can impose a deadline, or None.
+
+    Refuses a `timeout=` keyword on any deadline-capable call, and refuses a
+    deadline-capable call whose arguments flow through a `**kwargs` spread —
+    that is an unresolvable deadline vector (a launcher aliased and bounded via
+    `k['timeout'] = n`), and a name the walk cannot resolve to the canonical
+    launch is a refusal, not a skip.
+    """
+    func = call.func
+    deadline_capable = False
+    if isinstance(func, ast.Attribute):
+        if func.attr in _DEADLINE_METHODS:
+            deadline_capable = True
+        elif (func.attr in _LAUNCH_ATTRS
+              and isinstance(func.value, ast.Name)
+              and func.value.id in modules):
+            deadline_capable = True
+    elif isinstance(func, ast.Name) and func.id in launches:
+        deadline_capable = True
+    if not deadline_capable:
+        return None
+    if any(k.arg == 'timeout' for k in call.keywords):
+        return 'timeout='
+    if any(k.arg is None for k in call.keywords):
+        return '**kwargs into a deadline-capable call'
+    return None
+
+
 def _harness_launchers(harness_tree, functions):
     """Launcher names a harness actually calls, read off its own call sites."""
     reached = set()
@@ -337,13 +394,13 @@ def _harness_launchers(harness_tree, functions):
     return reached
 
 
-def _bounded_launches(launcher_names, functions):
-    """Launch sites reachable from `launcher_names` that carry a `timeout=`.
+def _bounded_launches(launcher_names, functions, launches, modules):
+    """Deadline faults on any launch reachable from `launcher_names`.
 
     Follows the call graph across the launcher modules, so a bound on any
     function the child's launcher actually reaches is found — not just one
-    spelled in the entry function. An unresolvable name is reported, not
-    skipped.
+    spelled in the entry function. A name the walk cannot resolve to a
+    function is reported, not skipped.
     """
     found = []
     seen = set()
@@ -360,27 +417,28 @@ def _bounded_launches(launcher_names, functions):
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
                 continue
-            if (isinstance(node.func, ast.Attribute)
-                    and node.func.attr in _LAUNCH_ATTRS
-                    and any(k.arg == 'timeout' for k in node.keywords)):
-                found.append((name, node.lineno))
+            fault = _deadline_faults(node, launches, modules)
+            if fault is not None:
+                found.append((name, node.lineno, fault))
             if isinstance(node.func, ast.Name) and node.func.id in functions:
                 work.append(node.func.id)
     return found
 
 
 def test_the_harness_children_run_without_a_wall_timeout(tmp):
-    """The Surface D runners launch their children with no timeout=.
+    """The Surface D runners launch their children with no wall bound.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. The question is bound to the
-    operation, not to a function name: from each harness's own call sites the
-    guard resolves which launcher the child is actually launched through, then
-    follows that launcher's call graph across `_stream_fake.py` and
-    `_noderun.py` and refuses any launch on the path that carries a `timeout=`.
-    A harness that swapped `run_inline_gate` for `run_gate`, or that reached a
-    bounded helper, is caught by this path, not by an enumeration of names. An
-    unresolvable launcher is a violation, not a skip.
+    starvation rejection this branch removes. The question is semantic — "can
+    anything on this path impose a deadline" — not an enumeration of names:
+    from each harness's own call sites the guard resolves which launcher the
+    child is launched through, follows that launcher's call graph across
+    `_stream_fake.py` and `_noderun.py`, resolves imported launch aliases to
+    the canonical `subprocess` launchers, and refuses any deadline-capable
+    call on the path that carries a `timeout=` keyword or routes its arguments
+    through a `**kwargs` spread it cannot resolve. `communicate(timeout=)` /
+    `wait(timeout=)` and an aliased-and-bounded launcher are therefore caught;
+    a legitimate launcher that carries neither resolves and passes.
 
     Named blind spot: a wall bound written in the harness's own JavaScript —
     inside a spliced program string — is invisible here, because this guard
@@ -394,6 +452,7 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     trees = {name: ast.parse((tests_dir / name).read_text(encoding='utf-8'))
              for name in _LAUNCHER_MODULES}
     functions = _launcher_functions(trees)
+    launches, modules = _subprocess_aliases(trees)
     for name in ('_relayharness.py', '_cdpharness.py'):
         tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
         # A Python-level `timeout=` anywhere in the harness is refused.
@@ -402,7 +461,7 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
         assert not sites, (name, sites)
         launchers = _harness_launchers(tree, functions)
         assert launchers, (name, 'no launcher call resolved from the harness')
-        bounded = _bounded_launches(launchers, functions)
+        bounded = _bounded_launches(launchers, functions, launches, modules)
         assert not bounded, (name, sorted(launchers), bounded)
 
 
