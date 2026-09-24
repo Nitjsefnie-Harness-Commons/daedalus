@@ -205,6 +205,33 @@ def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
     assert 'open pull request list' in err, err
 
 
+def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
+    """A non-list `/pulls` answer at HTTP 200 is a GLOBAL failure, not "none".
+
+    This is the SHIPPED live bug, distinct from the QueryError limb: an error
+    OBJECT returned with status 200 is not an unreadable call, so the read
+    succeeds and the payload alone is malformed. Answering optimistically
+    published 0 verdicts and exited 0. The fake returns a dict for the open-PR
+    list and answers every other read normally, so this entry is satisfied by
+    the non-list branch alone.
+    """
+    m = _mod()
+    published = []
+
+    def read(argv):
+        target = next(t for t in argv if t.startswith('repos/'))
+        if '/pulls?state=open' in target:
+            return _encode({'message': 'API rate limit exceeded'})
+        if 'POST' in argv or 'PATCH' in argv:
+            published.append(target)
+            return '{}'
+        return _flow_read(m, {}, {}, published)(argv)
+    code, err = _run_main(tmp, m, read, {})
+    assert code == 1, code
+    assert 'open pull request list' in err, err
+    assert published == [], 'a non-list payload published a verdict'
+
+
 def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
     """A GLOBAL failure on the gate lookup publishes NOTHING and exits 1.
 
