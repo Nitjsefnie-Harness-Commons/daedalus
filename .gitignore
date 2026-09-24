@@ -293,6 +293,7 @@
 !/tests/_jsroute_state.py
 !/tests/_jsroute_sweep.py
 !/tests/_jsroute_sweep_grammar.py
+!/tests/_jsroute_tab.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mcp_code_eval.py
@@ -521,6 +522,7 @@
 !/tests/test_tab_routing_js_bodies.py
 !/tests/test_tab_routing_js_closure.py
 !/tests/test_tab_routing_js_heads.py
+!/tests/test_tab_routing_js_keys.py
 !/tests/test_tab_routing_js_net.py
 !/tests/test_tab_routing_js_operations.py
 !/tests/test_tab_routing_js_reach.py
