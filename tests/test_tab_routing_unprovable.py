@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """An unprovable sender alias is reported through an opaque `**spread`."""
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute import py_tab_routing_violations  # noqa: E402
+from _pyroute_live import seed_selection_value  # noqa: E402
+from _pyroute_state import FlowState  # noqa: E402
+from _pyroute_values import UNPROVABLE_SENDER  # noqa: E402
 from test_tab_routing import (  # noqa: E402
     _assert_focus_cases, _tracked_focus_verdict)
 
@@ -604,6 +608,19 @@ def test_module_container_exposure_matches_runtime(tmp):
          '', False),
     ]
     _assert_export_cases(tmp, cases)
+
+
+def test_starred_operand_unprovable_seeds_unprovable_sender(tmp):
+    # The unprovable marker is silent at the (runtime, guard) verdict, so no
+    # selection row can observe it: it is asserted at the model boundary
+    # instead. A getattr whose starred operand expands to no provable element
+    # list must seed UNPROVABLE_SENDER, so a fail-open expansion that
+    # contributed one empty slot could not read the selection clean.
+    call = ast.parse('getattr(h, "missing", *build())').body[0].value
+    state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    seed_selection_value(call, state)
+    assert state.evaluated.get(id(call)) == UNPROVABLE_SENDER, (
+        state.evaluated.get(id(call)))
 
 
 def main():
