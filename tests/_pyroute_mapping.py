@@ -4,7 +4,8 @@ import ast
 import operator
 
 from _pyroute_storage import replace_deferred_storage
-from _pyroute_containers import ordered_container
+from _pyroute_containers import (SpreadContainer, iterated_key,
+                                ordered_container)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -414,14 +415,18 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             node, state.aliases)
     if isinstance(node, (ast.ListComp, ast.SetComp)):
         value = state.evaluated.get(id(node.elt))
-        if is_deferred_value(value):
-            return DeferredContainer(
-                {0: value}, 1, type(node).__name__[:-4].lower())
+        iterated = state.evaluated.get(iterated_key(node))
+        if is_deferred_value(value) or iterated is not None:
+            return SpreadContainer(
+                {0: value}, 1, type(node).__name__[:-4].lower(),
+                iterated=iterated)
     if isinstance(node, ast.DictComp):
         value = state.evaluated.get(id(node.value))
-        if is_deferred_value(value) or sender_value(value) is not None:
-            return DeferredContainer(
-                {DYNAMIC_KEY: value}, None, 'dict', node)
+        iterated = state.evaluated.get(iterated_key(node))
+        if (is_deferred_value(value) or sender_value(value) is not None
+                or iterated is not None):
+            return SpreadContainer(
+                {DYNAMIC_KEY: value}, None, 'dict', node, iterated=iterated)
     if isinstance(node, ast.Subscript):
         owner = _known_value(node.value, state)
         if isinstance(node.slice, ast.Slice):
