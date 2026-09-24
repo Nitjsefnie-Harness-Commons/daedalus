@@ -352,7 +352,7 @@ _POP_DIRECTION = [
     ('known-defect-1018-rebind-to-concat-name', _flow(
         _RELAY, 'k = "k"; j = "k" + ""; k = j', _STRING_D, 'd.pop(k, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
-    ('known-defect-1018-pop-concat', _flow(
+    ('known-defect-1018-rebind-to-concat', _flow(
         _RELAY, 'k = "k"; k = "k" + ""', _STRING_D, 'd.pop(k, None)',
         invoke='d.get("k", ordinary)()'), (0, 1)),
 ]
