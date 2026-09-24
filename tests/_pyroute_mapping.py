@@ -441,8 +441,10 @@ def _literal_pair_items(source, state):
 
     The deferred container for a literal list carries the display length but
     not its items, so occupancy is recovered from the source text; every
-    entry the pair loop folded is left as it found it. A pair value that is
-    an unresolvable call is stored unprovable, as a keyword store does.
+    entry the pair loop folded is left as it found it, and a key the shared
+    resolver folds is stored under that key the way every other store
+    writes one. A pair value that is an unresolvable call is stored
+    unprovable, as a keyword store does.
     """
     if not isinstance(source, (ast.List, ast.Tuple, ast.Set)):
         return {}
@@ -451,13 +453,13 @@ def _literal_pair_items(source, state):
         if not isinstance(pair, (ast.Tuple, ast.List, ast.Set)) \
                 or len(pair.elts) != 2:
             continue
-        key = pair.elts[0]
-        if not isinstance(key, ast.Constant) or key.value is None:
+        key = _literal_key(pair.elts[0], state)
+        if key is _UNRESOLVED_KEY:
             continue
         value = _known_value(pair.elts[1], state)
         if value is None and isinstance(pair.elts[1], ast.Call):
             value = UNPROVABLE_SENDER
-        items[key.value] = value
+        items[key] = value
     return items
 
 
