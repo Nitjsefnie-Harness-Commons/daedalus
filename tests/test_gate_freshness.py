@@ -10,7 +10,9 @@ green is the whole defect. The orchestration (``process``/``main``), the run
 bound, and the workflow shape live in ``test_gate_freshness_run.py``.
 """
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -97,49 +99,73 @@ def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
 
 
 def test_the_docstring_justifies_every_pattern(tmp):
-    """Each entry is justified in the module docstring, not merely listed."""
+    """Each entry is justified in the module docstring, not merely listed.
+
+    The pattern's OWN spelling must appear, so a `/**` directory pattern is
+    held too: taking a leaf of `.github/workflows/**` yields the empty string,
+    and `'' in doc` is always true.
+    """
     del tmp
     m = _mod()
     doc = m.__doc__ or ''
     for pattern in m.GATE_PATTERNS:
-        leaf = pattern.rsplit('/', 1)[-1].replace('*', '')
-        assert leaf in doc, (pattern, leaf)
+        assert pattern in doc, (pattern, 'its own spelling is not justified')
 
 
 # ---- derive the set from the workflows (the guard) ----
 
-_EXECUTED = re.compile(r'python3? +([\w./-]+\.py)\b')
+_EXECUTED = re.compile(r'python3? +([\w./-]+\.py)\b'
+                       r'|(?<![\w.-])([./][\w./-]+\.(?:sh|py))\b')
 _FLAG_VALUE = re.compile(
     r'--(?:rcfile|config|requirement|project|input|file)[= ]+([^\s\'"]+)'
     r'|(?<!\w)-r[= ]+([^\s\'"]+)')
 
 
-def _normalise(candidate, base=ROOT):
-    """A tracked repo-relative path for `candidate`, or None."""
+def _git_tracked(base):
+    """The tracked files of the git repository at `base`."""
+    listed = subprocess.run(
+        ['git', '-C', str(base), 'ls-files', '-z'],
+        capture_output=True, check=True, timeout=30)
+    return {os.fsdecode(name) for name in listed.stdout.split(b'\0') if name}
+
+
+def _normalise(candidate, base, tracked):
+    """A TRACKED repo-relative path for `candidate`, or None.
+
+    A candidate qualifies only when it names a file that exists on disk (the
+    shape check) AND is in the injected `tracked` set (the real meaning of
+    tracked). is_file() alone would admit a file a job generates at run time.
+    """
     parts = [p for p in candidate.split('/')
              if p and p not in ('.', '..', 'head')]
     parts = [p for p in parts if not p.startswith('$')]
     rel = '/'.join(parts)
-    return rel if rel and (base / rel).is_file() else None
+    if rel and (base / rel).is_file() and rel in tracked:
+        return rel
+    return None
 
 
-def _workflow_gate_files(directory, base=ROOT):
-    """Every TRACKED file a workflow executes or passes to a tool.
+def _workflow_gate_files(directory, base=ROOT, tracked=None):
+    """Every TRACKED file a workflow invokes or passes to a tool.
 
-    Two forms, both real here: a `.py` a step executes, and a file passed by a
-    config-style flag. Candidates are kept only when they name a tracked file,
-    which is what excludes files a job generates at run time and shell
-    fragments like `-r 'arrays'` that a jq expression contributes.
+    Three forms: a `.py` a step executes, an executable-path step
+    (`./scripts/x.sh`), and a file passed by a config-style flag. Candidates
+    are kept only when they name a TRACKED file (see `_normalise`), which is
+    what excludes files a job generates at run time and shell fragments like
+    `-r 'arrays'` that a jq expression contributes. `tracked` defaults to the
+    real `git ls-files` set and is injected for a fabricated tree.
     """
+    if tracked is None:
+        tracked = _git_tracked(base)
     found = set()
     for path in sorted(directory.glob('*.yml')):
         text = path.read_text(encoding='utf-8')
-        for match in _EXECUTED.findall(text):
-            resolved = _normalise(match, base)
+        for first, second in _EXECUTED.findall(text):
+            resolved = _normalise(first or second, base, tracked)
             if resolved:
                 found.add(resolved)
         for first, second in _FLAG_VALUE.findall(text):
-            resolved = _normalise(first or second, base)
+            resolved = _normalise(first or second, base, tracked)
             if resolved:
                 found.add(resolved)
     return found
@@ -148,7 +174,7 @@ def _workflow_gate_files(directory, base=ROOT):
 def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
     """The set is derived from the workflows, not trusted from a reading.
 
-    Every tracked file a workflow executes or passes to a tool must be gate-
+    Every TRACKED file a workflow invokes or passes to a tool must be gate-
     defining, unless it is a declared carried-by-the-branch file. A gate file
     added to a workflow later -- including one outside scripts/ci/ -- fails
     here rather than going silently unlisted.
@@ -193,7 +219,8 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
         'jobs:\n  gate:\n    steps:\n'
         '      - run: python3 scripts/scan_secrets_extra.py\n',
         encoding='utf-8')
-    used = _workflow_gate_files(workflows, base=base)
+    used = _workflow_gate_files(
+        workflows, base=base, tracked={'scripts/scan_secrets_extra.py'})
     assert 'scripts/scan_secrets_extra.py' in used
     # The guard's assertion, run against the planted tree: the file is used but
     # not gate-defining, so the guard would fail here -- which is the point.
@@ -202,15 +229,48 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
     assert not_gate == ['scripts/scan_secrets_extra.py'], not_gate
 
 
+def test_a_gate_invoked_by_path_outside_scripts_ci_is_caught(tmp):
+    """An executable-path step (`./scripts/x.sh`) is seen, not just `.py`.
+
+    The REACH LIMIT is a `python3 -m module` or a bare-tool invocation; a step
+    that runs a tracked script BY PATH is reachable and must be accounted for.
+    """
+    base = Path(tmp) / 'repo'
+    (base / 'scripts').mkdir(parents=True)
+    (base / 'scripts' / 'version_gate.sh').write_text('#!/bin/sh\n',
+                                                      encoding='utf-8')
+    workflows = base / '.github' / 'workflows'
+    workflows.mkdir(parents=True)
+    (workflows / 'probe.yml').write_text(
+        'jobs:\n  gate:\n    steps:\n'
+        '      - run: ./scripts/version_gate.sh\n', encoding='utf-8')
+    used = _workflow_gate_files(
+        workflows, base=base, tracked={'scripts/version_gate.sh'})
+    assert 'scripts/version_gate.sh' in used, used
+
+
 def test_a_generated_untracked_requirements_file_is_not_required(tmp):
-    """A file a job generates at run time is not a tracked gate file."""
-    del tmp
+    """A file a job generates at run time is not a TRACKED gate file.
+
+    `is_file()` alone would admit extras-requirements.txt the moment it exists
+    on disk, which it does on any machine that has run audit.yml. The tracked
+    SET is what excludes it, so this entry plants the file, injects a tracked
+    set WITHOUT it, and shows the guard still does not require it.
+    """
     m = _mod()
-    used = _workflow_gate_files(ROOT / '.github' / 'workflows')
-    # extras-requirements.txt is written by audit.yml from pyproject.toml; it
-    # is not tracked, so the guard never requires it.
-    assert 'extras-requirements.txt' not in used
+    base = Path(tmp) / 'repo'
+    (base / '.github' / 'workflows').mkdir(parents=True)
+    (base / 'extras-requirements.txt').write_text('mcp\n', encoding='utf-8')
+    (base / '.github' / 'workflows' / 'probe.yml').write_text(
+        'jobs:\n  gate:\n    steps:\n'
+        '      - run: pip install --requirement extras-requirements.txt\n',
+        encoding='utf-8')
+    used = _workflow_gate_files(
+        base / '.github' / 'workflows', base=base, tracked=set())
+    assert 'extras-requirements.txt' not in used, used
     assert not m.is_gate_defining('extras-requirements.txt')
+    real = _workflow_gate_files(ROOT / '.github' / 'workflows')
+    assert 'extras-requirements.txt' not in real, real
 
 
 # ---- merge base: the shape guard ----
@@ -518,7 +578,7 @@ def test_a_per_head_listing_failure_raises_so_the_run_can_skip(tmp):
     raise AssertionError('an unreadable listing did not raise QueryError')
 
 
-# ---- select_heads / required_calls ----
+# ---- select_heads ----
 
 def test_a_pull_request_not_based_on_main_is_skipped(tmp):
     del tmp
@@ -530,12 +590,6 @@ def test_a_pull_request_not_based_on_main_is_skipped(tmp):
         'base': {'ref': 'release/1.0'},
     }
     assert m.select_heads([pr]) == []
-
-
-def test_required_calls_charges_one_compare_per_gate(tmp):
-    del tmp
-    m = _mod()
-    assert m.required_calls(3, 4) == len(m.GATE_PATTERNS) + 3 * (4 + 4)
 
 
 def main():

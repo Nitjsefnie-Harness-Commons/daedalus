@@ -10,6 +10,8 @@ global-failure entries assert the exit code AND that nothing was published: a
 run that invents a verdict where it could not read one is the exact defect this
 issue records.
 """
+import contextlib
+import io
 import json
 import os
 import re
@@ -156,65 +158,77 @@ def test_the_pull_request_target_route_publishes_for_that_head(tmp):
     assert len(published) == 1, published
 
 
-def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
-    """A GLOBAL failure publishes NOTHING and exits nonzero."""
-    m = _mod()
-    event_path = Path(tmp) / 'event.json'
-    event_path.write_text('{}', encoding='utf-8')
+def _run_main(tmp, m, reader, event):
+    """Run main() on a `push` event, capturing stderr; return (code, err).
 
-    def boom(argv):
-        raise m.QueryError('HTTP 500')
+    `m` is the caller's module instance: the reader raises that instance's
+    QueryError, and main catches the SAME class, so the two must share it.
+    """
+    event_path = Path(tmp) / 'event.json'
+    event_path.write_text(json.dumps(event), encoding='utf-8')
     os.environ.update({'GITHUB_EVENT_NAME': 'push',
                        'GITHUB_EVENT_PATH': str(event_path),
                        'GITHUB_REPOSITORY': 'o/r'})
+    err = io.StringIO()
     try:
-        code = m.main([], read=boom)
+        with contextlib.redirect_stderr(err):
+            code = m.main([], read=reader)
     finally:
         os.environ.pop('GITHUB_EVENT_NAME', None)
         os.environ.pop('GITHUB_EVENT_PATH', None)
-    assert code != 0, 'an unreadable open-PR list exited 0 (silent pass)'
+    return code, err.getvalue()
+
+
+def _only_fail(target_marker, m):
+    """A reader that answers every read normally EXCEPT `target_marker`."""
+
+    def read(argv):
+        target = next(t for t in argv if t.startswith('repos/'))
+        if target_marker in target:
+            raise m.QueryError('HTTP 500')
+        return _flow_read(m, {}, {}, [])(argv)
+    return read
+
+
+def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
+    """A GLOBAL failure on the open-PR list publishes NOTHING and exits 1.
+
+    The fake fails ONLY the open-PR listing and answers every other read
+    normally, so the gate-lookup branch does NOT fire: this entry is satisfied
+    by the open-PR branch alone. A fail-open (`pulls = []`) would continue to a
+    successful gate lookup, publish zero, and exit 0 -- caught here. The
+    stderr line is asserted so a DIFFERENT global failure cannot satisfy it.
+    """
+    m = _mod()
+    code, err = _run_main(tmp, m, _only_fail('/pulls?state=open', m), {})
     assert code == 1, code
+    assert 'open pull request list' in err, err
 
 
 def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
-    """A GLOBAL failure on the gate lookup publishes NOTHING and exits nonzero.
+    """A GLOBAL failure on the gate lookup publishes NOTHING and exits 1.
 
-    The severe direction: treating an unreadable gate as "no gates" would
-    publish every head GREEN claiming it contains every gate-defining commit.
+    The fake SUCCEEDS on the open-PR list and fails only the gate lookup, so
+    this entry is satisfied by the gate branch alone. The severe direction:
+    treating an unreadable gate as "no gates" would publish every head GREEN
+    claiming it contains every gate-defining commit.
     """
     m = _mod()
-    event_path = Path(tmp) / 'event.json'
-    event_path.write_text(json.dumps({'open_pulls': [_pr(7)]}),
-                          encoding='utf-8')
     published = []
 
-    def gh_read(argv):
+    def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
         if '/commits?' in target:
             raise m.QueryError('HTTP 500')
         if '/pulls?state=open' in target:
             return _encode([_pr(7)])
-        if re.search(r'/pulls/\d+$', target):
-            return _encode({'head': {'sha': HEAD}})
-        if '/compare/' in target:
-            gate = target.split('compare/')[1].split('...')[0]
-            return _encode({'status': 'ahead',
-                            'merge_base_commit': {'sha': gate}})
-        if '/check-runs?' in target and 'GET' in argv:
-            return ''
         if 'POST' in argv or 'PATCH' in argv:
             published.append(target)
             return '{}'
-        raise AssertionError(target)
-    os.environ.update({'GITHUB_EVENT_NAME': 'push',
-                       'GITHUB_EVENT_PATH': str(event_path),
-                       'GITHUB_REPOSITORY': 'o/r'})
-    try:
-        code = m.main([], read=gh_read)
-    finally:
-        os.environ.pop('GITHUB_EVENT_NAME', None)
-        os.environ.pop('GITHUB_EVENT_PATH', None)
+        return _flow_read(m, {}, {}, published)(argv)
+    code, err = _run_main(tmp, m, read, {})
     assert code == 1, code
+    assert 'gate commit' in err, err
     assert published == [], 'a global failure published a verdict'
 
 
@@ -331,12 +345,53 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 
 # ---- the bound ----
 
-def test_required_calls_is_the_bound_the_run_enforces(tmp):
+def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
+    """Count the REAL reads a one-head flow makes: G + PER_HEAD_OVERHEAD.
+
+    Three entries once restated the formula and none measured the flow, so a
+    THIRD revalidation (a real G+5) left them green. This one counts the reads
+    the flow actually issues and compares that count to the shipped overhead.
+    """
     del tmp
     m = _mod()
-    # The run refuses when required_calls exceeds the budget it passes.
-    needed = m.required_calls(5, 1)
-    assert needed == len(m.GATE_PATTERNS) + 5 * (m.PER_HEAD_OVERHEAD + 1)
+    published = []
+    reads = []
+    gates = {pattern: [G1] for pattern in m.GATE_PATTERNS}
+    gate_list = [(pattern, G1) for pattern in m.GATE_PATTERNS]
+    base = _flow_read(m, gates, {7: HEAD}, published)
+
+    def read(argv):
+        reads.append(argv)
+        return base(argv)
+    m.process(read, 'o/r', m.select_heads([_pr(7)]), gate_list, RUN)
+    assert len(reads) == len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD, (
+        f'one head issued {len(reads)} reads; the shipped overhead is '
+        f'{m.PER_HEAD_OVERHEAD}')
+
+
+def test_every_read_carries_the_no_cache_header(tmp):
+    """Every `gh api` read routes through _api, which adds the header.
+
+    Dropping the header from any call site used to leave the suite green; now
+    one entry drives a full flow and checks each read argv carries it, so the
+    single _api helper is the one place the convention lives.
+    """
+    del tmp
+    m = _mod()
+    published = []
+    reads = []
+    gates = {pattern: [G1] for pattern in m.GATE_PATTERNS}
+    base = _flow_read(m, gates, {7: HEAD}, published)
+
+    def read(argv):
+        reads.append(list(argv))
+        return base(argv)
+    m.process(read, 'o/r', m.select_heads([_pr(7)]),
+              [(p, G1) for p in m.GATE_PATTERNS], RUN)
+    assert reads, 'no reads were issued'
+    for argv in reads:
+        joined = ' '.join(argv)
+        assert 'Cache-Control: no-cache' in joined, joined
 
 
 def test_over_the_bound_refuses_and_publishes_nothing(tmp):
@@ -426,25 +481,33 @@ def test_workflow_is_well_formed(tmp):
     assert 'thresholds.py --check' not in text
 
 
-def test_the_workflow_header_points_at_the_bound_it_relies_on(tmp):
-    """The header names the script's BOUND section and the timeout, and the
-    script's BOUND section carries the arithmetic (one compare per gate plus
-    PER_HEAD_OVERHEAD). The rationale lives in exactly one place."""
+def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
+    """The RELATION, not a literal: budget x assumed-rate < timeout.
+
+    A bound with no per-call rate is not a bound. The workflow's timeout must
+    clear DEFAULT_CALL_BUDGET calls at ASSUMED_SECONDS_PER_CALL; the header
+    points at the script's BOUND section, whose test pins this relation.
+    """
     del tmp
     text = _workflow_text()
     m = _mod()
-    # The header: a pointer, the timeout, and no duplicated arithmetic.
     assert 'scripts/ci/gate_freshness.py' in text, 'no pointer to the script'
     assert 'THE BOUND' in text, 'the header does not point at the BOUND'
-    assert 'timeout-minutes: 15' in text
-    # The script's BOUND section: the G + 4 shape the timeout must clear.
     doc = m.__doc__ or ''
     bound = doc[doc.index('THE BOUND'):]
     assert 'one compare' in bound
-    assert f'+ {m.PER_HEAD_OVERHEAD}' in bound, bound
-    # required_calls charges exactly one compare per gate plus the overhead.
-    expected = len(m.GATE_PATTERNS) + m.PER_HEAD_OVERHEAD + 2
-    assert m.required_calls(1, 2) == expected
+    assert 'PER_HEAD_OVERHEAD' in bound, bound
+    # The relation: the timeout the workflow sets must clear the budget.
+    from _wfjobs import load
+    timeout = int(load(ROOT / '.github' / 'workflows'
+                       / 'gate-freshness.yml').jobs[
+                           'publish-freshness']['timeout-minutes'])
+    needed_minutes = (m.DEFAULT_CALL_BUDGET
+                      * m.ASSUMED_SECONDS_PER_CALL / 60)
+    assert needed_minutes < timeout, (
+        f'budget {m.DEFAULT_CALL_BUDGET} at '
+        f'{m.ASSUMED_SECONDS_PER_CALL}s/call needs {needed_minutes:.1f} min, '
+        f'the timeout is {timeout}')
 
 
 def main():

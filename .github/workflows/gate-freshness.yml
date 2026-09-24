@@ -21,8 +21,12 @@ name: gate freshness
 # would take its workflow text from the merge ref while running a script from
 # the branch SHA, and the two can disagree.)
 #
-# `timeout-minutes` below sits above the run's worst case at the enforced call
-# budget; see THE BOUND in scripts/ci/gate_freshness.py.
+# THE BOUND, SIZED. The run refuses when its worst case (open PRs x gate
+# commits compares + per-head overhead) exceeds DEFAULT_CALL_BUDGET calls. At
+# ASSUMED_SECONDS_PER_CALL (1.5 s, the conservative measured rate) that budget
+# needs 1200*1.5/60 = 30 minutes, so `timeout-minutes` below is 35: the timeout
+# clears the enforced budget rather than merely sitting above it. See THE BOUND
+# in scripts/ci/gate_freshness.py, whose test pins this relation.
 on:
   push:
     branches: [main]
@@ -42,7 +46,7 @@ jobs:
   publish-freshness:
     name: publish freshness
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
 
     steps:
       - uses: >-
