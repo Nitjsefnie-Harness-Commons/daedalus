@@ -577,6 +577,25 @@ def test_dict_of_an_unknown_length_pair_second_stays_clean(tmp):
                 clean=True) == (0, 0)
 
 
+_STARRED_VALUE = ('d = dict(zip([], []))\n' + _QUIET
+                  + 'e = dict([("k", *d, relay()), ("j", q)])'
+                  + _SL + 'e["k"]()')
+
+
+def test_unknown_length_pair_joins_values_after_its_star(tmp):
+    assert _run(tmp, _STARRED_VALUE) == (1, 1)
+
+
+def test_unknown_length_pair_joins_values_after_its_star_stays_clean(tmp):
+    assert _run(tmp, _STARRED_VALUE, clean=True) == (0, 0)
+
+
+def test_unknown_length_pair_does_not_trust_its_first_item_as_key(tmp):
+    assert _run(tmp, 'd = dict(zip([], []))\n' + _QUIET
+                + 'e = dict([(q, *d, relay())])' + _SL
+                + 'e.get("k", q)()') == (0, 1)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='positions_')
 
