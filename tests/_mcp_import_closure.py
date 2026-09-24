@@ -11,22 +11,21 @@ same hole the tracked-name map left open, and both are refused. The
 registry is read at every level — the base structurally, the key by folding
 it — and a store that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one step
-on: a CONSTANT program handed to one is a program the walk can neither
-resolve nor follow, so it is refused, and so is any store that DELIVERS the
-builtin to a name — as a name, a parameter default, a container, or a call
-argument — read through the SAME store grammar as the operation and the
-registry, so the three axes cannot reach different store forms. A store that
-USES the builtin as a call's EFFECTIVE CALLEE, however it is spelled
-(`x = eval(var)`, `x = (eval if c else print)(x)`, a subscript that selects
-it), receives the call's RESULT, which is the declared call-result limit
-below, not a delivery; the walk resolves which value would actually be
-called, so a builtin in a DATA position of that callee expression — an
-argument, a lookup key — stays a delivery. Three shapes it cannot follow are
-ACCEPTED as declared limits: a value reached through a call's result, a
-tracked module or the operation handed as a call ARGUMENT (`use(sys)`), and
-a value the walk cannot fold to a
-constant — whether an import name or a program. Any accepted shape leaves
-the closure quietly short.
+on: a CONSTANT program handed to one is refused, and so is any store that
+DELIVERS the builtin to a name (as a name, a parameter default, a container
+or a call argument), read through the SAME store grammar as the operation
+and the registry. A store that USES the builtin as a call's EFFECTIVE CALLEE
+receives the call's RESULT — the declared call-result limit below, not a
+delivery — and the callee is resolved by the VALUE it produces, so a builtin
+in a DATA position of it (an argument, a lookup key) stays a delivery. Three
+shapes it cannot follow are ACCEPTED as declared limits: a value reached
+through a call's result, a tracked module or the operation handed as a call
+ARGUMENT (`use(sys)`), and a value the walk cannot fold to a constant — an
+import name or a program. The third is a MECHANISM: a value COMPUTED at
+runtime is accepted, so an interpolated f-string, a subscript that selects
+it (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`) and a starred argument are
+facets of it, pinned in `test_the_fold_limit_facets_are_accepted`. Any
+accepted shape leaves the closure quietly short.
 """
 import ast
 from pathlib import Path
@@ -196,12 +195,16 @@ class _BindingWalk(ast.NodeVisitor):
 
     The binding grammar is not a list of statement kinds, so this reads
     stores rather than statements: a walrus, an unpack, a `for` or `with`
-    target, a comprehension target, an `except ... as` name and a parameter
-    default all bind a name, and each is refused when it binds the
-    import-by-name operation, the module registry or a code-evaluating
-    builtin to somewhere the map cannot see, or when it overwrites a name
-    the map tracks. Because a tracked name is never allowed to be rebound,
-    the map needs no rewriting to stay a fixed point: the refusals are what
+    target, a comprehension target and a parameter default all bind a name,
+    and each is refused when it binds the import-by-name operation, the
+    module registry or a code-evaluating builtin to somewhere the map cannot
+    see, or when it overwrites a name the map tracks. An `except ... as`
+    name is the one store this read separately, and only the operation
+    axis and the rebind apply to it: an except-name binds the caught
+    EXCEPTION, never the registry or a code-evaluating builtin, so neither
+    is reachable through it. Because a tracked name is never allowed to be
+    rebound, the map needs no rewriting to stay a fixed point: the
+    refusals are what
     keep it one.
     """
 
@@ -487,6 +490,20 @@ def _yields_the_registry(value, bound):
                for child in ast.iter_child_nodes(value))
 
 
+def _program_argument(call):
+    """The expression a code-evaluating call passes as its program: the first
+    positional argument, or the first positional-or-keyword parameter bound by
+    keyword. For `eval`/`exec`/`compile` that parameter is `source`, so
+    `compile(source=PROG, ...)` hands over the program the positional spelling
+    does; None when the call passes no source at all."""
+    if call.args:
+        return call.args[0]
+    for keyword in call.keywords:
+        if keyword.arg == 'source':
+            return keyword.value
+    return None
+
+
 def _folded_string(node):
     """The constant string a node spells, folding a concatenation of string
     constants so `'import_' + 'module'` reads as the one name it is, and a
@@ -589,7 +606,9 @@ def _import_targets(path, root):
                     'operation through a lookup this scan cannot follow')
         elif isinstance(node, ast.Call) and _mcp_code_eval.may_be_code_eval(
                 node.func, bound, scopes):
-            program = _folded_string(node.args[0]) if node.args else None
+            program = _program_argument(node)
+            if program is not None:
+                program = _folded_string(program)
             if program is not None:
                 _refuse(path, root, node,
                         f'the program {program!r} is handed to a '

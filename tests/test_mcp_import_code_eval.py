@@ -40,8 +40,7 @@ def _assert_refusal(_tmp, source, site, phrase):
 
 
 def _assert_silent(_tmp, source):
-    """The scan returns the composition alone: this shape is a declared
-    limit or a shadowed builtin, not a refusal."""
+    """A declared limit or a shadowed builtin, not a refusal."""
     _write_tree(Path(_tmp), {'composition.py': source})
     scanned = _mcp_import_closure.composition_scan_set(
         Path(_tmp) / 'composition.py', _tmp)
@@ -49,10 +48,8 @@ def _assert_silent(_tmp, source):
 
 
 def _refused_with_code_eval(_tmp, source, label=''):
-    """The scan refuses this composition because a code-evaluating builtin
-    is hidden by a store. With no import-by-name operation and no registry
-    in the source, that is the only refusal it can produce, so the refusal
-    IS the evidence the code-eval axis reached this store form."""
+    """With no operation or registry in the source, the only refusal it can
+    produce IS the evidence the code-eval axis reached this store form."""
     _write_tree(Path(_tmp), {'composition.py': source})
     try:
         _mcp_import_closure.composition_scan_set(
@@ -65,9 +62,7 @@ def _refused_with_code_eval(_tmp, source, label=''):
 
 
 def test_a_program_naming_the_operation_refuses_the_scan(_tmp):
-    """The issue's own spelling: a constant program that reaches the
-    import-by-name operation. The program is read by the one folder, so it
-    is refused for the same reason the inline attribute is."""
+    """The issue's own spelling, read by the one folder."""
     _assert_refusal(_tmp, '''
 def load(name):
     return eval('importlib.import_module')(name)
@@ -75,8 +70,7 @@ def load(name):
 
 
 def test_a_constant_program_naming_a_helper_is_refused(_tmp):
-    """The walk cannot prove what a bare name evaluates to, so a constant
-    program is refused whatever it names — the decision, pinned."""
+    """A constant program is refused whatever it names — the decision."""
     _assert_refusal(_tmp, '''
 def load():
     return eval('some_helper')
@@ -84,9 +78,8 @@ def load():
 
 
 def test_each_code_evaluating_builtin_is_reached_by_one_mechanism(_tmp):
-    """`eval`, `exec` and `compile` are one operation reached through one
-    named set, not three parallel branches: a fourth member needs no new
-    branch, and dropping any single name here turns its row red."""
+    """One operation through one named set, not three branches; dropping
+    any single name turns its row red."""
     for name in ('eval', 'exec', 'compile'):
         _assert_refusal(_tmp, f'''
 def load(name):
@@ -95,9 +88,8 @@ def load(name):
 
 
 def test_a_module_level_shadow_is_not_the_code_evaluating_builtin(_tmp):
-    """`daedalus_mcp/server.py`'s `exec = eval_tools['exec']` is a tool, not
-    the builtin. Drop the shadow and the same program becomes a refusal, so
-    this row is what holds the shadow test rather than decoration."""
+    """`server.py`'s `exec = eval_tools['exec']` is a tool, not the builtin;
+    drop the shadow and the same program is refused."""
     _assert_silent(_tmp, '''
 eval_tools = {'exec': print}
 exec = eval_tools['exec']
@@ -109,12 +101,8 @@ def call():
 
 
 def test_a_from_builtins_import_reaches_the_builtin(_tmp):
-    """`from builtins import eval` binds the builtin itself, not a shadow.
-
-    The module-bound rule must not read a from-builtins import as a local;
-    the unaliased and the aliased spelling both reach the builtin, the same
-    from-import grammar the import operation is recognised through.
-    """
+    """`from builtins import eval` binds the builtin itself, not a shadow;
+    the unaliased and aliased spellings both reach it."""
     for source, site in (
             ('''
 from builtins import eval
@@ -142,8 +130,8 @@ def load():
 
 def test_a_function_local_shadow_is_not_the_code_evaluating_builtin(_tmp):
     """A `def exec` shadows the builtin only inside its function; a
-    parameter and a closure do the same. Each is pinned so a shadow test
-    that recognised only the module store fails here."""
+    parameter and a closure do the same, so a shadow test recognising only
+    the module store fails here."""
     for source in (
             '''
 def call():
@@ -167,9 +155,8 @@ def outer():
 
 
 def test_a_folded_program_spelling_is_refused(_tmp):
-    """The readability decision is the one constant-folder, so a
-    concatenation of literals reaches the builtin exactly as the joined
-    string does; without the fold this is an unreadable value instead."""
+    """The one constant-folder reads a concatenation of literals, so it
+    reaches the builtin as the joined string does."""
     _assert_refusal(_tmp, '''
 def load(name):
     return eval('import_' + 'lib')(name)
@@ -178,9 +165,7 @@ def load(name):
 
 def test_a_runtime_assembled_program_is_a_declared_limit(_tmp):
     """A program the folder cannot read as a constant is the value-side
-    limit the import name already carries: the walk follows no value it
-    cannot fold, whether the folded thing would be a module name or a
-    program."""
+    limit the import name already carries."""
     for source in ('''
 def load(name):
     return eval(name)
@@ -195,9 +180,8 @@ def load(x):
 
 
 def test_a_store_hiding_a_code_evaluating_builtin_refuses(_tmp):
-    """`loader = eval` hands the builtin to a name the walk cannot follow,
-    and that name is then handed a program. A reach-call whose RESULT is the
-    builtin binds it to a name the same way, and shares this refusal."""
+    """`loader = eval` hands the builtin to a name the walk cannot follow;
+    a reach-call whose RESULT is the builtin binds it the same way."""
     _assert_refusal(_tmp, '''
 def load():
     loader = eval
@@ -210,10 +194,14 @@ x = getattr(builtins, 'eval')
 ''', 4, 'code-evaluating')
 
 
-# Every store form the import-by-name operation axis already reaches, each
+# The store forms that flow through the shared `_hidden` decision, each
 # hiding a code-evaluating builtin and nothing else. This is the pin that
 # says the code-eval axis rides the SAME store grammar: a form missing here
 # is a store the walk follows for the operation but not for the builtin.
+# `except ... as` is deliberately NOT listed: it is read separately by
+# `visit_ExceptHandler`, which arms only the operation axis and the rebind
+# because an except-name binds the caught exception, not the registry or a
+# code-evaluating builtin, so neither is reachable through it (F7/F8).
 EVERY_STORE_FORM = (
     ('assign', 'x = eval\n'),
     ('annassign', 'x: object = eval\n'),
@@ -241,22 +229,34 @@ def test_every_store_form_the_operation_reaches_also_reaches_the_builtin(_tmp):
 
     `x = eval` was refused while `def f(x=eval)` scanned silent, because the
     new check was bolted onto the assignment store instead of the shared
-    `_hidden` decision the default path also routes through. Every form the
-    operation store axis already reached is listed here; the code-eval axis
-    must reach each one, so a store form nobody enumerates is a finding.
+    `_hidden` decision the default path also routes through. Every form that
+    flows through `_hidden` is listed here; the code-eval axis must reach
+    each one, so a store form nobody enumerates is a finding. `except ... as`
+    is excluded because it never reaches `_hidden` (see the note above).
     """
     for label, source in EVERY_STORE_FORM:
         _refused_with_code_eval(_tmp, source, label)
 
 
-def test_a_code_evaluating_builtin_nested_in_a_container_refuses(_tmp):
-    """A builtin in a container is as hidden as a bare one.
+def test_the_fold_limit_facets_are_accepted(_tmp):
+    """The "value the walk cannot fold" limit is a mechanism, and these are
+    its facets: a program or name COMPUTED at runtime the folder cannot read
+    back to a constant. The f-string, the subscript that selects it, the
+    tuple/dict index and the starred argument are all one declared limit,
+    pinned here so the limit's letter covers them without a folder rule."""
+    for source in (
+            "v = eval(f'{\"importlib.import_module\"}')\n",
+            "v = eval(['importlib.import_module'][0])\n",
+            "v = eval(('importlib.import_module',)[0])\n",
+            "v = eval({'a': 'importlib.import_module'}['a'])\n",
+            "v = eval(*['importlib.import_module'])\n",
+            "v = eval(''.join(['importlib', '.import_module']))\n"):
+        _assert_silent(_tmp, source)
 
-    The operation store recogniser recurses into a value's children, so
-    `{'m': importlib.import_module}` is refused; the code-eval recogniser
-    did not, and `{'e': eval}` was silent. The store recogniser now reads a
-    value the same recursive way on both axes.
-    """
+
+def test_a_code_evaluating_builtin_nested_in_a_container_refuses(_tmp):
+    """A builtin in a container is as hidden as a bare one; the store
+    recogniser reads a value the same recursive way on both axes."""
     for source in (
             "d = {'e': eval}\n",
             "d = [eval]\n",
@@ -268,12 +268,8 @@ def test_a_code_evaluating_builtin_nested_in_a_container_refuses(_tmp):
 
 
 def test_a_field_less_f_string_program_is_refused(_tmp):
-    """A field-less f-string is the constant it looks like.
-
-    The program is readable without knowing any runtime value, so the
-    folder must read it; a redundant `f` prefix is otherwise a one-character
-    evasion of the pinned repro.
-    """
+    """A field-less f-string is the constant it looks like; the folder must
+    read it, or a redundant `f` prefix evades the repro by one character."""
     _assert_refusal(_tmp, '''
 def load(name):
     return eval(f'importlib.import_module')(name)
@@ -308,9 +304,8 @@ def load(name):
 
 
 def test_a_getattr_lookup_reaches_the_builtin(_tmp):
-    """A `getattr` off the builtins module hands the builtin out without
-    naming it as an attribute; the walk reads the constant lookup and
-    refuses an unreadable one rather than letting it through."""
+    """A `getattr` off builtins hands the builtin out; an unreadable one is
+    refused rather than let through."""
     for source in (
             '''
 import builtins
@@ -330,16 +325,11 @@ def load(attribute, name):
 
 
 def test_a_store_of_a_code_eval_calls_result_is_the_declared_limit(_tmp):
-    """`x = eval(var)` USES the builtin as the call's effective callee and
-    stores the call's RESULT, which the declared call-result limit accepts.
-
-    The recognition is a property over the value the store will hold, not a
-    check on the immediate callee node: a builtin that becomes the EFFECTIVE
-    callee through an expression is still used. So the conditional callee,
-    the `or` callee, a comprehension subscripted back to the builtin, and a
-    parenthesised callee all deliver nothing, exactly as the bare name does.
-    `f(eval(var))` passes eval's RESULT on, which the same limit covers.
-    """
+    """A builtin that becomes the EFFECTIVE callee through any expression is
+    still USED — the store holds the call's RESULT, which the declared
+    call-result limit accepts — so the conditional, `or`, comprehension
+    subscript and parenthesised callees all deliver nothing, as the bare
+    name does."""
     for source in (
             '''
 def load(var):
@@ -368,16 +358,12 @@ def load(var):
 
 
 def test_a_code_eval_builtin_delivered_to_a_call_is_still_refused(_tmp):
-    """A builtin in a DATA position of the callee expression is delivered.
-
-    The counterpart of the callee case, pinned together with it so neither
-    side can regress alone: a blanket stop-at-call would silence the
-    delivery, and a walk of the callee expression would refuse the callee use.
-    A builtin that is the lookup KEY, an argument (plain, starred, or handed
-    to an inner call), or a parameter a lambda is called with is a delivery;
-    a builtin that is the SELECTED callee is a use. The walk does not model a
-    lambda as transparent — a lambda is a function the walk cannot follow, so
-    a builtin passed to one is delivered, which is the safe direction.
+    """A builtin in a DATA position — a lookup key, a plain/starred/nested
+    argument, or a parameter a lambda is called with — is delivered, while a
+    SELECTED callee is a use. Pinned with the callee case so neither side
+    regresses alone: a blanket stop-at-call silences the delivery, a walk of
+    the callee expression refuses the use. A lambda is NOT modelled as
+    transparent, so a builtin passed to one is delivered (the safe side).
     """
     for source in (
             'y = f(eval)\n',
@@ -392,16 +378,11 @@ def test_a_code_eval_builtin_delivered_to_a_call_is_still_refused(_tmp):
 
 
 def test_a_constant_program_through_an_effective_callee_is_refused(_tmp):
-    """A CONSTANT program reaches the builtin however the effective callee
-    is spelled, so the call arm reads the program through the same value
-    resolution the store uses.
-
-    Without this the store treats these callees as a use and the call arm
-    reads no program, so a constant program slips through — a regression the
-    store-use cases alone cannot see, because they carry no constant program.
-    A two-level or string-key selection, a `__call__` projection, and an
-    unreadable index are the same resolution, not new spellings.
-    """
+    """A CONSTANT program reaches the builtin however the effective callee is
+    spelled, so the call arm reads the program through the same value
+    resolution the store uses. Without this the store treats each callee as a
+    use and the call arm reads no program, so a constant program slips through
+    — invisible to the store-use cases, which carry no constant program."""
     for source in (
             "v = (eval if c else print)('importlib.import_module')\n",
             "v = (eval or print)('importlib.import_module')\n",
@@ -412,8 +393,98 @@ def test_a_constant_program_through_an_effective_callee_is_refused(_tmp):
             "v = [eval][i]('importlib.import_module')\n",
             "v = (0, eval)[1]('importlib.import_module')\n",
             "eval.__call__('importlib.import_module')('os')\n",
-            "getattr(eval, '__call__')('importlib.import_module')('os')\n"):
+            "getattr(eval, '__call__')('importlib.import_module')('os')\n",
+            "v = [eval, print][0:1][0]('importlib.import_module')\n",
+            "v = [*[eval]][0]('importlib.import_module')\n",
+            "v = (lambda *, k=1: eval)()\n",
+            "v = compile(source='importlib.import_module', filename='f',\n"
+            "          mode='eval')\n",
+            "a = lambda eval: 1; b = lambda: "
+            "eval('importlib.import_module')\n"):
         _assert_refusal(_tmp, source, 1, 'code-evaluating')
+    _assert_refusal(_tmp,
+                    "import builtins\nv = builtins.__dict__['eval']("
+                    "'importlib.import_module')\n", 2, 'code-evaluating')
+
+
+def test_a_lambda_is_a_reach_only_when_it_is_callable_with_no_arguments(_tmp):
+    """The zero-argument lambda reach is a PROPERTY, and the two bounds must
+    DISAGREE. A vararg, a kwarg and a defaulted parameter all accept a
+    zero-argument call and return the builtin, so they reach the operation;
+    a required positional or keyword-only parameter blocks the call and
+    raises at runtime, so it is not a reach."""
+    for source in (
+            'v = (lambda *a: eval)()\n',
+            'v = (lambda **k: eval)()\n',
+            'v = (lambda a=1: eval)()\n'):
+        _assert_refusal(_tmp, source, 1, 'code-evaluating')
+    for source in (
+            'v = (lambda a: eval)()\n',
+            'v = (lambda *, a: eval)()\n',
+            'v = (lambda *, k: eval)()\n'):
+        _assert_silent(_tmp, source)
+
+
+def test_a_code_evaluating_use_before_its_module_binding_is_refused(_tmp):
+    """A module runs top to bottom, so a use that PRECEDES its own later
+    module-level binding still reads the real builtin. A use AFTER the binding
+    sees the bound name and stays accepted, which is what keeps a legitimate
+    module-level `exec = <tool>` store clean."""
+    _assert_refusal(_tmp, '''
+import importlib
+v = eval('importlib.import_module')('os')
+def eval(code):
+    return code
+''', 3, 'code-evaluating')
+    _assert_silent(_tmp, '''
+import importlib
+def eval(code):
+    return code
+v = eval('x')
+''')
+
+
+def test_the_readable_selection_arms_have_rows_that_disagree(_tmp):
+    """A row per readable-selection limb, so deleting the negative-index
+    bound, the bool-key guard, the `__call__` projection guard, or the
+    keyword-only conjunct each turns one of these red."""
+    # a readable int key resolves the element: [0] picks eval
+    _assert_refusal(_tmp, 'v = [eval, 0][0]("importlib.import_module")\n',
+                    1, 'code-evaluating')
+    # a negative literal is a UnaryOp, an unreadable key, so the
+    # fail-closed container answer refuses it
+    _assert_refusal(_tmp, 'v = (0, eval)[-1]("importlib.import_module")\n',
+                    1, 'code-evaluating')
+    _assert_refusal(_tmp, 'v = (0, eval)[-5]("importlib.import_module")\n',
+                    1, 'code-evaluating')
+    # bool-key guard: [eval,0][True] is treated as unreadable, not as 1
+    _assert_refusal(_tmp, 'v = [eval, 0][True]("importlib.import_module")\n',
+                    1, 'code-evaluating')
+    # a readable key that selects a non-builtin stays silent
+    _assert_silent(_tmp, 'v = [eval, 0][1]("importlib.import_module")\n')
+    # a getattr on eval that is NOT __call__ is not a reach: the bare call
+    # is silent, so the __call__ projection guard is what is pinned
+    _assert_silent(_tmp,
+                   "getattr(eval, 'notcall')"
+                   "('importlib.import_module')('os')\n")
+    # a required keyword-only lambda parameter blocks the zero-arg call
+    _assert_silent(_tmp, 'v = (lambda *, k: eval)()\n')
+
+
+def test_the_unreadable_selection_fallback_has_a_negative_space(_tmp):
+    """The fail-closed answer for an unreadable selection is pinned on both
+    sides, so the fallback holds a delivery when the container holds a builtin
+    and stays silent when it does not."""
+    # container holds a builtin, unreadable index -> refused
+    _assert_refusal(_tmp, "v = [eval][i]('importlib.import_module')\n",
+                    1, 'code-evaluating')
+    # container holds no builtin, unreadable index -> silent
+    _assert_silent(_tmp, "v = [print][i]('importlib.import_module')\n")
+    # container reached only through a further selection that holds one
+    _assert_refusal(_tmp,
+                    "v = [[eval]][0][i]('importlib.import_module')\n",
+                    1, 'code-evaluating')
+    _assert_silent(_tmp, "v = [[print]][0][i]('importlib.import_module')\n")
 
 
 if __name__ == '__main__':
