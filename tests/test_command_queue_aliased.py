@@ -334,32 +334,43 @@ def test_the_vacating_retire_lets_a_swept_name_log_again(tmp):
 
 
 def test_the_vacating_retire_does_not_fire_when_the_unlink_fails(tmp):
-    """The retire fires only on a name the sweep actually freed.
+    """A name the sweep did not free keeps its record; the retire must not
+    fire.
 
     An aged directory named like an entry is refused, but the sweep cannot
     unlink a directory, so the name is still occupied when the sweep is done.
-    The retire must not clear that record: the same object refused again on
-    the next pass must stay silent, or the registry forgets a live entry.
+    With `_identity` pinned to one constant, the second drain computes the
+    same key whatever the clock did, so the silence below can only come from
+    the record surviving the sweep. The retire firing despite the failed
+    unlink would clear that record and the same object would re-log.
     """
     service = _load_service('aliased_vacating_retire_unlink_boundary')
+    queue = service.command_queue
     qdir = Path(tmp) / 'commands' / 'tok'
     qdir.mkdir(parents=True)
     entry = qdir / '0001_000001.json'
     entry.mkdir()
 
-    frames = []
-    first = _drain_refusals(service, qdir, frames)
-    assert first, 'the directory entry logged no refusal'
+    real_identity = queue._identity
+    queue._identity = lambda stat_result: (0, 0, 0)
+    try:
+        frames = []
+        first = _drain_refusals(service, qdir, frames)
+        assert first, 'the directory entry logged no refusal'
 
-    aged = time.time() - 160
-    os.utime(entry, (aged, aged))
-    service.command_queue.collect_expired(Path(tmp) / 'commands', 90)
-    assert entry.is_dir(), 'the sweep removed the occupied name'
+        aged = time.time() - 160
+        os.utime(entry, (aged, aged))
+        queue.collect_expired(Path(tmp) / 'commands', 90)
+        assert entry.is_dir(), 'the sweep removed the occupied name'
 
-    second = _drain_refusals(service, qdir, frames)
+        second = _drain_refusals(service, qdir, frames)
+    finally:
+        queue._identity = real_identity
+
     assert frames == [], frames
     assert second == [], (
-        f'the retire fired on a name the sweep did not free: {second!r}')
+        f'a name the sweep did not free lost its record (the retire fired): '
+        f'{second!r}')
 
 
 def test_the_registry_evicts_its_oldest_entry_past_the_bound(tmp):
