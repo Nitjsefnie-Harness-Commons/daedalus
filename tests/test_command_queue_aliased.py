@@ -56,6 +56,15 @@ def _refusals(captured):
             if '[STREAM] REFUSED' in line]
 
 
+def _drain_refusals(service, qdir, frames):
+    """Run one queue drain, returning only its REFUSED lines."""
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        service.drain_queue(
+            qdir, None, None, command_ttl=100, frame_writer=frames.append)
+    return _refusals(captured)
+
+
 def test_a_plain_candidate_opens_and_reads(tmp):
     queue = _load_queue('aliased_plain_candidate')
     path = Path(tmp) / 'tok.json'
@@ -396,6 +405,115 @@ def test_a_swept_queue_name_refused_again_for_a_different_object(tmp):
     assert frames == [], frames
     assert any(victim.name in line for line in second), (
         f'a different object at a swept name logged nothing: {second!r}')
+
+
+def test_the_vacating_retire_lets_a_swept_name_log_again(tmp):
+    """The vacating retire, pinned without reproducing inode reuse.
+
+    `_identity` returns one constant for the whole row, so every object at a
+    name carries the identity the registry already recorded for the object the
+    sweep removed. That degeneracy stands in for the one case identity cannot
+    decide alone — a filesystem reusing a freed inode in one clock tick. The
+    retire is then the sole thing that lets the second refusal log, so this row
+    fails when the retire is removed.
+    """
+    service = _load_service('aliased_vacating_retire_pinned')
+    queue = service.command_queue
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    victim = qdir / '0001_000001.json'
+    twin = qdir / '0002_000002.json'
+    _write_command(twin, 'aliased')
+    _hard_link(twin, victim)
+
+    real_identity = queue._identity
+    queue._identity = lambda stat_result: (0, 0, 0)
+    try:
+        frames = []
+        first = _drain_refusals(service, qdir, frames)
+        assert any(victim.name in line for line in first), first
+
+        aged = time.time() - 160
+        os.utime(victim, (aged, aged))
+        queue.collect_expired(Path(tmp) / 'commands', 90)
+        assert not victim.exists(), 'the sweep did not vacate the name'
+        qdir.mkdir(exist_ok=True)
+
+        # A different refused object takes the swept name; with a constant
+        # identity only the retire distinguishes it from the one recorded.
+        victim.mkdir()
+        second = _drain_refusals(service, qdir, frames)
+    finally:
+        queue._identity = real_identity
+
+    assert frames == [], frames
+    assert any(victim.name in line for line in second), (
+        f'a swept name did not log again once the retire ran: {second!r}')
+
+
+def test_the_vacating_retire_does_not_fire_when_the_unlink_fails(tmp):
+    """The retire fires only on a name the sweep actually freed.
+
+    An aged directory named like an entry is refused, but the sweep cannot
+    unlink a directory, so the name is still occupied when the sweep is done.
+    The retire must not clear that record: the same object refused again on
+    the next pass must stay silent, or the registry forgets a live entry.
+    """
+    service = _load_service('aliased_vacating_retire_unlink_boundary')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    entry = qdir / '0001_000001.json'
+    entry.mkdir()
+
+    frames = []
+    first = _drain_refusals(service, qdir, frames)
+    assert first, 'the directory entry logged no refusal'
+
+    aged = time.time() - 160
+    os.utime(entry, (aged, aged))
+    service.command_queue.collect_expired(Path(tmp) / 'commands', 90)
+    assert entry.is_dir(), 'the sweep removed the occupied name'
+
+    second = _drain_refusals(service, qdir, frames)
+    assert frames == [], frames
+    assert second == [], (
+        f'the retire fired on a name the sweep did not free: {second!r}')
+
+
+def test_the_registry_evicts_its_oldest_entry_past_the_bound(tmp):
+    """G5: the bound holds, and the OLDEST recorded entry is the one evicted.
+
+    A removed eviction loop grows the registry without bound; a reversed one
+    forgets the newest rather than the oldest. Driving three refusals past a
+    bound of two, the registry must hold exactly the two newest and have
+    forgotten the oldest, so the row pins the bound and the order together.
+    """
+    service = _load_service('aliased_refusal_bound_eviction')
+    qdir = Path(tmp) / 'commands' / 'tok'
+    qdir.mkdir(parents=True)
+    victims = [qdir / f'000{i}_00000{i}.json' for i in (1, 2, 3)]
+    for i, victim in enumerate(victims, start=1):
+        twin = Path(tmp) / f'twin{i}.json'
+        _write_command(twin, f'aliased{i}')
+        _hard_link(twin, victim)
+
+    real_limit = service._REFUSED_CANDIDATE_LIMIT
+    setattr(service, '_REFUSED_CANDIDATE_LIMIT', 2)
+    try:
+        frames = []
+        first = _drain_refusals(service, qdir, frames)
+        registry = dict(service._refused_candidates)
+    finally:
+        setattr(service, '_REFUSED_CANDIDATE_LIMIT', real_limit)
+
+    assert frames == [], frames
+    assert len(first) == 3, first
+    assert len(registry) == 2, registry
+    names = {key[0] for key in registry}
+    assert f'queue:tok/{victims[0].name}' not in names, (
+        f'the oldest entry was not evicted: {names}')
+    assert f'queue:tok/{victims[2].name}' in names, (
+        f'the newest entry was evicted: {names}')
 
 
 def test_a_replaced_queue_symlink_refused_again_for_its_name(tmp):
