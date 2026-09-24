@@ -130,21 +130,21 @@ SELECTIONS = [
      'try:\n    x = getattr(h, "fn", None, None)\nexcept TypeError:\n'
      '    x = ordinary', 'x()', False),
     # Value-axis control for the starred-argument-list shape: a clean attribute
-    # stays clean. A value control, not the shape exclusion below.
+    # stays clean. A value control, never a shape control.
     ('getattr-star-args-clean-value', 'class H: pass\nh = H(); '
      'h.clean = ordinary\npair = (h, "clean")\nx = getattr(*pair)', 'x()',
      False),
-    # ---- Excluded shapes: each a labelled tripwire. -----------------------
-    # Starred argument positions (list, owner, default). Tracked by daedalus
-    # issue 977.
+    # Starred argument positions (list, owner, default): each operand is
+    # spliced into the plain selection. Tracked by daedalus issue 977.
     ('getattr-star-arg-list (977)', 'class H: pass\nh = H(); '
-     'h.ext_cmd = relay()\npair = (h, "ext_cmd")', 'getattr(*pair)()',
-     (True, False)),
+     'h.ext_cmd = relay()\npair = (h, "ext_cmd")\nx = getattr(*pair)',
+     'x()', True),
     ('getattr-star-owner (977)', 'class H: pass\nh = H(); '
-     'h.ext_cmd = relay()\nowners = (h,)', 'getattr(*owners, "ext_cmd")()',
-     (True, False)),
+     'h.ext_cmd = relay()\nowners = (h,)\nx = getattr(*owners, "ext_cmd")',
+     'x()', True),
     ('getattr-star-default (977)', 'class H: pass\nh = H()\n'
-     'vals = (relay(),)', 'getattr(h, "missing", *vals)()', (True, False)),
+     'vals = (relay(),)\nx = getattr(h, "missing", *vals)', 'x()', True),
+    # ---- Excluded shapes: each a labelled tripwire. -----------------------
     # Direct-invocation form, no alias binding. Tracked by daedalus issue 979.
     ('getattr-direct-invoke-const (979)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()', 'getattr(h, "ext_cmd")()', (True, False)),

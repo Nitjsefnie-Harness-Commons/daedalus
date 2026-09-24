@@ -3,7 +3,8 @@ import ast
 
 from _pyroute_mapping import (_selected_values, apply_assignment_bindings)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
-                             DeferredClass, DeferredInstance, _known_value,
+                             DeferredClass, DeferredContainer,
+                             DeferredInstance, _known_value,
                              deferred_expression_value, is_deferred_value,
                              merge_yielded)
 
@@ -42,31 +43,110 @@ def _attribute_values(owner):
     return []
 
 
+def _select(owner, name, has_default, default):
+    """The value a getattr selects from an owner, a provable string name (or
+    None for a name the model cannot read) and an optional default."""
+    if name is not None:
+        selected = merge_yielded(_selected_values(owner, name,
+                                                  attribute=True))
+        if selected is not None:
+            return selected
+    else:
+        selected = merge_yielded(_attribute_values(owner))
+    return merge_yielded((selected, default)) if has_default else selected
+
+
+def _has_starred_arg(value, state):
+    """Whether an unbound getattr call fills an argument in a starred
+    position, so its positional list must be spliced rather than read
+    plainly."""
+    return (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+            and value.func.id == 'getattr' and not value.keywords
+            and value.func.id not in state.bound
+            and any(isinstance(arg, ast.Starred) for arg in value.args))
+
+
+def _expand_starred_args(value, state):
+    """The getattr call's positional arguments flattened into (is_value,
+    payload) entries, splicing every starred operand the model can prove.
+    None when a starred operand resolves to no provable element list."""
+    args = []
+    for arg in value.args:
+        if not isinstance(arg, ast.Starred):
+            args.append((False, arg))
+            continue
+        operand = _known_value(arg.value, state)
+        if not (isinstance(operand, DeferredContainer)
+                and operand.kind in ('tuple', 'list')
+                and operand.length is not None):
+            return None
+        args.extend((True, operand.items.get(index))
+                    for index in range(operand.length))
+    return args
+
+
+def _argument_value(entry, state):
+    is_value, payload = entry
+    return payload if is_value else _known_value(payload, state)
+
+
+def _argument_name(entry):
+    """The string constant an argument position names, or None when the
+    position is not a provable string (a dynamic name)."""
+    is_value, payload = entry
+    if is_value:
+        return (payload if isinstance(payload, str)
+                and payload != UNPROVABLE_SENDER else None)
+    if isinstance(payload, ast.Constant) and isinstance(payload.value, str):
+        return payload.value
+    return None
+
+
+def _starred_selection(value, state):
+    """The value a getattr call with a starred argument selects, or
+    UNPROVABLE_SENDER when a starred operand's elements cannot be proved.
+
+    Each starred operand is spliced into the positional argument list, so the
+    owner, name and default are read as if written plainly. A name the splice
+    cannot read as a string joins the dynamic-name arm (every value the owner
+    carries). A starred operand resolving to no provable element list hides
+    the call's arity, so no position can be read and the whole selection stays
+    unprovable."""
+    args = _expand_starred_args(value, state)
+    if args is None:
+        return UNPROVABLE_SENDER
+    if len(args) not in (2, 3):
+        return None
+    owner = _argument_value(args[0], state)
+    name = _argument_name(args[1])
+    has_default = len(args) == 3
+    default = _argument_value(args[2], state) if has_default else None
+    return _select(owner, name, has_default, default)
+
+
 def _selection_value(value, state):
     """The value a plain getattr call resolves to, within what the model can
     prove: the named attribute when it resolves to a tracked value, else the
     default in the 3-argument form; every value the owner carries when the name
     is not a provable string constant.
 
-    The model records no occupancy, so an untracked attribute reads as absent
-    and the default is selected (daedalus issue 978). A non-string constant
-    name cannot match the model's string keys, so it resolves to nothing."""
+    A starred argument is spliced into the positional list before the same
+    selection runs (daedalus issue 977). The model records no occupancy, so an
+    untracked attribute reads as absent and the default is selected (daedalus
+    issue 978). A non-string constant name cannot match the model's string
+    keys, so it resolves to nothing."""
+    if _has_starred_arg(value, state):
+        return _starred_selection(value, state)
     call = _plain_getattr(value, state)
     if call is None:
         return None
-    owner = _known_value(call.args[0], state)
     name = _constant_getattr(value, state)
-    if name is not None:
-        selected = merge_yielded(_selected_values(owner, name, attribute=True))
-        if selected is not None:
-            return selected
-    elif not isinstance(call.args[1], ast.Constant):
-        selected = merge_yielded(_attribute_values(owner))
-    else:
+    if name is None and isinstance(call.args[1], ast.Constant):
         return None
-    return merge_yielded(
-        (selected, _known_value(call.args[2], state))) \
-        if len(call.args) == 3 else selected
+    has_default = len(call.args) == 3
+    default = _known_value(call.args[2], state) if has_default else None
+    return _select(_known_value(call.args[0], state), name, has_default,
+                   default)
 
 
 def seed_selection_value(value, state):
