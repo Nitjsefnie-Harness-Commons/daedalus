@@ -212,7 +212,7 @@ _ISSUE962 = [
     ('name-key-unresolved-relay', _flow(
         _RELAY, 'd = {"k": relay()}; key = "k" + ""',
         'x = d.setdefault(key, relay())', invoke='x()'), (1, 1)),
-    ('name-key-unresolved-ordinary', _flow(
+    ('known-defect-963-name-key-unresolved-ordinary', _flow(
         _RELAY, 'd = {"k": relay()}; key = "k" + ""',
         'x = d.setdefault(key, ordinary)', invoke='x()'), (1, 0)),
 ]
@@ -257,6 +257,61 @@ def test_issue967_literal_key_forms(tmp):
         if actual != expected:
             bad.append((label, actual, expected))
     assert not bad, bad
+
+
+# A rebound name must not resolve to its first binding, and the rebind has
+# to be to something the table cannot hold: rebinding to a second literal
+# overwrites the entry and proves nothing. Both rows rebind to a call, so a
+# guard that keeps the first binding resolves the key it must not know. The
+# pop row is the false-green discriminator and the setdefault row the
+# over-report one: a guard keeping the first binding turns the pair into
+# `(1, 0)` and `(1, 1)`.
+_REBINDING = [
+    ('pop-rebound-to-non-literal', _flow(
+        _RELAY, 'd = {"k": relay(), "j": relay()}; k = "k"; k = relay()',
+        'd.pop(k, None)', invoke='d.get("k", ordinary)()'), (1, 1)),
+    ('setdefault-rebound-to-non-literal', _flow(
+        _RELAY, 'd = {"k": relay()}; k = "k"; k = relay()',
+        'x = d.setdefault(k, ordinary)', invoke='x()'), (0, 0)),
+]
+
+# A key the runtime rejects is a key the guard must read unprovable rather
+# than crash on: `dict.setdefault` raises `TypeError: unhashable type` for
+# every spelling below before it routes anything, so the guard's verdict is
+# about the call, and a guard that raises must fail a row instead of a suite.
+_UNUSABLE_KEYS = [
+    ('unusable-key-list', 'key = [1]'),
+    ('unusable-key-tuple-of-list', 'key = ([1],)'),
+    ('unusable-key-dict', 'key = {"a": 1}'),
+    ('unusable-key-set', 'key = {1, 2}'),
+]
+
+
+def test_rebinding_drops_the_first_literal(tmp):
+    bad = []
+    for label, body, expected in _REBINDING:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+def test_unusable_key_reads_unprovable(tmp):
+    quiet = []
+    for label, binding in _UNUSABLE_KEYS:
+        source = Path(tmp) / f'{label}.py'
+        source.write_text(
+            'def ordinary(*a, **k):\n'
+            '    return 0\n'
+            'def probe():\n'
+            '    d = {"k": 1}\n'
+            f'    {binding}\n'
+            '    send = d.setdefault(key, ordinary)\n'
+            '    return send("_focus", "focus-tab", tab=5)\n',
+            encoding='utf-8')
+        if not py_tab_routing_violations(source, source.name):
+            quiet.append(label)
+    assert not quiet, quiet
 
 
 def test_store_form_verdicts(tmp):
