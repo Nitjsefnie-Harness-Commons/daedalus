@@ -8,7 +8,8 @@ from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
                            _literal_value, _unhashable_key_sender)
 from _pyroute_positions import (alias_target_pairs, at_position,
-                                from_position, sequence_method_value)
+                                drop_shifted_positions, from_position,
+                                sequence_method_value)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -110,7 +111,8 @@ def _display_value(node, state):
         return DeferredContainer(
             {} if joined is None else {DYNAMIC_KEY: joined}, None, 'set')
     if items or isinstance(node, ast.List) or starred_any:
-        return DeferredContainer(items, index, type(node).__name__.lower())
+        return DeferredContainer(items, index, type(node).__name__.lower(),
+                                 star_display=index is None)
     return None
 
 
@@ -413,7 +415,8 @@ def _container_copy(owner, items, unknown_length=False):
     if owner.kind == 'dict':
         length = _dict_length(
             items, owner.length is not None and not unknown_length)
-    return DeferredContainer(items, length, owner.kind, owner.identity)
+    return DeferredContainer(items, length, owner.kind, owner.identity,
+                             owner.star_display)
 
 
 def _replace_container(state, owner_name, owner, items,
@@ -506,6 +509,7 @@ def _apply_pop(state, call):
 
 
 def apply_deferred_store(statement, state):
+    drop_shifted_positions(statement, state)
     if isinstance(statement, ast.Expr) \
             and isinstance(statement.value, ast.Call):
         call = statement.value
