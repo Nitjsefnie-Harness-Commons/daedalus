@@ -22,6 +22,9 @@ function storageError() {
   return (chrome.runtime.lastError && chrome.runtime.lastError.message) || '';
 }
 const KEYED_STORAGE_HANDLERS = new Set(['getValue', 'setValue', 'deleteValue']);
+const GM_STORAGE_HANDLERS = new Set([
+  'getValue', 'setValue', 'deleteValue', 'listValues',
+]);
 
 // Page-written GM keys live under a namespace derived from the origin Chrome
 // reports for this document (`location.origin`) and never from the message —
@@ -44,10 +47,46 @@ function gmNamespace() {
 
 // The UTF-8 byte length of a value as Chrome would store it, or a throw when
 // the value cannot be serialised, so an unmeasured write is never admitted.
+// Chrome's local QUOTA_BYTES is "measured by the JSON stringification of every
+// value" and its values are JSON-serialisable, so this is exactly the measure
+// Chrome charges; a Map/Set is stored and charged as its JSON form ({}).
 function gmValueBytes(value) {
   const json = JSON.stringify(value);
   if (typeof json !== 'string') throw new Error('not serialisable');
   return new TextEncoder().encode(json).length;
+}
+
+// chrome.storage has no compare-and-swap, so the cap's get → sum → set is a
+// read-modify-write: a burst of setValue calls issued in one turn would each
+// read the store before any set committed, so every one computes its sum
+// against the same snapshot and independently passes. Writes for one origin
+// therefore run one at a time, in submission order, each reading the store
+// only after the previous write's set callback has committed it. Every path
+// through a queued run calls its `done` exactly once — including the
+// storage-failure and over-cap refusals — so a refusal releases the queue and
+// the page is told, rather than the origin stalling or the failure going
+// silent.
+const _gmWriteQueues = new Map();
+
+function gmEnqueueWrite(namespace, run) {
+  let queue = _gmWriteQueues.get(namespace);
+  if (!queue) {
+    queue = { active: false, waiting: [] };
+    _gmWriteQueues.set(namespace, queue);
+  }
+  const advance = () => {
+    queue.active = true;
+    let finished = false;
+    run(() => {
+      if (finished) return;
+      finished = true;
+      queue.active = false;
+      const next = queue.waiting.shift();
+      if (next) next();
+    });
+  };
+  if (queue.active) queue.waiting.push(advance);
+  else advance();
 }
 
 // One entry per in-flight GM.xmlhttpRequest: the page's request id to
@@ -79,6 +118,16 @@ window.addEventListener('message', (e) => {
                            handler: msg.handler, error: 'reserved key' }, '*');
       return;
     }
+  }
+
+  // An opaque origin (a sandboxed frame, a data: URL) has Chrome reporting
+  // location.origin === "null". There is no owner to name a partition after,
+  // so every such document would share one gm:null: partition and read each
+  // other's keys; fail closed instead.
+  if (GM_STORAGE_HANDLERS.has(msg.handler) && location.origin === 'null') {
+    window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
+                         handler: msg.handler, error: 'opaque origin' }, '*');
+    return;
   }
 
   if (msg.handler === 'abortRequest') {
@@ -150,25 +199,33 @@ window.addEventListener('message', (e) => {
       return window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
         handler: 'setValue', error: 'value could not be measured' }, '*');
     }
-    // Recompute this origin's stored total before the write. The key being
-    // written is skipped so a replace charges the new value only, and keys
-    // outside the namespace — the extension's own — never charge the page.
-    chrome.storage.local.get(null, (data) => {
-      const err = storageError();
-      if (err) return window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
-      const namespace = gmNamespace();
-      let stored = 0;
-      for (const key of Object.keys(data)) {
-        if (!key.startsWith(namespace) || key === storeKey) continue;
-        stored += gmValueBytes(data[key]);
-      }
-      if (stored + incoming > GM_QUOTA_BYTES) {
-        return window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
-          handler: 'setValue', error: 'gm storage quota exceeded' }, '*');
-      }
-      chrome.storage.local.set({ [storeKey]: msg.value }, () => {
+    // Recompute this origin's stored total before the write, serialized per
+    // origin so a burst cannot race the cap. The key being written is skipped
+    // so a replace charges the new value only, and keys outside the namespace
+    // — the extension's own — never charge the page.
+    gmEnqueueWrite(gmNamespace(), (done) => {
+      chrome.storage.local.get(null, (data) => {
         const err = storageError();
-        window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+        if (err) {
+          window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+          return done();
+        }
+        const namespace = gmNamespace();
+        let stored = 0;
+        for (const key of Object.keys(data)) {
+          if (!key.startsWith(namespace) || key === storeKey) continue;
+          stored += gmValueBytes(data[key]);
+        }
+        if (stored + incoming > GM_QUOTA_BYTES) {
+          window.postMessage({ direction: 'daedalus-bg-to-page', reqId,
+            handler: 'setValue', error: 'gm storage quota exceeded' }, '*');
+          return done();
+        }
+        chrome.storage.local.set({ [storeKey]: msg.value }, () => {
+          const err = storageError();
+          window.postMessage({ direction: 'daedalus-bg-to-page', reqId, handler: 'setValue', error: err }, '*');
+          done();
+        });
       });
     });
   } else if (msg.handler === 'deleteValue') {
