@@ -329,8 +329,8 @@ def test_mixed_key_containers_join(tmp):
 def _opaque_mapping_verdicts(tmp, store):
     source = body(store, 'x["k"]()')
     clean = source.replace('lambda: send(', 'lambda: ordinary(')
-    # 815's fold fix reports the known item beside an opaque part; the
-    # clean variant carries no tab and stays unprovable-free.
+    # The known item beside an opaque part is reported; its clean twin
+    # carries no tab and reads (0, 0).
     verdicts(tmp, [('sender', source, (1, 1)), ('clean', clean, (0, 0))])
 
 
