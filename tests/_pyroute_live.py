@@ -11,21 +11,20 @@ from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
 
 _LIVE_UNRESOLVED = object()
 # In-place list/tuple methods the model does not fold back into the tracked
-# container, so a measured length no longer matches the real one. Methods that
-# only read (count, index, copy) leave the length provable and must not match.
+# container, so a measured length no longer matches the real one.
 LIST_LENGTH_MUTATIONS = frozenset(
     {'append', 'extend', 'insert', 'remove', 'pop', 'clear'})
 
 
 def _mutation_receiver(node, state):
     """The tracked list/tuple a statement mutates in place, or None. Covers the
-    three forms the model does not fold back (daedalus issue 990): a
-    length-changing method call, a slice assignment, and an augmented assign.
-    A subscript store only counts when its slice can resize the container: a
-    slice assignment may change the length; an index store is length-neutral.
-    Subscript deletion is not covered: the model folds it through its own
-    store path, so a length-changing index del is a separate (unhandled)
-    surface, not one of the forms claimed here."""
+    three length-changing forms the model does not fold back (daedalus issue
+    990): a method call, a slice assignment, and an augmented assign. A
+    subscript store counts only when its slice can resize the container, so an
+    index store (length-neutral) is excluded. Subscript deletion is not
+    covered: the model folds it through its own store path, which edits the
+    item map but leaves the tracked length stale, so a length read after a
+    delete is a separate (unhandled) surface."""
     target = None
     if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Attribute)
@@ -52,14 +51,14 @@ def _mutation_receiver(node, state):
 
 def invalidate_mutated_length(node, state):
     """A list/tuple mutated in place by a form the model does not fold back has
-    no provable length, so a later operand read of any name bound to that same
-    container leaves the call's arity unprovable rather than a stale single
-    fact (daedalus issue 990). Invalidation is by container identity across
-    every bound name, so an alias mutated through another name is covered too.
+    no provable length, so a later operand read of any name bound to that
+    container leaves the arity unprovable rather than stale (daedalus issue
+    990). Invalidation is by container identity across every bound name, so an
+    alias mutated through another name is covered too.
 
     Returns ``(name, lengthless)`` for an augmented assign, whose name the
-    caller re-binds after the generic rebind path drops it, so the operand read
-    still fails closed with the maker in reach; other forms return None."""
+    caller re-binds after the generic rebind path drops it, keeping the maker
+    in reach; other forms return None."""
     name, tracked = _mutation_receiver(node, state)
     if tracked is None:
         return None
@@ -221,11 +220,10 @@ def _selection_value(value, state):
 
 
 def _generator_operand_yields(node, state):
-    """The deferred values a generator-function operand yields, the element
-    list the call splices. A generator function's yields live in its body, not
-    in the call's own subtree, so without this the carriers reach only the
-    function itself and a maker carried by a yield is lost. The genexp
-    spelling needs no help: its iterable is in the call's own subtree."""
+    """The deferred values a generator-function operand yields. A generator
+    function's yields live in its body, not in the call's own subtree, so
+    without this the carriers reach only the function and a maker carried by a
+    yield is lost. (A genexp needs no help: its iterable is in the subtree.)"""
     for child in ast.walk(node):
         function = state.callables.get(child.id) if isinstance(
             child, ast.Name) else None
@@ -278,10 +276,9 @@ def seed_then_resolve(node, state, generator_factory, sender_resolver,
     """Widen an unprovable selection's carriers, then resolve the expression
     the ordinary way. Every expression flows through here, so a selection the
     model cannot resolve keeps a callable to follow however it is later bound.
-    The three forwarded parameters are named, not packed through ``*args``, so
-    the checker resolves this return as ``resolve_expression_value``'s declared
-    type rather than an opaque unpack; that inference otherwise reaches the
-    latent diagnostics in ``_pyroute_mapping`` (daedalus issue 990).
+    The forwarded parameters are named, not packed through ``*args``: an opaque
+    unpack lets the checker follow this return into the latent diagnostics in
+    ``_pyroute_mapping`` (daedalus issue 990).
     """
     seed_unprovable_selection(node, state)
     return resolve_expression_value(node, state, generator_factory,
