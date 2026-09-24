@@ -134,13 +134,11 @@ def _literal_count(node):
 
 
 def _fold_dynamic(target, value):
-    """Merge a value into the DYNAMIC_KEY slot, joining on repeat."""
     target[DYNAMIC_KEY] = merge_yielded(
         (target.get(DYNAMIC_KEY), value))
 
 
 def _fold_items(target, source):
-    """Fold source mapping items into target, joining DYNAMIC_KEY."""
     for key, value in source.items():
         if key is DYNAMIC_KEY:
             _fold_dynamic(target, value)
@@ -149,7 +147,6 @@ def _fold_items(target, source):
 
 
 def _dict_length(items, counted=True):
-    """A dict's key count while every key is known, otherwise None."""
     return len(items) if counted and DYNAMIC_KEY not in items else None
 
 
@@ -173,7 +170,7 @@ def _dict_value(node, state):
         else:
             _fold_dynamic(items, UNPROVABLE_SENDER)
     if len(node.keys) == 1 and node.keys[0] is not None:
-        return DeferredContainer(items, 1, 'dict', node)  # one key, unread
+        return DeferredContainer(items, 1, 'dict', node)  # one entry, one key
     return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
 
 
@@ -402,8 +399,7 @@ def _source_items(source, state):
         return known.items, known.length is not None
     if known.kind not in ('list', 'tuple', 'set'): return None
     items = {}
-    # A pair at an unknown position (every pair of a set) may be any of
-    # the alternatives that slot joins.
+    # A slot holding alternatives may hold any one of them as its pair.
     pairs = [candidate for value in known.items.values()
              for candidate in (value.values if isinstance(
                  value, DeferredAlternatives) else (value,))]
@@ -519,7 +515,7 @@ def _pop_key(call, state):
 
 def _apply_pop(state, call):
     owner = mapping_lookup_owner(call, state)
-    if owner is None or call.func.attr != 'pop' or not call.args:
+    if owner is None or call.func.attr != 'pop':
         return
     key = _pop_key(call, state)
     items = dict(owner.items)
