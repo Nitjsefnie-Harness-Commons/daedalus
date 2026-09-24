@@ -1,7 +1,7 @@
 """Positional reads of deferred sequence containers.
 
 An int key is an exact position from the start and the DYNAMIC_KEY slot may
-sit at any position. A read that cannot name one exact position, or that
+sit at any position from the container's exact prefix on. A read that cannot name one exact position, or that
 meets an unknown length it would need, joins every item: it never answers
 with a clean subset.
 """
@@ -20,14 +20,18 @@ _SEQUENCE_METHODS = ('pop', 'copy', '__getitem__')
 def at_position(container, index):
     """Values a container may hold at position or key index."""
     items = container.items
-    if container.kind != 'dict':
-        if not isinstance(index, int) or (
-                index < 0 and container.length is None):
-            return list(items.values())
-        if index < 0:
-            return [items.get(index), items.get(index + container.length),
-                    items.get(DYNAMIC_KEY)]
-    return [items.get(index), items.get(DYNAMIC_KEY)]
+    if container.kind == 'dict':
+        return [items.get(index), items.get(DYNAMIC_KEY)]
+    if not isinstance(index, int) or (
+            index < 0 and container.length is None):
+        return list(items.values())
+    values = [items.get(index)]
+    if index < 0:
+        index += container.length
+        values.append(items.get(index))
+    if index >= container.exact_prefix:
+        values.append(items.get(DYNAMIC_KEY))
+    return values
 
 
 def from_position(container, start):
@@ -162,7 +166,7 @@ def sequence_method_value(node, state):
     if not isinstance(owner, DeferredContainer) or owner.kind == 'dict':
         return None
     if node.func.attr == 'copy':
-        return DeferredContainer(
-            dict(owner.items), owner.length, owner.kind, node)
+        return DeferredContainer(dict(owner.items), owner.length, owner.kind,
+                                 node, owner.exact_prefix)
     index = _literal_key(node.args[0], state) if node.args else -1
     return merge_yielded(at_position(owner, index))

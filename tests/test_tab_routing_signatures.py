@@ -16,7 +16,7 @@ import _util  # noqa: E402
 from _pyroute_state import FlowState  # noqa: E402
 from _pyroute_storage import join_clean_occupancy  # noqa: E402
 from _pyroute_values import (  # noqa: E402
-    DeferredAlternatives, DeferredClass, DeferredContainer,
+    DYNAMIC_KEY, DeferredAlternatives, DeferredClass, DeferredContainer,
     DeferredGenerator, DeferredInstance, deferred_signature,
     is_clean_container, stored_signature, value_signature)
 
@@ -139,6 +139,26 @@ def test_occupancy_join_of_equal_items_unequal_lengths_is_unknown(tmp):
         _state_holding(kept), _state_holding(partner))
     assert joined.callables['d'].items == {'a': 'x'}
     assert joined.callables['d'].length is None
+
+
+def _prefixed(kept_prefix, partner_prefix):
+    identity = object()
+    return tuple(DeferredContainer({0: 'q', DYNAMIC_KEY: 'x'}, None, 'list',
+                                   identity, prefix)
+                 for prefix in (kept_prefix, partner_prefix))
+
+
+def test_exact_prefix_signs_with_and_without_occupancy(tmp):
+    exact, reopened = _prefixed(1, 0)
+    assert stored_signature(exact, False) != stored_signature(reopened, False)
+    assert stored_signature(exact, True) != stored_signature(reopened, True)
+
+
+def test_occupancy_join_keeps_the_shorter_exact_prefix(tmp):
+    for kept, partner in (_prefixed(1, 0), _prefixed(0, 1)):
+        joined = join_clean_occupancy(
+            _state_holding(kept), _state_holding(partner))
+        assert joined.callables['d'].exact_prefix == 0
 
 
 def main():
