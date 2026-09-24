@@ -9,18 +9,25 @@ too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. The
 registry is read at every level — the base structurally, the key by folding
-it — and a store that hands it away and a star import are refused too.
-Three shapes it cannot follow are ACCEPTED as declared limits: a value
-reached through a call's result, a tracked module or the operation handed
-as a call ARGUMENT (`use(sys)`), and a string ASSEMBLED at runtime the
-walk cannot fold to a constant. A string that DOES fold is refused. Any
-accepted shape leaves the closure quietly short.
+it — and a store that hands it away and a star import are refused too. A
+code-evaluating builtin is the same hole one step on: a CONSTANT program
+handed to one is a program the walk can neither resolve nor follow, so it
+is refused, as is a store hiding it in a name. Three shapes it cannot
+follow are ACCEPTED as declared limits: a value reached through a call's
+result, a tracked module or the operation handed as a call ARGUMENT
+(`use(sys)`), and a value the walk cannot fold to a constant — whether an
+import name or a program. A value that DOES fold is refused. Any accepted
+shape leaves the closure quietly short.
 """
 import ast
+import symtable
 from pathlib import Path
 
 
 DYNAMIC_ATTRIBUTES = ('import_module', '__import__')
+
+# Code-evaluating builtins; one set reads every direct reach of them.
+CODE_EVAL_BUILTINS = ('eval', 'exec', 'compile')
 
 # The map's values that name the module registry rather than the operation.
 # A registry name is tracked so a read of it can be refused, not because it
@@ -115,6 +122,99 @@ def _dynamic_callees(tree):
     return bound
 
 
+class _Scopes:
+    """Which names one reference resolves to, so a builtin is told apart
+    from a same-named local.
+
+    Built on `symtable` — Python's own binding grammar — so the answer is a
+    property (no enclosing scope binds the name), not a list of shadow
+    spellings: a name no scope binds is the builtin, which is what keeps the
+    MCP tool named `exec` an ordinary function. A scope the walk cannot line
+    up with the resolver's errs toward the builtin, so a correlation miss
+    refuses.
+    """
+    _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                    ast.Lambda)
+
+    def __init__(self, tree, source, filename):
+        self._root = symtable.symtable(source, filename, 'exec')
+        self._root_binds = self._bound(self._root)
+        self._symbols_by_table = {}
+        self._scope_of = {}
+        self._walk(tree, self._root)
+
+    @staticmethod
+    def _bound(table):
+        return {symbol.get_name() for symbol in table.get_symbols()
+                if symbol.is_assigned() or symbol.is_imported()
+                or symbol.is_parameter() or symbol.is_namespace()}
+
+    def _symbols(self, table):
+        found = self._symbols_by_table.get(id(table))
+        if found is None:
+            found = {symbol.get_name(): symbol
+                     for symbol in table.get_symbols()}
+            self._symbols_by_table[id(table)] = found
+        return found
+
+    @staticmethod
+    def _match(table, name, line):
+        for child in table.get_children():
+            if child.get_name() == name and child.get_lineno() == line:
+                return child
+        return None
+
+    def _walk(self, node, table):
+        self._scope_of[id(node)] = table
+        if isinstance(node, self._SCOPE_NODES):
+            name = 'lambda' if isinstance(node, ast.Lambda) else node.name
+            child = self._match(table, name, node.lineno)
+            if child is not None:
+                table = child
+        for child in ast.iter_child_nodes(node):
+            self._walk(child, table)
+
+    def is_builtin(self, node):
+        """The name is a code-evaluating builtin at `node`'s own scope."""
+        table = self._scope_of.get(id(node))
+        if table is None:
+            return True
+        symbol = self._symbols(table).get(node.id)
+        if symbol is None:
+            return True
+        if symbol.is_local() or symbol.is_free():
+            return False
+        # A global is the builtin only when the module leaves it unbound.
+        return node.id not in self._root_binds
+
+
+def _names_builtins(node, bound):
+    return isinstance(node, ast.Name) and bound.get(node.id) == 'builtins'
+
+
+def _denotes_code_eval(node, bound, scopes):
+    """The code-evaluating builtin this node evaluates to, or nothing.
+
+    A bare name is the builtin only where no enclosing scope binds it
+    (`scopes`); the module attribute and the constant `getattr` are the two
+    direct routes a module hands an attribute out through — the forms the
+    import operation is also recognised through, so both share one grammar.
+    """
+    if isinstance(node, ast.Name):
+        return node.id in CODE_EVAL_BUILTINS and scopes.is_builtin(node)
+    if isinstance(node, ast.Attribute):
+        return node.attr in CODE_EVAL_BUILTINS and _names_builtins(
+            node.value, bound)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == 'getattr' and len(node.args) >= 2:
+        attribute = node.args[1]
+        if isinstance(attribute, ast.Constant):
+            return attribute.value in CODE_EVAL_BUILTINS and _names_builtins(
+                node.args[0], bound)
+        return _names_builtins(node.args[0], bound)
+    return False
+
+
 def _is_dynamic_import(func, bound):
     """A call to import_module or __import__, per the module's own bindings.
 
@@ -189,8 +289,9 @@ class _BindingWalk(ast.NodeVisitor):
     point: the two refusals are what keep it one.
     """
 
-    def __init__(self, bound, refuse):
+    def __init__(self, bound, scopes, refuse):
         self.bound = bound
+        self.scopes = scopes
         self.refuse = refuse
 
     def _alias(self, node):
@@ -202,6 +303,11 @@ class _BindingWalk(ast.NodeVisitor):
         self.refuse(
             node, f'{ast.unparse(node)} binds the module registry to a name '
             'this scan cannot follow')
+
+    def _code_eval_alias(self, node):
+        self.refuse(
+            node, f'{ast.unparse(node)} binds a code-evaluating builtin to a '
+            'name this scan cannot follow')
 
     def _rebind(self, node, name):
         self.refuse(
@@ -234,6 +340,9 @@ class _BindingWalk(ast.NodeVisitor):
             self._registry_alias(node)
         elif isinstance(target, ast.Name) and target.id in self.bound:
             self._rebind(node, target.id)
+        elif any(value is not None and _denotes_code_eval(
+                value, self.bound, self.scopes) for value in values):
+            self._code_eval_alias(node)
 
     def _pooled(self, node, target, values):
         for leaf in _store_leaves(target):
@@ -362,10 +471,11 @@ class _BindingWalk(ast.NodeVisitor):
         self._keyword_defaults(node)
 
 
-def _refused_bindings(tree, bound, refuse):
-    """Refuse every store that hides the import-by-name operation from the
-    map, whatever form the store takes."""
-    _BindingWalk(bound, refuse).visit(tree)
+def _refused_bindings(tree, bound, scopes, refuse):
+    """Refuse every store that hides the import-by-name operation, the
+    registry or a code-evaluating builtin from the map, whatever form the
+    store takes."""
+    _BindingWalk(bound, scopes, refuse).visit(tree)
 
 
 def _looks_the_operation_up(node, bound):
@@ -510,11 +620,13 @@ def _import_targets(path, root):
     cannot hold.
     """
     targets = set()
-    tree = ast.parse(path.read_text(encoding='utf-8'))
+    source = path.read_text(encoding='utf-8')
+    tree = ast.parse(source)
     bound = _dynamic_callees(tree)
+    scopes = _Scopes(tree, source, str(path))
     package = path.resolve().relative_to(Path(root).resolve()).parent.parts
     _refused_bindings(
-        tree, bound,
+        tree, bound, scopes,
         lambda node, detail: _refuse(path, root, node, detail))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -548,6 +660,16 @@ def _import_targets(path, root):
             _refuse(path, root, node,
                     f'{ast.unparse(node)} can hand out the import-by-name '
                     'operation through a lookup this scan cannot follow')
+        elif isinstance(node, ast.Call) and _denotes_code_eval(
+                node.func, bound, scopes):
+            program = _folded_string(node.args[0]) if node.args else None
+            if program is not None:
+                _refuse(path, root, node,
+                        f'the program {program!r} is handed to a '
+                        'code-evaluating builtin, which this scan cannot '
+                        'resolve')
+            # A program the folder cannot read as a constant is a declared
+            # limit, shared with the import name.
     _refused_string_reads(
         tree, bound,
         lambda node, detail: _refuse(path, root, node, detail))
