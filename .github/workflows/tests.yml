@@ -1505,6 +1505,34 @@ jobs:
           path: base
           persist-credentials: false
 
+      - name: Probe the head scripts for options
+        id: probe
+        if: steps.baseline.outputs.point != ''
+        # This job's TEXT comes from the merge ref while its SCRIPTS come
+        # from head/, and the two are trees of different ages. A flag the
+        # merge ref's text carries can be one head/ cannot parse, and the
+        # cell then dies on a branch whose own changes had nothing to do
+        # with speed. Each script is therefore asked what it takes, and each
+        # caller below passes only what it advertised.
+        #
+        # An unreadable --help is a refusal, never a skip: it is also what a
+        # head predating the script itself looks like, and "we could not
+        # find out" must not read as "there is nothing to pass".
+        run: |
+          probe() {
+            script="$1"
+            key="$2"
+            if ! help="$(python3 "$script" --help)"; then
+              echo "::error::$script did not answer --help, so the options it takes are unknown."
+              exit 1
+            fi
+            echo "$key=$(printf '%s\n' "$help" \
+              | grep -oE '(^|[[:space:]])-{1,2}[a-z][a-z0-9-]+' \
+              | tr -d ' ' | sort -u | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          }
+          probe head/scripts/ci/compare_durations.py compare_options
+          probe head/scripts/ci/time_tests.py time_options
+
       # No `cache: pip`. setup-python saves its cache in a post-job step, so
       # asking for one here would have this job write cross-run state after it
       # has already run the code it was measuring. Without the input that post
@@ -1553,6 +1581,7 @@ jobs:
           # neither, and the instrument then times every suite.
           SUITES_ONLY: ${{ matrix.suites }}
           SUITES_EXCEPT: ${{ matrix.except }}
+          TIME_OPTIONS: ${{ steps.probe.outputs.time_options }}
         # A failing test does NOT fail this job: tests.yml owns that verdict.
         # A non-passing test is absent from the side's durations, so it drops
         # out of the intersection, and is recorded as an outcome beside them.
@@ -1560,6 +1589,31 @@ jobs:
         # reports on BOTH sides, so it checks for them explicitly rather than
         # trusting an exit code it ignores.
         run: |
+          # The instrument comes from head/ while this text comes from the
+          # merge ref, so a selection flag the text carries can be one the
+          # head's parser refuses — and that refusal exits before any report
+          # is written, which the MISSING guard below reports as a setup
+          # failure rather than as the flag mismatch it is. A dropped
+          # selection means this cell times MORE suites than the matrix
+          # slice, so it says so rather than losing the slice in silence.
+          REQUIRED="--tree --python --out"
+          add() { opt="$1"; shift
+            if [ -z "$TIME_OPTIONS" ]; then
+              args+=("$opt" "$@"); return
+            fi
+            case " $TIME_OPTIONS " in
+              *" $opt "*) args+=("$opt" "$@"); return ;;
+            esac
+            case " $REQUIRED " in
+              *" $opt "*)
+                echo "::error::$opt is required and this script does not offer it."
+                exit 1 ;;
+            esac
+            dropped="$dropped $opt"
+          }
+
+          args=()
+          dropped=""
           # set -f keeps the glob metacharacters away from the shell's own
           # pathname expansion — they have to reach the instrument as
           # patterns — and the unquoted expansion below is what turns the
@@ -1569,16 +1623,16 @@ jobs:
           # and under noglob it would stat one literal path and report a
           # step that measured everything as having produced nothing.
           set -f
-          selection=()
           if [ -n "$SUITES_ONLY" ]; then
-            # shellcheck disable=SC2086,SC2206
-            selection+=(--only $SUITES_ONLY)
+            # shellcheck disable=SC2086
+            add --only $SUITES_ONLY
           fi
           if [ -n "$SUITES_EXCEPT" ]; then
-            # shellcheck disable=SC2086,SC2206
-            selection+=(--except $SUITES_EXCEPT)
+            # shellcheck disable=SC2086
+            add --except $SUITES_EXCEPT
           fi
           set +f
+          selection=("${args[@]}")
 
           mkdir -p reports
           # Round 0 is thrown away. It is written outside the reports/base-*
@@ -1587,11 +1641,12 @@ jobs:
           # the size of what it absorbs is the evidence for doing it at all.
           for side in base head; do
             echo "::group::$side warm-up (discarded)"
+            args=()
+            add --tree "$side"
+            add --python "$GITHUB_WORKSPACE/venv-$side/bin/python"
+            add --out "$GITHUB_WORKSPACE/reports/warmup/$side"
             python3 head/scripts/ci/time_tests.py \
-              --tree "$side" \
-              --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
-              --out "$GITHUB_WORKSPACE/reports/warmup/$side" \
-              "${selection[@]}" \
+              "${args[@]}" "${selection[@]}" \
               || echo "$side warm-up: timing reported a problem"
             echo "::endgroup::"
           done
@@ -1599,15 +1654,32 @@ jobs:
           for round in $(seq 1 "$ROUNDS"); do
             for side in base head; do
               echo "::group::$side round $round"
+              args=()
+              add --tree "$side"
+              add --python "$GITHUB_WORKSPACE/venv-$side/bin/python"
+              add --out "$GITHUB_WORKSPACE/reports/$side-$round"
               python3 head/scripts/ci/time_tests.py \
-                --tree "$side" \
-                --python "$GITHUB_WORKSPACE/venv-$side/bin/python" \
-                --out "$GITHUB_WORKSPACE/reports/$side-$round" \
-                "${selection[@]}" \
+                "${args[@]}" "${selection[@]}" \
                 || echo "$side round $round: timing reported a problem"
               echo "::endgroup::"
             done
           done
+
+          if [ -z "$TIME_OPTIONS" ]; then
+            echo "::warning::no option set was probed for this instrument, so every option was passed as written."
+          fi
+          if [ -n "$dropped" ]; then
+            if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
+              note="this instrument's --help did not list$dropped, so it was not passed"
+            else
+              note="this instrument's --help did not list$dropped, so they were not passed"
+            fi
+            echo "::warning::$note"
+            {
+              echo
+              echo "$note."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
           missing=0
           for round in $(seq 1 "$ROUNDS"); do
@@ -1630,6 +1702,7 @@ jobs:
         if: steps.baseline.outputs.point != ''
         env:
           BASE_LABEL: ${{ steps.baseline.outputs.point }}
+          COMPARE_OPTIONS: ${{ steps.probe.outputs.compare_options }}
         # The comparator comes from the HEAD checkout, so an improvement to the
         # comparison itself takes effect on the commit that makes it rather
         # than one release later. The round directories hold this cell's
@@ -1639,16 +1712,58 @@ jobs:
         # test; any other regression, or an accepted test past its bound,
         # still fails this cell.
         run: |
+          # The comparator comes from head/ and this text from the merge
+          # ref, so a flag here can be one that parser refuses. Matching is
+          # by exact token, never by substring: --base is a prefix of
+          # --base-label, and a prefix match would hand a head the wrong
+          # flag's argument. What a dropped option costs is named rather
+          # than assumed: without --ratio-file the cell records no ratio,
+          # and without --summary-file it reports nothing to the run.
+          REQUIRED="--base --head"
+          add() { opt="$1"; shift
+            if [ -z "$COMPARE_OPTIONS" ]; then
+              args+=("$opt" "$@"); return
+            fi
+            case " $COMPARE_OPTIONS " in
+              *" $opt "*) args+=("$opt" "$@"); return ;;
+            esac
+            case " $REQUIRED " in
+              *" $opt "*)
+                echo "::error::$opt is required and this script does not offer it."
+                exit 1 ;;
+            esac
+            dropped="$dropped $opt"
+          }
+          args=()
+          dropped=""
           # shellcheck disable=SC2046
-          python3 head/scripts/ci/compare_durations.py \
-            --base $(ls -d reports/base-*) \
-            --head $(ls -d reports/head-*) \
-            --accept head/scripts/ci/accepted_speed_changes.json \
-            --max-regression "$MAX_REGRESSION" \
-            --base-label "$BASE_LABEL" \
-            --require-measurements \
-            --ratio-file reports/ratio.txt \
-            --summary-file "$GITHUB_STEP_SUMMARY"
+          add --base $(ls -d reports/base-*)
+          # shellcheck disable=SC2046
+          add --head $(ls -d reports/head-*)
+          add --accept head/scripts/ci/accepted_speed_changes.json
+          add --max-regression "$MAX_REGRESSION"
+          add --base-label "$BASE_LABEL"
+          add --require-measurements
+          add --ratio-file reports/ratio.txt
+          add --summary-file "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$COMPARE_OPTIONS" ]; then
+            echo "::warning::no option set was probed for this comparator, so every option was passed as written."
+          fi
+          if [ -n "$dropped" ]; then
+            if [ "$(echo $dropped | wc -w)" -eq 1 ]; then
+              note="this comparator's --help did not list$dropped, so it was not passed"
+            else
+              note="this comparator's --help did not list$dropped, so they were not passed"
+            fi
+            echo "::warning::$note"
+            {
+              echo
+              echo "$note."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          python3 head/scripts/ci/compare_durations.py "${args[@]}"
 
       - name: Record the cell verdict
         # Runs whenever the cell did work, a failed comparison included: the
