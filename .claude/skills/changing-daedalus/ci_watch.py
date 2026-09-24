@@ -59,8 +59,8 @@ DEBOUNCE_SECONDS = 60
 TARGET = ('repository', 'ref', 'target')
 CONTEXTS = TARGET + ('statusCheckRollup', 'contexts')
 
-CI_QUERY = f'''query WatchChecks($owner: String!, $name: String!, $ref: String!,
-    $after: String) {{
+CI_QUERY = f'''query WatchChecks($owner: String!, $name: String!,
+    $ref: String!, $after: String) {{
   repository(owner: $owner, name: $name) {{
     ref(qualifiedName: $ref) {{
       target {{

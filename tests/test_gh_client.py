@@ -75,8 +75,9 @@ def test_a_429_prefers_retry_after_over_the_reset_header(tmp):
     mod = _client()
     before = time.time()
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 429, 'headers': {'Retry-After': '60',
-                                   'X-RateLimit-Reset': str(int(before) + 3600)},
+        'status': 429, 'headers': {
+            'Retry-After': '60',
+            'X-RateLimit-Reset': str(int(before) + 3600)},
         'body': 'You have exceeded a secondary rate limit.'}})
     with fake.activate():
         try:

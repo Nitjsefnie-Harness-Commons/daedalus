@@ -335,12 +335,30 @@ What the aggregator does, and why each part is load-bearing:
   pull request and branch rather than one fixed filename, so concurrent runs
   cannot interleave inside a single batch.
 
-Both children fetch with `Cache-Control: no-cache` and `--paginate`, never
-consult read/unread state, announce items that already existed when armed, keep
-stderr off the event channel, and escalate consecutive poll failures to it -
-because a watcher that has gone blind must not look like a quiet pull request.
-CI announces success and failure alike, and re-resolves the branch head every
-poll since a push moves it.
+Both children read everything they watch in ONE `gh api graphql` query per
+poll - the comment watcher's state, reviews, inline comments and conversation
+in one; the CI watcher's head ref and its check runs in one - with
+`Cache-Control: no-cache` and every connection followed to its last page.
+An unchanged pull request therefore costs two requests a poll rather than
+six, and the account's primary limit survives several watchers at once. They
+never consult read/unread state, announce items that already existed when
+armed, keep stderr off the event channel, and escalate consecutive poll
+failures to it - because a watcher that has gone blind must not look like a
+quiet pull request. CI announces success and failure alike, and re-resolves
+the branch head every poll since a push moves it.
+
+**A rate-limit refusal is a wait, not a failure.** Each watcher says once
+where it is waiting - the instant the API reported as `X-RateLimit-Reset` or
+`Retry-After` - and resumes at that reset rather than retrying every interval,
+which is what used to keep the limit at zero after it was reached. A 403
+with no rate-limit evidence is an ordinary failure and is never a pause.
+
+**The children cannot outlive the aggregator.** `watch_all.py` passes its pid
+to both (`--parent-pid`) and each compares it on every tick and while it
+waits, and they are terminated on the way out; a kill of the parent never
+runs a `finally`, so neither mechanism carries the guarantee alone. A restart
+of the aggregator can therefore never leave the old pair polling beside the
+new one.
 
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
@@ -353,7 +371,9 @@ run on the SHA concluded `success`, `neutral` or `skipped`; 1 every run
 concluded and one concluded otherwise, offenders named with URLs; 2 the
 `--timeout` bound expired first; 3 the invocation was rejected or a query
 failed - loud and at once, never retried behind a message that reads like
-waiting. Unlike `ci_watch.py` it
+waiting. A rate-limit refusal is the one exception: it is a known wait, so
+it pauses until the reset and polls again, bounded by the same `--timeout`.
+Unlike `ci_watch.py` it
 PINS the SHA it is given instead of re-resolving the branch head each poll:
 a push landing mid-wait must not turn the answer into one about a commit the
 caller never asked about. Zero runs on the SHA is waiting, not success. Run
