@@ -22,7 +22,12 @@ concurrency:
 
 jobs:
   gate:
-    if: github.event.pull_request.user.type != 'Bot' && github.event.pull_request.draft == false
+    # A reopen is authored by github-actions[bot] with this workflow's own
+    # github.token, and GitHub's no-recursion exception holds such an event's
+    # pull_request runs for approval: a draft closed and reopened loses its CI.
+    if: >-
+      github.event.pull_request.user.type != 'Bot'
+      && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
