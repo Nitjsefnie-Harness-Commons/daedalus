@@ -492,8 +492,7 @@ def test_materialized_container_destructuring(tmp):
 
 def test_materialized_container_controls(tmp):
     """The materializer pairing must not move the controls that already
-    answered: the eager consumer's own index, a plain container, iter, and a
-    single-name target that subscripts the materialized container."""
+    answered."""
     cases = [
         ('list-index', body('x = list(pair())', 'x[0]()'), (1, 1)),
         ('plain-pair', body('x, y = pair()', 'x()'), (1, 1)),
@@ -654,12 +653,10 @@ def test_materialized_order_only_for_order_preserving_consumers(_tmp):
     for consumer in ('dict', 'frozenset', 'max', 'min', 'set', 'sorted',
                      'sum'):
         assert materialized_order(consumer, node, [state]) is None, consumer
-    # Why dict is excluded: iterating it yields the keys -- each pair's first
-    # element -- not the pairs the operand held, so a positional read cannot
-    # recover the operand's own elements. This is the projection, and it is
-    # what the exclusion is for; nothing here relies on order. A comment
-    # rather than assertions: neither line reads materialized_order, so as
-    # coverage it would pass with the whole dict arm deleted.
+    # Why dict is excluded: iterating it yields each pair's first element,
+    # not the pair. A comment rather than assertions: neither line reads
+    # materialized_order, so as coverage it would pass with the whole dict
+    # arm deleted.
     # list(dict([('first', 1), ('second', 2)])) == ['first', 'second']
     # list([('first', 1), ('second', 2)]) == [('first', 1), ('second', 2)]
 
