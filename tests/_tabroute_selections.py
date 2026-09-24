@@ -12,6 +12,12 @@ the daedalus issue that tracks the excluded shape, so the row fails if the
 shape starts being modelled — a disclosure that doubles as a tripwire. A
 value-axis clean twin of such a shape is kept separately and labelled as a
 value-axis control, never as a shape control.
+
+A row expecting ``(False, True)`` is the opposite disagreement: the guard
+reports a selection the runtime never produces, on a cell tracked by the
+occupancy model change (daedalus issue 978). Such a row pins a known false
+positive — the runtime verdict is ``0`` and the guard's is ``1`` — and its
+comment names the issue.
 """
 SELECTION_PRE = ('send = ordinary\ndef maker():\n    return lambda: send('
                  '"_focus", "focus-tab", tab=args.chrome_tab)\n'
@@ -51,12 +57,21 @@ SELECTIONS = [
     # The present-name 3-argument cell. The model records no occupancy, so a
     # present-but-untracked attribute reads as absent and the default is
     # selected: the guard reports a value the runtime never produces, with no
-    # runtime send. daedalus issue 978 tracks the model change that would make
-    # this cell's runtime verdict reachable.
+    # runtime send. The runtime verdict is 0 and always is; daedalus issue 978
+    # tracks the occupancy model change that would make the guard's verdict
+    # clean here.
     ('getattr-present-name-sender-default', 'class H: pass\nh = H(); '
      'h.fn = ordinary\nx = getattr(h, "fn", relay())', 'x()', (False, True)),
     ('getattr-present-name-clean-default', 'class H: pass\nh = H(); '
      'h.fn = ordinary\nx = getattr(h, "fn", ordinary)', 'x()', False),
+    # The present-AND-tracked half of the same cell: the owner carries the
+    # named attribute as a clean deferred callable, so the runtime selects it
+    # and sends nothing. This row is what makes the "the default is dead when
+    # the owner carries the attribute" early return load-bearing: drop it and
+    # this row flips to (0,1).
+    ('getattr-present-tracked-default', 'def cleanrelay():\n'
+     '    return lambda: ordinary()\nclass H: pass\nh = H(); '
+     'h.fn = cleanrelay()\nx = getattr(h, "fn", relay())', 'x()', False),
     # A name that is not a provable string constant makes the attribute
     # unknowable, so the selection is every value the owner could carry.
     ('getattr-dynamic-name', 'class H: pass\nh = H(); h.ext_cmd = relay()\n'
@@ -83,14 +98,38 @@ SELECTIONS = [
      'name = "ext_cmd"\nx = getattr(H, name)', 'x()', True),
     ('getattr-class-dynamic-clean', 'class H:\n    clean = ordinary\n'
      'name = "clean"\nx = getattr(H, name)', 'x()', False),
+    # An alternatives owner under a dynamic name, reached through a pick()
+    # helper that returns one of two instances. This is the row that pins
+    # _attribute_values' alternatives arm; delete the arm and it flips to
+    # (1,0).
+    ('getattr-alternatives-dynamic', 'class H: pass\na = H(); '
+     'a.ext_cmd = relay()\nb = H(); b.ext_cmd = relay()\n'
+     'def pick(flag):\n    return a if flag else b\n'
+     'owner = pick(int(args.flag))\nname = "ext_cmd"\n'
+     'x = getattr(owner, name)', 'x()', True),
+    ('getattr-alternatives-dynamic-clean', 'class H: pass\na = H(); '
+     'a.clean = ordinary\nb = H(); b.clean = ordinary\n'
+     'def pick(flag):\n    return a if flag else b\n'
+     'owner = pick(int(args.flag))\nname = "clean"\n'
+     'x = getattr(owner, name)', 'x()', False),
     # A dynamic name in the 3-argument form merges the selected value with the
-    # default.
+    # default. When the owner carries the named attribute as an untracked
+    # value, the runtime returns it and the guard reports the default: the
+    # same observable false positive as the present-name cell, reached by a
+    # different route, tracked by the same daedalus issue 978.
     ('getattr-dynamic-3arg-sender-default', 'class H: pass\nh = H(); '
      'h.ext_cmd = ordinary\nname = "ext_cmd"\nx = getattr(h, name, relay())',
      'x()', (False, True)),
     ('getattr-dynamic-3arg-clean-default', 'class H: pass\nh = H(); '
      'h.ext_cmd = ordinary\nname = "ext_cmd"\nx = getattr(h, name, ordinary)',
      'x()', False),
+    # The class-owner form of that same false-positive cell: a class carrying
+    # the named method as an untracked value, a dynamic name, and a
+    # sender-bearing default. Also tracked by daedalus issue 978.
+    ('getattr-class-3arg-sender-default', 'class H:\n    fn = ordinary\n'
+     'name = "fn"\nx = getattr(H, name, relay())', 'x()', (False, True)),
+    ('getattr-class-3arg-clean-default', 'class H:\n    fn = ordinary\n'
+     'name = "fn"\nx = getattr(H, name, ordinary)', 'x()', False),
     # Names and arities the plain selection model does not claim.
     ('getattr-nonstring-name', 'class H: pass\nh = H(); h.fn = relay()\n'
      'try:\n    x = getattr(h, 5)\nexcept TypeError:\n    x = ordinary', 'x()',
