@@ -13,13 +13,15 @@ registry name is one — `[sys][0].modules`, `sys.__dict__['modules']` — and
 a store that hands it to an unfollowable name is refused too; a star
 import, which binds names no name-based walk can follow, is refused
 outright. Three shapes it cannot follow are ACCEPTED rather than refused,
-and each is a declared limit, not a silent skip: a call's result; the
-operation delivered as a call ARGUMENT to a parameter (`use(importlib)`),
-because the walk does not follow a call's arguments; and an INTERPOLATED
-f-string (`f'import_{which}'`), whose value the walk cannot know. A
-field-less f-string folds to a constant and is refused like any other
-literal. Any of the accepted shapes would leave the closure quietly short
-of the modules that composition can reach.
+and each is a declared limit, not a silent skip: a value reached through a
+call's result, bound to a name or read inline as a base, attribute or
+subscript; a tracked module or the operation delivered as a call ARGUMENT —
+including `sys`, whose registry is reachable only past the argument —
+because the walk follows nothing a call returns or is handed; and an
+INTERPOLATED f-string (`f'import_{which}'`), whose value the walk cannot
+know. A field-less f-string folds to a constant and is refused like any
+other literal. Any accepted shape would leave the closure quietly short of
+the modules that composition can reach.
 """
 import ast
 from pathlib import Path
@@ -480,15 +482,19 @@ def _import_targets(path, root):
     skipped in silence: a call evaluates to whatever its callee returns, so
     refusing every store of one would refuse
     `mod = importlib.import_module('fcntl')` and every `x = f()` with it; a
-    name holding a call's result is followed by neither the operation map nor
-    these refusals. The operation delivered as a call ARGUMENT to a parameter
-    (`use(importlib)`) is likewise accepted: the walk does not follow a call's
-    arguments. An attribute of a known module that is not the operation
-    (`importlib.util`) is not a limit but an answer: its own name is not the
-    operation's, so no base can make it one. An INTERPOLATED f-string is the
-    third declared limit: a field-less one folds to a constant and is refused
-    like any other literal, but what interpolates into a `f'import_{which}'`
-    is not knowable statically. A string that NAMES the operation — folded
+    value reached through a call's result is followed by neither the operation
+    map nor these refusals, whether it is bound to a name or read inline as a
+    base, attribute or subscript (`__import__('sys').modules[k]`). A tracked
+    module or the operation delivered as a call ARGUMENT is likewise accepted
+    — `use(importlib)` and `use(sys)`, whose registry is reachable only past
+    the argument — because the walk follows nothing a call returns or is
+    handed. An attribute of a known module that is not the
+    operation (`importlib.util`) is not a limit but an answer: its own name is
+    not the operation's, so no base can make it one. An INTERPOLATED f-string
+    is the third declared limit: a field-less one folds to a constant and is
+    refused like any other literal, but what interpolates into a
+    `f'import_{which}'` is not knowable statically. A string that NAMES the
+    operation — folded
     from its parts, so a concatenation of literals is the name it assembles
     to — and a module read out of the registry by string are refused rather
     than accepted: they reach the operation the way a tracked name does, and
