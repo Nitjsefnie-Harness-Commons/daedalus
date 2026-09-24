@@ -6,7 +6,27 @@ let config = { token: '', serverUrl: DEFAULT_SERVER };
 
 // ─── Config ───
 
-async function loadConfig() {
+// Boot's loadConfig and a restart's heartbeat alarm can both reach loadConfig
+// while the first is still parked on its storage read (config.token is ''), so
+// the generation is memoized: a second caller joins the first one's result
+// instead of starting a second generation that races it to auto-generate a
+// token. The memo lives for the worker's lifetime — chrome.storage.onChanged
+// below updates config in place and never re-reads, and a worker restart
+// re-imports this module with fresh state — so it is never cleared on success.
+let _configPromise = null;
+
+function loadConfig() {
+  if (!_configPromise) {
+    _configPromise = _loadConfigOnce();
+    // A rejected generation must not wedge the worker for its lifetime: drop
+    // the memo so a later caller retries, while the callers already waiting
+    // on THIS promise all observe the same rejection.
+    _configPromise.catch(() => { _configPromise = null; });
+  }
+  return _configPromise;
+}
+
+async function _loadConfigOnce() {
   const stored = await chrome.storage.local.get([
     'daedalus-token', 'daedalus-server',
   ]);
