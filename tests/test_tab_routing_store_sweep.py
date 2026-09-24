@@ -543,8 +543,12 @@ _SIGNATURE_TERM = [
 # read finds nothing and the stored relay reads clean, which is why this row
 # exists beside the route assertion the yielded-sender suite keeps.
 _SUBSCRIPT_UNRESOLVED = [
+    # Two items, the ordinary one FIRST: the key the guard cannot resolve
+    # evaluates to "k" at runtime, which is the second item, so naming only
+    # the first candidate picks `ordinary` and misses the relay. A one-item
+    # dict cannot tell "every item" from "the first".
     ('subscript-unresolvable-key', _flow(
-        _RELAY, 'd = {"k": relay()}', 'x = d["k" + ""]',
+        _RELAY, 'd = {"a": ordinary, "k": relay()}', 'x = d["k" + ""]',
         invoke='x()'), (1, 1)),
 ]
 
@@ -561,6 +565,26 @@ def test_signature_term_separates_two_literal_bindings(tmp):
 def test_unresolvable_subscript_read_names_every_item(tmp):
     bad = []
     for label, body, expected in _SUBSCRIPT_UNRESOLVED:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
+# A resolvable subscript-store key is recorded UNDER THAT KEY, not in the
+# dynamic slot. The row reads a DIFFERENT key, so a store that parks the
+# relay dynamically leaks it into this read: the plain value sits first and
+# the parked relay would be a second candidate.
+_SUBSCRIPT_STORE_NAMES = [
+    ('subscript-store-by-name', _flow(
+        _RELAY, 'd = {"a": ordinary}; d["k"] = relay()',
+        'x = d.get("a", relay())', invoke='x()'), (0, 0)),
+]
+
+
+def test_subscript_store_records_a_resolvable_key_under_it(tmp):
+    bad = []
+    for label, body, expected in _SUBSCRIPT_STORE_NAMES:
         actual = _tracked_focus_verdict(tmp, body, counts=True)
         if actual != expected:
             bad.append((label, actual, expected))
