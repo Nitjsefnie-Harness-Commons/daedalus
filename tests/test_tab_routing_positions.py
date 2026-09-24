@@ -145,8 +145,8 @@ def _literal(tmp, name, element, call, clean=False):
                 clean)
 
 
-def test_star_empty_tuple_in_tuple_counts_exactly(tmp):
-    assert _literal(tmp, 'empty_tuple_in_tuple', 'ordinary', _T) == (0, 0)
+def test_star_empty_tuple_in_tuple_has_no_count(tmp):
+    assert _literal(tmp, 'empty_tuple_in_tuple', 'ordinary', _T) == (0, 1)
 
 
 def test_star_empty_tuple_in_tuple_relay_reports(tmp):
@@ -158,8 +158,8 @@ def test_star_empty_tuple_in_tuple_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_empty_tuple_in_list_counts_exactly(tmp):
-    assert _literal(tmp, 'empty_tuple_in_list', 'ordinary', _T) == (0, 0)
+def test_star_empty_tuple_in_list_has_no_count(tmp):
+    assert _literal(tmp, 'empty_tuple_in_list', 'ordinary', _T) == (0, 1)
 
 
 def test_star_empty_tuple_in_list_relay_reports(tmp):
@@ -171,8 +171,8 @@ def test_star_empty_tuple_in_list_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_string_in_tuple_counts_exactly(tmp):
-    assert _literal(tmp, 'string_in_tuple', 'ordinary', _T) == (0, 0)
+def test_star_string_in_tuple_has_no_count(tmp):
+    assert _literal(tmp, 'string_in_tuple', 'ordinary', _T) == (0, 1)
 
 
 def test_star_string_in_tuple_relay_reports(tmp):
@@ -184,8 +184,8 @@ def test_star_string_in_tuple_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_constant_set_in_tuple_counts_exactly(tmp):
-    assert _literal(tmp, 'constant_set_in_tuple', 'ordinary', _T) == (0, 0)
+def test_star_constant_set_in_tuple_has_no_count(tmp):
+    assert _literal(tmp, 'constant_set_in_tuple', 'ordinary', _T) == (0, 1)
 
 
 def test_star_constant_set_in_tuple_relay_reports(tmp):
@@ -197,8 +197,8 @@ def test_star_constant_set_in_tuple_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_constant_set_in_list_counts_exactly(tmp):
-    assert _literal(tmp, 'constant_set_in_list', 'ordinary', _T) == (0, 0)
+def test_star_constant_set_in_list_has_no_count(tmp):
+    assert _literal(tmp, 'constant_set_in_list', 'ordinary', _T) == (0, 1)
 
 
 def test_star_constant_set_in_list_relay_reports(tmp):
@@ -210,8 +210,8 @@ def test_star_constant_set_in_list_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_constant_tuple_in_tuple_counts_exactly(tmp):
-    assert _literal(tmp, 'constant_tuple_in_tuple', 'ordinary', _T) == (0, 0)
+def test_star_constant_tuple_in_tuple_has_no_count(tmp):
+    assert _literal(tmp, 'constant_tuple_in_tuple', 'ordinary', _T) == (0, 1)
 
 
 def test_star_constant_tuple_in_tuple_relay_reports(tmp):
@@ -223,8 +223,8 @@ def test_star_constant_tuple_in_tuple_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_duplicate_constant_set_counts_exactly(tmp):
-    assert _literal(tmp, 'duplicate_constant_set', 'ordinary', _T) == (0, 0)
+def test_star_duplicate_constant_set_has_no_count(tmp):
+    assert _literal(tmp, 'duplicate_constant_set', 'ordinary', _T) == (0, 1)
 
 
 def test_star_duplicate_constant_set_relay_reports(tmp):
@@ -236,8 +236,8 @@ def test_star_duplicate_constant_set_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_bytes_in_list_counts_exactly(tmp):
-    assert _literal(tmp, 'bytes_in_list', 'ordinary', _T) == (0, 0)
+def test_star_bytes_in_list_has_no_count(tmp):
+    assert _literal(tmp, 'bytes_in_list', 'ordinary', _T) == (0, 1)
 
 
 def test_star_bytes_in_list_relay_reports(tmp):
@@ -249,8 +249,8 @@ def test_star_bytes_in_list_relay_stays_clean(tmp):
                     clean=True) == (0, 0)
 
 
-def test_star_plain_tuple_in_list_counts_exactly(tmp):
-    assert _literal(tmp, 'plain_tuple_in_list', 'ordinary', _T) == (0, 0)
+def test_star_plain_tuple_in_list_has_no_count(tmp):
+    assert _literal(tmp, 'plain_tuple_in_list', 'ordinary', _T) == (0, 1)
 
 
 def test_star_plain_tuple_in_list_relay_reports(tmp):
