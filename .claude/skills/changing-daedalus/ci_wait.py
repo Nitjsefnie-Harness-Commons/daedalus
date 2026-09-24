@@ -150,7 +150,7 @@ def print_matrix(runs, sha, out):
         print(f'  {run.get("name")}: {state}{suffix}', file=out, flush=True)
 
 
-def wait(repo, sha, interval, timeout, out, parent_pid=None):
+def wait(repo, sha, interval, timeout, out):
     """Poll until a verdict or the bound; returns the exit code.
 
     A rate-limit refusal does not end the wait: the watcher says once where
@@ -159,7 +159,7 @@ def wait(repo, sha, interval, timeout, out, parent_pid=None):
     """
     deadline = time.monotonic() + timeout
     watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
-                                parent_pid=parent_pid, deadline=deadline)
+                                deadline=deadline)
     while True:
         try:
             runs = watcher.poll(lambda: runs_on(repo, sha))
@@ -207,8 +207,6 @@ def main(argv=None):
                         help='seconds between polls')
     parser.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT,
                         help='seconds before the wait gives up with exit 2')
-    parser.add_argument('--parent-pid', type=int, default=None,
-                        help='exit when this process is gone')
     parser.add_argument('--once', action='store_true',
                         help='one trial evaluation: print the matrix to '
                              'stderr, exit 0 unless the query failed')
@@ -223,9 +221,8 @@ def main(argv=None):
     try:
         if not args.once:
             return wait(args.repo, args.sha, args.interval, args.timeout,
-                        sys.stdout, args.parent_pid)
-        watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
-                                    parent_pid=args.parent_pid)
+                        sys.stdout)
+        watcher = gh_client.Watcher('ci_wait', out=sys.stderr)
         runs = watcher.poll(lambda: runs_on(args.repo, args.sha))
         print_matrix(runs, args.sha, sys.stderr)
         state, _ = verdict(runs)

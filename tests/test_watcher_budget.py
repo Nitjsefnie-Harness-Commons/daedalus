@@ -391,9 +391,7 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         _refusal(headers={'X-RateLimit-Reset': str(reset)}),
         pr_page(reviews=[_review(1)], conversation=[_comment(2)])]
     fake = _fake_gh.FakeGh(tmp, answers)
-    child = _watcher('pr_comment_watch.py',
-                     [PR, '--interval', '5', '--parent-pid',
-                      str(os.getpid())], fake)
+    child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
     try:
         _until(lambda: [line for line in child.out
                         if 'rate limit' in line],
@@ -421,8 +419,7 @@ def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
         ci_page([_check(1, 'pyright', 'FAILURE')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('ci_watch.py',
-                     [BRANCH, '--interval', '5', '--debounce', '0',
-                      '--parent-pid', str(os.getpid())], fake)
+                     [BRANCH, '--interval', '5', '--debounce', '0'], fake)
     try:
         _until(lambda: [line for line in child.out
                         if 'rate limit' in line],
