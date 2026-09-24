@@ -42,8 +42,6 @@ _READERS = {
     'comprehension_target': ('', '[c for a, b, c in [x]][0]()'),
     'generator_target': ('', 'next(c for a, b, c in [x])()'),
     'starred_target': ('', '[b[1] for a, *b in [x]][0]()'),
-    'enumerate': ('', 'list(enumerate(x))[2][1]()'),
-    'map': ('', 'list(map(lambda f: f, x))[2]()'),
     'alias_pop': ('y = x', 'y.pop()()'),
     'bound_last': ('f = x[-1]', 'f()'),
 }
