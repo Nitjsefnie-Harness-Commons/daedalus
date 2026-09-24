@@ -537,6 +537,146 @@ def test_the_passed_quotas_are_the_ones_a_new_record_carries(tmp):
     assert answer['configured_defaults'] != answer['quotas'], answer
 
 
+def _alt_probe(tmp, script, marker):
+    """Run `script` in a throwaway configured tree beside one it does not
+    name, and return the one JSON object `script` marked.
+
+    `DAEDALUS_DIR` is set, so `config.SEG_DIR` is a real second tree the
+    probe can both read and assert stayed untouched.
+    """
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith('DAEDALUS_')}
+    env.update({
+        'DAEDALUS_DIR': str(Path(tmp) / 'docroot'),
+        'DAEDALUS_PORT': '0',
+        'DAEDALUS_TOKEN': TOK,
+        'PYTHONDONTWRITEBYTECODE': '1',
+        'ALT_SEG_ROOT': str(Path(tmp) / 'alt-segments'),
+    })
+    proc = subprocess.run(
+        [sys.executable, '-c', script], cwd=_util.ROOT, env=env,
+        capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    marked = [line for line in proc.stdout.splitlines()
+              if line.startswith(marker)]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    return json.loads(marked[0][len(marker):])
+
+
+_RESUME_ROOT_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import config
+from daedalus_bridge import segment_jobs
+
+root = Path(os.environ['ALT_SEG_ROOT'])
+root.mkdir(parents=True)
+config.SEG_DIR.mkdir(parents=True, exist_ok=True)
+quotas = segment_jobs.JobQuotas(11, 2, 512)
+job = 'resume-root-job'
+first_status, first = segment_jobs.mint_job(
+    root, 'ownertok', {'job': job}, quotas)
+resume_status, resumed = segment_jobs.mint_job(
+    root, 'ownertok', {'job': job}, quotas)
+other_status, other = segment_jobs.mint_job(
+    root, 'othertok', {'job': job}, quotas)
+record = json.loads((root / f'{job}.json').read_text(encoding='utf-8'))
+print('RESUMEROOT ' + json.dumps({
+    'first_status': first_status,
+    'first_sig': first.get('sig'),
+    'resume_status': resume_status,
+    'resume_sig_same': resumed.get('sig') == first.get('sig'),
+    'other_status': other_status,
+    'other_error': other.get('error'),
+    'record_owner': record.get('token'),
+    'record_sig': record.get('sig'),
+    'roots_differ': str(config.SEG_DIR) != str(root),
+    'configured_entries': sorted(
+        path.name for path in config.SEG_DIR.iterdir()),
+}, sort_keys=True))
+'''
+
+
+def test_the_segments_root_governs_where_a_mint_resumes(tmp):
+    """A resume reads the record under the root it was handed.
+
+    Re-deriving that root finds no record there, so the documented
+    resume mints a fresh capability instead of returning the same one,
+    and a name another token owns is answered 200 and re-owned rather
+    than 409.
+    """
+    answer = _alt_probe(tmp, _RESUME_ROOT_PROBE, 'RESUMEROOT ')
+    assert answer['roots_differ'] is True, answer
+    assert answer['first_status'] == 200, answer
+    assert answer['resume_status'] == 200, answer
+    assert answer['resume_sig_same'] is True, answer
+    assert answer['other_status'] == 409, answer
+    assert answer['other_error'] == 'job owned by a different token', answer
+    assert answer['record_owner'] == 'ownertok', answer
+    assert answer['record_sig'] == answer['first_sig'], answer
+    assert answer['configured_entries'] == [], answer
+
+
+_RECONCILE_ROOT_PROBE = r'''
+import json
+import os
+from pathlib import Path
+
+from daedalus_bridge import config
+from daedalus_bridge import segment_jobs
+
+root = Path(os.environ['ALT_SEG_ROOT'])
+root.mkdir(parents=True)
+config.SEG_DIR.mkdir(parents=True, exist_ok=True)
+quotas = segment_jobs.JobQuotas(11, 2, 512)
+job = 'reconcile-root-job'
+first_status, first = segment_jobs.mint_job(
+    root, 'recitok', {'job': job}, quotas)
+record_path = root / f'{job}.json'
+before = json.loads(record_path.read_text(encoding='utf-8'))
+# Segments that reached the directory but not the record: the crash this
+# reconcile exists to heal. The record is the real mint's own.
+(root / job / '000000.ts').write_bytes(b'abcde')
+(root / job / '000001.ts').write_bytes(b'xy')
+configured_before = sorted(p.name for p in config.SEG_DIR.iterdir())
+resume_status, resumed = segment_jobs.mint_job(
+    root, 'recitok', {'job': job}, quotas)
+after = json.loads(record_path.read_text(encoding='utf-8'))
+configured_after = sorted(p.name for p in config.SEG_DIR.iterdir())
+print('RECONCILE ' + json.dumps({
+    'first_status': first_status,
+    'before_totals': [before['stored_count'], before['stored_bytes']],
+    'resume_status': resume_status,
+    'resume_sig_same': resumed.get('sig') == first.get('sig'),
+    'after_totals': [after['stored_count'], after['stored_bytes']],
+    'configured_unchanged': configured_before == configured_after,
+    'roots_differ': str(config.SEG_DIR) != str(root),
+}, sort_keys=True))
+'''
+
+
+def test_the_segments_root_governs_where_a_resume_reconciles(tmp):
+    """The resume's dirty mark and its refreshed totals go to the record
+    under the passed root.
+
+    Re-deriving either root leaves that record at the totals it already
+    carried, so the quota it enforces under-counts what the job already
+    stores, and drops the mark into the configured tree beside it.
+    """
+    answer = _alt_probe(tmp, _RECONCILE_ROOT_PROBE, 'RECONCILE ')
+    assert answer['roots_differ'] is True, answer
+    assert answer['first_status'] == 200, answer
+    assert answer['before_totals'] == [0, 0], answer
+    assert answer['resume_status'] == 200, answer
+    assert answer['resume_sig_same'] is True, answer
+    # The varied value reached this assertion through the resume's own
+    # write_usage, not through anything this fixture supplied by default.
+    assert answer['after_totals'] == [2, 7], answer
+    assert answer['configured_unchanged'] is True, answer
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segjobs_')
 

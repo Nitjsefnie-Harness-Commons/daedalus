@@ -609,6 +609,89 @@ def test_a_segment_write_reports_one_timing_line_per_write_when_enabled(tmp):
     assert [row['stored'] for row in observed] == ['0', '1'], observed
 
 
+def _alt(tmp, name):
+    """Two genuinely different roots, and the modules that take one."""
+    os.environ['DAEDALUS_DIR'] = str(Path(tmp))
+    configured = Path(tmp) / 'segments'
+    passed = Path(tmp) / 'passed-segments'
+    configured.mkdir(parents=True)
+    passed.mkdir(parents=True)
+    bridge = _util.ROOT / 'daedalus_bridge'
+    return (_util.load(bridge / 'segment_jobs.py', name + '_jobs'),
+            _util.load(bridge / 'segment_routes.py', name + '_routes'),
+            configured, passed)
+
+
+def test_two_writes_under_a_passed_root_never_count_the_directory(tmp):
+    """A trusted record is read, not recounted, and a stale mark in the
+    other tree does not untrust this one. Resolving the record or its mark
+    from configuration finds neither under a passed root, so every write
+    recounts; the first recounts on purpose, proving the counter is live."""
+    jobs, routes, configured, passed = _alt(tmp, 'recount')
+    assert passed != configured, 'the fixture made the roots equal'
+    job = 'recount-job'
+    status, minted = jobs.mint_job(
+        passed, 'recounttok', {'job': job}, jobs.JobQuotas(9, 8, 256))
+    assert status == 200, (status, minted)
+    sig = minted['sig']
+    # A stale mark in the configured tree must not untrust this one.
+    (configured / f'.{job}.json.dirty').write_text('', encoding='utf-8')
+    store = routes.segment_store
+    real_recount = store.recount
+    calls = []
+
+    def counted(seg_dir):
+        calls.append(seg_dir)
+        return real_recount(seg_dir)
+
+    def write(index):
+        admitted = routes.admit_segment(
+            passed, {'job': [job], 'seg': [str(index)]}, sig)
+        assert isinstance(admitted, routes.Admission), admitted
+        return routes.store_segment(b'abc', admitted)
+
+    try:
+        store.recount = counted
+        store.mark_dirty(passed, job)
+        assert write(0) == (200, {'ok': True})
+        assert calls, 'the recount wrapper was never installed'
+        calls.clear()
+        assert write(1) == (200, {'ok': True})
+        assert write(2) == (200, {'ok': True})
+        assert calls == [], calls
+    finally:
+        store.recount = real_recount
+    record = json.loads(
+        (passed / f'{job}.json').read_text(encoding='utf-8'))
+    assert record['stored_count'] == 3, record
+
+
+def test_a_refused_write_keeps_its_recount_in_the_passed_root(tmp):
+    """The recount an untrusted record forces is written back to the record
+    under the passed root, even when this request is then refused on the
+    totals the recount found. Nothing after that write runs."""
+    jobs, routes, configured, passed = _alt(tmp, 'refused')
+    assert passed != configured, 'the fixture made the roots equal'
+    job = 'refused-job'
+    status, minted = jobs.mint_job(
+        passed, 'refusedtok', {'job': job}, jobs.JobQuotas(9, 2, 256))
+    assert status == 200, (status, minted)
+    sig = minted['sig']
+    # Segments reached the directory but not the record: the crash.
+    for index in (0, 1):
+        (passed / job / f'{index:06d}.ts').write_bytes(b'abc')
+    routes.segment_store.mark_dirty(passed, job)
+    admitted = routes.admit_segment(
+        passed, {'job': [job], 'seg': ['5']}, sig)
+    assert isinstance(admitted, routes.Admission), admitted
+    assert routes.store_segment(b'zz', admitted) == (
+        413, {'error': 'segment count limit exceeded'})
+    record = json.loads(
+        (passed / f'{job}.json').read_text(encoding='utf-8'))
+    assert (record['stored_count'], record['stored_bytes']) == (2, 6), record
+    assert sorted(configured.iterdir()) == [], sorted(configured.iterdir())
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='segstorage_')
 
