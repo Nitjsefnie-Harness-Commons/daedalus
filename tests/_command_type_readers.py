@@ -1,60 +1,57 @@
 """The readers behind the worker command-type guard.
 
 Not a suite itself; the controls that observe these readers live in
-``tests/test_worker_command_types.py``. Each reader enumerates the IDENTITY
-of the thing it counts -- the dispatch switch's case labels, the type
-literals the shipped clients transmit -- rather than the spelling of a call,
-and refuses any reference shape it cannot enumerate, naming the file, the
-line and the shape. Three censuses per client surface keep "no reference
-found" from reading as "nothing to check": the send helper must be defined
-exactly once, at least one reference to it must exist, and at least one
-direct call must exist.
+``tests/test_worker_command_types.py``. Each enumerates the IDENTITY of the
+thing it counts -- the switch's case labels, the type literals the shipped
+clients transmit -- rather than a call's spelling, and refuses any shape it
+cannot enumerate, naming file, line and shape. Censuses keep "no reference
+found" from reading as "nothing to check": the Python reader requires one
+definition, one reference and one call per surface; the dashboard reader
+requires one definition and one reference.
 
-What is refused, precisely
--------------------------
-A client may reach its send helper in FIVE ways, and this list is the
-recognition claim the refusals are checked against -- it was wrong at four
-until an aliased import clause proved it:
+Reaching the send helper
+------------------------
+The recognition claim the refusals are checked against. It was wrong at four
+ways until an aliased import clause proved a fifth.
 
 1. ``ext_cmd('_id', 'cookies')`` / ``bridge.ext_cmd(...)`` / ``extCmd(...)``
-   -- a direct call whose type argument is a plain string literal, with no
-   starred argument that would move the value out of the second position.
-   READ.
-2. ``from .invoke import ext_cmd`` / ``import { extCmd }`` -- a PLAIN
-   binding clause. COUNTED as a reference, never treated as a call.
-3. ``def ext_cmd`` / ``function extCmd`` -- the single definition. COUNTED,
-   and the definition census requires exactly one per surface.
-4. ``from .invoke import ext_cmd as send`` / ``import { extCmd as send }``
-   -- an ALIASED binding clause. A call through the second name is a
-   reference no walk of the first name can see, so the alias itself is
-   where it is REFUSED, with file, line and shape.
-5. anything else that names the identifier -- a binding, a collection
-   member, a decorator, a parenthesised name, or a STRING equal to the
-   helper's name, which is how a dynamic lookup such as
-   ``getattr(bridge, 'ext_cmd')`` or ``globalThis['extCmd']`` reaches the
-   send path. REFUSED with file, line and shape.
+   -- a direct call, plain string literal, no starred argument. READ.
+2. ``from .invoke import ext_cmd`` / ``import { extCmd }`` -- a PLAIN binding.
+   COUNTED as a reference, never as a call.
+3. ``def ext_cmd`` / ``function extCmd`` -- the definition. COUNTED; the
+   definition census requires exactly one per surface.
+4. ``from .invoke import ext_cmd as send`` / ``import { extCmd as send }`` --
+   an ALIASED binding. A call through the second name is a reference no walk
+   of the first sees, so the alias itself is REFUSED.
+5. anything else naming the identifier -- a binding, a collection member, a
+   decorator, a parenthesised name, or a STRING equal to it. REFUSED.
 
-The string rule is a superset: a string that merely MENTIONS the helper
-(``'the ext_cmd helper'``) is prose and is not a reference, but a string
-EQUAL to the identifier is refused wherever it sits, because that is the only
-way a dynamic lookup can name the helper.
+Two properties of that list a reader cannot recover from the code:
 
-The one shape that is neither read nor refused
-----------------------------------------------
+* The string rule is a superset, and on the dashboard it runs on RAW text, so
+  a COMMENT quoting the name is refused as well. A string that merely
+  mentions the helper (``'the extCmd helper'``) is not equal to it and
+  passes. Both are choices: the rule exists because a dynamic lookup can only
+  name the helper through a string, and it is kept blunt so a lookup cannot
+  hide in a comment.
+* Exactly one definition spelling is modelled per language, and an unmodelled
+  one is refused rather than skipped. So ``extCmd?.(...)``, a class, an
+  arrow-function definition, a template literal and an object key are all
+  refusals. Accepting a second spelling would need its own control; keeping
+  fail-closed is what lets the list above stay a true recognition claim.
+
+Neither is a live defect in the shipped tree: no dashboard comment quotes the
+name, and the helper is defined once, as ``function extCmd``.
+
+The one shape neither read nor refused
+--------------------------------------
 A COMPUTED name -- ``getattr(bridge, 'ext' + '_cmd')`` or
-``globalThis['ext' + 'Cmd']`` -- is neither a literal nor a reference node, so
-it is invisible to both the identifier walk and the string rule. This is a
-named limit, not an enforced invariant, and it is bounded on both sides:
-
-* A computed command TYPE is already refused -- the direct-call branch
-  requires a plain string literal in the type position -- so nothing in a
-  shipped client can send a computed type. That half is ENFORCED by the
-  code, not merely true of the tree.
-* A computed helper NAME is what remains, and no shipped client does it:
-  the nine ``+`` expressions across ``daedalus_cli`` and ``daedalus_mcp``
-  build URLs, arithmetic and a print, none a helper name. That half is a
-  fact about the tree, restated here so the next reader knows it is not
-  being checked.
+``globalThis['ext' + 'Cmd']`` -- is neither a literal nor a reference node. A
+computed command TYPE is refused by the direct-call branch's plain-literal
+requirement, so that half is ENFORCED. A computed helper NAME is a fact
+about the tree, not a check: the nine ``+`` expressions across
+``daedalus_cli`` and ``daedalus_mcp`` build URLs, arithmetic, a set range, a
+list join and a print.
 """
 import ast
 import re
@@ -68,12 +65,12 @@ from _jsread import (js_bracket_end, js_mask,  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DISPATCH = 'dispatchCommand'
-# A plain string literal: one quote style, no escape, no interpolation. A
-# template or a computed value is a shape the enumeration does not read.
+# One quote style, no escape, no interpolation. A template or a computed
+# value is a shape the enumeration does not read.
 _STRING_LITERAL = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"")
 
-# The two helper definitions whose second parameter every proved-literal
-# call site fills. Any other indirection is refused, not counted.
+# Whose second parameter every proved-literal call site fills. Any other
+# indirection is refused, not counted.
 FORWARDING_FILES = frozenset({
     'daedalus_cli/invoke.py',
     'daedalus_mcp/transport.py',
@@ -92,7 +89,6 @@ def _line_of(text, offset):
 
 
 def _literal_value(text):
-    """The string a plain literal spells, or None for any other shape."""
     match = _STRING_LITERAL.fullmatch(text)
     if match is None:
         return None
@@ -117,7 +113,6 @@ def _function_body(mask, name):
 
 
 def _switch_body(source, mask, path):
-    """The one switch of `dispatchCommand`, as offsets into `source`."""
     outer, inner = _function_body(mask, _DISPATCH)
     found = [match.start() for match in re.finditer(r'\bswitch\b', mask)]
     inside = len(found) == 1 and outer < found[0] < inner
@@ -135,8 +130,7 @@ def served_types(source=None, path=None):
 
     The arm count is taken raw and again blanked, so a case the masker hid
     is a disagreement rather than an absent case; the labels come from a
-    depth-aware walk, so a nested `case` is refused by name. The shipped
-    body hides no case, so the first marker needs a synthetic source.
+    depth-aware walk, so a nested `case` is refused by name.
     """
     if source is None:
         read = ROOT / 'extension' / 'background.js'
@@ -186,7 +180,6 @@ def _parents(tree):
 
 
 def _reference_shape(node, parents):
-    """The named shape a non-call reference to the helper has."""
     parent = parents.get(id(node))
     if parent is None:
         return 'module scope'
@@ -196,7 +189,6 @@ def _reference_shape(node, parents):
 
 
 def _refuse(where, what) -> NoReturn:
-    """Terminal refusal naming where and what. Never a skip."""
     raise AssertionError(f'{where}: {what}')
 
 
@@ -214,11 +206,10 @@ def python_sent_types(paths, watched, callee_is_attribute):
     """The command types `watched` transmits, from every reference to it.
 
     A direct call carrying a plain string literal in the type position is
-    the only readable shape; every other reference is a refusal naming its
-    file, line and shape, so binding the helper and calling the binding
-    cannot drop a type out of the sent set. The two censuses -- exactly one
-    definition, at least one reference -- keep a rename that leaves this
-    reader matching nothing from reading as an empty sent set.
+    the only readable shape; every other reference is a refusal, so binding
+    the helper and calling the binding cannot drop a type from the sent
+    set. The three censuses keep a rename that leaves this reader matching
+    nothing from reading as an empty sent set.
     """
     literals = set()
     forwardings = set()
@@ -332,7 +323,6 @@ def python_sent_types(paths, watched, callee_is_attribute):
 
 
 def _enclosing_open_brace(mask, offset):
-    """The `{` opening the block the token at `offset` sits in, or -1."""
     depth = 0
     for position in range(offset - 1, -1, -1):
         char = mask[position]
@@ -349,7 +339,6 @@ def _enclosing_open_brace(mask, offset):
 
 
 def _is_import_binding(mask, offset):
-    """Whether the occurrence sits in an `import { ... }` clause."""
     brace = _enclosing_open_brace(mask, offset)
     if brace < 0:
         return False
@@ -365,8 +354,9 @@ def dashboard_sent_types(paths=None):
     Scans the blanked source for the IDENTIFIER, not for the `extCmd(`
     spelling, so a reference reaching the send path through a binding or a
     parenthesised name is found and refused rather than skipped. Readable:
-    the single definition, a direct call, an `import { ... }` binding.
-    `paths` is a seam for the synthetic-source controls.
+    the single `function extCmd` definition, a direct call, a plain
+    `import { extCmd }`; an aliased import and every other reference shape
+    are refusals. `paths` is a seam for the synthetic-source controls.
     """
     if paths is None:
         paths = (ROOT / 'dashboard').rglob('*.js')
@@ -432,7 +422,6 @@ def dashboard_sent_types(paths=None):
 
 
 def clients():
-    """Each shipped client's sent set, with the reading that produced it."""
     cli = python_sent_types((ROOT / 'daedalus_cli').rglob('*.py'),
                             'ext_cmd', False)
     mcp = python_sent_types((ROOT / 'daedalus_mcp').rglob('*.py'),
