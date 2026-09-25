@@ -8,18 +8,15 @@ the failure-reporting backstop on the single wait with no live process to
 give up on, which renders the surviving pids, the parent's exit and the
 captured output at expiry instead of a number of seconds.
 
-There is no guard here that the budget suite carries no wall-clock bound,
-and there was one for four rounds: a name list, then an arithmetic rule,
-then a loop marker, then four questions said to have closed domains. Each
-was defeated by an ordinary spelling its own decider did not read - a
-from-imported clock, a default argument, a `**`-unpacked timeout - and a
-guard whose reach is narrower than its reason for existing is the defect
-it was written to catch, so it was removed rather than narrowed. What
-carries the claim instead is the ledger: one control per arm of each wait
-below, every arm killed by name against a planted defect, plus the two
-mutation proofs on the teardown tests and the five review rounds recorded
-on the pull request. A reader who wants a static check here is told the
-trade rather than handed a spelling list.
+No guard here asserts that the budget suite carries no wall-clock bound,
+and one stood here for four rounds - a name list, an arithmetic rule, a
+loop marker, four questions with closed domains - each defeated by an
+ordinary spelling its own decider did not read. A guard narrower than
+its reason for existing is the defect it was written to catch, so it is
+gone rather than narrowed, and the claim is carried by the ledger below:
+a control per arm of each wait, every arm killed by name against a planted
+defect, the mutation proofs on the teardown tests, and the review rounds
+on the pull request.
 """
 import sys
 import threading
@@ -34,15 +31,14 @@ import _util  # noqa: E402
 # with, and the suites job allows twenty minutes for the whole file, so a
 # survivor is named long before the job's own limit ends the run nameless.
 BACKSTOP = 90
-# A wake-up interval, not a deadline: the waits below end on what the
-# process under test did, and this only says how often a wait re-reads the
-# record it is synchronised on.
+# A wake-up interval, never a deadline: the waits below end on what the
+# process under test did.
 POLL = 0.05
-# A double whose probe never terminates turns an assertion mutation into a
-# job timeout, so every double here ends by name instead.
+# A double that never terminates turns an assertion mutation into a job
+# timeout, so every double here ends by name instead.
 RUNAWAY_CALL_LIMIT = 1000
-# What a control's condition double waits for, so a wait that ignored the
-# state it was handed ends in seconds rather than at the job's timeout.
+# The slice a condition double waits, so a wait that ignored the state it
+# was handed ends in seconds rather than at the job's timeout.
 DOUBLE_WAIT = 0.01
 
 
@@ -104,7 +100,10 @@ def await_calls(fake, count, child, what):
     to wait on and this polls the record: what it waits for is the record
     itself, and how long the runner took to write it is not the claim. A
     child that has exited can make no further call, which is the state that
-    ends the wait early, with the child's own output in the failure.
+    ends the wait early, with the child's own output in the failure. A
+    child that stays up and never calls leaves this wait nothing to end it,
+    and the hung job naming this wait is the same trade `await_lines` takes
+    and the repository takes deliberately.
     """
     while True:
         calls = fake.calls()
@@ -138,10 +137,9 @@ class _ScriptedCondition(threading.Condition):
     """A condition that says when a wait began and ends a runaway one.
 
     A helper that ignored the state it was handed would wait here forever,
-    so the double names the run instead of letting a job timeout do it. A
-    real condition's `wait` returns as soon as a publisher notifies, and
-    this one returns on a short slice as well, which is what lets a mutated
-    helper exhaust the count above in seconds.
+    so the double names the run instead of letting a job timeout do it: it
+    returns on a short slice as well as on a notify, which is what lets a
+    mutated helper exhaust the count in seconds.
     """
 
     def __init__(self):
