@@ -6,6 +6,10 @@ postResult payloads alongside every recorded chrome call. The suites supply
 the plan and assert the answer and the calls together; this module never
 decides what a handler should do.
 
+The chrome surface is the shared stub (tests/_worker_sources.chrome_stub)
+plus the scenario deltas the tab handlers need; the retained eventTarget is
+the shared helper (tests/_worker_sources.event_target_stub).
+
 The plan may also ask for the deferred surface. `runTimers` makes the
 setTimeout stand-in run and record its callback; `fetchTimings` seeds the
 timing ring before any command; `hasNativeToBase64` pins whether the realm
@@ -22,24 +26,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
-from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    chrome_stub, event_target_stub, import_scripts_stub)
 
 TOKEN = 'tabs-token'
 SERVER = 'https://bridge.example.com'
 
-_TABS_HARNESS = (r"""
+_TABS_HARNESS = (
+    r"""
 const fs = require('fs');
 const vm = require('vm');
 
 const [backgroundPath, plan] = process.argv.slice(1);
 const resultPayloads = [];
 const calls = [];
-const messageListeners = [];
-const storageStore = {
-  'daedalus-token': '__TOKEN__',
-  'daedalus-server': '__SERVER__',
-};
 let createdCount = 0;
 
 function copy(value) {
@@ -55,14 +55,6 @@ function response(status, data) {
     body: null,
     json: async () => data,
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
   };
 }
 
@@ -84,111 +76,84 @@ function maybeReject(api) {
 const DEFAULT_ACTIVE_TABS = [
   { id: 7, windowId: 3, url: 'https://page.example.com', title: 'Page' },
 ];
-
-const chrome = {
-  storage: {
-    local: {
-      get: async (keys) => {
-        const out = {};
-        for (const key of [].concat(keys)) {
-          if (key in storageStore) out[key] = copy(storageStore[key]);
-        }
-        return out;
-      },
-      set: async (entries) => {
-        for (const key of Object.keys(entries)) {
-          storageStore[key] = copy(entries[key]);
-        }
-      },
-      remove: async (keys) => {
-        for (const key of [].concat(keys)) delete storageStore[key];
-      },
-    },
-    onChanged: eventTarget(),
-  },
-  tabs: {
-    onUpdated: eventTarget(),
-    onCreated: eventTarget(),
-    onRemoved: eventTarget(),
-    query(query, callback) {
-      // Boot's registerAllTabs calls query with a callback and an empty
-      // query. Answer it off the record so only the handlers' own
-      // promise-form queries appear in the call log.
-      if (typeof callback === 'function') {
-        callback([]);
-        return undefined;
-      }
-      record('tabs.query', [query]);
-      const tabs = plan.activeTabs || DEFAULT_ACTIVE_TABS;
-      return Promise.resolve(tabs.map((tab) => ({ ...tab })));
-    },
-    create: (details) => {
-      record('tabs.create', [details]);
-      // createSyncReject throws synchronously, so a map() over the urls
-      // aborts and the caller's outer catch is reached; createReject rejects
-      // a promise, so Promise.allSettled collects it as a per-url error.
-      const sync = (plan.createSyncReject || {})[details.url];
-      if (sync !== undefined) {
-        if (typeof sync === 'string') throw new Error(sync);
-        throw sync;
-      }
-      const reject = (plan.createReject || {})[details.url];
-      if (reject !== undefined) {
-        if (typeof reject === 'string') {
-          return Promise.reject(new Error(reject));
-        }
-        return Promise.reject(reject);
-      }
-      createdCount += 1;
-      // A resolved Tab carries Chrome's own url, not the requested one;
-      // handing back the request would make the two indistinguishable. A
-      // host-free fragment marks the value as this double's own without
-      // naming a deployment host.
-      const resolved = details.url + '#resolved';
-      return Promise.resolve({
-        id: 99 + createdCount, windowId: 1, url: resolved,
-      });
-    },
-    update: async (tabId, changes) => {
-      record('tabs.update', [tabId, changes]);
-      maybeReject('tabs.update');
-      return { id: tabId, windowId: 4 };
-    },
-    reload: async (tabId, options) => {
-      record('tabs.reload', [tabId, options]);
-      maybeReject('tabs.reload');
-    },
-    get: async () => {
-      throw new Error('unmodelled chrome.tabs.get');
-    },
-    sendMessage: async () => {
-      throw new Error('unmodelled chrome.tabs.sendMessage');
-    },
-  },
-  windows: {
-    update: async (windowId, details) => {
-      record('windows.update', [windowId, details]);
-      maybeReject('windows.update');
-      return {};
-    },
-  },
-""" + INERT_WORKER_APIS + r"""
-  scripting: {
-    executeScript: async () => { throw new Error('unavailable'); },
-    insertCSS: async (details) => {
-      record('scripting.insertCSS', [details]);
-      maybeReject('scripting.insertCSS');
-    },
-    removeCSS: async (details) => {
-      record('scripting.removeCSS', [details]);
-      maybeReject('scripting.removeCSS');
-    },
+"""
+    + event_target_stub()
+    + chrome_stub(f"'{TOKEN}'", f"'{SERVER}'", '(() => ({}))')
+    + r"""
+// The tab handlers drive chrome surfaces the shared CDP stub does not
+// model, so these are the scenario deltas layered on top of it.
+chrome.tabs.query = function(query, callback) {
+  // Boot's registerAllTabs calls query with a callback and an empty query.
+  // Answer it off the record so only the handlers' own promise-form
+  // queries appear in the call log.
+  if (typeof callback === 'function') {
+    callback([]);
+    return undefined;
+  }
+  record('tabs.query', [query]);
+  const tabs = plan.activeTabs || DEFAULT_ACTIVE_TABS;
+  return Promise.resolve(tabs.map((tab) => ({ ...tab })));
+};
+chrome.tabs.create = (details) => {
+  record('tabs.create', [details]);
+  // createSyncReject throws synchronously, so a map() over the urls aborts
+  // and the caller's outer catch is reached; createReject rejects a promise,
+  // so Promise.allSettled collects it as a per-url error.
+  const sync = (plan.createSyncReject || {})[details.url];
+  if (sync !== undefined) {
+    if (typeof sync === 'string') throw new Error(sync);
+    throw sync;
+  }
+  const reject = (plan.createReject || {})[details.url];
+  if (reject !== undefined) {
+    if (typeof reject === 'string') {
+      return Promise.reject(new Error(reject));
+    }
+    return Promise.reject(reject);
+  }
+  createdCount += 1;
+  // A resolved Tab carries Chrome's own url, not the requested one; handing
+  // back the request would make the two indistinguishable. A host-free
+  // fragment marks the value as this double's own without naming a
+  // deployment host.
+  const resolved = details.url + '#resolved';
+  return Promise.resolve({
+    id: 99 + createdCount, windowId: 1, url: resolved,
+  });
+};
+chrome.tabs.update = async (tabId, changes) => {
+  record('tabs.update', [tabId, changes]);
+  maybeReject('tabs.update');
+  return { id: tabId, windowId: 4 };
+};
+chrome.tabs.reload = async (tabId, options) => {
+  record('tabs.reload', [tabId, options]);
+  maybeReject('tabs.reload');
+};
+chrome.tabs.get = async () => {
+  throw new Error('unmodelled chrome.tabs.get');
+};
+chrome.tabs.sendMessage = async () => {
+  throw new Error('unmodelled chrome.tabs.sendMessage');
+};
+chrome.windows = {
+  update: async (windowId, details) => {
+    record('windows.update', [windowId, details]);
+    maybeReject('windows.update');
+    return {};
   },
 };
-
-// The reload handler reaches chrome.runtime.reload through a timer. The
-// INERT_WORKER_APIS runtime carries no reload, so record it here; like every
-// other surface it is a recorder, observable but never substituted.
+chrome.scripting.insertCSS = async (details) => {
+  record('scripting.insertCSS', [details]);
+  maybeReject('scripting.insertCSS');
+};
+chrome.scripting.removeCSS = async (details) => {
+  record('scripting.removeCSS', [details]);
+  maybeReject('scripting.removeCSS');
+};
+// The reload handler reaches chrome.runtime.reload through a timer; the
+// shared runtime carries no reload, so record it here. Like every other
+// surface it is a recorder, observable but never substituted.
 chrome.runtime.reload = () => {
   record('runtime.reload', []);
 };
@@ -256,7 +221,9 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
-""" + import_scripts_stub('context') + r"""
+"""
+    + import_scripts_stub('context')
+    + r"""
 
 async function dispatch(command) {
   context.nextCommand = command;
