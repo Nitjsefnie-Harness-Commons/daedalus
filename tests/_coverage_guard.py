@@ -59,9 +59,8 @@ _KEEP_ALLOWLIST = frozenset({
     # The workflow's .pth program is the subject of the child probe.
     'tests/test_js_coverage_workflow.py::'
     'test_subprocess_startup_program_starts_coverage',
-    # A synthetic collector is what the decorated launch's child reads.
-    'tests/test_coverage_decorated_launch.py::'
-    'test_a_decorated_launch_really_inherits_the_moved_cwd',
+    # A synthetic collector is what these launch probes' children read.
+    'tests/test_coverage_decorated_launch.py::_planted',
     # run_tests.py is measured where it stands in the copied tree.
     'tests/test_suite_runner.py::_runner_tree',
     # The runner-bound suite runs the copied runner so its lines are recorded.

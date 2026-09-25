@@ -156,32 +156,18 @@ def _carries_launcher(parts, facts):
 
 
 def _carries_launch_value(parts, facts):
-    """A launcher itself. A bare module name is not one: the alias walk
-    follows that wherever it is bound, and only the receiver position
-    reads a launcher out of the module it is handed."""
-    return any(_is_launch_value(part, facts) for part in parts)
+    """A launcher: an attribute that names one, or a name bound to one.
 
-
-def _invokes_what_it_is_given(node, facts):
-    """Whether this callee is one the guard already reads as a launcher.
-
-    A launcher handed to a callee that invokes what it is given is
-    unfollowable: that callee decides when, where and with what. The same
-    launcher handed to any other callee is only mentioned there —
-    compared, used as a spec, looked up in a registry — and none of those
-    launches anything, so refusing it would refuse correct code. The test
-    is the callee's own name against the one set that says what a
-    launcher is called here, not a list of the callees that do not.
+    A bare `subprocess` module name is not one, and that is the whole of
+    the difference from `_carries_launcher`. The two positions are read
+    differently because they mean different things here, not because
+    anything downstream differs: the receiver position is where a launch
+    method is read off what is carried — `{'sp': subprocess}['sp'].run`
+    calls `.run` on the module — so a module there is a launcher, while an
+    argument position carries no such read and a module there is a value
+    the walk has no launcher to lose.
     """
-    function = node.func
-    if isinstance(function, ast.Attribute):
-        name = function.attr
-    elif isinstance(function, ast.Name):
-        name = function.id
-    else:
-        return False
-    return (name in _LAUNCHERS
-            or _names_one_of(function, facts.launch_callables))
+    return any(_is_launch_value(part, facts) for part in parts)
 
 
 def _unfollowable_launcher_bindings(tree, facts):
@@ -194,9 +180,8 @@ def _unfollowable_launcher_bindings(tree, facts):
         if (isinstance(node, ast.Call)
                 and not _has_cwd_control(node)
                 and (_carries_launcher(_call_receiver_parts(node), facts)
-                     or (_invokes_what_it_is_given(node, facts)
-                         and _carries_launch_value(
-                             _call_argument_parts(node), facts)))):
+                     or _carries_launch_value(_call_argument_parts(node),
+                                              facts))):
             lines.append(node.lineno)
     # One line carries one verdict: a call that also sits in a binding
     # position is reached by both arms, and the reader needs it said once.
