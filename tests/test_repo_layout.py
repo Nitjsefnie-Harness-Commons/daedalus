@@ -351,7 +351,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
 
     A site is in scope two ways. A launch the analyser places and whose head
     reads as the constant `git` (through a `+` concat, a single-bound name, or
-    a container of argv literals, to a cap of _ARGV_UNWRAP_CAP) is refused,
+    a container of argv literals, to a cap of `ARGV_UNWRAP_CAP` in
+    `tests/_argv_read.py`) is refused,
     as is a `**`-unpacked mapping on it (which could hide a timeout); a name
     bound more than once in a module reads `unreadable`, never a guessed
     non-git. Second, a subprocess call the analyser does not place but that
@@ -366,12 +367,16 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     git. So is a receiver the analyser cannot trace to `subprocess`: a module
     name it cannot read (`import_module(argument)` on a parameter, or a `+`
     concat with an operand that does not read), an attribute bound in a
-    method body rather than in a class body, an attribute reached through
-    another attribute's value (`self.inner.mod`) whose enclosing class binds
-    no such name, and an attribute inherited from a base this module does
-    not define. The receiver's spelling is not one of them: `self.mod`,
-    `cls.mod` and `type(self).mod` read the same class body, the derived
-    class's own or a base's. The shipped tree holds none of these as a
+    method body rather than in a class body, an attribute bound in two
+    branches of one class body, an attribute reached through another
+    attribute's value (`self.inner.mod`) whose enclosing class binds no such
+    name, and an attribute inherited through a base expression the analyser
+    cannot read — a subscripted `Generic[T]`, or one built by a call. The
+    receiver's spelling is not one of them: `self.mod`, `cls.mod` and
+    `type(self).mod` read the same class body, the derived class's own or a
+    base's, and a class body binds a name however deeply the binding is
+    nested inside its own `if`, loop, `with` or `try`. The shipped tree holds
+    none of these as a
     bounded git launch, so the summary sentence is true of it; a future one
     is the filed boundary issue, not enforced here.
 

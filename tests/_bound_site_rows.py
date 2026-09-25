@@ -149,4 +149,16 @@ BOUND_SITE_ROWS = (
      "ns = {}\n"
      "ns['sub' + 1].dumps({})\n",
      [(2, 'git', 'timeout')]),
+    # The `+`-folding arm recurses into fresh resolver calls, each with its
+    # own loop, so the loop cap alone does not bound it: this name feeds
+    # itself. The correct answer is a verdict, and dropping the seen-guard
+    # turns it into a RecursionError that takes the whole tree-wide rule
+    # down, which is what makes this row discriminating.
+    ('self-referential-concat-name',
+     "import importlib\n"
+     "import subprocess\n"
+     "a = a + a\n"
+     "mod = importlib.import_module(a)\n"
+     "subprocess.run(['git', 'status'], check=True)\n",
+     []),
 )
