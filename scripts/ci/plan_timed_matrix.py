@@ -449,7 +449,14 @@ def main(argv=None):
         print(f'plan_timed_matrix: {error}', file=sys.stderr)
         return 1
     _LAST = decision
-    payload = json.dumps(decision.matrix)
+    # `strategy.matrix` is an OBJECT whose keys are dimensions (a cartesian
+    # product) or the special `include`/`exclude` lists. A cell is a
+    # CORRELATED pair -- one `group` and the exact `suites` packed into it --
+    # so the cells go under `include`, each entry one runner instance, and no
+    # dimension key multiplies them. A bare ARRAY publishes none of those
+    # keys, so the runner's matrix evaluation expands it to zero instances
+    # and the job is never created. See tests/test_timed_matrix_shape.py.
+    payload = json.dumps({'include': decision.matrix})
     if args.out:
         Path(args.out).write_text(payload, encoding='utf-8')
     else:
