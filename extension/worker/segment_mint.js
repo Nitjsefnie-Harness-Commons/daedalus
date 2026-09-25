@@ -9,6 +9,13 @@ const SEGMENT_ORIGINS_KEY = 'daedalus-segment-origins';
 const SEGMENT_ORIGIN_ERROR =
   'Missing or invalid origin (http(s) origin required)';
 
+// SEGMENT_ORIGIN_CAP bounds the allowlist in ENTRIES, not in bytes: a
+// canonical origin is on the order of 22 bytes, so 256 of them is ~6 KB
+// against the 3 MiB the GM budget reserves for the extension's own keys
+// (see gm_storage.js). Count-bounded, it is one more term in that budget
+// rather than a new subtraction from it, and no real operator reaches it.
+const SEGMENT_ORIGIN_CAP = 256;
+
 async function _storedOrigins() {
   const data = await chrome.storage.local.get([SEGMENT_ORIGINS_KEY]);
   const stored = data[SEGMENT_ORIGINS_KEY];
@@ -60,6 +67,16 @@ async function handleAllowSegmentOrigin(cmd) {
       const origins = await _storedOrigins();
       const added = !origins.includes(origin);
       if (added) {
+        // Refuse at the cap, never evict: an eviction would make an origin
+        // the operator permitted stop being permitted, and the failure would
+        // surface at `GM.segmentJob` pointing nowhere near its cause. The
+        // refusal is reversible through `revoke-segment-origin`, the command
+        // the operator already has for making room.
+        if (origins.length >= SEGMENT_ORIGIN_CAP) {
+          throw new Error(
+            'segment origin allowlist is at its ' + SEGMENT_ORIGIN_CAP
+            + '-origin limit; revoke one to make room');
+        }
         origins.push(origin);
         origins.sort();
         await chrome.storage.local.set({ [SEGMENT_ORIGINS_KEY]: origins });

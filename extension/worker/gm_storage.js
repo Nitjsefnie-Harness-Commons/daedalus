@@ -42,9 +42,11 @@ const GM_QUOTA_BYTES = 1024 * 1024;
 // capped at 1000 entries, and a delivery id is `<ms>_<counter>`, so
 // 1000 of them is on the order of 22 KB and the reserve is roughly
 // 140x that term.
-// `daedalus-segment-origins` has no count cap, but only an operator adds to it
-// and a page cannot write a `daedalus-` key. Only `gm:` keys are summed: the
-// extension's own keys are what the reserve pays for, not page budget.
+// `daedalus-segment-origins` is count-capped at 256 entries
+// (SEGMENT_ORIGIN_CAP in segment_mint.js), on the order of 6 KB against the
+// ledger's 22 KB, and only an operator adds to it: a page cannot write a
+// `daedalus-` key. Only `gm:` keys are summed: the extension's own keys are
+// what the reserve pays for, not page budget.
 const GM_TOTAL_QUOTA_BYTES = 5 * 1024 * 1024;
 
 const GM_KEY_PREFIX = 'gm:';
