@@ -80,149 +80,158 @@ MCP_OLD_NAMES = (
 # (repo-relative path, enclosing function) so an edit above a site cannot
 # move a row onto the wrong launch.
 BOUNDED_GIT_LAUNCHES = {
-    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root'):
-        'a standalone skill script an operator runs by hand; no suite or '
-        'CI bound sits above it, so a wedged git hangs an operator with '
-        'nothing to surface it',
-    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_slug'):
-        'a standalone skill script an operator runs by hand; no enclosing '
-        'bound sits above it, so a wedged git hangs an operator with '
-        'nothing to surface it',
-    ('scripts/gen_gitignore.py', '_check_ignore'):
-        'a standalone generator an operator runs by hand; no enclosing '
-        'bound sits above it, so a wedged git hangs an operator with '
-        'nothing to surface it',
-    ('scripts/gen_gitignore.py', 'main'):
-        'a standalone generator an operator runs by hand; no suite or CI '
-        'bound sits above it, so a wedged git hangs an operator with '
-        'nothing to surface it',
-    ('tests/_repo.py', 'git_index'):
-        'a generic git runner: the bound covers the index-writing commands '
-        'its callers pass (init, add take index.lock), not only the reads, '
-        'so the lock-taking path keeps a margin the suite bound would catch '
-        'too late to name',
-    # The unplaced arm reports every bounded call whose receiver the
-    # analyser cannot PROVE is a fixed, non-launch value, so these
-    # are the tree's bounded calls on receivers it cannot read: a
-    # method parameter, a connection object, a mock. Each reason
-    # says what the call is and why it cannot hang a git launch; a
-    # receiver the analyser cannot prove is never passed, which is
-    # the price of the arm and cheaper than a launch it cannot see.
-    ('tests/_drain.py', 'kill_and_drain'):
-        'a drain of an already-killed process: the process is gone'
-        'before the read, so the bound can only return',
-    ('tests/_realbrowser_workers.py', '_devtools_targets'):
-        'an HTTP read whose timeout is the bound itself: no git'
-        'launch here, and the timeout is what stops the read',
-    ('tests/_util.py', '_startup_observations'):
-        'a thread join on a receiver this module does not bind; the'
-        'enclosing suite covers the wait',
-    ('tests/_util.py', 'bridge'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/_util.py', 'get'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/_util.py', 'get_json'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/_util.py', 'header_stream'):
+    # Every in-scope bound site in the tracked tree, keyed by
+    # (path, line, function) so an allowance is for THAT site: a second
+    # bounded call in an already-allowed function is a different site
+    # and needs a row of its own. Each reason says what the call is and
+    # why it cannot hang a git launch; a receiver the analyser cannot
+    # prove is reported rather than passed, and this table is that
+    # report's disposition.
+    ('.claude/skills/changing-daedalus/watch_all.py', 362, '_aggregate'):
+        'a queue read with a deadline: the queue is drained,'
+        'nothing is launched',
+    ('.claude/skills/changing-daedalus/watch_all.py', 66, '_repo_root'):
+        'a standalone skill script an operator runs by hand; no'
+        'suite or CI bound sits above it, so a wedged git hangs an'
+        'operator',
+    ('.claude/skills/changing-daedalus/watch_all.py', 170, '_repo_slug'):
+        'a standalone skill script an operator runs by hand; no'
+        'enclosing bound sits above it, so a wedged git hangs an'
+        'operator',
+    ('run_tests.py', 52, '_terminate_and_reap'):
+        'a child wait while tearing the suite down; the runner is'
+        'the bound',
+    ('run_tests.py', 56, '_terminate_and_reap'):
+        'a second child wait in the same teardown, after a kill',
+    ('scripts/gen_gitignore.py', 101, '_check_ignore'):
+        'a standalone generator an operator runs by hand; no'
+        'enclosing bound sits above it, so a wedged git hangs an'
+        'operator',
+    ('scripts/gen_gitignore.py', 115, 'main'):
+        'a standalone generator an operator runs by hand; no suite'
+        'or CI bound sits above it, so a wedged git hangs an'
+        'operator',
+    ('tests/_drain.py', 25, 'kill_and_drain'):
+        'a drain of an already-killed process: it can only return',
+    ('tests/_drain.py', 33, 'kill_and_drain'):
+        'the reap that follows that drain, on the same dead process',
+    ('tests/_realbrowser_workers.py', 115, '_devtools_targets'):
+        'an HTTP read whose timeout is the bound itself',
+    ('tests/_realbrowser_workers.py', 89, '_retire_browser'):
+        'a browser-process wait while retiring it',
+    ('tests/_realbrowser_workers.py', 92, '_retire_browser'):
+        'the reap after that wait, on the same process',
+    ('tests/_repo.py', 45, 'git_index'):
+        'a generic git runner: the bound covers the index-writing'
+        'commands its callers pass, not only the reads',
+    ('tests/_speedharness.py', 171, '_reap_process'):
+        "a measurement process wait inside the harness's own"
+        'teardown',
+    ('tests/_speedharness.py', 187, '_reap_process'):
+        'the reap that follows it, on the same process',
+    ('tests/_util.py', 369, '_startup_observations'):
+        'a thread join on a thread this helper started',
+    ('tests/_util.py', 496, 'bridge'):
+        'a helper waiting for a port line; the caller bounds it',
+    ('tests/_util.py', 556, 'get'):
+        'the GET helper called with a keyword mapping; it opens a'
+        'connection',
+    ('tests/_util.py', 560, 'get_json'):
+        'the JSON GET helper the same way',
+    ('tests/_util.py', 574, 'header_stream'):
         'a connection constructor whose timeout bounds the TCP'
-        'setup, not a git launch',
-    ('tests/_util.py', 'post_json'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/_util.py', 'request'):
-        'an HTTP read whose timeout is the bound itself: no git'
-        'launch here, and the timeout is what stops the read',
-    ('tests/test_aggregate_gate.py',
+        'setup',
+    ('tests/_util.py', 565, 'post_json'):
+        'the JSON POST helper the same way',
+    ('tests/_util.py', 549, 'request'):
+        'an HTTP read whose timeout is the bound itself',
+    ('tests/test_aggregate_gate.py', 324,
      'test_every_single_dependency_result_is_tabled'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_aggregate_gate.py',
+        'a table builder called with a keyword mapping; it builds a'
+        'table, it launches nothing',
+    ('tests/test_aggregate_gate.py', 392,
      'test_two_dependencies_are_decided_jointly'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_bridge_startup.py',
+        'the same table builder, keyed from a zipped mapping',
+    ('tests/test_bridge_startup.py', 616,
      'test_dashboard_responses_refuse_cross_origin_framing'):
-        'an HTTP read whose timeout is the bound itself: no git'
-        'launch here, and the timeout is what stops the read',
-    ('tests/test_dashboard_behaviour.py', 'popen'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_mcp_server.py', '_mcp_request'):
+        'an HTTP read whose timeout is the bound itself',
+    ('tests/test_dashboard_behaviour.py', 529, 'popen'):
+        'a test double constructed with a keyword mapping; it'
+        'records, it does not launch',
+    ('tests/test_mcp_entry_point.py', 37, '_cleanup_mcp'):
+        'an MCP process wait while the test tears it down',
+    ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
+        'the reap after that wait, on the same process',
+    ('tests/test_mcp_server.py', 122, '_mcp_request'):
         'a connection constructor whose timeout bounds the TCP'
-        'setup, not a git launch',
-    ('tests/test_mcp_server.py', 'callers'):
-        'a test helper command call carrying a keyword mapping; the'
-        'caller is bounded by the suite',
-    ('tests/test_mcp_server.py',
+        'setup',
+    ('tests/test_mcp_server.py', 111, '_surface_responder_errors'):
+        'a thread join on a thread the fixture started',
+    ('tests/test_mcp_server.py', 940, 'callers'):
+        "an MCP tool call whose timeout is the tool's, not a bound"
+        'on a process',
+    ('tests/test_mcp_server.py', 554,
      'test_a_nonpositive_mcp_timeout_admits_no_command'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_mcp_server.py',
+        "the test's subject: an MCP call the server must reject for"
+        'its timeout',
+    ('tests/test_mcp_server.py', 1149,
      'test_bearer_middleware_rejects_duplicate_authorization_headers'):
         'a connection constructor whose timeout bounds the TCP'
-        'setup, not a git launch',
-    ('tests/test_mcp_server.py',
+        'setup',
+    ('tests/test_mcp_server.py', 1429,
      'test_mcp_port_zero_announces_the_actual_bound_port'):
-        'a child-process or thread wait on a receiver this module'
-        'does not bind; the enclosing suite covers the hang',
-    ('tests/test_parent_watch.py',
+        'an assertion on a bound event the module sets; the wait IS'
+        'the assertion',
+    ('tests/test_parent_watch.py', 369,
      'test_bounded_wait_reports_live_child_port_and_watch_state'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_real_browser_classification.py',
+        'a helper waiting for a child to exit; the test bounds it',
+    ('tests/test_real_browser_classification.py', 266,
      'test_answering_control_worker_twice_marks_worker_absence_our_failure'):
-        'a mock assertion carrying a keyword mapping, which is not'
-        'a launch; the mock raises on a mismatch',
-    ('tests/test_real_browser_classification.py',
+        'a mock assertion on a wait call: it asserts, it does not'
+        'wait',
+    ('tests/test_real_browser_classification.py', 311,
      'test_control_browser_exit_ends_the_diagnosis_without_a_verdict'):
-        'a mock assertion carrying a keyword mapping, which is not'
-        'a launch; the mock raises on a mismatch',
-    ('tests/test_real_browser_classification.py',
+        'the same mock assertion, on the exit control',
+    ('tests/test_real_browser_classification.py', 275,
      'test_control_diagnosis_launches_both_extensions_twice_before_guilt'):
-        'a mock assertion carrying a keyword mapping, which is not'
-        'a launch; the mock raises on a mismatch',
-    ('tests/test_real_browser_classification.py',
+        'the same mock assertion, in the twice-launched control',
+    ('tests/test_real_browser_classification.py', 61,
      'test_indeterminate_e2big_diagnostics_are_harness_failures'):
-        'a builtin call carrying a keyword mapping; object is not a'
-        'launch and cannot reach one',
-    ('tests/test_real_browser_classification.py',
+        'a mock patch whose keyword mapping substitutes the launch'
+        'the test is asserting on',
+    ('tests/test_real_browser_classification.py', 298,
      'test_unanswered_control_worker_leaves_the_skip_with_the_machine'):
-        'a mock assertion carrying a keyword mapping, which is not'
-        'a launch; the mock raises on a mismatch',
-    ('tests/test_real_browser_classification.py',
+        'the same mock assertion, on the unanswered control',
+    ('tests/test_real_browser_classification.py', 323,
      'test_unreadable_control_answer_polls_again_instead_of_settling'):
-        'a mock assertion carrying a keyword mapping, which is not'
-        'a launch; the mock raises on a mismatch',
-    ('tests/test_real_browser_harness.py', 'exercise'):
-        'an HTTP read whose timeout is the bound itself: no git'
-        'launch here, and the timeout is what stops the read',
-    ('tests/test_real_browser_harness.py', 'first_navigation'):
-        'an HTTP read whose timeout is the bound itself: no git'
-        'launch here, and the timeout is what stops the read',
-    ('tests/test_segment_routes.py', 'refusing'):
-        'a launch the analyser cannot prove is not git: the'
-        'receiver is a name this module does not bind',
-    ('tests/test_stream_lifecycle.py', '_open_stream'):
+        'the same mock assertion, on the unreadable control',
+    ('tests/test_real_browser_harness.py', 617, 'exercise'):
+        "the same navigation, on the harness's own page",
+    ('tests/test_real_browser_harness.py', 610, 'first_navigation'):
+        'a browser navigation whose timeout is the bound itself',
+    ('tests/test_segment_routes.py', 101, 'refusing'):
+        'a test double delegating with its arguments; it launches'
+        'nothing of its own',
+    ('tests/test_stream_lifecycle.py', 38, '_open_stream'):
         'a connection constructor whose timeout bounds the TCP'
-        'setup, not a git launch',
-    ('tests/test_suite_runner.py',
+        'setup',
+    ('tests/test_suite_runner.py', 399,
      'test_output_close_failure_reaps_the_spawned_suite'):
-        'a child-process or thread wait on a receiver this module'
-        'does not bind; the enclosing suite covers the hang',
-    ('tests/test_watcher_budget.py', 'stop'):
-        'a child-process or thread wait on a receiver this module'
-        'does not bind; the enclosing suite covers the hang',
-    ('tests/test_watcher_budget.py',
+        'a suite-process wait inside the reaping the test asserts',
+    ('tests/test_suite_runner.py', 405,
+     'test_output_close_failure_reaps_the_spawned_suite'):
+        'the reap that follows, on the same process',
+    ('tests/test_suite_runner.py', 408,
+     'test_output_close_failure_reaps_the_spawned_suite'):
+        'the final reap, on the same process',
+    ('tests/test_watcher_budget.py', 173, 'stop'):
+        'a fixture stopping a child it started',
+    ('tests/test_watcher_budget.py', 565,
      'test_a_graceful_exit_leaves_no_children_behind'):
-        'a child-process or thread wait on a receiver this module'
-        'does not bind; the enclosing suite covers the hang',
-    ('tests/test_watcher_budget.py',
+        'the same, in the graceful-exit control',
+    ('tests/test_watcher_budget.py', 381,
      'test_the_children_die_with_their_parent'):
-        'a child-process or thread wait on a receiver this module'
-        'does not bind; the enclosing suite covers the hang',
+        'a parent handle stopping a child the test started',
 }
 
 
@@ -280,20 +289,22 @@ def _enclosing_function(tree, line):
 
 
 def _bound_sites(source, here):
-    """Every in-scope bound site in one source as (path, function, note).
+    """Every in-scope bound site as (path, function, line, note).
 
     The analyser computes each launch's head, so this consumes its
     structured classification rather than re-parsing the human-readable
-    refusal; a message-format change cannot move the rule. A launch whose
-    head the analyser could not read is out of scope by its own stated
-    boundary, named on the refusal rather than dropped.
+    refusal; a message-format change cannot move the rule. The LINE is in
+    the key, so an allowance is for that site: a second bounded call in an
+    already-allowed function is a different site and needs a row of its
+    own. A launch whose head the analyser could not read is out of scope
+    by its own stated boundary, named on the refusal rather than dropped.
     """
     tree = ast.parse(source)
     sites = []
     for line, head, kind in bound_sites(source, here):
         if head in ('git', 'ambiguous') or kind == 'unplaced':
             function = _enclosing_function(tree, line)
-            sites.append((here, function,
+            sites.append((here, function, line,
                           f'{here}:{line} {kind} bound launch'))
     return sites
 
@@ -517,11 +528,12 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                                          errors='surrogateescape')
         if 'subprocess' not in source:
             continue
-        for site_path, function, refusal in _bound_sites(source, path):
-            live.setdefault((site_path, function), []).append(refusal)
+        for site_path, function, line, refusal in _bound_sites(source, path):
+            live.setdefault((site_path, line, function), []).append(refusal)
 
     unallowed = sorted(
-        f'{key[0]}::{key[1]} {sites}' for key, sites in live.items()
+        f'{key[0]}::{key[1]}:{key[2]} {sites}'
+        for key, sites in live.items()
         if key not in BOUNDED_GIT_LAUNCHES)
     assert not unallowed, (
         'bounded git launches with no BOUNDED_GIT_LAUNCHES row:\n'
@@ -532,10 +544,10 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
             'launch; a stale allowance is a refusal')
     for key in sorted(BOUNDED_GIT_LAUNCHES):
         count = len(live.get(key, ()))
-        assert count >= 1, (
+        assert count == 1, (
             f'BOUNDED_GIT_LAUNCHES row {key} matches {count} live bounded '
-            'sites; at least one is required, so a stale allowance is a '
-            'refusal')
+            'sites; exactly one is required, so a site in a function that '
+            'already has a row must be given its own')
 
 
 def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
