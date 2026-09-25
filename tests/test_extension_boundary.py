@@ -8,19 +8,32 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _noderun  # noqa: E402
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _boundary import HARNESS, run_extension_result_boundary  # noqa: E402
 from _boundary_env import ENVIRONMENT  # noqa: E402
-from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import worker_source_paths  # noqa: E402
+
+# Windows CreateProcess caps one command line at 32,767 characters. The
+# measured length is computed per case, never restated here.
+WINDOWS_COMMAND_LINE_LIMIT = 32767
+# The harness length on main when the defect was filed, the size the next
+# scenario entry was one line away from re-spending.
+MAIN_HARNESS_CHARS = 32171
+
+
+def _command_line_length(argv):
+    """The length Windows measures: the arguments joined by one space."""
+    return sum(len(argument) + 1 for argument in argv)
+
 
 _QUERY_TIMING_PROBE = ENVIRONMENT + r"""
 async function probe() {
@@ -46,19 +59,21 @@ def test_v8_coverage_attributes_the_shipped_background_script(tmp):
     node = shutil.which('node')
     assert node, 'node is required to collect V8 coverage'
     background_path = EXTENSION_ROOT / 'background.js'
-    env = dict(os.environ)
-    env['NODE_V8_COVERAGE'] = str(coverage)
-    with tempfile.TemporaryDirectory() as directory:
-        program = Path(directory) / 'harness.js'
-        # `-e` puts the whole 47 KB HARNESS on the command line, over the
-        # 32767-character Windows CreateProcess limit (WinError 206); a file
-        # keeps it short on every platform. The prologue drops the script
-        # path so argv[1] stays the background path ENVIRONMENT reads.
-        program.write_text(
-            'process.argv.splice(1, 1);' + HARNESS, encoding='utf-8')
-        result = subprocess.run(
-            [node, str(program), str(background_path), 'capacity'],
-            cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+    # run_node_program reads the child environment at launch, so point
+    # NODE_V8_COVERAGE at this test's own dumps directory and restore the
+    # caller's value afterwards. `-e` would put the whole harness on the
+    # command line, over the Windows CreateProcess limit; a file keeps it
+    # short on every platform.
+    previous = os.environ.get('NODE_V8_COVERAGE')
+    os.environ['NODE_V8_COVERAGE'] = str(coverage)
+    try:
+        result = _noderun.run_node_program(
+            node, HARNESS, [str(background_path), 'capacity'], ROOT)
+    finally:
+        if previous is None:
+            os.environ.pop('NODE_V8_COVERAGE', None)
+        else:
+            os.environ['NODE_V8_COVERAGE'] = previous
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     dumps = sorted(coverage.glob('*.json'))
@@ -83,14 +98,54 @@ def test_the_tabs_query_callback_is_delivered_on_a_microtask(tmp):
     whether the callback had fired by the end of the synchronous turn.
     """
     del tmp
-    result = run_node_program(
+    result = _noderun.run_node_program(
         shutil.which('node'), _QUERY_TIMING_PROBE,
-        [str(EXTENSION_ROOT / 'background.js'), 'query-timing'],
-        cwd=ROOT)
+        [str(EXTENSION_ROOT / 'background.js'), 'query-timing'], ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     observed = json.loads(result.stdout)
     assert observed == {'synchronous': 0, 'afterMicrotask': 1}, observed
+
+
+def test_the_v8_control_keeps_the_harness_off_the_command_line(tmp):
+    """The program reaches node by file, so the command line cannot grow.
+
+    The old shape passed the whole harness to `node -e`, so the command line
+    grew with the tables until it crossed the Windows cap. run_node_program
+    writes the program to a file instead, which leaves the command line
+    independent of the program size. Both main's size and a size past the cap
+    are measured, and the measurement runs on every platform; only the Windows
+    leg is the end-to-end confirmation.
+    """
+    del tmp
+    node = shutil.which('node')
+    assert node, 'node is required to measure the command line'
+    background = str(EXTENSION_ROOT / 'background.js')
+    captured = {}
+
+    def capture(argv, **_options):
+        captured['argv'] = argv
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+    for label, size in (('main', MAIN_HARNESS_CHARS),
+                        ('grown', WINDOWS_COMMAND_LINE_LIMIT * 2)):
+        program = 'x' * size
+        captured.clear()
+        with mock.patch.object(_noderun.subprocess, 'run', capture):
+            _noderun.run_node_program(
+                node, program, [background, 'capacity'], ROOT)
+        argv = captured['argv']
+        # The program is a file on disk, never an argument, so its size cannot
+        # reach the command line.
+        assert program not in argv, (
+            f'the {label} program rode the command line: {argv}')
+        assert _command_line_length(argv) < WINDOWS_COMMAND_LINE_LIMIT, (
+            f'the {label} command line is too long: {argv}')
+        # The shape this replaced fits at main's size and not past the cap,
+        # which is the growth the file-based route removes.
+        inline = [node, '-e', program, background, 'capacity']
+        if size > WINDOWS_COMMAND_LINE_LIMIT:
+            assert _command_line_length(inline) > WINDOWS_COMMAND_LINE_LIMIT
 
 
 def test_extension_same_id_overlap_keeps_each_delivery_id(tmp):
