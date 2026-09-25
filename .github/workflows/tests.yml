@@ -1245,25 +1245,38 @@ jobs:
             --summary \
             --summary-file "$GITHUB_STEP_SUMMARY")"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          # The line is read back and parsed, so a planner that published a
-          # refusal message, an empty list, or a cell this workflow cannot
-          # use fails here with the reason rather than failing the runner's
-          # matrix evaluation with `null`.
+          # The line is read back and held to the SHAPE the runner's
+          # `strategy.matrix` evaluation consumes: an OBJECT whose cells are
+          # under `include`. A bare ARRAY parses fine and is JSON the
+          # workflow could not have told apart here, yet it expands to zero
+          # instances -- the job is never created and only the `speed` verdict
+          # fails. So this refuses a payload the runner would silently empty,
+          # with the reason, rather than only refusing a value that is not
+          # JSON.
           python3 - "$matrix" <<'PY'
           import json, sys
           parsed = json.loads(sys.argv[1])
-          if not isinstance(parsed, list) or not parsed:
-              raise SystemExit(f'the planner published {parsed!r}')
-          for entry in parsed:
-              if set(entry) != {'group', 'suites'} or not entry['suites']:
+          if not isinstance(parsed, dict):
+              raise SystemExit(
+                  f'strategy.matrix is an object, not {type(parsed).__name__}: '
+                  f'the planner published {parsed!r}')
+          cells = parsed.get('include')
+          if not isinstance(cells, list) or not cells:
+              raise SystemExit(
+                  f'the matrix object has no cells to expand: {parsed!r}')
+          for entry in cells:
+              if not isinstance(entry, dict) or set(entry) != {'group', 'suites'}:
                   raise SystemExit(f'unusable cell: {entry!r}')
-              if not entry['group'].isascii() or \
-                      entry['group'][0] not in 'abcdefghijklmnopqrstuvwxyz0123456789' \
+              if not isinstance(entry['suites'], str) or not entry['suites']:
+                  raise SystemExit(f'unusable cell: {entry!r}')
+              group = entry['group']
+              if not isinstance(group, str) or not group.isascii() or \
+                      group[0] not in 'abcdefghijklmnopqrstuvwxyz0123456789' \
                       or not all(c in 'abcdefghijklmnopqrstuvwxyz0123456789-'
-                                 for c in entry['group']):
+                                 for c in group):
                   raise SystemExit(f'cell name is unusable in a check run: '
-                                   f'{entry["group"]!r}')
-          print(f'{len(parsed)} cells planned')
+                                   f'{group!r}')
+          print(f'{len(cells)} cells planned')
           PY
 
 
@@ -1404,12 +1417,15 @@ jobs:
     # One cell per slice of `tests/`, packed by measured runtime by
     # `plan-matrix` from the committed `.github/suite-timings.json`.
     #
-    # The planner emits `[{"group": "cell-01", "suites": "…"}, …]`, and the
-    # `''` default is for a run where the planner was skipped: a matrix
-    # that never starts evaluates nothing, while `fromJSON(null)` fails
-    # matrix evaluation on the runner before the job's `if:` is consulted.
-    # `timed`'s own `if:` already requires a green `plan-matrix`, so the
-    # default is only ever read by a job that does not run.
+    # The planner emits `{"include": [{"group": "cell-01", "suites": "…"},
+    # …]}` — an OBJECT whose `include` list is the cells, the shape this
+    # job's `strategy.matrix` evaluates. The `''` default is for a run where
+    # the planner was skipped: a matrix that never starts evaluates nothing,
+    # while `fromJSON(null)` fails matrix evaluation on the runner before the
+    # job's `if:` is consulted. `timed`'s own `if:` already requires a green
+    # `plan-matrix`, so the default is only ever read by a job that does not
+    # run, and it is spelled as the same empty object the planner's shape
+    # would be so nothing here teaches a bare array.
     #
     # The matrix is a bare expression, and that is what keeps the runner's
     # cells the planner's cells: a `strategy.include` row beside it — the
@@ -1434,7 +1450,7 @@ jobs:
       # measurement, not a faster one.
       fail-fast: false
       matrix: >-
-        ${{ fromJSON(needs.plan-matrix.outputs.matrix || '[]') }}
+        ${{ fromJSON(needs.plan-matrix.outputs.matrix || '{"include":[]}') }}
 
     env:
       # Fractional slowdown that fails the job.

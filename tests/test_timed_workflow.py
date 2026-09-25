@@ -19,8 +19,12 @@ lays artifacts out the way the CLI does. The layout the step's
 actually runs.
 
 Also here: the job's own `permissions` block, which replaced the
-workflow-level one and so took `contents: read` with it, and the timed
-matrix's `|| '[]'` default beside the `except` key that never existed.
+workflow-level one and so took `contents: read` with it, the timed
+matrix's `|| '{"include":[]}'` default beside the `except` key that never
+existed, and the SHAPE the planner publishes for `strategy.matrix` to
+expand — a control that runs the planner and models the runner's
+expansion, because the published value being JSON is not the property
+that matters.
 """
 import fnmatch
 import os
@@ -34,6 +38,7 @@ import _util  # noqa: E402
 from _repo import ROOT, git_index  # noqa: E402
 from _speedharness import (  # noqa: E402
     run_workflow_script, workflow_script, write_executable)
+from _timed_matrix import published_matrix  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 from _yamlread import job_mapping, step_scalars  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
@@ -578,12 +583,21 @@ def test_the_timed_matrix_is_the_planner_output_and_nothing_else(tmp):
 
     A catch-all default planted beside the planner's output would time
     every suite in every cell while every shape test stayed green, so
-    the expression is held to the whole string. The `|| '[]'` is
-    load-bearing -- `fromJSON('')` fails matrix evaluation on the runner
+    the expression is held to the whole string. The `|| '{"include":[]}'`
+    is load-bearing -- `fromJSON('')` fails matrix evaluation on the runner
     before the job's own `if:` is consulted -- and it is only ever read
     by a job that does not run.
+
+    Holding the expression to its string was the WHOLE control, and it
+    could not see this defect: it pins the CONSUMER's text and never
+    connects it to the PRODUCER's value, so a planner publishing a bare
+    array — which this same `fromJSON` fed to `strategy.matrix` would
+    expand to zero cells — left every assertion satisfied. So the pinned
+    expression is now held against the value that reaches it: the planner
+    is run, and its published output must be the object shape this
+    `fromJSON` hands to `strategy.matrix`. Same property — the matrix IS
+    the planner's output and nothing else — now spanning both ends.
     """
-    del tmp
     source = _tests_workflow()
     job = complete_job_mapping(source, 'timed')
     assert job is not None, 'tests.yml has no timed job'
@@ -591,12 +605,19 @@ def test_the_timed_matrix_is_the_planner_output_and_nothing_else(tmp):
     assert strategy is not None, 'the timed job has no strategy block'
     assert strategy == {
         'fail-fast': 'false',
-        'matrix': "${{ fromJSON(needs.plan-matrix.outputs.matrix "
-                  "|| '[]') }}"}, strategy
+        'matrix': '${{ fromJSON(needs.plan-matrix.outputs.matrix '
+                  "|| '{\"include\":[]}') }}"}, strategy
     # No `strategy.include` row beside the expression: a row is a live
     # cell on any runner that does not cross it out, carrying empty
     # suites, which the instrument reads as "time every suite".
     assert 'include' not in strategy, strategy
+    # The producer and the pinned consumer agree on the shape: an object
+    # whose `include` carries the cells, so this `fromJSON` has something
+    # `strategy.matrix` can expand.
+    published, _plan = published_matrix(tmp)
+    assert isinstance(published, dict) and published.get('include'), (
+        f'the planner publishes {published!r}, which the pinned '
+        'fromJSON feeds to strategy.matrix as a value it cannot expand')
 
 
 def test_the_except_env_is_empty_because_no_plan_carries_an_except_key(tmp):

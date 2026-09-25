@@ -354,6 +354,7 @@
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
+!/tests/_timed_matrix.py
 !/tests/_token_mask.py
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
@@ -579,6 +580,7 @@
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
+!/tests/test_timed_matrix_shape.py
 !/tests/test_timed_planner.py
 !/tests/test_timed_refresh.py
 !/tests/test_timed_workflow.py
