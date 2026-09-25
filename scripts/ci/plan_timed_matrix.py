@@ -26,10 +26,18 @@ tree suites the measurements do not cover); its content is rebuilt from
 the numbers of each write, and this reader does not type-check it
 because the sentence is for a human.
 
-Suites are enumerated with the timing instrument's own matcher
-(`time_tests.selected`, called with no globs, where it admits every
-name), so the planner and the instrument run the same rule today; the
-call is the seam, not a filter.
+Suites are enumerated from the TRACKED tree, through the timing
+instrument's own matcher (`time_tests.selected`, called with no globs,
+where it admits every name), so the planner and the instrument run the
+same rule today; the call is the seam, not a filter. The set comes from
+`git ls-files` rather than a directory listing, for the same reason
+`scripts/ci/size_baseline.py` reads the index: a file no commit
+contains is not a suite of this repository, and a scratch
+`tests/test_*.py` a neighbouring run left in the working tree would
+otherwise be allocated a cell and named in the data file's basis
+sentence. A missing `git`, or a tree that is not a checkout, is a
+refusal with a named reason rather than an empty plan: an empty plan
+times nothing.
 
 PACKING. `N = ceil(total / target)`, capped at `max_cells` and at the
 number of suites; a suite heavier than the target takes a cell to itself
@@ -91,6 +99,7 @@ import argparse
 import json
 import math
 import statistics
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -243,9 +252,42 @@ def _number(value, name):
 
 
 def suite_names(tree):
-    """The tree's suite files, by the timing instrument's own matcher."""
-    found = sorted((tree / 'tests').glob('test_*.py'))
-    names = [suite.name for suite in found if selected(suite.name, None, ())]
+    """The tree's TRACKED suite files, by the instrument's own matcher.
+
+    Read from git's index (`git ls-files`), not from a directory listing:
+    a file no commit contains is not a suite of this repository, and a
+    scratch `tests/test_*.py` left in the working tree by another run
+    must not be planned into a cell or named in the data file's basis.
+    `scripts/ci/size_baseline.py` reads the same way. A missing `git`,
+    or a tree that is not a checkout, is a refusal with a named reason
+    rather than an empty plan, because an empty plan times nothing.
+    """
+    try:
+        listed = subprocess.run(
+            ['git', '-C', str(tree), 'ls-files', '-z', '--', 'tests/'],
+            capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise PlanError(
+            f'cannot list tracked suites under {tree}: {error}; the planner '
+            'needs a git checkout') from None
+    if listed.returncode != 0:
+        detail = listed.stderr.decode('utf-8', 'replace').strip()
+        raise PlanError(
+            f'cannot list tracked suites under {tree}: git ls-files failed '
+            f'({detail or "no detail"}); the planner needs a git checkout')
+    names = []
+    for raw in listed.stdout.split(b'\0'):
+        if not raw:
+            continue
+        parts = raw.decode('utf-8', 'surrogateescape').split('/')
+        if len(parts) != 2 or parts[0] != 'tests':
+            continue
+        name = parts[1]
+        if (name.startswith('test_') and name.endswith('.py')
+                and (tree / 'tests' / name).is_file()
+                and selected(name, None, ())):
+            names.append(name)
+    names.sort()
     if not names:
         raise PlanError(f'no suites found under {tree}')
     return names

@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _repo import ROOT, git_index  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -42,6 +42,11 @@ def _tree(tmp, suites):
     (tree / 'tests').mkdir(parents=True, exist_ok=True)
     for name in suites:
         (tree / 'tests' / name).write_text('pass\n', encoding='utf-8')
+    # The planner and the basis both enumerate the TRACKED tree, so a
+    # fixture tree is a git checkout with these files in its index;
+    # `git ls-files` reads the index, so no commit is made or needed.
+    git_index(tree, 'init', '-q')
+    git_index(tree, 'add', '--', 'tests/')
     return tree
 
 
