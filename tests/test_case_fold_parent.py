@@ -37,32 +37,21 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
 def _folds(root):
-    """Whether this parent resolves a name to the entry it already spells.
+    """Whether this parent folds, or the reason this run cannot know.
 
-    Asked by creating a file and looking for it under another spelling, and
-    answered by the filesystem rather than by the platform: a macOS or
-    Windows volume says yes, an ext4 or vfat image says no, and the answer
-    is the parent's either way.
+    The question is asked of the filesystem by `tests/_case_fold.py`, which
+    the case-sensitive twins in the other suites ask too -- one definition,
+    so a gate and its twins cannot disagree about what "folds" means.
     """
-    stem = f'daedalus-fold-probe-aa{os.getpid()}'
-    probe = Path(root) / stem
-    try:
-        probe.write_text('', encoding='utf-8')
-    except OSError as why:
-        _util.skip(f'{root} will not take a probe file: {why}')
-    try:
-        # The same letters, the other case: a parent that folds resolves it
-        # to the entry just written, one that does not has nothing there.
-        return os.path.exists(str(Path(root) / stem.upper()))
-    finally:
-        try:
-            probe.unlink()
-        except OSError:
-            pass
+    answer = _case_fold.folds(root)
+    if answer is None:
+        _util.skip(f'{root} will not take a probe file')
+    return answer
 
 
 def _folding_parent(tmp):
@@ -402,9 +391,16 @@ def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
                 p.name for p in (res_dir / 'deliveries').iterdir())
         assert landed == ['1700000000000_a.json', '1700000000000_b.json'], (
             landed)
-        # Two spellings reached it, which is the divergence the fixture exists
-        # to drive, and one key and one lock came out the other side.
-        assert set(names) == {f'{token}_Foo', f'{token}_foo'}, names
+        # Both spellings were requested, and one key and one lock came out the
+        # other side. The recorded names are what each caller's resolver
+        # reported, and that is per-platform: a POSIX `realpath` hands back
+        # the caller's spelling, so both appear, while `ntpath.realpath`
+        # reports the on-disk spelling for all five acquisitions. Asserting
+        # the two-element set was asserting a property of the resolver, not
+        # of the stripe; what has to hold is that every acquisition named one
+        # of the two spellings this fixture used, and that they agreed.
+        assert names, seen
+        assert set(names) <= {f'{token}_Foo', f'{token}_foo'}, names
         assert keys == 1, seen
         assert stripes == 1, seen
 
@@ -537,8 +533,16 @@ def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
 
         _one_tick(route, sink, work, 'tok', 'extension')
 
-        assert sink.ids() == [], sink.ids()
-        assert [p.name for p in real.iterdir()], 'a reserved entry was drained'
+        # On a parent that folds, this entry answers to the extension's own
+        # name even though it is a link -- so the extension's own drain owns
+        # it and delivers its command once, untagged, and the per-tab scan
+        # finds the directory empty. "No frames at all" was the wrong
+        # expectation: it described the scan, not the outcome. What has to
+        # hold is that the command is delivered once and never as a tab's,
+        # and the case-sensitive twin is where the tag appears.
+        assert sink.ids() == ['behind-the-link'], sink.ids()
+        assert sink.tags() == [None], sink.tags()
+        assert not list(real.iterdir()), 'the owner drain did not take it'
         assert alias.is_symlink()
 
 

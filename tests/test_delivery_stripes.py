@@ -9,6 +9,7 @@ import zlib
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -139,6 +140,7 @@ def test_an_entry_reporting_no_inode_falls_back_to_its_name(tmp):
 
 
 def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
+
     """The control: on a case-sensitive parent they are two entries.
 
     The same two names with the host's own filesystem, which keeps them
@@ -146,6 +148,10 @@ def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
     folded verdict above and this one together are what make the difference
     the parent's rather than the assertion's.
     """
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'two entries differing only in case keep two keys',
+        'test_case_fold_parent.test_a_folded_target_is_one_directory_and_'
+        'one_stripe')
     result_store = _load_result_store(tmp)
     deliveries = Path(tmp) / 'results' / 'deliveries'
     upper = deliveries / 'stripe-token_Foo'

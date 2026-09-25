@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -425,6 +426,7 @@ def _symlinked_extension_queue(root, name):
 
 
 def test_a_symlinked_tab_named_like_the_extension_is_drained(tmp):
+
     """Where the parent folds nothing, `Extension` is a tab's queue.
 
     `tok_extension` names nothing on a case-sensitive filesystem, so the
@@ -433,6 +435,10 @@ def test_a_symlinked_tab_named_like_the_extension_is_drained(tmp):
     than folding the name itself. The half where the parent does resolve
     it is in `test_case_fold_parent`.
     """
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'a symlinked Extension queue is a tab\'s queue here',
+        'test_case_fold_parent.test_a_folded_symlinked_reserved_queue_is_'
+        'still_reserved')
     route = _load_route('stream_route_symlink_tab_control')
     root = Path(tmp)
     _real, _alias = _symlinked_extension_queue(root, 'tok')

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -315,6 +316,7 @@ def _folded_and_exact(store, res_dir):
 
 
 def test_on_a_case_sensitive_parent_the_two_spellings_are_two_targets(tmp):
+
     """The control: where the parent folds nothing, `Foo` and `foo` differ.
 
     Same fixture, no emulated parent, and the guard answers the same way for
@@ -323,6 +325,9 @@ def test_on_a_case_sensitive_parent_the_two_spellings_are_two_targets(tmp):
     apart. This is the half that makes the folded verdict above a property
     of the parent rather than of the assertion.
     """
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'two spellings of one tab are two targets',
+        'test_case_fold_parent.test_the_guard_accepts_a_name_the_parent_folds')
     store = _util.load(
         _util.ROOT / 'daedalus_bridge' / 'result_store.py',
         'fixture_case_sensitive_target')
