@@ -7,7 +7,8 @@ factories, and the record arrays. Every one of those names is load-bearing,
 and so are `chunkedResponse` and `forwardRequest` exactly when a plan
 declares a `{stream: N}` answer or a `forwards` entry: the gate checks its
 own contract the moment it is spliced, records any missing or wrong-typed
-name in `gateContractFaults`, and each harness asserts that list empty.
+name in `gateContractFaults`; the harnesses that read the census back assert
+it empty, while the frozen stream-backoff reference suite does not.
 Without that check a missing name throws a `ReferenceError` the worker's
 stream loop swallows, so the omission would leave the suite green.
 
