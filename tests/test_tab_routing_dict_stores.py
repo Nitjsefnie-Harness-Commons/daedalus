@@ -112,6 +112,17 @@ _FOLDED_PAIR_KEYS = _folded_pair_key_rows() + [
         _RELAY, _KEYREADER,
         'e = {}; e.update([("k", ordinary), (key(), relay())])',
         'x = e.get("k", ordinary)', invoke='x()'), (0, 1)),
+    # A star splices display positions, so the text position 2 names a
+    # different pair than the display position 2 holds. This pins the
+    # unaligned-sequence conjunct: with it dropped the store reads the
+    # star's own key off the wrong pair and the relay here goes
+    # unreported, a false green. It pins an invariant the code already
+    # holds, so it passes as written; reading "k" or "zzz" on this store
+    # is the over-report of issue 1069, not a row here.
+    ('pair-star-spliced-relay', _flow(
+        _RELAY, 'e = {}; e.update([("k", ordinary),'
+        ' *(("j", ordinary), ("m", relay())), ("q", ordinary)])',
+        'x = e.get("m", ordinary)', invoke='x()'), (1, 1)),
 ]
 
 
