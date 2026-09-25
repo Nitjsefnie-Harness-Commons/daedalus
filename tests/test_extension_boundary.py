@@ -348,6 +348,33 @@ def test_cdp_and_net_capture_share_one_attachment_per_tab(tmp):
             'attached': True,
             'state': {'cdpSession': True, 'netCapture': False},
         },
+        # Tab 9: the capture attaches while tab 8's kept session is still
+        # attached, so a DIFFERENT tab may be attached at the same time.
+        'captureTab9': {
+            'result': {'capturing': True, 'tabId': 9}, 'error': None,
+            'calls': {'attachCalls': 3, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': False, 'netCapture': True},
+        },
+        # A keep-session cdp that REUSES the capture's attachment must still
+        # record the sticky session — the capture's ownership does not stop
+        # the record. It reuses the attachment (no new attach, no detach).
+        'keepSessionOverCapture': {
+            'result': {}, 'error': None,
+            'calls': {'attachCalls': 3, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': True},
+        },
+        # Because the record survived, stopping the capture must NOT detach
+        # and must leave the kept session standing: no detach, cdpSession True.
+        'stopCaptureOverKept': {
+            'result': {'stopped': True, 'tabId': 9, 'count': 0,
+                       'requests': []},
+            'error': None,
+            'calls': {'attachCalls': 3, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': False},
+        },
     }, actual
 
 

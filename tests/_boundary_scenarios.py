@@ -342,7 +342,8 @@ async function runNetCaptureOwnership() {
     await vm.runInContext('dispatchCommand(stepCommand)', context);
     const posted = resultPayloads[resultPayloads.length - 1];
     return { result: posted.result, error: posted.error,
-      calls: { attachCalls, detachCalls }, attached: debuggerAttached,
+      calls: { attachCalls, detachCalls },
+      attached: debuggerAttached.has(tabId),
       state: readState(tabId) };
   };
 
@@ -361,8 +362,20 @@ async function runNetCaptureOwnership() {
   const captureOverKept = await run('net-capture', 8);
   const stopOverKept = await run('net-capture-stop', 8);
 
+  // Tab 9: a capture first, then a cdp --keep-session that REUSES the
+  // capture's attachment, then stop the capture. The keep-session record
+  // must survive the reuse (so the stop does not detach), and the kept
+  // session must outlive the stop on the reused attachment. Tab 8's kept
+  // session is still attached here, so this tab also proves a different tab
+  // may be attached at the same time.
+  const captureTab9 = await run('net-capture', 9);
+  const keepSessionOverCapture = await run(
+    'cdp', 9, { method: 'Runtime.enable', keep_session: true });
+  const stopCaptureOverKept = await run('net-capture-stop', 9);
+
   return { capture, cdpOverCapture, stopCapture,
-    keepSession, transientOverKept, captureOverKept, stopOverKept };
+    keepSession, transientOverKept, captureOverKept, stopOverKept,
+    captureTab9, keepSessionOverCapture, stopCaptureOverKept };
 }
 
 async function runHotfixRace() {
