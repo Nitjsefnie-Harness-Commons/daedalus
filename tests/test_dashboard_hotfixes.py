@@ -81,6 +81,9 @@ const rendered = {
   scoped: scopeCell('scoped').textContent,
   bare: scopeCell('bare').textContent,
 };
+const headers = container.find('[data-role=list]').all()
+  .filter((el) => el.tag === 'th')
+  .map((el) => el.textContent.trim());
 clickEdit('scoped');
 await bounded(settle(), 'edit a scoped fix', _dashnodeStepTimeoutMs);
 const scopedForm = form();
@@ -99,7 +102,7 @@ container.find('[data-role=store]').click();
 await bounded(settle(), 'store an unscoped fix', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  rendered, scopedForm, bareForm, commands: commands.filter(
+  rendered, headers, scopedForm, bareForm, commands: commands.filter(
     (c) => c.type === 'store-hotfix'),
 }));
 phase('dashboard harness finished');
@@ -158,6 +161,21 @@ def test_a_hotfix_stored_without_a_scope_reads_as_having_none(_tmp):
     # Absent travels as absent: an empty pattern would be refused by the
     # extension as one that does not parse.
     assert 'match' not in seen['commands'][1], seen
+
+
+def test_the_scope_column_carries_a_header(_tmp):
+    """The scope cell is found by its class, so nothing else pins the header.
+
+    Every other control here reads the scope through the cell's production
+    class, which a header row does not carry: a table rendered with no
+    `scope` <th> still passes all three, while the column above the scope
+    cells goes unlabelled and an operator reading it as the code preview is
+    not wrong about the markup. The header is what says which column the
+    pattern is in.
+    """
+    seen = _hotfix_scope(_tmp)
+
+    assert 'scope' in seen['headers'], seen
 
 
 def main():

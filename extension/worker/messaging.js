@@ -5,9 +5,8 @@
 // ─── Message handler (from content scripts) ───
 
 // In-flight GM.xmlhttpRequest relays, by the id the content script minted
-// for each one. An entry exists only while its fetch is running: it is
-// removed when the fetch settles and when a caller cancels it, so this
-// never grows past what is actually in flight.
+// for each. An entry lives only while its fetch runs, so this never grows
+// past what is in flight.
 const _fetchControllers = new Map();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -29,21 +28,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleGmStorage(msg, sender, sendResponse);
     return true;
   } else if (msg.type === 'replayHotfixes') {
-    // The document identity and its URL travel with the request: a tab id
-    // names the tab, and the tab's live document is not the one that asked
-    // by the time the replay reaches the page.
+    // The documentId and url travel with the request: a tab id names the tab,
+    // and the tab's live document is not the one that asked by replay time.
     if (sender.tab) {
       handleHotfixReplay(sender.tab.id, sender.documentId, sender.url);
     }
   } else if (msg.type === 'fetch') {
     // Cross-origin fetch relay — no CORS in service worker
-    // Hard timeout: caller-provided or 60s default, prevents hung workers
     const timeoutMs = typeof msg.timeout === 'number' && msg.timeout > 0
       ? msg.timeout : 60000;
     const controller = new AbortController();
     // Filed by id so a caller's abort can reach this controller. The entry
-    // carries the reason as well, because a timeout and a cancellation both
-    // arrive here as AbortError and are two different answers to the caller.
+    // carries the reason too: a timeout and a cancellation both arrive as
+    // AbortError and are different answers to the caller.
     const fetchEntry = { controller, cancelled: false };
     const fetchId = typeof msg.fetchId === 'string' ? msg.fetchId : '';
     if (fetchId) _fetchControllers.set(fetchId, fetchEntry);
@@ -83,9 +80,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const bytes = await readBoundedBody(
           resp, gmResponseLimit(msg.maxResponseBytes));
         tFetchDone = performance.now();
-        // The raw byte count, for both response types. The text path used to
-        // record its character count, which is not the size that matters to
-        // a limit measured in bytes.
+        // The raw byte count, for both response types: a limit is measured in
+        // bytes, not characters.
         const bodySize = bytes.byteLength;
         if (msg.responseType === 'arraybuffer') {
           data = bytesToBase64(bytes);
@@ -114,8 +110,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // finalUrl and statusText come from the RESPONSE, not the request:
         // after a redirect chain resp.url is where the body actually came
         // from, and reporting the requested URL told a caller a redirect had
-        // not happened. Both are relayed verbatim; content.js falls back to
-        // the request URL only when a response carries none.
+        // not happened.
         sendResponse({ status: resp.status, statusText: resp.statusText,
           finalUrl: resp.url, data, headers });
       } catch (e) {
@@ -124,9 +119,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const isAbort = e.name === 'AbortError';
         const isTooLarge = e.gmTooLarge === true;
         // A cancellation and a timeout are the same exception; only the entry
-        // says which happened. Reporting a cancelled request as a timeout
-        // would tell the caller the endpoint was slow when the caller is the
-        // one that stopped it.
+        // says which happened. Reporting a cancellation as a timeout tells
+        // the caller the endpoint was slow when the caller stopped it.
         const isCancel = isAbort && fetchEntry.cancelled;
         _recordTiming({
           url: msg.url.substring(0, 120),
@@ -137,13 +131,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ms_total: +(performance.now() - t0).toFixed(1),
           ts: Date.now(),
         });
-        // `timedOut` travels beside the message because a timeout is its own
-        // event to the caller: flattening it into an error string left
-        // page.js's ontimeout branch unreachable.
-        // `tooLarge` travels beside the message for the same reason
-        // `timedOut` does: a refused size is a different answer from a
-        // failed request, and a caller that wants to retry smaller can only
-        // tell them apart if the relay says which happened.
+        // `timedOut` and `tooLarge` travel beside the message, not flattened
+        // into its error string: a timeout and a refused size are each their
+        // own answer to the caller, and a caller that wants to retry smaller
+        // can only tell them apart if the relay says which happened.
         sendResponse({
           error: isCancel ? 'aborted by the caller'
             : (isAbort ? `fetch timeout after ${timeoutMs}ms` : e.message),
@@ -156,7 +147,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // async sendResponse
   } else if (msg.type === 'abortFetch') {
     // Idempotent by construction: the entry is removed as it is used, so a
-    // second abort, or one for a fetch that already settled, finds nothing.
+    // second abort, or one for a settled fetch, finds nothing.
     const entry = _fetchControllers.get(msg.fetchId);
     if (entry) {
       _fetchControllers.delete(msg.fetchId);
@@ -185,8 +176,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       chrome.tabs.create(
         { url: msg.url, active: msg.active !== false }, (tab) => {
           // A refused creation is reported only through lastError, with the
-          // callback invoked on no tab. Reading tab.id off that threw, so
-          // the page never got an answer and the error went unchecked.
+          // callback invoked on no tab.
           const refused = chrome.runtime.lastError;
           if (refused || !tab) {
             sendResponse({ error: (refused && refused.message) || 'no tab' });
@@ -196,7 +186,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
     } catch (e) {
       // A synchronous refusal never reaches the callback, so it is answered
-      // here, with the same terminal {error} a callback refusal uses.
+      // here with the same terminal {error}.
       sendResponse({ error: (e && e.message) || String(e) });
     }
     return true;
@@ -213,13 +203,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (typeof msg.url !== 'string') {
       // downloads.download refuses a non-string url with a synchronous
       // TypeError of its own; answered here, the refusal names the page's
-      // own contract instead.
+      // contract.
       sendResponse({ error: 'download requires a string URL' });
       return;
     }
     // Web URLs only. A download runs with the profile's cookies, so a
-    // page-chosen URL reaches content the page could never fetch itself —
-    // the same gate, and the same reason, as the openTab twin above.
+    // page-chosen URL reaches content the page could never fetch itself.
     let protocol = '';
     try { protocol = new URL(msg.url).protocol; } catch { /* not a URL */ }
     if (protocol !== 'http:' && protocol !== 'https:') {
@@ -236,8 +225,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
         });
     } catch (e) {
-      // A synchronous refusal never reaches the callback, so it is answered
-      // here, with the same terminal {error} a callback refusal uses.
+      // As above: a synchronous refusal never reaches the callback.
       sendResponse({ error: (e && e.message) || String(e) });
     }
     return true;
