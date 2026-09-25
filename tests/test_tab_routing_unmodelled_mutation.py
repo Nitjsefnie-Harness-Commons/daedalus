@@ -25,7 +25,10 @@ _PRE = (
     '    return lambda: send("_focus", "focus-tab", '
     'tab=args.chrome_tab)\n'
     'def relay(): return maker()\n'
-    'def quiet(): return lambda: ordinary()\n')
+    'def quiet(): return lambda: ordinary()\n'
+    'class ctx:\n'
+    '    def __enter__(self): return self\n'
+    '    def __exit__(self, *exc): return False\n')
 _SEND = '\nsend = ext_cmd\nreturn '
 
 _LIST = 'x = [ordinary, relay()]'
@@ -33,6 +36,10 @@ _ONE = 'x = [ordinary]'
 _PAIR = 'x = [ordinary, ordinary]'
 _STAR = 'x = [ordinary, relay(), *args.values]'
 _DICT = 'd = {"a": 1, "b": 2}'
+_SET = 's = {quiet()}'
+# The read is the comprehension itself, so the runtime count does not depend
+# on the order a set iterates in.
+SET_COMPREHENSION = '[f() for f in s]'
 
 # (name, store, mutate, after, read). `after` runs once the mutation has, and
 # `read` is the invocation the verdict is taken at.
@@ -97,6 +104,79 @@ _MUTATIONS = [
      ' pass', 'x = [*d, relay()]', 'x[1]()'),
 ]
 
+# The six positions a statement loop never reaches: a mutating call in a
+# header, a test, a context expression or a case guard is evaluated by the
+# expression checker alone, so a rule wired only into the per-statement
+# store hook never sees it.
+_POSITIONS = [
+    ('if_test', _LIST, 'if x.pop(0):\n    pass', '', 'x[0]()'),
+    ('while_test', _LIST, 'i = 0\nwhile i < 1 and x.pop(0):\n    i = i + 1',
+     '', 'x[0]()'),
+    ('for_iterable', _LIST, 'for _ in (x.pop(0),):\n    pass', '', 'x[0]()'),
+    ('with_context', _LIST, 'with (x.pop(0), ctx())[1]:\n    pass', '',
+     'x[0]()'),
+    ('match_guard', _LIST + '\nz = args.flag',
+     'match z:\n    case _ if x.pop(0):\n        pass', '', 'x[0]()'),
+    ('mapping_if_test', _DICT, 'if d.popitem():\n    pass',
+     'x = [*d, relay()]', 'x[1]()'),
+]
+
+# A mutating call whose receiver the model cannot resolve is not a no-op the
+# guard may read clean: the call's own value stays unproved, so a `tab` routed
+# through it later reports. Each row is paired with a control whose receiver
+# DOES resolve to a tracked container, where the same construction is provable
+# and stays clean. A tabless call through an unproved value is deliberately
+# clean: the guard's contract is about the `tab` on the call being made.
+_TAB = '("_focus", "focus-tab", tab=args.chrome_tab)'
+_FORWARD = 'forward = lambda *a, **k: send(*a, **k)\n'
+_UNFORWARD = 'forward = lambda *a, **k: ordinary()\n'
+_UNRESOLVED = [
+    ('attribute_receiver', _FORWARD + 'args.box = [forward, ordinary]',
+     'y = args.box.pop(0)', '', 'y' + _TAB, (1, 1)),
+    ('attribute_receiver_control', _UNFORWARD + 'box = [forward, ordinary]',
+     'y = box.pop(0)', '', 'y' + _TAB, (0, 0)),
+    ('getattr_receiver', _FORWARD + 'args.box = [forward, ordinary]',
+     'y = getattr(args, "box").pop(0)', '', 'y' + _TAB, (1, 1)),
+    ('getattr_receiver_control', _UNFORWARD + 'box = [forward, ordinary]',
+     'y = getattr(box, "pop")(0)', '', 'y' + _TAB, (0, 0)),
+]
+
+# The operation is a method invoked on a container, not an `Attribute` func
+# node: a method held in a name, and the unbound forms that reach a container
+# through `operator` and `functools`, all take the same path.
+_METHODS = [
+    ('method_in_a_name', _LIST, 'f = x.pop\nf(0)', '', 'x[0]()'),
+    ('getattr_rebound', _LIST, 'g = getattr\ng(x, "pop")(0)', '', 'x[0]()'),
+    ('operator_setitem', _LIST, 'import operator\noperator.setitem(x, 0, '
+     'relay())', '', 'x[0]()'),
+    ('operator_methodcaller', _LIST,
+     'import operator\noperator.methodcaller("pop", 0)(x)', '', 'x[0]()'),
+    ('functools_partial', _LIST,
+     'from functools import partial\npartial(list.pop, x)(0)', '', 'x[0]()'),
+    ('operator_delitem', _LIST, 'import operator\noperator.delitem(x, 0)',
+     '', 'x[0]()'),
+]
+
+# A set operation read over the set, so the runtime count does not depend on
+# the order a set iterates in. The store path folds `|=` into a tracked
+# mapping and nothing else; every other set operation is this rule's, so a
+# `&=` or `-=` that empties the set at runtime is a disclosed over-report
+# rather than a miss.
+_SET_FOLD = [
+    ('set_or_fold', _SET, 's |= {relay()}', SET_COMPREHENSION, (1, 1)),
+    ('set_or_control', _SET, 'ordinary()', SET_COMPREHENSION, (0, 0)),
+    ('set_and_over_reports', 'q = quiet()\ns = {q}', 's &= {relay()}',
+     SET_COMPREHENSION, (0, 1)),
+    ('set_sub_over_reports', 'q = quiet()\ns = {q}', 's -= {relay()}',
+     SET_COMPREHENSION, (0, 1)),
+    ('set_xor_fold', 'q = quiet()\ns = {q}', 's ^= {relay()}',
+     SET_COMPREHENSION, (1, 1)),
+    ('set_add_fold', 'q = quiet()\ns = {q}', 's.add(relay())',
+     SET_COMPREHENSION, (1, 1)),
+    ('set_control', 'q = quiet()\ns = {q}', 'ordinary()',
+     SET_COMPREHENSION, (0, 0)),
+]
+
 # Mutators the model already follows. The general invalidation must leave
 # their precise result alone.
 _PRECISE = [
@@ -113,6 +193,9 @@ _PRECISE = [
      'd["b"]()'),
     ('mapping_setdefault_ordinary', 'd = {"a": 1, "b": relay()}',
      'd.setdefault("c", ordinary())', '', 'd["b"]()'),
+    ('sequence_clear', 'x = [relay()]', 'x.clear()', 'x = [*x, relay()]',
+     'x[0]()'),
+    ('set_clear', 's = {relay()}', 's.clear()', 'x = [*s, relay()]', 'x[0]()'),
 ]
 
 # Recorded facts that a mutation does not move: a method that only reads, and
@@ -142,17 +225,19 @@ _READING = [
      'y[1]()', (0, 0)),
     ('literal_index_store_reads_its_own', _PAIR, 'x[0] = relay()',
      'y = [*x, ordinary]', 'y[0]()', (1, 1)),
-    # The in-place operators the store path folds itself: `|=` into a tracked
-    # mapping, and the set operators into a set container beside it. This
-    # rule must leave them to that path rather than invalidate over them.
-    ('set_or', 'q = quiet()\ns = {ordinary}', 's |= {q}', '',
-     'next(iter(s))()', (0, 0)),
-    ('set_and', 'q = quiet()\ns = {ordinary, q}', 's &= {q}', '',
-     'next(iter(s))()', (0, 0)),
-    ('set_xor', 'q = quiet()\ns = {ordinary, q}', 's ^= {q}', '',
-     'next(iter(s))()', (0, 0)),
-    ('set_sub', 'q = quiet()\ns = {ordinary, q}', 's -= {q}', '',
-     'next(iter(s))()', (0, 0)),
+    # `__iter__` walks a container and `fromkeys` builds a new one. Both sit on
+    # the derived surface and neither mutates its receiver.
+    ('sequence_iter', _LIST, 'x.__iter__()', '', 'x[0]()', (0, 0)),
+    ('mapping_fromkeys', 'd = {"a": quiet()}', 'd.fromkeys(["z"], relay())',
+     '', 'd["a"]()', (0, 0)),
+    # A bound call on a receiver the model does not track hands it a tracked
+    # container as an argument. The argument is an operand, never the thing
+    # being mutated.
+    ('bound_call_keeps_its_operand', 'args.lst = [quiet()]\nx = [ordinary, '
+     'relay()]', 'args.lst.append(x)', '', 'x[0]()', (0, 0)),
+    ('unbound_constructor_keeps_its_argument',
+     'd = {"a": quiet()}\nx = [ordinary, relay()]',
+     'dict.fromkeys(d, relay())', '', 'x[0]()', (0, 0)),
 ]
 
 
@@ -211,6 +296,42 @@ def test_recorded_positions_that_still_hold_stay_standing(tmp):
     observed = [(row[0], _verdict(tmp, *row[1:5])) for row in _READING]
     wrong = [item for item, row in zip(observed, _READING)
              if item[1] != row[5]]
+    assert not wrong, wrong
+
+
+def test_every_unreached_position_fails_closed(tmp):
+    missed = _missed(tmp, _POSITIONS, (1, 1))
+    assert not missed, missed
+
+
+def test_every_unreached_position_twin_stays_clean(tmp):
+    flagged = _flagged(tmp, _POSITIONS, (0, 0), True)
+    assert not flagged, flagged
+
+
+def test_an_unresolvable_receiver_fails_closed(tmp):
+    observed = [(row[0], _verdict(tmp, row[1], row[2], '', row[4]))
+                for row in _UNRESOLVED]
+    wrong = [item for item, row in zip(observed, _UNRESOLVED)
+             if item[1] != row[5]]
+    assert not wrong, wrong
+
+
+def test_every_method_invocation_spelling_fails_closed(tmp):
+    missed = _missed(tmp, _METHODS, (1, 1))
+    assert not missed, missed
+
+
+def test_every_method_invocation_twin_stays_clean(tmp):
+    flagged = _flagged(tmp, _METHODS, (0, 0), True)
+    assert not flagged, flagged
+
+
+def test_a_set_fold_matches_what_the_set_holds(tmp):
+    observed = [(row[0], _verdict(tmp, row[1], row[2], '', row[3]))
+                for row in _SET_FOLD]
+    wrong = [item for item, row in zip(observed, _SET_FOLD)
+             if item[1] != row[4]]
     assert not wrong, wrong
 
 
