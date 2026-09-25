@@ -193,25 +193,17 @@ const chrome = {
 
 
 def event_target_stub():
-    """The event-target stand-in that RETAINS the listeners registered on it.
+    """The event-target stand-in, which RETAINS every listener added to it.
 
-    Chrome's event objects keep every listener added to them. An earlier
-    stand-in, `addListener(l) { if (listeners) listeners.push(l); }` with
-    every call site passing the default `null`, discarded every
-    registration, so nothing a harness registered ever dispatched
-    (issue #1015). This one ALWAYS retains the listener and exposes it as
-    `listeners`; it adds no hasListener/removeListener of its own, so a
-    harness dispatches by iterating that array or, opting in, by calling
-    `dispatch`. Call shapes: `eventTarget()` and `eventTarget(retained)`
-    yield `{ addListener, listeners }`; `eventTarget(retained, true)` adds
-    `dispatch(...args)`, which calls EVERY retained listener, in the order
-    they were added, over a snapshot of the list taken at the call, with
-    each listener's exception contained so one that throws neither
-    silences the rest nor fails the caller. Those two properties are what
-    separate a delivery from a plain loop; a contained exception is not
-    reported, so a harness that needs to see one wraps its own listener.
-    Dispatch is opt-in because a harness that never fires an event must
-    not have a listener run behind its back.
+    `eventTarget()` and `eventTarget(retained)` yield
+    `{ addListener, listeners }`. `eventTarget(retained, true)` adds
+    `dispatch(...args)`, which calls every retained listener in order, over
+    a snapshot taken at the call, containing each listener's exception so
+    one that throws neither silences the rest nor fails the caller. It is
+    opt-in: a harness that never fires an event must not have a listener
+    run behind its back. A contained exception is not reported, so a
+    harness that needs to see one wraps its own listener.
+    `tests/test_worker_sources.py` holds the controls.
     """
     return r"""
 function eventTarget(retained = [], dispatches = false) {
@@ -221,13 +213,10 @@ function eventTarget(retained = [], dispatches = false) {
   };
   if (dispatches) {
     target.dispatch = (...args) => {
-      // A snapshot, so a listener that registers another does not pull it
-      // into the dispatch under way, and a try per listener, so one that
-      // throws neither silences the rest nor fails the caller.
       for (const listener of [...retained]) {
         try {
           listener(...args);
-        } catch (_) { /* isolated, as a real event target isolates it */ }
+        } catch (_) { /* a real event target isolates this too */ }
       }
     };
   }
