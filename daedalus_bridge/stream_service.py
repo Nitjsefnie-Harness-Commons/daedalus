@@ -275,12 +275,16 @@ def every_subscription_past(token, name):
     """True once every live dashboard subscription holds a cursor >= name.
 
     Plain lexicographic comparison orders these names because
-    `notify_dashboard` writes `<ms>_<8 hex>`: the millisecond prefix is a
-    fixed width for the current epoch, so byte order is publish order —
-    the same property the drain's `sorted()` scan already relies on. A
-    subscription that has registered but not yet drained carries no cursor
-    and blocks, the conservative join; the TTL sweep is the backstop for a
-    connection that never drains at all.
+    `notify_dashboard` publishes each event under `command_queue.next_seq`\'s
+    `<ms:013d>_<counter:06d>` stem, whose milliseconds and counter are both
+    allocated under `command_fs_lock`, so byte order is publish order within
+    and across milliseconds. That is the whole warrant for a name-ordered
+    cursor: a same-millisecond event published under a random suffix sorts
+    arbitrarily, lands below a window\'s cursor, and is dropped as
+    already-consumed. `test_a_same_millisecond_event_is_delivered_after_the_first`
+    fails if this property stops holding. A subscription that has registered
+    but not yet drained carries no cursor and blocks, the conservative join;
+    the TTL sweep is the backstop for a connection that never drains at all.
     """
     with _stream_lock:
         for entry in _active_streams.values():

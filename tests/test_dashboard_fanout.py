@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import time
 from pathlib import Path
 import sys
@@ -280,6 +281,74 @@ def test_notify_dashboard_publishes_its_own_id_and_kind(tmp):
     assert document['id'] == published.stem, document
     assert document['kind'] == 'event', document
     assert document['type'] == 'result', document
+
+
+class _DescendingUuid:
+    """A uuid4 whose hex strictly decreases, forcing a name inversion.
+
+    With the old random-hex stem two events published in one millisecond
+    order by this value, so the second can sort below the first and be lost
+    behind the cursor. The fixed naming never calls uuid at all, so the mock
+    is inert there and the two stems come from the monotonic counter instead.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def uuid4(self):
+        self.calls += 1
+        hexid = 'ffffffff' if self.calls == 1 else '00000000'
+        return type('U', (), {'hex': hexid})()
+
+
+def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
+    """Two events in one millisecond, the second published after the first
+    was consumed: the second is still delivered, and a following drain
+    delivers nothing. The published stems must be byte-ordered in publish
+    order (`<ms:013d>_<counter:06d>`), which is the sole warrant for the
+    cursor's name ordering. On the random-hex stem the second sorts below
+    the cursor, is skipped as already-consumed, and is unlinked — the event
+    is lost for a connected window and the evidence is removed."""
+    service, drain = _service('fanout_same_ms')
+    cq = service.command_queue
+    token = 'tok'
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = _queue(service, tmp, token)
+    _sub_id, killed = service.register(token, DASHBOARD)
+    saved_time = cq.time
+    had_uuid, saved_uuid = hasattr(cq, 'uuid'), getattr(cq, 'uuid', None)
+    # Both publishes in one millisecond, and a hex that descends, so the
+    # only discriminator between the two names is the one under test. The
+    # fixed naming never calls uuid, so this mock is inert there.
+    cq.time = type('T', (), {'time': staticmethod(lambda: 1_700_000_000.123)})()
+    cq.uuid = _DescendingUuid()
+    frames = []
+    try:
+        cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
+        first = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                      frame_writer=frames.append)
+        cq.notify_dashboard(cmd_dir, token, {'type': 'second'})
+        second = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                       frame_writer=frames.append)
+        third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                      frame_writer=frames.append)
+    finally:
+        cq.time = saved_time
+        if had_uuid:
+            cq.uuid = saved_uuid
+        else:
+            del cq.uuid
+
+    assert first == 1, first
+    assert second == 1, (
+        'the same-millisecond event published after the first was lost: '
+        f'{second}')
+    assert third == 0, third
+    assert [f['type'] for f in frames] == ['first', 'second'], frames
+    first_id, second_id = frames[0]['id'], frames[1]['id']
+    assert re.fullmatch(r'\d{13}_\d{6}', first_id), first_id
+    assert re.fullmatch(r'\d{13}_\d{6}', second_id), second_id
+    assert first_id < second_id, (first_id, second_id)
 
 
 _DEDUP_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
