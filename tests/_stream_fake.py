@@ -18,13 +18,22 @@ A harness that splices `STRICT_FETCH` must define, before the splice:
               `{stream: N}` to have the harness build an N-chunk relay answer,
               or a LIST of these for a per-attempt sequence (one answer per
               attempt; a sequence that runs out is a recorded refusal, never
-              a 200).
+              a 200). `forwards` optionally maps a declared request key to
+              the origin its real answer lives on: the gate records and
+              debits that request against `planned` like any other but never
+              answers it — the real server's answer is the scenario's — and
+              its origin must be permitted (`hosts` or `relayHosts`) or the
+              request is refused and recorded.
   BRIDGE_URL  the default permitted origin.
   response(status, data)  plain response factory.
   streamResponse(answer)  response factory for the stream branch.
   chunkedResponse(count)  builds a declared `{stream: N}` answer. Required by
               the contract exactly when a plan declares a `{stream: N}`
               answer; otherwise it need not exist.
+  forwardRequest(url, init, entry)  performs a declared forward through the
+              real `fetch`, stamps the real status on `entry.status` and
+              returns the real response. Required by the contract exactly
+              when a plan declares `forwards`; otherwise it need not exist.
   streamFetches, resultPosts, nonStreamFetches, refusedFetches,
   badOrigins  arrays the gate records into.
 
@@ -44,7 +53,10 @@ one is refused by status whatever the plan says. The origin is checked
 first — the stream URL is the one request a worker derives from runtime
 config, so a foreign-origin or relative stream is refused and recorded like
 any other. A request refused for its origin spends no route allowance, so
-the next legitimate request on that route still answers 200. The Python
+the next legitimate request on that route still answers 200. A key in
+`plan.forwards` is the one request the gate does not answer: it is recorded
+and debited like any other, but `forwardRequest` hands it to a real server
+and the real answer is what the worker and the scenario see. The Python
 helpers below drive a spliced harness and pin a scenario's recorded traffic
 against the plan it declared.
 """
@@ -80,6 +92,10 @@ if (typeof plan === 'undefined') {
 } else if (plan.answers !== undefined
   && (typeof plan.answers !== 'object' || Array.isArray(plan.answers))) {
   gateContractFaults.push('plan.answers');
+} else if (plan.forwards !== undefined
+  && (typeof plan.forwards !== 'object' || plan.forwards === null
+      || Array.isArray(plan.forwards))) {
+  gateContractFaults.push('plan.forwards');
 } else {
   // hosts, relayHosts and statuses are origin/answer lists. A wrong-typed one
   // must be named, not silently accepted: a string-typed `hosts` makes
@@ -98,6 +114,15 @@ if (typeof plan !== 'undefined' && plan.answers !== undefined
     && declaresChunkedAnswer(plan.answers)
     && typeof chunkedResponse !== 'function') {
   gateContractFaults.push('chunkedResponse');
+}
+// A plan that declares a forward must bring the hook that performs it: the
+// gate records and debits the request but never answers it itself, so without
+// the hook there is nothing that could.
+if (typeof plan !== 'undefined' && plan.forwards !== undefined
+    && typeof plan.forwards === 'object' && plan.forwards !== null
+    && !Array.isArray(plan.forwards)
+    && typeof forwardRequest !== 'function') {
+  gateContractFaults.push('forwardRequest');
 }
 if (typeof BRIDGE_URL === 'undefined') gateContractFaults.push('BRIDGE_URL');
 if (typeof response !== 'function') gateContractFaults.push('response');
@@ -218,6 +243,33 @@ async function bridgeFetch(target, init = {}) {
   if (entry.refused) {
     entry.status = 599;
     return response(599, { ok: false, error: 'more often than declared' });
+  }
+  const forwards = plan.forwards || {};
+  if (Object.prototype.hasOwnProperty.call(forwards, request)) {
+    // A declared forward is the one request the gate does not answer: the
+    // real server's answer is the whole point of that path. It is still
+    // debited against `planned` above and recorded, so a forward past its
+    // declared count was refused before this point, never passed through.
+    // The forward's own origin is checked here, before the hook runs, so a
+    // plan whose target moved is refused and recorded like any other
+    // foreign origin.
+    if (!permittedOrigins().includes(forwards[request])) {
+      badOrigins.push(forwards[request]);
+      entry.refused = true;
+      refusedFetches.push(request);
+      entry.status = 599;
+      return response(599, {
+        ok: false, error: 'forward origin not permitted',
+      });
+    }
+    // A hook that throws is a real fetch that failed; the record carries
+    // the throw, so a worker that swallows it still shows the request.
+    try {
+      return await forwardRequest(url, init, entry);
+    } catch (error) {
+      entry.status = 'throw';
+      throw error;
+    }
   }
   const planned = plannedAnswer(request);
   if (planned === EXHAUSTED) {
