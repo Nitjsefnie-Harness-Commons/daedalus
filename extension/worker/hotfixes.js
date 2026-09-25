@@ -2,7 +2,8 @@
 /* exported handleClearAllHotfixes, handleSetPermanent, handleListHotfixes */
 /* global VERSION, _serializer, _cdpSessions, _netCaptures */
 /* global _cdpError, _releaseCdpObjects */
-/* global _canUseMainWorldEval, _executeMainWorldEval, postResult */
+/* global _canUseMainWorldEval, _executeMainWorldEval */
+/* global _raceMainWorldEval, postResult */
 
 // ─── Hotfix system ───
 
@@ -100,7 +101,12 @@ async function handleHotfixReplay(chromeTabId) {
   for (const hf of fixes) {
     let failure;
     try {
-      failure = await _replayHotfix(chromeTabId, hf.code);
+      // The bound covers the WHOLE per-fix operation — the routing decision,
+      // the probe and the inject — not only the injection call, so a fix
+      // that wedges anywhere in its own replay cannot stop the fixes after
+      // it on this or any later load of the page.
+      failure = await _raceMainWorldEval(
+        _replayHotfix(chromeTabId, hf.code), 'hotfix fix');
     } catch (error) {
       failure = error && (error.message || String(error));
     }

@@ -28,7 +28,7 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
     ('worker/cdp.js', ('_cdpError', '_cdpSessions', '_cdpSettle',
                        '_releaseCdpObjects'), ()),
     ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
-                            '_takeEvalRelay'), ()),
+                            '_raceMainWorldEval', '_takeEvalRelay'), ()),
     ('worker/gm_storage.js', ('handleGmStorage',), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
     ('worker/segment_mint.js', ('mintSegmentSig',), ()),
