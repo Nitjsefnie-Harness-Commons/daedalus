@@ -185,7 +185,7 @@ _SET_FOLD = [
     ('set_or_control', _SET, 'ordinary()', SET_COMPREHENSION, (0, 0)),
     ('set_and_over_reports', 'q = quiet()\ns = {q}', 's &= {relay()}',
      SET_COMPREHENSION, (0, 1)),
-    ('set_sub_over_reports', 'q = quiet()\ns = {q}', 's -= {relay()}',
+    ('set_sub_removes', 'q = quiet()\ns = {q}', 's -= {relay()}',
      SET_COMPREHENSION, (0, 0)),
     ('set_xor_fold', 'q = quiet()\ns = {q}', 's ^= {relay()}',
      SET_COMPREHENSION, (1, 1)),
