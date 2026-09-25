@@ -335,15 +335,20 @@ def next_seq():
     """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>.
 
     The millisecond prefix is fixed width and the counter is padded to
-    twenty digits, so byte order is the order the counter was taken. The
-    bound is the counter staying below 10**20: no 64-bit counter reaches
-    that (2**64 < 10**20), and `itertools.count` is the only source. A
-    narrower field (six digits was the original) inverts order at the
-    first overflow — 999999 formats as six digits but 1000000 as seven,
+    twenty digits, so within a millisecond byte order is the order the
+    counter was taken, and across counter increases it stays that way
+    regardless of the clock. The field width is the bound: the ordering
+    holds while the counter is below 10**20. `itertools.count` is
+    arbitrary-precision and does not itself cap the counter, so this is a
+    stated width, not a type guarantee — but no reachable process comes
+    near 10**20. A narrower field (six digits was the original) inverts at
+    the first overflow — 999999 formats as six digits but 1000000 as seven,
     and '1' < '9' — which the dashboard cursor turns into a lost event.
-    Callers take this under `command_fs_lock`, the same lock the publish
-    is taken under, so a stem cannot be handed out in an order the writes
-    do not follow.
+    Across *different* milliseconds the millisecond prefix decides, so the
+    stem is publish-ordered only while the wall clock does not step
+    backwards between two publishes. Callers take this under
+    `command_fs_lock`, the same lock the publish is taken under, so a stem
+    cannot be handed out in an order the writes do not follow.
     """
     return f'{int(time.time() * 1000):013d}_{next(_seq_counter):020d}'
 
