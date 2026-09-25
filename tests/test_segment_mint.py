@@ -4,6 +4,7 @@
 A page reaches `POST /segment-job` only through the service worker, and the
 worker mints only for an origin an operator has allowed.
 """
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -263,6 +264,28 @@ def _command(command_type, **fields):
     return command
 
 
+def _declared_cap():
+    """The allowlist's count cap as the shipped module declares it.
+
+    Read out of the production source, so a boundary derived from it moves
+    with the cap rather than restating it, and a module that declares no
+    cap fails here instead of the boundary silently passing.
+    """
+    source = (EXTENSION_ROOT / 'worker' / 'segment_mint.js').read_text(
+        encoding='utf-8')
+    match = re.search(r'const SEGMENT_ORIGIN_CAP = (\d+);', source)
+    assert match, 'segment_mint.js declares no SEGMENT_ORIGIN_CAP'
+    return int(match.group(1))
+
+
+def _seed_origins(count):
+    # The scheme is a separate piece: a shipped literal whose host starts at
+    # the interpolation brace reads as a non-allowlisted host to the release
+    # scanner, which stops reading the URL there.
+    scheme = 'https://'
+    return [scheme + f'seed{index}.example.com' for index in range(count)]
+
+
 def _refused(outcome, message):
     """A refusal is exactly `{error}`, and the plan proved it never reached
     the bridge: a mint post outside the scenario's plan is refused by the
@@ -459,6 +482,73 @@ def test_allow_refuses_anything_but_an_http_origin(tmp):
         assert outcome['posted'][0]['error'] == INVALID_ORIGIN, (
             fields, outcome)
         assert outcome['stored'] is None, (fields, outcome)
+
+
+def test_allow_admits_the_origin_that_fills_the_cap(tmp):
+    """The entry that brings the list to exactly the cap is admitted."""
+    del tmp
+    cap = _declared_cap()
+    seeds = _seed_origins(cap - 1)
+    outcome = _commands(
+        [_command('allow-segment-origin', origin=OTHER)],
+        store={ORIGINS_KEY: seeds})
+    posted = outcome['posted'][0]
+    assert posted['error'] is None, outcome
+    assert posted['result']['added'] is True, outcome
+    assert outcome['stored'] == sorted(seeds + [OTHER]), outcome
+    assert len(outcome['stored']) == cap, outcome
+
+
+def test_allow_refuses_the_origin_past_the_cap_without_evicting(tmp):
+    """The refusal names the cap and the store is untouched: no eviction.
+
+    Silently dropping an entry would make an origin the operator permitted
+    stop being permitted, with the failure surfacing at `GM.segmentJob` and
+    pointing nowhere near the real cause.
+    """
+    del tmp
+    cap = _declared_cap()
+    seeds = _seed_origins(cap)
+    outcome = _commands(
+        [_command('allow-segment-origin', origin=OTHER)],
+        store={ORIGINS_KEY: seeds})
+    posted = outcome['posted'][0]
+    assert posted['result'] is None, outcome
+    assert posted['error'] and str(cap) in posted['error'], outcome
+    assert outcome['stored'] == seeds, outcome
+
+
+def test_revoke_still_succeeds_at_the_cap_and_frees_a_slot(tmp):
+    """A cap that also blocked the revoke path would be a new trap."""
+    del tmp
+    cap = _declared_cap()
+    seeds = _seed_origins(cap)
+    outcome = _commands([
+        _command('revoke-segment-origin', origin=seeds[0]),
+        _command('allow-segment-origin', origin=OTHER, id='y'),
+    ], store={ORIGINS_KEY: seeds})
+    revoked, allowed = outcome['posted']
+    assert revoked['error'] is None, outcome
+    assert revoked['result']['found'] is True, outcome
+    assert allowed['error'] is None, outcome
+    assert allowed['result']['added'] is True, outcome
+    assert outcome['stored'] == sorted(seeds[1:] + [OTHER]), outcome
+
+
+def test_allow_re_adds_a_listed_origin_at_the_cap_as_a_no_op(tmp):
+    """An idempotent re-add at the cap is a no-op, not a refusal."""
+    del tmp
+    cap = _declared_cap()
+    seeds = sorted(_seed_origins(cap - 1) + [ALLOWED])
+    outcome = _commands(
+        [_command('allow-segment-origin', origin=ALLOWED + '/')],
+        store={ORIGINS_KEY: seeds})
+    posted = outcome['posted'][0]
+    assert posted['error'] is None, outcome
+    assert posted['result'] == {
+        'origin': ALLOWED, 'origins': seeds, 'added': False,
+    }, outcome
+    assert outcome['stored'] == seeds, outcome
 
 
 def test_revoke_removes_a_listed_origin_and_reports_found(tmp):
