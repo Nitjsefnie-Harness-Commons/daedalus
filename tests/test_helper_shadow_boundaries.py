@@ -21,14 +21,15 @@ also imports it from a module in the same tests tree, whether by
 The rule is deliberately narrow and complete only over the static forms.
 A def, class, comprehension or lambda body is its own namespace, so a
 rebinding there is not a module-scope shadow and a walrus inside a
-comprehension or lambda is not collected — except a comprehension's
-outermost iterable, which is evaluated in the enclosing scope and does
-bind. An import binds the name it brings INTO the module, so an aliased
-import `X as _Y` is shadowed only by a rebind of `_Y`, never of `X`. A
-name the file binds with no import from a sibling tests module, or an
-import from outside the tests tree, is not a shadow. A module the detector
-cannot parse fails the control, naming the file, rather than being
-silently dropped.
+comprehension or lambda is not collected. A walrus in a comprehension's
+outermost iterable would bind in the enclosing scope, but CPython rejects
+that source at compile time, so no committed module carries the form and
+it is not collected. An import binds the name it brings INTO the module,
+so an aliased import `X as _Y` is shadowed only by a rebind of `_Y`, never
+of `X`. A name the file binds with no import from a sibling tests module,
+or an import from outside the tests tree, is not a shadow. A module the
+detector cannot parse fails the control, naming the file, rather than
+being silently dropped.
 
 What this control does not see, by design: a re-paste whose import was
 deleted along with it is a duplicate body, not a shadow; a `from X
@@ -106,8 +107,6 @@ def _scan(tree):
             elif isinstance(current, ast.Lambda):
                 continue
             elif isinstance(current, _COMPREHENSION):
-                if current.generators:
-                    stack.append(current.generators[0].iter)
                 continue
             else:
                 stack.extend(ast.iter_child_nodes(current))
@@ -281,8 +280,14 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         ('test_except_as.py', suite(
             'try:', '    pass',
             'except Exception as _load_queue:', '    pass'), '_load_queue'),
-        ('test_comp_outer.py', suite(
-            '[x for x in (_load_queue := range(3))]'), '_load_queue'),
+        # A bind in an else body or a finally body is reached only through
+        # that field of `statement`, so each case fires for its own alone.
+        ('test_orelse.py', suite(
+            'if True:', '    pass',
+            'else:', '    _load_queue = 1'), '_load_queue'),
+        ('test_finalbody.py', suite(
+            'try:', '    pass',
+            'finally:', '    _load_queue = 1'), '_load_queue'),
         ('test_match.py', suite(
             'match 1:', '    case _load_queue:', '        pass'),
          '_load_queue'),
@@ -317,11 +322,21 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
     ]
     expected = set()
     for filename, text, name in cases:
+        # A fabricated case is a program a tests module could contain,
+        # so it must compile; ast.parse accepts source compile() rejects.
+        compile(text, filename, 'exec')
         write('tests/' + filename, text)
         if name is not None:
             expected.add(('tests/' + filename, name))
-    found = {(item.path, item.name) for item in _shadow_findings(sources)}
+    findings = _shadow_findings(sources)
+    found = {(item.path, item.name) for item in findings}
     assert found == expected, sorted(found ^ expected)
+    # The report names the import and binding lines; the set comparison
+    # above holds with every lineno collapsed to 0, so pin them here.
+    walrus = next(item for item in findings
+                  if item.path == 'tests/test_b.py')
+    assert walrus.import_lines == [1], walrus
+    assert walrus.bind_lines == [2], walrus
 
 
 def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
