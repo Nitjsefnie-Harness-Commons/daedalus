@@ -269,8 +269,7 @@ def launch_refusals(source, here, bound_sink=None):
                 if isinstance(item.optional_vars, ast.Name):
                     bindings.append(
                         (item.optional_vars.id, item.context_expr))
-    # The function each node sits in, and that function's parameters. A
-    # parameter and a module-level import of the same name are different
+    # A parameter and a module-level import of the same name are different
     # bindings, and only one of them is readable.
     function_scopes = {}
     parameter_names = {}
@@ -359,11 +358,10 @@ def launch_refusals(source, here, bound_sink=None):
         if isinstance(node, (ast.Assign, ast.AnnAssign)) \
                 and node.value is not None \
                 and derives(node.value, bound):
-            # Two target shapes, two limbs. A tuple or list target unpacks
-            # the value into names the bindings table never records. An
-            # attribute or subscript target binds it to a place receiver
-            # resolution cannot read, which is not an unpacking. A name
-            # target is recorded and needs neither.
+            # A tuple or list target unpacks the value into names the
+            # bindings table never records; an attribute or subscript target
+            # binds it to a place receiver resolution cannot read, which is
+            # not an unpacking.
             targets = node.targets if isinstance(node, ast.Assign) \
                 else [node.target]
             if any(isinstance(t, (ast.Tuple, ast.List))
@@ -507,9 +505,8 @@ def launch_refusals(source, here, bound_sink=None):
                 or receiver.id == 'subprocess'):
             return False
         # A parameter is a DIFFERENT binding from a module-level import
-        # of the same name, in a different scope, and this one the
-        # analyser cannot read. Sharing a spelling is not sharing a
-        # binding.
+        # of the same name, in a different scope, and this one the analyser
+        # cannot read.
         if receiver.id in parameter_names.get(
                 id(function_scopes.get(id(receiver))), ()):
             return False
@@ -517,9 +514,6 @@ def launch_refusals(source, here, bound_sink=None):
         if machinery_route(held):
             return False
         if isinstance(held, ast.Call):
-            # A call is proved only when the call itself is the fixed
-            # value, which `getattr` is not: it hands back whatever the
-            # module holds under the name it is given.
             return normalize(callee_of(held)) != 'getattr'
         return True
 
@@ -527,19 +521,13 @@ def launch_refusals(source, here, bound_sink=None):
         """Every bounded call whose receiver is not a PROVED fixed value.
 
         A call carrying a readable `timeout=` or a `**`-unpacked mapping
-        is a bounded call, whatever it calls. It is reported unless the
-        receiver is provably a fixed, non-launch value, and proof is
-        narrow on purpose: a bare name this module binds and the analyser
-        read, and nothing else.
-
-        That is the whole of the second arm of the launch policy, and it
-        is what makes the policy decidable rather than a list of
-        spellings. A receiver reached through an import name held in a
-        variable, through a class attribute, or through a run-time
-        namespace is not proved, so it is reported at `unreadable` — the
-        rule then demands a refusal or an allowance row for it, and a
-        bounded git launch cannot pass the tree however the module was
-        obtained or reached.
+        is a bounded call, whatever it calls. That is the whole of the
+        second arm of the launch policy, and it is what makes the policy
+        decidable rather than a list of spellings. A receiver reached
+        through an import name held in a variable, through a class
+        attribute, or through a run-time namespace is not proved, so it is
+        reported at `unreadable` — the rule then demands a refusal or an
+        allowance row for it.
         """
         func = node.func
         if not any(keyword.arg == 'timeout' or keyword.arg is None

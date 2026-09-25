@@ -20,20 +20,20 @@ import ast
 
 # A concat/literal chain deeper than this is not a shape the tree spells;
 # the cap keeps a self-referential binding from spinning the head read. It
-# bounds the unwrap passes of each resolver, so a name chain or concat
-# longer than the cap stops at the cap and the head is reported unreadable
-# (the name path resolves one hop fewer than the concat path, because its
-# terminal value is only checked on the next pass).
+# bounds the passes of every resolver, so a chain past the cap stops there
+# and the head reads unreadable — the name path one hop short of the concat
+# path, whose terminal value is only checked on the next pass.
 ARGV_UNWRAP_CAP = 8
 
 
 class ArgvReader:
-    """One module's argv and head, read through its bindings tables.
+    """One module's argv and head, read through the two tables the launch
+    audit hands over.
 
-    The tables are the module-wide `binding_map` and its `ambiguous` set,
-    both final by the time the reader is built: the launch audit passes
-    them in rather than rebuilding them, so this reader never sees a
-    binding the caller has not finished collecting.
+    They are the module-wide `binding_map` and its `ambiguous` set, both
+    final by the time the reader is built: the launch audit passes them in
+    rather than rebuilding them, so this reader never sees a binding the
+    caller has not finished collecting.
     """
 
     def __init__(self, binding_map, ambiguous):
@@ -43,12 +43,10 @@ class ArgvReader:
     def resolve_constant(self, element):
         """An argv element's string constant, following a name chain.
 
-        Resolves a name through the bindings table to a fixpoint behind a
-        seen-guard bounded by ARGV_UNWRAP_CAP, the same idiom as
-        resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
-        ...])`) reaches its constant and a self-referential one (`A = A`)
-        stops instead of looping. A name bound more than once resolves to
-        None (unreadable), for the same last-wins reason as resolve_argv.
+        A multi-step binding (`A = 'git'; B = A; run([B, ...])`) reaches its
+        constant and a self-referential one (`A = A`) stops instead of
+        looping. A name bound more than once resolves to None (unreadable),
+        for the same last-wins reason as resolve_argv.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
@@ -64,20 +62,18 @@ class ArgvReader:
             element = self.binding_map[element.id]
         return None
 
-    # The seen-guards below are redundant with ARGV_UNWRAP_CAP: these
-    # resolvers do not recurse, so the cap bounds them and a guard cannot
-    # change an answer. They are kept as belt and braces, and may be
-    # deleted rather than defended.
+    # The seen-guards below cannot change an answer — these resolvers do
+    # not recurse, so the cap already bounds them. Belt and braces, and
+    # deletable rather than defensible.
     def resolve_argv(self, expr):
         """The argv's literal list/tuple, or None when it is dynamic.
 
         Unwraps a left-nested `+` chain and follows a plain name through
-        the bindings table, both bounded by ARGV_UNWRAP_CAP, so a
-        tuple-concatenated or name-held git argv is classified rather than
-        refused as unreadable. A name bound more than once in the module
-        resolves to None (unreadable): last-wins is a guess, and a guess
-        that lands on a non-git head would assert a provable non-git for a
-        git launch.
+        the bindings table, so a tuple-concatenated or name-held git argv
+        is classified rather than refused as unreadable. A name bound more
+        than once in the module resolves to None (unreadable): last-wins is
+        a guess, and a guess that lands on a non-git head would assert a
+        provable non-git for a git launch.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
@@ -119,7 +115,7 @@ class ArgvReader:
         return False
 
     def read_words(self, container):
-        """A literal list/tuple's string words, names resolved; else None."""
+        """A literal list/tuple's string words, an unreadable word as None."""
         if container is None:
             return []
         return [self.resolve_constant(element) for element in container.elts]
@@ -135,12 +131,10 @@ class ArgvReader:
     def first_word(self, container):
         """The head's string constant and whether the audit could read it.
 
-        A head element bound to a name resolves to its constant, so
-        `[GIT, 'status']` with `GIT = 'git'` classifies as a git launch.
         A literal `sys.executable` head is read as a known non-git
-        interpreter. Any other head that is not a readable string constant
-        is unreadable, never a provable non-git: on the exemption path a
-        wrong non-git label would silently widen the exempt set.
+        interpreter. Any head that is not a readable string constant is
+        unreadable, never a provable non-git: on the exemption path a wrong
+        non-git label would silently widen the exempt set.
         """
         if container is None or not container.elts:
             return (None, container is not None)
