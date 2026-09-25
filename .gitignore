@@ -232,6 +232,7 @@
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
 !/scripts/ci/line_lengths.py
+!/scripts/ci/plan_timed_matrix.py
 !/scripts/ci/ratchet.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
@@ -573,6 +574,7 @@
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
+!/tests/test_timed_planner.py
 !/tests/test_timing_selection.py
 !/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py
