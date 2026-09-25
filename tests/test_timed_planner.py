@@ -469,8 +469,13 @@ def test_the_matrix_line_is_one_line_of_json_the_workflow_can_take(tmp):
                    '--out', str(out)])
     assert '\n' not in out.read_text(encoding='utf-8')
     cells = json.loads(out.read_text(encoding='utf-8'))
-    assert list(cells[0]) == ['group', 'suites'], cells[0]
-    assert cells[0]['group'] == 'cell-01', cells
+    # The value is the object `strategy.matrix` expands, not a bare array:
+    # a value that merely parses is not the property — the cells live under
+    # `include`, and that is what reaches the runner.
+    assert set(cells) == {'include'}, cells
+    first = cells['include'][0]
+    assert list(first) == ['group', 'suites'], first
+    assert first['group'] == 'cell-01', cells
     # The brief's own path is stdout: one line, no trailing newline.
     line = _run(planner, ['--tree', str(tree), '--timings', str(path)])
     assert '\n' not in line, repr(line)
