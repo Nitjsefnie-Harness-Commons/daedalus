@@ -289,9 +289,8 @@ def test_a_stale_head_publishes_a_red_check(tmp):
 
 
 def _process_capturing_stderr(m, read, heads, **kwargs):
-    """One `process` call with its stderr captured. Returns (code, verdicts,
-    stderr): the exit code pins what the run does, the stderr is the only
-    witness that it said so."""
+    """Returns (code, verdicts, stderr): the exit code pins what the run
+    does, the stderr is the only witness that it said so."""
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         code, verdicts = m.process(read, 'o/r', heads,
@@ -331,10 +330,9 @@ def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
 
 def _writing_read(m, published, current, **flow):
     """A `_flow_read` whose recorded writes carry the head sha each was
-    written onto, so a test can name the pull request that received it. `m`
-    is the caller's module instance, as `_only_fail` also takes it: the
-    reader raises that instance's QueryError and process catches the same
-    class."""
+    written onto, so a test can say which head was written. `m` is the
+    caller's module instance, as `_only_fail` also takes it: the reader
+    raises that instance's QueryError and process catches the same class."""
     base = _flow_read(m, {'.pylintrc': [G1]}, current, published, **flow)
 
     def read(argv):
@@ -349,8 +347,6 @@ def _writing_read(m, published, current, **flow):
 
 
 def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
-    """A moved head alone must not cost the run the healthy head it walks
-    past, and must not by itself make the run nonzero."""
     del tmp
     m = _mod()
     published = []
@@ -364,9 +360,7 @@ def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
 
 
 def test_a_moved_head_and_a_write_failure_and_a_healthy_head(tmp):
-    """The mixed run pins the two outcomes apart: the moved head is not a
-    failure, the write failure is, and the healthy head still publishes. It
-    rules out "exit nonzero if anything was skipped" and "always exit 0",
+    """Rules out "exit nonzero if anything was skipped" and "always exit 0",
     each of which the one-directional tests let through."""
     del tmp
     m = _mod()
@@ -419,9 +413,8 @@ def test_a_per_head_write_failure_skips_that_head_and_continues(tmp):
 
 
 def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
-    """A one-head run whose only write fails publishes nothing and must still
-    exit nonzero: a healthy sibling is not what makes the run red. This is the
-    limb a `failed and published` exit code drops."""
+    """A healthy sibling is not what makes the run red: this is the limb a
+    `failed and published` exit code drops."""
     del tmp
     m = _mod()
     published = []
