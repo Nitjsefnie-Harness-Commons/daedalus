@@ -19,9 +19,9 @@ import ast
 from _pyroute_keys import _literal_key
 from _pyroute_positions import at_position
 from _pyroute_storage import replace_deferred_storage
-from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
-                             DeferredAlternatives, DeferredContainer,
-                             DeferredInstance, _known_value, merge_yielded,
+from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
+                             DeferredContainer, DeferredInstance,
+                             DeferredMethod, _known_value, merge_yielded,
                              sync_cells)
 
 # The names a container surface carries that only read: the non-assigning
@@ -30,11 +30,11 @@ from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
 _READERS = frozenset({
     '__add__', '__and__', '__class_getitem__', '__contains__', '__doc__',
     '__eq__', '__ge__', '__getattribute__', '__getitem__', '__gt__',
-    '__hash__', '__le__', '__len__', '__lt__', '__mul__', '__ne__', '__new__',
-    '__or__', '__rand__', '__reduce__', '__repr__', '__reversed__', '__ror__',
-    '__rmul__', '__rsub__', '__rxor__', '__sizeof__', '__sub__', '__xor__',
-    'copy', 'count', 'difference', 'get', 'index', 'intersection',
-    'isdisjoint', 'issubset', 'issuperset', 'items', 'keys',
+    '__hash__', '__iter__', '__le__', '__len__', '__lt__', '__mul__', '__ne__',
+    '__new__', '__or__', '__rand__', '__reduce__', '__repr__', '__reversed__',
+    '__ror__', '__rmul__', '__rsub__', '__rxor__', '__sizeof__', '__sub__',
+    '__xor__', 'copy', 'count', 'difference', 'fromkeys', 'get', 'index',
+    'intersection', 'isdisjoint', 'issubset', 'issuperset', 'items', 'keys',
     'symmetric_difference', 'union', 'values',
 })
 
@@ -49,11 +49,10 @@ CONTAINER_MUTATORS = (_mutating_surface(list) | _mutating_surface(dict)
 _NESTED_SCOPES = (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
                   ast.ClassDef)
 _SEQUENCE_KINDS = ('list', 'tuple', 'set')
-# The in-place operators the store path follows itself: `|=` merges into a
-# tracked mapping, and `|`, `&`, `^` and `-` over a set fold into a set
-# container beside it. None of them is a sequence store, so leaving them to
-# that path costs this rule nothing and keeps the two folds from overlapping.
-_FOLDED_OPERATORS = (ast.BitOr, ast.BitAnd, ast.BitXor, ast.Sub)
+# The container types the surface was taken from. A call through one of these
+# names is the type, not an instance of it, so its first argument is the
+# receiver the bound form writes as `func.value`.
+_CONTAINER_TYPES = frozenset({'dict', 'list', 'set'})
 # A receiver the model resolved no container behind: the value is what a
 # selection of an unknown name, or of a call, or of a nested subscript, leaves
 # unproved.
@@ -113,8 +112,7 @@ def _attribute_selection(selection, state):
         receiver, name = selection.func.value, selection.args[0]
     elif isinstance(selection.func, ast.Name) \
             and selection.func.id == 'getattr' \
-            and 2 <= len(selection.args) <= 3 and not selection.keywords \
-            and selection.func.id not in state.bound:
+            and 2 <= len(selection.args) <= 3 and not selection.keywords:
         receiver, name = selection.args[0], selection.args[1]
     else:
         return None
@@ -124,22 +122,80 @@ def _attribute_selection(selection, state):
 
 
 def _mutated(call, state):
-    """The tracked containers a call may mutate in place."""
+    """The tracked containers a call may mutate in place.
+
+    The operation is a method invoked on a container, so the spelling decides
+    only where the container is named: as the receiver of a bound call, as the
+    first argument of an unbound one, behind another call, or in a name the
+    model bound the method to.
+    """
     func = call.func
-    if isinstance(func, ast.Attribute) and func.attr in CONTAINER_MUTATORS:
-        found = _containers(_receiver_value(func.value, state))
-        # An unbound spelling names the container as the first argument; a
-        # bound one has already named it, so its other arguments are the
-        # operands, not another target.
-        return found if found or not call.args else _containers(
-            _receiver_value(call.args[0], state))
+    if isinstance(func, ast.Attribute):
+        return _bound_mutation(call, func, state)
     if isinstance(func, ast.Call):
-        selection = _attribute_selection(func, state)
-        if selection is not None:
-            receiver, name = selection
-            if name is None or name in CONTAINER_MUTATORS:
-                return _containers(_receiver_value(receiver, state))
-    return ()
+        return _indirect_mutation(call, func, state)
+    return _held_mutation(func, state)
+
+
+def _dunder_form(name):
+    """`operator`'s spelling of a container method without the underscores --
+    `setitem` for `__setitem__` -- or None when the name is not one. This is
+    the same surface read a second way, not a list of what `operator` exports.
+    """
+    for spelling in (f'__{name}__', f'__{name}', f'{name}__'):
+        if spelling in CONTAINER_MUTATORS:
+            return spelling
+    return None
+
+
+def _unbound_callee(receiver, state):
+    """Whether the callee is the container type rather than an instance of
+    one, so `list.pop(x, 0)` names the container as an argument. An instance's
+    own argument is an operand instead: `obj.append(x)` mutates `obj`.
+    """
+    return (isinstance(receiver, ast.Name)
+            and receiver.id in _CONTAINER_TYPES
+            and receiver.id not in state.bound)
+
+
+def _bound_mutation(call, func, state):
+    """A method called on the container it names, or on the one its first
+    argument names when the callee is the container type."""
+    if func.attr in CONTAINER_MUTATORS:
+        unbound = _unbound_callee(func.value, state)
+    elif _dunder_form(func.attr) is None:
+        return ()
+    else:
+        # The operation is in the name, so the first argument is the
+        # container however the callee itself is spelled.
+        unbound = True
+    found = _containers(_receiver_value(func.value, state))
+    if found or not (unbound and call.args):
+        return found
+    return _containers(_receiver_value(call.args[0], state))
+
+
+def _indirect_mutation(call, func, state):
+    """A call whose callee is itself a call: a method selected into a name, a
+    `functools.partial` of one, or an `operator` factory. The model cannot see
+    through any of them, so every tracked container the operands name is a
+    candidate the read must fail closed over."""
+    selected = _attribute_selection(func, state)
+    if selected is not None:
+        receiver, name = selected
+        if name is None or name in CONTAINER_MUTATORS:
+            return _containers(_receiver_value(receiver, state))
+    operands = [*func.args, *(keyword.value for keyword in func.keywords),
+                *call.args, *(keyword.value for keyword in call.keywords)]
+    return tuple(found for operand in operands
+                 for found in _containers(_receiver_value(operand, state)))
+
+
+def _held_mutation(func, state):
+    """A method the model bound to a name: the binding records the container
+    the call through that name mutates."""
+    value = _known_value(func, state)
+    return (value.owner,) if isinstance(value, DeferredMethod) else ()
 
 
 def _mutated_receiver(call, state):
@@ -153,6 +209,11 @@ def _mutated_receiver(call, state):
         receiver = selection[0] if selection is not None else None
     else:
         return None
+    if isinstance(receiver, ast.Call) \
+            and _attribute_selection(receiver, state) is not None:
+        # A selection the model cannot fold stands in for the receiver: what
+        # it selected may be the container, and nothing says it is not.
+        return receiver
     return receiver if isinstance(receiver, _UNRESOLVED_RECEIVERS) else None
 
 
@@ -181,13 +242,11 @@ def _stored(statement, state):
     length, so it leaves every recorded position where it was -- whether the
     index is literal or computed, the computed one landing in the unknown
     slot. Everything else moves what the container holds at those positions:
-    a delete of any index, a slice store, and an augmented assignment. A
-    mapping is left to the store path that names the key it writes, and so is
-    the in-place operator that path folds itself.
+    a delete of any index, a slice store, and an augmented assignment. The
+    store path claims the one augmented form it applies itself, so a mapping
+    union keeps its precise merge and everything else is this rule's.
     """
     if isinstance(statement, ast.AugAssign):
-        if isinstance(statement.op, _FOLDED_OPERATORS):
-            return []
         owner = _receiver_value(statement.target, state)
         return [owner] if (isinstance(owner, DeferredContainer)
                            and owner.kind in _SEQUENCE_KINDS) else []
@@ -287,8 +346,9 @@ def invalidate_unmodelled(statement, state, claimed=()):
     `claimed` names the calls and statements a precise handler already
     applied, so a mutation the model followed keeps its exact result. Every
     other mutation fails closed: the container's recorded values join the
-    unknown slot, its count becomes unknown, and a receiver the model could
-    not resolve leaves the call's own value unproved too.
+    unknown slot and its count becomes unknown. A receiver the model could
+    not resolve is the call's own value's business, and `unproved_call` owns
+    it.
     """
     claimed = set(claimed)
     done = set()
@@ -297,8 +357,6 @@ def invalidate_unmodelled(statement, state, claimed=()):
             continue
         if isinstance(node, ast.Call):
             found = _mutated(node, state)
-            if not found and _fail_closed(node, state):
-                state.evaluated[id(node)] = UNPROVABLE_SENDER
         elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.Delete,
                                ast.AugAssign)):
             found = _stored(node, state)
