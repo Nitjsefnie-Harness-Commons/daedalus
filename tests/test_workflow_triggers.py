@@ -200,6 +200,7 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
     del tmp
     workflows = ROOT / '.github' / 'workflows'
     threshold = '.github/ci-thresholds.json'
+    timings = '.github/suite-timings.json'
     source = 'server.py'
     for name in ('tests.yml', 'codeql.yml'):
         path = workflows / name
@@ -208,9 +209,20 @@ def test_threshold_only_push_skips_only_expensive_gates(tmp):
         assert _workflow_runs_for_paths(path, 'push', [source])
         assert _workflow_runs_for_paths(path, 'pull_request', [threshold])
         triggers = _workflow_triggers(path.read_text(encoding='utf-8'), name)
-        assert _workflow_path_filters(triggers['push'], name) == {
-            'paths-ignore': [threshold]}
+        # A superset check, not equality: these workflows ignore more than
+        # one generated data file, and requiring the list to be exactly one
+        # entry would go red when the requirement is MET.
+        assert threshold in _workflow_path_filters(
+            triggers['push'], name).get('paths-ignore', []), triggers['push']
         assert not _workflow_path_filters(triggers['pull_request'], name)
+
+        # The behaviour, not just the spelling: a run of the refresh's own
+        # data file must not wake the expensive gates, while a run that
+        # carries it beside a real source change must. A pull request is
+        # unfiltered, so the data file alone reaches these jobs there.
+        assert _workflow_runs_for_paths(path, 'push', [timings]) is False
+        assert _workflow_runs_for_paths(path, 'push', [timings, source])
+        assert _workflow_runs_for_paths(path, 'pull_request', [timings])
 
     audit = workflows / 'audit.yml'
     assert _workflow_runs_for_paths(audit, 'push', [threshold])
