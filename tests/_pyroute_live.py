@@ -271,15 +271,6 @@ def seed_selection_value(value, state):
             [selected, *parts, *carriers])
 
 
-def seed_unprovable_selection(value, state):
-    """Bind a selection the model cannot resolve to the deferred callables its
-    operands carry, so every route that binds the result to a name keeps a
-    callable to follow at a later call through it."""
-    if _selection_value(value, state) != UNPROVABLE_SENDER:
-        return
-    seed_selection_value(value, state)
-
-
 def seed_then_resolve(node, state, generator_factory, sender_resolver,
                       unprovable_sender):
     """Widen an unprovable selection's carriers, then resolve the expression

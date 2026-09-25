@@ -20,9 +20,9 @@ from _pyroute_keys import _literal_key
 from _pyroute_positions import at_position
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
-                             DeferredContainer, DeferredInstance,
-                             DeferredMethod, _known_value, merge_yielded,
-                             sync_cells)
+                             DeferredContainer, DeferredGenerator,
+                             DeferredInstance, DeferredMethod,
+                             _known_value, merge_yielded, sync_cells)
 
 # The names a container surface carries that only read: the non-assigning
 # operators and their reflected forms, the read protocol, and the named
@@ -244,7 +244,15 @@ def _stored(statement, state):
 def _item(value):
     """The deferred values one operand carries, reaching through a container
     to what it holds: what is appended lands in the container it is appended
-    to, so the value a later read can reach is what the operand held."""
+    to, so the value a later read can reach is what the operand held.
+
+    A generator is not among them. What a list takes from one is each value
+    the generator yields, and the generator itself is consumed as it goes --
+    so folding the object in would put a value whose own signature changes
+    with every step into the container's, and the state it belongs to could
+    never merge with the one before it."""
+    if isinstance(value, DeferredGenerator):
+        return [] if value.yielded is None else [value.yielded]
     if isinstance(value, DeferredContainer):
         return list(value.items.values())
     if isinstance(value, DeferredAlternatives):

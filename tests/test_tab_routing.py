@@ -592,8 +592,7 @@ def test_no_client_sends_the_browser_target_as_the_routing_field(tmp):
                       + "    api('PUT', '/command', cmd)\n")
 
     scanned_py = [path for path in [
-        ROOT / 'daedalus_mcp' / 'server.py',
-        *(ROOT / 'daedalus_mcp').glob('tools_*.py'),
+        *(ROOT / 'daedalus_mcp').glob('*.py'),
         *(ROOT / 'daedalus_cli').glob('*.py')] if path.is_file()]
     senders_js = sorted((ROOT / 'dashboard').rglob('*.js'))
     assert len(scanned_py) >= 18, ('Python senders moved', len(scanned_py))
