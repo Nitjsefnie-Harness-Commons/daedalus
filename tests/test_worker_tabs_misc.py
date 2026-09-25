@@ -135,6 +135,18 @@ def test_ext_reload_runs_the_reload_when_the_timer_fires(tmp):
     assert outcome['version'] == VERSION, outcome
 
 
+def test_ext_reload_defers_the_reload_by_the_margin_that_lands_the_post(tmp):
+    del tmp
+    # The 500 ms margin is load-bearing: the result POST must reach the bridge
+    # before chrome.runtime.reload() kills the MV3 worker and aborts the
+    # in-flight fetch. Select the timer by the reload it carried (the boot
+    # also schedules reconnect backoffs), never by position or count.
+    outcome = run_tabs([command(type='ext-reload')], runTimers=True)
+    reload_timers = [t for t in outcome['timers'] if t['ranReload']]
+    assert len(reload_timers) == 1, outcome['timers']
+    assert reload_timers[0]['delay'] == 500, reload_timers
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='tabsmisc_')
 

@@ -70,6 +70,17 @@ function record(api, args) {
   calls.push({ api, args: copy(args) });
 }
 
+// A plan can name a chrome surface that must reject, so a handler's catch
+// arm is reachable and the ordering of its postResult against the chrome
+// call is observable. The call is recorded before it rejects, exactly as the
+// create double records before throwing.
+function maybeReject(api) {
+  const reject = (plan.chromeReject || {})[api];
+  if (reject === undefined) return;
+  if (typeof reject === 'string') throw new Error(reject);
+  throw reject;
+}
+
 const DEFAULT_ACTIVE_TABS = [
   { id: 7, windowId: 3, url: 'https://page.example.com', title: 'Page' },
 ];
@@ -111,12 +122,22 @@ const chrome = {
       const tabs = plan.activeTabs || DEFAULT_ACTIVE_TABS;
       return Promise.resolve(tabs.map((tab) => ({ ...tab })));
     },
-    create: async (details) => {
+    create: (details) => {
       record('tabs.create', [details]);
+      // createSyncReject throws synchronously, so a map() over the urls
+      // aborts and the caller's outer catch is reached; createReject rejects
+      // a promise, so Promise.allSettled collects it as a per-url error.
+      const sync = (plan.createSyncReject || {})[details.url];
+      if (sync !== undefined) {
+        if (typeof sync === 'string') throw new Error(sync);
+        throw sync;
+      }
       const reject = (plan.createReject || {})[details.url];
       if (reject !== undefined) {
-        if (typeof reject === 'string') throw new Error(reject);
-        throw reject;
+        if (typeof reject === 'string') {
+          return Promise.reject(new Error(reject));
+        }
+        return Promise.reject(reject);
       }
       createdCount += 1;
       // A resolved Tab carries Chrome's own url, not the requested one;
@@ -124,14 +145,18 @@ const chrome = {
       // host-free fragment marks the value as this double's own without
       // naming a deployment host.
       const resolved = details.url + '#resolved';
-      return { id: 99 + createdCount, windowId: 1, url: resolved };
+      return Promise.resolve({
+        id: 99 + createdCount, windowId: 1, url: resolved,
+      });
     },
     update: async (tabId, changes) => {
       record('tabs.update', [tabId, changes]);
+      maybeReject('tabs.update');
       return { id: tabId, windowId: 4 };
     },
     reload: async (tabId, options) => {
       record('tabs.reload', [tabId, options]);
+      maybeReject('tabs.reload');
     },
     get: async () => {
       throw new Error('unmodelled chrome.tabs.get');
@@ -143,6 +168,7 @@ const chrome = {
   windows: {
     update: async (windowId, details) => {
       record('windows.update', [windowId, details]);
+      maybeReject('windows.update');
       return {};
     },
   },
@@ -151,9 +177,11 @@ const chrome = {
     executeScript: async () => { throw new Error('unavailable'); },
     insertCSS: async (details) => {
       record('scripting.insertCSS', [details]);
+      maybeReject('scripting.insertCSS');
     },
     removeCSS: async (details) => {
       record('scripting.removeCSS', [details]);
+      maybeReject('scripting.removeCSS');
     },
   },
 };
@@ -184,19 +212,23 @@ async function bridgeFetch(target, init = {}) {
   throw new Error('unexpected fetch: ' + url);
 }
 
-// The deferred stand-in. With runTimers unset it returns the inert handle
-// Task 1's suite was written against and runs nothing, so a suite that does
-// not opt in sees byte-identical behaviour. With runTimers set it records the
-// timer and runs the callback in the same tick, so a deferred effect is
-// observable with no wall-clock margin and no sleep. Running is armed only
-// while a command is dispatched, so the boot's own timers (reconnect work)
-// stay inert exactly as before and cannot hold the process open.
+// The deferred stand-in. With runTimers unset it returns an inert handle and
+// runs nothing. With runTimers set it records the timer — id, delay, and
+// whether the callback reached chrome.runtime.reload — and runs the callback
+// in the same tick, so a deferred effect is observable with no wall-clock
+// margin and no sleep. Running is armed only while a command is dispatched,
+// so the boot's own timers stay inert and cannot hold the process open.
 const timers = [];
 let nextTimerId = 0;
 let timersArmed = false;
+function reloadCalls() {
+  return calls.filter((call) => call.api === 'runtime.reload').length;
+}
 function setTimeoutStandIn(callback, delay) {
   if (!plan.runTimers || !timersArmed) return 1;
-  const timer = { id: ++nextTimerId, delay, ran: false, error: null };
+  const reloadsBefore = reloadCalls();
+  const timer = { id: ++nextTimerId, delay, ran: false, error: null,
+                  ranReload: false };
   timers.push(timer);
   timer.ran = true;
   try {
@@ -204,6 +236,7 @@ function setTimeoutStandIn(callback, delay) {
   } catch (error) {
     timer.error = String((error && error.message) || error);
   }
+  if (reloadCalls() > reloadsBefore) timer.ranReload = true;
   return timer.id;
 }
 
