@@ -94,7 +94,6 @@
     "tests/test_real_browser_environment.py": 8,
     "tests/test_real_browser_harness.py": 6,
     "tests/test_real_browser_harness_recovery.py": 15,
-    "tests/test_repo_layout.py": 2,
     "tests/test_speed_acceptance.py": 2,
     "tests/test_speed_gate.py": 17,
     "tests/test_speed_gate_jobs.py": 1,
