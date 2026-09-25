@@ -41,7 +41,8 @@ through the commit's check suites rather than the check-runs list because
 that list is appended to while a matrix fills; how is `gh_client`'s subject.
 
 Run --once before a long wait; --once prints the matrix to stderr and exits 0
-when the query succeeded, and only a failed query exits 3.
+when the query succeeded. A rejected argument or a failed query exits 3, and
+the argument refusals are read before this branch, so they answer --once too.
 """
 
 import argparse
