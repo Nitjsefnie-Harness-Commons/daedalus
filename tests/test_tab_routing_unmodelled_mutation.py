@@ -119,6 +119,11 @@ _POSITIONS = [
      'match z:\n    case _ if x.pop(0):\n        pass', '', 'x[0]()'),
     ('mapping_if_test', _DICT, 'if d.popitem():\n    pass',
      'x = [*d, relay()]', 'x[1]()'),
+    # A raise ends the path the statement was on, and the handler is entered
+    # from wherever the exception left it -- which is after the mutation, not
+    # before it.
+    ('raise_argument', _LIST, 'try:\n    raise ValueError(x.pop(0))\n'
+     'except ValueError:\n    pass', '', 'x[0]()'),
 ]
 
 # A mutating call whose receiver the model cannot resolve is not a no-op the
@@ -130,7 +135,20 @@ _POSITIONS = [
 _TAB = '("_focus", "focus-tab", tab=args.chrome_tab)'
 _FORWARD = 'forward = lambda *a, **k: send(*a, **k)\n'
 _UNFORWARD = 'forward = lambda *a, **k: ordinary()\n'
+# The tab may live inside the callee's body rather than on the call: `y` is
+# bound to the deferred callable `x[0]` would have selected, so a call
+# through it may reach a sender carrying one. A tabless call through an
+# unproved value is the shape the review filed and the lead measured.
+_CALL = '()'
 _UNRESOLVED = [
+    ('attribute_receiver_tableless', 'args.box = [relay(), ordinary]',
+     'y = args.box.pop(0)', '', 'y' + _CALL, (1, 1)),
+    ('attribute_receiver_tableless_twin', 'args.box = [ordinary, relay()]',
+     'y = args.box.pop(0)', '', 'y' + _CALL, (0, 0)),
+    ('getattr_receiver_tableless', 'args.box = [relay(), ordinary]',
+     'y = getattr(args, "box").pop(0)', '', 'y' + _CALL, (1, 1)),
+    ('getattr_receiver_tableless_twin', 'args.box = [ordinary, relay()]',
+     'y = getattr(args, "box").pop(0)', '', 'y' + _CALL, (0, 0)),
     ('attribute_receiver', _FORWARD + 'args.box = [forward, ordinary]',
      'y = args.box.pop(0)', '', 'y' + _TAB, (1, 1)),
     ('attribute_receiver_control', _UNFORWARD + 'box = [forward, ordinary]',

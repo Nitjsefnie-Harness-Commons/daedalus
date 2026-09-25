@@ -583,7 +583,13 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     [body_statement], body_pairs, exits)
                 violations.extend(found)
                 if not safe:
-                    handler_entry.extend([*before, *copied(body_pairs)])
+                    # A handler is entered from wherever the exception left
+                    # the body, which for a statement that raises is the state
+                    # the raise recorded -- not the snapshot taken before it.
+                    # Without this the effects of a mutation in a raising
+                    # statement are dropped on the way to its own handler.
+                    handler_entry.extend([*before, *copied(body_pairs),
+                                          *copied(exits['terminal'])])
                 if not body_pairs: break
             if statement.orelse:
                 found, normal_pairs = walk(

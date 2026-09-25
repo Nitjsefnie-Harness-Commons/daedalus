@@ -240,9 +240,15 @@ def _generator_operand_yields(node, state):
 
 
 def seed_selection_value(value, state):
-    """Seed the evaluated cache so an unprovable selection never reads
-    clean: a getattr call resolves to the value it selects, and a
-    maybe-sender keeps the deferred values it carries."""
+    """Seed the evaluated cache so a selection resolves where it is read: a
+    getattr call answers with the value it selects, and a maybe-sender keeps
+    the deferred values it carries.
+
+    A selection the model CAN resolve is seeded too, not only one it cannot.
+    A nested selection -- the receiver of `getattr(args, "box").pop(0)` -- is
+    never the assignment's own value, so the seeding that reaches a binding
+    directly does not reach it, and a receiver the model holds would resolve
+    to nothing."""
     cached = state.evaluated.get(id(value))
     selected = _selection_value(value, state)
     if selected is not None:
@@ -264,9 +270,7 @@ def seed_selection_value(value, state):
 def seed_unprovable_selection(value, state):
     """Bind a selection the model cannot resolve to the deferred callables its
     operands carry, so every route that binds the result to a name keeps a
-    callable to follow at a later call through it. Only the fail-closed
-    verdict is widened: a provable selection is left to the ordinary resolver,
-    so a selection the model reads cleanly keeps reading cleanly."""
+    callable to follow at a later call through it."""
     if _selection_value(value, state) != UNPROVABLE_SENDER:
         return
     seed_selection_value(value, state)
@@ -281,7 +285,7 @@ def seed_then_resolve(node, state, generator_factory, sender_resolver,
     unpack lets the checker follow this return into the latent diagnostics in
     ``_pyroute_mapping`` (daedalus issue 990).
     """
-    seed_unprovable_selection(node, state)
+    seed_selection_value(node, state)
     value = resolve_expression_value(node, state, generator_factory,
                                      sender_resolver, unprovable_sender)
     unproved = unproved_call(node, state, unprovable_sender)

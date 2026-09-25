@@ -296,6 +296,11 @@ def _invalidate(state, container, operands=()):
     later read answers with everything the container could hold rather than
     with one position from before the mutation. The identity is kept, so an
     alias bound to the same container is invalidated with it.
+
+    `star_display` is deliberately left at its default. Its only reader is the
+    shifted-position rule, and the join above has already made that rule a
+    no-op on this container -- so setting it bought nothing a row could pin,
+    and a plant flipping it to True survives every suite.
     """
     names = {name for name, value in state.callables.items()
              if isinstance(value, DeferredContainer)
@@ -305,16 +310,9 @@ def _invalidate(state, container, operands=()):
         *(item for value in operands for item in _item(value))])
     replacement = DeferredContainer(
         {} if joined is None else {DYNAMIC_KEY: joined}, None,
-        container.kind, container.identity, True)
+        container.kind, container.identity)
     replace_deferred_storage(state, container, replacement)
     sync_cells(state, names)
-    for name in names:
-        # The payload model keeps its own copy of the tracked keys; a key set
-        # from before the mutation is the same stale fact in the other model.
-        state.dicts.pop(name, None)
-        origin = state.dict_origins.pop(name, None)
-        if origin is not None:
-            state.dict_namespaces.setdefault(origin, {}).pop(name, None)
 
 
 def _fail_closed(call, state):
