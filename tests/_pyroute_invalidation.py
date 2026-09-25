@@ -267,6 +267,19 @@ def _fail_closed(call, state):
         and not _containers(_receiver_value(receiver, state))
 
 
+def unproved_call(node, state, unprovable):
+    """The value a mutating call must answer with, given a receiver the model
+    could not resolve to a container.
+
+    This is the value-resolution point, so the token a statement binds from it
+    is the unproved one. A store that runs after the binding has already read
+    the value changes nothing, which is why the token is written here and not
+    in the store path.
+    """
+    return unprovable if isinstance(node, ast.Call) \
+        and _fail_closed(node, state) else None
+
+
 def invalidate_unmodelled(statement, state, claimed=()):
     """Drop the facts of every tracked container this statement mutates in
     place by a path the model does not follow.

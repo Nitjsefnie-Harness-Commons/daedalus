@@ -22,7 +22,6 @@ from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
                               literal_pair_keys)
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
-                            OPAQUE_TAB_SPREAD as _OPAQUE_TAB_SPREAD,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
                             FlowState, apply_alias_statement,
                             apply_state_dict_statement, argument_defaults,
@@ -31,72 +30,19 @@ from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             deferred_generator, definition_values,
                             dict_assignments as _dict_assignments,
                             evaluated_value, function_allowed_opaque,
-                            is_extension_constant, literal_iterable_nonempty,
-                            lexical_scope_names, literal_truth,
-                            payload_keys, new_exits, rebound_names,
-                            record_exit, record_returns, resolve_sender_name,
-                            state_signature, statement_cannot_raise)
+                            literal_iterable_nonempty, lexical_scope_names,
+                            literal_truth, new_exits, payload_keys,
+                            rebound_names, record_exit, record_returns,
+                            resolve_sender_name, state_signature,
+                            statement_cannot_raise)
 from _pyroute_match import walk_match
+from _pyroute_violations import call_violations
 from _pyroute_targets import (bind_with_target, materialized_order,
                               probe_comprehension)
 
 _copy_state_pair = FlowState.copy
 dict_assignments = _dict_assignments
 _CALL_CACHE = {}
-
-
-def _py_call_violations(node, dicts, rel, allowed_opaque_names=frozenset(),
-                        sender_name=None):
-    func = node.func
-    if sender_name == _UNPROVABLE_SENDER:
-        callee = func.id if isinstance(func, ast.Name) else ast.unparse(func)
-        found = []
-        for kw in node.keywords:
-            if kw.arg == 'tab' and not is_extension_constant(kw.value):
-                found.append(f'{rel}:{kw.value.lineno}: `tab` passed through '
-                             f'`{callee}`, which may be ext_cmd')
-            elif kw.arg is None:
-                keys = payload_keys(kw.value, dicts)
-                if keys is None or _OPAQUE_TAB_SPREAD in keys:
-                    found.append(f'{rel}:{kw.value.lineno}: opaque spread '
-                                 f'through `{callee}`, which may be ext_cmd')
-                elif ('tab' in keys
-                        and not is_extension_constant(keys['tab'][1])):
-                    found.append(f'{rel}:{keys["tab"][0]}: `tab` passed '
-                                 f'through `{callee}`, which may be ext_cmd')
-        return found
-    if sender_name in ('ext_cmd', '_ext_cmd'):
-        found = []
-        for kw in node.keywords:
-            if kw.arg == 'tab' and not is_extension_constant(kw.value):
-                found.append(f'{rel}:{kw.value.lineno}: ext_cmd keyword `tab`')
-            elif kw.arg is None:
-                keys = payload_keys(kw.value, dicts)
-                if keys is None or _OPAQUE_TAB_SPREAD in keys:
-                    found.append(f'{rel}:{kw.value.lineno}: opaque **'
-                                 f'{ast.unparse(kw.value)} passed to ext_cmd; '
-                                 '`tab` cannot be verified')
-                elif 'tab' in keys:
-                    lineno, value = keys['tab']
-                    if not is_extension_constant(value):
-                        found.append(f'{rel}:{lineno}: `tab` in **'
-                                     f'{ast.unparse(kw.value)} passed to '
-                                     'ext_cmd')
-        return found
-    cmd_at = next((i for i, a in enumerate(node.args) if isinstance(
-        a, ast.Constant) and a.value == '/command'), None)
-    if cmd_at is None or cmd_at + 1 >= len(node.args): return []
-    keys = payload_keys(node.args[cmd_at + 1], dicts)
-    if keys and 'type' in keys and _OPAQUE_TAB_SPREAD in keys:
-        lineno, spread = keys[_OPAQUE_TAB_SPREAD]
-        if getattr(spread, 'id', None) not in allowed_opaque_names:
-            return [f'{rel}:{lineno}: opaque spread may replace `tab` on a '
-                    'typed /command payload']
-    if keys and 'type' in keys and 'tab' in keys:
-        lineno, value = keys['tab']
-        if not is_extension_constant(value):
-            return [f'{rel}:{lineno}: `tab` on a typed /command payload']
-    return []
 
 
 # pylint: disable-next=too-many-arguments,too-many-positional-arguments
@@ -287,6 +233,16 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             node, state, definition, local_names,
             capture_chain - local_names - global_names)
 
+    def check_store(node, current_pairs):
+        """Evaluate an expression the flow reaches without a statement of its
+        own, and store against it: a header, a test, a context expression or a
+        case guard. The per-statement store hook never sees these, so a
+        mutating call in one has to be stored the same way a statement's is."""
+        current_pairs = check_expression(node, current_pairs)
+        for state in current_pairs:
+            store_deferred_value(node, state)
+        return current_pairs
+
     def check_expression(node, current_pairs):
         if node is None: return current_pairs
         if isinstance(node, ast.Lambda):
@@ -378,7 +334,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     if consumer == 'next': append_deferred(
                         consumed_values, yielded)
                 for current_state in current:
-                    found = _py_call_violations(
+                    found = call_violations(
                         node, current_state.dicts, rel,
                         allowed_opaque_names,
                         sender or sender_value(deferred) or deferred)
@@ -525,7 +481,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = dedupe_states(completed)
             continue
         if isinstance(statement, ast.If):
-            pairs = check_expression(statement.test, pairs)
+            pairs = check_store(statement.test, pairs)
             incoming = [_copy_state_pair(pair) for pair in pairs]
             truth = literal_truth(statement.test)
             if truth is None and isinstance(statement.test, ast.Name):
@@ -553,7 +509,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
             header = (statement.iter if isinstance(
                 statement, (ast.For, ast.AsyncFor)) else statement.test)
-            pairs = check_expression(header, pairs)
+            pairs = check_store(header, pairs)
             header_nonempty = iterable_nonempty(
                 header, pairs, literal_iterable_nonempty)
             loop_generators = {
@@ -606,7 +562,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
         if isinstance(statement, (ast.With, ast.AsyncWith)):
             entered = [_copy_state_pair(pair) for pair in pairs]
             for item in statement.items:
-                entered = check_expression(item.context_expr, entered)
+                entered = check_store(item.context_expr, entered)
                 if item.optional_vars is None: continue
                 for state in entered:
                     bind_with_target(item, state, analyze_callable)
@@ -668,7 +624,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
             pairs = normal_pairs
             continue
         if isinstance(statement, ast.Match):
-            found, pairs = walk_match(statement, pairs, check_expression, walk)
+            found, pairs = walk_match(statement, pairs, check_store, walk)
             violations.extend(found)
             continue
         pairs = check_expression(statement, pairs)
