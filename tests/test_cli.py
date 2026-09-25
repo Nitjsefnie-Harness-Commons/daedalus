@@ -399,9 +399,8 @@ _WAIT_HARNESS = (
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
     'transport.time = _Clock()\n'
-    'calls, calls_timeout = [], []\n'
+    'calls = []\n'
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls_timeout.append(timeout)\n'
     '    calls.append(path)\n'
     '    if "consume=1" in path:\n'
     '        return {"consumed": True, "resultGeneration": "g1"}\n'
@@ -409,27 +408,28 @@ _WAIT_HARNESS = (
     '            "result": 7, "error": None}\n'
     'transport._request = fake_api\n'
     'res = transport.wait_for_result("c1", "extension", "d1", 2)\n'
-    'print("SLEEPS", *transport.time.sleeps)\n'
+    'print("SLEEPS", transport.time.sleeps)\n'
     'print("POLLS", len(calls))\n'
-    'print("BOUNDED", all(t is not None and t > 0 for t in calls_timeout[:1]))\n'
     'print("RESULT", res if res is None else res["result"])\n')
 
 
 def _wait_harness_output(stdout):
-    """(sleeps, polls, result) from one _WAIT_HARNESS run."""
+    """(sleeps, polls, result); a zero-sleep waiter prints SLEEPS []."""
     fields = dict(
         line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
-    return ([float(v) for v in fields['SLEEPS'].split()],
-            int(fields['POLLS']), fields['RESULT'])
+    return (json.loads(fields['SLEEPS']), int(fields['POLLS']),
+            fields['RESULT'])
 
 
 def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
     """An already available result must not cost a fixed half second.
 
-    The waiter slept its whole interval before the first poll, so every
-    command that waited paid 500ms even with the result already in the
-    slot. A virtual clock records the sleeps the loop REQUESTS, so this
-    pins the ramp's opening: macOS read 0.357s against a 0.25s bound.
+    The waiter charged every waited command its whole interval up front,
+    so an available result still cost 500ms. The MCP poller had that
+    shape and was fixed first. A virtual clock records the sleeps the
+    loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
+    against a 0.25s bound. The fake charges the sleep, not the request;
+    the budget it cannot see is test_cli_result_wait.py's.
     """
     del tmp
     r = run_python(_WAIT_HARNESS, cli_env(DAEDALUS_TOKEN=TOK))
