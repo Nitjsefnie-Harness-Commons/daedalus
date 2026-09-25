@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """The worker's served command types, checked against every shipped client.
 
-Issue 204: nothing enumerated the command types the extension worker serves,
-so a `case` added to `dispatchCommand` that no client sends -- and no route
-table row names -- passed every suite. The switch is read lexically, the
-clients' call sites are read from the AST, and the two are compared in both
-directions. Nothing is derived the same way twice, so neither read can vouch
-for the other, and a runtime dispatch pins the one served type no client
-names as a literal.
+Issue 204: nothing enumerated the command types the worker serves, so a
+`case` no client sends and no route-table row names passed every suite. The
+switch is read lexically, the clients from the AST, and the two compared
+both ways; nothing is derived twice, so neither read can vouch for the
+other, and a runtime dispatch pins the one served type no client names.
 
-The readers themselves live in ``_command_type_readers``; this suite is the
-controls that observe them. A marker nothing observes is a comment, so every
-marker those readers carry has a synthetic source here that manufactures the
-input it exists to catch, or a census that refuses a surface where it cannot
-fire.
+The readers live in ``_command_type_readers``; this suite observes them. A
+marker nothing observes is a comment, so every marker they carry has a
+synthetic source here that manufactures the input it exists to catch.
 """
 import sys
 from pathlib import Path
@@ -31,11 +27,7 @@ _CODE_COMMAND = {'id': 'code-path-control', 'code': 'return 1'}
 
 
 def test_the_dispatch_switch_is_read_and_its_labels_enumerated(tmp):
-    """The served set is read whole, and every label is a usable type.
-
-    A case token the masker hid, or one buried below the switch block, is
-    refused inside the reader rather than shrinking the served set.
-    """
+    """The served set is read whole, and every label is a usable type."""
     del tmp
     labels = served_types()
     assert labels, 'the dispatch switch has no case label'
@@ -55,7 +47,6 @@ def _refusal_from(read, accepted):
 
 
 def _dispatch_source(*arms, comment=''):
-    """A minimal `dispatchCommand` whose switch holds `arms`."""
     return (
         'function dispatchCommand(cmd) {\n'
         '  switch (cmd.type) {\n'
@@ -83,10 +74,8 @@ def test_a_case_label_that_is_not_a_plain_literal_is_refused(tmp):
 def test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree(tmp):
     """The raw/masked arm marker fires, and names what it saw.
 
-    The shipped switch body holds no comment naming a case, so nothing in
-    the tree exercises this marker: deleting the `js_mask` call outright
-    leaves every other test green, because the two counts then agree by
-    construction.
+    Nothing in the tree exercises it, and deleting the `js_mask` call
+    outright leaves every other test green: the two counts then agree.
     """
     del tmp
     source = _dispatch_source(
@@ -143,9 +132,8 @@ def test_every_served_type_appears_in_the_one_route_table(tmp):
 def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     """One served type is absent from the clients, and it is named.
 
-    The exception is a decidable claim, not a waiver: exactly one type, and
-    it must be `eval`, so a second is reported by name. The residual
-    comparison is then a true two-way equality naming both missing sides.
+    A decidable claim, not a waiver: exactly one, and it must be `eval`, so
+    a second is reported by name. The residual is then a two-way equality.
     """
     del tmp
     sent_sets, cli, mcp = clients()
@@ -172,8 +160,8 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
 def _eval_path_observation():
     """The code-only command's route observation, or a named failure.
 
-    A worker that stops deriving `eval` from `code` sends the command to
-    the default arm, which posts a result the scenario does not declare; the
+    A worker that stops deriving `eval` from `code` sends the command to the
+    default arm, which posts a result the scenario does not declare, so the
     node child exits with no output and the harness raises before this suite
     sees an observation. Named as this control's failure, with the
     mechanism, without claiming the decode error proves it.
@@ -211,9 +199,8 @@ def test_a_type_the_worker_does_not_serve_reaches_the_unknown_arm(tmp):
 def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
     """Runtime evidence for the `eval` exception, and nothing else.
 
-    Unconditional on purpose: nothing in this function can prevent the
-    observation, so breaking the `code` -> `eval` derivation is reported
-    here even though every served-type test stays green.
+    Unconditional on purpose: breaking the `code` -> `eval` derivation is
+    reported here even though every served-type test stays green.
     """
     del tmp
     observed = _eval_path_observation()
@@ -259,8 +246,9 @@ def _python_source(tmp, name, body):
 def test_a_python_client_aliasing_the_send_helper_is_refused(tmp):
     """Binding the helper to a name and calling that name is refused.
 
-    Considered because the reader enumerates the identifier, not the call
-    spelling, and refused because only a direct literal call is readable.
+    The reader enumerates the identifier, not a call's spelling, so the
+    aliased call is considered -- and refused, only a direct literal call is
+    readable.
     """
     written = _python_source(tmp, 'commands_alias.py', (
         'from .invoke import ext_cmd\n'
@@ -292,9 +280,8 @@ def test_a_python_client_bare_alias_with_no_call_is_refused(tmp):
 def test_a_python_surface_with_no_helper_definition_is_refused(tmp):
     """A surface that defines no helper yields no references to read.
 
-    Without this, renaming the helper would leave the reader matching
-    nothing and report a clean bill of health, which is the failure the
-    whole enumeration exists to prevent.
+    Without this, a rename leaves the reader matching nothing and reporting
+    a clean bill of health.
     """
     written = _python_source(tmp, 'commands_nodef.py', (
         'def do_probe():\n'
@@ -308,8 +295,7 @@ def test_a_python_surface_with_no_helper_definition_is_refused(tmp):
 def test_a_dashboard_call_not_spelling_extcmd_before_its_paren_is_refused(tmp):
     """`(extCmd)(...)` reaches the send path without the call spelling.
 
-    Found because the reader looks for the identifier, not for `extCmd(`,
-    and refused because `(` is not what follows the name here.
+    Found because the reader looks for the identifier, not for `extCmd(`.
     """
     written = Path(tmp) / 'section.js'
     written.write_text(
@@ -327,11 +313,10 @@ def test_a_dashboard_call_not_spelling_extcmd_before_its_paren_is_refused(tmp):
 def test_prose_naming_the_send_helper_is_not_a_reference(tmp):
     """The over-recognition direction: prose is not a call.
 
-    A string that MERELY MENTIONS the helper is prose, and a comment is
-    blanked before the identifier scan, so neither is a reference. A string
-    that NAMES the helper is a different case and is refused by its own
-    control, because a dynamic lookup needs exactly that. Without the
-    masking, the JavaScript string below would be classified and refused.
+    A string that MENTIONS the helper, and a comment, are not references.
+    A string or comment that QUOTES the name is refused by the string rule
+    instead -- the comment below is deliberately unquoted, and quoting it
+    would go red. Without the masking, this comment is classified.
     """
     python_written = _python_source(tmp, 'commands_prose.py', (
         '"""The ext_cmd helper sends one command type."""\n'
@@ -358,10 +343,9 @@ def test_prose_naming_the_send_helper_is_not_a_reference(tmp):
 def test_a_python_string_naming_the_send_helper_is_refused(tmp):
     """`getattr(bridge, 'ext_cmd')` is a lookup no reference walk can see.
 
-    A dynamic lookup can only exist if the helper's name appears as a string
-    literal, so a string equal to the identifier is refused wherever it sits.
-    The shipped clients hold none, so this control is the only thing that
-    observes the marker being able to fire.
+    A dynamic lookup can only exist if the name appears as a string
+    literal. The shipped clients hold none, so this control is the only
+    thing that observes the rule firing.
     """
     written = _python_source(tmp, 'commands_lookup.py', (
         'from .invoke import ext_cmd\n'
@@ -398,7 +382,7 @@ def test_a_python_client_aliasing_the_import_is_refused(tmp):
     """`from .invoke import ext_cmd as send` binds a second name.
 
     A call through `send` is a `Name` the callee matcher never sees, so the
-    binding itself is the only place the second name can be refused.
+    binding is the only place it can be refused.
     """
     written = _python_source(tmp, 'commands_import_alias.py', (
         'from .invoke import ext_cmd as send\n'
@@ -470,9 +454,8 @@ def test_a_surface_referencing_the_helper_but_never_calling_it_is_refused(tmp):
 def test_a_python_call_unpacking_a_starred_argument_is_refused(tmp):
     """`ext_cmd(*pair, 'cookies')` hides the value that lands second.
 
-    The second positional argument written here is not the second
-    positional argument the call passes, so reading it as the command type
-    is a guess, not a read.
+    The second argument written is not the second argument passed, so
+    reading it as the command type is a guess, not a read.
     """
     written = _python_source(tmp, 'commands_starred.py', (
         'from .invoke import ext_cmd\n'
