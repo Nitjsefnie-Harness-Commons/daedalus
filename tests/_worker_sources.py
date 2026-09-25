@@ -204,10 +204,14 @@ def event_target_stub():
     harness dispatches by iterating that array or, opting in, by calling
     `dispatch`. Call shapes: `eventTarget()` and `eventTarget(retained)`
     yield `{ addListener, listeners }`; `eventTarget(retained, true)` adds
-    `dispatch(...args)`, which calls every retained listener the way a
-    real EventTarget delivers an event. Dispatch is opt-in because a
-    harness that never fires an event must not have a listener run behind
-    its back.
+    `dispatch(...args)`, which calls EVERY retained listener, in the order
+    they were added, over a snapshot of the list taken at the call, with
+    each listener's exception contained so one that throws neither
+    silences the rest nor fails the caller. Those two properties are what
+    separate a delivery from a plain loop; a contained exception is not
+    reported, so a harness that needs to see one wraps its own listener.
+    Dispatch is opt-in because a harness that never fires an event must
+    not have a listener run behind its back.
     """
     return r"""
 function eventTarget(retained = [], dispatches = false) {
@@ -217,7 +221,14 @@ function eventTarget(retained = [], dispatches = false) {
   };
   if (dispatches) {
     target.dispatch = (...args) => {
-      for (const listener of retained) listener(...args);
+      // A snapshot, so a listener that registers another does not pull it
+      // into the dispatch under way, and a try per listener, so one that
+      // throws neither silences the rest nor fails the caller.
+      for (const listener of [...retained]) {
+        try {
+          listener(...args);
+        } catch (_) { /* isolated, as a real event target isolates it */ }
+      }
     };
   }
   return target;
