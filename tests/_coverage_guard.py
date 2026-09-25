@@ -8,12 +8,23 @@ launcher proves its working directory safe or declares on every call;
 any other callee does so when it spells one readably (`cwd=`, a `**`
 spread of a mapping literal naming `cwd`, or `dict(cwd=...)`); a
 launcher bound where the alias walk cannot follow — a decorator list
-binds the decorated name as a default binds its parameter — or carried
-by a `cwd=`-less call the guard reads as invoking what it is given, is
-refused there; a root owner reached any way but a plain attribute read
-stops proving ROOT; a star import removes the builtin-dict exemption;
-and `chdir` or `fchdir` on any base or through a from-import alias
-moves the cwd launches inherit.
+binds the decorated name as a default binds its parameter, and so does
+a lambda — or carried in an argument of a `cwd=`-less call, is refused
+at the site that carries it; a root owner reached any way but a plain
+attribute read stops proving ROOT; a star import removes the
+builtin-dict exemption; and `chdir` or `fchdir` on any base or through a
+from-import alias moves the cwd launches inherit.
+
+The argument rule asks one question and it is about the value, never
+the callee: does what this position carries name a launcher? Whether the
+callee would invoke it is not answerable from syntax, so the rule does
+not pretend to know, and a launcher handed to a callee that only
+compares it or looks it up is refused along with one handed to a callee
+that runs it. That costs nothing today: of the call sites in this
+tree, none carries a launcher in an argument or a container receiver, and
+exactly one carries a bare module name — the module-versus-launcher
+split below, which is the one distinction here that is about the value
+rather than a name.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`), an owner or
@@ -30,9 +41,9 @@ lambda body, an f-string and a subscript's slice each hide a launcher
 from every arm here, in the argument position and in the decorator and
 assignment binding positions alike. That leaf handling is pre-existing,
 shared by all the arms, and unchanged on this branch; it is filed as
-issue #1114, which is where the fix belongs. The `carry a launcher`
-clauses above are true of the leaves the walk does reach, and only of
-those.
+issue #1114, which is where the fix belongs. Every clause above about
+carrying or binding a launcher is true of the leaves the walk does
+reach, and only of those.
 """
 import ast
 
