@@ -221,14 +221,18 @@ async function handleEval(cmd) {
   // Prefer banner-free MAIN-world injection. A constant, source-free probe
   // checks whether page CSP permits dynamic compilation; the page can
   // influence that diagnostic choice, but no submitted source has run at this
-  // point.
+  // point. The probe is inside the same bound as the injection for the
+  // reason the per-fix replay's is: a worker waiting on a routing decision
+  // serves no later command. A probe that fails or does not answer within
+  // the bound leaves the MAIN-world path unavailable, which is the same
+  // outcome, so the CDP fallback is taken.
   let useMainWorld = false;
   try {
-    const probe = await chrome.scripting.executeScript({
+    const probe = await _raceMainWorldEval(chrome.scripting.executeScript({
       target: { tabId: chromeTabId },
       world: 'MAIN',
       func: _canUseMainWorldEval,
-    });
+    }), 'MAIN-world probe');
     useMainWorld = probe[0]?.result === true;
   } catch (_) {}
 

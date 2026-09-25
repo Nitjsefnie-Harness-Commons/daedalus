@@ -20,6 +20,7 @@ from _relayharness import (run_eval_after_cdp_fails_mid_flight,  # noqa: E402
                            run_main_world_injection_shapes)
 from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
                                run_main_world_eval_inside,
+                               run_main_world_eval_probe_hang,
                                run_hotfix_replay_timeout,
                                run_hotfix_replay_probe_hang,
                                run_hotfix_replay_cdp_timeout,
@@ -273,6 +274,29 @@ def test_a_main_world_eval_settling_inside_the_bound_returns_its_value(tmp):
     # A settled envelope still carries its own timing, the channel identity
     # intact, so a caller can tell which channel answered.
     assert isinstance(posted['exec_ms'], (int, float)), outcome
+
+
+def test_a_wedged_eval_probe_does_not_hold_the_worker(tmp):
+    """A probe that never answers is the same shape as one that fails: the
+    MAIN-world path is unavailable, so the eval is answered on CDP.
+
+    The replay's bound covers the whole per-fix operation precisely because
+    its probe is inside it; the eval path holds to the same rationale, so a
+    worker serving no later command is not the price of diagnosing a page.
+    """
+    del tmp
+    outcome = run_main_world_eval_probe_hang()
+    assert outcome['armed'] is True, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS], outcome
+    # Nothing is posted while the probe is open.
+    assert outcome['postedBeforeClock'] == 0, outcome
+    assert outcome['got'] is True, outcome
+    # The bound released the routing, and the eval was dispatched on CDP.
+    assert outcome['dispatches'] == 1, outcome
+    assert outcome['posted'] == [{
+        'result': 2, 'error': None, 'world': 'cdp', 'exec_ms': None,
+    }], outcome
+    assert outcome['remaining'] == [], outcome
 
 
 def test_a_stuck_hotfix_fix_does_not_block_a_later_fix(tmp):
