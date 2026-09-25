@@ -548,27 +548,25 @@ function admissionCases() {
   // The queue's release is once per run. A storage callback entered twice must
   // not release the queue twice and admit a write beside the one still in
   // flight — the read-modify-write hole the one serial section exists to
-  // close. Three writes of a measured charge are seeded one byte under the
-  // point where all three fit, so the first two are admitted and the third is
-  // not: a concurrent pair would read the store before the first of them
-  // committed, admit the third, and land the sum one byte over the cap.
+  // close. The double-firing write is issued by an origin with NOTHING else
+  // waiting, so a second release draws the first origin's first queued write
+  // and then, with no guard, its second one beside it. Three writes of a
+  // measured charge are seeded one byte under the point where all three fit,
+  // so the first two are admitted and the third is not: the concurrent pair
+  // reads the store before either of them committed, admits both, and lands
+  // the sum one byte over the cap.
   resetStore();
   const charge = 1000;
   seed(seedSpecs([FILLERS[0]], TOTAL_CAP - 3 * charge + 1));
   const twice = buildBackground(utilPath, gmPath, makeDoubleFireStorage);
-  const t0 = createFrame(ORIGIN_A, 'alpha.example.com', twice);
-  const t1 = createFrame(ORIGIN_A, 'alpha.example.com', twice);
-  const t2 = createFrame(ORIGIN_B, 'beta.example.com', twice);
-  const ids = [t0, t1, t2].map((frame, i) => {
-    const origin = i === 2 ? ORIGIN_B : ORIGIN_A;
-    const key = 'd' + i;
-    return frame.dispatch('setValue', key, valueOfCharge(origin, key, charge));
-  });
+  const origins = [ORIGIN_C, ORIGIN_A, ORIGIN_A];
+  const frames = origins.map((origin) => createFrame(
+    origin, origin.slice('https://'.length), twice));
+  const ids = frames.map((frame, i) => frame.dispatch(
+    'setValue', 'd' + i, valueOfCharge(origins[i], 'd' + i, charge)));
   flushDeferred();
-  const errors = ids.map((id, i) => {
-    const frame = [t0, t1, t2][i];
-    return (frame.replyFor(id) || {}).error || null;
-  });
+  const errors = ids.map((id, i) =>
+    (frames[i].replyFor(id) || {}).error || null);
   out.doubleCallback = {
     errors,
     order: completionOrder(ids, labelsFor(['d0', 'd1', 'd2'], ids)).order,
