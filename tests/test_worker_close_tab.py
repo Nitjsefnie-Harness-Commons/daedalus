@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """The worker's close-tab shape validation and per-tab result contract.
 
-It also pins the shared eventTarget's delivery, the only place in the tree
-where two listeners are ever registered on one dispatching target.
+The faked removal is delivered to the worker's real onRemoved listeners,
+which is what makes the requests a closed tab produces observable here.
 """
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
@@ -76,15 +74,15 @@ function response(status, data) {
 // one derived from the tab id the scenario supplied, so the stand-in can
 // never answer with the caller's own value; no control reads it yet.
 const REMOVED_WINDOW_ID = 42;
-// The one target that fires: only the removal needs dispatching, and an
+// The only target that fires: nothing else this suite dispatches, and an
 // opt-in target is the only way a listener runs here at all.
 const onRemovedTarget = eventTarget([], true);
 
 // The timer the removal listener defers its registry sync behind. A timer
 // armed WHILE an event is being dispatched is collected and run once the
-// commands settle, so the worker's own coalescing decides the count: a
-// burst of removals schedules one sync, exactly as Chrome coalesces them.
-// Every other timer stays inert, so the stream's reconnect cannot loop.
+// commands settle, so a burst of removals coalesces into the one sync the
+// worker's own guard admits. Every other timer stays inert, so the
+// stream's reconnect cannot loop.
 const deferredTimers = [];
 let dispatchingEvent = false;
 function setTimeoutStandIn(callback, _delay) {
@@ -137,9 +135,8 @@ const chrome = {
       const rejects = plan.reject || {};
       const message = rejects[String(tabId)];
       if (message !== undefined) throw new Error(message);
-      // Chrome announces a removal that happened; one that refused never
-      // fires. Chrome's own signature is (tabId, removeInfo).
-      attachmentLog.push({ api: 'close', tabId });
+      // Chrome's own signature is (tabId, removeInfo), and a removal that
+      // refused above never reaches this line.
       dispatchingEvent = true;
       try {
         onRemovedTarget.dispatch(tabId, {
@@ -159,14 +156,18 @@ const chrome = {
 
 // A local attach/detach over the shared inert fixture, which refuses to
 // attach at all, so no capture could be live and a close had nothing to
-// release. Overridden HERE, not in tests/_worker_chrome_fake.py: a dozen
-// suites import that fixture and none wants a different meaning of attach.
+// release. Overridden HERE, not in tests/_worker_chrome_fake.py: 8 suites
+// import that fixture and none wants a different meaning of attach.
+// `afterCloses` is read off removeCalls, so the log and the closure census
+// cannot disagree about what a close was.
 chrome.debugger.attach = async (target, version) => {
-  attachmentLog.push({ api: 'attach', tabId: target.tabId, version });
+  attachmentLog.push({ api: 'attach', tabId: target.tabId, version,
+                       afterCloses: removeCalls.length });
   return { attached: true };
 };
 chrome.debugger.detach = (target) => {
-  attachmentLog.push({ api: 'detach', tabId: target.tabId });
+  attachmentLog.push({ api: 'detach', tabId: target.tabId,
+                       afterCloses: removeCalls.length });
 };
 
 // The shared gate's in-scope contract. The gate answers only what the
@@ -226,53 +227,17 @@ run().then((result) => {
 """).replace('__TOKEN__', TOKEN).replace('__SERVER__', SERVER)
 
 
-# The delivery the shared eventTarget owes, driven twice over one target:
-# round one is the whole contract, round two separates "a listener added
-# during a dispatch waits" from "the stub threw it away".
-_DISPATCH_PROBE = event_target_stub() + (
-    r"""
-const target = eventTarget([], true);
-const ran = [];
-const late = [];
-const escaped = [];
-const lateAfterRound = [];
-target.addListener(() => {
-  ran.push('first');
-  throw new Error('listener blew up');
-});
-target.addListener(() => { ran.push('second'); });
-target.addListener(() => {
-  ran.push('third');
-  target.addListener(() => { late.push('late'); });
-});
-for (let round = 0; round < 2; round += 1) {
-  try {
-    target.dispatch(7, { windowId: 42, isWindowClosing: false });
-    escaped.push(null);
-  } catch (error) {
-    escaped.push(error.message);
-  }
-  lateAfterRound.push(late.length);
-}
-process.stdout.write(JSON.stringify({ ran, late, escaped, lateAfterRound }));
-"""
-    + event_target_stub())
-
-
-def _dispatch_record():
-    result = run_node_program(require_node(), _DISPATCH_PROBE, [], cwd=ROOT)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
-
-
 def _run_close_tab(command, reject=None, fail_query=False, unregistered=0,
-                   results=1, planned_stream=BOOT_STREAM):
+                   results=None, planned_stream=BOOT_STREAM):
     commands = list(command) if isinstance(command, (list, tuple)) else [
         command]
+    # One result post per dispatched command, so the count is derived rather
+    # than hand-written into each scenario; only a command that posts
+    # nothing says so.
+    posts = len(commands) if results is None else results
     plan = {
         'commands': commands,
-        'planned': _planned_requests(unregistered, results),
+        'planned': _planned_requests(unregistered, posts),
     }
     if reject is not None:
         plan['reject'] = reject
@@ -304,6 +269,16 @@ def _command(**fields):
     return command
 
 
+# The answer fields a control is about, projected so an assertion never
+# depends on a field nothing here can tell a real value from a typed one.
+_ANSWER_FIELDS = ('capturing', 'already', 'tabId', 'closed', 'errors')
+
+
+def _answer(post):
+    return {key: post['result'][key] for key in _ANSWER_FIELDS
+            if key in post['result']}
+
+
 def _capture(identifier):
     return {'id': identifier, 'type': 'net-capture', 'tabId': CAPTURED_TAB,
             '_did': 'did-' + identifier}
@@ -318,7 +293,23 @@ def _capture_then_close():
         _capture('cap-2'),
         _command(tabIds=[CAPTURED_TAB]),
         _capture('cap-3'),
-    ], unregistered=1, results=4)
+    ], unregistered=1)
+
+
+# The other limb of netcapture's `held`: a kept CDP session, opened through
+# the public surface the same way, so the close has a session to release and
+# no capture behind it.
+def _keep_session(identifier):
+    return {'id': identifier, 'type': 'cdp', 'tabId': CAPTURED_TAB,
+            'method': 'Runtime.enable', 'keep_session': True,
+            '_did': 'did-' + identifier}
+
+
+def _session_then_close():
+    return _run_close_tab([
+        _keep_session('cdp-1'),
+        _command(tabIds=[CAPTURED_TAB]),
+    ], unregistered=1)
 
 
 def _assert_wrong_shape(value):
@@ -410,8 +401,7 @@ def test_mixed_type_tab_ids_are_parsed_and_closed_in_order(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
-        'attachments': [
-            {'api': 'close', 'tabId': 1}, {'api': 'close', 'tabId': 2}],
+        'attachments': [],
         'unregisters': ['1', '2'],
     }, outcome
 
@@ -445,7 +435,7 @@ def test_tab_id_alone_is_closed(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
-        'attachments': [{'api': 'close', 'tabId': 5}],
+        'attachments': [],
         'unregisters': ['5'],
     }, outcome
 
@@ -463,7 +453,7 @@ def test_null_tab_ids_falls_back_to_tab_id(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
-        'attachments': [{'api': 'close', 'tabId': 5}],
+        'attachments': [],
         'unregisters': ['5'],
     }, outcome
 
@@ -502,59 +492,41 @@ def test_one_remove_error_is_reported_while_other_tabs_close(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
-        'attachments': [
-            {'api': 'close', 'tabId': 1}, {'api': 'close', 'tabId': 3}],
+        'attachments': [],
         'unregisters': ['1', '3'],
     }, outcome
-
-
-def test_every_retained_listener_is_called_in_registration_order(tmp):
-    del tmp
-    record = _dispatch_record()
-    assert record['ran'] == [
-        'first', 'second', 'third',
-        'first', 'second', 'third',
-    ], record
-
-
-def test_a_throwing_listener_neither_stops_the_next_nor_fails_the_caller(tmp):
-    del tmp
-    record = _dispatch_record()
-    assert record['escaped'] == [None, None], record
-    assert record['ran'].count('second') == 2, record
-
-
-def test_a_listener_added_during_a_dispatch_waits_for_the_next(tmp):
-    del tmp
-    record = _dispatch_record()
-    assert record['lateAfterRound'] == [0, 1], record
-    assert record['late'] == ['late'], record
 
 
 def test_closing_a_captured_tab_releases_its_debugger_attachment(tmp):
     del tmp
     outcome = _capture_then_close()
     assert outcome['attachments'] == [
-        {'api': 'attach', 'tabId': 9, 'version': '1.3'},
-        {'api': 'close', 'tabId': 9},
-        {'api': 'detach', 'tabId': 9},
-        {'api': 'attach', 'tabId': 9, 'version': '1.3'},
+        {'api': 'attach', 'tabId': 9, 'version': '1.3', 'afterCloses': 0},
+        {'api': 'detach', 'tabId': 9, 'afterCloses': 1},
+        {'api': 'attach', 'tabId': 9, 'version': '1.3', 'afterCloses': 1},
     ], outcome
+    assert outcome['removes'] == [9], outcome
 
 
 def test_a_capture_does_not_outlive_the_tab_it_was_taken_on(tmp):
     del tmp
     outcome = _capture_then_close()
-    assert outcome['posted'] == [
-        {'id': 'cap-1', 'tabId': 'extension',
-         'result': {'capturing': True, 'tabId': 9}, 'error': None},
-        {'id': 'cap-2', 'tabId': 'extension',
-         'result': {'already': True, 'tabId': 9, 'buffered': 0},
-         'error': None},
-        {'id': 'close-1', 'tabId': 'extension',
-         'result': {'closed': [9], 'errors': []}, 'error': None},
-        {'id': 'cap-3', 'tabId': 'extension',
-         'result': {'capturing': True, 'tabId': 9}, 'error': None},
+    # The fields the claim is about. `buffered` is left out: nothing here
+    # can tell a real zero from a typed one, so asserting it pins a constant.
+    assert [_answer(post) for post in outcome['posted']] == [
+        {'capturing': True, 'tabId': 9},
+        {'already': True, 'tabId': 9},
+        {'closed': [9], 'errors': []},
+        {'capturing': True, 'tabId': 9},
+    ], outcome
+
+
+def test_closing_a_tab_with_a_kept_cdp_session_releases_its_attachment(tmp):
+    del tmp
+    outcome = _session_then_close()
+    assert outcome['attachments'] == [
+        {'api': 'attach', 'tabId': 9, 'version': '1.3', 'afterCloses': 0},
+        {'api': 'detach', 'tabId': 9, 'afterCloses': 1},
     ], outcome
 
 

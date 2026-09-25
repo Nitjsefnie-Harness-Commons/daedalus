@@ -615,6 +615,7 @@
 !/tests/test_worker_route_guard.py
 !/tests/test_worker_runtime.py
 !/tests/test_worker_runtime_candidates.py
+!/tests/test_worker_sources.py
 !/tests/test_worker_tabs_chrome.py
 !/tests/test_worker_tabs_misc.py
 !/tests/test_workflow_bash.py
