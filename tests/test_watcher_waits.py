@@ -215,17 +215,21 @@ class _LateStream:
 
 
 def test_the_line_wait_ends_on_a_line_published_after_it_began_waiting(tmp):
-    """The wait is synchronised on the pump, not on a lucky first read: the
-    first pass finds nothing, and only a wait that suspends reaches the line
-    the double hands over on the second look.
+    """The wait is synchronised on the pump, not on a lucky first read.
+
+    The double hands the line over on the second look whatever the waiter
+    did, so the claim is the pair of them in one assertion: the line
+    arrived, and reaching it took at least one suspension of the condition.
+    A waiter that spun its way to the second look satisfies the first half
+    and fails the second.
     """
     del tmp
     changed = _ScriptedCondition()
     stream = _LateStream(changed, 'watcher pid 42')
     found = await_lines(stream, lambda line: 'watcher pid' in line, 1,
                         'both children to announce their pid')
-    assert found == ['watcher pid 42'], found
-    assert changed.waits >= 1, changed.waits
+    assert found == ['watcher pid 42'] and changed.waits >= 1, (
+        found, changed.waits)
 
 
 def test_the_line_wait_gives_up_by_name_when_the_stream_ends(tmp):
