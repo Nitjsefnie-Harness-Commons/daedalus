@@ -68,7 +68,7 @@ def test_a_fix_reaches_the_document_that_asked_and_only_that_one(tmp):
     # oracle, and the one that did record proves which array it ran in.
     assert outcome['documentUrls'] == {
         'doc-1': SITE, 'doc-2': 'https://shop.example.com/home'}, outcome
-    assert outcome['delivered']['doc-2'] == [], outcome
+    assert outcome['delivered'].get('doc-2') == [], outcome
     assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
     # Both browser calls name the same document as the request did, and
     # that document is not the one the tab was showing.
@@ -97,9 +97,9 @@ def test_a_fix_does_not_reach_the_document_that_replaced_the_asker(tmp):
     })
     # The anti-vacuity half: the document the tab moved to exists and has a
     # live recorder, so a tab-bound target would have been seen here.
-    assert outcome['documentUrls']['doc-2'] == (
+    assert outcome['documentUrls'].get('doc-2') == (
         'https://shop.example.com/next'), outcome
-    assert outcome['delivered']['doc-2'] == [], outcome
+    assert outcome['delivered'].get('doc-2') == [], outcome
     assert _delivered(outcome) == {}, outcome
     assert len(_errors(outcome)) == 1, outcome
     assert 'fix1' in _errors(outcome)[0], outcome
@@ -155,7 +155,7 @@ def test_a_fix_scoped_to_a_site_does_not_run_on_another_site(tmp):
         'asker': 0,
         'fixes': [{'id': 'fix1', 'code': FIX, 'match': SCOPE}],
     })
-    assert outcome['delivered']['doc-1'] == [], outcome
+    assert outcome['delivered'].get('doc-1') == [], outcome
     assert _delivered(outcome) == {}, outcome
     # The skip is reported rather than folded silently into the replayed
     # total, so an operator reading the console can see the fix did not run.
