@@ -1,70 +1,75 @@
 #!/usr/bin/env python3
 """Plan the `timed` matrix from a timings file, packing suites by runtime.
 
-The hand-written matrix was a list of suite-name globs per cell plus a
-catch-all, and the catch-all grew to 26.4 minutes while the next-longest cell
-ran 8.5 -- it alone set the speed gate's critical path, twice (issue 1073,
-after issue 536). This planner replaces those lists with a function of a
-committed data file: per-suite weights, a target weight per cell, and a
-bound, packed longest-first into the lightest cell.
+The hand-written matrix was suite-name globs per cell plus a catch-all
+that grew to 26.4 minutes while the next-longest cell ran 8.5, and alone
+set the speed gate's critical path (issue 1073, after issue 536). This
+planner replaces those lists with a function of a committed data file:
+per-suite weights, a target weight per cell and a bound, packed
+longest-first into the lightest cell.
 
-THE TIMINGS FILE IS ITS OWN FILE with its own schema, owned here and read
-only through `read_timings()`. A refresher writes what this module reads, so
-the field names live in SCHEMA_VERSION, REQUIRED, PROVENANCE_FIELDS, UNITS
-and SEED_REASON here, not restated by a writer or a test.
-`.github/ci-thresholds.json` was not usable for this: it rejects unknown
-top-level keys, and its test pins that.
+THE DATA FILE, `.github/suite-timings.json`, is its own file with its own
+schema, owned here and read only through `read_timings()`, and every
+field is required and type-checked, provenance included. A weight is a
+suite's runtime as a multiple of a fixed reference workload, so a slower
+runner scales every weight together and the packing is unchanged. The
+first file is seeded from raw seconds of one run, which `units` says
+(`seconds` before the reference workload exists, then
+`reference-multiples`); `units` is the only place that fact is recorded,
+because a second spelling of it is a second thing to disagree with
+itself. `measured_from` names the run the numbers came from and `runs`
+says how many, so a weight with no run behind it is a number no refresh
+can check.
 
-THE UNIT. A weight is a suite's runtime as a multiple of a fixed reference
-workload, so a slower runner scales every weight together and the packing is
-unchanged. The first file is seeded from raw seconds of one run, which the
-`units` field says (`seconds` before the reference workload exists, then
-`reference-multiples`), because relative weights within one run are what the
-planner needs either way.
+Suites are enumerated with the timing instrument's own matcher
+(`time_tests.selected`, called with no globs, where it admits every
+name), so the planner and the instrument run the same rule today; the
+call is the seam, not a filter.
 
-Suites are enumerated by the timing instrument's own rule
-(`time_tests.selected` over `tests/test_*.py`), so a cell can never claim a
-suite the instrument would not time, and every suite the instrument would
-time lands in exactly one cell.
+PACKING. `N = ceil(total / target)`, capped at `max_cells` and at the
+number of suites; a suite heavier than the target takes a cell to itself
+and is reported as a split candidate. The rest go longest-first (ties by
+suite name) into the lightest cell, ties by cell index. Both orders are
+total, so the same file and tree always produce the same matrix --
+including under a uniform rescale of every weight, which is what
+`--scale` simulates.
 
-PACKING. `N = ceil(total / target)`, clamped to `[1, max_cells]`; a suite
-heavier than the target takes a cell to itself and is reported as a split
-candidate. The rest go longest-first (ties by suite name) into the lightest
-cell, ties by cell index. Both orders are total, so the same file and tree
-always produce the same matrix -- including under a uniform rescale of every
-weight, which is what `--scale` simulates.
-
-Two arithmetics the brief does not spell out, both of which the run
-summary names when they bite. A suite heavier than the target would
-otherwise be placed into a shared cell and overweight it, so the heavy
-ones open cells of their own; when they outnumber the cells, the
-lightest of them joins the shared cells and the summary says how many
-shared. And a count larger than the suites would leave a cell holding
-nothing, which the instrument reads as "time every suite" -- so the
-count is capped at the suite count, and the matrix never carries an
-empty cell.
+Four arithmetics the brief does not spell out, each named by the run
+summary when it bites. A suite heavier than the target would otherwise
+be placed into a shared cell and overweight it, so the heavy ones open
+cells of their own; when they outnumber the cells, the least of them
+joins the lightest cell, because `max_cells` is the bound on what runs
+at once and the matrix never carries more cells than the bound allows --
+a heavy suite that gets no cell of its own is still a named split
+candidate, and the summary says which ones. A count larger than the
+suites would leave a cell holding nothing, which the instrument reads
+as "time every suite", so the count is capped at the suite count. And
+when the heaviest cell sits more than the margin above the median, the
+summary names the smallest target that would satisfy it.
 
 BALANCE GUARANTEE. `CELL_WEIGHT_MARGIN` is the share a cell may sit
 above the median cell the issue asks the planner to guarantee. Measured
-on this tree with the weights of run 36070301583 (237 suites, 817.7 s
-in total): at a target of 80 the 11 cells come out within 2.8% of the
-median, and over every target from 40 to 1000 the packer never left
-the heaviest cell more than 2.2% above the median. The one case that
-breaks it is a suite heavier than the target, which takes a cell to
-itself by the rule above: `test_watcher_budget.py` at 76.2 s sits
-1.34x a 57 s median at a target of 60. The margin is `0.35`, the round
-number at or above that, because the heavy-suite rule can cost up to
-one suite per cell -- 1.0 / median, which is 1.78 at today's weights
-and only falls as the target rises. A margin below 0.35 would make
-the guarantee a false alarm on today's tree; the guard's other job is
-catching a packer that stops packing, and the shortest-first order
-reaches 2.1x on the same weights, well past it. Re-derive with
-`python3 scripts/ci/plan_timed_matrix.py --summary` against the file.
-
-The default file is `.github/suite-timings.json`, the `.github/` sibling of
-`ci-thresholds.json`, which is where this repository keeps the data its CI
-reads. Task 2's refresher writes it; the planner's own suite reads a temp
-file and never the real one, so it is absent until that lands.
+on this tree with the per-suite head-round medians of run 36070301583
+(237 suites, 816.9 s in total, heavy tail led by
+`test_watcher_budget.py` at 76.2 s). There are two numbers, and the
+margin has to cover the larger. The SHARED cells -- every cell packing
+more than one suite -- come out within 0.3% of their own median at
+every target from 20 to 1000, so the packer is balanced; that is the
+packer's own behaviour. The ALL-cell ratio is `heaviest / median`, and
+it is 1.000 above a target of 85 (no suite is over the target, every
+cell is shared), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a
+suite heavier than the target is alone in its cell by the rule above
+and the median falls as the target does. The margin is `0.35`: the
+round number at or above the ratio at the seeded target of 60, where
+the heavy cell is 1.34x a 57 s median. Below that target the guarantee
+does not hold at this margin, and the summary says so, naming the
+smallest target that would (heaviest / 1.35); the alternative is a
+lower median, which is what Task 2's split of `test_watcher_budget.py`
+would give. The guard's other job is catching a packer that stops
+packing, and the shortest-first order reaches 2.1x on the same weights,
+well past it. Re-derive the two numbers with `python3
+scripts/ci/plan_timed_matrix.py --summary` against the data file at
+each target.
 """
 import argparse
 import json
@@ -80,27 +85,18 @@ try:
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.time_tests import selected
 
-# The data file's schema, as one authority. SCHEMA_VERSION rises when the
-# meaning of an existing field changes; REQUIRED, UNITS, PROVENANCE_FIELDS
-# and SEED_REASON are what a writer must supply and what this module
-# refuses to invent an interpretation for.
+# The data file's schema, as one authority for the writer to import.
 SCHEMA_VERSION = 1
 REQUIRED = ('schema_version', 'target_cell_weight', 'max_cells', 'units',
-            'suite_weights')
-PROVENANCE_FIELDS = ('measured_from', 'reference_normalized', 'runs')
-# The seed is raw seconds from one run and says so; once the reference
-# workload exists the refresher replaces it with multiples of it.
+            'suite_weights', 'measured_from', 'runs')
+PROVENANCE_FIELDS = ('measured_from', 'runs')
 UNITS = ('seconds', 'reference-multiples')
 SEED_REASON = 'seeded'
-# Estimate for a suite the file records nothing about: the median of the
-# recorded weights, or this when the file records none. A number needs a
-# basis, and the median of the tree's own distribution is that basis.
+# A suite the file records nothing about is estimated at the median of
+# the recorded weights, or at this when the file records none.
 DEFAULT_ESTIMATE = 1.0
-# The share a cell may sit above the median cell. The docstring carries
-# the measurement the number rests on.
 CELL_WEIGHT_MARGIN = 0.35
-# Cell names appear in check-run names, so they stay short and match
-# `[a-z0-9][a-z0-9-]*`.
+# Cell names appear inside check-run names.
 _CELL_PREFIX = 'cell-'
 
 
@@ -151,8 +147,8 @@ class Plan:
         ratio = max(loads) / median if median > 0 else 0.0
         lines = [
             '## Timed matrix plan', '',
-            f'cells {len(self.cells)} (max {self.max_cells}, target '
-            f'{self.target:g}); total {self.total:g}; median cell '
+            f'cells {len(self.cells)} (max_cells bound {self.max_cells}, '
+            f'target {self.target:g}); total {self.total:g}; median cell '
             f'{median:g}; heaviest/median {ratio:.3f} against a margin of '
             f'{CELL_WEIGHT_MARGIN:g}; suites '
             f'{sum(len(c.suites) for c in self.cells)}',
@@ -171,12 +167,7 @@ class Plan:
 
 
 def read_timings(path):
-    """Load and validate the timings data file, or refuse with a reason.
-
-    Unknown top-level fields are refused, the way `ci-thresholds.json`
-    treats its own keys: the schema is the module's, and a field nothing
-    reads is a field nothing can hold honest.
-    """
+    """Load and validate the timings data file, or refuse with a reason."""
     if not path.exists():
         raise PlanError(
             f'no timings data at {path}; seed it from a recent successful '
@@ -194,8 +185,7 @@ def read_timings(path):
     for name in REQUIRED:
         if name not in data:
             raise PlanError(f'missing field: {name} (in {path})')
-    for name in sorted(set(data) - set(REQUIRED) - set(PROVENANCE_FIELDS)
-                       - {SEED_REASON}):
+    for name in sorted(set(data) - set(REQUIRED) - {SEED_REASON}):
         raise PlanError(f'unknown field: {name} (in {path})')
     if data['schema_version'] != SCHEMA_VERSION:
         raise PlanError(f'schema_version {data["schema_version"]!r} is not '
@@ -209,6 +199,13 @@ def read_timings(path):
     if isinstance(data['max_cells'], bool) or not isinstance(
             data['max_cells'], int) or data['max_cells'] < 1:
         raise PlanError('max_cells must be an integer of at least one')
+    if not isinstance(data['measured_from'], str) \
+            or not data['measured_from'].strip():
+        raise PlanError('measured_from must be a non-empty string naming '
+                        'the run the numbers came from')
+    if isinstance(data['runs'], bool) or not isinstance(data['runs'], int) \
+            or data['runs'] < 1:
+        raise PlanError('runs must be an integer of at least one')
     weights = data['suite_weights']
     if not isinstance(weights, dict):
         raise PlanError('suite_weights must be an object mapping suite name '
@@ -233,7 +230,7 @@ def _number(value, name):
 
 
 def suite_names(tree):
-    """The tree's suite files, by the timing instrument's own rule."""
+    """The tree's suite files, by the timing instrument's own matcher."""
     found = sorted((tree / 'tests').glob('test_*.py'))
     names = [suite.name for suite in found if selected(suite.name, None, ())]
     if not names:
@@ -244,11 +241,8 @@ def suite_names(tree):
 def _resolve(recorded, names, scale):
     """Every tree suite's weight, and which names were estimated or stale.
 
-    A suite the file does not record is estimated at the median of the
-    recorded weights (the stated constant when the file records none) and
-    reported; a weight for a suite the tree no longer holds is stale -- a
-    deleted suite -- and is reported and dropped, so it can never consume
-    a cell.
+    A weight for a suite the tree no longer holds is stale -- a deleted
+    suite -- and is reported and dropped, so it can never consume a cell.
     """
     recorded = {name: _number(weight, name) * scale
                 for name, weight in recorded.items()}
@@ -266,56 +260,57 @@ def _resolve(recorded, names, scale):
     return weights, estimated, stale
 
 
-def _pack(weights, names, target, max_cells):
-    """Longest-first into the lightest cell; the heavy take cells alone.
+def _open_cells(weights, order, target, max_cells, notes):
+    """The cell count, and which suites open cells of their own.
 
-    Both orderings are total (weight, then suite name; planned weight,
-    then cell index), so the same file and tree always produce the same
-    matrix. A uniform rescale of every weight and the target leaves both
-    orders unchanged, which is the property a slower or faster runner
-    depends on.
+    A suite heavier than the target opens a cell unless the bound leaves
+    none to spare, in which case the least of them joins the lightest
+    cell: a matrix with more cells than the bound is not the bound.
     """
-    total = sum(weights[name] for name in names)
-    notes = []
+    total = sum(weights[name] for name in order)
     derived = max(1, math.ceil(total / target))
-    count = min(max_cells, derived, max(1, len(names)))
+    count = max(1, min(max_cells, derived, len(order)))
     if derived > max_cells:
         notes.append(
             f'cell count clamped to max_cells {max_cells}: the weights would '
             f'need {derived} cells for a target of {target:g}')
-    order = sorted(names, key=lambda name: (-weights[name], name))
+    if len(order) < derived:
+        notes.append(
+            f'cell count reduced to {len(order)}: the weights asked for more '
+            'cells than there are suites to fill them with')
     heavy = [name for name in order if weights[name] > target]
-    if len(heavy) > count:
-        # More suites are heavier than the target than the whole tree
-        # can occupy; the least of them joins the shared cells, where
-        # the heaviest one placed happens to be, and the summary names
-        # it as a split candidate like every other.
+    given_up = []
+    if len(heavy) > max(0, count - 1):
+        given_up = heavy[max(0, count - 1):]
         notes.append(
             f'{len(heavy)} suites are heavier than the target and only '
-            f'{count} cells exist; the lightest of them shares a cell')
-    shared = max(1, count - len(heavy))
-    if shared > len(names) - len(heavy):
-        # More cells than suites: the arithmetic would make a cell that
-        # times nothing, which is a cell the instrument refuses.
-        shared = len(names) - len(heavy)
-        count = len(heavy) + shared
-        notes.append(
-            f'cell count reduced to {count}: the weights asked for more '
-            'cells than there are suites to fill them with')
+            f'{count} cells exist; ' + ', '.join(given_up)
+            + ' join the other cells as split candidates without cells of '
+            'their own, because max_cells is the bound on what runs at '
+            'once')
+    return count, heavy, given_up
+
+
+def _pack(weights, names, target, max_cells):
+    notes = []
+    order = sorted(names, key=lambda name: (-weights[name], name))
+    count, heavy, given_up = _open_cells(
+        weights, order, target, max_cells, notes)
+    alone = [name for name in heavy if name not in given_up]
     rest = [name for name in order if name not in heavy]
-    if shared > len(rest):
-        # More cells than suites (every suite is a split candidate): each
-        # cell takes the heaviest suite left.
-        heavy = heavy[:max(0, shared)]
-        rest = [name for name in order if name not in heavy]
-    cells = [[name] for name in heavy] + [[name] for name in rest[:shared]]
-    loads = ([weights[name] for name in heavy]
+    # The heavy suites that kept a cell hold it alone; the rest open the
+    # shared cells, which is what is left of the count. The suites that
+    # gave up their cell (and whatever the shared cells cannot hold) are
+    # then placed longest-first into the lightest existing cell, so the
+    # cells never exceed the count and none is ever empty.
+    shared = min(max(0, count - len(alone)), len(rest))
+    cells = [[name] for name in alone] + [[name] for name in rest[:shared]]
+    loads = ([weights[name] for name in alone]
              + [weights[name] for name in rest[:shared]])
-    for name in rest[shared:]:
-        index = min(range(shared), key=lambda i: (loads[len(heavy) + i], i))
-        slot = len(heavy) + index
-        cells[slot].append(name)
-        loads[slot] += weights[name]
+    for name in rest[shared:] + given_up:
+        index = min(range(len(cells)), key=lambda i: (loads[i], i))
+        cells[index].append(name)
+        loads[index] += weights[name]
     return ([Cell(_cell_name(index), cell, loads[index])
              for index, cell in enumerate(cells)], heavy, notes)
 
@@ -325,7 +320,6 @@ def _cell_name(index):
 
 
 def plan(tree, timings, scale=1.0):
-    """Pack the tree's suites into cells by weight. Never returns None."""
     names = suite_names(tree)
     weights, estimated, stale = _resolve(
         timings['suite_weights'], names, scale)
@@ -342,6 +336,15 @@ def plan(tree, timings, scale=1.0):
         notes.append(
             f'dropped {len(cells) - len(filled)} empty cells: a cell with no '
             'suite times the whole tree or nothing')
+    loads = [cell.weight for cell in cells]
+    median = statistics.median(loads) if loads else 0.0
+    if loads and max(loads) > median * (1 + CELL_WEIGHT_MARGIN):
+        floor = max(loads) / (1 + CELL_WEIGHT_MARGIN)
+        notes.append(
+            f'heaviest cell is {max(loads) / median:.3f}x the median, over '
+            f'the {CELL_WEIGHT_MARGIN:g} margin: the target of {target:g} is '
+            f'below the {floor:.4g} this cell set would need, or the '
+            'heaviest suite needs splitting first')
     return Plan(cells=cells, total=sum(weights.values()), target=target,
                 max_cells=int(timings['max_cells']), estimated=estimated,
                 split_candidates=list(heavy), stale=stale, notes=notes,
@@ -396,7 +399,10 @@ def main(argv=None):
     if args.out:
         Path(args.out).write_text(payload, encoding='utf-8')
     else:
-        print(payload)
+        # No trailing newline: the value is written straight into a
+        # `$GITHUB_OUTPUT` line as `matrix=$json`, and a newline there
+        # would end the line before the value does.
+        sys.stdout.write(payload)
     if args.summary:
         print(decision.summary(), file=sys.stderr)
     if args.summary_file:
