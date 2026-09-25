@@ -200,16 +200,26 @@ def event_target_stub():
     every call site passing the default `null`, discarded every
     registration, so nothing a harness registered ever dispatched
     (issue #1015). This one ALWAYS retains the listener and exposes it as
-    `listeners`; it adds no dispatch/hasListener/removeListener of its own,
-    so a harness dispatches by iterating that array. Call shape:
-    `eventTarget()` yields `{ addListener, listeners }`.
+    `listeners`; it adds no hasListener/removeListener of its own, so a
+    harness dispatches by iterating that array or, opting in, by calling
+    `dispatch`. Call shapes: `eventTarget()` and `eventTarget(retained)`
+    yield `{ addListener, listeners }`; `eventTarget(retained, true)` adds
+    `dispatch(...args)`, which calls every retained listener the way a
+    real EventTarget delivers an event. Dispatch is opt-in because a
+    harness that never fires an event must not have a listener run behind
+    its back.
     """
     return r"""
-function eventTarget() {
-  const listeners = [];
-  return {
-    addListener(listener) { listeners.push(listener); },
-    listeners,
+function eventTarget(retained = [], dispatches = false) {
+  const target = {
+    addListener(listener) { retained.push(listener); },
+    listeners: retained,
   };
+  if (dispatches) {
+    target.dispatch = (...args) => {
+      for (const listener of retained) listener(...args);
+    };
+  }
+  return target;
 }
 """
