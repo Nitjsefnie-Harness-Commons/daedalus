@@ -141,20 +141,18 @@ function _canUseMainWorldEval() {
 }
 
 // `executeScript` has no abort, so a MAIN-world injection whose submitted
-// promise never settles would otherwise hold the worker — and, on hotfix
-// replay, every later fix — open forever. The guard is worker-side on
-// purpose: a page-owned `setTimeout` could veto the very bound meant to
-// contain it. Racing bounds the wait, and does NOT cancel the page promise:
-// the abandoned page-side work keeps running until the page's own promise
-// machinery settles it. The refusal carries no channel of its own: `what`
-// is the caller's, so a caller that routes at run time names the channel
-// that actually ran. The number is deliberately equal to
+// promise never settles would hold the worker — and, on hotfix replay, every
+// later fix — open forever. The guard is worker-side on purpose: a
+// page-owned `setTimeout` could veto the very bound meant to contain it.
+// Racing bounds the wait and does NOT cancel the page promise: the abandoned
+// page-side work runs until the page's own machinery settles it. The
+// refusal names no channel; `what` is the caller's, so a caller routing at
+// run time names the one that actually ran. The number equals
 // `_CDP_PROMISE_TIMEOUT_MS` in worker/cdp.js so one caller sees the same
-// settlement limit whichever channel the probe selects; the two are pinned
-// independently — tests/test_eval_relay.py and
-// tests/test_starvation_bounds.py — and nothing ties them together. The CDP
-// bound is a serviced-time sampler where this is a plain wall clock, so
-// they are a shared number rather than a shared mechanism.
+// limit whichever channel the probe selects; the two are pinned
+// independently (tests/test_eval_relay.py, tests/test_starvation_bounds.py)
+// and nothing ties them together. The CDP bound is a serviced-time sampler
+// where this is a plain wall clock: a shared number, not a shared mechanism.
 const _MAIN_WORLD_EVAL_TIMEOUT_MS = 10000;
 
 function _raceMainWorldEval(work, what) {
@@ -224,8 +222,8 @@ async function handleEval(cmd) {
   // point. The probe is inside the same bound as the injection for the
   // reason the per-fix replay's is: a worker waiting on a routing decision
   // serves no later command. A probe that fails or does not answer within
-  // the bound leaves the MAIN-world path unavailable, which is the same
-  // outcome, so the CDP fallback is taken.
+  // the bound leaves the MAIN-world path unavailable, which is the outcome
+  // a `false` probe already has, so the CDP fallback is taken.
   let useMainWorld = false;
   try {
     const probe = await _raceMainWorldEval(chrome.scripting.executeScript({

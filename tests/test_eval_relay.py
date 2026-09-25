@@ -26,12 +26,15 @@ from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
                                run_hotfix_replay_cdp_timeout,
                                run_hotfix_replay_inside)
 
-# The chosen MAIN-world settlement ceiling, in ms. Deliberately equal to the
-# CDP settlement bound so one caller sees the same limit whichever channel
-# the source-free probe selects; the two are pinned independently, by this
-# suite and by tests/test_starvation_bounds.py. The harness's inside modes
-# step to 9000, strictly inside it, so a control that halves or quarters
-# the ceiling crosses that step and goes red.
+# The chosen MAIN-world settlement ceiling, in ms. Equal to the CDP
+# settlement bound so one caller sees the same limit whichever channel the
+# source-free probe selects; the two are pinned independently, by this suite
+# and by tests/test_starvation_bounds.py. The harness's eval-inside mode
+# settles at 9000, strictly inside it: of the ceilings the inside tests can
+# be given, a quarter (2500) is caught by the value assertion, a half (5000)
+# one assertion earlier by the arming list, which halts before the value
+# assertion ever runs, and any other value the arming list names is caught
+# at the arming list.
 _SETTLE_MS = 10000
 
 
@@ -264,7 +267,10 @@ def test_a_main_world_eval_settling_inside_the_bound_returns_its_value(tmp):
     """The clock is driven to strictly inside the window before the page
     promise resolves, so a ceiling that fires early is caught by the
     assertion on the real value rather than passing because nothing was ever
-    crossed.
+    crossed. A quarter (2500) is caught by that value assertion; a half
+    (5000) never reaches it, because the arming-list assertion on the line
+    above — which names the ceiling twice — catches it first. Any other
+    value the arming list names is caught at the arming list.
     """
     del tmp
     outcome = run_main_world_eval_inside()

@@ -8,7 +8,12 @@ function for real in a page context, and models a worker-side clock the mode
 steps so a bound fires deterministically on any host rather than on a wall
 clock. The fake `executeScript` genuinely awaits the promise the injected
 function returns, so a promise that never settles stays un-settled — the
-exact property the settlement bound exists to bound.
+exact property the settlement bound exists to bound. A mode whose subject
+never arrives — `waitForResult` exhausting with the eval never dispatching,
+so the source never runs and `handleEval` never posts — exits with empty
+stdout, and its control reports `JSONDecodeError` on that empty answer. A
+decode error here means the thing being waited for never happened; it is not
+a verdict, and not a broken harness.
 """
 import json
 import shutil
@@ -325,8 +330,8 @@ async function run() {
       () => typeof evalResolvers.finish === 'function');
     const armed = await waitForResult(
       () => clock.armed.size > 0);
-    // Settle strictly inside the window: a bound that fires early is
-    // crossed here and loses the real value below.
+    // Settle strictly inside the window: a ceiling below this 9000 is
+    // crossed here, and the real-value assertion below fails.
     if (armed) advanceClock(9000);
     if (typeof evalResolvers.finish === 'function') evalResolvers.finish();
     const got = await waitForResult(
