@@ -96,6 +96,11 @@ BOUNDED_GIT_LAUNCHES = {
         'a standalone generator an operator runs by hand; no suite or CI '
         'bound sits above it, so a wedged git hangs an operator with '
         'nothing to surface it',
+    ('tests/_repo.py', 'git_index'):
+        'a generic git runner: the bound covers the index-writing commands '
+        'its callers pass (init, add take index.lock), not only the reads, '
+        'so the lock-taking path keeps a margin the suite bound would catch '
+        'too late to name',
 }
 
 
