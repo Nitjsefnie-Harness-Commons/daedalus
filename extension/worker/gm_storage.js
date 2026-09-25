@@ -20,11 +20,13 @@
 
 const RESERVED_KEY = /^daedalus-/;
 
-// GM_QUOTA_BYTES bounds one origin's partition. Chrome's documented `local`
-// cap is 10 MB and the extension asks for no `unlimitedStorage`, so a page
-// that filled the shared area would make the extension's own writes fail; one
-// origin is capped at 1 MB, at most a tenth of the area, leaving 9 MB of
-// headroom for the extension's state and other origins. The sum is recomputed
+// GM_QUOTA_BYTES bounds ONE origin's partition, independently of the sum:
+// a write is refused at 1 MB however small every other origin is, and however
+// many origins stay under 1 MB the per-origin cap does not move. Both caps
+// exist because Chrome's documented `local` cap is 10 MB and the extension
+// asks for no `unlimitedStorage`, so a page that filled the shared area would
+// make the extension's own writes fail; what the SUM's cap leaves is the room
+// the extension keeps, not what one origin's cap leaves. The sum is recomputed
 // from the values actually stored on every write — never an accumulator — so a
 // delete frees budget and a value the page did not count still counts.
 const GM_QUOTA_BYTES = 1024 * 1024;
