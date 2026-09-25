@@ -7,18 +7,24 @@ installed. What the worker does on the page's behalf is therefore bounded
 here: a relayed request goes out without the user's cookies, and a relayed
 tab open reaches only web URLs. These run the shipped worker in a Node VM
 against a fake browser that records what the worker asked it to do.
+
+The relay's own fetch goes through the shared gate: only the `fetch` mode
+makes a request, and that one declares the single relayed URL it plans, on
+the relay origin; every other mode declares no request at all.
 """
-import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
+
+RELAY_HOST = 'https://example.com'
+RELAYED = 'POST ' + RELAY_HOST + '/account'
 
 
 _RELAY_AUTHORITY_HARNESS = r"""
@@ -27,7 +33,6 @@ const vm = require('vm');
 
 const [backgroundPath, mode] = process.argv.slice(1);
 const messageListeners = [];
-const fetches = [];
 const created = [];
 let createCalls = 0;
 const downloaded = [];
@@ -136,18 +141,57 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees. The page's fetch goes
+// out through the gate's own response, which carries the `body`, `headers`,
+// `url` and `statusText` the relay reads; the relayed URL is a permitted
+// non-bridge origin, so it keys on its full URL and can never collide with a
+// bridge route.
+const BRIDGE_URL = 'https://bridge.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function response(status, data) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    url: '',
+    headers: { forEach() {} },
+    body: {
+      getReader: () => ({
+        read: async () => ({ done: true, value: undefined }),
+        cancel: async () => {},
+      }),
+    },
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
+}
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
+}
+const planArg = process.argv[process.argv.length - 1];
+const plan = typeof planArg === 'string' ? JSON.parse(planArg) : planArg;
+""" + STRICT_FETCH + r"""
+
 const context = vm.createContext({
   chrome,
+  // A thin wrapper that DELEGATES to the gate: the answer, the accounting,
+  // the refusal and the record are the gate's. The wrapper only notes the
+  // credentials mode the relay chose, which the gate's record does not
+  // carry, and stamps the answer's own URL back onto it.
   fetch: async (target, init = {}) => {
-    fetches.push({
-      url: String(target),
-      method: init.method || null,
-      credentials: init.credentials === undefined ? null : init.credentials,
-    });
-    return {
-      ok: true, status: 200, statusText: 'OK', url: String(target),
-      headers: { forEach() {} }, body: null,
-    };
+    const answer = await bridgeFetch(target, init);
+    const record = nonStreamFetches[nonStreamFetches.length - 1];
+    if (record) {
+      record.credentials = init.credentials === undefined
+        ? null : init.credentials;
+    }
+    answer.url = String(target);
+    return answer;
   },
   crypto: { randomUUID: () => 'relay-1' },
   AbortController,
@@ -210,7 +254,7 @@ async function run() {
       method: 'POST', headers: {}, body: '{}', responseType: 'text',
     });
     return {
-      fetches,
+      fetches: nonStreamFetches,
       answer: {
         status: relayed.answer.status === undefined
           ? null : relayed.answer.status,
@@ -299,7 +343,17 @@ async function run() {
   };
 }
 
+// Every mode reports the gate's record beside its own answer: only the
+// `fetch` mode makes a request, so only its plan declares one, and every
+// other mode's empty plan is checked against an empty record.
 run().then((result) => {
+  result.gate = {
+    records: nonStreamFetches,
+    refused: refusedFetches,
+    badOrigins,
+    streamAnswered: streamFetches.map((f) => f.answered),
+    contractFaults: gateContractFaults,
+  };
   process.stdout.write(JSON.stringify(result));
 }).catch((error) => {
   process.stderr.write((error.stack || String(error)) + '\n');
@@ -309,16 +363,28 @@ run().then((result) => {
 
 
 def _run_relay_authority(mode):
-    """Drive the worker's page-facing relay under Node and read back."""
-    node = shutil.which('node')
-    assert node, 'node is required to execute the GM relay'
-    result = subprocess.run(
-        [node, '-e', _RELAY_AUTHORITY_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), mode],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    """Drive the worker's page-facing relay under Node and read back.
+
+    The plan is this mode's recording: only the `fetch` mode reaches a fetch,
+    and it makes exactly one — the page's POST to the relay origin, keyed on
+    its full URL. Every other mode declares no request, so a fetch the worker
+    invents there is refused and recorded and the check below fails.
+    """
+    plan = {
+        'planned': [RELAYED] if mode == 'fetch' else [],
+        'relayHosts': [RELAY_HOST],
+    }
+    outcome = run_gate(require_node(), _RELAY_AUTHORITY_HARNESS,
+                       [str(EXTENSION_ROOT / 'background.js'), mode],
+                       cwd=ROOT, plan=plan)
+    gate = outcome.pop('gate')
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(plan['planned']), planned_stream=[])
+    return outcome
 
 
 def test_a_relayed_page_request_carries_no_cookies(tmp):
@@ -339,7 +405,10 @@ def test_a_relayed_page_request_carries_no_cookies(tmp):
     assert len(outcome['fetches']) == 1, outcome
     request = outcome['fetches'][0]
     assert request['url'] == 'https://example.com/account', request
-    assert request['method'] == 'POST', request
+    # The gate keys a relay request on "METHOD <full-url>"; the credentials
+    # mode rides the record beside it, stamped by the wrapper that delegates
+    # to the gate.
+    assert request['request'] == RELAYED, request
     assert request['credentials'] == 'omit', request
     # Still a working relay: the request went out and its answer came back.
     assert outcome['answer'] == {'status': 200, 'error': None}, outcome

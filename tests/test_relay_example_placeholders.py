@@ -7,16 +7,24 @@ placeholder itself is rewritten by that same replacement, so a script
 handed a real sig would compare the sig with itself and mint anyway. These
 run the substituted text the way the bridge does, wrapped as an async
 function body, against a stubbed `window.GM`, and read which branch ran.
+
+The example's own `fetch` goes through the shared gate on the bridge origin
+the substituted text carries: each scenario declares the requests the
+substituted example makes, the gate answers only those and refuses and
+records everything else, and `assert_gate_clean` reads that record. The
+`GM.xmlhttpRequest` stub answers the playlist read and leaves the segment
+read unresolved, as it always has, so the run reads the status, learns
+nothing from it, and parks on the first segment it tries to relay — the
+recording the plan below is taken from.
 """
-import json
-import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 
 EXAMPLE = ROOT / 'examples' / 'hls-segment-relay.js'
 SIG_HEADER = 'X-Daedalus-Segment-Sig'
@@ -26,12 +34,51 @@ FIXED = {
     '__JOB__': 'relay_job-1',
     '__PLAYLIST__': 'https://media.example.com/live/index.m3u8',
 }
+# The recording, from a run of the substituted example on the pre-change tree
+# (a temporary recorder, no tracked file changed): with the segment read
+# unresolved, the substituted text makes exactly one fetch — the job's
+# status read, which the scenario answers 500 so the run has nothing to skip
+# — and then relays its first segment through the unresolved read. The
+# status is declared as refused-not-ok on purpose: "the relay is not wired"
+# is a claim about the status answer, not a blanket fallback for every
+# route, so a plan that gave the example a 200 status would be a different
+# test. The status read goes to the bridge origin the substituted text
+# carries, so the gate keys it on the bare route.
+STATUS = 'GET /segment-status?job=relay_job-1'
 
 _HARNESS = r"""
 const vm = require('vm');
 
-const [plan] = process.argv.slice(1);
+const planArg = process.argv[process.argv.length - 1];
+const plan = typeof planArg === 'string'
+  ? JSON.parse(planArg) : planArg;
 const calls = [];
+
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request the substituted example makes;
+// the example's own SERVER constant is the bridge origin the gate permits,
+// so its status and segment reads key on the same route the real bridge
+// would see.
+const BRIDGE_URL = 'https://bridge.example.com';
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function response(status, data) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    body: null,
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
+}
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
+}
+""" + STRICT_FETCH + r"""
+
 const context = {
   window: { GM: {
     segmentJob: async (job) => {
@@ -50,9 +97,13 @@ const context = {
     createElement: () => ({ style: {} }),
     body: { appendChild() {} },
   },
+  // A thin wrapper that DELEGATES to the gate: the answer, the accounting,
+  // the refusal and the record are the gate's. The wrapper only keeps the
+  // suite's own `['fetch', url, headers]` projection, which the sig tests
+  // read to see which capability header the example sent.
   fetch: async (url, init) => {
     calls.push(['fetch', url, (init && init.headers) || {}]);
-    return { ok: false, status: 500 };
+    return bridgeFetch(url, init);
   },
   setTimeout: () => 1,
   console: { warn() {} },
@@ -65,7 +116,16 @@ const started = vm.runInNewContext(
 (async () => {
   const returned = await started;
   for (let turn = 0; turn < 20; turn++) await Promise.resolve();
-  process.stdout.write(JSON.stringify({ returned, calls }));
+  process.stdout.write(JSON.stringify({
+    returned, calls,
+    gate: {
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+      contractFaults: gateContractFaults,
+    },
+  }));
 })();
 """
 
@@ -79,14 +139,20 @@ def _substitute(**placeholders):
 
 
 def _run(source):
-    node = shutil.which('node')
-    assert node, 'node is required to execute the relay example'
-    result = run_node_program(
-        node, _HARNESS, [], cwd=ROOT,
-        payload={'source': source, 'playlist': PLAYLIST})
-    assert result.returncode == 0, (
-        result.returncode, result.stdout, result.stderr)
-    return json.loads(result.stdout)
+    outcome = run_gate(require_node(), _HARNESS, [], cwd=ROOT, plan={
+        'source': source, 'playlist': PLAYLIST,
+        'planned': [STATUS],
+        'hosts': [FIXED['__SERVER__']],
+        'answers': {STATUS: {'status': 500}},
+    })
+    gate = outcome.pop('gate')
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=[STATUS], planned_stream=[])
+    return outcome
 
 
 def _sig_in_use(outcome):
