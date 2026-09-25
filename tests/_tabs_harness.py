@@ -1,21 +1,18 @@
 """Shared Node-VM harness for the extension/worker/tabs.js suites.
 
 Not a suite itself — run_tests.py only loads `test_*.py`. It owns the whole
-worker control plane the tab suites share: build a `chrome` fake from a
-plan-driven domain literal spliced with INERT_WORKER_APIS, load background.js
-through import_scripts_stub, await loadConfig(), dispatch commands through
-dispatchCommand, and hand back the posted postResult payloads alongside every
-recorded chrome call. The suites supply the plan and assert the answer and the
-calls together; this module never decides what a handler should do.
+worker control plane the tab suites share and hands back the posted
+postResult payloads alongside every recorded chrome call. The suites supply
+the plan and assert the answer and the calls together; this module never
+decides what a handler should do.
 
 The plan may also ask for the deferred surface. `runTimers` makes the
 setTimeout stand-in run and record its callback; `fetchTimings` seeds the
 timing ring before any command; `hasNativeToBase64` pins whether the realm
 carries the native toBase64. The run reports the boot's installed `version`,
 the observed `hasNativeToBase64`, and the timers it ran. Each is opt-in and
-inert by default, so a suite that sets none of them drives exactly the fake
-this harness shipped with. The seeds and the pin shape the world the handler
-reads; none of them hands the handler a value to echo back.
+inert by default. The seeds and the pin shape the world the handler reads;
+none of them hands the handler a value to echo back.
 """
 import json
 import shutil
@@ -290,8 +287,7 @@ def run_tabs(commands, **plan):
     """Run the worker VM over `commands`; return calls/posted/outcomes.
 
     `plan` carries the fake chrome's behaviour: `activeTabs` (what
-    tabs.query resolves), `createReject` (url -> rejection message). Every
-    recorded chrome call and every posted postResult payload comes back.
+    tabs.query resolves), `createReject` (url -> rejection message).
     """
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'

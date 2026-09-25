@@ -81,7 +81,6 @@ def test_fetch_timings_posts_the_populated_ring(tmp):
     result = _result(outcome)
     assert result['timings'] == TIMINGS_2, outcome
     assert result['count'] == 2, outcome
-    # Realm pinned without the native toBase64, so the const is false.
     assert result['hasNativeToBase64'] is False, outcome
 
 
