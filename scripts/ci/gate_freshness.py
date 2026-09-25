@@ -93,7 +93,12 @@ GATE_PATTERNS = (
 # coverage-floor raise moves the floor up), so a stale branch's baseline can
 # never turn main red by merging. The derivation guard subtracts exactly this
 # tuple: a new such file must be added here with its own reason.
-CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',)
+# The two `timed` suites are carried under a second mechanism:
+# `timed-timings.yml` RUNS them to verify the refresh before it commits, so
+# the workflow-invokes-a-gate sweep finds them. They verify this branch.
+CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',
+                         'tests/test_timed_planner.py',
+                         'tests/test_timed_refresh.py')
 
 _HEX40 = frozenset('0123456789abcdef')
 

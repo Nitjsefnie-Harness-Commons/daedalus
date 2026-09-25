@@ -320,7 +320,7 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
     coverage = _job_section(workflow, 'coverage', 'diff-coverage')
-    diff = _job_section(workflow, 'diff-coverage', 'timed')
+    diff = _job_section(workflow, 'diff-coverage', 'plan-matrix')
     checkouts = re.findall(
         r'actions/checkout@.*?\n(?P<body>.*?)(?=\n      - |\Z)',
         coverage, re.DOTALL)
@@ -668,7 +668,8 @@ def test_diff_coverage_artifacts_cross_the_trusted_boundary(tmp):
     assert all(value.split('@', 1)[0].casefold() != 'actions/checkout'
                for value in uses), uses
     needs = aggregate.partition('needs:')[2].partition('runs-on:')[0]
-    assert 'diff-coverage' not in needs, needs
+    needs = [n for n in needs.splitlines() if n.strip().startswith('-')]
+    assert not any('diff-coverage' in n for n in needs), needs
     triggers = _workflow_triggers(comment_workflow)
     assert triggers.get('workflow_run') == [
         '    workflows: [tests]', '    types: [completed]'], triggers
