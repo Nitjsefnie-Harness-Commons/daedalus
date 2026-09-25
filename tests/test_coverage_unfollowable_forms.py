@@ -130,8 +130,11 @@ def _launching_callee_cases():
 
     Every row here reaches a child when run, and every row's callee is a
     name this guard has no reason to call a launcher. A rule that judged
-    the callee's name would leave all six clean and lose all six, which
-    is the whole reason the rule judges the value instead.
+    the callee's name would have to list all six to keep these rows
+    clean, which is part of why the rule judges the value instead. It
+    is not the whole reason: the runtime probes for the same three
+    shapes in test_coverage_decorated_launch.py are what a tuned list
+    cannot satisfy without naming them, and they are launched for real.
     """
     return (
         ('thread target', """import subprocess
@@ -165,13 +168,23 @@ def _opaque_callee_cases():
     """A launcher handed to a callee whose name says nothing.
 
     The other tables here name their callees — `operator.call`,
-    `Thread`, `submit` — and a guard that gated its argument rule on a
-    list of those names would satisfy every one of them. That is the
-    enumeration this branch removed, and a table keyed on callee
-    spellings cannot catch its return. These rows cannot be tuned to:
-    the callee names below are arbitrary, and the rule is indifferent to
-    all of them, so a gate has to name these too to keep them clean and
-    there is no reason for it to.
+    `Thread`, `submit` — so a guard that gated its argument rule on a
+    list of those names would satisfy every one of them. These rows
+    raise the cost of such a gate: the names below carry no
+    information, the rule is indifferent to all of them, and a list has
+    to name them too to keep them clean.
+
+    That is what they buy, and it is a smaller claim than it first looks.
+    Indifference is a property no finite sample of names can witness: a
+    gate naming all five of these as well as every other name in this
+    file satisfies every row here and every row in every other table,
+    and the suite stays green. What the rows are a real defence against
+    is the mistake that actually happened — a gate tuned to the
+    committed rows — because that gate has to be written against these
+    rows too, and the more of them there are the more it costs. The
+    runtime probes in test_coverage_decorated_launch.py are what stop a
+    tuned list being cheap, because a gate that excludes
+    `asyncio.to_thread` or `weakref.finalize` has to list those too.
     """
     return (
         ('single letter', """import subprocess
@@ -453,8 +466,10 @@ _ARGUMENTS = (
 # The enumeration this branch removed, reinstated in front of the arm. The
 # list holds the callee and keyword names the case tables name, so it is
 # the strongest form of the mistake: a gate tuned to satisfy every row.
-# Only the opaque-callee rows catch it, because their callee names
-# carry no information and a list cannot be tuned to them.
+# A gate like this one satisfies the tables, which is why the tables are
+# not the whole defence — the runtime probes reject it behaviourally,
+# because a gate naming every name here must also name to_thread,
+# callback and finalize, and the next name written is not on its list.
 _ENUMERATION = (
     "def _unfollowable_launcher_bindings(tree, facts):\n",
     "_INVOKING = frozenset({'call', 'partial', 'map', 'Thread',\n"
@@ -477,13 +492,25 @@ _ENUMERATION = (
 # A bare module name is a launcher only where a launch method is read off
 # it. Judging it in an argument position too must turn the module handed
 # to patch.object rows red.
+# The arm this row edits, anchored as a whole block ending at a line
+# break. A needle that stops short of the newline is a prefix of the
+# module-name row's, and a prefix's uniqueness is inherited from the
+# longer string rather than from the text this mutation changes.
 _ENUMERATION_ARM = (
+    "        if (isinstance(node, ast.Call)\n"
+    "                and not _has_cwd_control(node)\n"
+    "                and (_carries_launcher(_call_receiver_parts(node), "
+    "facts)\n"
     "                     or _carries_launch_value(_call_argument_parts("
     "node),\n"
-    "                                              facts))):",
+    "                                              facts))):\n",
+    "        if (isinstance(node, ast.Call)\n"
+    "                and not _has_cwd_control(node)\n"
+    "                and (_carries_launcher(_call_receiver_parts(node), "
+    "facts)\n"
     "                     or (_invoking_callee(node)\n"
     "                         and _carries_launch_value(\n"
-    "                             _call_argument_parts(node), facts)))):")
+    "                             _call_argument_parts(node), facts)))):\n")
 _MODULE_IN_ARGUMENT = (
     "                     or _carries_launch_value(_call_argument_parts("
     "node),\n"
