@@ -13,7 +13,9 @@ CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
 
 # A concat/literal chain deeper than this is not a shape the tree spells;
-# the cap keeps a self-referential binding from spinning the head read.
+# the cap keeps a self-referential binding from spinning the head read. The
+# constant bounds loop passes, and the terminal value is checked at the top
+# of each pass, so the chain actually resolvable is one shorter than it.
 _ARGV_UNWRAP_CAP = 8
 
 
