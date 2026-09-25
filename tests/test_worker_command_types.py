@@ -23,6 +23,7 @@ import ast
 import re
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -161,7 +162,7 @@ def _reference_shape(node, parents):
     return type(parent).__name__.lower()
 
 
-def _refuse(where, what):
+def _refuse(where, what) -> NoReturn:
     """Terminal refusal naming where and what. Never a skip."""
     raise AssertionError(f'{where}: {what}')
 
