@@ -374,6 +374,7 @@
 !/tests/_wfskip.py
 !/tests/_wfskip_cases.py
 !/tests/_worker_chrome_fake.py
+!/tests/_worker_routes.py
 !/tests/_worker_runtime.py
 !/tests/_worker_sources.py
 !/tests/_workflowrun.py
@@ -615,6 +616,7 @@
 !/tests/test_wfjobs.py
 !/tests/test_wfscalars.py
 !/tests/test_worker_close_tab.py
+!/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py
 !/tests/test_worker_register_throttle.py
 !/tests/test_worker_result_post.py
