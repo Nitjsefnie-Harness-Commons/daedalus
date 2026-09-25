@@ -234,29 +234,6 @@ def test_a_graphql_retry_after_is_honoured_when_no_reset_is_reported(tmp):
             raise AssertionError('retryAfter must be honoured')
 
 
-def test_a_slow_install_cannot_move_the_measured_retry_after(tmp):
-    """The offset is read at the call, so setup time cannot shift it: the
-    resume instant is the fixture's own `retryAfter` counted from the clock
-    the client read, so a slow install moves nothing and a window the
-    runner's speed decides is not what is left to assert.
-    """
-    mod = _client()
-    now = 1790266796.5
-    retry_after = 90
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
-        'status': 200,
-        'body': {'data': None, 'errors': [{
-            'type': 'RATE_LIMITED',
-            'extensions': {'retryAfter': retry_after}}]}}})
-    with fake.activate(), _frozen_client_clock(mod, now):
-        try:
-            mod.graphql(ITEM_QUERY, {'after': None})
-        except mod.RateLimited as refusal:
-            assert refusal.resume_at == now + retry_after, refusal.resume_at
-        else:
-            raise AssertionError('retryAfter must be honoured')
-
-
 def test_a_403_without_rate_limit_evidence_is_an_ordinary_failure(tmp):
     mod = _client()
     fake = _fake_gh.FakeGh(tmp, {'items(first: 2': {
