@@ -29,11 +29,10 @@ from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
 # The chosen MAIN-world settlement ceiling, in ms. Deliberately equal to the
 # CDP settlement bound so one caller sees the same limit whichever channel
 # the source-free probe selects; the two are pinned independently, by this
-# suite and by tests/test_starvation_bounds.py.
+# suite and by tests/test_starvation_bounds.py. The harness's inside modes
+# step to 9000, strictly inside it, so a control that halves or quarters
+# the ceiling crosses that step and goes red.
 _SETTLE_MS = 10000
-# A settlement driven to here is strictly inside the correct bound, so a
-# control that halves or quarters the ceiling crosses it and goes red.
-_INSIDE_MS = 9000
 
 
 def _replay_errors(replay):
