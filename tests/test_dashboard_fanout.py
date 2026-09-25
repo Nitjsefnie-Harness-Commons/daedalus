@@ -192,6 +192,42 @@ def test_a_fresh_subscription_receives_entries_queued_when_it_connected(tmp):
     assert [f['type'] for f in frames] == ['tabs-synced'], frames
 
 
+def test_a_failed_frame_write_leaves_the_entry_and_the_cursor(tmp):
+    """The frame is written BEFORE any removal, and the cursor advances
+    only after that write, so a peer that vanishes mid-write leaves the
+    event queued and the cursor where it was: the next drain redelivers
+    it. Advancing the cursor before the write, or unlinking before it, both
+    destroy the event on a failed write and are caught here."""
+    service, drain = _service('fanout_failed_write')
+    token = 'tok'
+    qdir = _queue(service, tmp, token)
+    entry = _write_event(qdir, '0000000000001_00000001', type='result')
+    _sub_id, killed = service.register(token, DASHBOARD)
+    delivered_frames = []
+
+    def failing(_data):
+        raise BrokenPipeError('the peer went away mid-write')
+
+    try:
+        drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                              frame_writer=failing)
+    except BrokenPipeError:
+        pass  # the injected dead peer, not the assertion under test
+    else:
+        raise AssertionError('the failing write did not propagate')
+
+    assert entry.exists(), 'the entry was unlinked despite a failed write'
+    assert delivered_frames == [], delivered_frames
+
+    # The cursor must not have moved, so the next drain redelivers the
+    # event instead of skipping it as already-consumed.
+    redelivered = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                        frame_writer=delivered_frames.append)
+    assert redelivered == 1, redelivered
+    assert [f['type'] for f in delivered_frames] == ['result'], (
+        delivered_frames)
+
+
 def test_a_second_drain_with_the_same_cursor_delivers_nothing(tmp):
     """Resetting the cursor each drain would redeliver an entry this
     connection already consumed. The entry has to still be on disk across
