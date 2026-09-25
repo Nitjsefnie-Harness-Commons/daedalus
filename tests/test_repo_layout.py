@@ -35,6 +35,7 @@ BRIDGE_PACKAGE = (
     'mcp_bootstrap.py',
     'parent_watch.py',
     'path_safety.py',
+    'queue_order.py',
     'result_routes.py',
     'result_store.py',
     'route_answer.py',
