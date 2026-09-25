@@ -264,7 +264,11 @@ def _run_hostile_post(tmp, label, body, workflow=None):
     state_path.write_text('[]', encoding='utf-8')
     calls_path.write_text('', encoding='utf-8')
     (workdir / 'body.md').write_text(body, encoding='utf-8')
-    (workdir / 'pr-number.txt').write_text('170\n', encoding='utf-8')
+    # BYTES: the step reads this with `claimed="$(cat pr-number.txt)"` and
+    # compares it to $PR_NUMBER. Text mode makes that trailing `\n` a
+    # `\r\n` on Windows, the `\r` survives command substitution, and the
+    # check refuses to post a matching claim.
+    (workdir / 'pr-number.txt').write_bytes(b'170\n')
     env = {
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',

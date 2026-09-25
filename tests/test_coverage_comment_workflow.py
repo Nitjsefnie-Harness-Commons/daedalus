@@ -358,7 +358,7 @@ def _run_comment_block(tmp, block_name, *, state, current_head='B',
     output = workdir / 'github-output'
     output.write_text('', encoding='utf-8')
     (workdir / 'body.md').write_text(body, encoding='utf-8')
-    (workdir / 'pr-number.txt').write_text(claimed + '\n', encoding='utf-8')
+    (workdir / 'pr-number.txt').write_bytes((claimed + '\n').encode('utf-8'))
     env = {
         **os.environ,
         'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',

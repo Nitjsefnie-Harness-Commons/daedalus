@@ -23,7 +23,9 @@ workflow-level one and so took `contents: read` with it, and the timed
 matrix's `|| '[]'` default beside the `except` key that never existed.
 """
 import fnmatch
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -57,7 +59,15 @@ _ARTIFACTS = tuple(f'{_ARTIFACT_PREFIX}{cell}' for cell in _CELLS)
 # lone selected artifact is extracted into the target directory ITSELF
 # while more than one each get a directory named after them.
 _GH_DOUBLE = '''\
-"""A `gh` double for the calls the timed-timings steps make."""
+"""A `gh` double for the calls the timed-timings steps make.
+
+Both answers that reach the shell go out through `sys.stdout.buffer`:
+`sys.stdout` is a TEXT stream, and on Windows it translates every `\\n` it
+writes to `os.linesep`, so a text write would put a carriage return on
+every line of a list the step then reads with `read -r` -- which strips
+the newline and keeps the CR. Bytes in, bytes out: the shell sees exactly
+what `gh` emits.
+"""
 import fnmatch
 import os
 import shutil
@@ -78,10 +88,11 @@ def _api(root, argv):
                 return 1
             listing = root / (run + '.names')
             if listing.exists():
-                sys.stdout.write(listing.read_text(encoding='utf-8'))
+                sys.stdout.buffer.write(listing.read_bytes())
             return 0
         if '/actions/workflows/' in argument:
-            sys.stdout.write(os.environ.get('GH_DOUBLE_WORKFLOW_RUNS', ''))
+            sys.stdout.buffer.write(
+                os.environ.get('GH_DOUBLE_WORKFLOW_RUNS', '').encode('utf-8'))
             return 0
     sys.stderr.write('gh: the double answers no call in %r\\n' % (argv,))
     return 1
@@ -179,8 +190,12 @@ def _artifacts(root, run_id, cells=_ARTIFACTS, reference=True,
     """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    (root / f'{run_id}.names').write_text(
-        ''.join(f'{name}\n' for name in cells), encoding='utf-8')
+    # The `.names` file IS the bytes the double relays as `gh --jq
+    # '.artifacts[].name'` output, so it is written as bytes: text mode
+    # would put a CR on every line on Windows and the double relays it
+    # verbatim.
+    (root / f'{run_id}.names').write_bytes(
+        ''.join(f'{name}\n' for name in cells).encode('utf-8'))
     if api_fails:
         (root / f'{run_id}.fails').write_text('', encoding='utf-8')
     for name in cells:
@@ -194,6 +209,21 @@ def _artifacts(root, run_id, cells=_ARTIFACTS, reference=True,
             (artifact / _REFERENCE_FILE).write_text(
                 '{"seconds": 2.0, "iterations": 16}', encoding='utf-8')
     return root
+
+
+def _write_run_ids(path, run_ids):
+    """The run-ids list the walk's `while read` reads, as BYTES.
+
+    `gh api --jq '.id'` writes `\\n` and nothing else, on every platform.
+    `Path.write_text` opens in TEXT mode, which translates that `\\n` to
+    `os.linesep` -- `\\r\\n` on Windows -- and `read` strips the newline but
+    NOT the carriage return, so every id arrives as `500\\r`, every
+    `runs/500\\r/...` misses, and the step reports an honest `count=0`.
+    Binary mode cannot translate what is not a newline, so the bytes the
+    shell reads are the bytes `gh` emits on any host.
+    """
+    Path(path).write_bytes(
+        ''.join(f'{run_id}\n' for run_id in run_ids).encode('utf-8'))
 
 
 def _step_environment(workdir, **names):
@@ -223,8 +253,7 @@ def _walk(workdir, run_ids, fixtures):
     reads `$GITHUB_OUTPUT` and the summary rather than the log.
     """
     environment = _step_environment(workdir, GH_DOUBLE_FIXTURES=str(fixtures))
-    (Path(workdir) / 'runner-temp' / 'run-ids').write_text(
-        ''.join(f'{run_id}\n' for run_id in run_ids), encoding='utf-8')
+    _write_run_ids(Path(workdir) / 'runner-temp' / 'run-ids', run_ids)
     result = run_workflow_script(workdir, _download_step(), environment)
     written = Path(workdir) / 'github-output'
     summary = Path(workdir) / 'summary.md'
@@ -385,6 +414,46 @@ def test_a_run_whose_artifacts_query_fails_is_tolerated_and_counted(tmp):
     # a real `if !` branch and not a swallowed message.
     assert 'HTTP 500' in result.stderr, result.stderr
     assert '1 candidate run(s) were stepped over' in summary, summary
+
+
+def test_every_list_the_step_reads_is_byte_exact_and_carries_no_cr(tmp):
+    """Both lists the walk reads are the bytes `gh` emits: no CR anywhere.
+
+    Two producers, one trap. The run-ids list is THIS fixture's, and the
+    artifact-names list is the `gh` double's, standing in for `gh --jq
+    '.artifacts[].name'`. Both were written in TEXT mode, which translates
+    `\\n` to `os.linesep` -- `\\r\\n` on Windows -- and the step's `read -r`
+    strips the newline but keeps the carriage return, so every id and every
+    cell name misses its target and the step reports the honest-looking
+    `count=0`. This asserts the BYTES at both sources rather than the
+    walk's outcome, so what the shell reads does not depend on the
+    platform that wrote the file, and a regression is caught where it is
+    introduced instead of three layers down as a green no-op.
+    """
+    fixtures = _artifacts(Path(tmp) / 'fixtures', 500)
+
+    # The run-ids list, straight from the writer the walk uses.
+    ids_file = Path(tmp) / 'run-ids'
+    _write_run_ids(ids_file, [500])
+    assert ids_file.read_bytes() == b'500\n', ids_file.read_bytes()
+
+    # The names the double relays, and the double's own answer for both
+    # calls that write to stdout -- captured RAW, the way the shell reads.
+    expected_names = b''.join(f'{n}\n'.encode() for n in _ARTIFACTS)
+    assert (fixtures / '500.names').read_bytes() == expected_names
+    module = _install_gh_double(tmp) / 'gh_double.py'
+    environment = {**os.environ, 'GH_DOUBLE_FIXTURES': str(fixtures),
+                   'GH_DOUBLE_WORKFLOW_RUNS': '500\n'}
+    artifacts = subprocess.run(
+        [sys.executable, str(module), 'api',
+         'repos/example/example/actions/runs/500/artifacts'],
+        env=environment, capture_output=True, check=True)
+    assert artifacts.stdout == expected_names, artifacts.stdout
+    listed = subprocess.run(
+        [sys.executable, str(module), 'api',
+         'repos/example/example/actions/workflows/tests.yml/runs'],
+        env=environment, capture_output=True, check=True)
+    assert listed.stdout == b'500\n', listed.stdout
 
 
 def test_the_listing_step_is_fail_closed_on_zero_candidates(tmp):
