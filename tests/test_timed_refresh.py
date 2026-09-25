@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""Refresh the suite-timings file: what it writes, and what it refuses.
+
+The artifacts are fixtures under a temp tree: no API, no `gh`, no
+network. Each test builds a run the way the timed job leaves one --
+`<run>/<cell>/head-N/<suite>.json`, one JSON per suite, plus the cell's
+reference reading -- and drives `refresh_timings.main()` over it.
+"""
+import contextlib
+import io
+import json
+import math
+import statistics
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
+from _repo import ROOT  # noqa: E402
+
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+
+
+def _refresh():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                      'refresh_timings')
+
+
+def _planner():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py',
+                      'plan_timed_matrix')
+
+
+def _workload():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'reference_workload.py',
+                      'reference_workload')
+
+
+def _tree(tmp, suites):
+    tree = Path(tmp) / 'tree'
+    (tree / 'tests').mkdir(parents=True, exist_ok=True)
+    for name in suites:
+        (tree / 'tests' / name).write_text('pass\n', encoding='utf-8')
+    return tree
+
+
+def _suite_file(path, seconds):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'tests': {'test_a': seconds},
+                                'outcomes': {}}), encoding='utf-8')
+
+
+def _write_run(root, run_id, cells,
+               reference: float | None = 2.0, decoys=()):
+    """One run's artifact tree; `cells` maps a cell name to suite seconds.
+
+    Each suite gets the given seconds in `head-1` and `head-2`, the two
+    measured rounds. `reference=None` writes no reference reading at
+    all. `decoys` names extra round directories (`base-1`, `warmup`)
+    that carry the same suites at ten times the seconds, so a parser
+    that counted them would not agree with one that did not.
+    """
+    run = Path(root) / str(run_id)
+    for cell, suites in cells.items():
+        for suite, seconds in suites.items():
+            # time_tests.py names each file after the suite's STEM, so
+            # the file is `test_a.json` for `test_a.py`.
+            name = f'{Path(suite).stem}.json'
+            for round_name in ('head-1', 'head-2'):
+                _suite_file(run / cell / round_name / name, seconds)
+        for decoy in decoys:
+            for suite, seconds in suites.items():
+                name = f'{Path(suite).stem}.json'
+                _suite_file(run / cell / decoy / name, seconds * 10)
+        if reference is not None:
+            (run / cell).mkdir(parents=True, exist_ok=True)
+            (run / cell / 'reference.json').write_text(
+                json.dumps({'seconds': reference, 'iterations': 16}),
+                encoding='utf-8')
+    return run
+
+
+def _data(weights, units='reference-multiples', target=10.0, max_cells=15,
+          **fields):
+    data = {
+        'schema_version': _planner().SCHEMA_VERSION,
+        'target_cell_weight': target,
+        'max_cells': max_cells,
+        'units': units,
+        'measured_from': 'tests run 1',
+        'runs': 1,
+        'suite_weights': weights,
+    }
+    data.update(fields)
+    return data
+
+
+def _file(tmp, data, name='suite-timings.json'):
+    path = Path(tmp) / name
+    path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+    return path
+
+
+def _run(refresh, args, expect=0):
+    """Run main() with both streams captured; return (code, out, err)."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = refresh.main(args)
+    assert code == expect, (code, out.getvalue(), err.getvalue())
+    return out.getvalue(), err.getvalue()
+
+
+def _refresh_args(tmp, root, out, runs=3, seed=False, tree=None):
+    args = ['--runs-root', str(root), '--out', str(out)]
+    if tree is not None:
+        args += ['--tree', str(tree)]
+    if runs is not None:
+        args += ['--runs', str(runs)]
+    if seed:
+        args += ['--seed']
+    return args
+
+
+def test_one_outlier_run_among_several_does_not_change_the_file(tmp):
+    """The maintainer's requirement: the median, not the mean.
+
+    Three complete runs measure the suite at 2.0 reference-multiples
+    each; a fourth, older run -- the outlier -- measures it ten times
+    that. A mean follows the outlier, a median does not, so the file
+    must be left exactly as it was.
+    """
+    refresh = _refresh()
+    suites = {'test_slow.py': 4.0, 'test_quick.py': 1.0}
+    for run_id in (40, 39, 38):
+        _write_run(Path(tmp) / 'runs', run_id,
+                   {'cell-01': suites, 'cell-02': {}})
+    _write_run(Path(tmp) / 'runs', 37,
+               {'cell-01': {'test_slow.py': 40.0, 'test_quick.py': 10.0},
+                'cell-02': {}})
+    out = _file(tmp, _data({'test_slow.py': 2.0, 'test_quick.py': 0.5}))
+    before = out.read_text(encoding='utf-8')
+    _out, err = _run(refresh, _refresh_args(tmp, Path(tmp) / 'runs', out))
+    assert 'wrote nothing' in err, err
+    assert out.read_text(encoding='utf-8') == before
+
+
+def test_a_weight_beyond_the_margin_is_written_and_one_inside_is_not(tmp):
+    """Both limbs, varying the magnitude against the MARGIN constant."""
+    refresh = _refresh()
+    margin = refresh.WEIGHT_MARGIN
+    inside, beyond = 1.0 + margin / 2, 1.0 + margin * 1.5
+    for factor, written in ((inside, False), (beyond, True)):
+        case = Path(tmp) / f'case{int(factor * 100)}'
+        root = case / 'runs'
+        _write_run(root, 50, {'cell-01': {'test_a.py': 4.0 * factor}})
+        out = _file(case, _data({'test_a.py': 2.0}), name='timings.json')
+        _out, err = _run(refresh, _refresh_args(case, root, out))
+        if written:
+            assert 'wrote' in err and 'wrote nothing' not in err, err
+            moved = json.loads(out.read_text(encoding='utf-8'))
+            assert moved['suite_weights']['test_a.py'] == 2.0 * factor
+        else:
+            assert 'wrote nothing' in err, err
+            assert json.loads(
+                out.read_text(encoding='utf-8'))['suite_weights'] == {
+                    'test_a.py': 2.0}
+
+
+def test_the_parser_reads_cell_names_from_the_artifacts(tmp):
+    """Cell names the repository has never used, read the same."""
+    refresh = _refresh()
+    cells = {'group-alpha-7f3': {'test_a.py': 2.0},
+             'zz last cell': {'test_b.py': 3.0},
+             '9': {'test_c.py': 1.0}}
+    root = Path(tmp) / 'runs'
+    _write_run(root, 60, cells)
+    out = _file(tmp, _data({}))
+    _run(refresh, _refresh_args(tmp, root, out))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['suite_weights'] == {
+        'test_a.py': 1.0, 'test_b.py': 1.5, 'test_c.py': 0.5}, written
+    assert '60' in written['measured_from'], written
+
+
+def test_a_cell_with_no_reference_reading_is_refused_by_name(tmp):
+    """Named cell, named suite -- refused, never stored as zero."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 70, {'cell-07': {'test_carried.py': 4.0},
+                          'cell-08': {}}, reference=None)
+    out = _file(tmp, _data({}))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out), expect=1)
+    assert 'cell-07' in err and 'test_carried.py' in err, err
+    assert 'reference' in err, err
+    assert json.loads(out.read_text(encoding='utf-8'))['suite_weights'] == {}
+
+
+def test_the_planner_reads_what_the_refresher_wrote_unchanged(tmp):
+    """Round trip: no field dropped, no field invented."""
+    refresh = _refresh()
+    tree = _tree(tmp, ['test_a.py', 'test_b.py', 'test_unmeasured.py'])
+    root = Path(tmp) / 'runs'
+    _write_run(root, 80, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 2.0}})
+    out = _file(tmp, _data({'test_a.py': 2.0}, target=3.0, max_cells=4))
+    _out, _err = _run(refresh, _refresh_args(tmp, root, out, tree=tree))
+    written = out.read_text(encoding='utf-8')
+    planner = _planner()
+    data = planner.read_timings(out)
+    assert data == json.loads(written), data
+    decision = planner.plan(tree, data)
+    assert decision.estimated == ['test_unmeasured.py'], decision.estimated
+    assert decision.stale == []
+    assert sum(len(cell.suites) for cell in decision.cells) == 3
+
+
+def test_a_run_with_no_artifacts_changes_nothing_and_does_not_crash(tmp):
+    """The empty history: no runs at all, or runs with no cells."""
+    refresh = _refresh()
+    out = _file(tmp, _data({'test_a.py': 2.0}))
+    before = out.read_text(encoding='utf-8')
+    root = Path(tmp) / 'runs'
+    root.mkdir()
+    (root / '90').mkdir()
+    (root / 'not-a-run').mkdir()
+    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    assert 'wrote nothing' in err, err
+    assert out.read_text(encoding='utf-8') == before
+
+
+def test_only_the_measured_head_rounds_are_read(tmp):
+    """The warm-up is discarded and the base side is another tree."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 100, {'cell-01': {'test_a.py': 4.0}},
+               decoys=('base-1', 'base-2', 'warmup'))
+    out = _file(tmp, _data({}))
+    _out, _err = _run(refresh, _refresh_args(tmp, root, out))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    # 4.0 s per head round over a 2.0 s reference: 2.0 multiples. Had a
+    # base or warm-up round been counted the weight would be larger.
+    assert written['suite_weights'] == {'test_a.py': 2.0}, written
+
+
+def test_a_file_in_seconds_is_rescaled_into_the_units_it_reports(tmp):
+    """A units change rewrites the target with the weights, not alone."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 110, {'cell-01': {'test_a.py': 4.0}}, reference=2.0)
+    out = _file(tmp, _data({'test_a.py': 4.0}, units='seconds', target=60.0))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['units'] == 'reference-multiples', written
+    # 4.0 s is 2.0 multiples of a 2.0 s reference; 60 s is 30 of them.
+    assert written['target_cell_weight'] == 30.0, written
+    assert 'units' in err or 'seconds' in err, err
+
+
+def test_a_suite_that_appeared_or_disappeared_is_written(tmp):
+    """Both membership changes count, whatever the weights did."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 120, {'cell-01': {'test_a.py': 4.0, 'test_new.py': 2.0}})
+    out = _file(tmp, _data({'test_a.py': 2.0, 'test_gone.py': 1.0}))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['suite_weights'] == {'test_a.py': 2.0,
+                                        'test_new.py': 1.0}, written
+    assert 'test_new.py' in err and 'test_gone.py' in err, err
+
+
+def test_the_median_is_over_the_selected_runs_and_the_count_is_recorded(
+        tmp):
+    """`runs` is the sample the median used, never a claim of five.
+
+    The newest run is measured, the next is a different cell set and is
+    stepped over, and the sample is drawn from the three complete runs
+    behind it -- one of which is the outlier.
+    """
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 130, {'cell-01': {'test_a.py': 4.0},
+                           'cell-02': {'test_b.py': 1.0}})
+    _write_run(root, 129, {'cell-01': {'test_a.py': 4.0}})
+    for run_id, seconds in ((128, 100.0), (127, 4.0), (126, 4.0)):
+        _write_run(root, run_id,
+                   {'cell-01': {'test_a.py': seconds},
+                    'cell-02': {'test_b.py': 1.0}})
+    out = _file(tmp, _data({}))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out, runs=3))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['suite_weights'] == {'test_a.py': 2.0,
+                                        'test_b.py': 0.5}, written
+    assert written['runs'] == 3, written
+    assert '130, 128, 127' == written['measured_from'], written
+    # It reached back over the run it stepped over, and said so.
+    assert '4 runs' in err and 'incomplete' in err, err
+
+
+def test_an_incomplete_run_set_is_skipped_and_an_older_one_is_used(tmp):
+    """A run with fewer cells is an older matrix, not a candidate."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 200, {'cell-01': {'test_a.py': 4.0},
+                           'cell-02': {'test_b.py': 2.0}})
+    _write_run(root, 199, {'cell-01': {'test_a.py': 8.0}})
+    out = _file(tmp, _data({}))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out, runs=1))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['measured_from'] == '200', written
+    # The sample was one run, whatever the default is: a file that
+    # claimed the default here would claim a median it never took.
+    assert written['runs'] == 1, written
+    assert 'incomplete' in err, err
+
+
+def test_a_suite_file_that_cannot_be_read_is_refused(tmp):
+    """A broken artifact names its cell, its run and its suite."""
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    run = _write_run(root, 300, {'cell-01': {'test_a.py': 4.0}})
+    (run / 'cell-01' / 'head-1' / 'test_broken.json').write_text(
+        json.dumps({'tests': {'test_x': 'quickly'}}), encoding='utf-8')
+    out = _file(tmp, _data({}))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out), expect=1)
+    assert 'test_broken' in err and 'cell-01' in err and '300' in err, err
+
+
+def test_the_reference_reading_comes_from_the_workload_it_names(tmp):
+    """The two halves agree: what the workload prints, refresh reads."""
+    workload = _workload()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert workload.main(['--json', '--iterations', '1000']) == 0
+    reading = json.loads(buffer.getvalue())
+    assert reading['seconds'] > 0 and reading['iterations'] == 1000, reading
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    run = _write_run(root, 400,
+                     {'cell-01': {'test_a.py': 3.0 * reading['seconds']}},
+                     reference=None)
+    (run / 'cell-01' / 'reference.json').write_text(
+        json.dumps(reading), encoding='utf-8')
+    out = _file(tmp, _data({}))
+    _out, _err = _run(refresh, _refresh_args(tmp, root, out))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    # Three seconds of suite per second of reference: three multiples,
+    # and three only if the reading itself was the divisor.
+    assert written['suite_weights'] == {'test_a.py': 3.0}, written
+
+
+def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
+    """Seed mode: raw seconds, a derived target, a derived bound."""
+    refresh = _refresh()
+    planner = _planner()
+    suites = {f'test_s{index:02d}.py': seconds for index, seconds in
+              enumerate([60.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0])}
+    cells = {'cell-01': dict(list(suites.items())[:4]),
+             'cell-02': dict(list(suites.items())[4:])}
+    tree = _tree(tmp, sorted(suites))
+    root = Path(tmp) / 'runs'
+    _write_run(root, 36054336022, cells)
+    out = _file(tmp, _data({}, units='seconds'), name='seed.json')
+    _run(refresh, _refresh_args(tmp, root, out, seed=True, tree=tree))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['units'] == 'seconds', written
+    assert written['runs'] == 1
+    assert written['measured_from'] == '36054336022', written
+    assert written['suite_weights'] == suites, written
+    # Two cells measured today is the bound. The target is the smallest
+    # five-second step whose plan holds the balance guarantee AND fits
+    # that bound -- derived here with the planner, so the expectation
+    # is the rule and not a transcribed number.
+    expected = _smallest_balancing_target(planner, tree, suites, 2)
+    assert written['max_cells'] == 2, written
+    assert written['target_cell_weight'] == expected, written
+    assert written['target_cell_weight'] % 5 == 0, written
+    assert 'raw seconds' in written['seeded'], written['seeded']
+    assert f'{expected:g}' in written['seeded'], written['seeded']
+    assert '2 cells' in written['seeded'], written['seeded']
+
+
+def _smallest_balancing_target(planner, tree, weights, max_cells):
+    """The seed rule, worked out with the planner, for the test to share."""
+    total = sum(weights.values())
+    for target in range(5, int(total) + 5, 5):
+        if math.ceil(total / target) > max_cells:
+            continue
+        data = _data(weights, units='seconds', target=target,
+                     max_cells=max_cells)
+        loads = [cell.weight for cell in planner.plan(tree, data).cells]
+        if loads and max(loads) <= statistics.median(loads) * (
+                1 + planner.CELL_WEIGHT_MARGIN):
+            return float(target)
+    return 0.0
+
+
+def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
+    """Fixed work, not a seconds-target loop: the unit cannot normalize."""
+    workload = _workload()
+    seconds, checksum = workload.measure(1000)
+    assert seconds < 2.0, seconds
+    assert workload.work(1000) == checksum
+    assert workload.work(2000) != checksum
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert workload.main(['--json', '--iterations', '1000']) == 0
+    printed = json.loads(buffer.getvalue())
+    assert printed['iterations'] == 1000, printed
+    assert printed['seconds'] > 0, printed
+    # The count is the unit: a weight in reference-multiples counts
+    # iterations, so the constant is what the data file's numbers are
+    # measured against, and it is the same on every runner. The default
+    # is that constant, not a seconds target.
+    assert isinstance(workload.ITERATIONS, int)
+    assert workload.ITERATIONS % 1_000_000 == 0, workload.ITERATIONS
+    assert workload.ITERATIONS == 16_000_000, workload.ITERATIONS
+
+
+def test_the_median_survives_a_planted_mean(tmp):
+    """Control: the median is the mean here, so the guard has teeth."""
+    values = [2.0, 2.0, 10.0]
+    assert statistics.median(values) == 2.0
+    assert statistics.mean(values) != statistics.median(values)
+
+
+def main():
+    """Run every test; return the runner's exit code."""
+    return _util.runner(_util.collect(globals()), tmp_prefix='timedrefresh_')
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
