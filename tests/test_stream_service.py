@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _case_fold  # noqa: E402
 import _util  # noqa: E402
 from _service_loader import _load_service  # noqa: E402
 
@@ -575,11 +576,16 @@ def test_the_legacy_delivered_line_carries_no_full_token(tmp):
 
 
 def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
+
     """Where the parent folds nothing, `Extension` is a tab's legacy file.
 
     The other half of the reserved-name check; the half where the parent
     does resolve it is in `test_case_fold_parent`, which needs one.
     """
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'the extension\'s own legacy file is a tab\'s here',
+        'test_case_fold_parent.test_the_extensions_own_legacy_file_the_parent_'
+        'folds')
     service = _load_service('stream_service_legacy_extension_nofold')
     command_dir = Path(tmp) / 'commands'
     command_dir.mkdir()
@@ -619,6 +625,7 @@ def _symlinked_legacy_file(command_dir):
 
 
 def test_legacy_drain_takes_a_symlinked_tab_file(tmp):
+
     """Where the parent folds nothing, that symlink is a tab's file.
 
     `tok_extension.json` names nothing here, so the entry is a tab's and is
@@ -626,6 +633,10 @@ def test_legacy_drain_takes_a_symlinked_tab_file(tmp):
     folding the name itself. The folded half is in
     `test_case_fold_parent`.
     """
+    _case_fold.require_case_sensitive(
+        Path(tmp), 'a symlinked Extension legacy file is a tab\'s file here',
+        'test_case_fold_parent.test_a_folded_symlinked_legacy_file_is_still_'
+        'reserved')
     service = _load_service('stream_service_legacy_symlink_control')
     command_dir = Path(tmp) / 'commands'
     command_dir.mkdir()
