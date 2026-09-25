@@ -519,6 +519,9 @@ def test_the_poll_refused_line_carries_no_full_token(tmp):
     `secret=` is a per-call-site argument, so the poll producer needs its own
     limb: dropping `secret=token` here would leak the whole token.
     """
+    _case_fold.require_second_name(
+        Path(tmp), "poll's refusal redacts the token's legacy file",
+        os.link, 'give one file a second name (a hard link)')
     service = _load_service('stream_service_poll_refused_redact')
     cq = service.command_queue
     cmd_dir = Path(tmp)
@@ -542,6 +545,9 @@ def test_the_legacy_refused_line_carries_no_full_token(tmp):
 
     The legacy-drain producer's own `secret=` argument needs a limb as well.
     """
+    _case_fold.require_second_name(
+        Path(tmp), 'a refused legacy drop keeps the token out of its line',
+        os.link, 'give one file a second name (a hard link)')
     service = _load_service('stream_service_legacy_refused_redact')
     legacy = Path(tmp) / 'tok-verify_tab6.json'
     twin = Path(tmp) / 'tok-verify_tab6_twin.json'
