@@ -19,10 +19,8 @@ _seq_counter = itertools.count(1)
 _cmd_events = {}  # {token: threading.Event}
 _cmd_events_lock = threading.Lock()
 
-# The one name of the dashboard target. Every site that spells it — the
-# notify publisher, the stream service's subscription check, the stream
-# route's dashboard branch, the extension's skipped legacy file — reads it
-# from here, so the criterion for "this is the dashboard" is defined once.
+# The one name of the dashboard target, so "is this the dashboard" is a
+# single criterion rather than a spelling repeated at each site.
 DASHBOARD_TAB = 'dashboard'
 
 # Set by the stream service, which owns the refusal registry, so the TTL
@@ -302,18 +300,14 @@ def notify_dashboard(cmd_dir, token, payload):
     try:
         with command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
-            # Share enqueue's monotonic stem so byte order is publish order
-            # within and across milliseconds: the fan-out drain's cursor
-            # orders events by name, so two events in one millisecond must
-            # not order by a random suffix or the later one sorts below a
-            # window's cursor and is dropped as already-consumed. Both
-            # callers take `next_seq` under this same `command_fs_lock` the
-            # publish is taken under, so the counter and the write it names
-            # cannot fall out of order.
+            # The fan-out drain's cursor orders events by name, so the stem
+            # must be publish-ordered or a same-millisecond event sorts below
+            # a window's cursor and is dropped. Both callers take `next_seq`
+            # under this same lock the publish is taken under, so a stem
+            # cannot be handed out in an order the writes do not follow.
             event_id = next_seq()
-            # The bridge's own id and kind are written AFTER the payload: a
-            # fan-out client dedups on id, so a publisher must not be able
-            # to forge one, nor to fake the kind the reader dispatches on.
+            # The bridge's own id and kind go AFTER the payload: the client
+            # dedups on id, so a publisher must not forge one or the kind.
             _publish(dash_dir, event_id,
                      {**payload, 'id': event_id, 'kind': 'event'})
         event(token).set()  # wake the dashboard stream immediately
@@ -334,21 +328,19 @@ def notify_dashboard(cmd_dir, token, payload):
 def next_seq():
     """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>.
 
-    The millisecond prefix is fixed width and the counter is padded to
-    twenty digits, so within a millisecond byte order is the order the
-    counter was taken, and across counter increases it stays that way
-    regardless of the clock. The field width is the bound: the ordering
-    holds while the counter is below 10**20. `itertools.count` is
-    arbitrary-precision and does not itself cap the counter, so this is a
-    stated width, not a type guarantee — but no reachable process comes
-    near 10**20. A narrower field (six digits was the original) inverts at
-    the first overflow — 999999 formats as six digits but 1000000 as seven,
-    and '1' < '9' — which the dashboard cursor turns into a lost event.
-    Across *different* milliseconds the millisecond prefix decides, so the
-    stem is publish-ordered only while the wall clock does not step
-    backwards between two publishes. Callers take this under
-    `command_fs_lock`, the same lock the publish is taken under, so a stem
-    cannot be handed out in an order the writes do not follow.
+    The millisecond prefix is fixed width and the counter padded to twenty
+    digits, so within a millisecond — and across counter increases — byte
+    order is the order the counter was taken, regardless of the clock. The
+    field width is the bound: order holds while the counter is below 10**20.
+    `itertools.count` is arbitrary-precision and does not itself cap the
+    counter, so this is a stated width, not a type guarantee; no reachable
+    process comes near it. A narrower field (six digits was the original)
+    inverts at the first overflow — 999999 is six digits but 1000000 is
+    seven, and '1' < '9'. Across *different* milliseconds the millisecond
+    prefix decides, so the stem is publish-ordered only while the wall clock
+    does not step backwards between two publishes (see the cursor's ordering
+    warrant in `stream_service.every_subscription_past`). Callers take this
+    under `command_fs_lock`; see the notify call site.
     """
     return f'{int(time.time() * 1000):013d}_{next(_seq_counter):020d}'
 
