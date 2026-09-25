@@ -1402,10 +1402,7 @@ jobs:
     timeout-minutes: 90
 
     # One cell per slice of `tests/`, packed by measured runtime by
-    # `plan-matrix` from the committed `.github/suite-timings.json`. The
-    # hand-written globs and the catch-all are gone: the catch-all grew to
-    # 26.4 minutes while the next-longest cell ran 8.5, and it alone set
-    # the critical path below.
+    # `plan-matrix` from the committed `.github/suite-timings.json`.
     #
     # The planner emits `[{"group": "cell-01", "suites": "…"}, …]`, and the
     # `''` default is for a run where the planner was skipped: a matrix
@@ -1428,11 +1425,9 @@ jobs:
     # in a required gate, not a shape limit.
     #
     # `group` is the key first because GitHub truncates a matrix job's
-    # display name — today's `catchall` cell is already cut off
-    # mid-suite-list in the API — so the cell's identity is the part
-    # that survives. The names are the planner's (`cell-01`, …), short
-    # and matching `[a-z0-9][a-z0-9-]*` because they appear inside
-    # check-run names.
+    # display name, so the cell's identity is the part that survives. The
+    # names are the planner's (`cell-01`, …), short and matching
+    # `[a-z0-9][a-z0-9-]*` because they appear inside check-run names.
     strategy:
       # A slow or failing slice must not cancel its siblings: each cell owns
       # a verdict, and losing the others to one of them is a smaller

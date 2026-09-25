@@ -94,7 +94,6 @@ jobs:
                    | .id' > "$RUNNER_TEMP/run-ids"
           count="$(grep -c . "$RUNNER_TEMP/run-ids")"
           echo "Listed $count completed push runs of tests on main." >&2
-          echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Download the cell artifacts
         id: download
