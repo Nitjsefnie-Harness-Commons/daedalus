@@ -16,6 +16,7 @@ import ast
 
 from _argv_read import ARGV_UNWRAP_CAP
 from _argv_read import ArgvReader
+from _class_index import ClassIndex
 
 CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
@@ -38,12 +39,7 @@ def launch_refusals(source, here, bound_sink=None):
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
-    # The class body each node sits in, and the attributes that body
-    # binds, so an attribute receiver is read against the class that binds
-    # it rather than by name alone. Both are filled by the walks below.
-    class_scopes = {}
-    class_attributes = {}
-    local_classes = {}
+    index = ClassIndex(tree)
 
     def normalize(called):
         """Map a machinery alias's member to its canonical spelling."""
@@ -132,52 +128,6 @@ def launch_refusals(source, here, bound_sink=None):
 
     attribute_active = set()
 
-    def inherited_classes(scope):
-        """scope's locally defined bases, left to right and depth first.
-
-        A base the module does not bind to a class — an imported mixin, a
-        base built at run time, a subscripted `Generic[T]` — is not
-        resolvable here and is skipped. It is a residual the docstring
-        names, and it is the one an inherited attribute can hide behind.
-        """
-        found = []
-        seen = set()
-        pending = list(scope.bases) if scope is not None else []
-        while pending:
-            base = pending.pop(0)
-            if not isinstance(base, ast.Name):
-                continue
-            node = local_classes.get(base.id)
-            if node is None or id(node) in seen:
-                continue
-            seen.add(id(node))
-            found.append(node)
-            pending = list(node.bases) + pending
-        return found
-
-    def attribute_values(value):
-        """The values this attribute can read, nearest reading first.
-
-        The enclosing class's own table first, so an override shadows
-        every base and a subclass binding the name to something that does
-        not derive is not a launch. Then each locally defined base in
-        inheritance order, because Python reads an attribute a base binds.
-        That order is left to right, depth first, which is the MRO's own
-        order wherever the attribute is bound in one place; a diamond that
-        binds it on both branches yields both, and either deriving is
-        enough — the audit computes no C3 linearisation, and reporting is
-        the fail-closed reading.
-        """
-        scope = class_scopes.get(id(value))
-        own = class_attributes.get(id(scope), {})
-        if value.attr in own:
-            yield own[value.attr]
-            return
-        for base in inherited_classes(scope):
-            held = class_attributes.get(id(base), {}).get(value.attr, _MISS)
-            if held is not _MISS:
-                yield held
-
     def attribute_derives(value, bound):
         """Does this attribute read as a value derived from subprocess?
 
@@ -198,8 +148,11 @@ def launch_refusals(source, here, bound_sink=None):
 
         - an attribute bound in a method body (`self.mod = subprocess` in
           a constructor) is not a class body binding and does not resolve;
-        - a base the module does not define, so an inherited attribute
-          behind an imported mixin does not resolve;
+        - a base the analyser cannot read — qualified, subscripted or
+          built at run time — so an inherited attribute behind one does
+          not resolve;
+        - a base name the enclosing scope binds more than once, which
+          yields every class it could name rather than guessing one;
         - a subclass override the analyser cannot read resolves as its
           own value rather than falling back to the base, which is the
           same last-wins rule as above;
@@ -208,7 +161,7 @@ def launch_refusals(source, here, bound_sink=None):
           binds the name, and to nothing when it does not: the value of
           `self.inner` is not readable, so the inner class cannot be.
         """
-        for held in attribute_values(value):
+        for held in index.attribute_values(value):
             if held is None or id(value) in attribute_active:
                 continue
             attribute_active.add(id(value))
@@ -334,23 +287,8 @@ def launch_refusals(source, here, bound_sink=None):
                 bindings.append((node.target.id, node.iter))
         elif isinstance(node, ast.ClassDef):
             defined_names.add(node.name)
-            attributes = {}
-            for statement in node.body:
-                if isinstance(statement, ast.Assign):
-                    bindings.append((node.name, statement.value))
-                    assigned = [(target.id, statement.value)
-                                for target in statement.targets
-                                if isinstance(target, ast.Name)]
-                elif isinstance(statement, ast.AnnAssign) \
-                        and statement.value is not None \
-                        and isinstance(statement.target, ast.Name):
-                    assigned = [(statement.target.id, statement.value)]
-                else:
-                    continue
-                for name, held in assigned:
-                    attributes[name] = None if name in attributes else held
-            class_attributes[id(node)] = attributes
-            local_classes[node.name] = node
+            bindings.extend((node.name, value)
+                            for value in index.class_body_binds(node))
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if isinstance(item.optional_vars, ast.Name):
@@ -363,13 +301,6 @@ def launch_refusals(source, here, bound_sink=None):
             ambiguous.add(name)
         binding_map[name] = value
     reader = ArgvReader(binding_map, ambiguous)
-    scope_walk: list[tuple] = [(tree, None)]
-    while scope_walk:
-        node, scope = scope_walk.pop()
-        for child in ast.iter_child_nodes(node):
-            class_scopes[id(child)] = scope
-            scope_walk.append(
-                (child, child if isinstance(child, ast.ClassDef) else scope))
 
     def resolve_string(element, seen=None):
         """A string constant behind a `+` concat as well as a name chain.
@@ -401,7 +332,7 @@ def launch_refusals(source, here, bound_sink=None):
                     and isinstance(element.value, str):
                 return element.value
             if isinstance(element, ast.Attribute):
-                held = next(iter(attribute_values(element)), None)
+                held = next(iter(index.attribute_values(element)), None)
                 if held is None or id(element) in attribute_active:
                     return None
                 attribute_active.add(id(element))

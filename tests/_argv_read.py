@@ -10,6 +10,11 @@ behind a seen-guard, so a name-held or name-concatenated git argv
 classifies rather than reading unreadable. A name bound more than once
 in the module is a guess, so it resolves to nothing and the caller labels
 the head `ambiguous` rather than taking either reading.
+
+One consumer: `tests/_launch_audit.py`, which builds a reader over its
+own bindings tables and takes every head label from it. Nothing else
+reads this module and it reads no configuration of its own, so a change
+here reaches the launch policy and nothing else.
 """
 import ast
 

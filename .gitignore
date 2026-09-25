@@ -265,6 +265,7 @@
 !/tests/_bridge_fake_oracle_harness.py
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
+!/tests/_class_index.py
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
 !/tests/_cli_parse.py

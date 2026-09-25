@@ -472,4 +472,173 @@ LAUNCH_REFUSAL_ROWS = (
      "subprocess.run(['git', 'status'], check=True)\n"
      "[sp, other] = [subprocess, 1]\n",
      'unpacks subprocess-derived values the audit cannot follow'),
+    # A class body is a block Python executes, so a name bound inside an
+    # `if`, a loop, a `with` or a `try` is a class-namespace binding. Each
+    # form is its own control, because the walk that reads them is one
+    # nearest-scope test and a row for only some of the forms would leave
+    # the others unproved.
+    ('class-body-if-binds-the-attribute',
+     "import subprocess\n"
+     "FLAG = True\n"
+     "class Base:\n"
+     "    if FLAG:\n"
+     "        mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('class-body-for-binds-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    for _ in range(1):\n"
+     "        mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('class-body-while-binds-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    while False:\n"
+     "        mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('class-body-with-binds-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    with open(__file__):\n"
+     "        mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('class-body-try-binds-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    try:\n"
+     "        mod = subprocess\n"
+     "    except OSError:\n"
+     "        pass\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('class-body-nested-blocks-bind-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    for _ in range(1):\n"
+     "        if True:\n"
+     "            try:\n"
+     "                mod = subprocess\n"
+     "            except OSError:\n"
+     "                pass\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # The other side of the same test: a nested function or a nested class
+    # binds its own names, so a binding inside one is not the outer
+    # class's attribute however deeply the class body nests it.
+    ('nested-class-body-binding-is-not-the-outer-class-attribute',
+     "import subprocess\n"
+     "class Holder:\n"
+     "    class Inner:\n"
+     "        mod = subprocess\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'declares no launch the audit can see through'),
+    ('nested-function-body-binding-is-not-a-class-attribute',
+     "import subprocess\n"
+     "class Holder:\n"
+     "    if True:\n"
+     "        def build():\n"
+     "            mod = subprocess\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'declares no launch the audit can see through'),
+    # The base name is read through the scope the class statement sits
+    # in, so a class of the same name defined inside a function does not
+    # take the module-level one's place.
+    ('function-local-class-does-not-shadow-the-base-name',
+     "import json\n"
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "def build():\n"
+     "    class Base:\n"
+     "        mod = json\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('qualified-base-attribute-receiver',
+     "import subprocess\n"
+     "class Outer:\n"
+     "    class Base:\n"
+     "        mod = subprocess\n"
+     "class Child(Outer.Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # Negative space of the base-name union: a name the scope binds twice
+    # yields every class it could name, so a base that binds the module
+    # and a later rebinding of that name to another module over-refuse.
+    ('base-name-bound-twice-over-refuses-either-class',
+     "import json\n"
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Base:\n"
+     "    mod = json\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('diamond-bases-disagree-over-refuses',
+     "import json\n"
+     "import subprocess\n"
+     "class Root:\n"
+     "    pass\n"
+     "class Far(Root):\n"
+     "    mod = json\n"
+     "class Near(Root):\n"
+     "    mod = subprocess\n"
+     "class Both(Far, Near):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # The `+`-folding arm recurses into fresh resolver calls, each with
+    # its own loop, so the loop cap alone does not bound it.
+    ('import-module-name-from-a-parameter',
+     "import importlib\n"
+     "import subprocess\n"
+     "def go(argument):\n"
+     "    mod = importlib.import_module(argument)\n"
+     "    return mod.run(['git', 'status'], check=True, timeout=30)\n",
+     'declares no launch the audit can see through'),
+    ('base-name-bound-twice-catches-either-class',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = json\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
 )
