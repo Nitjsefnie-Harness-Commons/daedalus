@@ -7,7 +7,8 @@ and the proxy access log, an object URL that is never revoked, or a
 stale cache entry that outlives the listing it came from. Each harness
 mounts dashboard/sections/uploads.js into a small DOM in Node, drives
 its own buttons, and judges the fetches it makes, the hrefs it renders
-and the object URLs it lets go of.
+and the object URLs it lets go of. The capture harnesses mount their own
+sections the same way.
 """
 import json
 import os
