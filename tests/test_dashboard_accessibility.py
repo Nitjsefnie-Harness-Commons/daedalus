@@ -183,6 +183,26 @@ def _css_variables(text):
                            block.group(1)))
 
 
+def _class_colours(text):
+    """The `color:` each bare class selector declares, for every such rule.
+
+    A selector list answers once per class it names, so `.sl-v, .sl-meta`
+    answers for both. Only a selector that is exactly one class counts, so a
+    descendant or attribute selector — a colour the class is given by
+    context, not one it carries — is not mistaken for a declaration.
+    """
+    colours = {}
+    for selectors, body in re.findall(r'([^{}]+)\{([^{}]*)\}', text):
+        declared = re.search(r'(?<![\w-])color\s*:\s*([^;]+);', body)
+        if declared is None:
+            continue
+        for selector in selectors.split(','):
+            name = re.fullmatch(r'\.([\w-]+)', selector.strip())
+            if name:
+                colours[name.group(1)] = declared.group(1).strip()
+    return colours
+
+
 def _relative_luminance(colour):
     def channel(offset):
         value = int(colour[offset:offset + 2], 16) / 255
@@ -229,6 +249,34 @@ def test_dashboard_text_colours_meet_wcag_contrast(tmp):
                     f'{text_var} {variables[text_var]} on {surface_var} '
                     f'{variables[surface_var]}: {ratio:.3f}:1')
     assert not failures, '\n'.join(failures)
+
+
+def test_every_status_line_cell_is_styled_like_the_version_cell(tmp):
+    """Each status cell's class reaches a rule colouring it like the version.
+
+    The contrast control reads the custom properties, so it cannot see a
+    cell whose class no rule styles at all: dropping `sl-meta` from the
+    `.sl-v, .sl-meta` selector list leaves four status cells uncoloured and
+    that control green. This one resolves each shipped cell's class to the
+    colour it declares, which is the fact the selector list exists to keep.
+    """
+    del tmp
+    markup = (ROOT / 'dashboard' / 'index.html').read_text(encoding='utf-8')
+    footer = re.search(
+        r'<footer class="statusline">.*?</footer>', markup, re.S)
+    assert footer, 'the status line footer is gone'
+    cells = re.findall(
+        r'<span class="sl-k">[^<]*</span><span class="([^"]+)"',
+        footer.group(0))
+    assert len(cells) == 5, cells
+    colours = _class_colours(
+        (ROOT / 'dashboard' / 'style.css').read_text(encoding='utf-8'))
+    version = colours.get('sl-v')
+    assert version, 'the version cell has no colour rule of its own'
+    for name in cells:
+        assert colours.get(name) == version, (
+            f'status cell .{name} resolves to {colours.get(name)!r}, '
+            f"not the version cell's {version!r}")
 
 
 def test_the_contrast_check_still_fails_a_failing_pair(tmp):
