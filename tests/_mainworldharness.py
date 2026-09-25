@@ -140,9 +140,11 @@ chrome.scripting.executeScript = async (injection) => {
   }
   if (injection.func.name === '_canUseMainWorldEval') {
     probeCount++;
-    if (mode === 'replay-probe-hang' && probeCount === 1) {
+    if ((mode === 'replay-probe-hang' || mode === 'eval-probe-hang')
+        && probeCount === 1) {
       // The first probe never answers, so the injection after it is never
-      // reached: only a bound over the whole operation contains it.
+      // reached: only a bound over the whole operation contains it, and the
+      // eval path's own probe is bounded the same way.
       return new Promise(() => {});
     }
     // A page whose CSP refuses dynamic compilation. The probe runs for real
@@ -159,7 +161,7 @@ chrome.scripting.executeScript = async (injection) => {
 };
 
 chrome.debugger.attach = async () => {
-  if (mode === 'replay-cdp-timeout') return;
+  if (mode === 'replay-cdp-timeout' || mode === 'eval-probe-hang') return;
   throw new Error('cdp unused in bound harness');
 };
 chrome.debugger.sendCommand = async (target, method) => {
@@ -168,6 +170,10 @@ chrome.debugger.sendCommand = async (target, method) => {
   // A wedged dispatch is the CDP-routed counterpart of a never-settling
   // page promise: the per-fix bound is what contains it.
   if (mode === 'replay-cdp-timeout') return new Promise(() => {});
+  // A plain dispatched value, for the eval whose own probe never answered.
+  if (mode === 'eval-probe-hang') {
+    return { result: { type: 'number', value: 2 } };
+  }
   return {};
 };
 
@@ -283,6 +289,9 @@ async function run() {
       _did: 'did-eval-timeout',
     };
     vm.runInContext('dispatchCommand(command)', context);
+    // The probe is bounded too, so the injection's own bound is identified
+    // by the submitted source having run, not by being the first arming.
+    await waitForResult(() => Boolean(evalResolvers.started));
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     const postedBeforeClock = postedResults.length;
@@ -310,18 +319,48 @@ async function run() {
     };
     const execution = vm.runInContext(
       'dispatchCommand(command)', context);
+    // Wait for the submitted promise to exist, so the clock step lands on
+    // the injection's bound and the probe's bound is already cleared.
+    await waitForResult(
+      () => typeof evalResolvers.finish === 'function');
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     // Settle strictly inside the window: a bound that fires early is
     // crossed here and loses the real value below.
     if (armed) advanceClock(9000);
-    if (typeof evalResolvers.finish === 'function') evalResolvers.finish();
+    evalResolvers.finish();
     const got = await waitForResult(
       () => postedResults.length >= 1);
     await execution;
     return {
       armed,
       got,
+      ...observed(),
+      posted: postedSummary(postedResults),
+    };
+  }
+
+  if (mode === 'eval-probe-hang') {
+    context.command = {
+      id: '_eval',
+      type: 'eval',
+      code: '1+1',
+      chromeTab: 7,
+      _did: 'did-eval-probe-hang',
+    };
+    vm.runInContext('dispatchCommand(command)', context);
+    const armed = await waitForResult(
+      () => clock.armed.size > 0);
+    const postedBeforeClock = postedResults.length;
+    const at = nextDeadline();
+    if (at !== null) advanceClock(at);
+    const got = await waitForResult(
+      () => postedResults.length >= 1);
+    return {
+      armed,
+      postedBeforeClock,
+      got,
+      dispatches: cdpDispatches.length,
       ...observed(),
       posted: postedSummary(postedResults),
     };
@@ -458,6 +497,10 @@ def run_main_world_eval_timeout():
 
 def run_main_world_eval_inside():
     return _run_bound_child('eval-inside')
+
+
+def run_main_world_eval_probe_hang():
+    return _run_bound_child('eval-probe-hang')
 
 
 def run_hotfix_replay_timeout():
