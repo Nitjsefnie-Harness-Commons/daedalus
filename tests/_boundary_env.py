@@ -68,6 +68,9 @@ SCENARIO_PLANS = {
     'unblock-zero': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
     'hotfix-race': {'planned': [SYNC, RESULT, RESULT],
                     'planned_stream': [503]},
+    # This scenario's plan is its caller's, so the row declares only the
+    # traffic every run makes; the runner adds the run's own results.
+    'hotfix-quota': {'planned': [SYNC], 'planned_stream': [503]},
     'net-capture': {'planned': [SYNC] + [RESULT] * 4, 'planned_stream': [503]},
     'net-capture-ownership': {'planned': [SYNC] + [RESULT] * 10,
                               'planned_stream': [503]},
