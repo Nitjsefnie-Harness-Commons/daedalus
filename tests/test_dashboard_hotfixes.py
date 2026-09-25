@@ -81,10 +81,13 @@ function clickArmed(id, label) {
   const button = rowFor(id).byText(label);
   button.click();
   globalThis.setTimeout = immediate;
-  // A second click only when the first armed something. A control that
-  // answers the first click is a different control, and the count below
-  // reports it rather than firing its handler twice and hanging the run.
-  if (held.length) button.click();
+  // A control that answers the first click did not arm, and it is not the
+  // control under test. Stop here, naming it, rather than let the run
+  // escalate through the outer backstop and report a timeout instead.
+  if (!held.length) {
+    throw new Error(label + ' armed nothing: the control is not armed');
+  }
+  button.click();
   return held;
 }
 function form() {

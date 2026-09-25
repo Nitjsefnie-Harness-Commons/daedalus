@@ -242,7 +242,12 @@ function evaluateIn(doc, expression) {
 // CDP is tab-bound: the expression runs in whatever document the tab holds
 // now, which is the whole reason the submitted source carries its own check.
 async function sendCommand(_target, method, params) {
-  if (method !== 'Runtime.evaluate') return {};
+  // An unmodelled method is refused, not answered: `_cdpError({})` is null, so
+  // a `{}` here reads as "no error, the fix ran" and a control that planted
+  // a different method would be told the page said nothing wrong.
+  if (method !== 'Runtime.evaluate') {
+    throw new Error('unmodelled CDP method ' + method);
+  }
   submitted.push({
     replMode: params.replMode === true,
     awaitPromise: params.awaitPromise === true,
@@ -295,7 +300,12 @@ const chrome = {
     query: async () => [{ id: TAB_ID, url: currentDocument.url,
                            title: 'Page' }],
     get: async (id) => ({ id, url: currentDocument.url, title: 'Page' }),
-    sendMessage: async () => {},
+    // Declared, never called on this path; a call is a shape this double
+    // does not model, so it fails rather than reporting a send that nobody
+    // can observe.
+    sendMessage: async () => {
+      throw new Error('unmodelled tabs.sendMessage');
+    },
   },
   scripting: { executeScript },
   debugger: {

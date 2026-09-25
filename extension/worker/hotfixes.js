@@ -130,11 +130,12 @@ function _scopedIdentity(parsed) {
 // Matched against the page the browser reported, with no fallback: a scoped
 // fix whose sender named no page runs nowhere.
 function _scopeRefusal(fix, identity) {
-  if (typeof fix.match !== 'string') return '';
+  if (fix.match === undefined || fix.match === null) return '';
+  // The store refuses a pattern it cannot parse, but its carry-over keeps
+  // what the record already holds without re-parsing, and a record is
+  // writable from the extension's own pages: an unusable scope reaches the
+  // record either way, and reading one as no scope is the widening.
   const parsed = _parseMatch(fix.match);
-  // The store refuses a pattern that does not parse, so one carrying it was
-  // written outside the store, which is operator-reachable: an unusable scope
-  // must not read as no scope.
   if (!parsed) return 'scope ' + fix.match + ' does not parse';
   if (!_matchesScope(parsed, identity)) {
     return 'scoped to ' + fix.match + ' and this page is not it';

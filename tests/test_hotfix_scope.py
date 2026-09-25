@@ -588,6 +588,86 @@ def test_a_file_scope_naming_a_host_is_refused_at_store_time(tmp):
     assert outcome['stored'] == [{'id': 'plain', 'match': FILE_SCOPE}], outcome
 
 
+# A scope that is not a string cannot be parsed and cannot be compared; the
+# four shapes below are the ones a record can plausibly carry out of the
+# store's own hands, and `true` is the sharpest — the branch spent ruling 9
+# and C13 guaranteeing the clear's own value can never be stored there.
+NON_STRING_SCOPES = (123, True, ['*'], {'a': 1})
+
+
+def test_a_stored_scope_that_is_not_a_string_runs_nothing(tmp):
+    """A scope the store cannot read is refused, not taken for no scope.
+
+    `_scopeRefusal` separates the two absent spellings from a value it cannot
+    read at all, and the difference is the widening direction: a record whose
+    `match` is a number, a boolean, a list or an object was scoped, and
+    reading it as unscoped runs that fix on every site its author scoped it
+    away from. The non-parseable STRING beside it is already refused, so the
+    permissive arm is the one place the function's own rule was not honoured.
+    """
+    del tmp
+    for value in NON_STRING_SCOPES:
+        outcome = run_hotfix_case({
+            'documents': [SITE],
+            'current': 0,
+            'asker': 0,
+            'fixes': [
+                {'id': 'unreadable',
+                 'code': "daedalusHits.push('unreadable')",
+                 'match': value},
+                # The anti-vacuity half, in the same record on the same page:
+                # both absent spellings — the key missing, and the key
+                # present and null — are fixes with no scope, and they run. A
+                # guard that refuses everything, or one that cannot tell a
+                # null from an unreadable value, fails here.
+                {'id': 'nulled', 'code': "daedalusHits.push('nulled')",
+                 'match': None},
+                {'id': 'plain', 'code': "daedalusHits.push('plain')"},
+            ],
+        })
+        assert _delivered(outcome) == {'doc-1': ['nulled', 'plain']}, (
+            value, outcome)
+        assert not _errors(outcome), (value, outcome)
+        assert _logs(outcome)[0] == (
+            '[Daedalus] replayed 2 hotfix(es) on tab 7'), (value, outcome)
+        skipped = [line for line in _logs(outcome) if 'by site scope' in line]
+        assert len(skipped) == 1, (value, outcome)
+        assert 'unreadable' in skipped[0], (value, outcome)
+
+
+CONTAINED_SCOPE_PAGE = ('https://other.example.com/'
+                        '?u=https://shop.example.com/cart')
+EXACT_SCOPE = '*://shop.example.com/cart'
+
+
+def test_a_scope_does_not_match_a_query_carrying_its_own_text(tmp):
+    """The matcher is anchored at both ends, and the anchors are the defence.
+
+    Every other scope control's non-matching page sits on a DIFFERENT
+    authority, so the suite's negative table never held a URL with the
+    pattern inside it. Unanchored, `*://shop.example.com/cart` matches the
+    page named above, and a fix scoped to one exact path is delivered to a
+    page on another host whose query happens to quote it — the scope the
+    operator believes exists and does not, arriving by the route the anchors
+    close.
+    """
+    del tmp
+    for page, delivers in ((CONTAINED_SCOPE_PAGE, False), (SITE, True)):
+        outcome = run_hotfix_case({
+            'documents': [page],
+            'current': 0,
+            'asker': 0,
+            'fixes': [{'id': 'fix1', 'code': FIX, 'match': EXACT_SCOPE}],
+        })
+        assert _delivered(outcome) == ({'doc-1': ['fix1']} if delivers
+                                       else {}), (page, outcome)
+        # The refusal is a reported skip, not an error, so the negative half
+        # is pinned on the skip line the code actually raises.
+        skipped = [line for line in _logs(outcome) if 'by site scope' in line]
+        assert len(skipped) == (0 if delivers else 1), (page, outcome)
+        assert not _errors(outcome), (page, outcome)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='hotfixscope_')
 
