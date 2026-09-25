@@ -276,13 +276,37 @@ def launch_refusals(source, here):
             return None
         return None
 
+    def resolve_constant(element):
+        """An argv element's string constant, following a name binding."""
+        if isinstance(element, ast.Constant) \
+                and isinstance(element.value, str):
+            return element.value
+        if isinstance(element, ast.Name):
+            bound_value = binding_map.get(element.id)
+            if isinstance(bound_value, ast.Constant) \
+                    and isinstance(bound_value.value, str):
+                return bound_value.value
+        return None
+
     def read_words(container):
-        """A literal list/tuple's string words; non-strings become None."""
+        """A literal list/tuple's string words, names resolved; else None."""
         if container is None:
             return []
-        return [elt.value if isinstance(elt, ast.Constant)
-                and isinstance(elt.value, str) else None
-                for elt in container.elts]
+        return [resolve_constant(element) for element in container.elts]
+
+    def first_word(container):
+        """The head's string constant and whether the audit could read it.
+
+        A head element bound to a name resolves to its constant, so
+        `[GIT, 'status']` with `GIT = 'git'` classifies as a git launch. A
+        head element that is not a readable string constant is unreadable,
+        never a provable non-git: on the exemption path a wrong non-git
+        label would silently widen the exempt set.
+        """
+        if container is None or not container.elts:
+            return (None, container is not None)
+        value = resolve_constant(container.elts[0])
+        return (value, value is not None)
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) \
@@ -361,9 +385,10 @@ def launch_refusals(source, here):
         argv = node.args[0] if node.args else None
         container = resolve_argv(argv) if argv is not None else None
         words = read_words(container)
-        if words and words[0] == 'git':
+        first_value, first_readable = first_word(container)
+        if first_value == 'git':
             head = 'git'
-        elif container is not None:
+        elif first_readable:
             head = 'non-git'
         else:
             head = 'unreadable'

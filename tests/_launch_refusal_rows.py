@@ -29,8 +29,8 @@ LAUNCH_REFUSAL_ROWS = (
      "argv does not start with the constant 'git'"),
     ('name-head-not-sys.executable',
      "import subprocess\n"
-     "git = 'git'\n"
-     "subprocess.run([git, 'clone'], check=True)\n",
+     "node = 'node'\n"
+     "subprocess.run([node, 'x'], check=True)\n",
      "argv does not start with the constant 'git'"),
     ('wall-clock-timeout-argument',
      "import subprocess\n"
