@@ -82,12 +82,21 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
 
 
 def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
-    """The carried-by-the-branch exclusion is one declared entry."""
+    """The carried-by-the-branch exclusion is exactly its declared entries.
+
+    Every carried file must itself NOT be gate-defining: the exclusion only
+    earns its keep for files that genuinely are not gates, so a carried file
+    that became a real gate would be silently hidden by it."""
     del tmp
     m = _mod()
-    assert m.CARRIED_BY_THE_BRANCH == ('.github/ci-thresholds.json',)
-    assert not m.is_gate_defining('.github/ci-thresholds.json')
-    assert '.github/ci-thresholds.json' not in m.GATE_PATTERNS
+    assert m.CARRIED_BY_THE_BRANCH == (
+        '.github/ci-thresholds.json',
+        'tests/test_timed_planner.py',
+        'tests/test_timed_refresh.py',
+    )
+    for carried in m.CARRIED_BY_THE_BRANCH:
+        assert not m.is_gate_defining(carried), carried
+        assert carried not in m.GATE_PATTERNS, carried
     doc = m.__doc__ or ''
     assert 'carries itself' in doc or 'carry' in doc
 

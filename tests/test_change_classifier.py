@@ -354,9 +354,13 @@ _MEASUREMENT_JOB, _ = _matrix_job_running(
     {'os': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
      'python': ['3.13']},
     'coverage_suites.py')
+# `plan-matrix` is a gate like every other job here: a planner that cannot
+# plan turns this aggregate red, and `timed` — which names the aggregate and
+# the planner in `needs:` — is skipped rather than measuring a silently
+# shrunk matrix.
 AGGREGATE_DEPS = ('changes', 'pycodestyle', 'pylint', 'pyright', 'eslint',
                   'actionlint', 'suites', 'wheel', 'coverage-matrix',
-                  'coverage')
+                  'coverage', 'plan-matrix')
 CONDITION_CONTEXTS = (
     ({'success': True, 'failure': False, 'cancelled': False}, True),
     ({'success': False, 'failure': False, 'cancelled': False}, True),
@@ -385,12 +389,18 @@ def test_changes_job_exposes_every_classifier_output(tmp):
     assert not missing, missing
 
 
-def test_changes_job_outputs_reference_existing_step_ids(tmp):
+def test_output_jobs_reference_existing_step_ids(tmp):
+    """Every job that declares `outputs:` has each one read from a real step.
+
+    `plan-matrix` is in the set because it must declare `outputs:` for
+    actionlint to type `needs.plan-matrix.outputs.matrix`; the load-bearing
+    half is the per-job `referenced <= declared` check, which is what this
+    test exists for."""
     del tmp
     workflow = _tests_yml()
     output_jobs = _job_names_with_outputs(workflow)
-    assert set(output_jobs) == {'changes'}, output_jobs
-    assert len(output_jobs) == len(set(output_jobs)) == 1, output_jobs
+    assert set(output_jobs) == {'changes', 'plan-matrix'}, output_jobs
+    assert len(output_jobs) == len(set(output_jobs)), output_jobs
     for job in output_jobs:
         referenced = _job_output_step_ids(workflow, job)
         declared = _job_step_ids(workflow, job)
