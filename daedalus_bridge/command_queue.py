@@ -238,7 +238,10 @@ def _publish(qdir, stem, document):
     The drain decodes UTF-8 and skips dot-prefixed names, so the encoding is
     fixed here rather than left to the locale -- a code-page file is
     undecodable on Windows and stays queued until the TTL sweep -- and the
-    final name only appears complete.
+    final name only appears complete. Under `command_fs_lock`, the same lock
+    that guards the `next_seq` mint, so the temp-then-rename and the mint are
+    mutually exclusive: a stem cannot be handed out between the temp and the
+    rename that publishes it.
     """
     tmp, destination = qdir / f'.{stem}.tmp', qdir / f'{stem}.json'
     try:
