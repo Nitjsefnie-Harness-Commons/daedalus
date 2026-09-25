@@ -343,6 +343,7 @@
 !/tests/_pyroute_setops.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
+!/tests/_pyroute_stores.py
 !/tests/_pyroute_targets.py
 !/tests/_pyroute_values.py
 !/tests/_pyroute_violations.py

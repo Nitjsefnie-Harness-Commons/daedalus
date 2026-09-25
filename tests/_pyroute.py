@@ -20,6 +20,8 @@ from _pyroute_live import (clear_expression_cache, live_expression_value,
                            seed_then_resolve)
 from _pyroute_mapping import (apply_deferred_store as store_deferred_value,
                               literal_pair_keys)
+# `payload_keys` is re-exported for the suites; the flow itself no
+# longer reads it. pylint: disable-next=unused-import
 from _pyroute_state import (BUILTIN_CONSUMERS as _BUILTIN_CONSUMERS,
                             COMPREHENSIONS as _COMPREHENSIONS,
                             UNPROVABLE_SENDER as _UNPROVABLE_SENDER,
