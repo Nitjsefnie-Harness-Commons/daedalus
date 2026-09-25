@@ -283,6 +283,18 @@ def test_status_line_class_token_suffix_with_attribute_is_not_a_site(
         tmp_path, "<span class='sl-value' id='x'>9.9.9</span>", _STATUS)
 
 
+def test_status_line_class_token_prefix_is_not_a_site(tmp_path):
+    """The token boundary holds at the front as well as the back.
+
+    The prefix side of the class-value group is what keeps `sl-v` a whole
+    token rather than a substring, and it had no control of its own: the
+    quoted arm. Relaxing it to `\\w*sl-v` turns `notsl-v` into a second
+    version site while the unquoted arm's control still passes.
+    """
+    _assert_markup_is_not_a_site(
+        tmp_path, "<span class='notsl-v' id='x'>9.9.9</span>", _STATUS)
+
+
 def test_uppercase_rail_class_value_is_not_a_site(tmp_path):
     """Class names are case-sensitive in standards mode, so the value is."""
     _assert_markup_is_not_a_site(
