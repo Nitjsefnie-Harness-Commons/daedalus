@@ -51,7 +51,12 @@ def _record_step(tmp, verdict, ratio=None):
     reports = Path(tmp) / 'reports'
     reports.mkdir()
     if ratio is not None:
-        (reports / 'ratio.txt').write_text(ratio, encoding='utf-8')
+        # BYTES: the step reads this with `ratio="$(cat reports/ratio.txt)"`
+        # and injects it straight into a JSON `printf`. Text mode would make
+        # that trailing `\n` a `\r\n` on Windows, the `\r` survives command
+        # substitution, and the emitted `verdict.json` no longer equals the
+        # exact bytes the assertions compare against.
+        (reports / 'ratio.txt').write_bytes(ratio.encode('utf-8'))
     environment = {'GROUP': 'bridge', 'VERDICT': verdict}
     return run_workflow_script(
         tmp, workflow_script(workflow, 'timed', 'Record the cell verdict'),

@@ -551,7 +551,12 @@ def _find_baseline(tmp, name, rows, **environment):
     calls = workdir / 'gh-calls'
     calls.write_text('', encoding='utf-8')
     row_file = workdir / 'gh-rows'
-    row_file.write_text(rows, encoding='utf-8')
+    # BYTES: the stub `cat`s this file as `gh --jq` output, and the step
+    # puts it through `$(...)` and then `is_sha`, which rejects any byte
+    # outside [0-9a-f]. Text mode would make that trailing `\n` a `\r\n`
+    # on Windows, the `\r` survives command substitution, and the step
+    # fails with "not 40 lowercase hex digits".
+    row_file.write_bytes(rows.encode('utf-8'))
     output = workdir / 'github-output'
     output.write_text('', encoding='utf-8')
     summary = workdir / 'summary.md'
