@@ -288,16 +288,31 @@ def test_a_stale_head_publishes_a_red_check(tmp):
     assert verdicts[0].kind == 'stale'
 
 
+def _process_capturing_stderr(m, read, heads, **kwargs):
+    """One `process` call with its stderr captured. Returns (code, verdicts,
+    stderr): the exit code pins what the run does, the stderr is the only
+    witness that it said so."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code, verdicts = m.process(read, 'o/r', heads,
+                                   [('.pylintrc', G1)], RUN, **kwargs)
+    return code, verdicts, err.getvalue()
+
+
+_MOVED = 'gate freshness: head of pull request 7 moved; skipping'
+
+
 def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
     del tmp
     m = _mod()
     published = []
     read = _flow_read(m, {'.pylintrc': [G1]}, {7: 'z' * 40}, published)
-    code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                               [('.pylintrc', G1)], RUN)
+    code, verdicts, err = _process_capturing_stderr(
+        m, read, m.select_heads([_pr(7)]))
     assert published == [], 'published onto a superseded SHA'
     assert code == 0, 'a moved head gets its own verdict; not a failure'
     assert verdicts == []
+    assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
 def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
@@ -307,10 +322,11 @@ def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
     m = _mod()
     published = []
     read = _flow_read(m, {}, {7: HEAD}, published, moved='m' * 40)
-    code, _ = m.process(read, 'o/r', m.select_heads([_pr(7)]),
-                        [('.pylintrc', G1)], RUN)
+    code, _, err = _process_capturing_stderr(m, read,
+                                             m.select_heads([_pr(7)]))
     assert published == [], 'published onto a SHA that stopped being the head'
     assert code == 0, 'a moved head gets its own verdict; not a failure'
+    assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
 def _writing_read(m, published, current, **flow):
@@ -322,8 +338,9 @@ def _writing_read(m, published, current, **flow):
     base = _flow_read(m, {'.pylintrc': [G1]}, current, published, **flow)
 
     def read(argv):
+        before = len(published)
         answer = base(argv)
-        if any(field.startswith('head_sha=') for field in argv):
+        if len(published) > before:
             sha = next(field[len('head_sha='):] for field in argv
                        if field.startswith('head_sha='))
             published[-1] = (sha, 'POST')
@@ -399,6 +416,24 @@ def test_a_per_head_write_failure_skips_that_head_and_continues(tmp):
     assert len(published) == 1, 'the run abandoned the later head'
     assert code != 0, 'a per-head write failure must be loud'
     assert len(verdicts) == 1
+
+
+def test_the_run_fails_when_the_only_head_cannot_be_published(tmp):
+    """A one-head run whose only write fails publishes nothing and must still
+    exit nonzero: a healthy sibling is not what makes the run red. This is the
+    limb a `failed and published` exit code drops."""
+    del tmp
+    m = _mod()
+    published = []
+    bad = 'b' * 40
+    read = _flow_read(m, {'.pylintrc': [G1]}, {7: bad}, published,
+                      fail_listing_for=(bad,))
+    code, verdicts, err = _process_capturing_stderr(
+        m, read, m.select_heads([_pr(7, sha=bad)]))
+    assert published == [], 'published onto a head whose write failed'
+    assert verdicts == []
+    assert code == 1, 'a run with no verdict published at all must fail'
+    assert 'could not publish the verdict for pull request 7' in err, err
 
 
 def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
