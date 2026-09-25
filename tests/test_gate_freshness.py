@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""Contract for the gate-freshness decision core (issue 1008).
-
-Every decision function is pure and driven here through an injected fake for
-the ``read`` seam, so a verdict is tested without a network. The two halves
-that must never be confused -- "the branch is stale" and "the answer could not
-be computed" -- get separate entries, and the publish path is exercised
-against a head already carrying a published success, because overwriting that
-green is the whole defect. The orchestration (``process``/``main``), the run
-bound, and the workflow shape live in ``test_gate_freshness_run.py``.
+"""Contract for the gate-freshness decision core (issue 1008). Every
+decision function is pure and driven through an injected fake for the ``read``
+seam. "Stale" and "could not be computed" get separate entries, and the publish
+path runs against a head already carrying a published success, because
+overwriting that green is the whole defect. Orchestration lives in
+``test_gate_freshness_run.py``.
 """
 import json
 import os
@@ -85,13 +82,10 @@ def test_near_miss_spellings_are_not_gate_defining(tmp):
 
 
 def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
-    """The baselines the branch carries itself are excluded, and the rule is
-    narrow enough to notice if it is widened by a new entry without a
-    reason."""
+    """The carried-by-the-branch exclusion is one declared entry."""
     del tmp
     m = _mod()
     assert m.CARRIED_BY_THE_BRANCH == ('.github/ci-thresholds.json',)
-    # Excluded from the set: a branch measures its own tree, so it is safe.
     assert not m.is_gate_defining('.github/ci-thresholds.json')
     assert '.github/ci-thresholds.json' not in m.GATE_PATTERNS
     doc = m.__doc__ or ''
@@ -99,12 +93,8 @@ def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
 
 
 def test_the_docstring_justifies_every_pattern(tmp):
-    """Each entry is justified in the module docstring, not merely listed.
-
-    The pattern's OWN spelling must appear, so a `/**` directory pattern is
-    held too: taking a leaf of `.github/workflows/**` yields the empty string,
-    and `'' in doc` is always true.
-    """
+    """Each pattern's own spelling is in the docstring, so a `/**` pattern is
+    held too (its leaf is empty, and `''` is always `in doc`)."""
     del tmp
     m = _mod()
     doc = m.__doc__ or ''
@@ -123,7 +113,6 @@ _FLAG_VALUE = re.compile(
 
 
 def _git_tracked(base):
-    """The tracked files of the git repository at `base`."""
     listed = subprocess.run(
         ['git', '-C', str(base), 'ls-files', '-z'],
         capture_output=True, check=True, timeout=30)
@@ -131,12 +120,9 @@ def _git_tracked(base):
 
 
 def _normalise(candidate, base, tracked):
-    """A TRACKED repo-relative path for `candidate`, or None.
-
-    A candidate qualifies only when it names a file that exists on disk (the
-    shape check) AND is in the injected `tracked` set (the real meaning of
-    tracked). is_file() alone would admit a file a job generates at run time.
-    """
+    """A TRACKED repo-relative path for `candidate`, or None. A candidate
+    must exist on disk AND be in the injected `tracked` set; is_file() alone
+    would admit a file a job generates at run time."""
     parts = [p for p in candidate.split('/')
              if p and p not in ('.', '..', 'head')]
     parts = [p for p in parts if not p.startswith('$')]
@@ -147,15 +133,11 @@ def _normalise(candidate, base, tracked):
 
 
 def _workflow_gate_files(directory, base=ROOT, tracked=None):
-    """Every TRACKED file a workflow invokes or passes to a tool.
-
-    Three forms: a `.py` a step executes, an executable-path step
-    (`./scripts/x.sh`), and a file passed by a config-style flag. Candidates
-    are kept only when they name a TRACKED file (see `_normalise`), which is
-    what excludes files a job generates at run time and shell fragments like
-    `-r 'arrays'` that a jq expression contributes. `tracked` defaults to the
-    real `git ls-files` set and is injected for a fabricated tree.
-    """
+    """Every TRACKED file a workflow invokes or passes to a tool, in three
+    forms: an executed `.py`, an executable-path step, and a config-style flag
+    value. Keeping only tracked files excludes generated ones and jq
+    fragments; `tracked` defaults to `git ls-files` and is injected for a
+    fabricated tree."""
     if tracked is None:
         tracked = _git_tracked(base)
     found = set()
@@ -173,13 +155,9 @@ def _workflow_gate_files(directory, base=ROOT, tracked=None):
 
 
 def test_every_gate_file_a_workflow_uses_is_accounted_for(tmp):
-    """The set is derived from the workflows, not trusted from a reading.
-
-    Every TRACKED file a workflow invokes or passes to a tool must be gate-
-    defining, unless it is a declared carried-by-the-branch file. A gate file
-    added to a workflow later -- including one outside scripts/ci/ -- fails
-    here rather than going silently unlisted.
-    """
+    """Every TRACKED file a workflow invokes or passes to a tool must be
+    gate-defining, unless declared carried-by-the-branch, so a gate file added
+    later fails here rather than going silently unlisted."""
     del tmp
     m = _mod()
     used = _workflow_gate_files(ROOT / '.github' / 'workflows')
@@ -202,13 +180,8 @@ def test_the_guard_accounts_for_the_files_the_set_now_carries(tmp):
 
 
 def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
-    """The derivation discriminates where the literal list did not.
-
-    A new gate script run by a workflow from OUTSIDE scripts/ci/ -- the shape
-    scripts/check_versions.py already ships -- is a real tracked file, so the
-    guard requires it to be gate-defining. A literal list of nine config names
-    would not have seen this file.
-    """
+    """A gate script run by a workflow from OUTSIDE scripts/ci/ is a real
+    tracked file, so the guard requires it to be gate-defining."""
     m = _mod()
     base = Path(tmp) / 'repo'
     (base / 'scripts').mkdir(parents=True)
@@ -223,19 +196,14 @@ def test_a_planted_gate_script_outside_scripts_ci_is_caught(tmp):
     used = _workflow_gate_files(
         workflows, base=base, tracked={'scripts/scan_secrets_extra.py'})
     assert 'scripts/scan_secrets_extra.py' in used
-    # The guard's assertion, run against the planted tree: the file is used but
-    # not gate-defining, so the guard would fail here -- which is the point.
     unaccounted = used - set(m.CARRIED_BY_THE_BRANCH)
     not_gate = [p for p in unaccounted if not m.is_gate_defining(p)]
     assert not_gate == ['scripts/scan_secrets_extra.py'], not_gate
 
 
 def test_a_gate_invoked_by_path_outside_scripts_ci_is_caught(tmp):
-    """An executable-path step (`./scripts/x.sh`) is seen, not just `.py`.
-
-    The REACH LIMIT is a `python3 -m module` or a bare-tool invocation; a step
-    that runs a tracked script BY PATH is reachable and must be accounted for.
-    """
+    """An executable-path step (`./scripts/x.sh`) is reachable, not just
+    `.py`; the REACH LIMIT names only `python3 -m module` and bare tools."""
     base = Path(tmp) / 'repo'
     (base / 'scripts').mkdir(parents=True)
     (base / 'scripts' / 'version_gate.sh').write_text('#!/bin/sh\n',
@@ -251,13 +219,8 @@ def test_a_gate_invoked_by_path_outside_scripts_ci_is_caught(tmp):
 
 
 def test_flagged_and_versioned_python_invocations_are_reached(tmp):
-    """`python3 -u PATH` and `python3.13 PATH` are seen, not just `python3`.
-
-    The REACH LIMIT names only the five discovery-read config files and
-    `python3 -m module`; a flagged or versioned interpreter is a path the
-    matcher must reach, or the code sees fewer real invocations than the
-    sentence admits -- the same overclaim that licensed the Critical.
-    """
+    """A flagged or versioned interpreter is a path the matcher must reach,
+    or it sees fewer invocations than the reach sentence admits."""
     for spelling in ('python3 -u scripts/lint_gate.py',
                      'python3.13 scripts/lint_gate.py',
                      'python scripts/lint_gate.py'):
@@ -276,13 +239,8 @@ def test_flagged_and_versioned_python_invocations_are_reached(tmp):
 
 
 def test_a_generated_untracked_requirements_file_is_not_required(tmp):
-    """A file a job generates at run time is not a TRACKED gate file.
-
-    `is_file()` alone would admit extras-requirements.txt the moment it exists
-    on disk, which it does on any machine that has run audit.yml. The tracked
-    SET is what excludes it, so this entry plants the file, injects a tracked
-    set WITHOUT it, and shows the guard still does not require it.
-    """
+    """A generated file is excluded by the tracked SET, not by its absence
+    from disk: it is planted here and still not required."""
     m = _mod()
     base = Path(tmp) / 'repo'
     (base / '.github' / 'workflows').mkdir(parents=True)
@@ -360,7 +318,6 @@ def test_an_unreadable_compare_is_red_and_states_the_observation(tmp):
     assert verdict.conclusion == 'failure'
     assert verdict.kind == 'unreadable'
     text = verdict.title + ' ' + verdict.summary
-    # The observation, positively: the compare request and its failure appear.
     assert 'compare' in text
     assert f'compare/{G1}...{HEAD}' in text
     assert 'HTTP 404' in text
@@ -402,14 +359,8 @@ def test_enumerate_gates_reads_one_commit_for_every_pattern(tmp):
 
 
 def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
-    """The SHAPE the endpoint accepts, not a well-formed string.
-
-    GitHub's `commits?path=` is a directory-prefix filter and does NOT expand a
-    `**` glob. A lexical "is the request well-formed" check would have passed
-    while the string meant nothing to the API. This pins that no glob reaches
-    the endpoint, that the two directory patterns arrive as their BARE
-    directory, and that an exact pattern is sent unchanged.
-    """
+    """The SHAPE the endpoint accepts, not a well-formed string: a lexical
+    check would have passed while the string meant nothing to the API."""
     del tmp
     m = _mod()
     asked = []
@@ -419,7 +370,6 @@ def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
         assert '*' not in request, request
     assert '.github/workflows' in asked, asked
     assert 'scripts/ci' in asked, asked
-    # an exact pattern is sent unchanged
     for exact in ('.pylintrc', 'setup.cfg', 'run_tests.py',
                   'requirements-dev.txt', 'requirements-test.txt',
                   'pyrightconfig.json', 'pyrightconfig.tests.json',
@@ -430,9 +380,7 @@ def test_the_commits_endpoint_receives_a_path_it_understands(tmp):
 
 def test_a_live_shaped_endpoint_resolves_every_pattern(tmp):
     """Against a fake that answers [] for a glob, the run still resolves all
-    thirteen -- because the request never carries a glob. Reverting the
-    translation makes the two directory patterns ask as `**`, the fake answers
-    [], and the run refuses: the motivating case is caught here."""
+    thirteen; reverting the translation makes it ask as `**` and refuse."""
     del tmp
     m = _mod()
     gates = m.enumerate_gates(_commits_read(m, live_shaped=True), 'o/r')
@@ -440,13 +388,8 @@ def test_a_live_shaped_endpoint_resolves_every_pattern(tmp):
 
 
 def test_a_gate_path_with_no_commits_is_a_global_failure(tmp):
-    """An empty answer is anomalous, not "no commits": refuse loudly.
-
-    Every pattern in the set has commits on main. A silent skip here would
-    under-count the set and turn a stale head green -- the exact defect this
-    module exists to prevent -- so an empty answer is a GLOBAL failure that
-    names the pattern.
-    """
+    """An empty answer is anomalous, not "no commits": a silent skip would
+    under-count the set and turn a stale head green, so it refuses loudly."""
     del tmp
     m = _mod()
     read = _commits_read(m, commits={'eslint.config.js': []})
@@ -584,9 +527,8 @@ def _publish_read(existing_ids, recorded, fail_listing=None):
 
 
 def test_a_failure_overwrites_a_published_success_by_patching(tmp):
-    """The regression: a head that already shows `gate freshness` green must
-    be PATCHed to red, not left alone. Deleting the PATCH leaves the stale
-    green in place, which is the defect."""
+    """The regression: a head already green must be PATCHed to red, not left
+    alone; deleting the PATCH leaves the stale green, the defect."""
     del tmp
     m = _mod()
     recorded = []

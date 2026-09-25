@@ -3,14 +3,13 @@
 
 For each open pull request head based on `main`, decide whether the head
 contains every gate-defining commit on `main`, and publish a `gate freshness`
-check run onto that head. A branch that already contains the gates stays green
-without rebasing; only a branch that predates a new gate is forced to rebase.
+check run onto that head. A branch already containing the gates stays green
+without rebasing; only one predating a new gate is forced to rebase.
 
 THE GATE-DEFINING PATH SET. A file is gate-defining when a change to it can
-change the verdict of a required check FOR THE SAME SOURCE TREE -- when it
-decides *what a check computes*, not *what tree it computes it on*. A changed
-TEST is not gate-defining: the tree is what a branch carries, so a branch
-always runs the tests it brings with it.
+change a required check's verdict FOR THE SAME SOURCE TREE -- it decides *what
+a check computes*, not *what tree it computes it on*. A changed TEST is not:
+the tree is what a branch carries, so a branch runs the tests it brings.
 
   .github/workflows/**       which checks run, and what each one does
   scripts/ci/**             the gate implementations under the CI directory
@@ -26,44 +25,40 @@ always runs the tests it brings with it.
   requirements-dev.txt      the tools the gates install and run
   requirements-test.txt     the tools the gates install and run
 
-A file the branch carries itself is deliberately NOT here; see
-CARRIED_BY_THE_BRANCH below.
-
+A file the branch carries itself is NOT here; see CARRIED_BY_THE_BRANCH below.
 The set is derived only as far as a workflow NAMES a file: the suite reads
 every `.github/workflows/*.yml` and requires every tracked file a workflow
 invokes by path or passes to a tool to be listed here (or declared
-carried-by-the-branch), so a gate file added to a workflow later fails the
-suite. The matcher reaches `python`, `python3`, a versioned `python3.13`, flags
-such as `-u`, and an executable-path step (`./scripts/x.sh`); a `head/`
-checkout prefix is normalised away. The REACH LIMIT is real and stated:
+carried-by-the-branch), so a gate file added later fails the suite. The REACH
+LIMIT is real and stated:
 `pyrightconfig.json`, `pyrightconfig.tests.json`, `setup.cfg`,
 `eslint.config.js` and `pyproject.toml` are read by tool DISCOVERY (a bare
-`pyright` / `eslint` / `pycodestyle` invocation, or a heredoc), never named, so
-the derivation cannot see them; those five are hand-held above, each with its
-reason. A `python3 -m module` invocation is likewise not seen.
+`pyright` / `eslint` /
+`pycodestyle` invocation, or a heredoc), never named, so the derivation cannot
+see them; those five are hand-held above, each with its reason. A `python3 -m
+module` invocation is likewise not seen.
 
 THE DECISION, per (gate commit, head): one `compare/<gate>...<head>` request.
 The gate commit is an ancestor of the head IFF the merge base equals the gate
 commit, validated as 40 lowercase hex. Every enumerated gate commit is checked
 -- short-circuiting on the first miss would be an optimisation, not the proof.
 A compare that cannot be read is NOT evidence of freshness: that head is
-published RED, because that is exactly the case where a stale green is
-waiting to be overwritten.
+published RED, the case where a stale green is waiting to be overwritten.
 
 READING FAILURES. A GLOBAL failure (the open-PR list, a gate-commit lookup, the
 call bound, a route that cannot establish its head) publishes NOTHING and exits
 nonzero: an invented verdict is worse than a missing one. A PER-HEAD failure
 (one head's compare unreadable, or its write failing) still writes that head's
-RED verdict where it can, skips it loudly where it cannot, and never lets one
-head's failure abandon the rest. All print a loud line to stderr.
+RED verdict where it can, skips it loudly where it cannot, and never abandons
+the rest. All print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
 commits, one compare, plus one head revalidation, one check-runs listing, a
 second head revalidation, and one write: G + PER_HEAD_OVERHEAD. The run refuses
 LOUDLY -- publishing nothing, exiting nonzero -- if the worst case exceeds the
 call budget, rather than truncating the head set, which is the silent-pass
-shape. The budget is a CALL count; the workflow's timeout is sized against it
-at ASSUMED_SECONDS_PER_CALL (below), and a test pins that relation.
+shape. The budget is a CALL count; the timeout is sized against it at
+ASSUMED_SECONDS_PER_CALL (below), and a test pins that relation.
 """
 import json
 import os
@@ -102,16 +97,14 @@ CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',)
 
 _HEX40 = frozenset('0123456789abcdef')
 
-# Per-head worst case that is not a compare: 1 revalidation + 1 listing
-# + 1 revalidation + 1 write. Each gate commit adds one compare.
+# Per-head worst case that is not a compare: 2 revalidations, 1 listing, 1
+# write. Each gate commit adds one compare.
 PER_HEAD_OVERHEAD = 4
 
 DEFAULT_CALL_BUDGET = 1200
 
-# The per-call rate the workflow's timeout is sized against. Measured live at
-# ~1.2 s/call; 1.5 s is the conservative figure the timeout must clear:
-# budget * this / 60 is the minutes the worst case needs. A bound with no
-# assumed rate is not a bound.
+# The per-call rate the timeout is sized against (see THE BOUND). Measured
+# live at ~1.2 s/call; 1.5 s is the conservative figure the timeout clears.
 ASSUMED_SECONDS_PER_CALL = 1.5
 
 
@@ -191,7 +184,6 @@ def enumerate_gates(read, repository):
     unreadable, not a list, no readable sha, OR empty. Empty is anomalous (all
     patterns have commits on main) and treating it as "no commits" would drop a
     gate and turn every head green -- the exact defect this module prevents."""
-
     gates = []
     for pattern in GATE_PATTERNS:
         request = _request_path(pattern)
