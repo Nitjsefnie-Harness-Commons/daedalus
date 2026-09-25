@@ -9,7 +9,8 @@ other, and a runtime dispatch pins the one served type no client names.
 
 The readers live in ``_command_type_readers``; this suite observes them. A
 marker nothing observes is a comment, so every marker they carry has a
-synthetic source here that manufactures the input it exists to catch.
+synthetic source here that manufactures the input it exists to catch, and
+removing any one of them from the reader turns this suite red.
 """
 import sys
 from pathlib import Path
@@ -19,8 +20,7 @@ import _util  # noqa: E402
 from _boundary import (run_extension_capability_routes,  # noqa: E402
                        run_extension_command_result)
 from _command_type_readers import (  # noqa: E402
-    FORWARDING_FILES, clients, dashboard_sent_types, python_sent_types,
-    served_types)
+    clients, dashboard_sent_types, python_sent_types, served_types)
 from _worker_routes import ROUTES  # noqa: E402
 
 _CODE_COMMAND = {'id': 'code-path-control', 'code': 'return 1'}
@@ -136,7 +136,7 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     a second is reported by name. The residual is then a two-way equality.
     """
     del tmp
-    sent_sets, cli, mcp = clients()
+    sent_sets = clients()[0]
     served = set(served_types())
     sent = set().union(*sent_sets.values())
     unnamed = served - sent
@@ -151,10 +151,6 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     assert residual == sent, (
         f'served without a client: {sorted(residual - sent)}; '
         f'client without a served type: {sorted(sent - residual)}')
-    assert (cli[1] | mcp[1]) <= FORWARDING_FILES, (
-        'a client payload forwards its command type through a parameter '
-        f'outside the two helper definitions: '
-        f'{sorted((cli[1] | mcp[1]) - FORWARDING_FILES)}')
 
 
 def _eval_path_observation():
@@ -210,7 +206,7 @@ def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
 
 
 def test_the_dashboard_command_scan_accounts_for_every_call_site(tmp):
-    """The dashboard's sent set is read from every `extCmd(` spelling."""
+    """The dashboard's sent set is read from every `extCmd` reference."""
     del tmp
     literals = dashboard_sent_types()
     assert literals, 'no dashboard extCmd call site was enumerated'
@@ -350,15 +346,14 @@ def test_a_python_string_naming_the_send_helper_is_refused(tmp):
     written = _python_source(tmp, 'commands_lookup.py', (
         'from .invoke import ext_cmd\n'
         '\n'
-        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
-        '    return cmd_type\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields): return cmd_type\n'
         '\n'
         'def do_probe(bridge):\n'
         "    return getattr(bridge, 'ext_cmd')('_probe', 'probe-lookup')\n"))
     message = _refusal_from(
         lambda: python_sent_types([written], 'ext_cmd', False),
         'a string naming the send helper was accepted')
-    assert 'commands_lookup.py:7' in message, message
+    assert 'commands_lookup.py:6' in message, message
     assert 'string literal' in message, message
 
 
@@ -387,8 +382,7 @@ def test_a_python_client_aliasing_the_import_is_refused(tmp):
     written = _python_source(tmp, 'commands_import_alias.py', (
         'from .invoke import ext_cmd as send\n'
         '\n'
-        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
-        '    return cmd_type\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields): return cmd_type\n'
         '\n'
         'def do_probe():\n'
         "    return send('_probe', 'probe-import-alias')\n"))
@@ -418,8 +412,7 @@ def test_a_python_surface_defining_the_helper_and_nothing_else_is_refused(
         tmp):
     """The reference census: a definition with no reference to it."""
     written = _python_source(tmp, 'commands_unused.py', (
-        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
-        '    return cmd_type\n'))
+        'def ext_cmd(cmd_id, cmd_type, **fields): return cmd_type\n'))
     message = _refusal_from(
         lambda: python_sent_types([written], 'ext_cmd', False),
         'a surface defining the helper with no reference to it passed')
@@ -443,8 +436,7 @@ def test_a_surface_referencing_the_helper_but_never_calling_it_is_refused(tmp):
     written = _python_source(tmp, 'commands_nocall.py', (
         'from .invoke import ext_cmd\n'
         '\n'
-        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
-        '    return cmd_type\n'))
+        'def ext_cmd(cmd_id, cmd_type, **fields): return cmd_type\n'))
     message = _refusal_from(
         lambda: python_sent_types([written], 'ext_cmd', False),
         'a surface with no direct call to the send helper passed')
@@ -460,16 +452,217 @@ def test_a_python_call_unpacking_a_starred_argument_is_refused(tmp):
     written = _python_source(tmp, 'commands_starred.py', (
         'from .invoke import ext_cmd\n'
         '\n'
-        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
-        '    return cmd_type\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields): return cmd_type\n'
         '\n'
         'def do_probe(pair):\n'
         "    return ext_cmd(*pair, 'probe-starred')\n"))
     message = _refusal_from(
         lambda: python_sent_types([written], 'ext_cmd', False),
         'a call unpacking a starred argument was accepted')
-    assert 'commands_starred.py:7' in message, message
+    assert 'commands_starred.py:6' in message, message
     assert 'starred' in message, message
+
+
+def _js_source(tmp, name, body):
+    written = Path(tmp) / name
+    written.write_text(body, encoding='utf-8')
+    return written
+
+
+def _dashboard_reads(written):
+    return lambda: dashboard_sent_types([written])
+
+
+def _python_reads(written):
+    return lambda: python_sent_types([written], 'ext_cmd', False)
+
+
+def test_a_case_below_the_switch_block_is_refused(tmp):
+    """A `case` token at depth two is not an arm of this switch."""
+    del tmp
+    source = _dispatch_source("case 'a': return { case: 1 };")
+    message = _refusal_from(
+        lambda: served_types(source, 'background.js'),
+        'a case label below the switch block was accepted')
+    assert 'sits below the switch block' in message, message
+
+
+def test_a_switch_with_two_default_arms_is_refused(tmp):
+    """The unknown-command arm is counted, not assumed."""
+    del tmp
+    source = ('function dispatchCommand(cmd) {\n  switch (cmd.type) {\n'
+              "    case 'a': return 1;\n"
+              '    default: return 0;\n    default: return 1;\n  }\n}\n')
+    message = _refusal_from(
+        lambda: served_types(source, 'background.js'),
+        'a switch with two default arms was accepted')
+    assert 'has 2 default arms' in message, message
+
+
+def test_duplicate_case_labels_are_refused(tmp):
+    """Two arms spelling the same type would read as one."""
+    del tmp
+    source = _dispatch_source("case 'a': return 1;", "case 'a': return 2;")
+    message = _refusal_from(
+        lambda: served_types(source, 'background.js'),
+        'duplicate case labels were accepted')
+    assert "duplicate case labels: ['a']" in message, message
+
+
+def test_a_source_without_dispatch_command_is_refused(tmp):
+    """The switch is located by name, so the name must be there."""
+    del tmp
+    source = ('function elsewhere(cmd) {\n  switch (cmd.type) {\n'
+              "    case 'a': return 1;\n    default: return null;\n  }\n}\n")
+    message = _refusal_from(
+        lambda: served_types(source, 'background.js'),
+        'a source with no dispatchCommand was accepted')
+    assert 'no dispatchCommand function declaration' in message, message
+
+
+def test_a_dashboard_type_argument_that_is_not_a_literal_is_refused(tmp):
+    """The command type must be spelled where the reader can see it."""
+    written = _js_source(tmp, 'section.js', (
+        "import { extCmd } from '../api.js';\n"
+        'export async function extCmd(type) { return type; }\n'
+        'const answer = await extCmd(someVariable);\n'))
+    message = _refusal_from(
+        _dashboard_reads(written),
+        'a dashboard call with a non-literal type was accepted')
+    assert 'not a plain string literal' in message, message
+
+
+def test_a_dashboard_with_two_definitions_is_refused(tmp):
+    """The definition census is a count, not a presence check."""
+    written = _js_source(tmp, 'section.js', (
+        'export async function extCmd(type) { return type; }\n'
+        'export function extCmd(type) { return type; }\n'
+        "const answer = await extCmd('probe-two-defs');\n"))
+    message = _refusal_from(
+        _dashboard_reads(written),
+        'a dashboard with two definitions was accepted')
+    assert 'define extCmd exactly once' in message, message
+
+
+def test_a_dashboard_send_call_with_no_argument_is_refused(tmp):
+    """A call that passes no type cannot have its type enumerated."""
+    written = _js_source(tmp, 'section.js', (
+        "import { extCmd } from '../api.js';\n"
+        'export async function extCmd(type) { return type; }\n'
+        'const answer = await extCmd();\n'))
+    message = _refusal_from(
+        _dashboard_reads(written),
+        'a dashboard send call with no argument was accepted')
+    assert 'called with no argument' in message, message
+
+
+def test_a_python_call_in_the_wrong_callee_form_is_refused(tmp):
+    """The CLI surface reads a bare name, not an attribute."""
+    written = _python_source(tmp, 'commands_form.py', (
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'class Client:\n'
+        '    pass\n\n'
+        'def do_probe(client):\n'
+        "    return client.ext_cmd('_probe', 'probe-form')\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'an attribute call in a bare-name surface was accepted')
+    assert 'is called in a shape this enumeration does not read' in message, \
+        message
+
+
+def test_a_python_call_with_no_type_argument_is_refused(tmp):
+    """The type is the second positional argument; without one it is absent."""
+    written = _python_source(tmp, 'commands_onearg.py', (
+        'from .invoke import ext_cmd\n\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def do_probe():\n'
+        "    return ext_cmd('_probe')\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'a call with no type argument was accepted')
+    assert 'is given no second positional argument' in message, message
+
+
+def test_a_python_import_binding_another_name_to_the_helper_is_refused(tmp):
+    """`from x import other as ext_cmd` binds the wrong object to the name.
+
+    The alias-target arm is a different condition from the aliased-import
+    arm above it, and this is the only input that reaches it.
+    """
+    written = _python_source(tmp, 'commands_target.py', (
+        'from .invoke import other as ext_cmd\n\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def do_probe():\n'
+        "    return ext_cmd('_probe', 'probe-target')\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'an import binding another object to the helper name was accepted')
+    assert 'binds another object to the name ext_cmd' in message, message
+
+
+def test_a_python_payload_type_that_is_not_a_parameter_is_refused(tmp):
+    """A module constant is not a parameter of anything."""
+    written = _python_source(tmp, 'commands_dict.py', (
+        'from .invoke import ext_cmd\n\n'
+        "PROBE_TYPE = 'probe-dict'\n\n"
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def do_probe():\n'
+        "    return {'type': PROBE_TYPE}\n\n"
+        'def do_ok():\n'
+        "    return ext_cmd('_probe', 'probe-ok')\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'a payload type that is not a parameter was accepted')
+    assert 'neither a plain string literal nor a parameter' in message, message
+
+
+def test_a_client_forwarding_a_payload_outside_the_helpers_is_refused(tmp):
+    """A third file forwarding a payload type is refused, not counted.
+
+    Both mechanisms are needed to reach it: a literal call, so the surface
+    clears its call-site census, and a payload whose type is a parameter,
+    so the reader classifies it as a forwarding rather than refusing.
+    """
+    written = _python_source(tmp, 'commands_forward.py', (
+        'from .invoke import ext_cmd\n\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def do_probe(kind):\n'
+        "    cmd = {'type': kind}\n"
+        "    return ext_cmd('_probe', 'probe-forward') or cmd\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'a payload forwarded from a third file was accepted')
+    assert 'outside the two helper definitions' in message, message
+
+
+def test_a_python_payload_type_from_a_sibling_scope_is_refused(tmp):
+    """A sibling function's parameter name forwards nothing here.
+
+    Parameters are collected per enclosing function, so a payload built in
+    `do_probe` may only forward through `do_probe`'s own parameters. A
+    file-wide name set would let `other`'s parameter forward a type that no
+    scope around the payload ever bound.
+    """
+    written = _python_source(tmp, 'commands_sibling.py', (
+        'from .invoke import ext_cmd\n\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def other(cmd_type):\n'
+        '    return cmd_type\n\n'
+        'def do_probe():\n'
+        "    return {'type': cmd_type}\n\n"
+        'def do_ok():\n'
+        "    return ext_cmd('_probe', 'probe-ok')\n"))
+    message = _refusal_from(
+        _python_reads(written),
+        'a payload forwarding through a sibling scope was accepted')
+    assert 'neither a plain string literal nor a parameter' in message, message
 
 
 def main():
