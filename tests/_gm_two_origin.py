@@ -21,7 +21,6 @@ const [contentPath, , utilPath, gmPath] = process.argv.slice(1);
 const ORIGIN_A = 'https://alpha.example.com';
 const ORIGIN_B = 'https://beta.example.com';
 const ORIGIN_C = 'https://gamma.example.com';
-const QUOTA_BYTES = 1048576;
 const enc = new TextEncoder();
 const store = Object.create(null);
 const storageCalls = [];
@@ -342,7 +341,7 @@ function main() {
   const burstReplies = a.burstWrites(12, 'k', 90000);
   out.concurrent = {
     total: partitionBytes(ORIGIN_A),
-    cap: QUOTA_BYTES,
+    cap: PER_ORIGIN_CAP,
     stored: burstReplies.filter((m) => !m.error).length,
     refusals: burstReplies.filter((m) =>
       m.error === 'gm storage quota exceeded').length,
@@ -367,7 +366,7 @@ function main() {
   });
   out.crossTab = {
     total: partitionBytes(ORIGIN_A),
-    cap: QUOTA_BYTES,
+    cap: PER_ORIGIN_CAP,
     refusals: crossRefusals,
   };
 
@@ -386,7 +385,7 @@ function main() {
   }
   out.keyLength = {
     total: partitionBytes(ORIGIN_A),
-    cap: QUOTA_BYTES,
+    cap: PER_ORIGIN_CAP,
     stored: keyStored,
     refusals: keyRefusals,
   };
@@ -395,9 +394,9 @@ function main() {
   // store: a value whose charge (value-JSON + storage-key) is just under the
   // cap is admitted, just over is refused.
   resetStore();
-  const under = a.send('setValue', 'u', bigString(QUOTA_BYTES - 200));
+  const under = a.send('setValue', 'u', bigString(PER_ORIGIN_CAP - 200));
   resetStore();
-  const over = a.send('setValue', 'o', bigString(QUOTA_BYTES));
+  const over = a.send('setValue', 'o', bigString(PER_ORIGIN_CAP));
   out.nearMiss = {
     underError: under.error, underCalls: under.calls,
     overError: over.error, overCalls: over.calls,
@@ -426,7 +425,7 @@ function main() {
   }
   const mapSet = a.send('setValue', 'm', hugeMap);
   const setSet = a.send('setValue', 's', hugeSet);
-  const fillSet = a.send('setValue', 'z', bigString(QUOTA_BYTES - 200));
+  const fillSet = a.send('setValue', 'z', bigString(PER_ORIGIN_CAP - 200));
   out.mapSet = {
     mapError: mapSet.error, mapCalls: mapSet.calls,
     setError: setSet.error, setCalls: setSet.calls,
@@ -446,13 +445,13 @@ function main() {
 
   // A replace is old-out/new-in.
   resetStore();
-  a.send('setValue', 'k', bigString(QUOTA_BYTES - 1000));
-  const replaced = a.send('setValue', 'k', bigString(QUOTA_BYTES - 100));
+  a.send('setValue', 'k', bigString(PER_ORIGIN_CAP - 1000));
+  const replaced = a.send('setValue', 'k', bigString(PER_ORIGIN_CAP - 100));
   out.replace = { error: replaced.error, calls: replaced.calls };
 
   // A delete frees budget.
   resetStore();
-  a.send('setValue', 'k', bigString(QUOTA_BYTES - 200));
+  a.send('setValue', 'k', bigString(PER_ORIGIN_CAP - 200));
   const addRefused = a.send('setValue', 'j', bigString(500));
   a.send('deleteValue', 'k');
   const addAccepted = a.send('setValue', 'j', bigString(500));
