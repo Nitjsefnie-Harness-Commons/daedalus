@@ -241,6 +241,7 @@
 !/scripts/ci/speed_summary.py
 !/scripts/ci/thresholds.py
 !/scripts/ci/time_tests.py
+!/scripts/ci/timings_bounds.py
 !/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/workflow_yaml_scan.py
