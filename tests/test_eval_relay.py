@@ -331,12 +331,9 @@ def test_a_stuck_hotfix_fix_does_not_block_a_later_fix(tmp):
 
 
 def test_a_cdp_routed_stuck_fix_names_the_channel_that_ran(tmp):
-    """A probe answering false routes the fix to CDP, and the bound wraps
-    that dispatch exactly as it wraps a MAIN-world injection.
-
-    An operator reading a MAIN-world label for a fix that never entered the
-    MAIN world is sent to the wrong subsystem, so the channel in the refusal
-    is the one the replay actually took.
+    """An operator reading a MAIN-world label for a fix that never entered
+    the MAIN world is sent to the wrong subsystem, so the channel in the
+    refusal is the one the replay actually took.
     """
     del tmp
     outcome = run_hotfix_replay_cdp_timeout()
