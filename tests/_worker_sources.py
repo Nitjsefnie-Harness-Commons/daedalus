@@ -79,11 +79,10 @@ __CONTEXT__.importScripts = (...sourceNames) => {
         '__TRACE_REGISTRATION__', trace_registration)
 
 
-# The stream answer factory the eval-relay and CDP harnesses share: a declared
-# 'hang' is a connected 200 whose reader never settles, and every other answer
-# is the harness's plain `response`. One copy — the cross-file duplicate check
-# cannot see JavaScript inside a Python string, so a copied factory would not
-# be caught; sharing it here is what keeps the two from drifting.
+# The stream answer factory the eval-relay and CDP harnesses share. The
+# cross-file duplicate check cannot see JavaScript inside a Python string, so
+# a copied factory would not be caught; one copy here is what keeps the two
+# from drifting.
 STREAM_RESPONSE = r"""
 function streamResponse(answer) {
   if (answer === 'hang') {
@@ -101,10 +100,6 @@ function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
 """
-# The VM context the message-driven worker harnesses share: the strict gate's
-# `fetch`, the browser APIs the worker's own modules assume, inert timers and
-# a deterministic id source. One copy, so the harnesses that dispatch
-# commands through it cannot drift from each other.
 RELAY_CONTEXT = r"""
 const context = vm.createContext({
   chrome,
@@ -128,14 +123,6 @@ const context = vm.createContext({
 
 def chrome_stub(token, server, send_command):
     """The chrome surface the CDP and starvation harnesses stand against.
-
-    The storage no-op, the single-tab list, the debugger attach/detach pair,
-    the scripting/runtime/alarms tail, and the shared `Runtime.releaseObject`
-    bookkeeping are identical in every harness that uses this, so they live
-    here once and cannot drift — the same one-copy rule as `RELAY_CONTEXT`
-    above. A caller supplies only what is genuinely its own: the token and
-    server it hands the worker, and a `send_command` async function for the
-    methods its scenario drives.
 
     The stub text closes over two free variables — `released` (an array the
     caller owns) and `pendingResolve` (a `let` the caller owns) — because the

@@ -161,12 +161,9 @@ def _post(*answers, command_id='cmd-result-post', did=None, tab_id=None,
           result=None, extra=None):
     """Drive one postResult call through the shipped worker source.
 
-    Each answer is what the scenario declares for one attempt on the result
-    route: `{'status': N}` for a status the bridge answers, or
-    `{'throw': msg}` for a bridge the scenario models as unreachable. The
-    plan declares exactly as many requests as the answers, so a request the
-    worker invents — or a fourth attempt the plan did not declare — is
-    refused and recorded, never served the last row again.
+    The plan declares exactly as many requests as there are answers, so a
+    request the worker invents — or a fourth attempt the plan did not
+    declare — is refused and recorded, never served the last row again.
     """
     scenario = {
         'commandId': command_id,
@@ -333,8 +330,7 @@ def test_5xx_retry_that_succeeds_stays_silent(tmp):
 def test_network_error_keeps_its_existing_final_log(tmp):
     """Three dead attempts log the existing line exactly once."""
     del tmp
-    # Three attempts, as the worker's own retry loop makes them: the old
-    # one-row plan was re-answered by the clamp for the second and third.
+    # Three attempts, as the worker's own retry loop makes them.
     seen = _post({'throw': 'relay down'}, {'throw': 'relay down'},
                  {'throw': 'relay down'})
     assert len(seen['requests']) == 3, seen

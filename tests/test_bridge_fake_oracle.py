@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""The shared bridge-fetch gate's own properties, driven without the worker.
-
-The gate answers a request only while the scenario declares it, refuses
-everything else with a status the worker's own error handling can hear, and
-records every request it sees. Each test below pins one of those properties
-against the shared module directly — no worker in the room — so a migration
-of any harness rests on this floor.
-"""
+"""The shared bridge-fetch gate's own properties, driven without the worker."""
 import sys
 from pathlib import Path
 
@@ -25,9 +18,9 @@ RESULT = 'POST /result'
 TABS = 'POST /tabs'
 NO_ORIGIN = '(no origin)'
 
-# The probe's outcome, whole. The list is compared by equality so the count
-# is pinned: five requests were seen even though the plan declares three,
-# because the probe deliberately over- and mis-addresses requests.
+# The probe's outcome, whole. Five requests were seen even though the plan
+# declares three, because the probe deliberately over- and mis-addresses
+# requests; the 599s are those refusals.
 EXPECTED_STATUSES = [200, 599, 599, 599, 599, 200, 200, 599, 599]
 EXPECTED_NON_STREAM = [SYNC, SYNC, TABS, OTHER, RESULT]
 EXPECTED_REFUSED = [SYNC, TABS]
@@ -69,11 +62,7 @@ def test_a_declared_route_answers_200_the_first_time(tmp):
 
 
 def test_a_request_beyond_the_declared_count_is_refused_by_status(tmp):
-    """A refusal is a status the worker can hear, not a thrown error.
-
-    The probe runs to completion and returns statuses, so no request threw;
-    the second answer is the 599 refusal.
-    """
+    """A refusal is a status the worker can hear, not a thrown error."""
     del tmp
     outcome = _probe()
     assert outcome['statuses'][1] == 599, outcome
@@ -192,7 +181,7 @@ def test_a_recorded_request_carries_its_authorization_header(tmp):
 def test_a_planned_answer_sets_the_status_and_body_the_scenario_declared(
         tmp):
     """A scenario that exercises a bridge's own error answer declares that
-    answer; the gate then hands the worker the status and body it planned."""
+    answer."""
     del tmp
     plan = {
         'planned': [OTHER],
@@ -210,8 +199,7 @@ def test_a_planned_answer_sets_the_status_and_body_the_scenario_declared(
 
 def test_a_planned_throw_answers_by_throwing_and_is_still_recorded(tmp):
     """An unreachable bridge is a thrown fetch, and a scenario that models
-    one declares the throw. The record carries it, so a swallowed throw
-    still shows the request happened."""
+    one declares the throw."""
     del tmp
     plan = {
         'planned': [OTHER],
@@ -266,17 +254,12 @@ def test_a_wrong_typed_plan_answers_table_is_a_contract_fault(tmp):
 
 
 # ---- gate extensions this worker family needed -----------------------------
-# The boundary harness fetches a NON-bridge origin through the relay and needs
-# per-attempt answers on one route and a chunked answer factory. Each extension
-# is pinned here against the shared gate directly, and each fixture can carry
-# the defect it guards.
 
 def test_a_non_bridge_origin_is_keyed_by_its_full_url(tmp):
     """A permitted non-bridge origin keys on the whole URL, not the bare path.
 
-    A bridge request keys on the bare path, so a relay fetch and a bridge
-    request to the SAME path would otherwise collide on one key. A permitted
-    relay origin is keyed by the full URL, so the two can never share a key.
+    A relay fetch and a bridge request to the SAME path would otherwise
+    collide on one key; the relay key is the full URL, so they cannot.
     """
     del tmp
     plan = {
@@ -294,12 +277,8 @@ def test_a_non_bridge_origin_is_keyed_by_its_full_url(tmp):
 
 
 def test_a_bridge_and_a_relay_request_to_one_path_do_not_collide(tmp):
-    """The bridge keys on the bare path, the relay on the full URL: distinct.
-
-    Both requests are to the same path, one on the bridge origin and one on a
-    permitted relay origin. The bridge strips its origin, the relay keeps its
-    own, so the two records differ and each is answered from its own entry.
-    """
+    """The bridge keys on the bare path, the relay on the full URL:
+    distinct."""
     del tmp
     plan = {
         'planned': ['GET /shared', 'GET ' + ELSEWHERE + '/shared'],
@@ -320,9 +299,7 @@ def test_a_bridge_and_a_relay_request_to_one_path_do_not_collide(tmp):
 def test_a_new_bridge_origin_is_keyed_on_the_bare_path(tmp):
     """A bridge URL the config rotates to is the same route, not a new one.
 
-    `hosts` lists permitted BRIDGE origins, and a bridge request keys on the
-    bare path whatever bridge it went to. This is what a new bridge URL is:
-    the same route on another bridge, not a distinct key.
+    A bridge request keys on the bare path whatever bridge it went to.
     """
     del tmp
     other_bridge = 'https://other-bridge.example.com'
@@ -344,9 +321,8 @@ def test_a_new_bridge_origin_is_keyed_on_the_bare_path(tmp):
 def test_a_per_attempt_sequence_gives_each_attempt_its_own_answer(tmp):
     """A route that needs a different answer per attempt declares a list.
 
-    The scenario needs the first POST answered 503 and the retry 200, on the
-    same route. plan.answers maps the key to a LIST; each attempt consumes the
-    next entry, so the sequence is a real per-attempt declaration.
+    plan.answers maps the key to a LIST; each attempt consumes the next
+    entry, so the sequence is a real per-attempt declaration.
     """
     del tmp
     plan = {
@@ -372,8 +348,7 @@ def test_a_per_attempt_sequence_that_runs_out_refuses_the_next_attempt(tmp):
     """A declared sequence that runs out is a recorded refusal, not a 200.
 
     The sequence is the contract; past its end there is no declared answer, so
-    the next attempt is refused by status and recorded. A silent fallback to
-    the default 200 is exactly the defect this branch exists to kill.
+    the next attempt is refused by status and recorded.
     """
     del tmp
     plan = {
@@ -430,10 +405,8 @@ def test_a_chunked_answer_without_a_chunk_factory_is_a_contract_fault(tmp):
 def test_a_hang_stream_answer_is_a_connected_body_that_never_settles(tmp):
     """A 'hang' statuses entry is a 200 whose reader never settles.
 
-    A live SSE connection the watchdog must treat as open-but-idle: the fetch
-    RESOLVES (so startStream proceeds and arms the watchdog) but the body's
-    read never returns a chunk. The probe reads the response without awaiting
-    the body, so it completes; the record carries the answer.
+    The fetch RESOLVES (so startStream proceeds and arms the watchdog) but
+    the body's read never returns a chunk.
     """
     del tmp
     plan = {
@@ -455,7 +428,6 @@ def test_a_string_typed_hosts_table_is_a_contract_fault(tmp):
 
     permittedOrigins().includes(origin) on a string does a substring test, so a
     string-typed `hosts` would admit a foreign origin the plan never permitted.
-    The splice-time check names it instead.
     """
     del tmp
     plan = {
@@ -495,11 +467,6 @@ def test_a_string_typed_statuses_table_is_a_contract_fault(tmp):
 
 
 # ---- the forward path: a request the gate records but does not answer ------
-# A scenario whose real answer comes from a real server declares that target
-# in `plan.forwards` (keyed on the route key, valued with the origin its
-# answer lives on) and hands the gate a `forwardRequest` hook that performs
-# the request. The gate still debits the request against `planned` and records
-# it, so a forward past its declared count is a refusal, never a pass-through.
 
 def _forward_plan(count, **extra):
     plan = {
@@ -517,9 +484,8 @@ def _forward_plan(count, **extra):
 def test_a_declared_forward_is_answered_by_the_real_server_not_the_gate(tmp):
     """A forwarded request's answer is the real server's own.
 
-    The upstream answers 418 — a status the gate's own factories never
-    synthesise — so the recorded status and the returned status are the
-    real server's, and `upstreamHits` shows the request really left.
+    The upstream answers 418, a status the gate's own factories never
+    synthesise.
     """
     del tmp
     outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
@@ -533,8 +499,7 @@ def test_a_declared_forward_is_answered_by_the_real_server_not_the_gate(tmp):
 
 def test_a_forward_past_its_declared_count_is_refused_not_forwarded(tmp):
     """The forward is accounted like any other request: two declared, three
-    sent. The third is refused by status, recorded, and never reaches the real
-    server — a defect, not a pass-through.
+    sent. The third is refused by status and recorded, never passed through.
     """
     del tmp
     # three probes against a two-entry plan: forward, forward, refuse
@@ -582,10 +547,6 @@ def test_a_string_typed_forwards_table_is_a_contract_fault(tmp):
 
 
 # ---- assert_gate_clean's own controls -------------------------------------
-# Each drives the helper directly with a record that carries one specific
-# defect and requires it to be rejected. A weakening of the helper that lets
-# its defect through makes the matching control fail, so these are the
-# controls the four re-mutations must each turn red.
 
 def _record(request, status=200):
     return {'request': request, 'status': status}

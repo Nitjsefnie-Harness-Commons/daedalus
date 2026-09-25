@@ -335,11 +335,10 @@ run().then((result) => {
 """).replace('__BRIDGE__', BRIDGE)
 
 # Each scenario's declared bridge requests, from a recording of the shipped
-# worker driven through a permissive recorder: a boot that gets past its
-# config read opens the stream and syncs the tab list, and a scenario whose
-# config read fails (or is held, so boot's continuation never runs) makes no
-# bridge request at all. Those scenarios declare none, which is a stronger
-# statement than a blocklist: the gate proves no request of any kind was made.
+# worker: a boot that gets past its config read opens the stream and syncs
+# the tab list, and a scenario whose config read fails (or is held, so boot's
+# continuation never runs) makes no bridge request at all — those declare
+# none, and the gate proves no request of any kind was made.
 SCENARIO_PLANS = {
     'boot-generation': ((), ()),
     'config-retry': ((), ()),
@@ -350,12 +349,7 @@ SCENARIO_PLANS = {
 
 
 def _run(plan):
-    """Drive the worker under Node with one plan and read back.
-
-    The scenario's declared requests are checked against what the gate
-    recorded, so a request the worker invents outside the plan is refused by
-    status and fails here.
-    """
+    """Drive the worker under Node with one plan and read back."""
     planned, planned_stream = SCENARIO_PLANS[plan['scenario']]
     outcome = run_gate(
         require_node(), _HARNESS,

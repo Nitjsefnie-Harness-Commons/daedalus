@@ -7,10 +7,6 @@ installed. What the worker does on the page's behalf is therefore bounded
 here: a relayed request goes out without the user's cookies, and a relayed
 tab open reaches only web URLs. These run the shipped worker in a Node VM
 against a fake browser that records what the worker asked it to do.
-
-The relay's own fetch goes through the shared gate: only the `fetch` mode
-makes a request, and that one declares the single relayed URL it plans, on
-the relay origin; every other mode declares no request at all.
 """
 import sys
 from pathlib import Path
@@ -363,13 +359,7 @@ run().then((result) => {
 
 
 def _run_relay_authority(mode):
-    """Drive the worker's page-facing relay under Node and read back.
-
-    The plan is this mode's recording: only the `fetch` mode reaches a fetch,
-    and it makes exactly one — the page's POST to the relay origin, keyed on
-    its full URL. Every other mode declares no request, so a fetch the worker
-    invents there is refused and recorded and the check below fails.
-    """
+    """Drive the worker's page-facing relay under Node and read back."""
     plan = {
         'planned': [RELAYED] if mode == 'fetch' else [],
         'relayHosts': [RELAY_HOST],
@@ -405,9 +395,7 @@ def test_a_relayed_page_request_carries_no_cookies(tmp):
     assert len(outcome['fetches']) == 1, outcome
     request = outcome['fetches'][0]
     assert request['url'] == 'https://example.com/account', request
-    # The gate keys a relay request on "METHOD <full-url>"; the credentials
-    # mode rides the record beside it, stamped by the wrapper that delegates
-    # to the gate.
+    # The credentials mode rides the record beside the gate's full-URL key.
     assert request['request'] == RELAYED, request
     assert request['credentials'] == 'omit', request
     # Still a working relay: the request went out and its answer came back.

@@ -561,12 +561,8 @@ run().then((result) => {
 def _observe(plan, *args):
     """Drive one relay mode under a plan and read back its answer.
 
-    Every request the mode makes is accounted against `plan`, and the whole
-    recorded list is compared through the shared gate's check, so an
-    undeclared, missing or extra request is loud even when the worker
-    swallowed it. No wall bound: the child bounds itself by attempt counts
-    (see waitFor in the harness above), so a genuine deadlock surfaces as a
-    hung job under the runner's own suite ceiling.
+    No wall bound: the child bounds itself by attempt counts, so a genuine
+    deadlock surfaces as a hung job under the runner's own suite ceiling.
     """
     outcome = run_inline_gate(
         require_node(), _EVAL_RELAY_OVERLAP_HARNESS, list(args),
@@ -584,9 +580,8 @@ def _observe(plan, *args):
 def _one_result(count=1):
     """The recording every single-result relay mode makes.
 
-    Boot opens the stream (503) and syncs the tab list, the content
-    script's boot registers the tab, and each dispatched eval posts one
-    result — all recorded, all declared here, none special-cased.
+    Boot opens the stream (503), syncs the tab list and registers the tab;
+    each dispatched eval posts one result.
     """
     return {'planned': [SYNC, REGISTER] + [RESULT] * count, 'statuses': [503]}
 

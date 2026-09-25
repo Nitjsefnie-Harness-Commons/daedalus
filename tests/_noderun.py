@@ -1,12 +1,10 @@
 """Run a Node program from a closed, automatically cleaned file.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 This launcher carries no scenario state and no configuration of its own, so
 it lives in a neutral module both the boundary harness and the shared fetch
-gate import. Keeping it here is what stops `tests/_boundary_env.py` (which
-splices the gate) and `tests/_stream_fake.py` (the gate belongs to it) from
-importing each other — a cycle pylint reads as R0401 and CI treats as fatal.
+gate import — which is what stops `tests/_boundary_env.py` (which splices the
+gate) and `tests/_stream_fake.py` (the gate belongs to it) from importing
+each other, a cycle pylint reads as R0401 and CI treats as fatal.
 """
 import json
 import subprocess
@@ -28,10 +26,7 @@ def run_node_program(node, program, arguments, cwd, payload=None, timeout=30):
     correct for a value chosen per call: `test_js_coverage.py` sets
     `os.environ['NODE_V8_COVERAGE']` per test to point at its own dumps
     directory, and an import-time snapshot would send the child to the wrong
-    directory. Scrubbing at launch keeps the coverage collector's names out of
-    the child (the guard's static check reads this `env=` declaration, which a
-    direct call satisfies) while letting a per-call value reach the child — a
-    per-call value is the whole point.
+    directory.
     """
     with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
         program_path = Path(directory) / 'program.js'

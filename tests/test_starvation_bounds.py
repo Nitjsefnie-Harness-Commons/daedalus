@@ -2,17 +2,9 @@
 """Serviced and attempt-count bounds on work a starved process still owes.
 
 A wall-clock bound rejects or kills work that was never scheduled, where a
-serviced or attempt-based bound would have waited (issue 925). The CDP
-settlement guard is bounded by serviced event-loop time — crediting each
-sampler gap at one doubled interval, so a frozen stretch is charged at most
-that cap — and the test-side queue and CLI waits are bounded by poll
-attempts. Each control below was watched failing against the wall-clock
-code it replaces, for the defect's own reason.
-
-The worker-bound scenarios run the shipped worker in a Node VM with the
-shared bridge gate in place: every mode declares the exact requests its
-boot makes, and a request outside the plan is refused by status and
-recorded, so an invented fetch fails the scenario.
+serviced or attempt-based bound would have waited (issue 925). Each control
+below was watched failing against the wall-clock code it replaces, for the
+defect's own reason.
 """
 import ast
 import sys
@@ -32,8 +24,7 @@ from _worker_sources import (  # noqa: E402
 
 # The starvation scenarios run with the freeze/thaw budget of their own (see
 # _FREEZE_RUN_TIMEOUT_S); the harness children the wall-timeout guard names do
-# not, and run_gate/run_inline_gate leave the child's environment to the one
-# scrubbed constant those launchers name.
+# not.
 _ENV = _util.child_coverage('scrub')
 
 
@@ -45,8 +36,6 @@ BRIDGE = 'https://starve.example.com'
 SYNC = 'POST /sync-tabs'
 # Every mode's recording, from a run of the shipped worker: boot opens the
 # stream and syncs the tab list, and nothing after that touches the bridge.
-# The boot stream fetch is answered 503 and is declared and asserted like
-# the accounted routes.
 BOOT_PLAN = [SYNC]
 BOOT_STREAM = [503]
 
@@ -70,7 +59,7 @@ let clockStep = 100;
 let fires = 0;
 
 // The inspector command this scenario drives; the shared release bookkeeping
-// lives in the chrome stub. This handles the rest.
+// lives in the chrome stub.
 async function sendCommand(_target, method, params) {
   if (method === 'Runtime.evaluate') {
     return { result: { value: 1 } };
@@ -96,8 +85,6 @@ function response(status, data) {
   };
 }
 
-// The shared gate's in-scope contract. The gate answers only what the
-// scenario declared and records every request it sees.
 const BRIDGE_URL = '__BRIDGE__';
 const streamFetches = [];
 const resultPosts = [];
@@ -174,10 +161,6 @@ async function drive() {
     (error) => { outcome = error.message; });
   await delay();
   if (mode === 'freeze') {
-    // The #928 idiom: one real busy-wait freeze outrunning the guard's
-    // whole budget, the work settling one timers phase after the thaw. A
-    // wall guard swept in that thaw phase rejects finished work; the
-    // serviced guard charges the freeze at its cap and waits.
     await new Promise((resolve) => setTimeout(() => {
       const until = Date.now() + """ + str(_FREEZE_MS) + r""";
       while (Date.now() < until) {}
@@ -230,11 +213,7 @@ _FREEZE_RUN_TIMEOUT_S = 60
 
 
 def _starve_run(mode):
-    """Drive the settlement guard in a node child under one starvation mode.
-
-    The mode's declared requests are checked against what the gate recorded,
-    so a request outside the plan is refused by status and fails here.
-    """
+    """Drive the settlement guard in a node child under one starvation mode."""
     outcome = run_gate(
         require_node(), _CDP_STARVE_HARNESS,
         [str(_repo.ROOT / 'extension' / 'background.js'), mode],
@@ -253,10 +232,8 @@ def test_a_cdp_settlement_needing_one_turn_after_a_freeze_still_settles(
         tmp):
     """Starved work that settles after the thaw is not rejected.
 
-    The child freezes its loop for longer than the guard's whole budget and
-    the pending settlement resolves one timers phase after the thaw. A wall
-    guard whose timer expired inside the freeze is swept in that same thaw
-    phase, ahead of the work, and rejects a settlement the worker had
+    A wall guard whose timer expired inside the freeze is swept in that same
+    thaw phase, ahead of the work, and rejects a settlement the worker had
     already earned; the serviced guard charges the freeze at the cap and
     the race resolves.
     """
@@ -269,10 +246,7 @@ def test_a_cdp_settlement_needing_one_turn_after_a_freeze_still_settles(
 def test_a_cdp_guard_rejects_only_once_serviced_for_its_budget(tmp):
     """A never-settling step still rejects, on serviced evidence only.
 
-    The child fires the guard's self-rescheduling sampler with a clock that
-    only moves when the loop is serviced, so reaching the budget takes at
-    least budget-over-cap serviced samples — never one wall timer. The
-    rejection names the same label the wall guard named, and the late
+    The rejection names the same label the wall guard named, and the late
     response a rejected race abandons is released exactly as before: the
     `timedOut` flip on serviced expiry is what releases it.
     """
@@ -292,9 +266,7 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
 
     The first sample reads a clock pushed far past the whole budget; the
     guard must survive that sample — an uncapped credit would spend the
-    budget in one go — and then reach expiry on ordinary credits alone. The
-    fires-to-reject count pins the arithmetic: cap, then one interval per
-    serviced sample.
+    budget in one go — and then reach expiry on ordinary credits alone.
     """
     del tmp
     outcome = _starve_run('cap')
@@ -307,18 +279,15 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
         outcome)
 
 
-# The modules the two harness children are launched through: `_stream_fake`
-# holds the gate's file and `node -e` launchers, `_noderun` the file launcher
-# they forward to. The guard resolves the launcher each harness actually calls
-# (by the callee at its own call site) and follows that call graph, so the
-# verdict is bound to the operation the harness performs, not to one function
-# name.
+# The modules the two harness children are launched through. The guard
+# resolves the launcher each harness actually calls (by the callee at its own
+# call site) and follows that call graph, so the verdict is bound to the
+# operation, not to one function name.
 _LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
 # Sentinel for a callee that names a launcher-module entity but whose body the
 # walk cannot see. It is a refusal, not a skip: an unread body is a hole in
 # this audit, so the audit cannot certify it, and a bound hiding there would
-# be a real false green. See `_resolve_callee` for the line drawn between this
-# and a genuinely-external call.
+# be a real false green.
 _UNRESOLVED = 'unresolved'
 
 
@@ -358,10 +327,9 @@ def _module_class_aliases(tree, classes):
 def _launcher_context(trees):
     """Index every function and method the launcher modules define.
 
-    Keys bodies three ways so a callee can be resolved by a bare name, by a
-    module-qualified attribute (`_noderun.run_node_program`), by `self.<m>`, or
-    by `<Class>.<m>` / `<Class>().<m>`. Collecting class methods here is what
-    stops the class-method route from being an unseen hole.
+    Bodies are keyed so a callee resolves by bare name, module-qualified
+    attribute, `self.<m>` or `<Class>.<m>` / `<Class>().<m>`; collecting
+    class methods is what stops that route being an unseen hole.
     """
     functions = {}
     methods = {}
@@ -398,18 +366,13 @@ def _local_class_bindings(function, classes):
 def _resolve_callee(call, current_class, ctx, locals_):
     """The bodies a call reaches, or `_UNRESOLVED`, or None for external.
 
-    This is a resolve-or-refuse census over the callee grammar. The line I draw
-    is *whose code is it*, not *does it look risky*:
-
-    - a receiver that is a launcher-module entity (a module stem, a class, a
-      `self`, or a local bound to a class) must resolve to a body I can read;
-      if it does not, the callee is `_UNRESOLVED` — an unread launcher-module
-      body is a hole in this audit, so it is refused;
-    - any other receiver (a stdlib module, a parameter, a local, a literal) is
-      external: I cannot type it as my own code, and refusing it would refuse
-      legitimate code like `dumps.glob(...)` and an imported helper module. It
-      is skipped, and a `timeout=` keyword on the call is still caught by the
-      concept scan of the caller's own body.
+    The line is *whose code is it*, not *does it look risky*: a launcher-module
+    receiver (module stem, class, `self`, local bound to a class) must resolve
+    to a body I can read, or it is `_UNRESOLVED` — an unread body is a hole
+    this audit cannot certify. Any other receiver is external (I cannot type it
+    as my own code, and refusing it would refuse `dumps.glob(...)`), so it is
+    skipped; a `timeout=` keyword on it is still caught by the caller's own
+    concept scan.
     """
     func = call.func
     if isinstance(func, ast.Name):
@@ -479,18 +442,11 @@ def _const_str(node):
 def _timeout_faults(function):
     """Every place the deadline concept `timeout` appears in `function`.
 
-    The recogniser decides the *concept* a deadline travels in, not the
-    spelling of any one launch, because that is what keeps it from moving when
-    a route is missed. On a resolved body the concept can enter a child three
-    ways, and all three are found here: a `timeout=` keyword on any call (so
-    `subprocess.run(timeout=)`, `communicate(timeout=)` and a locally bound
-    `_wait(timeout=)` are all the same fact), a `timeout` parameter in the
-    signature (a deadline passed through the function), and a `'timeout'` key
-    written into a container a `**` spread forwards (an aliased launcher
-    bounded via `k['timeout'] = n`). A bare `**opts` with no `timeout`
-    anywhere is
-    deliberately NOT a fault: a spread is not evidence of a bound, and refusing
-    one refuses legitimate code.
+    The concept, not the spelling of any one launch, is what keeps this from
+    moving when a route is missed. It enters a child three ways: a `timeout=`
+    keyword on any call, a `timeout` parameter, and a `'timeout'` key written
+    into a container a `**` spread forwards. A bare `**opts` with no `timeout`
+    anywhere is deliberately NOT a fault: a spread is not evidence of a bound.
     """
     faults = []
     if 'timeout' in _parameter_names(function):
@@ -511,10 +467,9 @@ def _timeout_faults(function):
 def _census(entry_bodies, trees, ctx):
     """Every timeout fault and every refusal reachable from the entries.
 
-    Walks the resolved call graph. A body visited more than once is visited
-    once; a callee that resolves to `_UNRESOLVED` is a refusal (this audit
-    cannot see it, so it cannot certify it); a body whose timeout concept the
-    scan finds is a fault.
+    A callee that resolves to `_UNRESOLVED` is a refusal (this audit cannot
+    see it, so it cannot certify it); a body whose timeout concept the scan
+    finds is a fault.
     """
     table = _bodies(trees, ctx)
     faults = []
@@ -547,9 +502,7 @@ def _census(entry_bodies, trees, ctx):
 def _harness_entries(harness_tree, ctx):
     """The launcher bodies a harness reaches, resolved off its call sites.
 
-    Resolves each call in the harness with the census grammar, so an
-    attribute-called launcher and a class-instance method are entries just as
-    a bare name is. Returns `(entries, refusals)`.
+    Returns `(entries, refusals)`.
     """
     entries = []
     refusals = []
@@ -568,18 +521,10 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     """The Surface D runners launch their children with no wall bound.
 
     A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. The guard asks two questions.
-    *Reachability*: from each harness's own call sites it resolves the launcher
-    the child is launched through and performs a resolve-or-refuse census over
-    the callee grammar — a bare name, a module-qualified attribute,
-    `self.<method>`, and a class-instance method (`C().m()`) resolve to a body;
-    a callee that names a launcher-module entity but whose body the walk cannot
-    read is refused, not skipped, because an unread body is a hole this audit
-    cannot certify. *Recognition*: on every body the walk reaches it refuses
-    the deadline concept `timeout` in the three positions it enters a child — a
-    `timeout=` keyword on any call, a `timeout` parameter, and a `'timeout'`
-    key forwarded through a `**` spread. A bare `**opts` with no `timeout`
-    anywhere is deliberately not a fault.
+    starvation rejection this branch removes. The guard resolves the launcher
+    each harness's own call sites reach (see `_resolve_callee` and
+    `_timeout_faults` for the resolve-or-refuse census and the deadline
+    concept it refuses).
 
     Enforced: no `timeout` concept, and no unread launcher-module body, on the
     resolved call graph from each harness's launcher. Not enforced, and not
@@ -587,8 +532,7 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     JavaScript, which this guard's input language (Python `ast`) cannot see;
     (2) a helper the launcher modules import from outside themselves;
     (3) a `timeout` parameter defaulted inside a method reached through a
-    receiver the walk cannot type to a class (an untypeable receiver is
-    external, not refused, to avoid refusing legitimate code); (4) a deadline
+    receiver the walk cannot type to a class; (4) a deadline
     assembled without the word `timeout` — a clock comparison plus a kill, or
     `signal.alarm`; (5) a launcher-module body the census does not put on the
     graph by construction — a class constructor (a bare `C()` call resolves to
@@ -613,7 +557,6 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
     ctx = _launcher_context(trees)
     for name in ('_relayharness.py', '_cdpharness.py'):
         tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
-        # A Python-level `timeout=` anywhere in the harness is refused.
         sites = [node.lineno for node in ast.walk(tree)
                  if isinstance(node, ast.keyword) and node.arg == 'timeout']
         assert not sites, (name, sites)
@@ -626,10 +569,8 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):
     """A starved runner's clock jump does not end a condition wait early.
 
-    The condition becomes true on the second poll, but the wall clock jumps
-    far past a 15 s budget between the polls — the shape of a runner that
-    was not scheduled. The wall deadline version raised on that jump; the
-    attempt-count version has no clock to jump and finds the condition.
+    The wall deadline version raised on that jump; the attempt-count version
+    has no clock to jump and finds the condition.
     """
     del tmp
     readings = iter([0.0, 0.0] + [30.0] * 8)

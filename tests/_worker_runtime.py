@@ -320,7 +320,7 @@ def observe_worker_runtime(source_details, background_path=None, plan=None):
         'contractFaults': [], 'records': [], 'refused': [],
         'badOrigins': [], 'streamAnswered': [],
     }
-    # The effective plan is the caller's, or the harness default (zero). A
+    # The effective plan is the caller's, or the harness default (zero): a
     # caller observing the shipped background that omits its plan mismatches
     # its boot stream fetch against zero and fails here — fail-closed.
     effective = plan or {'planned': [], 'planned_stream': []}

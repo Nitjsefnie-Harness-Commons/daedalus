@@ -14,6 +14,7 @@ import _util  # noqa: E402
 
 # The child answer's stdout, as the scripted second attempt delivers it: the
 # posted-results list the caller reads, and the empty gate record beside it.
+# No command means no result POST, so the plan the driver declares is empty.
 _RESULT = json.dumps({'posted': [], 'gate': {
     'records': [], 'refused': [], 'badOrigins': [],
     'streamAnswered': [], 'contractFaults': [],
@@ -27,8 +28,7 @@ def _scripted_stall(communicates, drains):
     Popen stub, so a pin asserts on the record the harness actually kept.
     """
     # A successful attempt's stdout: the child answer the caller reads, which
-    # the gate check now parses on the way out. No command means no result
-    # POST, so the plan this call declares is empty on every route.
+    # the gate check now parses on the way out.
     process = mock.Mock(pid=4713, returncode=0, stdout=_RESULT, stderr='')
     process.communicate.side_effect = communicates
     popen = mock.Mock(return_value=process)

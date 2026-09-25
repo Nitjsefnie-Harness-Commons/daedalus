@@ -2,12 +2,7 @@
 """The worker's origin-allowlisted segment-job mint and its allowlist.
 
 A page reaches `POST /segment-job` only through the service worker, and the
-worker mints only for an origin an operator has allowed. These run the
-shipped worker in a Node VM against a fake browser, with the shared bridge
-gate in place: every scenario declares the exact requests it makes, the gate
-answers only those, and a request outside the plan is refused by status and
-recorded — so an invented fetch, a foreign origin or a request the scenario
-never planned fails the scenario instead of answering 200 to nobody.
+worker mints only for an origin an operator has allowed.
 """
 import sys
 from pathlib import Path
@@ -33,8 +28,7 @@ RESULT = 'POST /result'
 # Every scenario's recording, from a run of the shipped worker: boot opens the
 # stream and syncs the tab list, then the scenario's own work posts its
 # result. A scenario with no stored bridge URL never gets boot past its
-# config, and declares no request at all. The boot stream fetch is answered
-# 503 and is declared and asserted like the accounted routes.
+# config, and declares no request at all.
 BOOT_STREAM = (503,)
 MINT_PLAN = [SYNC, SEGMENT]
 REFUSED_PLAN = [SYNC]
@@ -123,10 +117,6 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-// The shared gate's in-scope contract. The gate answers only what the
-// scenario declared and records every request it sees. No route is
-// special-cased: the control plane the old fake waved through at boot is
-// declared in the plan like any other.
 const BRIDGE_URL = '__SERVER__';
 const streamFetches = [];
 const resultPosts = [];
@@ -140,13 +130,12 @@ function streamResponse(answer) {
 
 // One message, one answer, as content.js relays for a page. The sender is
 // the plan's, because what the worker trusts is exactly what Chrome puts
-// there — a test that supplied its own tab URL would be testing itself.
+// there.
 //
 // Chrome keeps the reply channel open past the listener's return only
 // when the listener returned `true`; otherwise the channel closes as it
 // returns, a later sendResponse is dropped, and the sender gets
-// undefined. A branch that forgets `return true` is therefore dead in the
-// browser, and this harness answers exactly as the browser would.
+// undefined. This harness answers exactly as the browser would.
 function send(message) {
   return new Promise((resolve, reject) => {
     try {
@@ -222,12 +211,7 @@ run().then((result) => {
 
 
 def _run_mint(plan, planned_stream=BOOT_STREAM):
-    """Drive the worker under Node with one plan and read back.
-
-    The scenario's declared requests are checked against what the gate
-    recorded, so a request outside the plan is refused by status and fails
-    here, whatever the worker does with the refusal.
-    """
+    """Drive the worker under Node with one plan and read back."""
     outcome = run_gate(require_node(), _MINT_HARNESS,
                        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
                        plan=plan)
@@ -257,8 +241,6 @@ def _mint_plan(allowlist, sender, message, answer=None, planned=None,
                **extra):
     """A mint scenario's plan: boot's sync plus the mint post.
 
-    `answer` is the bridge answer the scenario planned for the mint post —
-    a status and body, or a throw for a bridge it models as unreachable.
     `planned` names the requests for a scenario that never reaches the
     bridge at all (its default), or names none when no bridge URL is
     configured and boot itself makes no request.
@@ -324,11 +306,7 @@ def test_an_empty_or_absent_allowlist_refuses_every_origin(tmp):
 
 
 def test_an_unlisted_origin_learns_nothing_else(tmp):
-    """The allowlist is checked before the job and the bridge config.
-
-    An unlisted page with a bad job or an unconfigured bridge hears
-    `origin not allowed`, never `Missing job` or `bridge not configured`.
-    """
+    """The allowlist is checked before the job and the bridge config."""
     del tmp
     outcome = _run_mint(_mint_plan(
         [ALLOWED], _sender(OTHER), {'type': 'segmentJob'}))
@@ -378,12 +356,7 @@ def test_a_missing_empty_or_non_string_job_is_refused(tmp):
 
 
 def test_an_unconfigured_bridge_is_reported_without_a_fetch(tmp):
-    """No server URL: say so rather than fetch a relative path.
-
-    The plan names no request: without a bridge URL the worker is never
-    configured, so boot opens no stream and syncs no tabs — a claim the
-    gate now checks, which the old fake's blanket 200 could not.
-    """
+    """No server URL: say so rather than fetch a relative path."""
     del tmp
     plan = _mint_plan(
         [ALLOWED], _sender(), {'type': 'segmentJob', 'job': 'job_1'},
@@ -434,12 +407,7 @@ def test_a_storage_failure_answers_an_error_not_silence(tmp):
 
 
 def _commands(commands, store=None, concurrent=None):
-    """Dispatch commands, declaring boot's sync plus one result per command.
-
-    The count is the recording: every dispatched command posts its result,
-    so a scenario that dispatches a third command the plan does not name is
-    refused by the gate rather than waved through.
-    """
+    """Dispatch commands, declaring boot's sync plus one result per command."""
     dispatched = len(commands) + len(concurrent or [])
     plan = {'store': store or {}, 'commands': commands,
             'planned': [SYNC] + [RESULT] * dispatched}

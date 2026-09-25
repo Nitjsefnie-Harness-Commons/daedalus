@@ -5,8 +5,7 @@ Not the accounting itself — `tests/test_bridge_fake_oracle.py` owns that.
 These pin the two capabilities the eval-relay and CDP harnesses need on top
 of it: a declared `{hang: true}` relay answer that only cancellation ends,
 and the `node -e` launcher, which hands the program text to node as an
-argument instead of writing it to a file. The plan rides last under both
-launchers, so one spliced gate serves both.
+argument instead of writing it to a file.
 """
 import sys
 from pathlib import Path
@@ -73,10 +72,8 @@ function settleOrPending(promise) {
   let rejected = null;
   try { await held; } catch (error) { rejected = error.name; }
   // Without a signal: a hang that can never settle is refused, not leaked.
-  // Race it against one event-loop turn so a broken refusal (an answer that
-  // never settles) reports 'pending' here instead of emptying the loop and
-  // dying with an empty stdout the runner cannot read — the same channel as
-  // every other gate refusal.
+  // Raced against one event-loop turn so a broken refusal reports 'pending'
+  // instead of dying with an empty stdout the runner cannot read.
   const unsignalableAnswer = bridgeFetch(RELAY + '/other', { method: 'GET' });
   const unsignalable = await Promise.race([
     unsignalableAnswer,
@@ -113,13 +110,7 @@ def _hang_probe():
 
 
 def test_a_declared_relay_hang_never_settles_until_its_signal_aborts(tmp):
-    """A non-stream `{hang: true}` holds the request until it is aborted.
-
-    The `/slow` relay shape: a fetch the scenario wants held open so the
-    test can cancel it. The gate answers 200 (the request really left) and
-    never settles the promise until the request's own AbortSignal fires,
-    which is the only thing that can end it.
-    """
+    """A non-stream `{hang: true}` holds the request until it is aborted."""
     del tmp
     outcome = _hang_probe()
     assert outcome['beforeAbort'] == 'pending', outcome
@@ -198,9 +189,7 @@ function streamResponse(answer) {
 """
 
 # Wrong on purpose: it takes the last argv entry as the plan WITHOUT parsing
-# it. Under the inline launcher that is JSON text, so `plan.planned` is
-# undefined and the contract check must name it instead of letting a
-# half-parsed plan run the gate.
+# it.
 _UNPARSED_INLINE_HARNESS = r"""
 const plan = process.argv[process.argv.length - 1];
 const BRIDGE_URL = 'https://bridge.example.com';
@@ -229,12 +218,10 @@ process.stdout.write(JSON.stringify({ contractFaults: gateContractFaults }));
 def test_the_inline_driver_runs_a_node_e_harness_against_a_declared_plan(tmp):
     """`run_inline_gate` drives a `node -e` harness against a plan.
 
-    The relay and CDP harnesses hand their program text to `node -e`
-    rather than writing it to a file. The plan rides last in both launches
-    and the harness reads its own arguments from slice(1) in both, so the
-    spliced gate is the same JS either way; this pins the inline driver end
-    to end so a mis-wired `-e` launch is caught here and not as a dead child
-    in one harness.
+    The plan rides last in both launches and the harness reads its own
+    arguments from slice(1) in both, so the spliced gate is the same JS
+    either way; this pins the inline driver end to end so a mis-wired `-e`
+    launch is caught here and not as a dead child in one harness.
     """
     del tmp
     outcome = run_inline_gate(require_node(), _INLINE_HARNESS, ['labelled'],

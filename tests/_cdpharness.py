@@ -1,7 +1,5 @@
 """The Node VM harness for CDP handle lifecycle.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 Every CDP evaluation leaves a remote handle on the inspector side, and a
 session that is kept for a capture keeps the attachment too — so the release
 has to happen on the compile, throw, reject and pending paths alike. This
@@ -143,11 +141,10 @@ const badOrigins = [];
 const context = vm.createContext({
   chrome,
   // A thin wrapper that DELEGATES to the gate and then does this harness's
-  // own attribution. Every request — the answer, the accounting, the
-  // refusal, the record — is the gate's; `resultWorlds` is the harness's own
-  // note of which dispatched command produced which result, which the gate
-  // cannot know because it sees a fetch, not the command behind it. The
-  // wrapper decides no status and counts nothing.
+  // own attribution. `resultWorlds` is the harness's own note of which
+  // dispatched command produced which result, which the gate cannot know
+  // because it sees a fetch, not the command behind it. The wrapper decides
+  // no status and counts nothing.
   fetch: async (target, init = {}) => {
     const url = String(target);
     if (url.endsWith('/result') && init && init.method === 'POST') {
@@ -259,9 +256,7 @@ def run_cdp_handle_lifecycle():
     """Drive the CDP lifecycle child under one plan and read its answer.
 
     The stream is answered `hang` — a connected body that never settles —
-    which is the faithful model of the session this scenario holds open. The
-    plan declares the sync count that answer actually produces, measured on
-    this tree, not a wish.
+    which is the faithful model of the session this scenario holds open.
     """
     plan = _PLAN
     outcome = run_inline_gate(
