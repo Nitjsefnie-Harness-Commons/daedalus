@@ -173,6 +173,73 @@ def test_removal_waits_for_every_live_subscriber_then_reclaims(tmp):
         'cursor at or past them')
 
 
+def test_a_peer_that_unregisters_stops_blocking_removal(tmp):
+    """A subscription that disconnects stops being live, so whatever it
+    left behind is reclaimed by the next drain: once the only remaining
+    live subscriber holds a cursor at or past the entry, it goes."""
+    service, drain = _service('fanout_peer_unregister')
+    token = 'tok'
+    qdir = _queue(service, tmp, token)
+    entry = _write_event(qdir, '0000000000001_00000001', type='result')
+    _a_id, a_killed = service.register(token, DASHBOARD)
+    _b_id, b_killed = service.register(token, DASHBOARD)
+    frames = []
+
+    assert drain.drain_dashboard(qdir, token, a_killed, command_ttl=90,
+                                 frame_writer=frames.append) == 1
+    assert entry.exists(), 'the entry went while a live peer was behind'
+
+    service.unregister(_b_id, b_killed)
+
+    assert drain.drain_dashboard(qdir, token, a_killed, command_ttl=90,
+                                 frame_writer=frames.append) == 0
+    assert not entry.exists(), 'a departed peer kept blocking removal'
+
+
+def test_the_removal_join_is_token_scoped(tmp):
+    """One token's behind-subscriptions do not block another token's
+    reclaim. A subscription on `tok2` that never drained must not keep a
+    `tok1` entry that its own only subscriber has already consumed."""
+    service, drain = _service('fanout_token_scope')
+    q1 = _queue(service, tmp, 'tok1')
+    entry = _write_event(q1, '0000000000001_00000001', type='result')
+    _a_id, a_killed = service.register('tok1', DASHBOARD)
+    _b_id, _b_killed = service.register('tok2', DASHBOARD)  # never drains
+    frames = []
+
+    assert drain.drain_dashboard(q1, 'tok1', a_killed, command_ttl=90,
+                                 frame_writer=frames.append) == 1
+    assert not entry.exists(), (
+        "another token's behind-subscription blocked this token's reclaim")
+
+
+def test_a_never_draining_peer_does_not_starve_the_first_window(tmp):
+    """A second window that connects and never drains costs the first
+    window nothing: the first still receives, and the queue stays bounded
+    by the collector's TTL sweep rather than by the join, because the
+    sweep reclaims an expired entry regardless of any cursor."""
+    service, drain = _service('fanout_not_starve')
+    cq = service.command_queue
+    token = 'tok'
+    cmd_root = Path(tmp) / 'commands'
+    qdir = _queue(service, tmp, token)
+    _a_id, a_killed = service.register(token, DASHBOARD)
+    _b_id, _b_killed = service.register(token, DASHBOARD)  # never drains
+    cq.notify_dashboard(cmd_root, token, {'type': 'result'})
+    frames = []
+
+    assert drain.drain_dashboard(qdir, token, a_killed, command_ttl=90,
+                                 frame_writer=frames.append) == 1
+    assert [f['type'] for f in frames] == ['result'], frames
+    remaining = list(qdir.iterdir())
+    assert len(remaining) == 1, remaining
+    old = time.time() - 500
+    os.utime(remaining[0], (old, old))
+    cq.collect_expired(cmd_root, 90)
+    assert not remaining[0].exists(), (
+        'the TTL sweep did not reclaim an entry a peer never consumed')
+
+
 def test_a_fresh_subscription_receives_entries_queued_when_it_connected(tmp):
     """Seeded at the head of the retained queue, a window that opens
     receives the events already waiting. Seeding at the end would skip
@@ -356,7 +423,8 @@ def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
     # Both publishes in one millisecond, and a hex that descends, so the
     # only discriminator between the two names is the one under test. The
     # fixed naming never calls uuid, so this mock is inert there.
-    cq.time = type('T', (), {'time': staticmethod(lambda: 1_700_000_000.123)})()
+    cq.time = type('T', (), {
+        'time': staticmethod(lambda: 1_700_000_000.123)})()
     cq.uuid = _DescendingUuid()
     frames = []
     try:
