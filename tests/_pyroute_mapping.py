@@ -374,9 +374,11 @@ def _literal_pair_items(source, state):
     return entries, aligned
 
 
-def literal_pair_keys(source, states):
+def literal_pair_keys(source, states, consumer):
     """The keys the pairs an iterable argument yields fold to, in yield
-    order, or an empty tuple when the yield cannot be matched to the text.
+    order, or an empty tuple when there is no key to name: the projection
+    reads no keys, the yield cannot be matched to the text, or the source
+    models no pair. Only the dict call files them.
 
     A generator's element is one pair in every state. A literal sequence
     qualifies when every state models the same container, so the order
@@ -387,6 +389,8 @@ def literal_pair_keys(source, states):
     at all and the store keeps every pair in the unknown-key slot. A star
     splices the display's positions and never qualifies.
     """
+    if consumer != 'dict':
+        return ()
     element = isinstance(source, ast.GeneratorExp)
     if element:
         source = source.elt
