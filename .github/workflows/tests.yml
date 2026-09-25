@@ -16,8 +16,12 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
+    # The suite-timings data file joins it: a refresh commit changes one
+    # JSON file, and a full matrix run would measure a tree whose code did
+    # not change.
     paths-ignore:
       - '.github/ci-thresholds.json'
+      - '.github/suite-timings.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
     #
     # Documentation-only runs are narrowed inside the workflow instead, by
@@ -1155,6 +1159,104 @@ jobs:
           if-no-files-found: error
 
 
+  # The `timed` matrix, planned rather than written by hand.
+  #
+  # What this answers is "which suites share a cell", and the answer used to
+  # be thirteen named globs plus a catch-all. The catch-all took every suite
+  # no glob matched, grew to 26.4 minutes while the next-longest cell ran 8.5,
+  # and alone set the critical path below: the gate's time was one cell that
+  # no one had sized. `plan_timed_matrix.py` packs suites by measured runtime
+  # (`.github/suite-timings.json`, refreshed daily by timed-timings.yml) into
+  # as many equal cells as the bound allows, and the run summary beside the
+  # matrix names the split candidates when one suite is heavier than a cell.
+  #
+  # The checkout is the PULL REQUEST'S OWN HEAD — the same ref the `timed`
+  # cells time — because the cell partition is a function of the suite files
+  # on that ref, and a planner that read the merge commit's tree would plan
+  # cells the cells never run. On a push, `github.sha` is the pushed commit.
+  # It runs the head's planner, like every other step in this workflow that
+  # reads proposed code, so a branch that changed the planner plans with the
+  # planner it ships.
+  #
+  # This job is a GATE, not a convenience: a planner that cannot produce a
+  # matrix (a missing data file, a schema it refuses, an unbalanced bound)
+  # exits nonzero, `aggregate` names it in `needs:`, and the speed gate goes
+  # red rather than quietly measuring fewer cells. That is the same stance as
+  # every other gate here: a red signal a human must look at beats a green one
+  # nobody asked for.
+  plan-matrix:
+    name: plan timed matrix
+    needs:
+      - changes
+    # The same guards the cells carry, minus the aggregate: the aggregate
+    # names THIS JOB in `needs:` (a planner that cannot plan must stop the
+    # speed gate), so naming the aggregate here as well would be a cycle —
+    # and a cycle is a workflow GitHub refuses to start. The correctness
+    # gates therefore still gate the cells: `timed` lists the aggregate, and
+    # the aggregate lists this job, so a red correctness leg skips the
+    # planner, fails the aggregate, and skips the cells in turn; only the
+    # planner's own run is spent on a tree whose gates are red.
+    #
+    # A documentation-only run has no suites to plan, and a manual run names
+    # no measurement to plan for.
+    if: ${{ !cancelled() && !failure()
+               && needs.changes.outputs.docs_only != 'true'
+               && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out the head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The exact head of the pull request, the same ref the timed cells
+          # time: the merge commit checkout defaults to is a tree nobody
+          # authored, and a partition planned from it is not the partition
+          # the cells run.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Plan the matrix
+        id: plan
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        # The planner's STDOUT is the one line this job publishes: it is
+        # `json.dumps` with default separators, so it carries no embedded
+        # newline, and it goes straight into `$GITHUB_OUTPUT` as
+        # `matrix=$json`. Nothing is re-serialised here, and nothing reaches
+        # the script through `${{ }}`: the matrix is the script's stdout, not
+        # a shell argument. `--out` is deliberately NOT `$GITHUB_OUTPUT`:
+        # that file is a key=value list, and `--out` TRUNCATES its target, so
+        # it would erase the file instead of adding a line to it.
+        run: |
+          matrix="$(python3 scripts/ci/plan_timed_matrix.py \
+            --tree . \
+            --timings .github/suite-timings.json \
+            --summary \
+            --summary-file "$GITHUB_STEP_SUMMARY")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          # The line is read back and parsed, so a planner that published a
+          # refusal message, an empty list, or a cell this workflow cannot
+          # use fails here with the reason rather than failing the runner's
+          # matrix evaluation with `null`.
+          python3 - "$matrix" <<'PY'
+          import json, sys
+          parsed = json.loads(sys.argv[1])
+          if not isinstance(parsed, list) or not parsed:
+              raise SystemExit(f'the planner published {parsed!r}')
+          for entry in parsed:
+              if set(entry) != {'group', 'suites'} or not entry['suites']:
+                  raise SystemExit(f'unusable cell: {entry!r}')
+              if not entry['group'].isascii() or \
+                      entry['group'][0] not in 'abcdefghijklmnopqrstuvwxyz0123456789' \
+                      or not all(c in 'abcdefghijklmnopqrstuvwxyz0123456789-'
+                                 for c in entry['group']):
+                  raise SystemExit(f'cell name is unusable in a check run: '
+                                   f'{entry["group"]!r}')
+          print(f'{len(parsed)} cells planned')
+          PY
+
+
   # Did the test suite get slower since the last release?
   #
   # THE MEASUREMENT ONLY MEANS ANYTHING BECAUSE BOTH BUILDS RUN IN ONE CELL. A
@@ -1246,10 +1348,16 @@ jobs:
     needs:
       - changes
       - aggregate
+      - plan-matrix
     # The aggregate is what the cells wait on, and the status functions turn a
     # red or cancelled one into a skip: the result travels through `needs`
     # instead of a job polling the Checks API for it. `docs_only` skips a
     # documentation-only run, where no measurement can mean anything.
+    # `plan-matrix` is load-bearing beside the name it is listed under: the
+    # matrix below reads the planner's output, and an unresolved
+    # `needs.plan-matrix.outputs.matrix` renders as `null` and fails matrix
+    # evaluation on the runner. A planner that could not plan is in
+    # `aggregate`'s `needs:`, so it stops this gate rather than shrinking it.
     if: ${{ !cancelled() && !failure()
                && needs.changes.outputs.docs_only != 'true'
                && github.event_name != 'workflow_dispatch' }}
@@ -1283,102 +1391,47 @@ jobs:
     # the whole budget a single cell needs, however many cells run beside it.
     timeout-minutes: 90
 
+    # One cell per slice of `tests/`, packed by measured runtime by
+    # `plan-matrix` from the committed `.github/suite-timings.json`. The
+    # hand-written globs and the catch-all are gone: the catch-all grew to
+    # 26.4 minutes while the next-longest cell ran 8.5, and it alone set
+    # the critical path below.
+    #
+    # The planner emits `[{"group": "cell-01", "suites": "…"}, …]`, and the
+    # `''` default is for a run where the planner was skipped: a matrix
+    # that never starts evaluates nothing, while `fromJSON(null)` fails
+    # matrix evaluation on the runner before the job's `if:` is consulted.
+    # `timed`'s own `if:` already requires a green `plan-matrix`, so the
+    # default is only ever read by a job that does not run.
+    #
+    # The two actionlint findings on this job are the price of that value,
+    # and the shape that silences them — a placeholder `include` row beside
+    # the expression — is the one shape that could put a live cell on the
+    # runner: the repository's actionlint 1.7.12 rejects `include` beside
+    # `matrix` as a schema violation (GitHub accepts it, because a
+    # `matrix` VALUE supersedes an `include`), and a later actionlint
+    # accepts it and reads the row as the matrix's keys. Measured over the
+    # shapes the runner's evaluator would compute (/tmp probe: planned →
+    # 2 cells; planner skipped → `[]` → 0 cells; `include` alone → 1
+    # placeholder cell with empty suites, which the instrument would time
+    # as EVERY suite), the expression is the only shape that cannot put an
+    # unintended cell on the runner, and it is kept for that reason. The
+    # two findings are named in the report; the gate must accept the two
+    # lines, or ignore them by regex, before this job can be merged.
+    #
+    # `group` is the key first because GitHub truncates a matrix job's
+    # display name — today's `catchall` cell is already cut off
+    # mid-suite-list in the API — so the cell's identity is the part
+    # that survives. The names are the planner's (`cell-01`, …), short
+    # and matching `[a-z0-9][a-z0-9-]*` because they appear inside
+    # check-run names.
     strategy:
       # A slow or failing slice must not cancel its siblings: each cell owns
       # a verdict, and losing the others to one of them is a smaller
       # measurement, not a faster one.
       fail-fast: false
-      matrix:
-        # One cell per slice of `tests/`. The named groups are disjoint, and
-        # the last cell is the catch-all: it takes every suite file the named
-        # globs do not match, so a suite added later and matched by nothing is
-        # still measured rather than silently dropping out of the gate.
-        include:
-          - group: bridge
-            suites: >-
-              test_bridge_credentials.py test_bridge_requests.py
-              test_bridge_uploads.py test_bridge_startup.py
-              test_bridge_tabs.py test_path_safety.py
-          - group: bridge-delivery
-            suites: >-
-              test_bridge_results.py test_bridge_streams.py
-              test_delivery_*.py test_result_*.py test_control_*.py
-          - group: queue
-            suites: >-
-              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
-          - group: segment
-            suites: >-
-              test_segment_*.py
-          - group: mcp
-            suites: >-
-              test_mcp_*.py
-          - group: cli
-            suites: >-
-              test_cli*.py test_pr_*.py
-          - group: repo-ci
-            suites: >-
-              test_ci_*.py test_workflow_*.py test_yamlread*.py
-              test_wf*.py test_ghexpr.py test_speed*.py
-              test_suite_runner.py test_child_coverage.py
-              test_worker_runtime.py test_worker_module_boundary.py
-              test_change_classifier.py test_version_contract.py
-              test_version_contract_*.py
-              test_release_scan.py test_repo_layout.py test_file_sizes.py
-              test_gitignore_*.py test_checkout_pin.py
-          - group: coverage
-            suites: >-
-              test_coverage_*.py test_diff_coverage.py
-              test_diff_coverage_*.py test_js_coverage*.py
-          - group: browser
-            suites: >-
-              test_real_browser_*.py test_eval_relay.py test_gm_*.py
-              test_vm_file_load_guard.py test_extension_*.py
-              test_worker_route_guard.py
-          - group: dashboard
-            suites: >-
-              test_dashboard_*.py test_js_lines.py
-          - group: overlap
-            suites: test_overlap_*.py
-          - group: tab-routing
-            suites: test_tab_routing.py
-          - group: tab-routing-js
-            suites: >-
-              test_tab_routing_js*.py
-# Bucketed by measured runtime rather than topic: test_unresolved_routes.py
-# pins checker routes, so a future tab-routing sibling falls to the catchall.
-          - group: tab-routing-variants
-            suites: >-
-              test_tab_routing_unprovable.py test_tab_routing_performance.py
-              test_tab_routing_yielded_sender.py test_unresolved_routes.py
-          - group: catchall
-            suites: '*'
-            except: >-
-              test_bridge_credentials.py test_bridge_requests.py
-              test_bridge_uploads.py test_bridge_startup.py
-              test_bridge_tabs.py test_path_safety.py
-              test_bridge_results.py test_bridge_streams.py
-              test_delivery_*.py test_result_*.py test_control_*.py
-              test_cmdqueue*.py test_command_queue*.py test_stream_*.py
-              test_segment_*.py
-              test_mcp_*.py
-              test_cli*.py test_pr_*.py
-              test_ci_*.py test_workflow_*.py test_yamlread*.py
-              test_wf*.py test_ghexpr.py test_speed*.py
-              test_suite_runner.py test_child_coverage.py
-              test_worker_runtime.py test_worker_module_boundary.py
-              test_change_classifier.py test_version_contract.py
-              test_version_contract_*.py
-              test_release_scan.py test_repo_layout.py test_file_sizes.py
-              test_gitignore_*.py test_checkout_pin.py
-              test_coverage_*.py test_diff_coverage.py
-              test_diff_coverage_*.py test_js_coverage*.py
-              test_real_browser_*.py test_eval_relay.py test_gm_*.py
-              test_vm_file_load_guard.py test_extension_*.py
-              test_worker_route_guard.py
-              test_dashboard_*.py test_overlap_*.py test_js_lines.py
-              test_tab_routing.py test_tab_routing_js*.py
-              test_tab_routing_unprovable.py test_tab_routing_performance.py
-              test_tab_routing_yielded_sender.py test_unresolved_routes.py
+      matrix: >-
+        ${{ fromJSON(needs.plan-matrix.outputs.matrix || '[]') }}
 
     env:
       # Fractional slowdown that fails the job.
@@ -1530,6 +1583,14 @@ jobs:
           }
           probe head/scripts/ci/compare_durations.py compare_options
           probe head/scripts/ci/time_tests.py time_options
+          # The unit the suite weights are counted in. The same fail-closed
+          # discipline: a head that predates the script cannot answer --help,
+          # which must read as unknown rather than as nothing to pass.
+          if [ -f head/scripts/ci/reference_workload.py ]; then
+            probe head/scripts/ci/reference_workload.py reference_options
+          else
+            echo "reference_options=" >> "$GITHUB_OUTPUT"
+          fi
 
       # No `cache: pip`. setup-python saves its cache in a post-job step, so
       # asking for one here would have this job write cross-run state after it
@@ -1571,12 +1632,55 @@ jobs:
           echo "base mcp:"; "venv-base/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
           echo "head mcp:"; "venv-head/bin/python" -m pip show mcp | grep -E '^(Name|Version):'
 
+      # The unit the suite weights are counted in: one fixed iteration count
+      # of one fixed computation, timed on this runner. It runs ONCE per
+      # cell, before the rounds, beside the reports the cell uploads, and in
+      # the head virtualenv — the interpreter that runs the head's suites —
+      # so the reading and the numbers it normalizes come from the same
+      # process on the same machine. A reading taken after the rounds would
+      # measure a runner that has since run two virtualenv installs and
+      # every suite in the cell; a reading on another machine would be a
+      # different unit. The file lands at reports/reference.json, which
+      # `refresh_timings.py` reads as the cell's `{"seconds": …}`.
+      - name: Measure the reference
+        id: reference
+        if: steps.baseline.outputs.point != ''
+        env:
+          REFERENCE_OPTIONS: ${{ steps.probe.outputs.reference_options }}
+        run: |
+          # --json is optional: without it the script prints a human line,
+          # which the refusal below turns into a failed cell rather than a
+          # reference.json no reader can use.
+          args=()
+          case " $REFERENCE_OPTIONS " in
+            *" --json "*) args+=(--json) ;;
+            *) echo "::error::the head's reference workload does not" \
+                 " offer --json." >&2
+               exit 1 ;;
+          esac
+          mkdir -p reports
+          if ! "venv-head/bin/python" head/scripts/ci/reference_workload.py \
+               "${args[@]}" > reports/reference.json; then
+            echo "the reference workload failed; the cell's weights would be" >&2
+            echo "counted in no unit at all." >&2
+            exit 1
+          fi
+          # The script's own --json output, kept whole: the refresher reads
+          # the `seconds` key and nothing else, so `iterations` and
+          # `checksum` travel beside it as the evidence that two readings
+          # did the same work.
+          cat reports/reference.json
+
       - name: Run both suites, interleaved
         if: steps.baseline.outputs.point != ''
         env:
           # The cell's slice of the tree, as space-separated globs over the
-          # suite file names. Both are empty when the matrix cell names
-          # neither, and the instrument then times every suite.
+          # suite file names. The planner's partition is exact — every suite
+          # is placed, none is excluded — so `except` is always empty for
+          # today's cells; the path stays wired because the instrument still
+          # offers the flag, and an option declared but never passed is the
+          # negotiation rotting in silence. Both empty means the instrument
+          # times every suite.
           SUITES_ONLY: ${{ matrix.suites }}
           SUITES_EXCEPT: ${{ matrix.except }}
           TIME_OPTIONS: ${{ steps.probe.outputs.time_options }}
@@ -1944,6 +2048,14 @@ jobs:
       - wheel
       - coverage-matrix
       - coverage
+      # The timed cells' matrix is planned by a job, so the planner is a
+      # gate like every other job here: a planner that cannot plan (a
+      # missing or refused timings file, a bound the margin forbids) turns
+      # this aggregate red, and the `timed` job — which names the aggregate
+      # and the planner in `needs:` — is skipped rather than measuring a
+      # silently shrunk matrix. The exemption list (`diff-coverage`) stays
+      # as `tests/test_aggregate_needs.py` declares it.
+      - plan-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # A job-level block replaces the workflow-level one rather than adding

@@ -220,7 +220,14 @@ def test_the_speed_cells_start_only_after_the_aggregate(tmp):
     for job in ('changes', 'aggregate', 'timed', 'speed'):
         assert complete_job_mapping(workflow, job) is not None, job
     timed = complete_job_mapping(workflow, 'timed')
-    assert timed['needs'] == ['changes', 'aggregate'], timed.get('needs')
+    # plan-matrix is load-bearing beside the name: the matrix below reads
+    # `needs.plan-matrix.outputs.matrix`, and an unresolved `needs` entry
+    # renders as `null` and fails matrix evaluation on the runner. It
+    # joins both gates, so nothing measures on an ungreen tree.
+    assert timed['needs'] == ['changes', 'aggregate', 'plan-matrix'], \
+        timed.get('needs')
+    assert 'plan-matrix' in _job_needs(workflow, 'aggregate')
+    assert _job_needs(workflow, 'plan-matrix') == ['changes']
     assert timed['strategy']['fail-fast'] == 'false'
     assert int(timed['timeout-minutes']) > 0
     cases = (
