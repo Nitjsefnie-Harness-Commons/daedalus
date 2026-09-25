@@ -8,16 +8,16 @@ import contextlib
 import io
 import subprocess
 import sys
-import time
 from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _drain  # noqa: E402
 import _overlap  # noqa: E402
+import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 from _overlap import (  # noqa: E402
-    _assert_step_trace, _harness_failure, _slow_result_server)
+    _assert_step_trace, _harness_failure)
+from _overlap_clients import _slow_result_server  # noqa: E402
 
 
 _SETTLING_WORKER = """
@@ -120,19 +120,12 @@ def _worker(tmp, source):
     return path
 
 
-def _wait_for_path(path):
-    deadline = time.monotonic() + 5
-    while not path.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert path.exists(), f'{path.name} was not published'
-
-
 def test_run_background_overlap_accepts_a_short_inner_bound(tmp):
     """A caller can shorten diagnostic bounds without changing production."""
     actual = _overlap.run_background_overlap(
         _worker(tmp, _SETTLING_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
-        ['owner-a'], inner_wait=1)
+        ['owner-a'], inner_wait=1, boot=False)
     assert actual == [{
         'id': '_cookies',
         'owner': 'owner-a',
@@ -154,7 +147,8 @@ def test_a_stalled_config_load_names_the_wait(tmp):
 
 def test_posted_results_with_stalled_dispatches_name_the_settle_wait(tmp):
     """Posted results do not hide dispatch promises that never settle."""
-    failure = _harness_failure(_worker(tmp, _STALLED_DISPATCH_WORKER))
+    failure = _harness_failure(_worker(tmp, _STALLED_DISPATCH_WORKER),
+                               boot=False)
     assert ('timed out waiting for all dispatchCommand calls to settle'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -242,7 +236,8 @@ def test_a_synchronous_dispatch_stall_names_the_dispatch_checkpoint(tmp):
 
 def test_completed_work_that_does_not_exit_reports_the_finished_step(tmp):
     """Finished work is distinct from a harness that never completed."""
-    failure = _harness_failure(_worker(tmp, _FINISHED_BUT_RUNNING_WORKER))
+    failure = _harness_failure(_worker(tmp, _FINISHED_BUT_RUNNING_WORKER),
+                               boot=False)
     assert 'last step: the overlap harness finished' in failure, failure
     assert '"owner":"owner-a"' in failure, failure
     _assert_step_trace(failure, [
@@ -266,7 +261,7 @@ def test_a_stalled_async_predicate_cannot_outlive_its_wait(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True, inner_wait=2)
+            wait_between=True, inner_wait=2, boot=False)
     assert ('timed out waiting for the first result to be consumed'
             in failure), failure
     assert 'outer backstop' not in failure, failure
@@ -290,7 +285,7 @@ def test_a_slow_result_post_cannot_preempt_the_consume_wait(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER), commands=commands,
             order=['owner-a', 'owner-b'], result_base=base,
-            wait_between=True, inner_wait=1,
+            wait_between=True, inner_wait=1, boot=False,
             # outer_slack restores the 14s backstop at zero wall-clock cost.
             outer_slack=7)
     assert ('timed out waiting for the first result to be consumed'
@@ -312,7 +307,7 @@ def test_a_rejected_result_post_is_reported_not_posted(tmp):
         failure = _harness_failure(
             _worker(tmp, _SETTLING_WORKER),
             commands=[{'id': '_cookies', 'domain': 'owner-a'}],
-            order=['owner-a'], result_base=base, inner_wait=2)
+            order=['owner-a'], result_base=base, inner_wait=2, boot=False)
     assert ('the result POST for owner-a failed: '
             'id=_cookies _did=null' in failure), failure
     assert 'status 400' in failure, failure
@@ -329,7 +324,7 @@ def test_two_posts_for_one_owner_cannot_deadlock_the_wait(tmp):
     posted = _overlap.run_background_overlap(
         _worker(tmp, _DOUBLE_POST_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
-        ['owner-a'], inner_wait=2)
+        ['owner-a'], inner_wait=2, boot=False, results=2)
     assert [item['owner'] for item in posted] == ['owner-a', 'owner-a'], posted
 
 
@@ -342,7 +337,7 @@ def test_shipped_worker_retries_a_transient_result_post(tmp):
     with _slow_result_server(post_statuses=[500, 200]) as base:
         actual = _overlap.run_background_overlap(
             _SHIPPED_BACKGROUND, commands, ['owner-a'], result_base=base,
-            inner_wait=2)
+            inner_wait=2, results=2)
     assert actual == [{
         'id': '_cookies', 'owner': 'owner-a', 'deliveryId': 'did-retry',
     }], actual
@@ -373,7 +368,7 @@ def test_shipped_worker_terminal_5xx_fails_fast_with_clipped_diagnostics(tmp):
 
 def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
     """The relocated driver preserves the existing durable token carrier."""
-    real_bridge = _overlap._util.bridge
+    real_bridge = _overlap_clients._util.bridge
     recorded = None
 
     @contextlib.contextmanager
@@ -384,11 +379,12 @@ def test_real_overlap_bridge_defaults_to_the_durable_token_path(tmp):
             yield running
 
     token = 'overlap-client-token'
-    with mock.patch.object(_overlap._util, 'bridge', recording_bridge):
+    with mock.patch.object(
+            _overlap_clients._util, 'bridge', recording_bridge):
         try:
-            _overlap.run_same_id_client_overlap(
-                tmp, ['missing-owner'], _overlap.cookie_client_argv,
-                _overlap.client_env(), token,
+            _overlap_clients.run_same_id_client_overlap(
+                tmp, ['missing-owner'], _overlap_clients.cookie_client_argv,
+                _overlap_clients.client_env(), token,
                 _util.ROOT / 'extension' / 'background.js')
         except AssertionError as failure:
             message = str(failure)
@@ -406,17 +402,17 @@ def test_real_overlap_success_path_waits_for_clients_without_a_bound(tmp):
     kill that once left a self-contradictory record behind.
     """
     recorded = {}
-    real_client_states = _overlap.client_states
+    real_client_states = _overlap_clients.client_states
 
     def recording_client_states(processes, grace, **kwargs):
         recorded['grace'] = grace
         return real_client_states(processes, grace, **kwargs)
 
     with mock.patch.object(
-            _overlap, 'client_states', recording_client_states):
-        actual = _overlap.run_same_id_client_overlap(
-            tmp, ['owner-a', 'owner-b'], _overlap.cookie_client_argv,
-            _overlap.client_env(), 'overlap-client-token',
+            _overlap_clients, 'client_states', recording_client_states):
+        actual = _overlap_clients.run_same_id_client_overlap(
+            tmp, ['owner-a', 'owner-b'], _overlap_clients.cookie_client_argv,
+            _overlap_clients.client_env(), 'overlap-client-token',
             _util.ROOT / 'extension' / 'background.js')
     assert actual == {
         owner: {
@@ -432,9 +428,9 @@ def test_real_overlap_failure_keeps_harness_and_live_client_states(tmp):
     """Client cleanup cannot mask a named failure from the real harness."""
     message = None
     try:
-        _overlap.run_same_id_client_overlap(
-            tmp, ['missing-owner'], _overlap.cookie_client_argv,
-            _overlap.client_env(), 'overlap-client-token',
+        _overlap_clients.run_same_id_client_overlap(
+            tmp, ['missing-owner'], _overlap_clients.cookie_client_argv,
+            _overlap_clients.client_env(), 'overlap-client-token',
             _util.ROOT / 'extension' / 'background.js')
     except AssertionError as failure:
         message = str(failure)
@@ -457,239 +453,6 @@ def test_killed_client_pipe_release_keeps_an_independent_floor(tmp):
     minimum_release = 5
     actual = _overlap._KILLED_CLIENT_PIPE_RELEASE_S
     assert actual >= minimum_release, (actual, minimum_release)
-
-
-def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
-    """A client that misses its grace is diagnostic data, not an exception."""
-    ready_path = Path(tmp) / 'client.ready'
-    client = (
-        'import sys, time\n'
-        'from pathlib import Path\n'
-        'print("started", flush=True)\n'
-        'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
-        'time.sleep(60)\n'
-    )
-    process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        _wait_for_path(ready_path)
-        states = _overlap.client_states({'slow-owner': process}, grace=0.1)
-    finally:
-        _drain.kill_and_drain(process)
-    state = states['slow-owner']
-    assert state['stillRunning'] is True, state
-    assert state['returncode'] is None, state
-    assert state['stdout'] == 'started', state
-    assert state['stderr'] == '', state
-
-
-class _KillRecordsOwnStatus:
-    """A client the harness killed, whose kill left its own status behind.
-
-    Windows `Popen.kill()` is `TerminateProcess(handle, 1)` and POSIX's is
-    SIGKILL, so `proc.returncode` after that kill describes the kill rather
-    than the client. The post-kill drain completes with nothing on either
-    stream, which is what the reported Windows record showed.
-    """
-
-    stdout = None
-    stderr = None
-    returncode = None
-
-    def __init__(self, kill_status):
-        self._kill_status = kill_status
-        self._drained = False
-
-    def communicate(self, timeout=None):
-        if self._drained:
-            return '', ''
-        self._drained = True
-        raise subprocess.TimeoutExpired('stub-client', timeout)
-
-    def kill(self):
-        self.returncode = self._kill_status
-
-
-def test_client_states_records_no_exit_status_for_a_client_it_killed(tmp):
-    """A killed client's record cannot carry an exit status at all."""
-    del tmp
-    states = _overlap.client_states({
-        owner: _KillRecordsOwnStatus(status)
-        for owner, status in (('owner-a', 1), ('owner-b', -9))
-    }, grace=0.1)
-    assert states == {
-        'owner-a': {
-            'stillRunning': True, 'returncode': None,
-            'stdout': '', 'stderr': '', 'drainTimedOut': False,
-        },
-        'owner-b': {
-            'stillRunning': True, 'returncode': None,
-            'stdout': '', 'stderr': '', 'drainTimedOut': False,
-        },
-    }, states
-
-
-def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
-    """A killed client keeps its output while inherited pipes close."""
-    ready_path = Path(tmp) / 'slow-pipes.ready'
-    client = (
-        'import subprocess, sys, time\n'
-        'from pathlib import Path\n'
-        'print("slow-pipe-marker", flush=True)\n'
-        'print("slow-pipe-error", file=sys.stderr, flush=True)\n'
-        'grandchild = subprocess.Popen('
-        '[sys.executable, "-c", "import time; time.sleep(1)"])\n'
-        'target = Path(sys.argv[1])\n'
-        'pending = target.with_suffix(".tmp")\n'
-        'pending.write_text("ready", encoding="ascii")\n'
-        'pending.replace(target)\n'
-        'time.sleep(60)\n'
-    )
-    process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        _wait_for_path(ready_path)
-        states = _overlap.client_states(
-            {'slow-pipe-owner': process}, grace=0.1)
-    finally:
-        _drain.kill_and_drain(process)
-    state = states['slow-pipe-owner']
-    assert state['stillRunning'] is True, state
-    assert state['drainTimedOut'] is False, state
-    assert state['stdout'] == 'slow-pipe-marker', state
-    assert state['stderr'] == 'slow-pipe-error', state
-
-
-def test_client_states_records_a_killed_clients_held_pipes(tmp):
-    """A grandchild-held pipe forces the drain timeout, and the record holds.
-
-    The killed client has already written to its pipe and its grandchild keeps
-    that pipe open, so the second drain expires whatever the reader won in the
-    window. What the fixture proves is that the recorded state still comes out
-    self-consistent through that expiry: still running, no exit status of its
-    own, and the timeout recorded rather than raised. Whether the reader won
-    the pipe's contents before the deadline is a wall-clock race, so the
-    contents themselves are pinned against a stub by the client-state suite.
-    """
-    ready_path = Path(tmp) / 'grandchild.ready'
-    client = (
-        'import subprocess, sys, time\n'
-        'from pathlib import Path\n'
-        'print("held-pipe-marker", flush=True)\n'
-        'grandchild = subprocess.Popen('
-        '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
-        'target = Path(sys.argv[1])\n'
-        'pending = target.with_suffix(".tmp")\n'
-        'pending.write_text("ready", encoding="ascii")\n'
-        'pending.replace(target)\n'
-        'time.sleep(60)\n'
-    )
-    process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        _wait_for_path(ready_path)
-        states = _overlap.client_states(
-            {'pipe-owner': process}, grace=0.1, killed_pipe_release=0.1)
-    finally:
-        _drain.kill_and_drain(process)
-    state = states['pipe-owner']
-    assert state['stillRunning'] is True, state
-    assert state['returncode'] is None, state
-    assert state['drainTimedOut'] is True, state
-
-
-def test_client_states_bounds_fallback_wait_after_drain_timeout(tmp):
-    """A failed drain cannot turn its last-resort reap into an unbounded hang.
-
-    The fallback wait runs only after the killed client's drain has already
-    timed out. If that wait were unbounded, the diagnostic helper would hang
-    precisely when the process was already known to be broken.
-    """
-    del tmp
-
-    class NeverReapedProcess:
-        """A killed client whose communicate and reap never complete."""
-
-        stdout = None
-        stderr = None
-        returncode = None
-
-        def communicate(self, timeout):
-            del self
-            raise subprocess.TimeoutExpired('fake-client', timeout)
-
-        def kill(self):
-            del self
-
-        def wait(self, timeout=None):
-            del self
-            if timeout is None:
-                raise AssertionError('fallback wait was unbounded')
-            raise subprocess.TimeoutExpired('fake-client', timeout)
-
-    state = _overlap.client_states(
-        {'stuck-owner': NeverReapedProcess()}, grace=0.1,
-        killed_pipe_release=0.1)['stuck-owner']
-    assert state == {
-        'stillRunning': True,
-        'returncode': None,
-        'stdout': '',
-        'stderr': '',
-        'drainTimedOut': True,
-    }, state
-
-
-def test_a_silent_nonzero_client_is_named_as_its_own_failure(tmp):
-    """A silent non-zero exit is a different failure from outliving grace."""
-    del tmp
-    posted = [{'id': '_cookies', 'owner': 'owner-a'}]
-    states = {
-        'owner-a': {
-            'stillRunning': False, 'returncode': 1,
-            'stdout': '', 'stderr': '', 'drainTimedOut': False,
-        },
-    }
-    message = None
-    try:
-        _overlap.assert_clients_exited(states, posted)
-    except AssertionError as failure:
-        message = str(failure)
-    else:
-        raise AssertionError('a silent non-zero client was accepted')
-    assert 'clients exited non-zero with no output' in message, message
-    assert "['owner-a']" in message, message
-    assert 'still running after grace' not in message, message
-
-
-def test_running_clients_report_the_owner_posted_results_and_states(tmp):
-    """Success-path client stalls preserve all diagnostics in one assertion."""
-    del tmp
-    posted = [{'id': '_cookies', 'owner': 'owner-a'}]
-    states = {
-        'owner-a': {
-            'stillRunning': False, 'returncode': 0,
-            'stdout': 'owner-a', 'stderr': '', 'drainTimedOut': False,
-        },
-        'owner-b': {
-            'stillRunning': True, 'returncode': None,
-            'stdout': 'partial', 'stderr': 'waiting',
-            'drainTimedOut': False,
-        },
-    }
-    message = None
-    try:
-        _overlap.assert_clients_exited(states, posted)
-    except AssertionError as failure:
-        message = str(failure)
-    else:
-        raise AssertionError('a still-running client was accepted')
-    assert message is not None
-    assert 'owner-b' in message, message
-    assert f'harness posted: {posted}' in message, message
-    assert f'client states: {states}' in message, message
 
 
 if __name__ == '__main__':

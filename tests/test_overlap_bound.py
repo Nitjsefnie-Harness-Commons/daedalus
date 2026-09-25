@@ -214,7 +214,7 @@ def test_the_harness_wait_survives_a_starved_child(tmp):
     actual = _overlap.run_background_overlap(
         _worker(tmp, _CALLER_FREEZE_WORKER),
         [{'id': '_cookies', 'domain': 'owner-a'}],
-        ['owner-a'], inner_wait=0.5)
+        ['owner-a'], inner_wait=0.5, boot=False)
     assert actual == [{
         'id': '_cookies',
         'owner': 'owner-a',

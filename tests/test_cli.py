@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
-import _overlap  # noqa: E402
+import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 from _queueread import queued_command  # noqa: E402
@@ -597,10 +597,10 @@ def test_two_same_id_clients_receive_only_their_own_results(tmp):
 
     background = _util.ROOT / 'extension' / 'background.js'
     actual = {
-        'a-first': _overlap.run_same_id_client_overlap(
+        'a-first': _overlap_clients.run_same_id_client_overlap(
             Path(tmp) / 'a-first', ['owner-a', 'owner-b'], client_argv,
             cli_env(), TOK, background),
-        'b-first': _overlap.run_same_id_client_overlap(
+        'b-first': _overlap_clients.run_same_id_client_overlap(
             Path(tmp) / 'b-first', ['owner-b', 'owner-a'], client_argv,
             cli_env(), TOK, background),
     }

@@ -2,6 +2,7 @@
 """The overlap harness's one-retry-on-a-silent-stall pins."""
 import contextlib
 import io
+import json
 import subprocess
 import sys
 from unittest import mock
@@ -11,6 +12,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _overlap  # noqa: E402
 import _util  # noqa: E402
 
+# The child answer's stdout, as the scripted second attempt delivers it: the
+# posted-results list the caller reads, and the empty gate record beside it.
+_RESULT = json.dumps({'posted': [], 'gate': {
+    'records': [], 'refused': [], 'badOrigins': [],
+    'streamAnswered': [], 'contractFaults': [],
+}})
+
 
 def _scripted_stall(communicates, drains):
     """Drive the harness with every attempt's outcome scripted.
@@ -18,7 +26,10 @@ def _scripted_stall(communicates, drains):
     Returns the result, the verdict, the stderr the harness wrote and the
     Popen stub, so a pin asserts on the record the harness actually kept.
     """
-    process = mock.Mock(pid=4713, returncode=0, stdout=None, stderr=None)
+    # A successful attempt's stdout: the child answer the caller reads, which
+    # the gate check now parses on the way out. No command means no result
+    # POST, so the plan this call declares is empty on every route.
+    process = mock.Mock(pid=4713, returncode=0, stdout=_RESULT, stderr='')
     process.communicate.side_effect = communicates
     popen = mock.Mock(return_value=process)
     captured = io.StringIO()
@@ -32,7 +43,10 @@ def _scripted_stall(communicates, drains):
     ):
         result = message = None
         try:
-            result = _overlap.run_background_overlap('background', [], [])
+            # 'background' is a placeholder behind a Popen stub: no worker
+            # runs, so the plan the caller declares has no boot rows.
+            result = _overlap.run_background_overlap(
+                'background', [], [], boot=False)
         except AssertionError as failure:
             message = str(failure)
     return result, message, captured.getvalue(), popen
@@ -42,13 +56,16 @@ def test_silent_stall_recovers_on_second_attempt(tmp):
     """A silent stall is retried once with doubled bounds."""
     del tmp
     result, message, note, popen = _scripted_stall(
-        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [subprocess.TimeoutExpired('node', 60), (_RESULT, '')],
         [(False, '', '')])
     assert result == [], result
     assert message is None, message
     assert popen.call_count == 2, popen.call_args_list
     second_argv = popen.call_args_list[1].args[0]
-    assert second_argv[-1] == '30000', second_argv
+    # The inner wait is the second-to-last argument: the plan rides last, as
+    # it does under every other gate driver.
+    assert second_argv[-2] == '30000', second_argv
+    assert json.loads(second_argv[-1])['planned'] == [], second_argv
     assert ('overlap harness recovered after outer timeout: '
             'attempt 1 (pid ' in note), note
 
@@ -112,7 +129,7 @@ def test_stall_with_output_does_not_retry(tmp):
     """Recorded output is the diagnosis; a retry would only spend a child."""
     del tmp
     result, message, note, popen = _scripted_stall(
-        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [subprocess.TimeoutExpired('node', 60), (_RESULT, '')],
         [(False, 'partial stdout', '[step] something')])
     assert result is None, result
     assert message == (
@@ -127,7 +144,7 @@ def test_a_stall_with_only_stderr_recorded_does_not_retry(tmp):
     """Recorded stderr alone is the diagnosis; a retry would spend a child."""
     del tmp
     result, message, note, popen = _scripted_stall(
-        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [subprocess.TimeoutExpired('node', 60), (_RESULT, '')],
         [(False, '', '[step] something')])
     assert result is None, result
     assert message == (
@@ -142,7 +159,7 @@ def test_a_stall_with_only_stdout_recorded_does_not_retry(tmp):
     """Recorded stdout alone is the diagnosis; a retry would spend a child."""
     del tmp
     result, message, note, popen = _scripted_stall(
-        [subprocess.TimeoutExpired('node', 60), ('[]', '')],
+        [subprocess.TimeoutExpired('node', 60), (_RESULT, '')],
         [(False, 'partial stdout', '')])
     assert result is None, result
     assert message == (
