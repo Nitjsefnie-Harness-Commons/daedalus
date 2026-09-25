@@ -343,6 +343,7 @@ def test_concurrent_writes_from_distinct_origins_hold_the_aggregate_cap(tmp):
     assert burst['total'] <= case['cap'], case
     assert burst['stored'] == 5, case
     assert burst['refusals'] == 1, case
+    # Index 5 is incidental (FIFO order); the cap is the asserts above.
     assert burst['errors'][:5] == [None] * 5, case
     assert burst['errors'][5] == AGGREGATE_ERROR, case
 
