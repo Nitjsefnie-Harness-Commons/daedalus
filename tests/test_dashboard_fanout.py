@@ -11,8 +11,6 @@ redelivery after a drain with the same cursor reaches nobody, an expired
 entry is taken for everyone, and a publisher cannot forge the bridge's own
 event id or kind.
 """
-import contextlib
-import io
 import itertools
 import json
 import os
@@ -25,54 +23,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _service_loader import _load_service  # noqa: E402
-
-
-DASHBOARD = 'dashboard'
-
-
-def _service(name):
-    """The path-loaded stream service and a drain bound to that copy.
-
-    `stream_service` is loaded by path under a private name, so it is a
-    different module object from `daedalus_bridge.stream_service`; the drain
-    has to see THIS copy's registry or `register` and the cursor queries
-    would not meet.
-    """
-    service = _load_service(name)
-    drain = _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'dashboard_drain.py',
-        name=f'{name}_drain')
-    # setattr, not `drain.stream_service = service`: pyright refuses a
-    # direct attribute assignment on a ModuleType.
-    setattr(drain, 'stream_service', service)
-    return service, drain
-
-
-def _queue(service, tmp, token):
-    """The dashboard event queue directory for `token`."""
-    cq = service.command_queue
-    name, _ = cq.command_target_names(token, DASHBOARD)
-    qdir = Path(tmp) / 'commands' / name
-    qdir.mkdir(parents=True, exist_ok=True)
-    return qdir
-
-
-def _write_event(qdir, stem, **fields):
-    """Write one dashboard event under an explicit, sortable stem."""
-    document = {'id': stem, 'kind': 'event'}
-    document.update(fields)
-    path = qdir / f'{stem}.json'
-    path.write_text(json.dumps(document), encoding='utf-8')
-    return path
-
-
-@contextlib.contextmanager
-def _captured():
-    """Capture what the module printed while the block ran."""
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        yield buffer
+# Shared wiring lives in _fanout so the drain-blocking suite uses the same
+# by-path loader and queue helpers; imported under their former local names
+# so the controls below are unchanged.
+from _fanout import (  # noqa: E402
+    DASHBOARD,
+    DescendingUuid as _DescendingUuid,
+    captured_stdout as _captured,
+    dashboard_queue as _queue,
+    service_pair as _service,
+    write_event as _write_event,
+)
 
 
 def test_two_dashboard_subscriptions_both_receive_one_event(tmp):
@@ -453,24 +414,6 @@ def test_notify_dashboard_publishes_its_own_id_and_kind(tmp):
     assert document['id'] == published.stem, document
     assert document['kind'] == 'event', document
     assert document['type'] == 'result', document
-
-
-class _DescendingUuid:
-    """A uuid4 whose hex strictly decreases, forcing a name inversion.
-
-    With the old random-hex stem two events published in one millisecond
-    order by this value, so the second can sort below the first and be lost
-    behind the cursor. The fixed naming never calls uuid at all, so the mock
-    is inert there and the two stems come from the monotonic counter instead.
-    """
-
-    def __init__(self):
-        self.calls = 0
-
-    def uuid4(self):
-        self.calls += 1
-        hexid = 'ffffffff' if self.calls == 1 else '00000000'
-        return type('U', (), {'hex': hexid})()
 
 
 def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):

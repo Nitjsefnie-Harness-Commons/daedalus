@@ -32,8 +32,25 @@ def drain_dashboard(qdir, token, killed_event, *, command_ttl,
     connection has read it: it is unlinked only once every live dashboard
     subscription for the token holds a cursor at or past it, or the TTL
     takes it. A slow or wedged window therefore costs retained files for at
-    most the command TTL and never costs another window an event. Returns
-    the number of events handed to `frame_writer`.
+    most the command TTL and never costs another window an event.
+
+    The drain delivers a *prefix* of the queue and never advances its cursor
+    past an entry this connection did not consume. The first entry it cannot
+    resolve — another consumer holds its claim, the object is refused, or it
+    will not parse — stops the scan for this tick, so the cursor stays at the
+    last entry actually delivered and the unresolved entry is retried on the
+    next tick. Advancing past it instead would strand it below the cursor,
+    where the next pass would treat it as already-consumed and the removal
+    join would unlink it: a real event lost, a refused object removed against
+    the contract (and outside the refusal registry's retire path), and an
+    unparseable file dropped before its TTL.
+
+    The liveness cost is deliberate and bounded: an entry at the head that
+    stays unresolvable blocks later events to this connection until
+    `command_queue.remove_expired` vacates it on age — at most the command
+    TTL — which also retires its refusal record via `on_name_vacated`. A
+    contended claim is the common case and clears as soon as the holder
+    releases it. Returns the number of events handed to `frame_writer`.
     """
     if not qdir.is_dir():
         return 0
@@ -61,14 +78,21 @@ def drain_dashboard(qdir, token, killed_event, *, command_ttl,
         key = command_queue.queue_key(qdir.name, name)
         with command_queue.claimed(key) as owned:
             if not owned:
-                continue  # another consumer covering this queue has it
+                # Another consumer holds this entry right now. Stop here:
+                # the entry is not ours to skip over, and advancing the
+                # cursor past it would strand and then unlink it.
+                break
             opened, reason, ident = command_queue.open_command_candidate(path)
             if opened is None:
-                if reason is not None:
-                    stream_service.refusal_once(
-                        (key, ident),
-                        f'q={qdir.name}/{name}', reason, secret=secret)
-                continue  # absent, or refused: never delivered or unlinked
+                if reason is None:
+                    continue  # absent: the name named nothing, resolved
+                stream_service.refusal_once(
+                    (key, ident),
+                    f'q={qdir.name}/{name}', reason, secret=secret)
+                # Refused: an object is there we cannot deliver. Leave it
+                # in place (never delivered or unlinked) and stop, so it is
+                # not stranded below the cursor.
+                break
             # Decide with the descriptor open; unlink only once it closes.
             with opened:
                 age = time.time() - os.fstat(opened.fileno()).st_mtime
@@ -79,9 +103,11 @@ def drain_dashboard(qdir, token, killed_event, *, command_ttl,
                         parsed = json.loads(opened.read().decode('utf-8'))
                     except (OSError, json.JSONDecodeError, RecursionError,
                             ValueError):
-                        # An older non-atomic writer may still hold it;
-                        # leave it in place, the TTL sweep bounds retries.
-                        continue
+                        # Unparseable: an older non-atomic writer may still
+                        # hold it. Leave it in place — the TTL sweep bounds
+                        # retries — and stop, so it is not stranded below
+                        # the cursor and removed before its TTL.
+                        break
                     if isinstance(parsed, dict):
                         data = parsed
             if data is not None:
@@ -94,8 +120,8 @@ def drain_dashboard(qdir, token, killed_event, *, command_ttl,
                     f'id={log_safe(data.get("id", ""))} '
                     f'did={log_safe(data.get("_did", ""))}', flush=True)
             stream_service.advance_subscription(killed_event, name)
-            # A refused object and an expired entry leave now; a real event
-            # waits until every live peer has reached it.
+            # An expired entry leaves now; a real event waits until every
+            # live peer has reached it.
             if (data is None
                     or stream_service.every_subscription_past(token, name)):
                 _unlink(path)
