@@ -8,15 +8,13 @@ the failure-reporting backstop on the single wait with no live process to
 give up on, which renders the surviving pids, the parent's exit and the
 captured output at expiry instead of a number of seconds.
 
-No guard here asserts that the budget suite carries no wall-clock bound,
-and one stood here for four rounds - a name list, an arithmetic rule, a
-loop marker, four questions with closed domains - each defeated by an
-ordinary spelling its own decider did not read. A guard narrower than
-its reason for existing is the defect it was written to catch, so it is
-gone rather than narrowed, and the claim is carried by the ledger below:
-a control per arm of each wait, every arm killed by name against a planted
-defect, the mutation proofs on the teardown tests, and the review rounds
-on the pull request.
+No guard here asserts that the budget suite carries no wall-clock bound.
+Five were tried and each was defeated by an ordinary spelling its own
+decider did not read, and a guard narrower than its reason for existing is
+the defect it was written to catch, so there is none. The claim is carried
+by the ledger below: a control per arm of each wait, every arm killed by
+name against a planted defect, and the mutation proofs on the teardown
+tests.
 """
 import sys
 import threading
@@ -144,14 +142,12 @@ class _ScriptedCondition(threading.Condition):
 
     def __init__(self):
         super().__init__()
-        self.waited = threading.Event()
         self.waits = 0
 
     def wait(self, timeout=None):
         self.waits += 1
         if self.waits > RUNAWAY_CALL_LIMIT:
             raise AssertionError('condition double exceeded call limit')
-        self.waited.set()
         return super().wait(DOUBLE_WAIT)
 
 
@@ -191,22 +187,45 @@ class _ScriptedChild:
         return self._output
 
 
+class _LateStream:
+    """A stream double that hands its line over only once a waiter has
+    looked and found nothing.
+
+    The control's claim is an ordering - the line lands after the wait has
+    begun - and the ordering is produced by the look count rather than by a
+    second thread, so nothing in this control can be starved. A waiter that
+    never suspends spins here, is handed the line anyway, and is caught by
+    the control's own assertion on the wait count. `await_lines` reads
+    exactly the three attributes this carries.
+    """
+
+    def __init__(self, changed, line):
+        self.changed = changed
+        self.ended = False
+        self._line = line
+        self._drained = []
+        self.looks = 0
+
+    @property
+    def lines(self):
+        self.looks += 1
+        if self.looks == 2:
+            self._drained.append(self._line)
+        return self._drained
+
+
 def test_the_line_wait_ends_on_a_line_published_after_it_began_waiting(tmp):
     """The wait is synchronised on the pump, not on a lucky first read: the
-    line lands only once the waiter is inside the condition, and the wait
-    still hands it over.
+    first pass finds nothing, and only a wait that suspends reaches the line
+    the double hands over on the second look.
     """
+    del tmp
     changed = _ScriptedCondition()
-    stream = Stream(changed)
-
-    def publish():
-        assert changed.waited.wait(BACKSTOP), 'the wait never began'
-        stream.publish('watcher pid 42')
-
-    threading.Thread(target=publish, daemon=True).start()
+    stream = _LateStream(changed, 'watcher pid 42')
     found = await_lines(stream, lambda line: 'watcher pid' in line, 1,
                         'both children to announce their pid')
     assert found == ['watcher pid 42'], found
+    assert changed.waits >= 1, changed.waits
 
 
 def test_the_line_wait_gives_up_by_name_when_the_stream_ends(tmp):
@@ -275,6 +294,10 @@ def test_the_death_wait_names_the_survivors_when_the_backstop_passes(tmp):
     take this control to the job's timeout instead of failing.
     """
     del tmp
+    # 7 answers alive, 7 again, then 8 answers dead: the survivors list the
+    # backstop builds must be the pids that are still up, not every pid it
+    # was handed.
+    states = iter((True, True, False))
     calls = 0
 
     def alive(_pid):
@@ -282,7 +305,7 @@ def test_the_death_wait_names_the_survivors_when_the_backstop_passes(tmp):
         calls += 1
         if calls > RUNAWAY_CALL_LIMIT:
             raise AssertionError('pid double exceeded call limit')
-        return True
+        return next(states, True)
 
     child = _ScriptedChild(output='started ci watcher pid 9', code=-9)
     message = None
@@ -295,7 +318,8 @@ def test_the_death_wait_names_the_survivors_when_the_backstop_passes(tmp):
         raise AssertionError('a surviving child did not fail')
     assert message is not None
     assert 'children to die with the parent' in message, message
-    assert 'pids still alive [7, 8]' in message, message
+    assert 'pids still alive [7]' in message, message
+    assert 'pids still alive [7, 8]' not in message, message
     assert 'parent exit -9' in message, message
     assert 'started ci watcher pid 9' in message, message
 
