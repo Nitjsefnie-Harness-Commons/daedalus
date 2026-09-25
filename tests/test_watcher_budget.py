@@ -131,6 +131,14 @@ def _announces_review(line):
     return ' review from ' in line
 
 
+def _reports_state(line):
+    return 'state: open' in line
+
+
+def _announces_failure(line):
+    return 'pyright: failure' in line
+
+
 class _Child:
     """A watcher process with both of its streams drained."""
 
@@ -393,7 +401,7 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         pause = [line for line in child.out.lines
                  if _reports_rate_limit(line)][0]
         assert stamp in pause, (stamp, pause)
-        waits.await_lines(child.out, lambda line: 'state: open' in line, 1,
+        waits.await_lines(child.out, _reports_state, 1,
                           'the resumed poll to report what it found')
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
@@ -417,8 +425,7 @@ def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
     try:
         waits.await_lines(child.out, _reports_rate_limit, 1,
                           'the CI pause line')
-        waits.await_lines(child.out,
-                          lambda line: 'pyright: failure' in line, 1,
+        waits.await_lines(child.out, _announces_failure, 1,
                           'the resumed poll to announce the conclusion')
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
