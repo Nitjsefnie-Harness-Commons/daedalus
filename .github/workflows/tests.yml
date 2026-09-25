@@ -1677,12 +1677,17 @@ jobs:
         if: steps.baseline.outputs.point != ''
         env:
           # The cell's slice of the tree, as space-separated globs over the
-          # suite file names. The planner's partition is exact — every suite
-          # is placed, none is excluded — so `except` is always empty for
-          # today's cells; the path stays wired because the instrument still
-          # offers the flag, and an option declared but never passed is the
-          # negotiation rotting in silence. Both empty means the instrument
-          # times every suite.
+          # suite file names. `SUITES_EXCEPT` is empty for every cell the
+          # planner produces — `Cell.include()` emits `group` and `suites`
+          # and nothing else, so no `except` key exists — and the path stays
+          # wired because `time_tests.py` declares `--except`, this step is
+          # its only caller, and
+          # `test_every_option_a_script_declares_reaches_its_step` holds the
+          # two together. A planner that grew the key would be measured the
+          # moment it did; the emptiness is a property of the plan, not a
+          # wire waiting to be plugged in. Both empty is the instrument's
+          # "time every suite", which is what a run with no planned cell
+          # would ask for.
           SUITES_ONLY: ${{ matrix.suites }}
           SUITES_EXCEPT: ${{ matrix.except }}
           TIME_OPTIONS: ${{ steps.probe.outputs.time_options }}

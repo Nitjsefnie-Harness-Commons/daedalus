@@ -36,12 +36,22 @@ as long as the staleness this file exists to fix goes unnoticed. A run
 with a DIFFERENT cell set is a different partition of the tree, so its
 numbers are not comparable and it is skipped, and the report says how
 far back the search reached and why. A cell directory with no
-reference reading is not a skipped run but a refusal naming the cell
-and the suites it carried: a run that produced the full set of cells
-and lost one unit's reading is a broken measurement, and stepping over
-it is the silence the maintainer ruled out. The median is taken over
-the selected runs and `runs` records that sample -- a median over one
-run is still a median; a file that silently claimed three is not.
+reference reading is a REFUSAL naming the cell and the suites it
+carried: a run that produced the full set of cells and lost one unit's
+reading is a broken measurement, and stepping over it here is the
+silence the maintainer ruled out. The workflow's walk is the gate in
+front of this one, and it reaches the opposite disposition for that
+same run -- it steps over a candidate whose cells lack `reference.json`,
+and releases the reference cell set while nothing has been kept yet, so
+a run from before the cells measured the reference workload cannot block
+the search. The two are not in conflict, and neither is a fallback for
+the other: the walk narrows the candidate list, and this refusal is
+what a TREE the walk did not narrow -- a hand-built runs root, an
+operator's own download -- gets instead of a silent skip.
+`tests/test_timed_workflow.py` pins the walk's half by executing it.
+The median is taken over the selected runs and `runs` records that
+sample -- a median over one run is still a median; a file that silently
+claimed three is not.
 
 THE WRITE. The file is rewritten when a weight moved beyond
 `WEIGHT_MARGIN` of the recorded one, a suite appeared in the
@@ -59,7 +69,7 @@ planner only notes a target the margin forbids before exiting 0. So
 before every write -- seed or refresh -- the target is verified
 against the margin with the weights being written and re-derived
 rather than written through when the margin forbids it
-(`timings_bounds`, the chokepoint), and the file carries a `seeded`
+(`timings_bounds`, the chokepoint), and the file carries a `basis`
 field naming both bounds, their measured basis and the tree suites the
 measurements do not cover, rebuilt from the numbers of that write so
 it cannot go stale the way a preserved sentence would.
@@ -85,13 +95,14 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
-    from plan_timed_matrix import PlanError, SCHEMA_VERSION, read_timings
+    from plan_timed_matrix import (
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
     from timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
         plan_is_balanced, verify_target)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        PlanError, SCHEMA_VERSION, read_timings)
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
     from scripts.ci.timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
         plan_is_balanced, verify_target)
@@ -332,8 +343,8 @@ def _write(path, data):
 
 
 def _attach_basis(tree, data, cells):
-    """The file's `seeded` field: the basis of both bounds, rebuilt now."""
-    data['seeded'] = basis_sentence(
+    """The file's `basis` field: the basis of both bounds, rebuilt now."""
+    data[BASIS_FIELD] = basis_sentence(
         tree, data, cells, estimated_count(tree, data))
     return data
 
@@ -406,7 +417,7 @@ def seed(runs_root, out, tree):
     if not seconds:
         raise RefreshError(f'run {run_id} carries no suite durations')
     max_cells = len(cells)
-    target = derive_target(tree, seconds, max_cells, 'seconds')
+    target = derive_target(tree, seconds, max_cells)
     data = _written(seconds, target, max_cells, [run_id], 'seconds')
     if not plan_is_balanced(tree, data):
         raise BoundsError(
@@ -446,6 +457,13 @@ def main(argv=None):
     """Print what was decided; return 0, or 1 after a named refusal."""
     args = _parser().parse_args(argv)
     out = Path(args.out)
+    # A non-positive sample walks EVERY complete run rather than none,
+    # which is a different measurement from the one that was asked for
+    # and is a typo rather than an intention.
+    if args.runs < 1:
+        print(f'refresh_timings: --runs must be at least one, '
+              f'not {args.runs}', file=sys.stderr)
+        return 1
     try:
         if args.seed:
             message = seed(Path(args.runs_root), out, Path(args.tree))

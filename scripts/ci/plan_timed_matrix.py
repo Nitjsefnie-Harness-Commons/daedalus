@@ -19,12 +19,12 @@ first file is seeded from raw seconds of one run, which `units` says
 because a second spelling of it is a second thing to disagree with
 itself. `measured_from` names the run the numbers came from and `runs`
 says how many, so a weight with no run behind it is a number no refresh
-can check. The one optional field, `seeded`, is the BASIS the refresher
-writes beside the two policy numbers on every write (which run, which
-units, why the target and the cell bound, and which tree suites the
-measurements do not cover); its name is the schema's, its content is
-rebuilt from the numbers of each write, and this reader does not
-type-check it because the sentence is for a human.
+can check. The one optional field, `basis`, is the PROSE the refresher
+writes beside the two policy numbers on every write, seed or refresh
+(which run, which units, why the target and the cell bound, and which
+tree suites the measurements do not cover); its content is rebuilt from
+the numbers of each write, and this reader does not type-check it
+because the sentence is for a human.
 
 Suites are enumerated with the timing instrument's own matcher
 (`time_tests.selected`, called with no globs, where it admits every
@@ -102,18 +102,17 @@ except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.time_tests import selected
 
 # The data file's schema, as one authority for the writer to import.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REQUIRED = ('schema_version', 'target_cell_weight', 'max_cells', 'units',
             'suite_weights', 'measured_from', 'runs')
 PROVENANCE_FIELDS = ('measured_from', 'runs')
 UNITS = ('seconds', 'reference-multiples')
 # The optional basis field every write carries; see the module docstring.
-SEED_REASON = 'seeded'
+BASIS_FIELD = 'basis'
 # A suite the file records nothing about is estimated at the median of
 # the recorded weights, or at this when the file records none.
 DEFAULT_ESTIMATE = 1.0
 CELL_WEIGHT_MARGIN = 0.35
-# Cell names appear inside check-run names.
 _CELL_PREFIX = 'cell-'
 
 
@@ -130,16 +129,13 @@ class Cell:
     weight: float
 
     def include(self):
-        """The matrix entry, or None when the cell holds no suite.
+        """The matrix entry.
 
-        An empty cell runs a matrix job that times nothing, and an empty
-        `--only` selection means the instrument times the WHOLE tree
-        again -- the one shape where a cell silently measures something
-        other than its slice. A cell that would be empty is never emitted
-        as a matrix entry; the planner drops it after reporting it.
+        Every cell carries a suite and the matrix is exactly these
+        entries, so nothing here can be empty: an empty cell times
+        nothing and an empty `--only` times the WHOLE tree, and the
+        packer's openers are the reason neither shape exists.
         """
-        if not self.suites:
-            return None
         return {'group': self.name, 'suites': ' '.join(self.suites)}
 
 
@@ -202,7 +198,7 @@ def read_timings(path):
     for name in REQUIRED:
         if name not in data:
             raise PlanError(f'missing field: {name} (in {path})')
-    for name in sorted(set(data) - set(REQUIRED) - {SEED_REASON}):
+    for name in sorted(set(data) - set(REQUIRED) - {BASIS_FIELD}):
         raise PlanError(f'unknown field: {name} (in {path})')
     if data['schema_version'] != SCHEMA_VERSION:
         raise PlanError(f'schema_version {data["schema_version"]!r} is not '
@@ -316,13 +312,10 @@ def _pack(weights, names, target, max_cells):
     alone = [name for name in heavy if name not in given_up]
     rest = [name for name in order if name not in heavy]
     # The heavy suites that kept a cell hold it alone; the rest open the
-    # shared cells, which is what is left of the count. The suites that
-    # gave up their cell (and whatever the shared cells cannot hold) are
-    # then placed longest-first into the lightest existing cell, so the
-    # cells never exceed the count and none is ever empty. A bound of
-    # one with every suite heavy leaves no cell to place into, so the
-    # first cell opens on the heaviest suite rather than the placement
-    # choosing among none, and that suite is not placed a second time.
+    # shared cells, which is what is left of the count. A bound of one
+    # with every suite heavy leaves no cell to place into, so the first
+    # cell opens on the heaviest suite rather than the placement choosing
+    # among none.
     shared = min(max(0, count - len(alone)), len(rest))
     openers = alone + rest[:shared]
     if not openers:
@@ -355,11 +348,6 @@ def plan(tree, timings, scale=1.0):
         notes.append(
             'stale weights dropped (their suites are gone from the tree): '
             + ', '.join(stale))
-    filled = [cell for cell in cells if cell.suites]
-    if len(filled) != len(cells):
-        notes.append(
-            f'dropped {len(cells) - len(filled)} empty cells: a cell with no '
-            'suite times the whole tree or nothing')
     loads = [cell.weight for cell in cells]
     median = statistics.median(loads) if loads else 0.0
     if loads and max(loads) > median * (1 + CELL_WEIGHT_MARGIN):
@@ -372,7 +360,7 @@ def plan(tree, timings, scale=1.0):
     return Plan(cells=cells, total=sum(weights.values()), target=target,
                 max_cells=int(timings['max_cells']), estimated=estimated,
                 split_candidates=list(heavy), stale=stale, notes=notes,
-                matrix=[cell.include() for cell in filled])
+                matrix=[cell.include() for cell in cells])
 
 
 def _parser():

@@ -7,6 +7,7 @@ network. Each test builds a run the way the timed job leaves one --
 reference reading -- and drives `refresh_timings.main()` over it.
 """
 import contextlib
+import difflib
 import io
 import json
 import math
@@ -198,6 +199,57 @@ def test_a_cell_with_no_reference_reading_is_refused_by_name(tmp):
     assert json.loads(out.read_text(encoding='utf-8'))['suite_weights'] == {}
 
 
+def test_a_reference_reading_that_is_not_a_positive_number_is_refused(tmp):
+    """The reading is DIVIDED by: zero and a non-number must both stop.
+
+    `_reference` reads `seconds` and every suite's weight is that
+    reading's divisor, so a `seconds` of 0 is a `ZeroDivisionError`
+    traceback in a nightly job the moment the positivity check goes, and
+    a string is a `TypeError` from the same line. The shipped code
+    refuses both, naming the field and the offending value; this pins
+    that, because every other reference fixture here writes a reading of
+    2.0 and neither input reaches them. The refusal names the FIELD and
+    not the cell, unlike the missing-file and missing-key branches
+    above it -- the run that produced a bad reading is still in the
+    walk's log.
+    """
+    refresh = _refresh()
+    for seconds, value in ((0, '0'), ('fast', "'fast'"), (-1, '-1')):
+        root = Path(tmp) / f'runs-{value}'
+        run = _write_run(root, 71, {'cell-03': {'test_a.py': 4.0}},
+                         reference=None)
+        (run / 'cell-03' / 'reference.json').write_text(
+            json.dumps({'seconds': seconds, 'iterations': 16}),
+            encoding='utf-8')
+        out = _file(tmp, _data({}), name=f'timings-{value}.json')
+        _o, err = _run(refresh, _refresh_args(tmp, root, out), expect=1)
+        assert 'reference.json seconds' in err, (value, err)
+        assert value in err, (value, err)
+        assert json.loads(out.read_text(encoding='utf-8'))[
+            'suite_weights'] == {}
+
+
+def test_a_run_count_below_one_is_refused_rather_than_walked(tmp):
+    """`--runs 0` and `--runs -1` are a typo, not a request for every run.
+
+    A non-positive sample would otherwise reach `select`, whose
+    `len(selected) == wanted` never fires, and walk EVERY complete run
+    under the root -- a different measurement from the one asked for,
+    silently taken.
+    """
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    _write_run(root, 90, {'cell-01': {'test_a.py': 4.0}})
+    for runs in ('0', '-1'):
+        out = _file(tmp, _data({}), name=f'timings-runs{runs}.json')
+        _o, err = _run(refresh, _refresh_args(tmp, root, out, runs=int(runs)),
+                       expect=1)
+        assert '--runs must be at least one' in err, (runs, err)
+        assert f'not {runs}' in err, (runs, err)
+        assert json.loads(out.read_text(encoding='utf-8'))[
+            'suite_weights'] == {}
+
+
 def test_the_planner_reads_what_the_refresher_wrote_unchanged(tmp):
     """Round trip: no field dropped, no field invented."""
     refresh = _refresh()
@@ -377,14 +429,13 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
     assert written['max_cells'] == 2, written
     assert written['target_cell_weight'] == expected, written
     assert written['target_cell_weight'] % 5 == 0, written
-    assert 'raw seconds' in written['seeded'], written['seeded']
-    assert f'{expected:g}' in written['seeded'], written['seeded']
-    assert '2 cells' in written['seeded'], written['seeded']
+    assert 'raw seconds' in written['basis'], written['basis']
+    assert f'{expected:g}' in written['basis'], written['basis']
+    assert '2 cells' in written['basis'], written['basis']
     # The seed says which tree suites the numbers do not cover, so a
     # reader of the file alone knows the remainder is estimated.
-    assert 'test_unmeasured.py' in written['seeded'], written['seeded']
-    assert "1 of the tree's 9 suites" in written['seeded'], \
-        written['seeded']
+    assert 'test_unmeasured.py' in written['basis'], written['basis']
+    assert "1 of the tree's 9 suites" in written['basis'], written['basis']
 
 
 def _smallest_balancing_target(planner, tree, weights, max_cells):
@@ -400,6 +451,35 @@ def _smallest_balancing_target(planner, tree, weights, max_cells):
                 1 + planner.CELL_WEIGHT_MARGIN):
             return float(target)
     return 0.0
+
+
+def test_the_shipped_basis_is_what_this_generator_writes(tmp):
+    """The committed prose is the CURRENT generator's, character for character.
+
+    The data file's `basis` is written by `timings_bounds.basis_sentence`
+    and nothing else, so it is recomputable from the file's own numbers
+    plus the tree: a seeded file measured `max_cells` cells, which is
+    what `seed()` passed, so `max_cells` is the cell count the sentence
+    needs. The committed prose outlived the generator that wrote it once
+    -- a sentence the shipped generator cannot emit stayed in the file
+    and nothing went red, because the stale text was still TRUE of the
+    seed that produced it. A recomputation is what tells the two apart.
+
+    It is also the estimate list: adding a suite to the tree changes the
+    plan, and a `basis` that still names the old count is a sentence
+    about a tree that no longer exists.
+    """
+    del tmp
+    planner = _planner()
+    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                        'timings_bounds')
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    recomputed = bounds.basis_sentence(
+        ROOT, data, data['max_cells'], bounds.estimated_count(ROOT, data))
+    if recomputed != data['basis']:
+        raise AssertionError('\n'.join(difflib.unified_diff(
+            data['basis'].split('. '), recomputed.split('. '),
+            'committed', 'generator', lineterm='', n=0)))
 
 
 def test_the_shipped_file_satisfies_the_margin_it_names(tmp):
@@ -442,13 +522,13 @@ def test_a_target_the_margin_forbids_is_re_derived_not_written_through(tmp):
     assert 'target re-derived' in err, err
     assert written['target_cell_weight'] == 25.0, written
     assert written['suite_weights'] == weights, written
-    assert 'seeded' in written, written
+    assert 'basis' in written, written
 
 
 def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     """A refresh must not drop the only text explaining the two bounds.
 
-    The seed writes the basis into the file's `seeded` field; the first
+    The seed writes the basis into the file's `basis` field; the first
     scheduled refresh rewrites the whole file, so it has to write a
     basis too -- rebuilt for the refreshed numbers, naming the runs,
     the units, both bounds and the tree suites still estimated.
@@ -462,13 +542,13 @@ def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     out = _file(tmp, _data({}, units='seconds'), name='seed.json')
     _run(refresh, _refresh_args(tmp, seed_root, out, seed=True, tree=tree))
     assert 'raw seconds' in json.loads(
-        out.read_text(encoding='utf-8'))['seeded']
+        out.read_text(encoding='utf-8'))['basis']
     root = Path(tmp) / 'runs'
     _write_run(root, 2, {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0}},
                reference=2.0)
     _run(refresh, _refresh_args(tmp, root, out, tree=tree))
     written = json.loads(out.read_text(encoding='utf-8'))
-    basis = written['seeded']
+    basis = written['basis']
     assert written['units'] == 'reference-multiples', written
     assert 'raw seconds' not in basis, basis
     assert 'reference-normalized medians over 1 run(s) (2)' in basis, basis
@@ -496,7 +576,7 @@ def test_the_basis_does_not_equate_the_bound_with_the_measured_cells(tmp):
     _write_run(root, 7, {'cell-01': {'test_a.py': 40.0},
                          'cell-02': {'test_b.py': 40.0}}, reference=2.0)
     _run(refresh, _refresh_args(tmp, root, out, tree=tree))
-    basis = json.loads(out.read_text(encoding='utf-8'))['seeded']
+    basis = json.loads(out.read_text(encoding='utf-8'))['basis']
     assert 'max_cells 5' in basis, basis
     assert '2 cells' in basis, basis
     assert 'the bound is that number' not in basis, basis
@@ -533,11 +613,39 @@ def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
     assert workload.ITERATIONS == 16_000_000, workload.ITERATIONS
 
 
-def test_the_median_survives_a_planted_mean(tmp):
-    """Control: the median is the mean here, so the guard has teeth."""
-    values = [2.0, 2.0, 10.0]
-    assert statistics.median(values) == 2.0
-    assert statistics.mean(values) != statistics.median(values)
+def test_the_balance_chokepoint_is_a_median_not_a_mean(tmp):
+    """`plan_is_balanced` decides on a MEDIAN cell, and can be told apart.
+
+    The chokepoint every write passes through compares the heaviest cell
+    against `median(loads) * (1 + margin)`. On a RIGHT-skewed set the two
+    statistics cannot disagree about a max -- the mean is the larger of
+    the two, so a mean can only refuse more -- which is why the planted
+    mean survived every right-skewed fixture the other suites use. This
+    one is LEFT-skewed: two light cells under three heavy ones, so the
+    mean falls below the median while the heaviest cell stays put. The
+    load list is the packer's own output for the weights below, and the
+    expectation is the chokepoint's own condition recomputed here with
+    `statistics.median`; the mean-based verdict is asserted to be the
+    OPPOSITE so this fixture cannot quietly stop discriminating.
+    """
+    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                        'timings_bounds')
+    planner = _planner()
+    suites = ['test_a.py', 'test_b.py', 'test_c.py', 'test_d.py',
+              'test_e.py']
+    weights = {'test_a.py': 1.0, 'test_b.py': 1.0, 'test_c.py': 30.0,
+               'test_d.py': 30.0, 'test_e.py': 40.0}
+    tree = _tree(tmp, suites)
+    data = _data(weights, target=10.0, max_cells=5)
+    loads = [cell.weight for cell in planner.plan(tree, data).cells]
+    assert sorted(loads) == [1.0, 1.0, 30.0, 30.0, 40.0], loads
+    median = statistics.median(loads)
+    mean = statistics.mean(loads)
+    assert mean < median, (mean, median)
+    bound = 1 + planner.CELL_WEIGHT_MARGIN
+    assert max(loads) <= median * bound, (loads, median)
+    assert max(loads) > mean * bound, (loads, mean)
+    assert bounds.plan_is_balanced(tree, data) is True, (loads, median)
 
 
 def main():
