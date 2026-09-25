@@ -123,8 +123,10 @@ const chrome = {
       }
       createdCount += 1;
       // A resolved Tab carries Chrome's own url, not the requested one;
-      // handing back the request would make the two indistinguishable.
-      const resolved = details.url.replace('https://', 'https://www.');
+      // handing back the request would make the two indistinguishable. A
+      // host-free fragment marks the value as this double's own without
+      // naming a deployment host.
+      const resolved = details.url + '#resolved';
       return { id: 99 + createdCount, windowId: 1, url: resolved };
     },
     update: async (tabId, changes) => {
@@ -240,6 +242,7 @@ async function run() {
     const pin = plan.hasNativeToBase64
       ? 'Uint8Array.prototype.toBase64 = function () { return ""; };'
       : 'delete Uint8Array.prototype.toBase64;';
+    // vm-load-exempt: runs a computed realm pin, not a shipped file
     vm.runInContext(pin, context);
   }
   vm.runInContext(
