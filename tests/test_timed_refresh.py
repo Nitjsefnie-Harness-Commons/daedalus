@@ -480,6 +480,28 @@ def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     assert 'test_unmeasured.py' in basis, basis
 
 
+def test_the_basis_does_not_equate_the_bound_with_the_measured_cells(tmp):
+    """The file's bound and the measured run's cell count are two facts.
+
+    On a refresh the bound is carried over from the file while the cell
+    count is what the newest run measured, so the two need not coincide;
+    a sentence that said the bound "is that number" would be
+    self-contradictory on every refresh that changed the cell count.
+    """
+    refresh = _refresh()
+    tree = _tree(tmp, ['test_a.py', 'test_b.py'])
+    out = _file(tmp, _data({'test_a.py': 1.0, 'test_b.py': 1.0},
+                           max_cells=5))
+    root = Path(tmp) / 'runs'
+    _write_run(root, 7, {'cell-01': {'test_a.py': 40.0},
+                         'cell-02': {'test_b.py': 40.0}}, reference=2.0)
+    _run(refresh, _refresh_args(tmp, root, out, tree=tree))
+    basis = json.loads(out.read_text(encoding='utf-8'))['seeded']
+    assert 'max_cells 5' in basis, basis
+    assert '2 cells' in basis, basis
+    assert 'the bound is that number' not in basis, basis
+
+
 def test_a_recorded_zero_weight_is_a_move_not_a_division(tmp):
     """The seed rounds to four decimals; a zero must not divide."""
     refresh = _refresh()
