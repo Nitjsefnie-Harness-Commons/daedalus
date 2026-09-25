@@ -12,7 +12,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
 from _wfgraph import _job_section, _tests_yml  # noqa: E402
 from _yamlread import job_mapping, step_scalar  # noqa: E402
 
