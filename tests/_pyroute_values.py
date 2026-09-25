@@ -78,6 +78,8 @@ def stored_signature(value, occupancy=True):
             _STORED_SIGNATURES[(id(value), True)] = signature
             _STORED_ANCHORS.append(value)
         return signature
+    if isinstance(value, DeferredMethod):
+        return ('method', identity_token(value.owner), value.name)
     if isinstance(value, DeferredAlternatives):
         signature = _STORED_SIGNATURES.get((id(value), True))
         if signature is None:
@@ -219,6 +221,18 @@ class DeferredAlternatives:
 
 
 @dataclass(frozen=True)
+class DeferredMethod:
+    """A method selected from a tracked container.
+
+    The guard's question about `f = x.pop; f(0)` is which container the call
+    mutates, not what it returns, so the value carries the container and the
+    method's name rather than a callable."""
+
+    owner: object
+    name: str
+
+
+@dataclass(frozen=True)
 class DeferredContainer:
     """Statically known deferred values stored by key or index. star_display
     marks a sequence built by a display holding a star of unknown count."""
@@ -242,7 +256,7 @@ class DeferredInstance:
 
 DEFERRED_VALUES = (DeferredGenerator, DeferredCallable, DeferredClass,
                    DeferredAlternatives, DeferredContainer,
-                   DeferredInstance)
+                   DeferredInstance, DeferredMethod)
 _DEFERRED_TYPES = frozenset(DEFERRED_VALUES)
 
 

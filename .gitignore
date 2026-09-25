@@ -340,6 +340,7 @@
 !/tests/_pyroute_storage.py
 !/tests/_pyroute_targets.py
 !/tests/_pyroute_values.py
+!/tests/_pyroute_violations.py
 !/tests/_queueread.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_classification_support.py

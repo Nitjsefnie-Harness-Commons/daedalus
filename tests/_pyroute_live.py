@@ -1,6 +1,7 @@
 """Resolve deferred expression values against live flow state."""
 import ast
 
+from _pyroute_invalidation import unproved_call
 from _pyroute_mapping import (_selected_values, apply_assignment_bindings,
                               resolve_expression_value)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
@@ -281,8 +282,26 @@ def seed_then_resolve(node, state, generator_factory, sender_resolver,
     ``_pyroute_mapping`` (daedalus issue 990).
     """
     seed_unprovable_selection(node, state)
-    return resolve_expression_value(node, state, generator_factory,
-                                    sender_resolver, unprovable_sender)
+    value = resolve_expression_value(node, state, generator_factory,
+                                     sender_resolver, unprovable_sender)
+    unproved = unproved_call(node, state, unprovable_sender)
+    return value if unproved is None else unproved
+
+
+def rebind_augmented(node, names, state):
+    """Restore the name an augmented store rebound.
+
+    The length helper covers a list or a tuple. Every other operand -- a set
+    operator, a division, a shift -- has no length to drop, and without this
+    the name is simply unbound: the container it held is what the store the
+    model did not fold still has to be found on."""
+    rebound = invalidate_mutated_length(node, state)
+    if rebound is not None:
+        state.callables[rebound[0]] = rebound[1]
+    elif isinstance(node, ast.AugAssign) and len(names) == 1:
+        held = _known_value(node.target, state)
+        if is_deferred_value(held):
+            state.callables[next(iter(names))] = held
 
 
 def bind_alias_statement(node, state, binder):
