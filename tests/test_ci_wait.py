@@ -258,9 +258,9 @@ def test_a_timeout_names_the_runs_still_open(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    mod.runs_on = lambda repo, sha: [
+    setattr(mod, 'runs_on', lambda repo, sha: [
         _run(1, 'success', '2026-09-07T10:00:00Z'),
-        _run(2, None, '2026-09-07T10:05:00Z', status='in_progress')]
+        _run(2, None, '2026-09-07T10:05:00Z', status='in_progress')])
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
@@ -277,7 +277,7 @@ def test_a_timeout_before_any_run_says_so(tmp):
     del tmp
     mod = _ci_wait()
     clock = _Clock()
-    mod.runs_on = lambda repo, sha: []
+    setattr(mod, 'runs_on', lambda repo, sha: [])
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
@@ -304,7 +304,7 @@ def test_a_pause_that_ends_the_wait_still_reports_the_limit(tmp):
                 'slow down', resume_at=clock.now + 3600)
         return []
 
-    mod.runs_on = _refuse_first
+    setattr(mod, 'runs_on', _refuse_first)
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
         code = mod.wait('o/r', 'e' * 40, 30, 30, out)
@@ -331,7 +331,7 @@ def test_a_refusal_that_ended_early_still_answers_the_wait(tmp):
                 'slow down', resume_at=clock.now + 5)
         return [_run(1, 'success', '2026-09-07T10:00:00Z')]
 
-    mod.runs_on = _refuse_first
+    setattr(mod, 'runs_on', _refuse_first)
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
         code = mod.wait('o/r', 'f' * 40, 30, 60, out)
@@ -359,7 +359,7 @@ def test_a_pause_that_ended_early_does_not_label_the_next_timeout(tmp):
                 'slow down', resume_at=clock.now + 5)
         return [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')]
 
-    mod.runs_on = _refuse_first
+    setattr(mod, 'runs_on', _refuse_first)
     out = io.StringIO()
     err = io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
@@ -368,6 +368,63 @@ def test_a_pause_that_ended_early_does_not_label_the_next_timeout(tmp):
     assert code == 2, text
     assert polls == [1000.0, 1005.0, 1015.0, 1025.0], polls
     assert clock.now == 1030.0, clock.now
+    assert 'rate limited' not in text, text
+    assert text.endswith('wait exceeded 30s on aaaaaaaaaaaa: still open: '
+                         'run 1 (in_progress)\n'), text
+
+
+def _counting_watcher(mod, raised):
+    """The real Watcher, counting its bound's escape hatch firing.
+
+    Both exit-2 routes print the same line, so the report alone cannot
+    tell them apart: the WaitExpired handler and the `remaining <= 0`
+    exit are observationally identical from outside. This counts the one
+    signal that differs - a WaitExpired actually raised by the real poll
+    loop - so a control can prove which exit the wait took.
+    """
+    real = mod.gh_client.Watcher
+
+    class _Counting(real):
+        def poll(self, call):
+            try:
+                return super().poll(call)
+            except mod.gh_client.WaitExpired:
+                raised.append(True)
+                raise
+
+    return _Counting
+
+
+def test_a_poll_that_overruns_the_bound_reports_the_runs(tmp):
+    """The `remaining <= 0` exit: a poll that takes longer than the whole
+    budget leaves nothing to wait for, so the bound is reached with the
+    runs already in hand - no refusal, and no WaitExpired, which is what
+    `raised == []` pins: with that branch deleted the loop sleeps zero and
+    the very next poll raises WaitExpired, printing the same line by the
+    other route."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    raised = []
+    real_watcher = mod.gh_client.Watcher
+    setattr(mod.gh_client, 'Watcher', _counting_watcher(mod, raised))
+
+    def _overrunning(repo, sha):
+        clock.now += 100
+        return [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')]
+
+    setattr(mod, 'runs_on', _overrunning)
+    out = io.StringIO()
+    err = io.StringIO()
+    try:
+        with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+            code = mod.wait('o/r', 'a' * 40, 10, 30, out)
+    finally:
+        setattr(mod.gh_client, 'Watcher', real_watcher)
+    text = out.getvalue()
+    assert code == 2, text
+    assert clock.now == 1100.0, clock.now
+    assert raised == [], raised
     assert 'rate limited' not in text, text
     assert text.endswith('wait exceeded 30s on aaaaaaaaaaaa: still open: '
                          'run 1 (in_progress)\n'), text
