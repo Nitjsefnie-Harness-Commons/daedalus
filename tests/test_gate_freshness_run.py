@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""The gate-freshness run: routing, the bound, and the workflow shape.
-
-`scripts/ci/gate_freshness.py`'s decision core is exercised in
-``test_gate_freshness.py``. This module drives the parts that only exist at
-run time: ``main``'s two trigger routes and its global-failure exits, the
-per-head flow through ``process`` (revalidation, a per-head write failure, the
-dry run), the call bound, and the shape of the workflow that runs it. The
-global-failure entries assert the exit code AND that nothing was published: a
-run that invents a verdict where it could not read one is the exact defect this
-issue records.
+"""The gate-freshness run: routing, the bound, and the workflow shape. The
+decision core is in ``test_gate_freshness.py``. The global-failure entries
+assert the exit code AND that nothing was published: inventing a verdict where
+one could not be read is the exact defect this issue records.
 """
 import contextlib
 import io
@@ -44,9 +38,8 @@ def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
 
 def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
                fail_listing_for=()):
-    """The whole per-head flow. `moved` makes the head change after the first
-    pull-request read, so the pre-write revalidation sees a different sha.
-    `fail_listing_for` names heads whose existing-check listing fails."""
+    """The per-head flow. `moved` changes the head after the first read;
+    `fail_listing_for` names heads whose listing fails."""
     state = {'reads': 0}
 
     def read(argv):
@@ -153,20 +146,14 @@ def test_the_pull_request_target_route_publishes_for_that_head(tmp):
     code, calls, published = _main_env(tmp, 'pull_request_target', {
         'pull_request': _pr(7)})
     assert code == 0, code
-    # The event head, not the open-PR list.
     assert not any('state=open' in c for c in calls), calls
     assert len(published) == 1, published
 
 
 def test_the_pull_request_target_route_refuses_a_missing_event(tmp):
     """A route that cannot establish WHICH pull request it is deciding fails
-    closed.
-
-    The pull_request_target route read its head from the event payload. A
-    missing or unparseable event used to become "no heads" -- publishing
-    nothing and exiting 0, i.e. "fresh", which the ruleset would honour. This
-    is the same silent-pass shape its sibling route refuses.
-    """
+    closed: a missing or unparseable event must not become "no heads" and exit
+    0 as "fresh"."""
     m = _mod()
     published = []
 
@@ -189,11 +176,9 @@ def _run_main(tmp, m, reader, event):
 
 
 def _run_main_event(tmp, m, reader, event_name, event):
-    """Run main() on `event_name`, capturing stderr; return (code, err).
-
-    `m` is the caller's module instance: the reader raises that instance's
-    QueryError, and main catches the SAME class, so the two must share it.
-    """
+    """Run main() on `event_name`, capturing stderr. `m` is the caller's module
+    instance: the reader raises that instance's QueryError and main catches the
+    SAME class, so the two share it."""
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
     os.environ.update({'GITHUB_EVENT_NAME': event_name,
@@ -222,13 +207,8 @@ def _only_fail(target_marker, m):
 
 def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
     """A GLOBAL failure on the open-PR list publishes NOTHING and exits 1.
-
-    The fake fails ONLY the open-PR listing and answers every other read
-    normally, so the gate-lookup branch does NOT fire: this entry is satisfied
-    by the open-PR branch alone. A fail-open (`pulls = []`) would continue to a
-    successful gate lookup, publish zero, and exit 0 -- caught here. The
-    stderr line is asserted so a DIFFERENT global failure cannot satisfy it.
-    """
+    The fake fails ONLY this read, so the gate-lookup branch does NOT fire; the
+    stderr line is asserted so a DIFFERENT global failure cannot satisfy it."""
     m = _mod()
     code, err = _run_main(tmp, m, _only_fail('/pulls?state=open', m), {})
     assert code == 1, code
@@ -236,15 +216,9 @@ def test_an_unreadable_open_pull_request_list_publishes_nothing_and_fails(tmp):
 
 
 def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
-    """A non-list `/pulls` answer at HTTP 200 is a GLOBAL failure, not "none".
-
-    This is the SHIPPED live bug, distinct from the QueryError limb: an error
-    OBJECT returned with status 200 is not an unreadable call, so the read
-    succeeds and the payload alone is malformed. Answering optimistically
-    published 0 verdicts and exited 0. The fake returns a dict for the open-PR
-    list and answers every other read normally, so this entry is satisfied by
-    the non-list branch alone.
-    """
+    """A non-list `/pulls` answer at HTTP 200 is a GLOBAL failure, not
+    "none": an error OBJECT at status 200 is a successful read whose payload is
+    malformed, distinct from the QueryError limb."""
     m = _mod()
     published = []
 
@@ -264,12 +238,8 @@ def test_a_non_list_open_pull_request_payload_publishes_nothing_and_fails(tmp):
 
 def test_an_unreadable_gate_lookup_publishes_nothing_and_fails(tmp):
     """A GLOBAL failure on the gate lookup publishes NOTHING and exits 1.
-
     The fake SUCCEEDS on the open-PR list and fails only the gate lookup, so
-    this entry is satisfied by the gate branch alone. The severe direction:
-    treating an unreadable gate as "no gates" would publish every head GREEN
-    claiming it contains every gate-defining commit.
-    """
+    this entry is satisfied by the gate branch alone."""
     m = _mod()
     published = []
 
@@ -331,13 +301,8 @@ def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
 
 
 def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
-    """Revalidate immediately before the write.
-
-    A head can move after the first revalidation and before the publish. The
-    only entry that reaches this is a read whose answer changes between the
-    two revalidations; it discriminates the pre-write revalidation from the
-    first one, which the moved-head entry above already covers.
-    """
+    """Revalidate immediately before the write: a head that moves between the
+    two revalidations is skipped, not published onto."""
     del tmp
     m = _mod()
     published = []
@@ -367,12 +332,8 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
 
 
 def test_a_per_head_write_failure_skips_that_head_and_continues(tmp):
-    """A transient listing failure must not abandon the later heads.
-
-    One head's write failing raises out of the old loop, killing the run; the
-    later heads -- including stale ones waiting for a red -- get nothing. Here
-    the failing head is skipped loudly and the healthy one still publishes.
-    """
+    """A transient listing failure must not abandon the later heads: the
+    failing head is skipped loudly and the healthy one still publishes."""
     del tmp
     m = _mod()
     published = []
@@ -403,12 +364,8 @@ def test_dry_run_computes_every_verdict_and_publishes_nothing(tmp):
 # ---- the bound ----
 
 def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
-    """Count the REAL reads a one-head flow makes: G + PER_HEAD_OVERHEAD.
-
-    Three entries once restated the formula and none measured the flow, so a
-    THIRD revalidation (a real G+5) left them green. This one counts the reads
-    the flow actually issues and compares that count to the shipped overhead.
-    """
+    """Count the REAL reads a one-head flow makes: G + PER_HEAD_OVERHEAD, so
+    a THIRD revalidation (a real G+5) is caught."""
     del tmp
     m = _mod()
     published = []
@@ -427,13 +384,8 @@ def test_the_per_head_flow_costs_one_compare_per_gate_plus_the_overhead(tmp):
 
 
 def test_every_read_carries_the_no_cache_header(tmp):
-    """Every `gh api` read routes through _api, which adds the header.
-
-    This drives main() END TO END so the two GLOBAL call sites (the open-PR
-    listing and the gate enumeration) are reached too -- a per-head flow only
-    reaches the per-head sites, so a header dropped from a global site used to
-    leave this entry green. Every argv the run issues is recorded and checked.
-    """
+    """Every read routes through _api. This drives main() END TO END so the
+    two GLOBAL call sites are reached; a per-head flow misses them."""
     m = _mod()
     published = []
     reads = []
@@ -451,8 +403,6 @@ def test_every_read_carries_the_no_cache_header(tmp):
         return _flow_read(m, {p: [G1] for p in m.GATE_PATTERNS},
                           {7: HEAD}, published)(argv)
     _run_main(tmp, m, read, {})
-    # The global sites must actually have been exercised, or the entry would
-    # pass vacuously on a run that never reached them.
     joined_all = ' '.join(' '.join(a) for a in reads)
     assert 'state=open' in joined_all, 'the open-PR listing was never read'
     assert 'commits?sha=main' in joined_all, 'the gate enumeration never ran'
@@ -474,8 +424,7 @@ def test_over_the_bound_refuses_and_publishes_nothing(tmp):
                         call_budget=5)
     assert code != 0
     assert published == [], 'a truncated run must publish nothing'
-    # The heads were all readable, so nothing could have been skipped: the only
-    # way to publish nothing here is the bound refusal.
+    # All heads were readable, so nothing could have been skipped.
     assert code == 1, code
 
 
@@ -550,12 +499,8 @@ def test_workflow_is_well_formed(tmp):
 
 
 def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
-    """The RELATION, not a literal: budget x assumed-rate < timeout.
-
-    A bound with no per-call rate is not a bound. The workflow's timeout must
-    clear DEFAULT_CALL_BUDGET calls at ASSUMED_SECONDS_PER_CALL; the header
-    points at the script's BOUND section, whose test pins this relation.
-    """
+    """The RELATION, not a literal: budget x assumed-rate < timeout. A bound
+    with no per-call rate is not a bound."""
     del tmp
     text = _workflow_text()
     m = _mod()
@@ -565,7 +510,6 @@ def test_the_workflow_timeout_clears_the_enforced_call_budget(tmp):
     bound = doc[doc.index('THE BOUND'):]
     assert 'one compare' in bound
     assert 'PER_HEAD_OVERHEAD' in bound, bound
-    # The relation: the timeout the workflow sets must clear the budget.
     from _wfjobs import load
     timeout = int(load(ROOT / '.github' / 'workflows'
                        / 'gate-freshness.yml').jobs[
