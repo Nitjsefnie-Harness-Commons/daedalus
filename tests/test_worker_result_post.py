@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
 """A refused result POST names itself; the caller never waits in silence."""
 import json
-import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _stream_fake import (  # noqa: E402
+    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
+RESULT = 'POST /result'
+
 _POST_RESULT_HARNESS = r"""
 const fs = require('fs');
+// The bridge the worker is configured against; the gate permits this origin.
+const SERVER = 'https://bridge.example.com';
 const vm = require('vm');
-const [backgroundPath, scenario] = process.argv.slice(1);
+const [backgroundPath] = process.argv.slice(1);
+const scenario = __SCENARIO__;
+// The plan rides last in both launches (the file launcher splices it in as an
+// object literal, this one appends it as JSON text), so the gate reads it from
+// the last entry and parses only when it arrived as text.
+const gatePlanArg = process.argv[process.argv.length - 1];
+const plan = typeof gatePlanArg === 'string'
+  ? JSON.parse(gatePlanArg) : gatePlanArg;
 // backgroundPath is never read as a script here; it is the free identifier
 // import_scripts_stub resolves 'worker/config.js' through (its directory).
 // Renaming it crashes every test in this file.
 const messageListeners = [];
-const requests = [];
 const errors = [];
 const timerDelays = [];
 
@@ -36,7 +46,7 @@ const chrome = {
         for (const key of keys) {
           if (key === 'daedalus-token') found[key] = 'result-token';
           if (key === 'daedalus-server') {
-            found[key] = 'https://bridge.example.com';
+            found[key] = SERVER;
           }
         }
         return found;
@@ -47,28 +57,44 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-async function bridgeFetch(target, init = {}) {
-  // The plan clamps: a request past its end is served the last entry again,
-  // so a one-row plan drives every retry attempt of one scenario.
-  const entry = scenario.plan[
-    Math.min(requests.length, scenario.plan.length - 1)];
-  requests.push({
-    url: String(target), method: init.method,
-    body: init.body || null,
-    payload: init.body ? JSON.parse(init.body) : null,
-  });
-  if (entry.networkError !== undefined) {
-    throw new Error(entry.networkError);
-  }
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees; the answers the
+// worker sees are the per-attempt sequence the plan declares, and a request
+// past the declared count is a recorded 599 refusal, never a re-answer of
+// the last row.
+const BRIDGE_URL = SERVER;
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+function response(status, data) {
   return {
-    ok: entry.status >= 200 && entry.status < 300,
-    status: entry.status,
+    ok: status >= 200 && status < 300,
+    status,
+    body: null,
+    json: async () => data,
+    text: async () => JSON.stringify(data),
   };
+}
+function streamResponse(answer) {
+  return response(answer, { error: 'disabled' });
+}
+""" + STRICT_FETCH + r"""
+
+// A thin wrapper that DELEGATES to the gate: the answer, the accounting, the
+// refusal and the record are the gate's. It keeps the raw body text the suite
+// measures the refused result's size against, which the gate's record (a
+// parsed body) cannot carry.
+const rawBodies = [];
+async function resultPostFetch(target, init = {}) {
+  rawBodies.push(init.body || null);
+  return bridgeFetch(target, init);
 }
 
 const context = vm.createContext({
   chrome,
-  fetch: bridgeFetch,
+  fetch: resultPostFetch,
   DEFAULT_SERVER: 'https://default.example.com',
   _loadSeenDids: async () => {},
   stopStream() {},
@@ -105,7 +131,21 @@ async function run() {
     })()
 `, context, { filename: 'harness-driver' });
   await settle();
-  return { requests, errors, timerDelays };
+  return {
+    requests: nonStreamFetches.map((record, index) => ({
+      url: record.url, method: 'POST', body: rawBodies[index],
+      payload: record.body,
+    })),
+    errors,
+    timerDelays,
+    gate: {
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+      contractFaults: gateContractFaults,
+    },
+  };
 }
 
 run().then(result => process.stdout.write(JSON.stringify(result)))
@@ -114,28 +154,45 @@ run().then(result => process.stdout.write(JSON.stringify(result)))
     process.exitCode = 1;
   });
 """
+assert '__SCENARIO__' in _POST_RESULT_HARNESS
 
 
-def _post(*plan, command_id='cmd-result-post', did=None, tab_id=None,
+def _post(*answers, command_id='cmd-result-post', did=None, tab_id=None,
           result=None, extra=None):
-    """Drive one postResult call through the shipped worker source."""
+    """Drive one postResult call through the shipped worker source.
+
+    Each answer is what the scenario declares for one attempt on the result
+    route: `{'status': N}` for a status the bridge answers, or
+    `{'throw': msg}` for a bridge the scenario models as unreachable. The
+    plan declares exactly as many requests as the answers, so a request the
+    worker invents — or a fourth attempt the plan did not declare — is
+    refused and recorded, never served the last row again.
+    """
     scenario = {
-        'plan': list(plan), 'commandId': command_id,
+        'commandId': command_id,
         'result': result, 'extra': extra,
     }
     if did:
         scenario['did'] = did
     if tab_id is not None:
         scenario['tabId'] = tab_id
-    node = shutil.which('node')
-    assert node, 'node is required to execute the worker'
-    outcome = run_node_program(
-        node, _POST_RESULT_HARNESS,
-        [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
-        payload=scenario)
-    assert outcome.returncode == 0, (
-        outcome.returncode, outcome.stdout, outcome.stderr)
-    return json.loads(outcome.stdout)
+    plan = {
+        'planned': [RESULT] * len(answers),
+        'answers': {RESULT: list(answers)},
+    }
+    harness = _POST_RESULT_HARNESS.replace(
+        '__SCENARIO__', json.dumps(scenario))
+    outcome = run_gate(require_node(), harness,
+                       [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
+                       plan=plan)
+    gate = outcome.pop('gate')
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(plan['planned']), planned_stream=[])
+    return outcome
 
 
 def test_ok_answers_with_one_request_and_no_log(tmp):
@@ -211,10 +268,10 @@ def test_a_refused_substitute_is_logged_once(tmp):
 def test_a_dead_substitute_network_error_is_logged_once(tmp):
     """A substitute that cannot reach the bridge names that too."""
     del tmp
-    seen = _post({'status': 413}, {'networkError': 'substitute down'})
+    seen = _post({'status': 413}, {'throw': 'substitute down'})
     assert len(seen['requests']) == 2, seen
     assert seen['errors'] == [
-        '[Daedalus] Substitute result POST failed: Error: substitute down',
+        '[Daedalus] Substitute result POST failed: TypeError: substitute down',
     ], seen
 
 
@@ -245,11 +302,11 @@ def test_network_error_after_5xx_logs_exactly_once(tmp):
     """The catch's status reset keeps the give-up log from doubling."""
     del tmp
     seen = _post(
-        {'status': 503}, {'status': 503}, {'networkError': 'relay down'})
+        {'status': 503}, {'status': 503}, {'throw': 'relay down'})
     assert len(seen['requests']) == 3, seen
     assert seen['timerDelays'] == [300, 600, 900], seen
     assert seen['errors'] == [
-        '[Daedalus] Result POST failed: Error: relay down'], seen
+        '[Daedalus] Result POST failed: TypeError: relay down'], seen
 
 
 def test_5xx_exhaustion_names_the_last_status(tmp):
@@ -276,10 +333,13 @@ def test_5xx_retry_that_succeeds_stays_silent(tmp):
 def test_network_error_keeps_its_existing_final_log(tmp):
     """Three dead attempts log the existing line exactly once."""
     del tmp
-    seen = _post({'networkError': 'relay down'})
+    # Three attempts, as the worker's own retry loop makes them: the old
+    # one-row plan was re-answered by the clamp for the second and third.
+    seen = _post({'throw': 'relay down'}, {'throw': 'relay down'},
+                 {'throw': 'relay down'})
     assert len(seen['requests']) == 3, seen
     assert seen['errors'] == [
-        '[Daedalus] Result POST failed: Error: relay down'], seen
+        '[Daedalus] Result POST failed: TypeError: relay down'], seen
 
 
 def main():
