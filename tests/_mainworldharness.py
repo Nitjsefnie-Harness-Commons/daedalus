@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
 
@@ -30,6 +31,8 @@ const [backgroundPath, mode] = process.argv.slice(1);
 const postedResults = [];
 const evalResolvers = {};
 const bgConsole = [];
+const messageListeners = [];
+const deadlineHistory = [];
 let hotfixStore = null;
 let probeCount = 0;
 let injectionSeq = 0;
@@ -38,13 +41,16 @@ let injectionSeq = 0;
 // nothing waits on the wall, so every control below is host-speed
 // independent. This is the controlled clock, not a forcing device: a timer
 // fires exactly when the stepped clock reaches its deadline, so it models
-// real timer semantics rather than manufacturing an interleaving.
+// real timer semantics rather than manufacturing an interleaving. Every
+// arming is recorded by its DELAY, so a control sees which ceiling the
+// worker armed: a second one, or a stray timer, is a second entry, where a
+// bare count could not tell them apart.
 const clock = { now: 0, seq: 0, armed: new Map() };
 function fakeSetTimeout(callback, delay) {
   const id = ++clock.seq;
-  clock.armed.set(id, {
-    callback, at: clock.now + (Number(delay) || 0),
-  });
+  const ms = Number(delay) || 0;
+  deadlineHistory.push(ms);
+  clock.armed.set(id, { callback, delay: ms, at: clock.now + ms });
   return id;
 }
 function fakeClearTimeout(id) { clock.armed.delete(id); }
@@ -64,6 +70,13 @@ function advanceClock(targetMs) {
   }
   clock.now = Math.max(clock.now, targetMs);
 }
+function nextDeadline() {
+  let at = null;
+  for (const entry of clock.armed.values()) {
+    if (at === null || entry.at < at) at = entry.at;
+  }
+  return at;
+}
 
 function eventTarget() {
   return { addListener() {} };
@@ -82,10 +95,22 @@ function response(status, data) {
 const chrome = {
   storage: {
     local: {
-      get: async () => Object.assign({
-        'daedalus-token': 'bound-token',
-        'daedalus-server': 'test-bridge',
-      }, hotfixStore || {}),
+      // Only the requested keys come back, as the real API answers. A get
+      // that returned the whole store would satisfy a hotfix selector
+      // reading the wrong key, and every replay control would stay green.
+      get: async (keys) => {
+        const store = Object.assign({
+          'daedalus-token': 'bound-token',
+          'daedalus-server': 'test-bridge',
+        }, hotfixStore || {});
+        const wanted = keys === null || keys === undefined
+          ? Object.keys(store) : [].concat(keys);
+        const out = {};
+        for (const key of wanted) {
+          if (key in store) out[key] = store[key];
+        }
+        return out;
+      },
       set: async () => {},
       remove: async () => {},
     },
@@ -99,41 +124,39 @@ const chrome = {
     get: async (tabId) => ({ id: tabId, url: '', title: 'Page' }),
     sendMessage: async () => {},
   },
-  debugger: {
-    onEvent: eventTarget(),
-    onDetach: eventTarget(),
-    attach: async () => { throw new Error('cdp unused in bound harness'); },
-    detach: async () => {},
-    sendCommand: async () => ({}),
-  },
-  scripting: {
-    async executeScript(injection) {
-      if (injection.func.name === '_canUseMainWorldEval') {
-        probeCount++;
-        if (mode === 'replay-probe-hang' && probeCount === 1) {
-          // The first fix's source-free probe never answers, so its
-          // injection is never reached. Only a bound covering the whole
-          // per-fix operation, not just the injection after it, contains it.
-          return new Promise(() => {});
-        }
-      }
-      pageContext.__args = injection.args || [];
-      const source = '(' + injection.func.toString()
-        + ')(...__args)';
-      // vm-load-exempt: runs the function the extension injected
-      const result = await vm.runInContext(source, pageContext);
-      delete pageContext.__args;
-      return [{ result }];
-    },
-  },
-  runtime: {
-    onMessage: eventTarget(),
-    onConnect: eventTarget(),
-    getPlatformInfo() {},
-    getManifest: () => ({ version: '0.26.1' }),
-  },
-  alarms: { onAlarm: eventTarget(), create() {} },
+""" + INERT_WORKER_APIS + r"""
 };
+
+// The shared double's executeScript is inert and its debugger refuses every
+// call; both are replaced here. The live executeScript runs the injected
+// function in a page context, so a promise that never settles stays
+// un-settled. It models the MAIN world only — an ISOLATED injection would
+// compile under a different CSP — so a world it does not model is refused
+// rather than silently run in the wrong one.
+chrome.scripting.executeScript = async (injection) => {
+  if (injection.world !== 'MAIN') {
+    throw new Error('unmodelled injection world ' + injection.world);
+  }
+  if (injection.func.name === '_canUseMainWorldEval') {
+    probeCount++;
+    if (mode === 'replay-probe-hang' && probeCount === 1) {
+      // The first probe never answers, so the injection after it is never
+      // reached: only a bound over the whole operation contains it.
+      return new Promise(() => {});
+    }
+  }
+  pageContext.__args = injection.args || [];
+  const source = '(' + injection.func.toString() + ')(...__args)';
+  // vm-load-exempt: runs the function the extension injected
+  const result = await vm.runInContext(source, pageContext);
+  delete pageContext.__args;
+  return [{ result }];
+};
+
+chrome.debugger.attach = async () => {
+  throw new Error('cdp unused in bound harness');
+};
+chrome.debugger.sendCommand = async () => ({});
 
 const context = vm.createContext({
   chrome,
@@ -167,7 +190,6 @@ const context = vm.createContext({
   },
 });
 """ + import_scripts_stub('context') + r"""
-
 const pageContext = vm.createContext({
   performance,
   evalResolvers,
@@ -186,6 +208,15 @@ async function waitForResult(predicate) {
     await delay();
   }
   return predicate();
+}
+
+// What every mode reports: the armings seen, by delay, and whatever is
+// still armed once the run has settled. A bound that leaves its own timer
+// behind delays an MV3 worker suspend, and arms one more per replayed fix.
+function observed() {
+  const remaining = [...clock.armed.values()].map((entry) => entry.delay);
+  remaining.sort((a, b) => a - b);
+  return { deadlines: deadlineHistory.slice(), remaining };
 }
 
 // The only surface an operator sees for a replay: handleHotfixReplay
@@ -229,13 +260,15 @@ async function run() {
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     const postedBeforeClock = postedResults.length;
-    if (armed) advanceClock(10000);
+    const at = nextDeadline();
+    if (at !== null) advanceClock(at);
     const got = await waitForResult(
       () => postedResults.length >= 1);
     return {
       armed,
       postedBeforeClock,
       got,
+      ...observed(),
       posted: postedSummary(postedResults),
     };
   }
@@ -263,6 +296,7 @@ async function run() {
     return {
       armed,
       got,
+      ...observed(),
       posted: postedSummary(postedResults),
     };
   }
@@ -279,7 +313,8 @@ async function run() {
     vm.runInContext('handleHotfixReplay(7)', context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
-    if (armed) advanceClock(10000);
+    const at = nextDeadline();
+    if (at !== null) advanceClock(at);
     const reported = await waitForResult(
       () => replayConsole().length > 0);
     return {
@@ -287,6 +322,7 @@ async function run() {
       reported,
       fix1Started: Boolean(evalResolvers.fix1Started),
       ranSecond: Boolean(evalResolvers.fix2Ran),
+      ...observed(),
       replay: replayConsole(),
     };
   }
@@ -299,7 +335,8 @@ async function run() {
     vm.runInContext('handleHotfixReplay(7)', context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
-    if (armed) advanceClock(10000);
+    const at = nextDeadline();
+    if (at !== null) advanceClock(at);
     const reported = await waitForResult(
       () => replayConsole().length > 0);
     return {
@@ -307,6 +344,7 @@ async function run() {
       reported,
       fix1Ran: Boolean(evalResolvers.fix1Ran),
       ranSecond: Boolean(evalResolvers.fix2Ran),
+      ...observed(),
       replay: replayConsole(),
     };
   }
@@ -331,6 +369,7 @@ async function run() {
       armed,
       cleared,
       ranSecond: Boolean(evalResolvers.fix2Ran),
+      ...observed(),
       errors: bgConsole.filter(
         (e) => e.level === 'error' && e.text.includes('hotfix')),
       clear: bgConsole.filter((e) => e.text.includes('replayed')),
