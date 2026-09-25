@@ -296,6 +296,7 @@
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
 !/tests/_hotfix_quota_scenario.py
+!/tests/_hotfixharness.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
@@ -485,6 +486,7 @@
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
 !/tests/test_helper_shadow_boundaries.py
+!/tests/test_hotfix_scope.py
 !/tests/test_hotfix_store.py
 !/tests/test_http_transport.py
 !/tests/test_js_coverage.py
