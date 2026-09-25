@@ -94,4 +94,14 @@ BOUND_SITE_ROWS = (
      "    return subprocess\n"
      "get.run(['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
+    # A namespace whose own value is a subprocess-derived binding: the
+    # receiver derives, but the receiver resolver refuses that base, so
+    # the launch is refused and reaches the tree-wide rule as an unplaced
+    # site at an unreadable head rather than a placed one.
+    ('derived-base-the-resolver-refuses',
+     "import subprocess\n"
+     "mods = {'subprocess': subprocess}\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
+     "mods['subprocess'].run(['git', 'status'], check=True, timeout=30)\n",
+     [(4, 'unreadable', 'unplaced'), (3, 'git', 'timeout')]),
 )
