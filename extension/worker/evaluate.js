@@ -146,16 +146,22 @@ function _canUseMainWorldEval() {
 // purpose: a page-owned `setTimeout` could veto the very bound meant to
 // contain it. Racing bounds the wait, and does NOT cancel the page promise:
 // the abandoned page-side work keeps running until the page's own promise
-// machinery settles it. The ceiling matches the CDP settlement bound so one
-// caller sees the same limit whichever channel the probe selects.
+// machinery settles it. The refusal carries no channel of its own: `what`
+// is the caller's, so a caller that routes at run time names the channel
+// that actually ran. The number is deliberately equal to
+// `_CDP_PROMISE_TIMEOUT_MS` in worker/cdp.js so one caller sees the same
+// settlement limit whichever channel the probe selects; the two are pinned
+// independently — tests/test_eval_relay.py and
+// tests/test_starvation_bounds.py — and nothing ties them together. The CDP
+// bound is a serviced-time sampler where this is a plain wall clock, so
+// they are a shared number rather than a shared mechanism.
 const _MAIN_WORLD_EVAL_TIMEOUT_MS = 10000;
 
 function _raceMainWorldEval(work, what) {
   let timerId;
   const guard = new Promise((_resolve, reject) => {
     timerId = setTimeout(() => reject(new Error(
-      `MAIN-world ${what} timed out after `
-      + `${_MAIN_WORLD_EVAL_TIMEOUT_MS} ms`)),
+      `${what} timed out after ${_MAIN_WORLD_EVAL_TIMEOUT_MS} ms`)),
       _MAIN_WORLD_EVAL_TIMEOUT_MS);
   });
   return Promise.race([work, guard])
@@ -237,7 +243,7 @@ async function handleEval(cmd) {
         world: 'MAIN',
         func: _executeMainWorldEval,
         args: [cmd.code],
-      }), 'eval');
+      }), 'MAIN-world eval');
     } catch (error) {
       await failMainWorld(error.message || String(error));
       return;
