@@ -14,9 +14,9 @@ Every reader refuses rather than skips. A `case` label or a client's type
 argument that is not a plain string literal fails the suite with its shape
 and its file:line named, so "no match found" is never read as "nothing to
 check". Each reader carries a completeness marker computed by a different
-mechanism from the extraction it counts: a flat token count against a
-depth-aware walk for the switch, a raw substring count against a parsed call
-count for the dashboard.
+mechanism from the extraction it counts: a raw token count against the
+comment-and-string blanked one, plus a depth-aware walk, for the switch; a
+raw substring count against a parsed call count for the dashboard.
 """
 import ast
 import re
@@ -99,9 +99,12 @@ def _switch_body(source, mask, path):
 def served_types(source=None, path=None):
     """The case labels `dispatchCommand` dispatches on, in source order.
 
-    The arm count is a flat token scan of the switch body while the labels
-    come from a depth-aware walk, so a case buried in a nested switch fails
-    the comparison instead of shrinking the served set.
+    Two markers, both live. The arm count is taken on the raw switch body
+    and again on the comment-and-string blanked one; a case the masker hid
+    makes the two disagree, so a regex that stopped matching cannot read as
+    an empty switch. The labels themselves come from a depth-aware walk, so
+    a `case` buried in a nested switch is refused by name instead of being
+    counted and dropped.
     """
     if source is None:
         read = ROOT / 'extension' / 'background.js'
@@ -110,7 +113,12 @@ def served_types(source=None, path=None):
     mask = js_mask(source)
     start, end = _switch_body(source, mask, path)
     body, body_mask = source[start:end], mask[start:end]
+    raw_arms = len(re.findall(r'\bcase\b', body))
     tokens = [match.start() for match in re.finditer(r'\bcase\b', body_mask)]
+    assert raw_arms == len(tokens), (
+        f'{path}: the dispatch switch body holds {raw_arms} case tokens and '
+        f'the masked body {len(tokens)}; a case the masker hid is not an '
+        'absent case')
     labels = []
     for offset in tokens:
         here = f'{path}:{_line_of(source, start + offset)}'
@@ -123,9 +131,6 @@ def served_types(source=None, path=None):
             f'{here}: the case label is not a plain string literal, so the '
             f'served set cannot be enumerated from it: {text!r}')
         labels.append(value)
-    assert len(labels) == len(tokens), (
-        f'{path}: extracted {len(labels)} case labels from {len(tokens)} '
-        'case tokens in the dispatch switch')
     defaults = len(re.findall(r'\bdefault\b', body_mask))
     assert defaults == 1, (
         f'{path}: the dispatch switch has {defaults} default arms; exactly '
@@ -267,9 +272,8 @@ def _clients():
 def test_the_dispatch_switch_is_read_and_its_labels_enumerated(tmp):
     """The served set is read whole, and every label is a usable type.
 
-    The flat token count and the depth-aware walk are separate readings of
-    the one switch body, so a case this reader cannot account for fails the
-    comparison inside the reader rather than shrinking the served set.
+    A case token the masker hid, or one buried below the switch block, is
+    refused inside the reader rather than shrinking the served set.
     """
     del tmp
     labels = served_types()
@@ -343,9 +347,9 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
 
     The exception is a decidable claim, not a waiver: the served set minus
     the sent set must hold exactly one type and that type must be `eval`,
-    so a second one is reported by name rather than absorbed. What is left
-    once that one is named must be empty in both directions, and the message
-    for that comparison names both missing sides.
+    so a second one is reported by name rather than absorbed. With that one
+    named, the residual comparison is a true two-way set equality and its
+    message names both missing sides.
     """
     del tmp
     sent_sets, cli, mcp = _clients()
@@ -359,10 +363,10 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     assert exception == 'eval', (
         f'the one served type no client names is {sorted(unnamed)}; the '
         'code path, not a type literal, is what reaches eval')
-    unserved = sent - served
-    assert not unserved, (
-        f'served without a client: {sorted(unnamed - {exception})}; '
-        f'client without a served type: {sorted(unserved)}')
+    residual = served - {exception}
+    assert residual == sent, (
+        f'served without a client: {sorted(residual - sent)}; '
+        f'client without a served type: {sorted(sent - residual)}')
     assert cli[1] | mcp[1] <= _FORWARDING_FILES, (
         'a client payload forwards its command type through a parameter '
         f'outside the two helper definitions: '
@@ -401,7 +405,10 @@ def test_the_dashboard_command_scan_accounts_for_every_call_site(tmp):
     del tmp
     literals = dashboard_sent_types()
     assert literals, 'no dashboard extCmd call site was enumerated'
-    assert '' not in literals, f'empty dashboard command type: {literals}'
+    unserved = literals - set(served_types())
+    assert not unserved, (
+        f'the dashboard sends command types the worker does not serve: '
+        f'{sorted(unserved)}')
 
 
 def test_a_client_type_argument_that_is_not_a_literal_is_refused(tmp):
