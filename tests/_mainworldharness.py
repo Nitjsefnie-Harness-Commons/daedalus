@@ -328,7 +328,7 @@ async function run() {
     // Settle strictly inside the window: a bound that fires early is
     // crossed here and loses the real value below.
     if (armed) advanceClock(9000);
-    evalResolvers.finish();
+    if (typeof evalResolvers.finish === 'function') evalResolvers.finish();
     const got = await waitForResult(
       () => postedResults.length >= 1);
     await execution;
