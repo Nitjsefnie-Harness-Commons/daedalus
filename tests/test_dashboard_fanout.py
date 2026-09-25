@@ -13,6 +13,7 @@ event id or kind.
 """
 import contextlib
 import io
+import itertools
 import json
 import os
 import re
@@ -295,6 +296,74 @@ def test_a_failed_frame_write_leaves_the_entry_and_the_cursor(tmp):
         delivered_frames)
 
 
+def test_a_failed_write_with_a_past_peer_loses_no_event(tmp):
+    """The same guarantee when the removal join is satisfiable at write
+    time.
+
+    A single-subscriber fixture can never reach the unlink arm on a failed
+    write (the current connection is the only subscriber and has not
+    advanced yet, so the join is false), so advancing the cursor before the
+    write is caught but unlinking before it is not. Here a peer has already
+    consumed the event, so the join is satisfiable once this connection
+    advances: unlinking before the write would destroy an event that
+    nothing could redeliver. Both the advance-before-write and
+    unlink-before-write mutations are caught.
+    """
+    service, drain = _service('fanout_failed_write_peer')
+    token = 'tok'
+    qdir = _queue(service, tmp, token)
+    entry = _write_event(qdir, '0000000000001_00000001', type='result')
+    _a_id, a_killed = service.register(token, DASHBOARD)
+    _b_id, b_killed = service.register(token, DASHBOARD)
+    # The peer consumes the event first: it is now past it, so the join is
+    # satisfiable and the unlink arm is reachable.
+    assert drain.drain_dashboard(qdir, token, b_killed, command_ttl=90,
+                                 frame_writer=lambda _d: None) == 1
+    assert entry.exists(), 'the peer removed the event out from under A'
+
+    def failing(_data):
+        raise BrokenPipeError('the peer went away mid-write')
+
+    try:
+        drain.drain_dashboard(qdir, token, a_killed, command_ttl=90,
+                              frame_writer=failing)
+    except BrokenPipeError:
+        pass  # the injected dead peer, not the assertion under test
+    else:
+        raise AssertionError('the failing write did not propagate')
+
+    assert entry.exists(), 'the entry was unlinked despite a failed write'
+    redelivered = []
+    assert drain.drain_dashboard(qdir, token, a_killed, command_ttl=90,
+                                 frame_writer=redelivered.append) == 1
+    assert [f['type'] for f in redelivered] == ['result'], redelivered
+
+
+def test_a_foreign_named_dashboard_entry_is_delivered_not_skipped(tmp):
+    """A dashboard queue entry whose name is not the bridge's own grammar
+    — a stale file from a differently-formatted producer — is handled
+    correctly: the drain does not raise on it, and does not silently drop
+    it as already-consumed. A fresh subscription delivers it (its name sorts
+    after the empty seed cursor), and a following drain does not redeliver
+    it."""
+    service, drain = _service('fanout_foreign_name')
+    token = 'tok'
+    qdir = _queue(service, tmp, token)
+    _write_event(qdir, 'foreign-event', type='stale')          # no separator
+    _write_event(qdir, '1700000000123_notanumber', type='mix')  # mixed grammar
+    _sub_id, killed = service.register(token, DASHBOARD)
+    frames = []
+
+    delivered = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                      frame_writer=frames.append)
+    again = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                  frame_writer=frames.append)
+
+    assert delivered == 2, delivered
+    assert sorted(f['type'] for f in frames) == ['mix', 'stale'], frames
+    assert again == 0, again
+
+
 def test_a_second_drain_with_the_same_cursor_delivers_nothing(tmp):
     """Resetting the cursor each drain would redeliver an entry this
     connection already consumed. The entry has to still be on disk across
@@ -450,9 +519,65 @@ def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
     assert third == 0, third
     assert [f['type'] for f in frames] == ['first', 'second'], frames
     first_id, second_id = frames[0]['id'], frames[1]['id']
-    assert re.fullmatch(r'\d{13}_\d{6}', first_id), first_id
-    assert re.fullmatch(r'\d{13}_\d{6}', second_id), second_id
+    # A stem-format mismatch is reported as a format failure, distinct from
+    # the delivery assertion above, so a wrong field width is never masked
+    # by (or mask) a lost event.
+    for stem in (first_id, second_id):
+        assert re.fullmatch(r'\d{13}_\d{20}', stem), (
+            f'stem format failure: {stem!r} is not <ms:013d>_<counter:020d>')
     assert first_id < second_id, (first_id, second_id)
+
+
+def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
+    """The counter-boundary control, AT the boundary that matters.
+
+    Seed the shared counter at 999999 — the first value at which the
+    original six-digit counter field overflowed: 999999 formats as six
+    digits but 1000000 as seven, and '1' < '9', so byte order inverted and
+    the second event fell below the first window's cursor and was dropped.
+    The widened twenty-digit field keeps the order across that transition.
+    (A high seed such as 10**19 would not distinguish the widths: both
+    values already format to twenty digits and ascend either way — the
+    overflow is only observable at the six-to-seven transition.) Both
+    events are delivered, neither file is unlinked, and the stem-format
+    expectation still holds at the seeded value.
+    """
+    service, drain = _service('fanout_counter_boundary')
+    cq = service.command_queue
+    token = 'tok'
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = _queue(service, tmp, token)
+    _sub_id, killed = service.register(token, DASHBOARD)
+    saved_time, saved_counter = cq.time, cq._seq_counter
+    cq.time = type('T', (), {
+        'time': staticmethod(lambda: 1_700_000_000.123)})()
+    cq._seq_counter = itertools.count(999999)  # the first overflow point
+    frames = []
+    try:
+        cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
+        first = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                      frame_writer=frames.append)
+        cq.notify_dashboard(cmd_dir, token, {'type': 'second'})
+        second = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                       frame_writer=frames.append)
+        third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
+                                      frame_writer=frames.append)
+    finally:
+        cq.time, cq._seq_counter = saved_time, saved_counter
+
+    assert first == 1, first
+    assert second == 1, (
+        'the event published across the counter overflow was lost: '
+        f'{second}')
+    assert third == 0, third
+    assert [f['type'] for f in frames] == ['first', 'second'], frames
+    first_id, second_id = frames[0]['id'], frames[1]['id']
+    for stem in (first_id, second_id):
+        assert re.fullmatch(r'\d{13}_\d{20}', stem), (
+            f'stem format failure at the boundary: {stem!r}')
+    assert first_id < second_id, (
+        'the overflow inverted the byte order: '
+        f'{first_id!r} !< {second_id!r}')
 
 
 _DEDUP_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
