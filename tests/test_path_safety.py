@@ -517,6 +517,9 @@ present = result_store.delivery_stripe_key(root / 'tok_real')
 absent = result_store.delivery_stripe_key(root / 'tok_absent')
 same_lock = (result_store.delivery_lock_for(root / 'tok_real')
              is result_store.delivery_lock_for(root / 'tok_real'))
+# The present key is the entry's identity, so it carries the device and the
+# inode rather than the name a caller would have spelled.
+identity_form = b':' in present
 # A target that is not there has no entry to stripe on at all. Naming a
 # stripe for a directory that is not there is the mistake this issue is
 # about: a writer creates the entry first and then keys on the entry, so it
@@ -545,7 +548,7 @@ print('STRIPE ' + json.dumps({
     'same_lock': same_lock,
     'absent_refused': absent_refused,
     'present_is_not_the_name': present != b'tok_real',
-    'present_differs_from_absent': present and present != absent,
+    'present_is_an_identity': identity_form,
     'refused_bare_name': refused_name,
     'refused_str_path': refused_path,
 }))
@@ -567,12 +570,11 @@ def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
     and the two-names-one-entry case on any host
     (`test_delivery_stripes.test_two_names_for_one_entry_take_one_stripe`).
 
-    A directory is what it takes now, and a bare string is refused: a
-    string is silently resolvable against the process working directory, so
-    a caller that passed a name would take a stripe for a directory nobody
-    in the request named -- which is the shape that shipped as the original
-    bug. The absent-target half is here too, because it is the same
-    question: there is a stripe for an entry, and not for a name.
+    A directory is what it takes, and a bare string is refused: a string is
+    silently resolvable against the working directory, so a caller that
+    passed a name would take a stripe for a directory nobody in the request
+    named -- the shape that shipped as the original bug. The absent-target
+    half is the same question: a stripe for an entry, and not for a name.
     """
     docroot = Path(tmp) / 'docroot'
     docroot.mkdir(parents=True, exist_ok=True)
@@ -593,7 +595,7 @@ def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
     assert answer['same_lock'] is True, answer
     assert answer['absent_refused'] is True, answer
     assert answer['present_is_not_the_name'] is True, answer
-    assert answer['present_differs_from_absent'] is True, answer
+    assert answer['present_is_an_identity'] is True, answer
     assert answer['refused_bare_name'] is True, answer
     assert answer['refused_str_path'] is True, answer
 

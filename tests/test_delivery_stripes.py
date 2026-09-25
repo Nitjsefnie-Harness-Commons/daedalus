@@ -155,6 +155,86 @@ def test_two_entries_differing_only_in_case_keep_two_keys(tmp):
     assert os.stat(upper).st_ino != os.stat(lower).st_ino
 
 
+def test_the_store_selects_through_the_seeded_mapping(tmp):
+    """The store asks the keyed mapping, and takes the lock it names.
+
+    The per-process secret in `delivery_stripes` exists so a caller cannot
+    compute or steer which targets share a stripe, and that is a statement
+    about the *wiring* as much as about the mapping: a store that hashed its
+    own key with something public would satisfy every property the mapping
+    has on its own and none of the acceptance. This is the pin that says
+    which of the two the store does -- the store's key goes to
+    `stripe_index`, and the lock it hands back is the one that mapping chose
+    for that key.
+    """
+    result_store = _load_result_store(tmp)
+    target = Path(tmp) / 'results' / 'deliveries' / 'stripe-token_wiring'
+    target.mkdir(parents=True)
+    asked = []
+    real_stripe_index = result_store.stripe_index
+
+    def recording_stripe_index(key, stripes):
+        index = real_stripe_index(key, stripes)
+        asked.append((key, index, stripes))
+        return index
+
+    setattr(result_store, 'stripe_index', recording_stripe_index)
+    try:
+        lock = result_store.delivery_lock_for(target)
+    finally:
+        setattr(result_store, 'stripe_index', real_stripe_index)
+    assert asked, 'the store did not select through the keyed mapping'
+    key, index, stripes = asked[0]
+    assert key == result_store.delivery_stripe_key(target), (key, target)
+    assert stripes == result_store.DELIVERY_LOCK_STRIPES, stripes
+    assert lock is result_store.delivery_locks[index], (index, lock)
+
+
+def test_crc_colliding_names_do_not_share_a_stripe_at_the_wiring(tmp):
+    """A public hash of the name would put a colliding set on one stripe.
+
+    This is the property the old pin had, re-expressible: a real target's key
+    is its entry, so a set of *names* sharing a CRC32 bucket only reaches
+    the selector through the one path that keys on a name -- a filesystem that
+    reports no inode number, which the fallback exists for. Under that
+    fallback the store must still refuse to put 128 names the keyed mapping
+    separates onto one stripe, which is the observable effect of the
+    per-process secret at the wiring. A raw `crc32` in `delivery_lock_for`
+    answers this the other way: the names share a bucket by construction, so
+    they all land on one lock.
+    """
+    result_store = _load_result_store(tmp)
+    deliveries = Path(tmp) / 'results' / 'deliveries'
+    deliveries.mkdir(parents=True)
+    names = _crc_collisions(128)
+    for name in names:
+        (deliveries / name).mkdir()
+    real_stat = os.stat
+
+    class _NoInode:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+        @property
+        def st_ino(self):
+            return 0
+
+    os.stat = lambda path, *a, **k: _NoInode(real_stat(path, *a, **k))
+    try:
+        locks = [
+            result_store.delivery_lock_for(deliveries / name)
+            for name in names
+        ]
+    finally:
+        os.stat = real_stat
+    assert all(lock is not None for lock in locks), 'a live target had no lock'
+    assert any(lock is not locks[0] for lock in locks[1:]), (
+        'every CRC-colliding name took one stripe, so the mapping is public')
+
+
 def test_server_wiring_spreads_real_targets_across_the_table(tmp):
     """The store draws its locks from the keyed table, not from one lock.
 

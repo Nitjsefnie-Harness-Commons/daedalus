@@ -443,6 +443,13 @@ def _recorded_locks(store):
 
     def recording_lock_for(target_dir):
         lock = real_lock_for(target_dir)
+        # The key is asked for, not remembered: the selector has just asked
+        # the filesystem, and this is the only place a second answer exists.
+        # That costs an extra stat inside the wrapper, which is safe here
+        # because the folding shim is idempotent -- but a recorder that took
+        # a reading of its own for convenience could consume an injected
+        # ordering, which is the hazard the other suite's recorder warns
+        # about.
         seen.append((target_dir, real_key_for(target_dir), id(lock)))
         return lock
 

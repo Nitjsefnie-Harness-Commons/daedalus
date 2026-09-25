@@ -92,7 +92,15 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
             # second one -- which is a delivery a consume could then take.
             delivery_dir.mkdir(parents=True, exist_ok=True)
             stripe = result_store.delivery_lock_for(delivery_dir)
-            assert stripe is not None, 'the directory was created just now'
+            if stripe is None:
+                # The directory was created a line ago, so a stripe that does
+                # not come back is a stat that failed for some other reason:
+                # permissions that changed under us, EIO on a network
+                # filesystem, a deleter outside the bridge. The same 500 the
+                # storage failures below answer, because the client is owed a
+                # response either way -- an exception here escapes the route
+                # and the client gets no answer at all.
+                return 500, {'error': 'result storage failure'}
             with stripe:
                 with result_store.result_lock:
                     duplicate = result_store.delivery_recorded(did)
