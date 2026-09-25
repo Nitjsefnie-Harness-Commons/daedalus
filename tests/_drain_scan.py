@@ -629,11 +629,11 @@ _SITES = (
 
 
 # A real unbounded drain with no stop before it: the control against a
-# scan that reads a drain on its own, as (module, the drain).
+# scan that reads a drain on its own, as (module, the drain). Each entry
+# names a real process child; a `threading.Event` wait reads the same but
+# is not one, so it is not a site this control stands on.
 _UNBOUNDED_WITHOUT_STOP = (
     ('scripts/ci/time_tests.py', 'child.wait()'),
-    ('tests/_cdpharness.py', 'proc.communicate()'),
-    ('tests/_relayharness.py', 'proc.communicate()'),
 )
 
 
