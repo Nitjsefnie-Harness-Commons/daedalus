@@ -60,8 +60,16 @@ jobs:
     # `gh api` reads of workflow runs and artifacts, exactly as the
     # `coverage` ratchet runs under the workflow default with the same
     # deploy key and the same push.
+    #
+    # BOTH scopes are named here, and the workflow-level `contents: read`
+    # above is NOT additive with them: a job-level block REPLACES the
+    # workflow-level one, and every scope it leaves unnamed becomes `none`.
+    # This job checks out `main`, so it needs `contents: read` here as well
+    # as `actions: read`; `zizmor`'s excessive-permissions audit cannot see
+    # this, because it flags over-broad scopes, not missing ones.
     permissions:
-      actions: read  # the workflow-run and artifact reads
+      actions: read    # the workflow-run and artifact reads
+      contents: read   # the checkout below, and nothing else
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -74,7 +82,6 @@ jobs:
           persist-credentials: false
 
       - name: List the recent tests runs on main
-        id: runs
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -86,6 +93,16 @@ jobs:
         # take the heredoc as a `cat` argument — the reason the candidate
         # list is rendered into the file and then counted, rather than
         # piped through `head`.
+        #
+        # FAIL-CLOSED, deliberately, and this is the one step that is: the
+        # count is a bare assignment, so its status is `grep`'s, and a
+        # zero-match `grep -c` exits 1 under the `bash -e` GitHub starts a
+        # `run:` block with. Zero completed push runs of `tests` on main
+        # means the measuring workflow has never finished there, which is a
+        # CI fault to see — not the quiet night the download step's "kept 0
+        # is a green no-op" path below describes, which means runs existed
+        # and none of them measured. The two dispositions are eleven lines
+        # apart on purpose.
         run: |
           gh api -H "Cache-Control: no-cache" --paginate \
             "repos/$REPOSITORY/actions/workflows/tests.yml/runs?branch=main&per_page=100" \
@@ -121,6 +138,18 @@ jobs:
         # lays each artifact out under a directory named after it, so a
         # cell lands at runs/<run-id>/speed-durations-<cell>/ — the `<cell>`
         # half of the name the planner generated.
+        #
+        # `-p` is the GLOB flag and `-n` is the EXACT-NAME flag; the cell
+        # artifact names are generated, so they are only ever knowable as a
+        # pattern. `-n 'speed-durations-*'` matches nothing, exits 1, and
+        # leaves `runs/<id>` uncreated, which the `if ! ...` below turns into
+        # a stepped-over candidate — a green night on which the whole job
+        # downloads nothing, the refresher never runs, and
+        # `.github/suite-timings.json` never updates without anything
+        # reporting it. `tests/test_timed_workflow.py` executes this block
+        # against a `gh` double that implements both flags' documented
+        # meanings, so the layout the `reference.json` probe below reads is
+        # reached through this command rather than asserted beside it.
         run: |
           mkdir -p runs
           set -euo pipefail
@@ -179,7 +208,7 @@ jobs:
               continue
             fi
             rm -rf "runs/$id"
-            if ! gh run download "$id" -n 'speed-durations-*' -D "runs/$id" \
+            if ! gh run download "$id" -p 'speed-durations-*' -D "runs/$id" \
                  >"download-$id.log" 2>&1; then
               echo "run $id: the download failed:"; sed 's/^/  /' "download-$id.log"
               rm -rf "runs/$id"
