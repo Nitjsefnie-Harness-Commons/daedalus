@@ -302,12 +302,19 @@ def _pack(weights, names, target, max_cells):
     # shared cells, which is what is left of the count. The suites that
     # gave up their cell (and whatever the shared cells cannot hold) are
     # then placed longest-first into the lightest existing cell, so the
-    # cells never exceed the count and none is ever empty.
+    # cells never exceed the count and none is ever empty. A bound of
+    # one with every suite heavy leaves no cell to place into, so the
+    # first cell opens on the heaviest suite rather than the placement
+    # choosing among none, and that suite is not placed a second time.
     shared = min(max(0, count - len(alone)), len(rest))
-    cells = [[name] for name in alone] + [[name] for name in rest[:shared]]
-    loads = ([weights[name] for name in alone]
-             + [weights[name] for name in rest[:shared]])
+    openers = alone + rest[:shared]
+    if not openers:
+        openers = [order[0]]
+    cells = [[name] for name in openers]
+    loads = [weights[name] for name in openers]
     for name in rest[shared:] + given_up:
+        if name in openers:
+            continue
         index = min(range(len(cells)), key=lambda i: (loads[i], i))
         cells[index].append(name)
         loads[index] += weights[name]
