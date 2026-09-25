@@ -417,6 +417,32 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
         f'no ext_cmd call site was read: cli={cli[2]}, mcp={mcp[2]}')
 
 
+def _eval_path_observation():
+    """The code-only command's route observation, or a named failure.
+
+    When the worker stops deriving `eval` from `code` the command falls to
+    the default arm, which posts a result the capability-routes scenario
+    does not declare; the refused fetch is left pending, the node child
+    exits with no output, and the boundary harness raises a decode error
+    before this suite ever sees an observation. That is still this control
+    failing to produce its observation, so it is reported as one -- naming
+    the known mechanism, without claiming the decode error proves it.
+    """
+    try:
+        return run_extension_capability_routes([{
+            'symbol': 'handleEval',
+            'publishedSymbols': ['handleEval', 'handleCookies'],
+            'command': _CODE_COMMAND,
+        }])[0]
+    except (AssertionError, ValueError) as error:
+        raise AssertionError(
+            'the code-only command produced no route observation, so this '
+            'control could not confirm that the code path reaches the eval '
+            'handler; a worker that stops deriving eval from code sends it '
+            f'to the default arm instead. The harness reported: {error!r}'
+        ) from error
+
+
 def test_a_type_the_worker_does_not_serve_reaches_the_unknown_arm(tmp):
     """The served-marker limb: an unserved type literal falls to `default`.
 
@@ -443,11 +469,7 @@ def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
     even though every served-type test stays green.
     """
     del tmp
-    observed = run_extension_capability_routes([{
-        'symbol': 'handleEval',
-        'publishedSymbols': ['handleEval', 'handleCookies'],
-        'command': _CODE_COMMAND,
-    }])[0]
+    observed = _eval_path_observation()
     assert observed['callCount'] == 1 and observed['answered'], observed
     assert 'calledType' not in observed, (
         f'the eval handler saw a type field on the code command: {observed}')
