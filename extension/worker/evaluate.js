@@ -1,4 +1,4 @@
-/* exported _takeEvalRelay, _canUseMainWorldEval */
+/* exported _takeEvalRelay, _canUseMainWorldEval, _raceMainWorldEval */
 /* exported _executeMainWorldEval, handleEval */
 /* global _cdpSessions, _netCaptures, _releaseCdpObjects */
 /* global _cdpError, _cdpSettle, postResult */
@@ -140,6 +140,28 @@ function _canUseMainWorldEval() {
   }
 }
 
+// `executeScript` has no abort, so a MAIN-world injection whose submitted
+// promise never settles would otherwise hold the worker — and, on hotfix
+// replay, every later fix — open forever. The guard is worker-side on
+// purpose: a page-owned `setTimeout` could veto the very bound meant to
+// contain it. Racing bounds the wait, and does NOT cancel the page promise:
+// the abandoned page-side work keeps running until the page's own promise
+// machinery settles it. The ceiling matches the CDP settlement bound so one
+// caller sees the same limit whichever channel the probe selects.
+const _MAIN_WORLD_EVAL_TIMEOUT_MS = 10000;
+
+function _raceMainWorldEval(work, what) {
+  let timerId;
+  const guard = new Promise((_resolve, reject) => {
+    timerId = setTimeout(() => reject(new Error(
+      `MAIN-world ${what} timed out after `
+      + `${_MAIN_WORLD_EVAL_TIMEOUT_MS} ms`)),
+      _MAIN_WORLD_EVAL_TIMEOUT_MS);
+  });
+  return Promise.race([work, guard])
+    .finally(() => clearTimeout(timerId));
+}
+
 function _executeMainWorldEval(code) {
   try {
     const started = performance.now();
@@ -210,12 +232,12 @@ async function handleEval(cmd) {
       cmd._execution, null, 'MAIN-world eval failed: ' + detail,
       String(chromeTabId), { world: 'page-main' });
     try {
-      results = await chrome.scripting.executeScript({
+      results = await _raceMainWorldEval(chrome.scripting.executeScript({
         target: { tabId: chromeTabId },
         world: 'MAIN',
         func: _executeMainWorldEval,
         args: [cmd.code],
-      });
+      }), 'eval');
     } catch (error) {
       await failMainWorld(error.message || String(error));
       return;
