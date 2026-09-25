@@ -189,6 +189,18 @@ def test_open_tabs_empty_urls_is_refused_without_creating(tmp):
     assert apis(outcome, CREATE) == [], outcome
 
 
+def test_open_tabs_outer_catch_posts_the_create_failure(tmp):
+    del tmp
+    # A synchronous create rejection aborts the map() before allSettled sees
+    # it, so the caller's outer catch posts the message once. The per-url
+    # createReject path instead lands in errors[]; this covers the other arm.
+    outcome = run_tabs(
+        [command(type='open-tabs',
+                 urls=['https://a.example.com', 'https://b.example.com'])],
+        createSyncReject={'https://a.example.com': 'planned sync failure'})
+    assert _error(outcome) == 'planned sync failure', outcome
+
+
 # ─── handleFocusTab ───
 
 def test_focus_tab_activates_the_tab_then_focuses_the_window(tmp):
@@ -206,6 +218,13 @@ def test_focus_tab_missing_tab_id_is_refused_without_updating(tmp):
     outcome = run_tabs([command(type='focus-tab')])
     assert _error(outcome) == 'Missing tabId', outcome
     assert apis(outcome, UPDATE, WINDOW) == [], outcome
+
+
+def test_focus_tab_update_rejection_posts_the_message(tmp):
+    del tmp
+    outcome = run_tabs([command(type='focus-tab', tabId=5)],
+                       chromeReject={'tabs.update': 'planned update failure'})
+    assert _error(outcome) == 'planned update failure', outcome
 
 
 # ─── handleNavigate ───
@@ -250,6 +269,14 @@ def test_navigate_missing_url_is_refused_before_any_handler_query(tmp):
     assert apis(outcome, QUERY, UPDATE) == [], outcome
 
 
+def test_navigate_update_rejection_posts_the_message(tmp):
+    del tmp
+    outcome = run_tabs([command(type='navigate', tabId=5,
+                                url='https://new.example.com')],
+                       chromeReject={'tabs.update': 'planned update failure'})
+    assert _error(outcome) == 'planned update failure', outcome
+
+
 # ─── handleReload ───
 
 def test_reload_passes_bypass_cache_true(tmp):
@@ -285,6 +312,24 @@ def test_reload_no_active_tab_is_refused_without_reloading(tmp):
     outcome = run_tabs([command(type='reload')], activeTabs=[])
     assert _error(outcome) == 'No active tab', outcome
     assert apis(outcome, RELOAD) == [], outcome
+
+
+def test_reload_coerces_a_string_tab_id(tmp):
+    del tmp
+    # The string tabId must be parsed to a number before it reaches
+    # chrome.tabs.reload, which is what the shipped coercion line guarantees.
+    outcome = run_tabs([command(type='reload', tabId='5')])
+    assert apis(outcome, RELOAD) == [
+        [RELOAD, [5, {'bypassCache': False}]]], outcome
+    assert _result(outcome) == {
+        'tabId': 5, 'bypassCache': False}, outcome
+
+
+def test_reload_rejection_posts_the_message(tmp):
+    del tmp
+    outcome = run_tabs([command(type='reload', tabId=5)],
+                       chromeReject={'tabs.reload': 'planned reload failure'})
+    assert _error(outcome) == 'planned reload failure', outcome
 
 
 # ─── handleInjectCss ───
@@ -338,6 +383,22 @@ def test_inject_css_no_active_tab_is_refused_without_inserting(tmp):
     assert apis(outcome, INSERT) == [], outcome
 
 
+def test_inject_css_insert_rejection_posts_only_the_error(tmp):
+    del tmp
+    # insertCSS failing must surface as the single error post, never as a
+    # success post for CSS that was never inserted. _error also pins that
+    # exactly one post landed, so a post-before-insert ordering mutant (which
+    # would post success then error) fails on the post count.
+    outcome = run_tabs([command(type='inject-css', tabId=5, css=CSS)],
+                       chromeReject={
+                           'scripting.insertCSS': 'planned insert failure'})
+    assert _error(outcome) == 'planned insert failure', outcome
+    assert apis(outcome, INSERT) == [[INSERT, [{
+        'target': {'tabId': 5, 'allFrames': False},
+        'css': CSS,
+    }]]], outcome
+
+
 # ─── handleRemoveCss ───
 
 def test_remove_css_reports_the_length_and_carries_all_frames(tmp):
@@ -387,6 +448,14 @@ def test_remove_css_no_active_tab_is_refused_without_removing(tmp):
         [command(type='remove-css', css=CSS)], activeTabs=[])
     assert _error(outcome) == 'No active tab', outcome
     assert apis(outcome, REMOVE) == [], outcome
+
+
+def test_remove_css_removal_rejection_posts_the_message(tmp):
+    del tmp
+    outcome = run_tabs([command(type='remove-css', tabId=5, css=CSS)],
+                       chromeReject={
+                           'scripting.removeCSS': 'planned removal failure'})
+    assert _error(outcome) == 'planned removal failure', outcome
 
 
 def main():
