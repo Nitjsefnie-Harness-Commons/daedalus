@@ -71,7 +71,9 @@ function clickEdit(id) {
   rowFor(id).byText('edit').click();
 }
 // An armed button answers its first click by arming and un-arming itself on
-// a timer, so a click is what a browser's pending timer would not allow.
+// a timer, so a click is what a browser's pending timer would not allow. The
+// callbacks held back are reported: a button that armed nothing scheduled
+// nothing, and a control that does not arm is not the one under test.
 function clickArmed(id, label) {
   const immediate = globalThis.setTimeout;
   const held = [];
@@ -79,8 +81,11 @@ function clickArmed(id, label) {
   const button = rowFor(id).byText(label);
   button.click();
   globalThis.setTimeout = immediate;
-  button.click();
-  return held.length;
+  // A second click only when the first armed something. A control that
+  // answers the first click is a different control, and the count below
+  // reports it rather than firing its handler twice and hanging the run.
+  if (held.length) button.click();
+  return held;
 }
 function form() {
   return {
@@ -123,11 +128,11 @@ listed = { version: '1.0', fixes: [
 container.find('[data-role=refresh]').click();
 await bounded(settle(), 'refresh onto the scoped fix again',
                _dashnodeStepTimeoutMs);
-clickArmed('scoped', 'clear scope');
+const armedTimers = clickArmed('scoped', 'clear scope');
 await bounded(settle(), 'clear a scope', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  rendered, headers, rowLabels, scopedForm, bareForm,
+  rendered, headers, rowLabels, armedTimers, scopedForm, bareForm,
   commands: commands.filter((c) => c.type === 'store-hotfix'),
 }));
 phase('dashboard harness finished');
@@ -204,6 +209,11 @@ def test_the_row_removes_a_scope_without_rewriting_the_code(_tmp):
     # The anti-vacuity half: the button is on the SCOPED row, and the two
     # stores above it are the same panel sending a scope and sending none.
     assert 'clear scope' in seen['rowLabels']['scoped'], seen
+    # One un-arming callback, from one arming click: the control is an
+    # armedAction, and the second click below ran its handler rather than
+    # arming it again.
+    assert len(seen['armedTimers']) == 1, seen
+    assert len(seen['commands']) == 3, seen
     # Nothing to take away on a fix that carries no scope, so nothing is
     # offered: a button on both rows is one the unscoped row cannot use.
     assert 'clear scope' not in seen['rowLabels']['bare'], seen

@@ -31,6 +31,7 @@ Single delivery mode: Chrome extension (MV3); the legacy Tampermonkey userscript
   - CDP `Runtime.evaluate` uses REPL mode, reads direct values by reference, bounds promise settlement at 10 seconds, and releases result and exception handles even when a kept session or capture holds the attachment.
   - Trust: a page you do not control can choose the returned value on any channel. On `page-main` its own `eval` and `Function` bindings can also read the submitted source; on `cdp` it can choose the value whenever that source uses page-controlled state or page promise machinery. The `world` field (`page-main`, `cdp`, `page:<hostname>`) records the channel, not whether to trust the value; the background adds the mandatory `page:` prefix, so relay hostnames cannot collide with the other two — a descriptive property, not a trust boundary.
   - The relay admits 1,000 live entries; a new one at capacity gets a terminal error without eviction, and a live entry expires with one terminal error after 300,000 ms.
+  - `store-hotfix`'s site scope: `match` is a Chrome match pattern, where an absent `match` keeps the scope the fix already has and a pattern that parses sets it, `clearScope: true` — a boolean beside `match` and never in it — removes it and leaves the code and `permanent` alone, and any other `match` value, or a `clearScope` that is present and not a boolean, is refused with the stored record untouched.
 - Tab tracking: `chrome.tabs` API, registered on create/update with a 30s `chrome.alarms` heartbeat.
 
 **Server (`server.py`)**

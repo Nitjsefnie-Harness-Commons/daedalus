@@ -94,6 +94,31 @@ def test_store_hotfix_refuses_a_clear_alongside_a_scope(tmp):
         ['store-hotfix', 'fix', '--code', 'x', '--clear-scope'])
 
 
+def test_store_hotfix_prints_the_scope_the_fix_ended_up_with(tmp):
+    """The confirmation names the scope, so a clear is not a plain store.
+
+    `--clear-scope` and a store that changed nothing print the same line
+    otherwise, which leaves the operator with no way to tell a clear from a
+    swallowed one — the confusion this command's whole reason for existing.
+    Both arms are asserted here because a print that renders one shape for
+    either outcome satisfies either assertion alone.
+    """
+    del tmp
+    _recorded, cleared = run_cli(
+        ['store-hotfix', 'fix', '--code', 'console.log(1)', '--clear-scope'],
+        [dict(STORED, match=None)])
+
+    assert 'unscoped' in cleared, repr(cleared)
+    assert SCOPE not in cleared, repr(cleared)
+
+    _recorded, scoped = run_cli(
+        ['store-hotfix', 'fix', '--code', 'console.log(1)',
+         '--match', SCOPE], [dict(STORED, match=SCOPE)])
+
+    assert SCOPE in scoped, repr(scoped)
+    assert 'unscoped' not in scoped, repr(scoped)
+
+
 def test_list_hotfixes_prints_the_scope_it_read_back(tmp):
     """C9, list direction: the row names the scope the record carried."""
     del tmp
