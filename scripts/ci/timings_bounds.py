@@ -60,20 +60,22 @@ def plan_is_balanced(tree, data):
     return max(loads) <= statistics.median(loads) * (1 + CELL_WEIGHT_MARGIN)
 
 
-def _candidate(tree, weights, target, max_cells):
+def _candidate(weights, target, max_cells, units):
     return {'schema_version': SCHEMA_VERSION,
             'target_cell_weight': float(target),
-            'max_cells': max_cells, 'units': 'seconds',
+            'max_cells': max_cells, 'units': units,
             'suite_weights': weights, 'measured_from': 'derive', 'runs': 1}
 
 
-def derive_target(tree, weights, max_cells):
+def derive_target(tree, weights, max_cells, units):
     """The smallest target the balance guarantee allows, in TARGET_STEPs.
 
     At a target the margin forbids, a heavy suite sits alone in its
     cell while the median cell stays small, and the ratio crosses the
     margin; raising the target lets more suites share cells and the
-    median rises under the heavy one.
+    median rises under the heavy one. `units` is the file's own unit,
+    carried into the probe so the candidate never asserts one the
+    weights are not in.
     """
     total = sum(weights.values())
     if total <= 0 or max_cells < 1:
@@ -82,7 +84,7 @@ def derive_target(tree, weights, max_cells):
         if math.ceil(total / target) > max_cells:
             continue
         if plan_is_balanced(
-                tree, _candidate(tree, weights, target, max_cells)):
+                tree, _candidate(weights, target, max_cells, units)):
             return float(target)
     return float(math.ceil(total / max_cells / TARGET_STEP) * TARGET_STEP)
 
@@ -98,7 +100,8 @@ def verify_target(tree, data, max_cells):
     if plan_is_balanced(tree, data):
         return data['target_cell_weight'], ''
     recorded = data['target_cell_weight']
-    target = derive_target(tree, data['suite_weights'], max_cells)
+    target = derive_target(
+        tree, data['suite_weights'], max_cells, data['units'])
     if not plan_is_balanced(tree, dict(data,
                                        target_cell_weight=target)):
         raise BoundsError(
@@ -181,11 +184,11 @@ def basis_sentence(tree, data, cells, estimated):
          f'{median_cell:.4g} median, margin {CELL_WEIGHT_MARGIN:g}) and the '
          f'count fits the bound, so the target is measured rather than '
          f'chosen.'),
-        (f'max_cells {data["max_cells"]}: the measured run ran '
-         f'{_plural(cells, "cell")}, the concurrency the repository runs '
-         f'today, so the bound is that number; when the derived count '
-         f'reaches it the planner clamps and names the target the margin '
-         f'would need.'),
+        (f'max_cells {data["max_cells"]}: the bound on the cells the planner '
+         f'derives; the measured run ran {_plural(cells, "cell")}, the '
+         f'concurrency the repository runs today, and when the derived '
+         f'count reaches the bound the planner clamps and names the target '
+         f'the margin would need.'),
     ]
     if estimated:
         parts.append(
