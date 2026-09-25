@@ -100,23 +100,36 @@ function _matchesScope(parsed, identity) {
                     + '$').test(identity);
 }
 
-// What the CDP channel compares and what the site scope is matched against.
-// The fragment is left out: a hash change is not a new document, and the
-// MAIN channel, which binds by document, would still deliver to it. The
-// authority is spelled out rather than folded into `origin` because
-// `file:` has none — its origin is the string "null", which a pattern
-// compiled from the pattern's own text can never match. Chrome supplies
-// this on every content-script message, so a null here is a request the
-// worker cannot bind rather than a page's path.
-function _pageIdentity(url) {
+// Chrome supplies a url on every content-script message, so a null here is
+// a request the worker cannot bind rather than a page's path.
+function _pageUrl(url) {
   if (typeof url !== 'string' || url === '') return null;
   try {
-    const parsed = new URL(url);
-    return parsed.protocol + '//' + parsed.host + parsed.pathname
-      + parsed.search;
+    return new URL(url);
   } catch (_) {
     return null;
   }
+}
+
+// What the CDP channel compares: the document binding, so it keeps the
+// port, which is a real discriminator between two documents on one host.
+// The authority is spelled out rather than folded into `origin` because
+// `file:` has none — its origin is the string "null", which a pattern
+// compiled from the pattern's own text can never match.
+function _boundIdentity(parsed) {
+  return parsed.protocol + '//' + parsed.host + parsed.pathname
+    + parsed.search;
+}
+
+// What the site scope is matched against, and a different job: Chrome match
+// patterns have no port in the host position and ignore one when matching,
+// so a scope naming a host covers that host's other ports — which is what
+// an operator writing `*://shop.example.com/*` means. The fragment is left
+// out of both for the same reason: a hash change is not a new document, and
+// the MAIN channel, which binds by document, would still deliver to it.
+function _scopedIdentity(parsed) {
+  return parsed.protocol + '//' + parsed.hostname + parsed.pathname
+    + parsed.search;
 }
 
 // Matched against the page the browser reported for the sender, with no
@@ -245,18 +258,19 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
   // carrying neither can be bound to nothing and runs nothing. Chrome
   // supplies all three on every content-script message, so no real page
   // reaches this; the refusal is what a shape the worker cannot bind gets.
-  const identity = _pageIdentity(senderUrl);
-  if (typeof documentId !== 'string' || documentId === '' || !identity) {
+  const page = _pageUrl(senderUrl);
+  if (typeof documentId !== 'string' || documentId === '' || !page) {
     console.error('[Daedalus] hotfix replay on tab ' + chromeTabId
                   + ' ran nothing: the request named no document, or a url'
                   + ' that names no page');
     return;
   }
+  const identity = _boundIdentity(page);
   const failures = [];
   const skipped = [];
   let ran = 0;
   for (const hf of fixes) {
-    const outOfScope = _scopeRefusal(hf, identity);
+    const outOfScope = _scopeRefusal(hf, _scopedIdentity(page));
     if (outOfScope) {
       skipped.push(hf.id + ': ' + outOfScope);
       continue;
@@ -316,7 +330,7 @@ async function handleStoreHotfix(cmd) {
       return postResult(cmd._execution, null,
         'Unusable match pattern: '
         + (typeof cmd.match === 'string' ? cmd.match
-          : String(JSON.stringify(cmd.match))),
+          : JSON.stringify(cmd.match)),
         'extension');
     }
     const outcome = await _withHotfixLock(async () => {
