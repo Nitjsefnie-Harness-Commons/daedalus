@@ -347,27 +347,22 @@ async function runNetCaptureOwnership() {
       state: readState(tabId) };
   };
 
-  // Tab 7: capture first, then a transient cdp over it, then stop the
-  // capture with no other owner left.
+  // Tab 7: capture, a transient cdp over it, then stop with no other owner.
   const capture = await run('net-capture', 7);
   const cdpOverCapture = await run('cdp', 7, { method: 'Runtime.enable' });
   const stopCapture = await run('net-capture-stop', 7);
 
-  // Tab 8: kept cdp session first, then a transient cdp that reuses it, then
-  // a capture over the kept session, then stop that capture — the kept
-  // session must survive the stop and keep the attachment.
+  // Tab 8: a kept cdp session, a transient cdp and a capture that reuse it,
+  // then stop the capture — the kept session must survive and keep it.
   const keepSession = await run(
     'cdp', 8, { method: 'Runtime.enable', keep_session: true });
   const transientOverKept = await run('cdp', 8, { method: 'Runtime.enable' });
   const captureOverKept = await run('net-capture', 8);
   const stopOverKept = await run('net-capture-stop', 8);
 
-  // Tab 9: a capture first, then a cdp --keep-session that REUSES the
-  // capture's attachment, then stop the capture. The keep-session record
-  // must survive the reuse (so the stop does not detach), and the kept
-  // session must outlive the stop on the reused attachment. Tab 8's kept
-  // session is still attached here, so this tab also proves a different tab
-  // may be attached at the same time.
+  // Tab 9: a capture, a keep-session cdp that reuses it, then stop — the
+  // record must survive the reuse so the stop leaves it standing. Tab 8 is
+  // still attached, so this also proves a different tab may attach.
   const captureTab9 = await run('net-capture', 9);
   const keepSessionOverCapture = await run(
     'cdp', 9, { method: 'Runtime.enable', keep_session: true });

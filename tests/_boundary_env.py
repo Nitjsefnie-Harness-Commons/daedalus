@@ -69,6 +69,8 @@ SCENARIO_PLANS = {
     'hotfix-race': {'planned': [SYNC, RESULT, RESULT],
                     'planned_stream': [503]},
     'net-capture': {'planned': [SYNC] + [RESULT] * 4, 'planned_stream': [503]},
+    'net-capture-ownership': {'planned': [SYNC] + [RESULT] * 10,
+                              'planned_stream': [503]},
     'dedup-restart': {'planned': [SYNC, RESULT, SYNC],
                       'planned_stream': [503, 503]},
     'block-rule-restart': {'planned': [SYNC, RESULT, SYNC]
