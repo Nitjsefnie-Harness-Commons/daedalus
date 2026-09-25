@@ -265,7 +265,7 @@ def test_next_seq_is_lexically_increasing_and_well_formed(_tmp):
     first, second = queue.next_seq(), queue.next_seq()
     assert first < second, (first, second)
     for value in (first, second):
-        assert (tuple(map(len, value.split('_'))) == (13, 6)
+        assert (tuple(map(len, value.split('_'))) == (13, 20)
                 and value.replace('_', '').isdigit()), value
 
 

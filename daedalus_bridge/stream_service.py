@@ -275,16 +275,21 @@ def every_subscription_past(token, name):
     """True once every live dashboard subscription holds a cursor >= name.
 
     Plain lexicographic comparison orders these names because
-    `notify_dashboard` publishes each event under the `<ms:013d>_<counter:06d>`
-    stem `command_queue.next_seq` returns, whose milliseconds and counter are
-    both allocated under `command_fs_lock`, so byte order is publish order
-    within and across milliseconds. That is the whole warrant for a
-    name-ordered cursor: a same-millisecond event published under a random
-    suffix sorts arbitrarily, lands below a window's cursor, and is dropped
-    as already-consumed. The same-millisecond control fails if this property
-    stops holding. A subscription that has registered but not yet drained
-    carries no cursor and blocks, the conservative join; the TTL sweep is the
-    backstop for a connection that never drains at all.
+    `notify_dashboard` publishes each event under the
+    `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns, whose
+    milliseconds and counter are both allocated under `command_fs_lock`, so
+    byte order is publish order within and across milliseconds.
+    The counter field is twenty digits wide —
+    no 64-bit counter reaches 10**20 — so the padding holds across the
+    overflow a six-digit field inverted at, and the ordering is a stated
+    bound rather than a rate. That is the whole warrant for a name-ordered
+    cursor: a stem that is not ordered by publish order (a random suffix, or
+    a counter field that overflows) sorts arbitrarily, lands below a window's
+    cursor, and is dropped as already-consumed. The same-millisecond and
+    counter-boundary controls fail if this property stops holding. A
+    subscription that has registered but not yet drained carries no cursor and
+    blocks, the conservative join; the TTL sweep is the backstop for a
+    connection that never drains at all.
     """
     with _stream_lock:
         for entry in _active_streams.values():
