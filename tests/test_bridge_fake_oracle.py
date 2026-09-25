@@ -13,8 +13,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _bridge_fake_oracle_harness import _ORACLE_HARNESS  # noqa: E402
 from _stream_fake import (  # noqa: E402
-    STRICT_FETCH, assert_gate_clean, require_node, run_gate)
+    assert_gate_clean, require_node, run_gate)
 
 BRIDGE = 'https://bridge.example.com'
 ELSEWHERE = 'https://elsewhere.example.com'
@@ -31,113 +32,6 @@ EXPECTED_STATUSES = [200, 599, 599, 599, 599, 200, 200, 599, 599]
 EXPECTED_NON_STREAM = [SYNC, SYNC, TABS, OTHER, RESULT]
 EXPECTED_REFUSED = [SYNC, TABS]
 EXPECTED_BAD_ORIGINS = [ELSEWHERE, NO_ORIGIN, ELSEWHERE, NO_ORIGIN]
-
-_ORACLE_HARNESS = r"""
-const [plan] = process.argv.slice(1);
-const BRIDGE_URL = 'https://bridge.example.com';
-const streamFetches = [];
-const resultPosts = [];
-const nonStreamFetches = [];
-const refusedFetches = [];
-const badOrigins = [];
-const chunkCalls = [];
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
-function streamResponse(answer) {
-  // The gate routes every stream answer through this factory, so a harness
-  // that serves 'hang' models the connected-but-idle body here. The hang test
-  // reds if this factory stops building it.
-  if (answer === 'hang') {
-    return {
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => ({
-          read: () => new Promise(() => {}),
-          cancel: () => Promise.resolve(),
-        }),
-      },
-    };
-  }
-  return response(answer, { error: 'disabled' });
-}
-
-// The gate builds a declared {stream: N} answer through the harness's chunk
-// factory; `noChunkFactory` withholds it so the splice-time contract check can
-// be exercised.
-let chunkedResponse = plan.noChunkFactory
-  ? undefined
-  : (count) => {
-    chunkCalls.push(count);
-    return response(200, { chunked: count });
-  };
-""" + STRICT_FETCH + r"""
-
-async function run() {
-  const statuses = [];
-  const answered = [];
-  const streamBodies = [];
-  for (const step of plan.probe) {
-    const init = { method: step.method };
-    if (step.body !== undefined) init.body = JSON.stringify(step.body);
-    if (step.headers !== undefined) init.headers = step.headers;
-    // A step that expects the gate to throw says so, so the probe runs to
-    // completion and the throw is evidence rather than a dead child.
-    if (step.expectThrow) {
-      let thrown = null;
-      try { await bridgeFetch(step.url, init); }
-      catch (error) { thrown = error.message; }
-      statuses.push(thrown === null ? 'no throw' : 'throw: ' + thrown);
-      answered.push(null);
-      continue;
-    }
-    const answer = await bridgeFetch(step.url, init);
-    statuses.push(answer.status);
-    // A stream answer's body shape is the hang the watchdog exercises: a
-    // connected 200 whose reader never settles. Recorded so the oracle can
-    // pin it without awaiting a promise that (correctly) never resolves.
-    if (step.url.includes('/stream?')) {
-      streamBodies.push(
-        answer && answer.body
-          ? typeof answer.body.getReader === 'function' : null);
-    }
-    answered.push(answer && answer.json
-      ? await answer.json().catch(() => null) : null);
-  }
-  return {
-    statuses,
-    answered,
-    streamBodies,
-    nonStream: nonStreamFetches.map((i) => i.request),
-    refused: refusedFetches,
-    badOrigins,
-    records: nonStreamFetches,
-    streamAnswered: streamFetches.map((f) => f.answered),
-    contractFaults: gateContractFaults,
-    bodies: nonStreamFetches.map(
-      (i) => ({ request: i.request, body: i.body })),
-    auths: nonStreamFetches.map((i) => i.auth),
-    resultPosts,
-    chunkCalls,
-  };
-}
-
-run().then((result) => {
-  process.stdout.write(JSON.stringify(result));
-}).catch((error) => {
-  process.stderr.write((error.stack || String(error)) + '\n');
-  process.exitCode = 1;
-});
-"""
 
 
 def _probe_plan():
@@ -598,6 +492,93 @@ def test_a_string_typed_statuses_table_is_a_contract_fault(tmp):
     outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
                        plan=plan)
     assert outcome['contractFaults'] == ['plan.statuses'], outcome
+
+
+# ---- the forward path: a request the gate records but does not answer ------
+# A scenario whose real answer comes from a real server declares that target
+# in `plan.forwards` (keyed on the route key, valued with the origin its
+# answer lives on) and hands the gate a `forwardRequest` hook that performs
+# the request. The gate still debits the request against `planned` and records
+# it, so a forward past its declared count is a refusal, never a pass-through.
+
+def _forward_plan(count, **extra):
+    plan = {
+        'planned': [RESULT] * count,
+        'forwards': {RESULT: 'UPSTREAM'},
+        'hosts': [BRIDGE, 'UPSTREAM'],
+        'probe': [
+            {'method': 'POST', 'url': BRIDGE + '/result', 'body': {'id': 'f'}},
+        ] * count,
+    }
+    plan.update(extra)
+    return plan
+
+
+def test_a_declared_forward_is_answered_by_the_real_server_not_the_gate(tmp):
+    """A forwarded request's answer is the real server's own.
+
+    The upstream answers 418 — a status the gate's own factories never
+    synthesise — so the recorded status and the returned status are the
+    real server's, and `upstreamHits` shows the request really left.
+    """
+    del tmp
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=_forward_plan(1))
+    assert outcome['statuses'] == [418], outcome
+    assert outcome['records'][0]['status'] == 418, outcome
+    assert outcome['upstreamHits'] == 1, outcome
+    assert len(outcome['forwarded']) == 1, outcome
+    assert outcome['refused'] == [], outcome
+
+
+def test_a_forward_past_its_declared_count_is_refused_not_forwarded(tmp):
+    """The forward is accounted like any other request: two declared, three
+    sent. The third is refused by status, recorded, and never reaches the real
+    server — a defect, not a pass-through.
+    """
+    del tmp
+    # three probes against a two-entry plan: forward, forward, refuse
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=_forward_plan(2, probe=[
+                           {'method': 'POST', 'url': BRIDGE + '/result',
+                            'body': {'id': 'f'}}] * 3))
+    assert outcome['statuses'] == [418, 418, 599], outcome
+    assert outcome['refused'] == [RESULT], outcome
+    assert outcome['upstreamHits'] == 2, outcome
+    assert len(outcome['forwarded']) == 2, outcome
+    assert outcome['records'][2]['status'] == 599, outcome
+
+
+def test_a_forward_from_an_unpermitted_origin_is_refused(tmp):
+    """The forward's own origin is origin-checked: a plan that keeps a
+    different origin there (`KEEP`) has the request refused and recorded
+    before the hook is ever called.
+    """
+    del tmp
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=_forward_plan(1, forwards={RESULT: 'KEEP'},
+                                          hosts=[BRIDGE]))
+    assert outcome['statuses'] == [599], outcome
+    assert outcome['upstreamHits'] == 0, outcome
+    assert outcome['forwarded'] == [], outcome
+    assert outcome['badOrigins'], outcome
+
+
+def test_a_forward_without_the_hook_is_a_contract_fault(tmp):
+    """A plan that declares a forward but brings no `forwardRequest` names
+    the missing name at splice time rather than failing to answer later.
+    """
+    del tmp
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=_forward_plan(1, noForwardHook=True, probe=[]))
+    assert outcome['contractFaults'] == ['forwardRequest'], outcome
+
+
+def test_a_string_typed_forwards_table_is_a_contract_fault(tmp):
+    del tmp
+    outcome = run_gate(require_node(), _ORACLE_HARNESS, [], cwd=ROOT,
+                       plan=_forward_plan(1, forwards=RESULT))
+    assert outcome['contractFaults'] == ['plan.forwards'], outcome
 
 
 # ---- assert_gate_clean's own controls -------------------------------------
