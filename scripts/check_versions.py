@@ -106,23 +106,21 @@ SITES = [
     # names a different element and is not a site — which a pattern-wide
     # re.IGNORECASE would lose (#522).
     #
-    # Both sites admit the whole trailing attribute region, so a duplicate
-    # written with any attribute after `class` is refused whatever that
-    # attribute is. Admitting the region is only sound while each site class
-    # names exactly one element in the markup: the footer rendered four
-    # more `sl-v` cells carrying `data-meta`, and a second version span
-    # written `<span class='sl-v' id='x'>` is that same shape, so a
-    # status-line region admitted every attribute it also admitted the
-    # tree's own four cells (#522, closed by 538). Those cells now carry
-    # `sl-meta` of their own, and both classes name one element each, so
-    # the region costs no attribute-name exceptions and no new enumeration
-    # in the regex.
+    # Both sites admit the whole trailing attribute region: a duplicate
+    # carrying any attribute after `class` is refused whatever that
+    # attribute is. That is only sound while each site class names exactly
+    # one element in the markup — the status line rendered four more `sl-v`
+    # cells once, and a duplicate written `<span class='sl-v' id='x'>` is
+    # that same shape, so admitting either refused the tree (#522, closed
+    # by 538). Both classes now name one element, so the region costs no
+    # attribute-name exceptions.
     #
     # Well-formed markup walks linearly. A malformed tag (an unclosed quote)
     # makes every anchor walk to that quote — quadratic. Each lookahead's
     # trailing region is a second unbounded walk — cubic in k: k anchors
     # over k `class='rail-foot' ` runs with no `>v` after them. The shape
-    # `'<div ' * k + "class='rail-foot' " * k + 'a' * k` reproduces it —
+    # `'<div ' * k + "class='rail-foot' " * k + 'a' * k` reproduces it,
+    # and the status twin is the same over `<span ` and `class='sl-v' ` —
     # catastrophic without the lookahead, bounded with it — and where the
     # cost detonates depends on the interpreter, so no timings are recorded
     # here. A capped walk was declined: a cap re-introduces a silent false

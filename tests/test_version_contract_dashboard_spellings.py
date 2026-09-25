@@ -6,9 +6,9 @@ uppercase tag and attribute names, further attributes after `class`, and
 whitespace before the `>`. A second version element written any of those ways
 used to match nothing at all, so the checker reported a tree consistent while
 the page rendered two different versions (522). The status line was the one
-site still pinned to whitespace after `class`, because four of its cells
-shared the class; they moved onto `sl-meta` so the site admits the whole
-trailing region like the rail footer (538).
+site still pinned to whitespace after `class`; the four cells that shared its
+class moved onto `sl-meta`, so it admits the whole region like the rail
+footer (538).
 """
 import sys
 from pathlib import Path
@@ -59,9 +59,7 @@ _STATUS_SPELLINGS = {
     'unquoted_gt_in_earlier_attribute': (
         "<span title='a>b' class=sl-v>9.9.9</span>"),
     # The trailing-attribute rows the status site admits now (538): any
-    # attribute after `class` is a duplicate, named no way. The four status
-    # cells that made the region ambiguous moved onto `sl-meta`, so `sl-v`
-    # names one element in the markup and the region no longer admits them.
+    # attribute after `class` is a duplicate, named no way.
     'trailing_attribute': "<span class='sl-v' id='x'>9.9.9</span>",
     'data_attribute': "<span class='sl-v' data-meta='x'>9.9.9</span>",
     'uppercase_trailing_attribute': "<SPAN CLASS='sl-v' ID='X'>9.9.9</SPAN>",
@@ -235,11 +233,8 @@ def test_trailing_region_reads_a_quoted_gt_whole(tmp_path):
 def test_status_line_shipped_class_names_one_element(tmp_path):
     """The trailing region rests on this class naming one element.
 
-    The footer rendered four more `sl-v` cells carrying `data-meta`, and a
-    duplicate written `<span class='sl-v' id='x'>` had that same shape, so
-    the region could not be admitted without also admitting the tree's own
-    cells. The four moved onto `sl-meta` (538); the site counts the one
-    real element exactly once.
+    The four cells that made the region ambiguous moved onto `sl-meta` (538),
+    leaving this one to be the class the site admits the whole region for.
     """
     copy_root = Path(tmp_path) / 'tree'
     checker = _copy_versioned_tree(copy_root)
@@ -287,9 +282,9 @@ def test_status_line_class_token_prefix_is_not_a_site(tmp_path):
     """The token boundary holds at the front as well as the back.
 
     The prefix side of the class-value group is what keeps `sl-v` a whole
-    token rather than a substring, and it had no control of its own: the
-    quoted arm. Relaxing it to `\\w*sl-v` turns `notsl-v` into a second
-    version site while the unquoted arm's control still passes.
+    token rather than a substring, and the quoted arm had no control of its
+    own: relaxing it to `\\w*sl-v` turns `notsl-v` into a second version site
+    while the unquoted arm's control still passes.
     """
     _assert_markup_is_not_a_site(
         tmp_path, "<span class='notsl-v' id='x'>9.9.9</span>", _STATUS)
@@ -410,12 +405,10 @@ def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
 
 def test_repeated_status_line_class_runs_without_a_close_do_not_flip(
         tmp_path):
-    """The same shape over the status-line region, which now takes one too.
+    """The rail control's shape over the region the status site now admits.
 
-    Both sites' trailing regions are a second unbounded walk; the lookahead
-    each carries prunes it. This pins the verdict on that shape for the
-    status line, not the lookahead's presence, for the reason its rail twin
-    records.
+    It pins the verdict on that shape, not the guard's presence, for the
+    reason its rail twin records.
     """
     anchors = 200
     _assert_markup_is_not_a_site(
