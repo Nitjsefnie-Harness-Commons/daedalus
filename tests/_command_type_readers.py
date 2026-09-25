@@ -35,10 +35,17 @@ Two properties of that list a reader cannot recover from the code:
   name the helper through a string, and it is kept blunt so a lookup cannot
   hide in a comment.
 * Exactly one definition spelling is modelled per language, and an unmodelled
-  one is refused rather than skipped. So ``extCmd?.(...)``, a class, an
-  arrow-function definition, a template literal and an object key are all
-  refusals. Accepting a second spelling would need its own control; keeping
-  fail-closed is what lets the list above stay a true recognition claim.
+  one is refused rather than skipped, so the list above stays a true
+  recognition claim. Four of them are refused because something other than
+  ``(`` follows the name: ``extCmd?.(...)``, ``class extCmd {}``, an
+  arrow-function definition (``const extCmd = ...``, where ``=`` follows),
+  and an object key. A fifth, a class METHOD named ``extCmd``, is not: it is
+  read as a zero-argument call and refused by the no-argument marker.
+  Accepting a second spelling would need its own control.
+* A template literal is not a refusal, it is a position. Around a CALL it is
+  read -- ``${extCmd('cookies')}`` dispatches 'cookies' -- while in the
+  command-type position ``extCmd(`${v}`)`` is refused, because the type
+  argument must be a plain literal.
 
 Neither is a live defect in the shipped tree: no dashboard comment quotes the
 name, and the helper is defined once, as ``function extCmd``.
@@ -50,8 +57,9 @@ A COMPUTED name -- ``getattr(bridge, 'ext' + '_cmd')`` or
 computed command TYPE is refused by the direct-call branch's plain-literal
 requirement, so that half is ENFORCED. A computed helper NAME is a fact
 about the tree, not a check: the nine ``+`` expressions across
-``daedalus_cli`` and ``daedalus_mcp`` build URLs, arithmetic, a set range, a
-list join and a print.
+``daedalus_cli`` and ``daedalus_mcp`` are three ``URL + path``, two
+``max(done) + 1``, two ``monotonic() + timeout``, one tuple add feeding
+``', '.join``, and the reload print.
 """
 import ast
 import re
@@ -69,8 +77,9 @@ _DISPATCH = 'dispatchCommand'
 # value is a shape the enumeration does not read.
 _STRING_LITERAL = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"")
 
-# Whose second parameter every proved-literal call site fills. Any other
-# indirection is refused, not counted.
+# Whose second parameter every proved-literal call site fills. A payload
+# forwarded from any other file is counted here and then REFUSED at the end
+# of `python_sent_types`, beside this constant rather than in the suite.
 FORWARDING_FILES = frozenset({
     'daedalus_cli/invoke.py',
     'daedalus_mcp/transport.py',
@@ -192,14 +201,33 @@ def _refuse(where, what) -> NoReturn:
     raise AssertionError(f'{where}: {what}')
 
 
-def _parameter_names(tree):
-    names = set()
+def _parameters_by_function(tree):
+    """Parameter names keyed by the id of the function declaring them.
+
+    Keyed per function rather than collected per file: a payload built in
+    one function may only forward through a parameter of THAT function, or
+    a sibling function's parameter name would forward a type no enclosing
+    scope ever bound.
+    """
+    by_function = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names = set()
             for group in (node.args.posonlyargs, node.args.args,
                           node.args.kwonlyargs):
                 names.update(argument.arg for argument in group)
-    return names
+            by_function[id(node)] = names
+    return by_function
+
+
+def _enclosing_parameters(node, parents, by_function):
+    """The parameters of the nearest function the node sits inside."""
+    current = parents.get(id(node))
+    while current is not None:
+        if id(current) in by_function:
+            return by_function[id(current)]
+        current = parents.get(id(current))
+    return frozenset()
 
 
 def python_sent_types(paths, watched, callee_is_attribute):
@@ -221,7 +249,7 @@ def python_sent_types(paths, watched, callee_is_attribute):
         text = path.read_text(encoding='utf-8')
         tree = ast.parse(text, filename=relative)
         parents = _parents(tree)
-        parameters = _parameter_names(tree)
+        parameters = _parameters_by_function(tree)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name == watched:
@@ -272,8 +300,10 @@ def python_sent_types(paths, watched, callee_is_attribute):
                     'here; this enumeration reads written arguments, not '
                     'the call they produce')
                 assert len(parent.args) >= 2, (
-                    f'{at}: {watched} passes no second positional argument, '
-                    'so the command type it sends is not enumerable here')
+                    f'{at}: {watched} is given no second positional argument. '
+                    'This reader reads positional arguments only, so a type '
+                    'passed as a keyword is not read here even when it is a '
+                    'plain literal')
                 value = parent.args[1]
                 assert isinstance(value, ast.Constant) and isinstance(
                     value.value, str), (
@@ -302,8 +332,10 @@ def python_sent_types(paths, watched, callee_is_attribute):
                         literals.add(value.value)
                         continue
                     at = f'{relative}:{value.lineno}'
+                    enclosing = _enclosing_parameters(
+                        node, parents, parameters)
                     assert isinstance(value, ast.Name) and (
-                        value.id in parameters), (
+                        value.id in enclosing), (
                         f'{at}: a command payload type is neither a plain '
                         'string literal nor a parameter of the function it '
                         'is built in, so the sent set cannot be enumerated '
@@ -319,6 +351,10 @@ def python_sent_types(paths, watched, callee_is_attribute):
         f'the {watched} surface references {watched} but holds no direct '
         f'call to it; a surface that sends nothing is a refusal, not an '
         'empty sent set')
+    stray = sorted(forwardings - FORWARDING_FILES)
+    assert not stray, (
+        'a client payload forwards its command type through a parameter '
+        f'outside the two helper definitions: {stray}')
     return literals, forwardings, call_sites
 
 
