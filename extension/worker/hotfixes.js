@@ -13,9 +13,7 @@ const HOTFIX_KEY = 'daedalus-hotfixes';
 // HOTFIX_QUOTA_BYTES bounds the record in BYTES, not in fixes. The record
 // shares Chrome's `local` area with the token, the seen-delivery ledger and
 // the page-facing GM storage, and a count cap does not bound that area: 160
-// fixes of 64 KiB is the repro. Chrome measures QUOTA_BYTES as the JSON
-// stringification of every value plus every key's length, so the record under
-// one key costs its JSON bytes plus the key's length.
+// fixes of 64 KiB is the repro.
 //
 //   Chrome area                 10,485,760
 //   GM_TOTAL_QUOTA_BYTES         5,242,880   (5 MiB, every origin summed)

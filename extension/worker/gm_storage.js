@@ -50,24 +50,19 @@ function gmNamespace(origin) {
   return GM_KEY_PREFIX + encodeURIComponent(origin) + ':';
 }
 
-// The one GM write queue. chrome.storage has no compare-and-swap, so the
-// caps' get → sum → set is a read-modify-write: concurrent setValue calls
-// would each read the store before any set committed and each pass. The cap
-// over the sum is over the WHOLE store, so the queue is one for every origin —
-// keyed by namespace, two different origins would each read the same pre-write
-// store and each pass the aggregate check. Runs go one at a time, each reading
-// the store only after the previous write's set callback has committed it, and
-// within that one serial section the origins take turns: a page's burst sets
-// the order of its OWN writes and nothing else. The run's every exit — each
-// storage callback and the synchronous issuance — reaches done exactly once,
-// including a throw, so a failure releases the queue and is reported to the
-// page instead of wedging it.
+// The one GM write queue. chrome.storage has no compare-and-swap, so every
+// run's get → sum → set is a read-modify-write, and the queue runs them one at
+// a time — each reading the store only after the previous write's set callback
+// has committed it. Within that one serial section the origins take turns: a
+// page's burst sets the order of its OWN writes and nothing else. The run's
+// every exit — each storage callback and the synchronous issuance — reaches
+// done exactly once, including a throw, so a failure releases the queue and is
+// reported to the page instead of wedging it.
 const _gmWriteQueue = { active: false, rotation: [], waiting: new Map() };
 
-// A run for `origin` has finished, so its turn is over: it moves to the back
-// of the rotation while it has writes waiting and leaves it when it has none,
-// so a page that goes quiet and comes back re-enters at the back rather than
-// resuming the place it held before.
+// A run for `origin` has finished, so its turn is over; a page that goes
+// quiet and comes back re-enters at the back rather than resuming the place
+// it held before.
 function _retire(origin, queue) {
   const at = queue.rotation.indexOf(origin);
   if (at === -1) return;
@@ -76,7 +71,7 @@ function _retire(origin, queue) {
   else queue.waiting.delete(origin);
 }
 
-// The front of the rotation is the origin whose turn has been longest over.
+// The origin whose turn has been longest over.
 function _nextQueued(queue) {
   if (!queue.rotation.length) return null;
   return queue.waiting.get(queue.rotation[0]).shift();
