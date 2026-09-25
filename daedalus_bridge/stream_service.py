@@ -277,16 +277,21 @@ def every_subscription_past(token, name):
     Plain lexicographic comparison orders these names because
     `notify_dashboard` publishes each event under the
     `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns, whose
-    milliseconds and counter are both allocated under `command_fs_lock`, so
-    byte order is publish order within and across milliseconds.
-    The counter field is twenty digits wide —
-    no 64-bit counter reaches 10**20 — so the padding holds across the
-    overflow a six-digit field inverted at, and the ordering is a stated
-    bound rather than a rate. That is the whole warrant for a name-ordered
-    cursor: a stem that is not ordered by publish order (a random suffix, or
-    a counter field that overflows) sorts arbitrarily, lands below a window's
-    cursor, and is dropped as already-consumed. The same-millisecond and
-    counter-boundary controls fail if this property stops holding. A
+    milliseconds and counter are both allocated under `command_fs_lock`. The
+    counter is monotonic, so within one millisecond — and across counter
+    increases — byte order is publish order regardless of the clock; the
+    twenty-digit field keeps the padding from overflowing the way a
+    six-digit field did. Across *different* milliseconds the millisecond
+    prefix decides, so the stem is publish-ordered only while the wall clock
+    does not step backwards between two publishes; a backwards step places a
+    later event's name below an earlier one's. That hole is pre-existing for
+    command ordering, and this cursor makes it a loss for a connected
+    dashboard window. That is the whole warrant for a name-ordered cursor: a
+    stem that is not ordered by publish order (a random suffix, an
+    overflowing counter field, or a backwards clock) sorts arbitrarily,
+    lands below a window's cursor, and is dropped as already-consumed. The
+    same-millisecond, counter-boundary and cursor-invariant controls fail if
+    this property stops holding. A
     subscription that has registered but not yet drained carries no cursor and
     blocks, the conservative join; the TTL sweep is the backstop for a
     connection that never drains at all.
