@@ -62,21 +62,3 @@ def captured_stdout():
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         yield buffer
-
-
-class DescendingUuid:
-    """A uuid4 whose hex strictly decreases, forcing a name inversion.
-
-    With a random-hex stem two events published in one millisecond order by
-    this value, so the second can sort below the first. The monotonic
-    naming never calls uuid at all, so the mock is inert there and the stems
-    come from the counter instead.
-    """
-
-    def __init__(self):
-        self.calls = 0
-
-    def uuid4(self):
-        self.calls += 1
-        hexid = 'ffffffff' if self.calls == 1 else '00000000'
-        return type('U', (), {'hex': hexid})()

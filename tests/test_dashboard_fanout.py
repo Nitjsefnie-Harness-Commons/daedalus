@@ -25,12 +25,22 @@ from _repo import ROOT  # noqa: E402
 # so the controls below are unchanged.
 from _fanout import (  # noqa: E402
     DASHBOARD,
-    DescendingUuid as _DescendingUuid,
     captured_stdout as _captured,
     dashboard_queue as _queue,
     service_pair as _service,
     write_event as _write_event,
 )
+
+
+def _order():
+    """The real daedalus_bridge.queue_order the loaded command_queue mints
+    with. It only enters sys.modules once a by-path command_queue has been
+    loaded (which imports it), so it is fetched lazily; the instance is the
+    shared, cached one."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from daedalus_bridge import queue_order
+    return queue_order
 
 
 def test_two_dashboard_subscriptions_both_receive_one_event(tmp):
@@ -459,14 +469,12 @@ def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
     cmd_dir = Path(tmp) / 'commands'
     qdir = _queue(service, tmp, token)
     _sub_id, killed = service.register(token, DASHBOARD)
-    saved_time = cq.time
-    had_uuid, saved_uuid = hasattr(cq, 'uuid'), getattr(cq, 'uuid', None)
-    # Both publishes in one millisecond, and a hex that descends, so the
-    # only discriminator between the two names is the one under test. The
-    # fixed naming never calls uuid, so this mock is inert there.
-    cq.time = type('T', (), {
-        'time': staticmethod(lambda: 1_700_000_000.123)})()
-    cq.uuid = _DescendingUuid()
+    # Both publishes in one millisecond, so the counter is the sole
+    # discriminator between the two names and is the one under test.
+    _qo = _order()
+    saved_time = _qo.time
+    setattr(_qo, 'time', type('T', (), {
+        'time': staticmethod(lambda: 1_700_000_000.123)})())
     frames = []
     try:
         cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
@@ -478,11 +486,7 @@ def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
         third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
                                       frame_writer=frames.append)
     finally:
-        cq.time = saved_time
-        if had_uuid:
-            cq.uuid = saved_uuid
-        else:
-            del cq.uuid
+        setattr(_qo, 'time', saved_time)
 
     assert first == 1, first
     assert second == 1, (
@@ -520,10 +524,11 @@ def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
     cmd_dir = Path(tmp) / 'commands'
     qdir = _queue(service, tmp, token)
     _sub_id, killed = service.register(token, DASHBOARD)
-    saved_time, saved_counter = cq.time, cq._seq_counter
-    cq.time = type('T', (), {
-        'time': staticmethod(lambda: 1_700_000_000.123)})()
-    cq._seq_counter = itertools.count(999999)  # the first overflow point
+    _qo = _order()
+    saved_time, saved_counter = _qo.time, _qo._seq_counter
+    setattr(_qo, 'time', type('T', (), {
+        'time': staticmethod(lambda: 1_700_000_000.123)})())
+    setattr(_qo, '_seq_counter', itertools.count(999999))  # overflow point
     frames = []
     try:
         cq.notify_dashboard(cmd_dir, token, {'type': 'first'})
@@ -535,7 +540,8 @@ def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
         third = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
                                       frame_writer=frames.append)
     finally:
-        cq.time, cq._seq_counter = saved_time, saved_counter
+        setattr(_qo, 'time', saved_time)
+        setattr(_qo, '_seq_counter', saved_counter)
 
     assert first == 1, first
     assert second == 1, (
