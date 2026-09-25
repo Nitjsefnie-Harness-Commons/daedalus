@@ -167,8 +167,6 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
         'a client payload forwards its command type through a parameter '
         f'outside the two helper definitions: '
         f'{sorted((cli[1] | mcp[1]) - FORWARDING_FILES)}')
-    assert cli[2] and mcp[2], (
-        f'no ext_cmd call site was read: cli={cli[2]}, mcp={mcp[2]}')
 
 
 def _eval_path_observation():
@@ -394,6 +392,101 @@ def test_a_dashboard_string_naming_the_send_helper_is_refused(tmp):
         'a dashboard string naming the send helper was accepted')
     assert 'section.js:3' in message, message
     assert 'string literal' in message, message
+
+
+def test_a_python_client_aliasing_the_import_is_refused(tmp):
+    """`from .invoke import ext_cmd as send` binds a second name.
+
+    A call through `send` is a `Name` the callee matcher never sees, so the
+    binding itself is the only place the second name can be refused.
+    """
+    written = _python_source(tmp, 'commands_import_alias.py', (
+        'from .invoke import ext_cmd as send\n'
+        '\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n'
+        '\n'
+        'def do_probe():\n'
+        "    return send('_probe', 'probe-import-alias')\n"))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'an aliased import of the send helper was accepted')
+    assert 'commands_import_alias.py:1' in message, message
+    assert 'import alias' in message, message
+
+
+def test_a_dashboard_aliasing_the_import_is_refused(tmp):
+    """`import { extCmd as send }` is the same fifth way, on the JS side."""
+    written = Path(tmp) / 'section.js'
+    written.write_text(
+        "import { extCmd as send } from '../api.js';\n"
+        'export async function extCmd(type) { return type; }\n'
+        "const answer = await send('probe-js-alias');\n",
+        encoding='utf-8')
+    message = _refusal_from(
+        lambda: dashboard_sent_types([written]),
+        'an aliased dashboard import was accepted')
+    assert 'section.js:1' in message, message
+    assert 'import alias' in message, message
+
+
+def test_a_python_surface_defining_the_helper_and_nothing_else_is_refused(
+        tmp):
+    """The reference census: a definition with no reference to it."""
+    written = _python_source(tmp, 'commands_unused.py', (
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n'))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a surface defining the helper with no reference to it passed')
+    assert 'holds no reference' in message, message
+
+
+def test_a_dashboard_defining_the_helper_and_nothing_else_is_refused(tmp):
+    """The dashboard reference census, driven the same way."""
+    written = Path(tmp) / 'section.js'
+    written.write_text(
+        'export async function extCmd(type) { return type; }\n',
+        encoding='utf-8')
+    message = _refusal_from(
+        lambda: dashboard_sent_types([written]),
+        'a dashboard defining the helper with no reference to it passed')
+    assert 'holds no reference' in message, message
+
+
+def test_a_surface_referencing_the_helper_but_never_calling_it_is_refused(tmp):
+    """The call-site census: an import and a definition, and no call."""
+    written = _python_source(tmp, 'commands_nocall.py', (
+        'from .invoke import ext_cmd\n'
+        '\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n'))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a surface with no direct call to the send helper passed')
+    assert 'no direct call' in message, message
+
+
+def test_a_python_call_unpacking_a_starred_argument_is_refused(tmp):
+    """`ext_cmd(*pair, 'cookies')` hides the value that lands second.
+
+    The second positional argument written here is not the second
+    positional argument the call passes, so reading it as the command type
+    is a guess, not a read.
+    """
+    written = _python_source(tmp, 'commands_starred.py', (
+        'from .invoke import ext_cmd\n'
+        '\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n'
+        '\n'
+        'def do_probe(pair):\n'
+        "    return ext_cmd(*pair, 'probe-starred')\n"))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a call unpacking a starred argument was accepted')
+    assert 'commands_starred.py:7' in message, message
+    assert 'starred' in message, message
 
 
 def main():
