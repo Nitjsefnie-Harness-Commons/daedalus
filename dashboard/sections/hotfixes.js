@@ -19,6 +19,13 @@ export function mount(container) {
       h('div', {}, field('fix id', h('input', { type: 'text', data: { role: 'id' }, placeholder: 'my-fix' }))),
       h('div', { class: 'grow' }, field('code', h('textarea', { data: { role: 'code' }, placeholder: 'console.log("hotfix ran")', spellcheck: false }))),
     ),
+    h('div', { class: 'row' },
+      h('div', {}, field('scope (optional)', h('input', {
+        type: 'text', data: { role: 'match' }, spellcheck: false,
+        placeholder: '*://*.example.com/*',
+        title: 'A Chrome match pattern. The fix runs only on the pages whose URL it matches; left empty, it runs wherever it is asked for.',
+      }))),
+    ),
     h('div', { class: 'toolbar', style: { marginTop: '8px' } },
       h('button', { class: 'primary', data: { role: 'store' } }, 'STORE'),
       h('label', { style: { marginLeft: '8px' } },
@@ -47,6 +54,7 @@ export function mount(container) {
         h('thead', {}, h('tr', {},
           h('th', { style: { width: '60px' } }, ''),
           h('th', { style: { width: '180px' } }, 'id'),
+          h('th', { style: { width: '200px' } }, 'scope'),
           h('th', {}, 'code preview'),
           h('th', { style: { width: '150px' } }, 'stored'),
           h('th', { style: { width: '220px', textAlign: 'right' } }, ''),
@@ -59,6 +67,10 @@ export function mount(container) {
                 : h('span', { class: 'dim small' }, '—'),
             ),
             h('td', { class: 'mono amber' }, hf.id),
+            // A fix stored without a scope runs wherever it is asked for,
+            // so the cell says so rather than leaving an empty column that
+            // reads as a scope naming nothing.
+            h('td', { class: 'mono-sm scope' }, hf.match || '—'),
             h('td', {},
               h('details', { class: 'collapse' },
                 h('summary', {}, h('span', { class: 'mono-sm' }, truncate(hf.code.replace(/\s+/g, ' '), 80))),
@@ -78,6 +90,7 @@ export function mount(container) {
                 class: 'ghost sm', onclick: () => {
                   root.querySelector('[data-role=id]').value = hf.id;
                   root.querySelector('[data-role=code]').value = hf.code;
+                  root.querySelector('[data-role=match]').value = hf.match || '';
                   root.querySelector('[data-role=permanent]').checked = !!hf.permanent;
                   toast('loaded into form', 'info');
                 },
@@ -112,9 +125,15 @@ export function mount(container) {
   root.querySelector('[data-role=store]').addEventListener('click', async () => {
     const id = (root.querySelector('[data-role=id]').value || '').trim();
     const code = (root.querySelector('[data-role=code]').value || '').trim();
+    const match = (root.querySelector('[data-role=match]').value || '').trim();
     const permanent = !!root.querySelector('[data-role=permanent]').checked;
     if (!id || !code) { toast('id + code required', 'warn'); return; }
-    try { await extCmd('store-hotfix', { fixId: id, code, permanent }); toast('stored ' + id + (permanent ? ' [perm]' : ''), 'ok'); load(); }
+    // An empty scope is left unsaid rather than sent as one: the extension
+    // refuses a pattern it cannot parse, and reads an absent field as "keep
+    // the scope this fix already has".
+    const fields = { fixId: id, code, permanent };
+    if (match) fields.match = match;
+    try { await extCmd('store-hotfix', fields); toast('stored ' + id + (permanent ? ' [perm]' : ''), 'ok'); load(); }
     catch (e) { toast(errMsg(e), 'err'); }
   });
 

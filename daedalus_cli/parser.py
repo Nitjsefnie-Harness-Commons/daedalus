@@ -284,6 +284,9 @@ def build_parser():
     s.add_argument('--permanent', action='store_true',
                    help='Mark fix as permanent '
                         '(survives extension version bumps)')
+    s.add_argument('--match', metavar='PATTERN',
+                   help='Scope the fix to the documents whose URL this '
+                        'Chrome match pattern matches (default: every site)')
 
     # clear-hotfix (extension)
     s = sub.add_parser('clear-hotfix', help='Remove a specific hotfix')

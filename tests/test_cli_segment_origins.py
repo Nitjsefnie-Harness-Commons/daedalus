@@ -12,56 +12,18 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_dispatch  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli import commands_content  # noqa: E402
-from daedalus_cli.cli import DISPATCH  # noqa: E402
 from daedalus_cli.parser import build_parser  # noqa: E402
+
+run_cli = _cli_dispatch.run_cli
 
 ALLOWED = 'https://allowed.example.com'
 OTHER = 'https://other.example.com'
 NON_CANONICAL = 'https://allowed.example.com/some/path'
-
-
-class RecordingExtCmd:
-    """Records each ext_cmd call and replays canned answers in order."""
-
-    def __init__(self, answers):
-        self.answers = list(answers)
-        self.calls = []
-
-    def __call__(self, cmd_id, cmd_type, timeout=10, **fields):
-        self.calls.append((cmd_id, cmd_type, fields))
-        return self.answers.pop(0)
-
-
-def parse(argv):
-    """The parsed namespace, or an assertion naming argparse's refusal."""
-    err = io.StringIO()
-    try:
-        with contextlib.redirect_stderr(err):
-            return build_parser().parse_args(argv)
-    except SystemExit as exit_request:
-        raise AssertionError(
-            f'{argv} was refused (exit {exit_request.code}): '
-            f'{err.getvalue()}') from None
-
-
-def run_cli(argv, answers):
-    """Parse argv with the real parser, dispatch, return (calls, stdout)."""
-    recorded = RecordingExtCmd(answers)
-    args = parse(argv)
-    out = io.StringIO()
-    original = commands_content.ext_cmd
-    commands_content.ext_cmd = recorded
-    try:
-        with contextlib.redirect_stdout(out):
-            DISPATCH[args.cmd](args)
-    finally:
-        commands_content.ext_cmd = original
-    return recorded, out.getvalue()
 
 
 def test_allow_segment_origin_sends_the_extension_command(tmp):
