@@ -266,6 +266,9 @@ TOOL_COMMANDS = {
         ({'permanent': False},
          [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
                permanent=False)]),
+        ({'match': '*://*.example.com/*'},
+         [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
+               match='*://*.example.com/*')]),
     ],
     'clear_hotfix': [({}, [_ext('_clear_hf', 'clear-hotfix', fixId='fix')])],
     'clear_hotfixes': [

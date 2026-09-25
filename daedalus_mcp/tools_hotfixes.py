@@ -4,17 +4,23 @@
 def register(mcp, bridge):
     @mcp.tool()
     async def store_hotfix(fix_id: str, code: str,
-                           permanent: bool | None = None) -> dict:
+                           permanent: bool | None = None,
+                           match: str | None = None) -> dict:
         """Store inline JS as a persistent hotfix. `permanent=True` marks the
     fix as surviving extension version bumps, `False` clears that mark, and
-    None (the default) keeps the flag a fix of this id already has stored."""
+    None (the default) keeps the flag a fix of this id already has stored.
+    `match` is a Chrome match pattern; None (the default) keeps the scope the
+    fix already has, and a fix stored without one runs wherever it is asked
+    for."""
         if not code:
             raise ValueError('code required')
         fields: dict = {'fixId': fix_id, 'code': code}
-        # The extension keeps a re-stored fix's flag only when the field is
-        # absent, so an unstated choice must not travel as False.
+        # The extension keeps a re-stored fix's flag and its scope only when
+        # the field is absent, so an unstated choice must not travel as one.
         if permanent is not None:
             fields['permanent'] = permanent
+        if match is not None:
+            fields['match'] = match
         return await bridge.ext_cmd('_store_hf', 'store-hotfix', **fields)
 
     @mcp.tool()
@@ -34,7 +40,8 @@ def register(mcp, bridge):
     @mcp.tool()
     async def list_hotfixes() -> dict:
         """List stored hotfixes. Returns
-        {version, fixes:[{id,ts,code},...]}."""
+        {version, fixes:[{id,ts,code,permanent,match},...]} — `match` is the
+        fix's site scope, and a fix stored without one has no `match`."""
         return await bridge.ext_cmd('_list_hf', 'list-hotfixes')
 
     @mcp.tool()

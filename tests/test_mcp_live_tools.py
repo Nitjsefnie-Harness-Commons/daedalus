@@ -81,9 +81,11 @@ LIVE_ROWS = {
     'list_block_rules': _row('list-block-rules', {},
                              lambda mod: mod.list_block_rules),
     'store_hotfix': _row('store-hotfix',
-                         {'fixId': 'fix1', 'code': 'console.log(1)'},
+                         {'fixId': 'fix1', 'code': 'console.log(1)',
+                          'match': '*://*.example.com/*'},
                          lambda mod: lambda: mod.store_hotfix(
-                             'fix1', 'console.log(1)')),
+                             'fix1', 'console.log(1)',
+                             match='*://*.example.com/*')),
     'clear_hotfix': _row('clear-hotfix', {'fixId': 'fix1'},
                          lambda mod: lambda: mod.clear_hotfix('fix1')),
     'clear_hotfixes': _row('clear-all-hotfixes', {},

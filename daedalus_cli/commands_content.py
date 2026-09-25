@@ -195,6 +195,9 @@ def do_store_hotfix(args):
     # was updated without restating --permanent.
     if args.permanent:
         fields['permanent'] = True
+    # A scope is carried the same way; an empty one would be refused there.
+    if args.match:
+        fields['match'] = args.match
     result = ext_cmd('_store_hf', 'store-hotfix', **fields)
     perm = ' [PERM]' if result.get('permanent') else ''
     print(f'Stored hotfix "{result.get("stored", "?")}"{perm} '
@@ -234,7 +237,10 @@ def do_list_hotfixes(args):
                            time.localtime(hf.get('ts', 0) / 1000))
         code_preview = hf['code'][:80].replace('\n', '\\n')
         marker = '[PERM]' if hf.get('permanent') else '      '
-        print(f'  {marker} {hf["id"]}  {ts}  {code_preview}')
+        # A fix stored without a scope runs wherever it was asked for, so
+        # the column says so rather than leaving a cell that reads as one.
+        scope = hf.get('match') or '(none)'
+        print(f'  {marker} {hf["id"]}  {scope}  {ts}  {code_preview}')
     print(f'{len(fixes)} hotfix(es)')
 
 
