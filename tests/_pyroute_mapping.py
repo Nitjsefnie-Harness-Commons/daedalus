@@ -5,7 +5,7 @@ import ast
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
-from _pyroute_invalidation import invalidate_unmodelled
+from _pyroute_invalidation import CONTAINER_MUTATORS, invalidate_unmodelled
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
                            _literal_value, _unhashable_key_sender)
 from _pyroute_pop import _unknown_lookup_default
@@ -16,9 +16,9 @@ from _pyroute_setops import fold_set_operation, set_operands
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
-                             DeferredInstance, _known_value, is_deferred_value,
-                             mapping_lookup_owner, merge_yielded,
-                             sender_value, sync_cells)
+                             DeferredInstance, DeferredMethod, _known_value,
+                             is_deferred_value, mapping_lookup_owner,
+                             merge_yielded, sender_value, sync_cells)
 
 
 def _selected_values(value, key, attribute=False):
@@ -304,6 +304,11 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             _selected_values(owner, node.attr, attribute=True))
         if value is not None:
             return value
+        if isinstance(owner, DeferredContainer) \
+                and node.attr in CONTAINER_MUTATORS:
+            # A method taken off a tracked container names the container, so a
+            # binding of it (`f = x.pop`) still says what `f(0)` mutates.
+            return DeferredMethod(owner, node.attr)
     if isinstance(node, ast.Call):
         owner = _known_value(node.func, state)
         if isinstance(owner, DeferredClass):
@@ -608,19 +613,26 @@ def _apply_modelled_store(statement, state, claimed):
             return
         owner_name = call.func.value.id
         owner = state.callables.get(owner_name)
+        # `update` and `setdefault` are followed for a mapping and only for a
+        # mapping: a set's shares the names but not the effect, and claiming
+        # a name alone would drop a mutation the model never applied. `clear`
+        # empties whatever it is called on, so the model follows it for every
+        # kind.
+        mapping = owner is None or (isinstance(owner, DeferredContainer)
+                                    and owner.kind == 'dict')
         if call.func.attr == 'clear' and isinstance(owner, DeferredContainer):
             replacement = DeferredContainer(
                 {}, 0, owner.kind, owner.identity)
             replace_deferred_storage(state, owner, replacement)
             sync_cells(state, {owner_name})
             claimed.add(id(call))
-        elif call.func.attr == 'update':
+        elif call.func.attr == 'update' and mapping:
             _apply_mapping_store(
                 state, owner_name, call.args, {
                     keyword.arg: keyword.value for keyword in call.keywords
                     if keyword.arg is not None}, call)
             claimed.add(id(call))
-        elif call.func.attr == 'setdefault':
+        elif call.func.attr == 'setdefault' and mapping:
             _apply_setdefault(state, call, owner_name)
             claimed.add(id(call))
         return
@@ -629,17 +641,21 @@ def _apply_modelled_store(statement, state, claimed):
             operands = set_operands(statement.op, statement.target,
                                     statement.value, state)
             if operands is not None:
+                # The fold is this store path's own answer, so the claim keeps
+                # the general invalidation from joining a set it just folded.
                 _apply_set_store(state, statement.target.id, statement.op,
                                  operands, statement)
-                return
-        if isinstance(statement.op, ast.BitOr) \
-                and isinstance(statement.target, ast.Name):
-            # The rebinding already dropped the name; merge into its dict.
-            held = _known_value(statement.target, state)
-            if isinstance(held, DeferredContainer) and held.kind == 'dict':
-                state.callables[statement.target.id] = held
-                sync_cells(state, {statement.target.id})
                 claimed.add(id(statement))
+                return
+        held = _known_value(statement.target, state)
+        if isinstance(statement.op, ast.BitOr) \
+                and isinstance(statement.target, ast.Name) \
+                and isinstance(held, DeferredContainer) \
+                and held.kind == 'dict':
+            # The rebinding already dropped the name; merge into its dict.
+            state.callables[statement.target.id] = held
+            sync_cells(state, {statement.target.id})
+            claimed.add(id(statement))
             _apply_mapping_store(
                 state, statement.target.id, [statement.value], {},
                 statement)

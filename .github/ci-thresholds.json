@@ -11,7 +11,6 @@
     }
   },
   "module_size_baseline": {
-    "tests/_pyroute.py": 723,
     "tests/test_bridge_results.py": 981,
     "tests/test_cli.py": 1218,
     "tests/test_mcp_server.py": 1575,
@@ -44,7 +43,6 @@
     "tests/_jsroute_source.py": 3,
     "tests/_mcp_guard_floor.py": 3,
     "tests/_pyroute.py": 1,
-    "tests/_pyroute_mapping.py": 1,
     "tests/_pyroute_values.py": 3,
     "tests/_realbrowser_pages.py": 1,
     "tests/_token_policy.py": 1,
