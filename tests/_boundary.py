@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import (  # noqa: E402
     ENVIRONMENT, RESULT, SCENARIO_PLANS, run_node_program)
+from _noderun import ChildDeadlineExceeded  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _boundary_scenarios import SCENARIOS  # noqa: E402
 from _hotfix_quota_scenario import HOTFIX_SCENARIOS  # noqa: E402
@@ -75,17 +76,26 @@ def run_extension_hotfix_quota(plan):
     declared['planned'] = (list(declared['planned'])
                            + [RESULT] * len(plan['steps']))
     program = HARNESS + '\nplan = ' + json.dumps(declared) + ';\n'
-    result = run_node_program(
-        node, program,
-        [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
-        cwd=ROOT, payload=json.dumps(plan))
+    try:
+        result = run_node_program(
+            node, program,
+            [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
+            cwd=ROOT, payload=json.dumps(plan))
+    except ChildDeadlineExceeded as failure:
+        # The two ways a worker stops answering are different failures and
+        # are reported differently. A promise that never resolves drains
+        # node's event loop, so the child EXITS with an empty stdout and the
+        # assertion below names it. A worker in a loop that never returns
+        # never exits, and this is the branch that names it: the launcher's
+        # detector killed the child, the cleanup reaped it, and the evidence
+        # is the worker's own output plus what the cleanup did. Without this
+        # the suite ceiling would end the run instead — and it SIGTERMs the
+        # suite, leaving the child alive and reparented, naming no test.
+        raise AssertionError(
+            'the hotfix-quota scenario never finished: the worker stopped '
+            'answering a command it had been given') from failure
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
-    # A worker that stops answering settles as an empty stdout — a promise
-    # that never resolves drains node's loop and the child exits — so this is
-    # the assertion that names it. A worker wedged in a loop that never
-    # returns does not reach it, and ends as a hung job under the suite's
-    # ceiling instead.
     assert result.stdout.strip(), (
         'the hotfix-quota scenario produced no answer: the worker stopped '
         f'answering (rc={result.returncode}, '

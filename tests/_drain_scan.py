@@ -495,7 +495,7 @@ _SITES = (
      '        process.kill()\n'
      '        process.wait()'
      ),
-    ('tests/_speedharness.py',
+    ('tests/_processtree.py',
      '    try:\n'
      '        process.kill()\n'
      '    except ProcessLookupError:\n'
@@ -505,7 +505,7 @@ _SITES = (
      '    else:\n'
      "        cleanup += '; fallback process kill requested'\n"
      '    try:\n'
-     '        process.wait(timeout=_CLEANUP_TIMEOUT)',
+     '        process.wait(timeout=cleanup_timeout)',
      '    try:\n'
      '        process.kill()\n'
      '    except ProcessLookupError:\n'

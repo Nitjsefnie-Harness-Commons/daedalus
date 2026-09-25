@@ -534,15 +534,26 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
     counts = (1, 4, 7, 10)
     measurements = {'HARNESS': {}, 'OBSERVER': {}}
     active = {'label': None, 'count': None}
-    real_run = _noderun.subprocess.run
+    real_popen = _noderun.subprocess.Popen
 
-    def measured_run(argv, **kwargs):
-        del kwargs
+    class MeasuredChild:
+        """A child that answers without running: it writes the one answer
+        the gate reads and reports success, so the measurement is of the
+        command line the launcher built rather than of a real node run."""
+
+        pid = 0
+
+        def wait(self, timeout=None):
+            del timeout
+            return 0
+
+    def measured_popen(argv, **kwargs):
         measurements[active['label']][active['count']] = len(
             subprocess.list2cmdline(argv))
-        return subprocess.CompletedProcess(argv, 0, '{}', '')
+        kwargs['stdout'].write(b'{}')  # the launch opens it binary
+        return MeasuredChild()
 
-    _noderun.subprocess.run = measured_run
+    _noderun.subprocess.Popen = measured_popen
     try:
         for count in counts:
             routes = [
@@ -570,7 +581,7 @@ def test_worker_harness_command_line_is_module_count_independent(tmp):
             _worker_runtime.observe_worker_runtime(
                 details, background_path=Path(tmp) / 'background.js')
     finally:
-        _noderun.subprocess.run = real_run
+        _noderun.subprocess.Popen = real_popen
 
     assert all(len(set(values.values())) == 1
                for values in measurements.values()), measurements

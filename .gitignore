@@ -29,6 +29,8 @@
 
 # ─── root ───
 !/.gitignore
+!/.gitignore
+!/.gitignore
 !/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
@@ -334,6 +336,7 @@
 !/tests/_jsroute_target.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
+!/tests/_launch_census.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
 !/tests/_mcp_code_eval.py
@@ -351,6 +354,7 @@
 !/tests/_overlap_clients.py
 !/tests/_owned_writes.py
 !/tests/_pip_cache.py
+!/tests/_processtree.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
 !/tests/_pyroute_indexing.py
@@ -384,6 +388,8 @@
 !/tests/_seg_lock_seam.py
 !/tests/_segments.py
 !/tests/_service_loader.py
+!/tests/_speedharness.py
+!/tests/_speedharness.py
 !/tests/_speedharness.py
 !/tests/_step_ceiling.py
 !/tests/_stream_fake.py
@@ -541,6 +547,7 @@
 !/tests/test_gm_segment_job.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_harness_launch_bounds.py
 !/tests/test_helper_reimplementation.py
 !/tests/test_helper_reimplementation_js.py
 !/tests/test_helper_shadow_boundaries.py
