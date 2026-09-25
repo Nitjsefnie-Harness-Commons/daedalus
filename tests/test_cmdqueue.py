@@ -26,6 +26,7 @@ from _cmdqueue_faults import (  # noqa: E402
     _virtual_cmdqueue_clock,
 )
 import _overlap  # noqa: E402
+import _overlap_clients  # noqa: E402
 import test_cli  # noqa: E402
 import test_mcp_server  # noqa: E402
 
@@ -369,16 +370,16 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
 
 def test_the_overlap_command_wait_times_out_with_a_diagnostic(tmp):
     queue, _queued = _queued_file(tmp)
-    original = _overlap._CLIENT_COMMAND_WAIT_S
-    _overlap._CLIENT_COMMAND_WAIT_S = 0.1
+    original = _overlap_clients._CLIENT_COMMAND_WAIT_S
+    _overlap_clients._CLIENT_COMMAND_WAIT_S = 0.1
     try:
         message = None
         try:
-            _overlap._wait_for_client_commands(queue, 2)
+            _overlap_clients._wait_for_client_commands(queue, 2)
         except AssertionError as failure:
             message = str(failure)
     finally:
-        _overlap._CLIENT_COMMAND_WAIT_S = original
+        _overlap_clients._CLIENT_COMMAND_WAIT_S = original
     assert message == 'timed out waiting for both same-id client commands', \
         message
 
@@ -394,7 +395,7 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
     for refused_file in (first, second):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
-            commands = _overlap._wait_for_client_commands(queue, 2)
+            commands = _overlap_clients._wait_for_client_commands(queue, 2)
         # Same bound as the multi-command control above.
         assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
@@ -506,7 +507,7 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
     _cmdqueue.wait_for_commands = wait_then_arm
     try:
         try:
-            _overlap.run_same_id_client_overlap(
+            _overlap_clients.run_same_id_client_overlap(
                 tmp, ['owner-a', 'owner-b'], client_argv, {}, token,
                 'unused-background')
         except AssertionError as failure:

@@ -26,9 +26,9 @@ import _drain  # noqa: E402
 import _util  # noqa: E402
 from _clientstate import assert_clients_exited, client_states  # noqa: E402
 
-# `_overlap` imports this module at its end to re-export these helpers, so
-# importing it here at the top would be a cycle. It is imported inside the
-# two functions that call back into the harness driver instead.
+# `_overlap_clients` drives the harness in `_overlap`, so importing that
+# module at the top would be a cycle (`pylint` reads R0401 as fatal, and CI
+# treats it so). It is imported inside the one function that calls back.
 
 # Publication and healthy exits may move together: expiry on a killed client's
 # pipes means a broken drain, not a busy runner; the parameter only forces it.

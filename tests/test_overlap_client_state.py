@@ -14,7 +14,7 @@ from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _overlap  # noqa: E402
+import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -39,7 +39,8 @@ def test_client_states_hands_grace_none_to_the_client_unbounded(tmp):
     """
     del tmp
     client = _RecordsDrainTimeout()
-    state = _overlap.client_states({'owner-a': client}, grace=None)['owner-a']
+    state = _overlap_clients.client_states(
+        {'owner-a': client}, grace=None)['owner-a']
     assert client.timeouts == [None], client.timeouts
     assert state == {
         'stillRunning': False, 'returncode': 0,
@@ -85,7 +86,7 @@ def test_client_states_records_the_output_a_timed_out_drain_held(tmp):
     `drainTimedOut` rather than replace it with nothing.
     """
     del tmp
-    state = _overlap.client_states(
+    state = _overlap_clients.client_states(
         {'held-owner': _DrainExpiresCarryingOutput()}, grace=0.1,
         killed_pipe_release=0.1)['held-owner']
     assert state == {
@@ -110,7 +111,7 @@ def test_a_still_running_client_is_diagnosed_before_a_silent_one(tmp):
     }
     message = None
     try:
-        _overlap.assert_clients_exited(states, [{'owner': 'owner-a'}])
+        _overlap_clients.assert_clients_exited(states, [{'owner': 'owner-a'}])
     except AssertionError as failure:
         message = str(failure)
     else:
@@ -130,7 +131,7 @@ def test_a_nonzero_client_with_timeout_output_is_named_as_a_failure(tmp):
     }
     message = None
     try:
-        _overlap.assert_clients_exited(states, [{'owner': 'owner-a'}])
+        _overlap_clients.assert_clients_exited(states, [{'owner': 'owner-a'}])
     except AssertionError as failure:
         message = str(failure)
     else:
@@ -169,7 +170,8 @@ def test_a_consumed_delivery_does_not_break_the_listing(tmp):
         return original(candidate, *args, **kwargs)
 
     with mock.patch.object(Path, 'read_text', vanishes_before_read):
-        report = _overlap._client_failure_diagnostics(['log line'], tmp)
+        report = _overlap_clients._client_failure_diagnostics(
+            ['log line'], tmp)
     assert 'delivery state' in report, report
     assert ('tok_extension/1700000000000_000001.json: deliveryId '
             '1700000000000_1') in report, report
@@ -197,11 +199,13 @@ def _overlap_client_failure_message(tmp, states=None):
         del kwargs
         return {owner: dict(expected[owner]) for owner in processes}
 
-    with mock.patch.object(_overlap, 'client_states', failing_states):
+    with mock.patch.object(
+            _overlap_clients, 'client_states', failing_states):
         try:
-            _overlap.run_same_id_client_overlap(
+            _overlap_clients.run_same_id_client_overlap(
                 tmp, ['owner-a', 'owner-b'],
-                _overlap.cookie_client_argv, _overlap.client_env(),
+                _overlap_clients.cookie_client_argv,
+                _overlap_clients.client_env(),
                 'overlap-client-token',
                 _util.ROOT / 'extension' / 'background.js',
                 stop_clients_after_enqueue=True)
@@ -223,7 +227,7 @@ def test_the_diagnosis_keeps_the_announcement_a_noisy_log_would_bury(tmp):
     announcement = '[Daedalus] Listening on 127.0.0.1:41234 - base=/tmp/x\n'
     noise = [f'ConnectionResetError: [WinError 10054] {n}\n'
              for n in range(80)]
-    message = _overlap._client_failure_diagnostics(
+    message = _overlap_clients._client_failure_diagnostics(
         [announcement] + noise, tmp)
     assert '[Daedalus] Listening on 127.0.0.1:41234' in message, message
     assert noise[-1].strip() in message, message
