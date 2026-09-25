@@ -6,24 +6,18 @@ so a `case` added to `dispatchCommand` that no client sends -- and no route
 table row names -- passed every suite. The switch is read lexically, the
 clients' call sites are read from the AST, and the two are compared in both
 directions. Nothing is derived the same way twice, so neither read can vouch
-for the other: the switch read is a depth-aware walk, the client read is an
-AST walk, and a runtime dispatch pins the one served type no client names as
-a literal.
+for the other, and a runtime dispatch pins the one served type no client
+names as a literal.
 
-Every reader refuses rather than skips. A `case` label or a client's type
-argument that is not a plain string literal fails the suite with its shape
-and its file:line named, so "no match found" is never read as "nothing to
-check". Each reader carries a completeness marker computed by a different
-mechanism from the extraction it counts: a raw token count against the
-comment-and-string blanked one, plus a depth-aware walk, for the switch; a
-raw substring count against a parsed call count for the dashboard.
+Every reader refuses rather than skips, and each keys on the IDENTITY of the
+thing it enumerates rather than on a call's spelling: a `case` label, a
+client's type argument, or any reference to a client's send helper. A shape
+a reader cannot enumerate fails with its file, line and shape named, so "no
+match found" is never read as "nothing to check".
 
-A marker nothing observes is a comment. The switch's arm marker is policed
-by a synthetic source that hides a case in a comment
-(`test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree`). The
-dashboard's marker has no such source and is only checked for agreement on
-the shipped tree, where the two counts cannot disagree; closing that is left
-to a later wave rather than claimed here.
+A marker nothing observes is a comment, so every marker here has a synthetic
+source that manufactures the input it exists to catch, or a census that
+refuses a surface where it cannot fire.
 """
 import ast
 import re
@@ -45,8 +39,7 @@ _DISPATCH = 'dispatchCommand'
 _STRING_LITERAL = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"")
 _CODE_COMMAND = {'id': 'code-path-control', 'code': 'return 1'}
 # The two helper definitions whose second parameter every proved-literal
-# call site fills. A payload type that forwards through any other parameter,
-# or a module constant, is refused rather than counted as a sent type.
+# call site fills. Any other indirection is refused, not counted.
 _FORWARDING_FILES = frozenset({
     'daedalus_cli/invoke.py',
     'daedalus_mcp/transport.py',
@@ -106,17 +99,10 @@ def _switch_body(source, mask, path):
 def served_types(source=None, path=None):
     """The case labels `dispatchCommand` dispatches on, in source order.
 
-    Two markers, both live and both observed. The arm count is taken on the
-    raw switch body and again on the comment-and-string blanked one; a case
-    the masker hid makes the two disagree, so a regex that stopped matching
-    cannot read as an empty switch. The labels themselves come from a
-    depth-aware walk, so a `case` buried in a nested switch is refused by
-    name instead of being counted and dropped.
-
-    The shipped switch body hides no case, so the first marker is policed by
-    a synthetic source in
-    `test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree` rather
-    than by anything in the tree.
+    The arm count is taken raw and again blanked, so a case the masker hid
+    is a disagreement rather than an absent case; the labels come from a
+    depth-aware walk, so a nested `case` is refused by name. The shipped
+    body hides no case, so the first marker needs a synthetic source.
     """
     if source is None:
         read = ROOT / 'extension' / 'background.js'
@@ -160,6 +146,26 @@ def _callee_name(node):
     return None
 
 
+def _parents(tree):
+    return {id(child): parent for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)}
+
+
+def _reference_shape(node, parents):
+    """The named shape a non-call reference to the helper has."""
+    parent = parents.get(id(node))
+    if parent is None:
+        return 'module scope'
+    if isinstance(parent, ast.Call):
+        return 'callee' if parent.func is node else 'call argument'
+    return type(parent).__name__.lower()
+
+
+def _refuse(where, what):
+    """Terminal refusal naming where and what. Never a skip."""
+    raise AssertionError(f'{where}: {what}')
+
+
 def _parameter_names(tree):
     names = set()
     for node in ast.walk(tree):
@@ -171,41 +177,71 @@ def _parameter_names(tree):
 
 
 def python_sent_types(paths, watched, callee_is_attribute):
-    """The command types `watched` transmits, from its call sites.
+    """The command types `watched` transmits, from every reference to it.
 
-    A call whose type argument is not a plain string literal is refused by
-    name: the clients send exactly one spelling of each type, and an
-    indirect one would drop that type from the sent set silently.
+    A direct call carrying a plain string literal in the type position is
+    the only readable shape; every other reference is a refusal naming its
+    file, line and shape, so binding the helper and calling the binding
+    cannot drop a type out of the sent set. The two censuses -- exactly one
+    definition, at least one reference -- keep a rename that leaves this
+    reader matching nothing from reading as an empty sent set.
     """
     literals = set()
     forwardings = set()
     call_sites = 0
+    definitions = []
+    references = 0
     for path in sorted(paths):
         relative = _relative(path)
-        tree = ast.parse(path.read_text(encoding='utf-8'), filename=relative)
+        text = path.read_text(encoding='utf-8')
+        tree = ast.parse(text, filename=relative)
+        parents = _parents(tree)
         parameters = _parameter_names(tree)
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and _callee_name(node.func) == watched):
-                call_sites += 1
-                at = f'{relative}:{node.lineno}'
-                shape = (isinstance(node.func, ast.Attribute)
-                         if callee_is_attribute
-                         else isinstance(node.func, ast.Name))
-                assert shape, (
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == watched:
+                    definitions.append(f'{relative}:{node.lineno}')
+                continue
+            if isinstance(node, ast.alias):
+                if node.asname == watched:
+                    _refuse(
+                        f'{relative}:{node.lineno}',
+                        f'{node.name} binds another object to the name '
+                        f'{watched}; the import must name {watched} itself')
+                elif node.name == watched:
+                    references += 1
+                continue
+            if (isinstance(node, (ast.Name, ast.Attribute))
+                    and _callee_name(node) == watched):
+                parent = parents.get(id(node))
+                if (parent is None or not isinstance(parent, ast.Call)
+                        or parent.func is not node):
+                    _refuse(
+                        f'{relative}:{node.lineno}',
+                        f'{watched} is referenced here outside a direct '
+                        f'call: shape {_reference_shape(node, parents)!r}. A '
+                        'client that binds the helper and calls the binding '
+                        'sends a command type this enumeration cannot read')
+                references += 1
+                at = f'{relative}:{parent.lineno}'
+                form = (isinstance(node, ast.Attribute)
+                        if callee_is_attribute else isinstance(node, ast.Name))
+                assert form, (
                     f'{at}: {watched} is called in a shape this enumeration '
                     'does not read; every call must name the command type as '
                     'its second positional argument')
-                assert len(node.args) >= 2, (
+                assert len(parent.args) >= 2, (
                     f'{at}: {watched} passes no second positional argument, '
                     'so the command type it sends is not enumerable here')
-                value = node.args[1]
+                value = parent.args[1]
                 assert isinstance(value, ast.Constant) and isinstance(
                     value.value, str), (
                     f'{at}: the command type passed to {watched} is not a '
                     'plain string literal, so the sent set cannot be '
                     f'enumerated from it: {ast.dump(value)}')
                 literals.add(value.value)
+                call_sites += 1
+                continue
             if isinstance(node, ast.Dict):
                 for key, value in zip(node.keys, node.values):
                     if not (isinstance(key, ast.Constant)
@@ -223,33 +259,83 @@ def python_sent_types(paths, watched, callee_is_attribute):
                         'is built in, so the sent set cannot be enumerated '
                         f'from it: {watched} payload {value!r}')
                     forwardings.add(relative)
+    assert len(definitions) == 1, (
+        f'the {watched} surface must define {watched} exactly once; found '
+        f'{sorted(definitions)}')
+    assert references, (
+        f'the {watched} surface holds no reference to {watched} at all; a '
+        'renamed helper is a refusal, not an empty sent set')
     return literals, forwardings, call_sites
 
 
-def dashboard_sent_types():
+def _enclosing_open_brace(mask, offset):
+    """The `{` opening the block the token at `offset` sits in, or -1."""
+    depth = 0
+    for position in range(offset - 1, -1, -1):
+        char = mask[position]
+        if char in ')]}':
+            depth += 1
+        elif char in '([{':
+            if depth:
+                depth -= 1
+            elif char == '{':
+                return position
+            else:
+                return -1
+    return -1
+
+
+def _is_import_binding(mask, offset):
+    """Whether the occurrence sits in an `import { ... }` clause."""
+    brace = _enclosing_open_brace(mask, offset)
+    if brace < 0:
+        return False
+    position = brace - 1
+    while position >= 0 and mask[position].isspace():
+        position -= 1
+    return re.search(r'\bimport$', mask[:position + 1]) is not None
+
+
+def dashboard_sent_types(paths=None):
     """The command types the dashboard's `extCmd` transmits.
 
-    The completeness marker is a raw `extCmd(` substring count over the
-    comment-blanked sources against the number of sites this reader parsed,
-    so a spelling the reader's own regex does not match -- a comment between
-    the name and the paren, say -- is a mismatch rather than an absence.
+    Scans the blanked source for the IDENTIFIER, not for the `extCmd(`
+    spelling, so a reference reaching the send path through a binding or a
+    parenthesised name is found and refused rather than skipped. Readable:
+    the single definition, a direct call, an `import { ... }` binding.
+    `paths` is a seam for the synthetic-source controls.
     """
+    if paths is None:
+        paths = (ROOT / 'dashboard').rglob('*.js')
     literals = set()
     call_sites = 0
     definitions = 0
-    substring_total = 0
-    for path in sorted((ROOT / 'dashboard').rglob('*.js')):
+    references = 0
+    for path in sorted(paths):
         relative = _relative(path)
         text = path.read_text(encoding='utf-8')
         mask = js_mask(text)
-        substring_total += mask.count('extCmd(')
-        for match in re.finditer(r'\bextCmd\s*\(', mask):
+        for match in re.finditer(r'\bextCmd\b', mask):
+            references += 1
+            at = f'{relative}:{_line_of(text, match.start())}'
             if re.search(r'\bfunction\s+$', mask[:match.start()]):
                 definitions += 1
                 continue
+            after = match.end()
+            while after < len(mask) and mask[after].isspace():
+                after += 1
+            following = mask[after] if after < len(mask) else ''
+            if following != '(':
+                if _is_import_binding(mask, match.start()):
+                    continue
+                _refuse(
+                    at,
+                    f'extCmd is referenced and {following!r} follows it, so '
+                    'it is not a direct call; a call that reaches the send '
+                    'path without naming extCmd immediately before its paren '
+                    'is a shape this enumeration does not read')
             call_sites += 1
-            at = f'{relative}:{_line_of(text, match.start())}'
-            open_paren = mask.index('(', match.start())
+            open_paren = after
             arguments = js_split_top_level(
                 mask, text, open_paren + 1,
                 js_bracket_end(mask, open_paren) - 1)
@@ -263,10 +349,9 @@ def dashboard_sent_types():
             literals.add(value)
     assert definitions == 1, (
         f'the dashboard must define extCmd exactly once; found {definitions}')
-    assert substring_total == definitions + call_sites, (
-        f'the dashboard holds {substring_total} extCmd( spellings but the '
-        f'enumeration read {definitions} definition and {call_sites} call '
-        'sites; a spelling it cannot parse is not an absence')
+    assert references, (
+        'the dashboard holds no reference to extCmd at all; a renamed '
+        'helper is a refusal, not an empty sent set')
     return literals
 
 
@@ -296,46 +381,53 @@ def test_the_dispatch_switch_is_read_and_its_labels_enumerated(tmp):
         f'unusable command type label: {labels}'
 
 
+def _refusal_from(read, accepted):
+    """`read`'s refusal message, or a failure naming what was accepted."""
+    try:
+        read()
+    except AssertionError as error:
+        return str(error)
+    raise AssertionError(accepted)
+
+
+def _dispatch_source(*arms, comment=''):
+    """A minimal `dispatchCommand` whose switch holds `arms`."""
+    return (
+        'function dispatchCommand(cmd) {\n'
+        '  switch (cmd.type) {\n'
+        + comment
+        + ''.join(f'    {arm}\n' for arm in arms)
+        + '    default: return null;\n'
+        '  }\n'
+        '}\n')
+
+
 def test_a_case_label_that_is_not_a_plain_literal_is_refused(tmp):
     """A computed label is named with its line, not skipped."""
     del tmp
-    source = (
-        'function dispatchCommand(cmd) {\n'
-        "  switch (cmd.type) {\n"
-        "    case 'cookies': return handleCookies(cmd);\n"
-        '    case COMMANDS.ping: return handlePing(cmd);\n'
-        '    default: return null;\n'
-        '  }\n'
-        '}\n')
-    try:
-        served_types(source, 'background.js')
-    except AssertionError as error:
-        message = str(error)
-        assert 'background.js:4' in message, message
-        assert 'COMMANDS.ping' in message, message
-        assert 'not a plain string literal' in message, message
-    else:
-        assert False, 'a computed case label was accepted'
+    source = _dispatch_source(
+        "case 'cookies': return handleCookies(cmd);",
+        'case COMMANDS.ping: return handlePing(cmd);')
+    message = _refusal_from(
+        lambda: served_types(source, 'background.js'),
+        'a computed case label was accepted')
+    assert 'background.js:4' in message, message
+    assert 'COMMANDS.ping' in message, message
+    assert 'not a plain string literal' in message, message
 
 
 def test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree(tmp):
     """The raw/masked arm marker fires, and names what it saw.
 
     The shipped switch body holds no comment naming a case, so nothing in
-    the tree exercises this marker. Deleting the `js_mask` call outright
+    the tree exercises this marker: deleting the `js_mask` call outright
     leaves every other test green, because the two counts then agree by
-    construction. This synthetic source is the only thing that observes the
-    marker being able to fail, so it is what keeps the masker policed.
+    construction.
     """
     del tmp
-    source = (
-        'function dispatchCommand(cmd) {\n'
-        '  switch (cmd.type) {\n'
-        '    // a case label in a comment is not an arm\n'
-        "    case 'cookies': return handleCookies(cmd);\n"
-        '    default: return null;\n'
-        '  }\n'
-        '}\n')
+    source = _dispatch_source(
+        "case 'cookies': return handleCookies(cmd);",
+        comment='    // a case label in a comment is not an arm\n')
     try:
         served_types(source, 'background.js')
     except AssertionError as error:
@@ -387,11 +479,9 @@ def test_every_served_type_appears_in_the_one_route_table(tmp):
 def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     """One served type is absent from the clients, and it is named.
 
-    The exception is a decidable claim, not a waiver: the served set minus
-    the sent set must hold exactly one type and that type must be `eval`,
-    so a second one is reported by name rather than absorbed. With that one
-    named, the residual comparison is a true two-way set equality and its
-    message names both missing sides.
+    The exception is a decidable claim, not a waiver: exactly one type, and
+    it must be `eval`, so a second is reported by name. The residual
+    comparison is then a true two-way equality naming both missing sides.
     """
     del tmp
     sent_sets, cli, mcp = _clients()
@@ -420,13 +510,11 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
 def _eval_path_observation():
     """The code-only command's route observation, or a named failure.
 
-    When the worker stops deriving `eval` from `code` the command falls to
-    the default arm, which posts a result the capability-routes scenario
-    does not declare; the refused fetch is left pending, the node child
-    exits with no output, and the boundary harness raises a decode error
-    before this suite ever sees an observation. That is still this control
-    failing to produce its observation, so it is reported as one -- naming
-    the known mechanism, without claiming the decode error proves it.
+    A worker that stops deriving `eval` from `code` sends the command to
+    the default arm, which posts a result the scenario does not declare; the
+    node child exits with no output and the harness raises before this suite
+    sees an observation. Named as this control's failure, with the
+    mechanism, without claiming the decode error proves it.
     """
     try:
         return run_extension_capability_routes([{
@@ -444,11 +532,10 @@ def _eval_path_observation():
 
 
 def test_a_type_the_worker_does_not_serve_reaches_the_unknown_arm(tmp):
-    """The served-marker limb: an unserved type literal falls to `default`.
+    """The served-marker limb: an unserved type falls to `default`.
 
-    Split from the eval limb on purpose. These two properties are broken by
-    different edits, and when they shared one function the first assertion
-    decided which of them ever ran.
+    Split from the eval limb because different edits break these two, and
+    when they shared one function the first assertion decided which ran.
     """
     del tmp
     marker = run_extension_command_result(
@@ -462,11 +549,9 @@ def test_a_type_the_worker_does_not_serve_reaches_the_unknown_arm(tmp):
 def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
     """Runtime evidence for the `eval` exception, and nothing else.
 
-    A command carrying only `code` must reach the eval handler, and the
-    sentinel must see no `type` field on it. This observation is
-    unconditional: nothing in this function can prevent it from running, so
-    breaking the `code` -> `eval` derivation in the worker is reported here
-    even though every served-type test stays green.
+    Unconditional on purpose: nothing in this function can prevent the
+    observation, so breaking the `code` -> `eval` derivation is reported
+    here even though every served-type test stays green.
     """
     del tmp
     observed = _eval_path_observation()
@@ -495,14 +580,115 @@ def test_a_client_type_argument_that_is_not_a_literal_is_refused(tmp):
         'def do_probe():\n'
         "    return ext_cmd('_probe', TYPE)\n",
         encoding='utf-8')
-    try:
-        python_sent_types([written], 'ext_cmd', False)
-    except AssertionError as error:
-        message = str(error)
-        assert 'commands_probe.py:4' in message, message
-        assert 'not a plain string literal' in message, message
-    else:
-        assert False, 'an indirect client command type was accepted'
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'an indirect client command type was accepted')
+    assert 'commands_probe.py:4' in message, message
+    assert 'not a plain string literal' in message, message
+
+
+def _python_source(tmp, name, body):
+    written = Path(tmp) / name
+    written.parent.mkdir(parents=True, exist_ok=True)
+    written.write_text(body, encoding='utf-8')
+    return written
+
+
+def test_a_python_client_aliasing_the_send_helper_is_refused(tmp):
+    """Binding the helper to a name and calling that name is refused.
+
+    Considered because the reader enumerates the identifier, not the call
+    spelling, and refused because only a direct literal call is readable.
+    """
+    written = _python_source(tmp, 'commands_alias.py', (
+        'from .invoke import ext_cmd\n'
+        '\n'
+        '_ALIAS = ext_cmd\n'
+        '\n'
+        'def do_probe():\n'
+        "    return _ALIAS('_probe', 'probe-alias')\n"))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a client that aliases the send helper was accepted')
+    assert 'commands_alias.py:3' in message, message
+    assert "shape 'assign'" in message, message
+
+
+def test_a_python_client_bare_alias_with_no_call_is_refused(tmp):
+    """A bare binding is the first step of the escape, so it is refused too."""
+    written = _python_source(tmp, 'commands_bare.py', (
+        'from .invoke import ext_cmd\n'
+        '\n'
+        'ALIAS = ext_cmd\n'))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a bare binding of the send helper was accepted')
+    assert 'commands_bare.py:3' in message, message
+    assert "shape 'assign'" in message, message
+
+
+def test_a_python_surface_with_no_helper_definition_is_refused(tmp):
+    """A surface that defines no helper yields no references to read.
+
+    Without this, renaming the helper would leave the reader matching
+    nothing and report a clean bill of health, which is the failure the
+    whole enumeration exists to prevent.
+    """
+    written = _python_source(tmp, 'commands_nodef.py', (
+        'def do_probe():\n'
+        "    return something.elsewhere('_probe', 'probe-nodef')\n"))
+    message = _refusal_from(
+        lambda: python_sent_types([written], 'ext_cmd', False),
+        'a client surface with no send-helper definition passed')
+    assert 'define ext_cmd exactly once' in message, message
+
+
+def test_a_dashboard_call_not_spelling_extcmd_before_its_paren_is_refused(tmp):
+    """`(extCmd)(...)` reaches the send path without the call spelling.
+
+    Found because the reader looks for the identifier, not for `extCmd(`,
+    and refused because `(` is not what follows the name here.
+    """
+    written = Path(tmp) / 'section.js'
+    written.write_text(
+        "import { extCmd } from '../api.js';\n"
+        "export async function extCmd(type) { return type; }\n"
+        "const alias = (extCmd)('probe-dash-alias');\n",
+        encoding='utf-8')
+    message = _refusal_from(
+        lambda: dashboard_sent_types([written]),
+        'a parenthesised dashboard send call was accepted')
+    assert 'section.js:3' in message, message
+    assert 'not a direct call' in message, message
+
+
+def test_prose_naming_the_send_helper_is_not_a_reference(tmp):
+    """The over-recognition direction: prose must not be read as a call.
+
+    A Python string and a JavaScript string naming the helper are invisible
+    to their readers, and a JavaScript comment is blanked before the scan.
+    Without that masking the string below would be classified and refused.
+    """
+    python_written = _python_source(tmp, 'commands_prose.py', (
+        '"""The ext_cmd helper sends one command type."""\n'
+        '# ext_cmd is named in this comment too\n'
+        'from .invoke import ext_cmd\n\n'
+        'def ext_cmd(cmd_id, cmd_type, **fields):\n'
+        '    return cmd_type\n\n'
+        'def do_probe():\n'
+        "    return ext_cmd('_probe', 'probe-prose')\n"))
+    literals, _, calls = python_sent_types([python_written], 'ext_cmd', False)
+    assert literals == {'probe-prose'} and calls == 1, (literals, calls)
+
+    js_written = Path(tmp) / 'section.js'
+    js_written.write_text(
+        "import { extCmd } from '../api.js';\n"
+        "// extCmd is named in this comment too\n"
+        "const label = 'extCmd';\n"
+        'export async function extCmd(type) { return type; }\n'
+        "const answer = await extCmd('probe-js-prose');\n",
+        encoding='utf-8')
+    assert dashboard_sent_types([js_written]) == {'probe-js-prose'}
 
 
 def main():
