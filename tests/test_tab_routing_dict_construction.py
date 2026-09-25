@@ -126,6 +126,9 @@ def test_or_opaque_name_stays_clean(tmp):
         prefix=_PRE_CLEAN)) == (0, 0)
 
 
+# The `args.box` part resolved: an attribute store on a base the model
+# holds nothing for records the value, so the unpacked operand is read as
+# what it held rather than as an opaque spread.
 def _opaque(store, held='send'):
     return (f'send = ext_cmd\nargs.box = {{"k": {held}}}\n{store}\n'
             'return x["k"]("_focus", "focus-tab", tab=args.chrome_tab)')
@@ -135,18 +138,18 @@ def test_opaque_part_display_unpack_reports(tmp):
     assert _verdict(tmp, _opaque('x = {"j": 1, **args.box}')) == (1, 1)
 
 
-def test_opaque_part_display_unpack_clean_is_unprovable(tmp):
+def test_opaque_part_display_unpack_clean_stays_clean(tmp):
     assert _verdict(tmp, _opaque(
-        'x = {"j": 1, **args.box}', 'ordinary')) == (0, 1)
+        'x = {"j": 1, **args.box}', 'ordinary')) == (0, 0)
 
 
 def test_opaque_part_dict_call_unpack_reports(tmp):
     assert _verdict(tmp, _opaque('x = dict(j=1, **args.box)')) == (1, 1)
 
 
-def test_opaque_part_dict_call_unpack_clean_is_unprovable(tmp):
+def test_opaque_part_dict_call_unpack_clean_stays_clean(tmp):
     assert _verdict(tmp, _opaque(
-        'x = dict(j=1, **args.box)', 'ordinary')) == (0, 1)
+        'x = dict(j=1, **args.box)', 'ordinary')) == (0, 0)
 
 
 def test_opaque_part_or_name_reports(tmp):
@@ -154,18 +157,18 @@ def test_opaque_part_or_name_reports(tmp):
         'o = args.box\nx = {"j": 1} | o')) == (1, 1)
 
 
-def test_opaque_part_or_name_clean_is_unprovable(tmp):
+def test_opaque_part_or_name_clean_stays_clean(tmp):
     assert _verdict(tmp, _opaque(
-        'o = args.box\nx = {"j": 1} | o', 'ordinary')) == (0, 1)
+        'o = args.box\nx = {"j": 1} | o', 'ordinary')) == (0, 0)
 
 
 def test_opaque_part_or_attribute_reports(tmp):
     assert _verdict(tmp, _opaque('x = {"j": 1} | args.box')) == (1, 1)
 
 
-def test_opaque_part_or_attribute_clean_is_unprovable(tmp):
+def test_opaque_part_or_attribute_clean_stays_clean(tmp):
     assert _verdict(tmp, _opaque(
-        'x = {"j": 1} | args.box', 'ordinary')) == (0, 1)
+        'x = {"j": 1} | args.box', 'ordinary')) == (0, 0)
 
 
 def _pairs(store, held):
