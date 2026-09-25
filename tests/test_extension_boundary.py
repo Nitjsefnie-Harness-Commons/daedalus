@@ -10,7 +10,6 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -123,15 +122,22 @@ def test_the_v8_control_keeps_the_harness_off_the_command_line(tmp):
     background = str(EXTENSION_ROOT / 'background.js')
     captured = {}
 
+    class FakeChild:
+        """A child that never ran, so no program reaches node at all."""
+
+        def wait(self, timeout=None):
+            captured['wait_timeout'] = timeout
+            return 0
+
     def capture(argv, **_options):
         captured['argv'] = argv
-        return SimpleNamespace(returncode=0, stdout='', stderr='')
+        return FakeChild()
 
     for label, size in (('main', MAIN_HARNESS_CHARS),
                         ('grown', WINDOWS_COMMAND_LINE_LIMIT * 2)):
         program = 'x' * size
         captured.clear()
-        with mock.patch.object(_noderun.subprocess, 'run', capture):
+        with mock.patch.object(_noderun.subprocess, 'Popen', capture):
             _noderun.run_node_program(
                 node, program, [background, 'capacity'], ROOT)
         argv = captured['argv']
