@@ -7,6 +7,15 @@ through import_scripts_stub, await loadConfig(), dispatch commands through
 dispatchCommand, and hand back the posted postResult payloads alongside every
 recorded chrome call. The suites supply the plan and assert the answer and the
 calls together; this module never decides what a handler should do.
+
+The plan may also ask for the deferred surface. `runTimers` makes the
+setTimeout stand-in run and record its callback; `fetchTimings` seeds the
+timing ring before any command; `hasNativeToBase64` pins whether the realm
+carries the native toBase64. The run reports the boot's installed `version`,
+the observed `hasNativeToBase64`, and the timers it ran. Each is opt-in and
+inert by default, so a suite that sets none of them drives exactly the fake
+this harness shipped with. The seeds and the pin shape the world the handler
+reads; none of them hands the handler a value to echo back.
 """
 import json
 import shutil
@@ -150,6 +159,13 @@ const chrome = {
   },
 };
 
+// The reload handler reaches chrome.runtime.reload through a timer. The
+// INERT_WORKER_APIS runtime carries no reload, so record it here; like every
+// other surface it is a recorder, observable but never substituted.
+chrome.runtime.reload = () => {
+  record('runtime.reload', []);
+};
+
 async function bridgeFetch(target, init = {}) {
   const url = String(target);
   if (url.endsWith('/result') && init.method === 'POST') {
@@ -169,6 +185,29 @@ async function bridgeFetch(target, init = {}) {
   throw new Error('unexpected fetch: ' + url);
 }
 
+// The deferred stand-in. With runTimers unset it returns the inert handle
+// Task 1's suite was written against and runs nothing, so a suite that does
+// not opt in sees byte-identical behaviour. With runTimers set it records the
+// timer and runs the callback in the same tick, so a deferred effect is
+// observable with no wall-clock margin and no sleep. Running is armed only
+// while a command is dispatched, so the boot's own timers (reconnect work)
+// stay inert exactly as before and cannot hold the process open.
+const timers = [];
+let nextTimerId = 0;
+let timersArmed = false;
+function setTimeoutStandIn(callback, delay) {
+  if (!plan.runTimers || !timersArmed) return 1;
+  const timer = { id: ++nextTimerId, delay, ran: false, error: null };
+  timers.push(timer);
+  timer.ran = true;
+  try {
+    callback();
+  } catch (error) {
+    timer.error = String((error && error.message) || error);
+  }
+  return timer.id;
+}
+
 const context = vm.createContext({
   chrome,
   fetch: bridgeFetch,
@@ -179,7 +218,7 @@ const context = vm.createContext({
   performance,
   atob,
   btoa,
-  setTimeout: () => 1,
+  setTimeout: setTimeoutStandIn,
   clearTimeout() {},
   setInterval: () => 1,
   clearInterval() {},
@@ -193,11 +232,29 @@ async function dispatch(command) {
 }
 
 async function run() {
+  // _hasNativeToBase64 is a const evaluated the moment util.js loads, so the
+  // pin has to land before the boot runs. Adding or removing the builtin is a
+  // property of this realm, not a value handed to the handler: the handler
+  // still reads its own const, so a substituted answer stays observable.
+  if (Object.prototype.hasOwnProperty.call(plan, 'hasNativeToBase64')) {
+    const pin = plan.hasNativeToBase64
+      ? 'Uint8Array.prototype.toBase64 = function () { return ""; };'
+      : 'delete Uint8Array.prototype.toBase64;';
+    vm.runInContext(pin, context);
+  }
   vm.runInContext(
     fs.readFileSync(backgroundPath, 'utf8'), context,
     { filename: backgroundPath });
   await vm.runInContext('loadConfig()', context);
+  if (Array.isArray(plan.fetchTimings)) {
+    // The ring is world state: these entries are values the handler reads
+    // back out of the world, never values it was given and must echo.
+    context.__seededTimings = plan.fetchTimings;
+    vm.runInContext('_fetchTimings.push(...__seededTimings)', context);
+    delete context.__seededTimings;
+  }
   const outcomes = [];
+  timersArmed = plan.runTimers === true;
   for (const command of plan.commands || []) {
     try {
       await dispatch(command);
@@ -206,7 +263,15 @@ async function run() {
       outcomes.push({ settled: 'rejected', message: error.message });
     }
   }
-  return { calls, posted: resultPayloads, outcomes };
+  timersArmed = false;
+  return {
+    calls,
+    posted: resultPayloads,
+    outcomes,
+    timers,
+    version: vm.runInContext('VERSION', context),
+    hasNativeToBase64: vm.runInContext('_hasNativeToBase64', context),
+  };
 }
 
 run().then((result) => {
