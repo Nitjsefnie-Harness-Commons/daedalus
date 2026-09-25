@@ -27,7 +27,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -268,6 +268,21 @@ def _shell_value(word):
     return word
 
 
+def _posix_relative(path, root):
+    """`path` under `root`, in the spelling the step's own shell uses.
+
+    The step and the probe that reads its output are POSIX shell, and
+    the layout is a set of `/`-separated names -- so the forward slash
+    is the correct spelling, not a platform-neutral one to be tolerated.
+    `str()` renders the HOST's separator instead, which on Windows spells
+    each entry `cell-01\\reference.json`: a spelling the step never
+    writes, so the assertion was comparing two renderings rather than
+    two layouts and reddened on the Windows legs. `as_posix()` is the
+    one rendering that is the step's on every host.
+    """
+    return path.relative_to(root).as_posix()
+
+
 def _download_selection(script):
     """`(flag, pattern, target)` decoded from the step's download command.
 
@@ -342,7 +357,7 @@ def test_the_download_lays_every_cell_artifact_under_its_own_name(tmp):
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert 'count=1' in output, (output, result.stdout)
     laid_out = sorted(
-        str(path.relative_to(Path(tmp) / 'runs' / '500'))
+        _posix_relative(path, Path(tmp) / 'runs' / '500')
         for path in (Path(tmp) / 'runs' / '500').rglob(_REFERENCE_FILE))
     assert laid_out == [f'{name}/{_REFERENCE_FILE}' for name in _ARTIFACTS], \
         laid_out
@@ -351,6 +366,40 @@ def test_the_download_lays_every_cell_artifact_under_its_own_name(tmp):
               / 'test_a.json')
     assert report.is_file(), report
     assert 'Downloaded 1 complete run' in summary, summary
+
+
+def test_the_layout_is_spelled_the_way_the_step_spells_it(tmp):
+    """The layout comparison, on a path whose separator is a backslash.
+
+    The layout assertion above cannot see this class by itself: on Linux
+    `str()` and `as_posix()` are the same string, so a revert to `str()`
+    stays green here and only ever reddens on the Windows legs -- which is
+    where it was found. So the rendering is exercised on a
+    `PureWindowsPath`, whose native separator is `\\` on EVERY host, and
+    the two spellings are held apart on the same path: the layout the step
+    probes is the `/` one, and the host's own rendering is not.
+    """
+    del tmp
+    root = PureWindowsPath('runs') / '500'
+    laid_out = PureWindowsPath('runs', '500', _ARTIFACTS[0], _REFERENCE_FILE)
+    # `format` renders through `__str__`, which is the host's own
+    # spelling: a backslash here, whatever host this suite runs on.
+    assert f'{laid_out.relative_to(root)}' == \
+        f'{_ARTIFACTS[0]}\\{_REFERENCE_FILE}'
+    assert _posix_relative(laid_out, root) == \
+        f'{_ARTIFACTS[0]}/{_REFERENCE_FILE}'
+    # Every name, not the first: the exact set is what the assertion
+    # above it pins, so a renderer that got one right must get them all.
+    assert [_posix_relative(PureWindowsPath('runs', '500', name,
+                                            _REFERENCE_FILE), root)
+            for name in _ARTIFACTS] == \
+        [f'{name}/{_REFERENCE_FILE}' for name in _ARTIFACTS]
+    # And the call site, because a revert can be spelled inline, where
+    # the property above cannot reach it: no relative path in this module
+    # is rendered with `str()`.
+    module = Path(__file__).read_text(encoding='utf-8')
+    assert not re.search(r'str\([^)]*relative_to', module), (
+        'a relative path is rendered with str() somewhere in this module')
 
 
 def test_a_walk_that_keeps_nothing_is_a_green_no_op(tmp):
