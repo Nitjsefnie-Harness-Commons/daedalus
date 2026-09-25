@@ -44,10 +44,12 @@ def _error(outcome):
 
 
 def _timed_result(outcome):
-    """The answer with create_ms checked as a clock, then dropped."""
+    """The answer with create_ms checked for int type and sign, then cut."""
     result = _result(outcome)
     value = result.pop('create_ms')
-    assert isinstance(value, int) and value >= 0, result
+    # type() is deliberate: isinstance(True, int) is also True.
+    # pylint: disable=unidiomatic-typecheck
+    assert type(value) is int and value >= 0, result
     return result
 
 
@@ -61,7 +63,7 @@ def test_open_tab_creates_the_url_and_posts_the_new_tab(tmp):
         [CREATE, [{'url': 'https://a.example.com'}]]], outcome
     assert _timed_result(outcome) == {
         'tabId': 100,
-        'url': 'https://a.example.com',
+        'url': 'https://www.a.example.com',
         'windowId': 1,
     }, outcome
 
@@ -77,6 +79,11 @@ def test_open_tab_carries_active_pinned_and_window_options(tmp):
         'pinned': True,
         'windowId': 7,
     }]]], outcome
+    assert _timed_result(outcome) == {
+        'tabId': 100,
+        'url': 'https://www.a.example.com',
+        'windowId': 1,
+    }, outcome
 
 
 def test_open_tab_create_rejection_posts_the_message(tmp):
@@ -107,8 +114,32 @@ def test_open_tabs_creates_every_url_in_order(tmp):
     ], outcome
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://a.example.com', 'windowId': 1},
-            {'tabId': 101, 'url': 'https://b.example.com', 'windowId': 1},
+            {'tabId': 100, 'url': 'https://www.a.example.com',
+             'windowId': 1},
+            {'tabId': 101, 'url': 'https://www.b.example.com',
+             'windowId': 1},
+        ],
+        'errors': [],
+    }, outcome
+
+
+def test_open_tabs_carries_options_into_every_create(tmp):
+    del tmp
+    outcome = run_tabs([command(
+        type='open-tabs',
+        urls=['https://a.example.com', 'https://b.example.com'],
+        active=False, pinned=True, windowId='7')])
+    opts = {'active': False, 'pinned': True, 'windowId': 7}
+    assert apis(outcome, CREATE) == [
+        [CREATE, [dict(opts, url='https://a.example.com')]],
+        [CREATE, [dict(opts, url='https://b.example.com')]],
+    ], outcome
+    assert _timed_result(outcome) == {
+        'opened': [
+            {'tabId': 100, 'url': 'https://www.a.example.com',
+             'windowId': 1},
+            {'tabId': 101, 'url': 'https://www.b.example.com',
+             'windowId': 1},
         ],
         'errors': [],
     }, outcome
@@ -122,10 +153,26 @@ def test_open_tabs_partial_rejection_carries_the_reason(tmp):
         createReject={'https://b.example.com': 'cannot open b'})
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://a.example.com', 'windowId': 1},
+            {'tabId': 100, 'url': 'https://www.a.example.com',
+             'windowId': 1},
         ],
         'errors': [{'url': 'https://b.example.com',
                     'error': 'cannot open b'}],
+    }, outcome
+
+
+def test_open_tabs_non_error_rejection_is_stringified(tmp):
+    del tmp
+    outcome = run_tabs(
+        [command(type='open-tabs', urls=['https://a.example.com',
+                                         'https://b.example.com'])],
+        createReject={'https://b.example.com': 42})
+    assert _timed_result(outcome) == {
+        'opened': [
+            {'tabId': 100, 'url': 'https://www.a.example.com',
+             'windowId': 1},
+        ],
+        'errors': [{'url': 'https://b.example.com', 'error': '42'}],
     }, outcome
 
 
@@ -150,9 +197,9 @@ def test_focus_tab_activates_the_tab_then_focuses_the_window(tmp):
     outcome = run_tabs([command(type='focus-tab', tabId=5)])
     assert apis(outcome, UPDATE, WINDOW) == [
         [UPDATE, [5, {'active': True}]],
-        [WINDOW, [3, {'focused': True}]],
+        [WINDOW, [4, {'focused': True}]],
     ], outcome
-    assert _result(outcome) == {'tabId': 5, 'windowId': 3}, outcome
+    assert _result(outcome) == {'tabId': 5, 'windowId': 4}, outcome
 
 
 def test_focus_tab_missing_tab_id_is_refused_without_updating(tmp):
@@ -195,8 +242,10 @@ def test_navigate_no_active_tab_is_refused_without_updating(tmp):
     assert apis(outcome, UPDATE) == [], outcome
 
 
-def test_navigate_missing_url_is_refused_without_querying(tmp):
+def test_navigate_missing_url_is_refused_before_any_handler_query(tmp):
     del tmp
+    # The boot-time callback-form query is answered off the record, so an
+    # absent QUERY here means the handler made no promise-form query.
     outcome = run_tabs([command(type='navigate')])
     assert _error(outcome) == 'Missing url', outcome
     assert apis(outcome, QUERY, UPDATE) == [], outcome
@@ -261,6 +310,8 @@ def test_inject_css_defaults_all_frames_to_false(tmp):
         'target': {'tabId': 5, 'allFrames': False},
         'css': CSS,
     }]]], outcome
+    assert _result(outcome) == {
+        'tabId': 5, 'injected': len(CSS)}, outcome
 
 
 def test_inject_css_resolves_the_active_tab_when_none_is_named(tmp):
@@ -310,6 +361,8 @@ def test_remove_css_defaults_all_frames_to_false(tmp):
         'target': {'tabId': 5, 'allFrames': False},
         'css': CSS,
     }]]], outcome
+    assert _result(outcome) == {
+        'tabId': 5, 'removed': len(CSS)}, outcome
 
 
 def test_remove_css_resolves_the_active_tab_when_none_is_named(tmp):

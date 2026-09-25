@@ -108,13 +108,19 @@ const chrome = {
     create: async (details) => {
       record('tabs.create', [details]);
       const reject = (plan.createReject || {})[details.url];
-      if (reject !== undefined) throw new Error(reject);
+      if (reject !== undefined) {
+        if (typeof reject === 'string') throw new Error(reject);
+        throw reject;
+      }
       createdCount += 1;
-      return { id: 99 + createdCount, windowId: 1, url: details.url };
+      // A resolved Tab carries Chrome's own url, not the requested one;
+      // handing back the request would make the two indistinguishable.
+      const resolved = details.url.replace('https://', 'https://www.');
+      return { id: 99 + createdCount, windowId: 1, url: resolved };
     },
     update: async (tabId, changes) => {
       record('tabs.update', [tabId, changes]);
-      return { id: tabId, windowId: 3 };
+      return { id: tabId, windowId: 4 };
     },
     reload: async (tabId, options) => {
       record('tabs.reload', [tabId, options]);
