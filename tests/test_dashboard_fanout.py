@@ -368,6 +368,41 @@ def test_an_expired_entry_is_removed_for_everyone_and_never_delivered(tmp):
     assert not stale.exists(), 'an expired entry was retained'
 
 
+def test_this_drain_reclaims_an_expired_entry_despite_a_stuck_peer(tmp):
+    """The TTL limb of the unlink disjunction, isolated.
+
+    The drain unlinks an entry when `data is None` (this drain found it
+    expired or non-event) OR when every live subscription has passed it. In
+    every other expired fixture the second limb is also satisfied, so
+    substituting `False` for the first limb leaves them green while the
+    runtime stops reclaiming an expired entry whenever a stuck peer holds the
+    join false. This fixture holds the join false — a registered peer that
+    never drains — so only the drain's own age check can reclaim, which is
+    what the TTL-DROP line and the unlink on THIS drain prove.
+    """
+    service, drain = _service('fanout_ttl_own_drain')
+    token = 'tok'
+    qdir = _queue(service, tmp, token)
+    stale = _write_event(qdir, '0000000000001_00000001', type='result')
+    old = time.time() - 500
+    os.utime(stale, (old, old))
+    _a_id, a_killed = service.register(token, DASHBOARD)
+    # This peer never drains, so every_subscription_past is False and only
+    # the TTL limb can satisfy the unlink.
+    _b_id, _b_killed = service.register(token, DASHBOARD)
+    delivered = []
+
+    with _captured() as out:
+        assert drain.drain_dashboard(
+            qdir, token, a_killed, command_ttl=90,
+            frame_writer=delivered.append) == 0
+
+    assert delivered == [], delivered
+    assert not stale.exists(), (
+        'this drain did not reclaim the expired entry on its own')
+    assert 'TTL-DROP' in out.getvalue(), out.getvalue()
+
+
 def test_an_expired_entry_past_a_subscriber_cursor_is_not_delivered(tmp):
     """A subscription whose cursor already holds at or past an entry is
     never handed that entry again, expired or not, and the entry does not
