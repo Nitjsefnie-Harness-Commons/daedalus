@@ -98,6 +98,7 @@
 !/daedalus_bridge/atomic_file.py
 !/daedalus_bridge/command_queue.py
 !/daedalus_bridge/config.py
+!/daedalus_bridge/dashboard_drain.py
 !/daedalus_bridge/data_root_lock.py
 !/daedalus_bridge/delivery_stripes.py
 !/daedalus_bridge/env_config.py
@@ -440,6 +441,7 @@
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_dashboard_eval.py
+!/tests/test_dashboard_fanout.py
 !/tests/test_dashboard_harness.py
 !/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_node_retry.py

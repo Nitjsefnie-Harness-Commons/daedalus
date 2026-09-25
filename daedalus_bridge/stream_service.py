@@ -40,7 +40,7 @@ _REFUSED_CANDIDATE_LIMIT = 4096
 _refused_lock = threading.Lock()
 
 
-def _refusal_once(key, name, reason, secret=''):
+def refusal_once(key, name, reason, secret=''):
     """Report one refused candidate the first time this process refuses it."""
     with _refused_lock:
         if key in _refused_candidates:
@@ -70,18 +70,27 @@ command_queue.on_name_vacated(_forget_vacated)
 def register(token, tab):
     """Register one connection and return its opaque id and kill event.
 
-    Named streams replace an existing stream when their `(token, tab)` values
-    compare equal. A tabless stream never replaces and is never replaced. The
-    caller owns the returned pair: it stops when the event is set and passes
-    both values to `unregister` when the connection ends.
+    Streams come in two kinds. An *addressed* stream is a delivery to one
+    connection on one `(token, tab)`: a reconnect with an equal key evicts
+    its predecessor. A *subscription* — the dashboard, and only the exact
+    dashboard target name — is a fan-out: every connection on that name
+    receives every event, so a subscription neither replaces nor is
+    replaced. A tabless stream never replaces and is never replaced. The
+    kind is recorded per entry so the dashboard drain can find the live
+    subscribers of a token and their cursors; a reader who cannot see the
+    criterion here would assume every stream is addressed. The caller owns
+    the returned pair: it stops when the event is set and passes both values
+    to `unregister` when the connection ends.
     """
     key = (token, tab) if tab else None
+    subscription = tab == command_queue.DASHBOARD_TAB
     killed_event = threading.Event()
     with _stream_lock:
         # None is not an identity another connection can claim. A tabless
         # stream is still registered under its per-connection id so health can
-        # see it, while any number of tabless connections may coexist.
-        if key is not None:
+        # see it, while any number of tabless connections may coexist. A
+        # subscription coexists with its peers rather than evicting them.
+        if key is not None and not subscription:
             for old_id, old in list(_active_streams.items()):
                 if old['key'] == key:
                     old['killed'].set()
@@ -89,7 +98,8 @@ def register(token, tab):
                     print(f'[STREAM] REPLACED tab={tab[:8]}', flush=True)
         stream_id = next(_stream_ids)
         _active_streams[stream_id] = {
-            'key': key, 'tab': tab, 'killed': killed_event}
+            'key': key, 'tab': tab, 'killed': killed_event,
+            'subscription': subscription, 'cursor': None}
     return stream_id, killed_event
 
 
@@ -171,7 +181,7 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
             opened, reason, ident = command_queue.open_command_candidate(path)
             if opened is None:
                 if reason is not None:
-                    _refusal_once(
+                    refusal_once(
                         (key, ident),
                         f'q={qdir.name}/{name}', reason, secret=secret)
                 continue  # absent, or refused: never delivered or unlinked
@@ -223,6 +233,65 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
     return count
 
 
+def _entry_for(killed_event):
+    """The registry entry this connection owns, or None."""
+    with _stream_lock:
+        for entry in _active_streams.values():
+            if entry['killed'] is killed_event:
+                return entry
+    return None
+
+
+def subscription_cursor(killed_event):
+    """This dashboard connection's cursor, seeded on the first call.
+
+    Returns None when the connection is not a live dashboard subscription.
+    The cursor is the name of the last entry the connection consumed; a
+    first call seeds it to the empty string, before every event name, so a
+    window that opens now receives the events already queued. The dashboard
+    drain is the only caller, and it keeps this in the registry entry
+    because the unlink decision has to see every live subscriber's
+    position.
+    """
+    with _stream_lock:
+        for entry in _active_streams.values():
+            if entry['killed'] is killed_event:
+                if entry['cursor'] is None:
+                    entry['cursor'] = ''
+                return entry['cursor']
+    return None
+
+
+def advance_subscription(killed_event, name):
+    """Move this dashboard connection's cursor past `name`."""
+    with _stream_lock:
+        for entry in _active_streams.values():
+            if entry['killed'] is killed_event:
+                entry['cursor'] = name
+                return
+
+
+def every_subscription_past(token, name):
+    """True once every live dashboard subscription holds a cursor >= name.
+
+    Plain lexicographic comparison orders these names because
+    `notify_dashboard` writes `<ms>_<8 hex>`: the millisecond prefix is a
+    fixed width for the current epoch, so byte order is publish order —
+    the same property the drain's `sorted()` scan already relies on. A
+    subscription that has registered but not yet drained carries no cursor
+    and blocks, the conservative join; the TTL sweep is the backstop for a
+    connection that never drains at all.
+    """
+    with _stream_lock:
+        for entry in _active_streams.values():
+            if not entry['subscription'] or entry['key'][0] != token:
+                continue
+            cursor = entry['cursor']
+            if cursor is None or cursor < name:
+                return False
+    return True
+
+
 def legacy_claim_key(name):
     """The logical claim key one legacy command file is consumed under.
 
@@ -257,7 +326,7 @@ def poll_legacy(cmd_dir, token):
                 cmd_file)
             if opened is None:
                 if reason is not None:
-                    _refusal_once(
+                    refusal_once(
                         (legacy_claim_key(cmd_file.name), ident),
                         f'legacy={cmd_file.name}', reason, secret=token)
                 return 200, data
@@ -303,8 +372,8 @@ def drain_legacy_file(path, chrome_tab, *, command_ttl, frame_writer,
         opened, reason, ident = command_queue.open_command_candidate(path)
         if opened is None:
             if reason is not None:
-                _refusal_once((legacy_claim_key(path.name), ident),
-                              f'legacy={path.name}', reason, secret=secret)
+                refusal_once((legacy_claim_key(path.name), ident),
+                             f'legacy={path.name}', reason, secret=secret)
             return 0  # absent, or refused: left in place
         with opened:
             try:
@@ -364,7 +433,8 @@ def drain_legacy_ext(cmd_dir, token, killed_event, *,
             continue  # handled separately (no chromeTab tag)
         sub = name[len(prefix):-5]
         if path_safety.same_entry(
-                path.parent, name, f'{prefix}dashboard.json'):
+                path.parent, name,
+                f'{prefix}{command_queue.DASHBOARD_TAB}.json'):
             continue
         count += drain_legacy_file(
             path, sub, command_ttl=command_ttl,

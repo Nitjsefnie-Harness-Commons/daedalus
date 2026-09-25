@@ -11,6 +11,7 @@ import typing
 from functools import partial
 
 from daedalus_bridge import command_queue
+from daedalus_bridge import dashboard_drain
 from daedalus_bridge import path_safety
 from daedalus_bridge import stream_service
 
@@ -87,9 +88,9 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
             ev = command_queue.event(token)
             ev.clear()
             delivered = 0
-            if tab == 'dashboard':
-                delivered += stream_service.drain_queue(
-                    targets.queue, None, killed_event,
+            if tab == command_queue.DASHBOARD_TAB:
+                delivered += dashboard_drain.drain_dashboard(
+                    targets.queue, token, killed_event,
                     command_ttl=command_ttl, frame_writer=writer,
                     secret=token)
             elif tab == 'extension':
@@ -114,7 +115,8 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
                     if any(
                             path_safety.same_entry(
                                 cmd_dir, entry.name, f'{prefix}{reserved}')
-                            for reserved in ('extension', 'dashboard')):
+                            for reserved in (
+                                'extension', command_queue.DASHBOARD_TAB)):
                         continue
                     delivered += stream_service.drain_queue(
                         entry, sub, killed_event, command_ttl=command_ttl,
@@ -143,7 +145,7 @@ def serve_stream(wfile, *, cmd_dir, token, tab, targets, killed_event,
                         frame_writer=writer, secret=token)
             # Broadcast legacy raw-file — skip for dashboard so it doesn't
             # steal commands
-            if tab != 'dashboard':
+            if tab != command_queue.DASHBOARD_TAB:
                 delivered += stream_service.drain_legacy_file(
                     targets.broadcast_legacy, None, command_ttl=command_ttl,
                     frame_writer=writer, secret=token)
