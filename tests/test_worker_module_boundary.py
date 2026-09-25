@@ -209,16 +209,24 @@ def test_non_command_worker_ownership_is_structural(tmp):
             continue
         details = runtime[relative]
         exported = _directive_names(sources[relative], 'exported')
-        problem = {
+        # Each key names one problem kind. Three carry a list of names; the
+        # fourth carries a per-listener mapping, so the two shapes are kept in
+        # separate variables and merged — the alternative, one mapping typed
+        # `object`, moves the error to the merge.
+        name_problems = {
             'missing bindings': sorted(set(owned) - set(details['bindings'])),
             'missing exports': sorted(set(owned) - exported),
             'retained by background': sorted(set(owned) & background_names),
         }
+        listener_problems: dict[str, list[str]] = {}
         for listener in listener_sites:
             owners = [name for name, source in sources.items()
                       if js_mask(source).count(listener)]
             if set(owners) != listener_owners[listener]:
-                problem.setdefault('listener owners', {})[listener] = owners
+                listener_problems[listener] = owners
+        problem: dict[str, object] = dict(name_problems)
+        if listener_problems:
+            problem['listener owners'] = listener_problems
         problem = {key: value for key, value in problem.items() if value}
         if problem:
             failures[module] = problem
