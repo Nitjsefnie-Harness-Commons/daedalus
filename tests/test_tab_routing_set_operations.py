@@ -15,9 +15,8 @@ _PRELUDE = ('send = ordinary\n'
             'def quiet(): return lambda: ordinary()\n'
             'class K:\n'
             '    s = {relay()}\n')
-# A lambda that takes `tab` puts the keyword at the CALL SITE, which is what
-# the unprovable-callee control in `_pyroute.py` keys on; `_PRELUDE`'s bakes
-# it inside the lambda instead, so a call there carries no keyword.
+# A lambda that takes `tab` puts the keyword at the call site, which is
+# what the control keys on; `_PRELUDE`'s bakes it inside the lambda.
 _TAB_PRELUDE = ('send = ordinary\n'
                 'def maker():\n'
                 '    return lambda tab=None: send("_focus", "focus-tab", '
@@ -71,9 +70,8 @@ def test_an_empty_right_operand_leaves_the_left_readable(tmp):
             == (1, 1), operator
 
 
-# `set()` and `frozenset()` name a set the model holds nothing for, so the
-# follow-on statement is what tells the result's type: iterating a mapping
-# reads its keys, not the elements.
+# The follow-on statement is what tells the result's type: iterating a
+# mapping reads its keys, not the elements.
 _EMPTY_FACTORY = [
     ('set-union', 's = set() | K.s\ns |= {relay()}'),
     ('set-symdiff', 's = set() | K.s\ns ^= {relay()}'),
@@ -111,8 +109,7 @@ def test_symmetric_difference_keeps_the_element_only_the_right_holds(tmp):
 def test_difference_drops_what_only_the_right_operand_holds(tmp):
     # `A - B` is a subset of `A`, so the fold keeps the left operand alone.
     # A fold keeping the right operand too would read (0, 1) here; the
-    # second row is the oracle, and test_difference_reads_the_element_the_
-    # left_holds carries the same pair on its own.
+    # second row is the oracle.
     assert _verdict(tmp, 's = {quiet()} - {relay()}') == (0, 0)
     assert _verdict(tmp, 's = {relay()} - {quiet()}') == (1, 1)
 
@@ -123,8 +120,8 @@ def test_intersection_keeps_the_element_only_the_right_holds(tmp):
     assert _verdict(tmp, 'q = quiet()\nf = relay()\ns = {q} & {q, f}',
                     '[g() for g in s]') == (0, 1)
     assert _verdict(tmp, 'f = relay()\ns = {f} & {f}') == (1, 1)
-    # The cost of keeping both sides, on the row above's oracle: an empty
-    # intersection stays conservatively reachable.
+    # The cost of keeping both sides: an empty intersection stays
+    # conservatively reachable.
     assert _verdict(tmp, 'f = relay()\ns = {f} & set()',
                     '[g() for g in s]') == (0, 1)
 
@@ -183,8 +180,6 @@ def test_an_unreadable_operand_reports_through_a_tab_keyword(tmp):
     invoke = '[f(tab=args.chrome_tab) for f in s]'
     assert _verdict(tmp, 's = {quiet()} | K.s', invoke, _TAB_PRELUDE) \
         == (1, 1)
-    # The two controls: a resolvable routing element reports the same way,
-    # and two resolvable quiet elements report nothing.
     assert _verdict(tmp, 's = {quiet()} | {relay()}', invoke,
                     _TAB_PRELUDE) == (1, 1)
     assert _verdict(tmp, 's = {quiet()} | {quiet()}', invoke,
