@@ -3,6 +3,9 @@ routing values."""
 import ast
 
 from _pyroute_storage import replace_deferred_storage
+from _pyroute_stores import (container_copy, dict_length,
+                             fold_dynamic, replace_container,
+                             store_deferred_target)
 from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_invalidation import CONTAINER_MUTATORS, invalidate_unmodelled
@@ -86,21 +89,21 @@ def _display_value(node, state):
         value = _known_value(item.value if starred else item, state)
         if not starred:
             if index is None:
-                _fold_dynamic(items, value)
+                fold_dynamic(items, value)
             else:
                 if value is not None:
                     items[index] = value
                 index += 1
         elif not isinstance(value, DeferredContainer):
             index = None
-            _fold_dynamic(items, UNPROVABLE_SENDER)
+            fold_dynamic(items, UNPROVABLE_SENDER)
         elif value.kind == 'dict':
             # Unpacking a dict yields its keys, never the modelled values.
             index = (None if index is None or value.length is None
                      else index + value.length)
         elif index is None or value.length is None:
             index = None
-            _fold_dynamic(items, from_position(value, 0))
+            fold_dynamic(items, from_position(value, 0))
         else:
             for offset in range(value.length):
                 nested = merge_yielded(at_position(value, offset))
@@ -119,21 +122,12 @@ def _display_value(node, state):
     return None
 
 
-def _fold_dynamic(target, value):
-    target[DYNAMIC_KEY] = merge_yielded(
-        (target.get(DYNAMIC_KEY), value))
-
-
 def _fold_items(target, source):
     for key, value in source.items():
         if key is DYNAMIC_KEY:
-            _fold_dynamic(target, value)
+            fold_dynamic(target, value)
         else:
             target[key] = value
-
-
-def _dict_length(items, counted=True):
-    return len(items) if counted and DYNAMIC_KEY not in items else None
 
 
 def _dict_value(node, state):
@@ -146,7 +140,7 @@ def _dict_value(node, state):
             if literal is not _UNRESOLVED_KEY:
                 items[literal] = value
             else:
-                _fold_dynamic(items, value)
+                fold_dynamic(items, value)
             continue
         value = (_dict_value(item, state) if isinstance(item, ast.Dict)
                  else _known_value(item, state))
@@ -154,10 +148,10 @@ def _dict_value(node, state):
             _fold_items(items, value.items)
             counted = counted and value.length is not None
         else:
-            _fold_dynamic(items, UNPROVABLE_SENDER)
+            fold_dynamic(items, UNPROVABLE_SENDER)
     if len(node.keys) == 1 and node.keys[0] is not None:
         return DeferredContainer(items, 1, 'dict', node)  # one entry, one key
-    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
 
 
 def _merge_or_value(node, state):
@@ -173,10 +167,10 @@ def _merge_or_value(node, state):
             _fold_items(items, known.items)
             counted = counted and known.length is not None
         else:
-            _fold_dynamic(items, UNPROVABLE_SENDER)
+            fold_dynamic(items, UNPROVABLE_SENDER)
     if not items:
         return None
-    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
 
 
 def _dict_call_value(node, state):
@@ -188,7 +182,7 @@ def _dict_call_value(node, state):
     for source in sources:
         known = _source_items(source, state)
         if known is None:
-            _fold_dynamic(items, UNPROVABLE_SENDER)
+            fold_dynamic(items, UNPROVABLE_SENDER)
         else:
             _fold_items(items, known[0])
             counted = counted and known[1]
@@ -197,7 +191,7 @@ def _dict_call_value(node, state):
             items[keyword.arg] = _known_value(keyword.value, state)
     if not items:
         return None
-    return DeferredContainer(items, _dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
 
 
 def _setdefault_value(node, state):
@@ -452,10 +446,10 @@ def _source_items(source, state):
                 # key below, so its value is not an unknown-key entry.
                 continue
             if pair.length != 2 or DYNAMIC_KEY in pair.items:
-                _fold_dynamic(items, from_position(pair, 0))
+                fold_dynamic(items, from_position(pair, 0))
             else:
                 # A modelled key is a callable or a sender, never a key.
-                _fold_dynamic(items, pair.items.get(1))
+                fold_dynamic(items, pair.items.get(1))
     # The last pair written at a key is the one the dict holds (`1` and
     # `True` one key there), and only the dynamic slot precedes it.
     for key, value in entries.values():
@@ -467,25 +461,8 @@ def _mark_unprovable(state, owner_name):
     state.aliases[owner_name] = UNPROVABLE_SENDER
     owner = state.callables.get(owner_name)
     if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
-        _replace_container(state, owner_name, owner, dict(owner.items),
-                           unknown_length=True)
-
-
-def _container_copy(owner, items, unknown_length=False):
-    """A copy of owner holding items; a dict's length is recounted."""
-    length = owner.length
-    if owner.kind == 'dict':
-        length = _dict_length(
-            items, owner.length is not None and not unknown_length)
-    return DeferredContainer(items, length, owner.kind, owner.identity,
-                             owner.star_display)
-
-
-def _replace_container(state, owner_name, owner, items,
-                       unknown_length=False):
-    replace_deferred_storage(
-        state, owner, _container_copy(owner, items, unknown_length))
-    sync_cells(state, {owner_name})
+        replace_container(state, owner_name, owner,
+                          dict(owner.items), unknown_length=True)
 
 
 def _apply_mapping_store(state, owner_name, sources, keywords, node):
@@ -519,8 +496,8 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
             return
         combined = dict(owner.items)
         _fold_items(combined, items)
-        _replace_container(state, owner_name, owner, combined,
-                           unknown_length=not counted)
+        replace_container(state, owner_name, owner, combined,
+                          unknown_length=not counted)
 
 
 def _apply_setdefault(state, call, owner_name):
@@ -539,13 +516,13 @@ def _apply_setdefault(state, call, owner_name):
             owner = DeferredContainer({}, None, 'dict', call)
             state.callables[owner_name] = owner
         if literal not in owner.items:
-            _replace_container(state, owner_name, owner,
-                               {**owner.items, literal: default})
+            replace_container(state, owner_name, owner,
+                              {**owner.items, literal: default})
         return
     if isinstance(owner, DeferredContainer):
         value = merge_yielded((owner.items.get(DYNAMIC_KEY), default))
-        _replace_container(state, owner_name, owner,
-                           {**owner.items, DYNAMIC_KEY: value})
+        replace_container(state, owner_name, owner,
+                          {**owner.items, DYNAMIC_KEY: value})
         return
     _mark_unprovable(state, owner_name)
 
@@ -569,7 +546,7 @@ def _apply_pop(state, call):
         items.pop(key, None)
     elif owner.kind != 'dict':
         return None
-    replace_deferred_storage(state, owner, _container_copy(
+    replace_deferred_storage(state, owner, container_copy(
         owner, items, key is _UNRESOLVED_KEY))
     return owner
 
@@ -584,7 +561,7 @@ def _apply_set_store(state, name, operator, operands, node):
     folded = fold_set_operation(operator, operands, node)
     previous = operands[0]
     if isinstance(previous, DeferredContainer):
-        folded = _container_copy(previous, folded.items)
+        folded = container_copy(previous, folded.items)
         replace_deferred_storage(state, previous, folded)
     state.callables[name] = folded
     sync_cells(state, {name})
@@ -681,62 +658,3 @@ def _apply_modelled_store(statement, state, claimed):
             value is None and raw is None
             and isinstance(statement, (ast.Assign, ast.AnnAssign))
             and isinstance(statement.value, ast.Call))
-
-
-def store_deferred_target(target, value, state, removing=False,
-                          unknown_call=False):
-    owner_name = getattr(getattr(target, 'value', None), 'id', None)
-    owner = state.callables.get(owner_name)
-    if isinstance(target, ast.Attribute) \
-            and isinstance(owner, DeferredInstance):
-        attributes = dict(owner.attributes)
-        if value is None:
-            attributes.pop(target.attr, None)
-        else:
-            attributes[target.attr] = value
-        replacement = DeferredInstance(attributes, owner.identity)
-        replace_deferred_storage(state, owner, replacement)
-        sync_cells(state, {owner_name})
-    elif isinstance(target, ast.Attribute) and owner is None \
-            and owner_name and is_deferred_value(value):
-        # An attribute store on a base the model holds nothing for still
-        # names a value, and the use site spells the same base and attribute.
-        # Recording it against the base is what lets a later
-        # `args.box.pop(0)` place the element it removes, rather than
-        # dropping a value the model had and reading the call unproved.
-        state.callables[owner_name] = DeferredInstance({target.attr: value})
-        sync_cells(state, {owner_name})
-    elif isinstance(target, ast.Subscript) \
-            and isinstance(target.value, ast.Name):
-        literal = _literal_key(target.slice, state)
-        dynamic = literal is _UNRESOLVED_KEY
-        if owner is None:
-            if value is None and (removing or not unknown_call):
-                return
-            owner = DeferredContainer({}, None, 'dict', target)
-            state.callables[owner_name] = owner
-        elif not isinstance(owner, DeferredContainer):
-            return
-        items = dict(owner.items)
-        mapping = owner.kind == 'dict'
-        if dynamic and not removing:
-            if value is not None or unknown_call:
-                _fold_dynamic(items, UNPROVABLE_SENDER
-                              if value is None else value)
-            elif not mapping:
-                return
-        elif value is not None:
-            items[literal] = value
-        elif unknown_call:
-            if items.get(literal) is None:
-                items[literal] = UNPROVABLE_SENDER
-        elif dynamic:
-            if not mapping:
-                return
-        elif removing:
-            items.pop(literal, None)
-        else:
-            items[literal] = None
-        # A computed key may add or remove an entry: the count is unknown.
-        _replace_container(state, owner_name, owner, items,
-                           unknown_length=dynamic and mapping)
