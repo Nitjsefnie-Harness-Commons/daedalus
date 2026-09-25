@@ -19,7 +19,12 @@ first file is seeded from raw seconds of one run, which `units` says
 because a second spelling of it is a second thing to disagree with
 itself. `measured_from` names the run the numbers came from and `runs`
 says how many, so a weight with no run behind it is a number no refresh
-can check.
+can check. The one optional field, `seeded`, is the BASIS the refresher
+writes beside the two policy numbers on every write (which run, which
+units, why the target and the cell bound, and which tree suites the
+measurements do not cover); its name is the schema's, its content is
+rebuilt from the numbers of each write, and this reader does not
+type-check it because the sentence is for a human.
 
 Suites are enumerated with the timing instrument's own matcher
 (`time_tests.selected`, called with no globs, where it admits every
@@ -60,14 +65,25 @@ it is 1.000 above a target of 85 (no suite is over the target, every
 cell is shared), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a
 suite heavier than the target is alone in its cell by the rule above
 and the median falls as the target does. The margin is `0.35`: the
-round number at or above the ratio at the seeded target of 60, where
-the heavy cell is 1.34x a 57 s median. Below that target the guarantee
-does not hold at this margin, and the summary says so, naming the
-smallest target that would (heaviest / 1.35); the alternative is a
-lower median, which is what Task 2's split of `test_watcher_budget.py`
-would give. The guard's other job is catching a packer that stops
-packing, and the shortest-first order reaches 2.1x on the same weights,
-well past it. Re-derive the two numbers with `python3
+round number at or above the ratio at 60 on that run (1.34x a 57 s
+median). The SHIPPED file's target is 65, not 60, and that is measured
+rather than assumed: on run 36054336022's weights -- the seed, 230
+recorded suites totalling 804.4 s, heavy tail `test_watcher_budget.py`
+at 76.9 s -- the ALL-cell ratio is 1.359 at 60, over the margin,
+1.255 at 65 (13 cells, a 61.2 s median) and 1.151 at 70. So the
+target is the smallest five-second step the guarantee admits, derived
+with the planner itself (`scripts/ci/timings_bounds.derive_target`) and
+verified against the margin before every write by
+`scripts/ci/refresh_timings.py`, the one owner of the data file: this
+module NAMES a target the margin forbids, in the summary and in the
+exit-0 matrix it still prints, and the refresher refuses to write
+one. Below a target the margin admits the guarantee does not hold, and
+the summary says so, naming the smallest target that would
+(heaviest / 1.35); the alternative is a lower median, which is what
+splitting `test_watcher_budget.py` -- a split candidate at the seeded
+target -- would give. The guard's other job is catching a packer that
+stops packing, and the shortest-first order reaches 2.1x on the same
+weights, well past it. Re-derive the two numbers with `python3
 scripts/ci/plan_timed_matrix.py --summary` against the data file at
 each target.
 """
@@ -91,6 +107,7 @@ REQUIRED = ('schema_version', 'target_cell_weight', 'max_cells', 'units',
             'suite_weights', 'measured_from', 'runs')
 PROVENANCE_FIELDS = ('measured_from', 'runs')
 UNITS = ('seconds', 'reference-multiples')
+# The optional basis field every write carries; see the module docstring.
 SEED_REASON = 'seeded'
 # A suite the file records nothing about is estimated at the median of
 # the recorded weights, or at this when the file records none.

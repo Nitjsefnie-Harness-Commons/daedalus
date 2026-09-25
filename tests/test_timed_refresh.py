@@ -124,22 +124,25 @@ def _refresh_args(tmp, root, out, runs=3, seed=False, tree=None):
 def test_one_outlier_run_among_several_does_not_change_the_file(tmp):
     """The maintainer's requirement: the median, not the mean.
 
-    Three complete runs measure the suite at 2.0 reference-multiples
-    each; a fourth, older run -- the outlier -- measures it ten times
-    that. A mean follows the outlier, a median does not, so the file
-    must be left exactly as it was.
+    The window is the three most recent complete runs, and the
+    OUTLIER IS INSIDE IT: runs 40 and 38 measure the suite at 2.0
+    reference-multiples and run 39, the middle one, measures it ten
+    times that. The median of [2.0, 20.0, 2.0] is 2.0 and the file
+    must be left exactly as it was; a mean would follow the outlier
+    past the margin and write. The err names the window, so a reader
+    can see the outlier was inside it.
     """
     refresh = _refresh()
-    suites = {'test_slow.py': 4.0, 'test_quick.py': 1.0}
-    for run_id in (40, 39, 38):
-        _write_run(Path(tmp) / 'runs', run_id,
-                   {'cell-01': suites, 'cell-02': {}})
-    _write_run(Path(tmp) / 'runs', 37,
-               {'cell-01': {'test_slow.py': 40.0, 'test_quick.py': 10.0},
-                'cell-02': {}})
-    out = _file(tmp, _data({'test_slow.py': 2.0, 'test_quick.py': 0.5}))
+    for run_id, seconds in ((40, 4.0), (39, 40.0), (38, 4.0)):
+        cells = {'cell-01': {'test_slow.py': seconds,
+                             'test_quick.py': seconds / 4.0},
+                 'cell-02': {'test_other.py': 1.0}}
+        _write_run(Path(tmp) / 'runs', run_id, cells)
+    out = _file(tmp, _data({'test_slow.py': 2.0, 'test_quick.py': 0.5,
+                            'test_other.py': 0.5}))
     before = out.read_text(encoding='utf-8')
     _out, err = _run(refresh, _refresh_args(tmp, Path(tmp) / 'runs', out))
+    assert 'runs 40, 39, 38' in err, err
     assert 'wrote nothing' in err, err
     assert out.read_text(encoding='utf-8') == before
 
@@ -356,7 +359,7 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
               enumerate([60.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0])}
     cells = {'cell-01': dict(list(suites.items())[:4]),
              'cell-02': dict(list(suites.items())[4:])}
-    tree = _tree(tmp, sorted(suites))
+    tree = _tree(tmp, sorted(suites) + ['test_unmeasured.py'])
     root = Path(tmp) / 'runs'
     _write_run(root, 36054336022, cells)
     out = _file(tmp, _data({}, units='seconds'), name='seed.json')
@@ -377,6 +380,11 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
     assert 'raw seconds' in written['seeded'], written['seeded']
     assert f'{expected:g}' in written['seeded'], written['seeded']
     assert '2 cells' in written['seeded'], written['seeded']
+    # The seed says which tree suites the numbers do not cover, so a
+    # reader of the file alone knows the remainder is estimated.
+    assert 'test_unmeasured.py' in written['seeded'], written['seeded']
+    assert "1 of the tree's 9 suites" in written['seeded'], \
+        written['seeded']
 
 
 def _smallest_balancing_target(planner, tree, weights, max_cells):
@@ -392,6 +400,93 @@ def _smallest_balancing_target(planner, tree, weights, max_cells):
                 1 + planner.CELL_WEIGHT_MARGIN):
             return float(target)
     return 0.0
+
+
+def test_the_shipped_file_satisfies_the_margin_it_names(tmp):
+    """The tripwire: the SHIPPED file's own numbers must hold the margin.
+
+    The planner only notes a target the margin forbids and exits 0, so
+    a hand edit of `target_cell_weight` or of any weight in
+    `.github/suite-timings.json` would otherwise reach a pull request
+    with a full matrix printed from a target nothing admits. This reads
+    the shipped file and plans the real tree with it.
+    """
+    planner = _planner()
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    loads = [cell.weight for cell in planner.plan(ROOT, data).cells]
+    median = statistics.median(loads)
+    assert max(loads) <= median * (1 + planner.CELL_WEIGHT_MARGIN), (
+        f'the shipped file plans a heaviest cell of {max(loads):.3f} against '
+        f'a {median:.3f} median, over the {planner.CELL_WEIGHT_MARGIN:g} '
+        f'margin: {max(loads) / median:.3f}x')
+
+
+def test_a_target_the_margin_forbids_is_re_derived_not_written_through(tmp):
+    """The chokepoint: a write never leaves a forbidden target behind.
+
+    A heavy suite beside a light one, with a target below the heavy
+    suite's weight, leaves the heavy cell alone at 10x the median; the
+    refresher re-derives the target (the smallest step the margin
+    admits) and says so in the reason, even though no weight moved.
+    """
+    refresh = _refresh()
+    tree = _tree(tmp, ['test_heavy.py', 'test_light.py'])
+    root = Path(tmp) / 'runs'
+    _write_run(root, 70, {'cell-01': {'test_heavy.py': 40.0,
+                                      'test_light.py': 4.0}},
+               reference=2.0)
+    weights = {'test_heavy.py': 20.0, 'test_light.py': 2.0}
+    out = _file(tmp, _data(weights, target=5.0, max_cells=4))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out, tree=tree))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert 'target re-derived' in err, err
+    assert written['target_cell_weight'] == 25.0, written
+    assert written['suite_weights'] == weights, written
+    assert 'seeded' in written, written
+
+
+def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
+    """A refresh must not drop the only text explaining the two bounds.
+
+    The seed writes the basis into the file's `seeded` field; the first
+    scheduled refresh rewrites the whole file, so it has to write a
+    basis too -- rebuilt for the refreshed numbers, naming the runs,
+    the units, both bounds and the tree suites still estimated.
+    """
+    refresh = _refresh()
+    tree = _tree(tmp, ['test_a.py', 'test_b.py', 'test_unmeasured.py'])
+    seed_root = Path(tmp) / 'seed-runs'
+    _write_run(seed_root, 1, {'cell-01': {'test_a.py': 40.0,
+                                          'test_b.py': 4.0}},
+               reference=None)
+    out = _file(tmp, _data({}, units='seconds'), name='seed.json')
+    _run(refresh, _refresh_args(tmp, seed_root, out, seed=True, tree=tree))
+    assert 'raw seconds' in json.loads(
+        out.read_text(encoding='utf-8'))['seeded']
+    root = Path(tmp) / 'runs'
+    _write_run(root, 2, {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0}},
+               reference=2.0)
+    _run(refresh, _refresh_args(tmp, root, out, tree=tree))
+    written = json.loads(out.read_text(encoding='utf-8'))
+    basis = written['seeded']
+    assert written['units'] == 'reference-multiples', written
+    assert 'raw seconds' not in basis, basis
+    assert 'reference-normalized medians over 1 run(s) (2)' in basis, basis
+    # The basis describes the numbers THIS write produced, not a
+    # remembered one: both bound names carry the file's own values.
+    target = written['target_cell_weight']
+    assert f'target_cell_weight {target:g}' in basis, basis
+    assert f'max_cells {written["max_cells"]}' in basis, basis
+    assert 'test_unmeasured.py' in basis, basis
+
+
+def test_a_recorded_zero_weight_is_a_move_not_a_division(tmp):
+    """The seed rounds to four decimals; a zero must not divide."""
+    refresh = _refresh()
+    # pylint: disable=protected-access
+    assert refresh._moved({'test_tiny.py': 0.0},
+                          {'test_tiny.py': 1.5}) == [
+        ('test_tiny.py', 0.0, 1.5)]
 
 
 def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
