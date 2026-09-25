@@ -76,11 +76,9 @@ MCP_OLD_NAMES = (
 )
 
 # The launches exempt from the tree-wide no-wall-clock-bound rule, keyed by
-# (repo-relative path, enclosing function) so an unrelated edit above a site
-# cannot move a row onto the wrong launch. Each value names either the bound
-# that replaces the launch's own, or why the launch cannot be a bounded git
-# launch. Checked both ways: a live site with no row and a row with no live
-# site are both refusals.
+# (repo-relative path, enclosing function) so an edit above a site cannot
+# move a row onto the wrong launch. Each value names the bound that replaces
+# the launch's own, or why it cannot be a bounded git launch.
 BOUNDED_GIT_LAUNCHES = {
     ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root'):
         'a standalone skill script an operator runs by hand; no suite or '
@@ -162,13 +160,9 @@ def _enclosing_function(tree, line):
 def _bound_sites(source, here):
     """Every in-scope bound site in one source as (path, function, refusal).
 
-    The rule is about git launches, so a site is in scope only when the
-    launch's head reads as the constant ``git``: a readable ``timeout=`` or
-    a ``**``-unpacked keyword mapping (which could hide a timeout) on such
-    a launch. A readable non-git head is provably not a git launch, and an
-    unreadable head is the analyser's stated boundary; the analyser still
-    names both on the refusal, so neither is silently dropped, and the
-    pull-request report lists every one with its head. A refusal the strict
+    A site is in scope only when the launch's head reads as the constant
+    ``git``: a readable ``timeout=`` or a ``**``-unpacked keyword mapping
+    (which could hide a timeout) on such a launch. A refusal the strict
     pattern cannot parse is returned as its own site, so a bound the
     parser cannot read fails closed rather than passing as an accept.
     """
@@ -348,43 +342,33 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     """No git subprocess launch in the tracked tree carries a wall-clock
     bound, except the ones BOUNDED_GIT_LAUNCHES allows by name.
 
-    The audit's scope is the tracked tree, not a hand-written module list,
-    so a module added later is inside its reach with no hand edit. Each
-    tracked Python file is prefilted on the substring 'subprocess' before
-    the analyser runs: the analyser only understands launches spelled
-    through `subprocess`, so a source without that substring cannot hold a
-    launch it would see. The analyser's full resolution over the whole
-    tree is kept to a few seconds by that prefilter.
+    Scope is the tracked tree, not a hand-written module list, so a module
+    added later is inside its reach with no hand edit. Each file is
+    prefilted on 'subprocess': the analyser only understands launches
+    spelled through `subprocess`, so a source without it cannot hold a
+    launch it would see.
 
-    Dropping the bound also drops the only hang-guard on a wedged git
-    launch; the remedy accepts a hang surfacing as run_tests.py's
-    900-second suite bound ("SUITE TIMED OUT"), or the CI job's own
-    timeout-minutes, instead of a wall-clock margin that fires on a loaded
-    runner. A launch that only reads the local repository, or that sits
-    inside an enclosing bound, is bounded by that; a launch that can block
-    on a repository lock or the network, or that runs as a standalone tool
-    with nothing above it to catch a hang, keeps a bound and a table row
-    naming it. No site is ever fixed by widening a number or adding a
-    retry.
+    A launch that only reads the local repository, or sits inside an
+    enclosing suite or CI bound, is bounded by that; a hang surfaces as
+    the enclosing bound, a better failure than a margin on a loaded
+    runner. A launch that can block on a repository lock or the network,
+    or that runs as a standalone tool with nothing above it to catch a
+    hang, keeps a bound and a table row naming it.
 
-    The head is read through a left-nested `+` concatenation and through a
-    plain name bound to a literal, both to a cap of _ARGV_UNWRAP_CAP, so a
-    tuple-concatenated or name-held git argv is classified rather than
-    refused as unreadable. A site is in scope only when the head reads as
-    the constant `git`. A `**`-unpacked keyword mapping on a git launch
-    is in scope, because a mapping the audit cannot read can hide a
-    timeout. A readable non-git head is provably not a git launch and an
-    unreadable head is the analyser's stated boundary; the analyser names
-    the head on every such refusal, so neither is silently dropped, and
-    the pull-request report lists each with its head and decision.
+    A site is in scope only when the head reads as the constant `git`,
+    through a `+` concat or a name bound to a literal, to a cap of
+    _ARGV_UNWRAP_CAP. A `**`-unpacked keyword mapping on a git launch is
+    in scope: a mapping the audit cannot read can hide a timeout. A
+    readable non-git head is provably not a git launch; an unreadable head
+    is the analyser's stated boundary, named on the refusal so nothing is
+    silently dropped.
 
-    The allowance is an exemption, so it is pinned from both sides: a live
-    site with no table row fails, a table row matching zero or more than
-    one live site fails, and a table row whose function no longer holds a
-    site fails. Matching is on the exact (path, function) pair — a bounded
-    git launch in a different function of an allowed module, or a second
-    bounded git launch inside an allowed function, is a refusal, so the
-    exemption can never be widened by a cheaper prefix or substring match.
+    The allowance is pinned from both sides: a live site with no row, a
+    row matching zero or more than one live site, and a row whose function
+    no longer holds a site all fail. Matching is on the exact (path,
+    function) pair, so a launch in a different function of an allowed
+    module, or a second launch in an allowed function, is a refusal — the
+    exemption cannot be widened by a prefix or substring match.
     """
     del tmp
     live = {}
@@ -446,11 +430,10 @@ def test_the_head_label_separates_git_non_git_and_unreadable(tmp):
     The analyser enforces the bound only on a git head, so a head it cannot
     read must never be labelled a provable non-git: on the exemption path
     that would silently widen the exempt set. The name-bound git shape is
-    the real-target case (planted as a tracked module and caught by the
-    tree-wide rule); no tracked bounded launch has an unreadable head to
-    plant, so the unresolved-name shape is pinned here against the real
-    analyser, and the two non-git shapes are pinned beside it so a cheaper
-    reading that maps both unreadable and non-git to one label dies.
+    proven against the real tree-wide rule by a plant; no tracked bounded
+    launch has an unreadable head to plant, so the unresolved-name shape
+    is pinned here against the real analyser, with the non-git shapes
+    beside it so a reading that collapses the labels dies.
     """
     del tmp
     shapes = (
