@@ -116,6 +116,93 @@ def test_store_hotfix_carries_a_scope_out_and_hands_the_record_back(_tmp):
     assert 'match' not in listed['fixes'][1], listed
 
 
+def test_store_hotfix_forwards_the_empty_pattern_it_cannot_swallow(_tmp):
+    """C15: `match=""` travels to the extension, which is what refuses it.
+
+    The extension owns the pattern grammar, so the surface's whole job is to
+    forward what the caller wrote and let the extension answer. A guard that
+    drops an empty string turns that refusal into silence: the store keeps
+    the scope the operator was trying to change and reports success. This is
+    the one routing decision on this surface whose truthy-guard mutant
+    changes behaviour without turning any other control red — the empty
+    string is refused, so no accepted-store control sees it — and it is
+    pinned here rather than left to the extension's own refusal.
+    """
+    composition = _load_composition('hotfix-empty-match')
+    registered = composition.mcp.registered
+
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)',
+                                           match=''))
+
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)', match=''),
+    ]
+
+    # The anti-vacuity half: the same field forwards a real pattern and
+    # forwards nothing at all when it is unstated, so the assertion above
+    # reads the value rather than the field's presence.
+    composition.bridge.calls.clear()
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)',
+                                           match=SCOPE))
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)'))
+
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)', match=SCOPE),
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)'),
+    ], composition.bridge.calls
+
+
+def test_store_hotfix_carries_a_clear_out_and_refuses_a_contradiction(_tmp):
+    """C12/C13, MCP direction: the clear reaches the extension as the clear.
+
+    An unstated clear is not sent — the extension reads an absent field as
+    "leave the scope alone", so sending `False` by default would be a second
+    spelling of the same instruction. A clear that travels beside a pattern
+    is refused here rather than sent as a contradiction the extension has to
+    guess at.
+    """
+    composition = _load_composition('hotfix-clear')
+    registered = composition.mcp.registered
+
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)',
+                                           clear_scope=True))
+
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)', clearScope=True),
+    ]
+
+    composition.bridge.calls.clear()
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)'))
+
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)'),
+    ], composition.bridge.calls
+
+    refused = False
+    composition.bridge.calls.clear()
+    try:
+        asyncio.run(registered['store_hotfix'](
+            'fix', 'console.log(1)', match=SCOPE, clear_scope=True))
+    except ValueError:
+        refused = True
+    # The anti-vacuity half: the refusal is the PAIR, so the same call
+    # without the clear is still forwarded.
+    assert refused, 'clear_scope with a match was not refused'
+    assert composition.bridge.calls == [], composition.bridge.calls
+    asyncio.run(registered['store_hotfix']('fix', 'console.log(1)',
+                                           match=SCOPE, clear_scope=False))
+
+    assert composition.bridge.calls == [
+        _mcp_tool_commands._ext('_store_hf', 'store-hotfix', fixId='fix',
+                                code='console.log(1)', match=SCOPE),
+    ], composition.bridge.calls
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='mcphotfix_')
 

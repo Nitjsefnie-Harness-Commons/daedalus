@@ -195,12 +195,20 @@ def do_store_hotfix(args):
     # was updated without restating --permanent.
     if args.permanent:
         fields['permanent'] = True
-    # A scope is carried the same way; an empty one would be refused there.
-    if args.match:
+    # A scope is carried the same way, and an empty one would be refused
+    # there. The parser already refuses a scope and a clear together, so one
+    # of these two runs.
+    if args.clear_scope:
+        fields['clearScope'] = True
+    elif args.match:
         fields['match'] = args.match
     result = ext_cmd('_store_hf', 'store-hotfix', **fields)
     perm = ' [PERM]' if result.get('permanent') else ''
-    print(f'Stored hotfix "{result.get("stored", "?")}"{perm} '
+    # A clear and a plain store print the same line otherwise, and the scope
+    # the fix ended up with is what the operator came to change.
+    scope = result.get('match')
+    scope = ' [unscoped]' if scope is None else f' [{scope}]'
+    print(f'Stored hotfix "{result.get("stored", "?")}"{perm}{scope} '
           f'({result.get("total", "?")} total)')
 
 
