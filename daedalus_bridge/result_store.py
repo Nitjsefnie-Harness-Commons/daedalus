@@ -140,11 +140,27 @@ def delivery_result_paths(res_dir, token, tab, did):
     return delivery_dir, delivery_file
 
 
+def _present(path):
+    """Whether the path is there, answering a failed stat as "not there".
+
+    `Path.exists()` re-raises a stat that failed for a reason other than
+    absence -- a permission error, a stale handle on a network filesystem --
+    and a read that lets that out leaves the caller with no response at all
+    rather than an answer. For a read the safe reading of "could not tell" is
+    the one it already gives for a file that is not there: nothing to read,
+    and the stripe the caller asks for next is refused on the same ground.
+    """
+    try:
+        return os.path.exists(path)
+    except OSError:
+        return False
+
+
 def find_delivery_result(res_dir, token, tab, did):
     """Find a delivery file and the tab component that owns its slot."""
     delivery_dir, delivery_file = delivery_result_paths(
         res_dir, token, tab, did)
-    if tab or delivery_file.exists():
+    if tab or _present(delivery_file):
         return delivery_dir, delivery_file, tab
     root = delivery_root(res_dir)
     prefix = f'{token}_'
@@ -165,7 +181,7 @@ def find_delivery_result(res_dir, token, tab, did):
                 secret=token)
         except ValueError:
             continue
-        if candidate_file.exists():
+        if _present(candidate_file):
             return candidate_dir, candidate_file, name[len(prefix):]
     return delivery_dir, delivery_file, ''
 

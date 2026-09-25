@@ -14,11 +14,13 @@ runs on a case-sensitive filesystem, and the folding-parent half of the same
 contract is pinned against a real case-folding parent in
 `test_result_routes.test_a_folded_target_is_one_directory_and_one_stripe`.
 """
+import errno
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _bridge import BRIDGE_ENV, TOK  # noqa: E402
 import _util  # noqa: E402
 
 # Above any delivery count these fixtures store, so eviction never fires.
@@ -79,7 +81,7 @@ def test_a_consume_never_takes_a_stripe_the_writer_will_not(tmp):
 
     def absent_then_publish(path, *args, **kwargs):
         """The reader's stat, before the writer that makes it true."""
-        if os.fspath(path) == os.fspath(target) and not fired:
+        if os.fsdecode(path) == os.fsdecode(target) and not fired:
             fired['reader'] = True
             published.append(routes.accept_result(
                 res_dir, cmd_dir, token,
@@ -175,6 +177,11 @@ def test_the_post_creates_the_directory_before_it_asks_for_the_stripe(tmp):
     seen = []
 
     def recording_lock_for(target_dir):
+        # `is_dir()` is a stat, from inside the wrapper. That is the order
+        # this fixture exists to read, so it has to be asked here; a recorder
+        # that took a second filesystem reading for its own convenience would
+        # move the moment it is recording. Anything else recorded here has to
+        # be state the wrapper already has.
         existed = target_dir.is_dir()
         seen.append((os.fspath(target_dir), existed))
         return real_lock_for(target_dir)
@@ -228,6 +235,183 @@ def test_the_post_hands_the_stripe_a_directory_not_a_name(tmp):
     assert seen[0].is_dir(), seen
     keys = {store.delivery_stripe_key(seen[0])}
     assert len(keys) == 1 and None not in keys, keys
+
+
+def _stat_failure_routes(routes, tmp, errno, exc):
+    """Drive a stat failure that is not absence through all three routes.
+
+    The three routes owe three different answers to the same event, so they
+    are driven together: a POST has work to refuse, and a read has none. The
+    failing stat is injected at `os.stat`, which is the boundary the program
+    asks its question at, and the injection is asserted to have fired.
+    """
+    res_dir, cmd_dir = _roots(tmp)
+    # The accepted-delivery record is process-wide, so each case needs its own
+    # delivery id or the second case's setup POST reads as a duplicate.
+    token, did = f'statfail{errno}tok', f'1700000000000_s{errno}'
+    stored = routes.accept_result(
+        res_dir, cmd_dir, token,
+        {'tabId': 'tab', 'id': 'one', '_did': did}, DELIVERY_CAP)
+    delivery_file = _delivery(res_dir, token, 'tab', did)
+    assert stored == (200, {'ok': True}), stored
+    real_stat = os.stat
+    fired = []
+
+    def failing_stat(path, *args, **kwargs):
+        # Every delivery target is one level under the deliveries root, so
+        # that is what the injection has to answer for: the POST's own new
+        # target, the read's, and the broadcast directory the compat path
+        # falls back to.
+        if os.fsdecode(path).split(os.sep)[-2:-1] == ['deliveries']:
+            fired.append(os.fsdecode(path))
+            raise exc(errno, 'injected: the parent will not answer')
+        return real_stat(path, *args, **kwargs)
+
+    os.stat = failing_stat
+    try:
+        posted = routes.accept_result(
+            res_dir, cmd_dir, token,
+            {'tabId': 'other', 'id': 'two',
+             '_did': f'1700000000001_s{errno}'},
+            DELIVERY_CAP)
+        read = routes.fetch_result(
+            res_dir, token, {'tab': ['tab'], 'delivery': [did],
+                             'consume': ['1']})
+        kept = routes.fetch_result(
+            res_dir, token, {'tab': ['tab'], 'consume': ['1']})
+    finally:
+        os.stat = real_stat
+    assert fired, 'the injection never fired'
+    return posted, read, kept, delivery_file
+
+
+def test_a_stat_failure_is_answered_not_raised_on_every_route(tmp):
+    """A stat that fails for any reason is a 500, a pending and a pending.
+
+    `except OSError: return None` in the key function cannot tell a stat that
+    failed from a stat that found nothing, and the three routes must live
+    with that: a POST has just created the directory, so for it the same
+    answer means a storage failure and a 500, and a read has nothing to do
+    either way, so `pending` is the honest one. Pinned for three error
+    numbers, because a permission error, a path component that is not a
+    directory and a symlink loop are all reachable and none of them is
+    absence.
+    """
+    cases = [(errno.EACCES, PermissionError),
+             (errno.ENOTDIR, NotADirectoryError),
+             (errno.ELOOP, OSError)]
+    for index, (number, exc) in enumerate(cases):
+        routes = _load(f'stripe_stat_failure_{number}')
+        res_dir = Path(tmp) / f'case{index}'
+        res_dir.mkdir()
+        posted, read, kept, delivery_file = _stat_failure_routes(
+            routes, res_dir, number, exc)
+        assert posted == (500, {'error': 'result storage failure'}), (
+            number, posted)
+        assert read == (200, {'pending': True}), (number, read)
+        assert kept[0] == 200, (number, kept)
+        # The read was asked to consume and did not, so the delivery is
+        # still there -- the failure refused the work rather than half
+        # doing it.
+        assert delivery_file.exists(), number
+        assert not _slot(res_dir, f'statfail{number}tok', 'tab').exists() or (
+            kept[0] == 200), number
+
+
+# A stat that fails for any reason other than absence, inside the real
+# bridge process: every delivery target is one level under the deliveries
+# root, so that is what the patch refuses. Injected at `os.stat`, which is
+# the boundary the key function asks its question at.
+_STAT_FAILURE_PATCH = """
+import os
+
+_real_stat = os.stat
+
+
+def _failing_stat(path, *args, **kwargs):
+    # Only a path is rewritten: `os.scandir` entries are stat'd against a
+    # directory descriptor, which is an int and has no spelling to refuse.
+    if isinstance(path, (str, bytes, os.PathLike)):
+        text = os.fspath(path)
+        if os.sep + 'deliveries' + os.sep in text + os.sep:
+            raise PermissionError(13, 'injected: the parent will not answer')
+    return _real_stat(path, *args, **kwargs)
+
+
+os.stat = _failing_stat
+"""
+
+
+def test_a_no_tab_read_under_a_stat_failure_answers_pending(tmp):
+    """The read with no tab, which has to look for the file to be told.
+
+    A `delivery=` read that names no tab asks whether the file is there
+    before it scans, and `Path.exists()` re-raises a stat that failed for a
+    reason other than absence -- a permission error among the three this
+    repository can raise on purpose. The scan's own probe has the same shape.
+    Both are now answered as "not there", which is what a read can say
+    without one: the delivery is still there, and the next read that can stat
+    will find it. Before, the exception left `do_GET` and the client with a
+    closed connection -- measured against the real handler on EACCES, with
+    ENOTDIR and ELOOP already absorbed by `Path.exists()`'s own list.
+    """
+    routes = _load('stripe_stat_failure_no_tab')
+    res_dir, cmd_dir = _roots(tmp)
+    token, did = 'notabstatok', '1700000000000_n'
+    stored = routes.accept_result(
+        res_dir, cmd_dir, token,
+        {'tabId': 'tab', 'id': 'one', '_did': did}, DELIVERY_CAP)
+    delivery_file = _delivery(res_dir, token, 'tab', did)
+    assert stored == (200, {'ok': True}), stored
+    assert delivery_file.is_file(), delivery_file
+    real_stat = os.stat
+    fired = []
+
+    def failing_stat(path, *args, **kwargs):
+        if isinstance(path, (str, bytes, os.PathLike)):
+            text = os.fsdecode(path)
+            if os.sep + 'deliveries' + os.sep in text + os.sep:
+                fired.append(text)
+                raise PermissionError(errno.EACCES, 'injected: no answer')
+        return real_stat(path, *args, **kwargs)
+
+    os.stat = failing_stat
+    try:
+        # The first probe is the direct one; the rest come from the scan the
+        # no-tab read falls into once the direct probe says "not there".
+        first = routes.fetch_result(res_dir, token, {'delivery': [did]})
+        second = routes.fetch_result(
+            res_dir, token, {'delivery': [did], 'consume': ['1']})
+    finally:
+        os.stat = real_stat
+    assert fired, 'the injection never fired'
+    assert first == (200, {'pending': True}), first
+    assert second == (200, {'pending': True}), second
+    assert delivery_file.exists(), 'a refused read still consumed'
+
+
+def test_a_stat_failure_answers_a_client_instead_of_dropping_it(tmp):
+    """The POST owes a client a response even when the stripe is refused.
+
+    The route-level fixtures above call `accept_result` directly. This one
+    goes through the real `BaseHTTPRequestHandler` the bridge derives from,
+    because the difference the route-level call cannot see is exactly the one
+    that matters: an exception the route does not catch escapes `do_POST`,
+    which has no catch-all, and the client gets a closed connection instead
+    of the 500 the contract promises. `_util.post_json` raises on a dropped
+    connection, so this fixture cannot pass by accident.
+    """
+    patch_dir = Path(tmp) / 'patch'
+    patch_dir.mkdir()
+    (patch_dir / 'sitecustomize.py').write_text(
+        _STAT_FAILURE_PATCH, encoding='utf-8')
+    env = {**BRIDGE_ENV, 'PYTHONPATH': str(patch_dir)}
+    with _util.bridge(tmp, env=env) as (base, _docroot):
+        status, body = _util.post_json(base + '/result', {
+            'token': TOK, 'tabId': 'tab', 'id': 'one', 'result': 'x',
+            'error': None, 'ts': 1, '_did': 'stat-failure-1'})
+    assert status == 500, status
+    assert body == {'error': 'result storage failure'}, body
 
 
 def main():
