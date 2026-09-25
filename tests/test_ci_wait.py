@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ci_wait.py's verdict: the superseded-cancelled rule and its edges."""
+import contextlib
 import io
 import sys
 from pathlib import Path
@@ -216,6 +217,160 @@ def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
         '  run 1: completed/success\n'
         'all 1 run(s) on bbbbbbbbbbbb acceptable\n'
     )
+
+
+class _Clock:
+    """The clock both modules read, moved only by the sleeps themselves."""
+
+    def __init__(self, now=1000.0):
+        self.now = now
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+@contextlib.contextmanager
+def _frozen_wait_clock(mod, clock):
+    """One clock for ci_wait and the client it polls through.
+
+    The bound is read from the client's own `time`, so a wait faked on
+    ci_wait's clock alone would never expire. Nothing real is waited on,
+    so a timeout here is a value, not a margin.
+    """
+    real = (mod.time, mod.gh_client.time)
+    mod.time = clock
+    mod.gh_client.time = clock
+    try:
+        yield clock
+    finally:
+        mod.time, mod.gh_client.time = real
+
+
+def test_a_timeout_names_the_runs_still_open(tmp):
+    """Issue 1088: a bound reached with no refusal pending is a plain
+    timeout, so it must name the runs that are still open."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    mod.runs_on = lambda repo, sha: [
+        _run(1, 'success', '2026-09-07T10:00:00Z'),
+        _run(2, None, '2026-09-07T10:05:00Z', status='in_progress')]
+    out = io.StringIO()
+    err = io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'c' * 40, 30, 30, out)
+    text = out.getvalue()
+    assert code == 2, text
+    assert clock.now == 1030.0, clock.now
+    assert 'rate limited' not in text, text
+    assert text.endswith('wait exceeded 30s on cccccccccccc: still open: '
+                         'run 2 (in_progress)\n'), text
+
+
+def test_a_timeout_before_any_run_says_so(tmp):
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    mod.runs_on = lambda repo, sha: []
+    out = io.StringIO()
+    err = io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'd' * 40, 30, 30, out)
+    text = out.getvalue()
+    assert code == 2, text
+    assert 'rate limited' not in text, text
+    assert text.endswith('wait exceeded 30s on dddddddddddd: no workflow '
+                         'run ever appeared\n'), text
+
+
+def test_a_pause_that_ends_the_wait_still_reports_the_limit(tmp):
+    """The other half of the rate-limit path: a refusal whose pause
+    consumed the whole remaining budget ends the wait, and says so."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    polls = []
+
+    def _refuse_first(repo, sha):
+        polls.append(clock.now)
+        if len(polls) == 1:
+            raise mod.gh_client.RateLimited(
+                'slow down', resume_at=clock.now + 3600)
+        return []
+
+    mod.runs_on = _refuse_first
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'e' * 40, 30, 30, out)
+    assert code == 2, out.getvalue()
+    assert polls == [1000.0], polls
+    assert clock.now == 1030.0, clock.now
+    assert out.getvalue() == (
+        'wait exceeded 30s on eeeeeeeeeeee: still rate limited, '
+        'no verdict to report\n'), out.getvalue()
+    assert len([line for line in err.getvalue().splitlines()
+                if 'rate limit reached' in line]) == 1, err.getvalue()
+
+
+def test_a_refusal_that_ended_early_still_answers_the_wait(tmp):
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    polls = []
+
+    def _refuse_first(repo, sha):
+        polls.append(clock.now)
+        if len(polls) == 1:
+            raise mod.gh_client.RateLimited(
+                'slow down', resume_at=clock.now + 5)
+        return [_run(1, 'success', '2026-09-07T10:00:00Z')]
+
+    mod.runs_on = _refuse_first
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'f' * 40, 30, 60, out)
+    assert code == 0, out.getvalue()
+    assert polls == [1000.0, 1005.0], polls
+    assert 'acceptable' in out.getvalue(), out.getvalue()
+    assert len([line for line in err.getvalue().splitlines()
+                if 'rate limit reached' in line]) == 1, err.getvalue()
+
+
+def test_a_pause_that_ended_early_does_not_label_the_next_timeout(tmp):
+    """The discriminator: the polls after a pause that ended well before
+    the bound are ordinary polls, so a bound that passes among them is an
+    ordinary timeout. Recording that a refusal happened at all would make
+    this one report the rate limit again."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    polls = []
+
+    def _refuse_first(repo, sha):
+        polls.append(clock.now)
+        if len(polls) == 1:
+            raise mod.gh_client.RateLimited(
+                'slow down', resume_at=clock.now + 5)
+        return [_run(1, None, '2026-09-07T10:00:00Z', status='in_progress')]
+
+    mod.runs_on = _refuse_first
+    out = io.StringIO()
+    err = io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'a' * 40, 10, 30, out)
+    text = out.getvalue()
+    assert code == 2, text
+    assert polls == [1000.0, 1005.0, 1015.0, 1025.0], polls
+    assert clock.now == 1030.0, clock.now
+    assert 'rate limited' not in text, text
+    assert text.endswith('wait exceeded 30s on aaaaaaaaaaaa: still open: '
+                         'run 1 (in_progress)\n'), text
 
 
 def main():

@@ -86,8 +86,14 @@ class WaitExpired(RuntimeError):
     A wait needs a liveness escape: without one, a refusal that outlives
     the bound sleeps to it, retries and spins on the API refusing it. This
     is what the bound becomes, so the caller reaches its own timed-out path
-    rather than looping here.
+    rather than looping here. `rate_limited` says the bound was reached on
+    the wake from a pause rather than between two polls, which is the only
+    thing that separates a wait the limit ended from one the budget did.
     """
+
+    def __init__(self, message, rate_limited=False):
+        super().__init__(message)
+        self.rate_limited = rate_limited
 
 
 class RateLimited(RuntimeError):
@@ -438,16 +444,22 @@ class Watcher:
 
         A bound, when one was given, is a liveness escape and not only a
         cap on the sleep: once it has passed, the pause ends the wait
-        instead of buying one more request.
+        instead of buying one more request. The `WaitExpired` then carries
+        whether a pause was the step that reached the bound. The flag
+        belongs to this call alone: a pause that ended before the bound
+        was not what ended the wait, and the polls after it are ordinary
+        polls, so a bound that passes among them is an ordinary timeout.
         """
+        paused = False
         while True:
             if (self.deadline is not None
                     and time.monotonic() >= self.deadline):
-                raise WaitExpired('the wait deadline passed')
+                raise WaitExpired('the wait deadline passed', paused)
             try:
                 return call()
             except RateLimited as refusal:
                 self._pause(refusal)
+                paused = True
 
     def sleep(self, seconds):
         """Sleep the whole wait in slices, so it stays a sequence of steps."""

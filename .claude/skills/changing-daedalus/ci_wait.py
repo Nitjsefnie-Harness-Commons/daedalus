@@ -133,22 +133,42 @@ def print_matrix(runs, sha, out):
         print(f'  {run.get("name")}: {state}{suffix}', file=out, flush=True)
 
 
+def _timeout_report(runs, timeout, sha, out):
+    """The exit-2 line about the runs the bound was reached with."""
+    if not runs:
+        print(f'wait exceeded {timeout}s on {sha[:12]}: no workflow '
+              'run ever appeared', file=out, flush=True)
+        return
+    open_runs = ', '.join(
+        f'{run.get("name")} ({run.get("status")})'
+        for run in runs if run.get('status') != 'completed')
+    print(f'wait exceeded {timeout}s on {sha[:12]}: still open: '
+          f'{open_runs}', file=out, flush=True)
+
+
 def wait(repo, sha, interval, timeout, out):
     """Poll until a verdict or the bound; returns the exit code.
 
     A rate-limit refusal does not end the wait: the watcher says once where
     it is waiting and resumes at the reset, bounded by this wait's own
-    deadline, and the next poll is a poll like any other.
+    deadline, and the next poll is a poll like any other. Only a bound
+    reached on the wake from a pause is the rate limit's; one reached
+    between two polls reports the runs, which is the state the caller has
+    to act on.
     """
     deadline = time.monotonic() + timeout
     watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
                                 deadline=deadline)
+    runs = []
     while True:
         try:
             runs = watcher.poll(lambda: runs_on(repo, sha))
-        except gh_client.WaitExpired:
-            print(f'wait exceeded {timeout}s on {sha[:12]}: still rate '
-                  'limited, no verdict to report', file=out, flush=True)
+        except gh_client.WaitExpired as expired:
+            if expired.rate_limited:
+                print(f'wait exceeded {timeout}s on {sha[:12]}: still rate '
+                      'limited, no verdict to report', file=out, flush=True)
+            else:
+                _timeout_report(runs, timeout, sha, out)
             return 2
         state, offenders = verdict(runs)
         print_matrix(runs, sha, out)
@@ -169,15 +189,7 @@ def wait(repo, sha, interval, timeout, out):
             return 1
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            if not runs:
-                print(f'wait exceeded {timeout}s on {sha[:12]}: no workflow '
-                      'run ever appeared', file=out, flush=True)
-            else:
-                open_runs = ', '.join(
-                    f'{run.get("name")} ({run.get("status")})'
-                    for run in runs if run.get('status') != 'completed')
-                print(f'wait exceeded {timeout}s on {sha[:12]}: still open: '
-                      f'{open_runs}', file=out, flush=True)
+            _timeout_report(runs, timeout, sha, out)
             return 2
         watcher.sleep(max(0, min(interval, remaining)))
 
