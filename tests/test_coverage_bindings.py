@@ -4,11 +4,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _coverage_guard import _synthetic_violations  # noqa: E402
+from _coverage_guard import (  # noqa: E402
+    _BINDING_MESSAGE, _synthetic_violations)
 
 
-_BINDING_MESSAGE = (
-    'a launcher is bound through a form the guard cannot follow')
 _NL = '\n'
 _FRESH_SOURCE_MARKER = 'mutation child loaded fresh source'
 _SCOPE_INVOKE = (
@@ -408,6 +407,8 @@ def _mutation_specs():
         _ROOT_PROVENANCE_MUTATIONS as _DESTINATION_MUTATIONS)
     from test_coverage_scope_bindings import (
         _ROOT_PROVENANCE_INVOKE, _ROOT_PROVENANCE_MUTATIONS)
+    from test_coverage_unfollowable_forms import (
+        _UNFOLLOWABLE_MUTATIONS as _unfollowable_mutations)
 
     assign = (
         "        if (len(node.targets) == 1 and "
@@ -435,14 +436,7 @@ def _mutation_specs():
         "",
     )
     defaults = (
-        "    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, "
-        "ast.Lambda)):\n"
-        "        defaults = [*node.args.defaults,\n"
-        "                    *(value for value in node.args.kw_defaults\n"
-        "                      if value is not None)]\n"
-        "        return [(value.lineno, value) for value in defaults]\n",
-        "",
-    )
+        "    if isinstance(node, _SIGNED_FORMS):\n", "    if False:\n")
     match = (
         "    if isinstance(node, ast.Match) and any(\n"
         "            _pattern_binds(case.pattern) for case in node.cases):\n"
@@ -469,13 +463,9 @@ def _mutation_specs():
         "        yield from _carried_parts(value.value)\n"
         "        yield from _carried_parts(value.slice)\n", "")
     call_receiver = (
-        "        if (isinstance(node, ast.Call)\n"
-        "                and not _has_cwd_control(node)\n"
-        "                and any(_names_one_of(part, "
-        "facts.subprocess_modules)\n"
-        "                        or _is_launch_value(part, facts)\n"
-        "                        for part in _call_receiver_parts(node))):\n"
-        "            lines.append(node.lineno)\n", "")
+        "    if isinstance(callee, (ast.Tuple, ast.List, ast.Set, ast.Dict)):"
+        "\n        yield from _carried_parts(callee)\n",
+        "    if False:\n        yield from _carried_parts(callee)\n")
     default_scope = (
         "            for value in (*node.args.defaults, "
         "*node.args.kw_defaults):\n"
@@ -575,7 +565,9 @@ def _mutation_specs():
         ('match subject', 'bindings', (match,),
          'suite.test_match_capture_refuses_a_hidden_launcher(None)'),
         ('callee base', 'bindings', (callee,),
-         'suite.test_call_result_assignment_refuses_a_hidden_launcher(None)'),
+         'import test_coverage_unfollowable_forms as form_suite; '
+         'form_suite.test_a_launcher_reached_only_through_a_callee_chain_is_'
+         'refused(None)'),
         ('dict values', 'bindings', (dict_values,),
          _INLINE_INVOKE),
         ('subscript values', 'bindings', (subscript,),
@@ -622,7 +614,8 @@ def _mutation_specs():
         ('MatchMapping global', 'scopes', (match_rest_names,),
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
     ) + _BASH_MUTATION_SPECS + _ROOT_PROVENANCE_MUTATIONS \
-        + _DESTINATION_MUTATIONS + _CACHE_MUTATIONS
+        + _DESTINATION_MUTATIONS + _CACHE_MUTATIONS \
+        + _unfollowable_mutations
 
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
