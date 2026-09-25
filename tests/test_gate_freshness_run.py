@@ -296,7 +296,7 @@ def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
     code, verdicts = m.process(read, 'o/r', m.select_heads([_pr(7)]),
                                [('.pylintrc', G1)], RUN)
     assert published == [], 'published onto a superseded SHA'
-    assert code != 0, 'skipping a moved head must be loud'
+    assert code == 0, 'a moved head gets its own verdict; not a failure'
     assert verdicts == []
 
 
@@ -310,7 +310,60 @@ def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
     code, _ = m.process(read, 'o/r', m.select_heads([_pr(7)]),
                         [('.pylintrc', G1)], RUN)
     assert published == [], 'published onto a SHA that stopped being the head'
-    assert code != 0, 'skipping a head that moved must be loud'
+    assert code == 0, 'a moved head gets its own verdict; not a failure'
+
+
+def _writing_read(m, published, current, **flow):
+    """A `_flow_read` whose recorded writes carry the head sha each was
+    written onto, so a test can name the pull request that received it. `m`
+    is the caller's module instance, as `_only_fail` also takes it: the
+    reader raises that instance's QueryError and process catches the same
+    class."""
+    base = _flow_read(m, {'.pylintrc': [G1]}, current, published, **flow)
+
+    def read(argv):
+        answer = base(argv)
+        if any(field.startswith('head_sha=') for field in argv):
+            sha = next(field[len('head_sha='):] for field in argv
+                       if field.startswith('head_sha='))
+            published[-1] = (sha, 'POST')
+        return answer
+    return read
+
+
+def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
+    """A moved head alone must not cost the run the healthy head it walks
+    past, and must not by itself make the run nonzero."""
+    del tmp
+    m = _mod()
+    published = []
+    heads = m.select_heads([_pr(7), _pr(8)])
+    read = _writing_read(m, published, current={7: 'e' * 40, 8: HEAD})
+    code, verdicts = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN)
+    assert code == 0, 'a moved head is not a failure'
+    assert published == [(HEAD, 'POST')], published
+    assert len(verdicts) == 1
+    assert verdicts[0].conclusion == 'success'
+
+
+def test_a_moved_head_and_a_write_failure_and_a_healthy_head(tmp):
+    """The mixed run pins the two outcomes apart: the moved head is not a
+    failure, the write failure is, and the healthy head still publishes. It
+    rules out "exit nonzero if anything was skipped" and "always exit 0",
+    each of which the one-directional tests let through."""
+    del tmp
+    m = _mod()
+    published = []
+    bad_sha = 'b' * 40
+    heads = m.select_heads([_pr(7), _pr(8, sha=bad_sha), _pr(9)])
+    read = _writing_read(m, published,
+                         current={7: 'e' * 40, 8: bad_sha, 9: HEAD},
+                         fail_listing_for=(bad_sha,))
+    code, verdicts = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN)
+    assert code == 1, 'the failed write must still fail the run'
+    assert published == [(HEAD, 'POST')], published
+    assert len(verdicts) == 1
+    assert verdicts[0].conclusion == 'success'
 
 
 def test_a_head_is_revalidated_before_the_decision(tmp):

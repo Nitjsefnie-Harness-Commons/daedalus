@@ -50,7 +50,10 @@ call bound, a route that cannot establish its head) publishes NOTHING and exits
 nonzero: an invented verdict is worse than a missing one. A PER-HEAD failure
 (one head's compare unreadable, or its write failing) still writes that head's
 RED verdict where it can, skips it loudly where it cannot, and never abandons
-the rest. All print a loud line to stderr.
+the rest. A head that MOVED under the run is reported on stderr and skipped
+WITHOUT failing the run: its new head receives its own verdict from its own
+`pull_request_target` event, so a concurrent push is not a write failure. All
+print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
 commits, one compare, plus one head revalidation, one check-runs listing, a
@@ -359,10 +362,13 @@ def required_calls(head_count, gate_count):
 
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
-    """Publish a verdict for each head. Returns (exit_code, published). A head
-    whose write fails is skipped loudly and the run continues: one transient
-    failure must not abandon the later heads, which include stale ones waiting
-    for a red. `dry_run` computes and reports but publishes nothing.
+    """Publish a verdict for each head. Returns (exit_code, published), the
+    exit code nonzero iff at least one write FAILED. A head that moved under
+    the run is reported and skipped without failing it: its new head gets its
+    own verdict from its own `pull_request_target` event. A head whose write
+    fails is skipped loudly and the run continues: one transient failure must
+    not abandon the later heads, which include stale ones waiting for a red.
+    `dry_run` computes and reports but publishes nothing.
     """
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
     needed = required_calls(len(heads), len(gates))
@@ -372,18 +378,16 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
               'publishing nothing', file=sys.stderr)
         return 1, []
     published = []
-    skipped = 0
+    failed = 0
     for head in heads:
         if current_head(read, repository, head['number']) != head['sha']:
             print(f'gate freshness: head of pull request '
                   f'{head["number"]} moved; skipping', file=sys.stderr)
-            skipped += 1
             continue
         verdict = head_verdict(read, repository, head, gates)
         if current_head(read, repository, head['number']) != head['sha']:
             print(f'gate freshness: head of pull request '
                   f'{head["number"]} moved; skipping', file=sys.stderr)
-            skipped += 1
             continue
         if dry_run:
             print(f'PR #{head["number"]} {head["sha"][:12]} '
@@ -397,10 +401,10 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
                 print(f'gate freshness: could not publish the verdict for '
                       f'pull request {head["number"]}: {error}; skipping',
                       file=sys.stderr)
-                skipped += 1
+                failed += 1
                 continue
         published.append(verdict)
-    return (1 if skipped else 0), published
+    return (1 if failed else 0), published
 
 
 def gh_read(argv):
