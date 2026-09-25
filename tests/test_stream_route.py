@@ -97,16 +97,23 @@ def _one_tick(route, sink, tmp, token, tab, *, keepalive=15, clock=None):
 
     The clock seam ends the loop on the second iteration, so every drain the
     shape owns has run once when the call returns. A missing frame is then an
-    assertion rather than a wait nobody ends.
+    assertion rather than a wait nobody ends. The connection is registered
+    and unregistered around the loop exactly as `server.py` does it: the
+    dashboard drain keeps its per-connection cursor in the registry entry,
+    so a connection that was never registered is not a dashboard stream.
     """
     steps = iter(clock if clock is not None else (0.0, 0.0, 0.0, 0.0))
     route._now = lambda: next(steps, 5000.0)
     targets = route.resolve_targets(tmp, token, tab)
     assert targets is not None, 'the fixture targets were refused'
-    route.serve_stream(
-        sink, cmd_dir=tmp, token=token, tab=tab, targets=targets,
-        killed_event=threading.Event(), command_ttl=90, keepalive=keepalive,
-        max_age=3600, client_label='test')
+    stream_id, killed = route.stream_service.register(token, tab)
+    try:
+        route.serve_stream(
+            sink, cmd_dir=tmp, token=token, tab=tab, targets=targets,
+            killed_event=killed, command_ttl=90, keepalive=keepalive,
+            max_age=3600, client_label='test')
+    finally:
+        route.stream_service.unregister(stream_id, killed)
 
 
 def test_resolve_targets_refuses_an_unsafe_derived_name(tmp):
