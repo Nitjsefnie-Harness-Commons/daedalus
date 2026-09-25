@@ -7,15 +7,19 @@ fails with `No source for code`. The guard fails closed: a recognised
 launcher proves its working directory safe or declares on every call;
 any other callee does so when it spells one readably (`cwd=`, a `**`
 spread of a mapping literal naming `cwd`, or `dict(cwd=...)`); a
-launcher bound where the alias walk cannot follow is refused there; a
-root owner reached any way but a plain attribute read stops proving
-ROOT; a star import removes the builtin-dict exemption;
-and `chdir` or `fchdir` on any base or through a from-import
-alias moves the cwd launches inherit.
+launcher bound where the alias walk cannot follow — a decorator list
+binds the decorated name as a default binds its parameter — or carried
+anywhere in a `cwd=`-less call is refused there; a root owner reached
+any way but a plain attribute read stops proving ROOT; a star import
+removes the builtin-dict exemption; and `chdir` or `fchdir` on any base
+or through a from-import alias moves the cwd launches inherit.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
-chdir reached only by a string (`getattr(os, 'chdir')`) or a call
-result, and an unreadable `**` spread on an unrecognised callee.
+chdir reached only by a string (`getattr(os, 'chdir')`), an owner or
+chdir reached by a call result, a call argument carrying the subprocess
+module bare rather than a launcher read off it
+(`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
+on an unrecognised callee.
 """
 import ast
 
@@ -28,6 +32,7 @@ from _coverage_scopes import (
     _scope_bindings, _scope_shadows, _shadowed_names, _visible_scope_shadows)
 
 _DECLARATION = 'child_coverage'
+_BINDING_MESSAGE = 'a launcher is bound through a form the guard cannot follow'
 _MUTATING_METHODS = frozenset({
     'clear', 'pop', 'popitem', 'setdefault', 'update',
 })
@@ -41,6 +46,9 @@ _KEEP_ALLOWLIST = frozenset({
     # The workflow's .pth program is the subject of the child probe.
     'tests/test_js_coverage_workflow.py::'
     'test_subprocess_startup_program_starts_coverage',
+    # A synthetic collector is what the decorated launch's child reads.
+    'tests/test_coverage_decorated_launch.py::'
+    'test_a_decorated_launch_really_inherits_the_moved_cwd',
     # run_tests.py is measured where it stands in the copied tree.
     'tests/test_suite_runner.py::_runner_tree',
     # The runner-bound suite runs the copied runner so its lines are recorded.
@@ -599,8 +607,7 @@ def _analyze(relative, source, keeps):
     violations.extend(_declaration_name_violations(tree, facts, relative))
     violations.extend(_helper_rebind_violations(tree, facts, relative))
     violations.extend(
-        f'{relative}:{line}: a launcher is bound through a form the guard '
-        'cannot follow'
+        f'{relative}:{line}: {_BINDING_MESSAGE}'
         for line in _unfollowable_launcher_bindings(tree, facts))
     return violations
 
