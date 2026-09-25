@@ -465,21 +465,27 @@ def launch_refusals(source, here, bound_sink=None):
                    for sub in ast.walk(expr))
 
     def unplaced_bounded_call(node):
-        """A subprocess launch the analyser refused or skipped, with a
-        readable ``timeout=``. Reported as an unreadable bound site, never
-        accepted, so a spelling it refuses at source tier cannot hide a
-        bound from the tree-wide rule."""
+        """A subprocess launch the analyser refused or skipped, carrying a
+        bound the source shows: a readable ``timeout=`` or a ``**``-unpacked
+        mapping that could hide one. Reported as an unreadable bound site,
+        never accepted, so a spelling it refuses at source tier cannot hide
+        a bound from the tree-wide rule. The receiver is recognised by the
+        analyser's own ``derives`` predicate, which reaches ``sys.modules
+        [...]``, a subprocess-derived binding and the import machinery; the
+        refused import spellings (``subprocess_names``) and a name walk for
+        receivers no expression predicate reaches (a getattr call) are kept
+        because ``derives`` cannot see either."""
         func = node.func
-        if not any(keyword.arg == 'timeout' for keyword in node.keywords):
+        if not any(keyword.arg == 'timeout' or keyword.arg is None
+                   for keyword in node.keywords):
             return False
-        if isinstance(func, ast.Attribute) \
-                and isinstance(func.value, ast.Name):
-            return func.value.id in ('subprocess',) \
-                or func.value.id in subprocess_names \
-                or func.value.id in bound
+        if isinstance(func, ast.Attribute):
+            return (derives(func.value, bound)
+                    or (isinstance(func.value, ast.Name)
+                        and func.value.id in subprocess_names))
         if isinstance(func, ast.Name):
-            return func.id in subprocess_names or func.id in bound
-        return mentions_subprocess(func)
+            return func.id in subprocess_names or derives(func, bound)
+        return derives(func, bound) or mentions_subprocess(func)
 
     if bound_sink is not None:
         placed = {id(node) for node in launches}
