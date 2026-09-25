@@ -25,8 +25,12 @@ on:
     # request open is not a tree anyone is reviewing.
     branches: [main]
     # Ratchet commits change only this data; audit still gates those pushes.
+    # The suite-timings data file joins it: a refresh commit changes one
+    # JSON file, and a fresh analysis would scan a tree whose code did not
+    # change.
     paths-ignore:
       - '.github/ci-thresholds.json'
+      - '.github/suite-timings.json'
     # release.yml needs a run on the tagged SHA; audit remains unfiltered.
   pull_request:
   schedule:

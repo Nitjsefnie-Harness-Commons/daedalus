@@ -1,0 +1,309 @@
+name: timed timings
+
+# Re-derive `.github/suite-timings.json` from what the `timed` cells actually
+# measured, once a day.
+#
+# The data file is what `plan_timed_matrix.py` packs the `timed` matrix by,
+# so it is a function of CI's own measurements: each suite's weight is the
+# time it took per measured head round, as a multiple of one fixed reference
+# workload (`scripts/ci/reference_workload.py`) measured on the same runner.
+# `refresh_timings.py` owns the measurement; this workflow owns the ordering
+# around it — find the recent `tests` runs, download their `speed-durations-*`
+# artifacts, and lay them out as `<runs-root>/<run-id>/<cell>/…` — because
+# the refresher reads a directory tree and never touches the API.
+#
+# WHICH RUNS. The most recent runs that produced a COMPLETE set of cell
+# artifacts, whatever the run's overall conclusion: `timed` names `aggregate`
+# in `needs:`, so one red correctness leg — a flaky Windows `suites` leg, in
+# practice — skips the whole measuring matrix, and selecting only green runs
+# would leave the file unrefreshed for exactly as long as the staleness this
+# file exists to fix goes unnoticed. A run whose cell set differs from the
+# newest complete one is a different partition of the tree; it is stepped
+# over. The step summary below says how far back the search reached, and the
+# sample size lands in the file's provenance.
+#
+# A scheduled workflow's own definition is read from the DEFAULT branch, so
+# the commit this workflow pushes cannot re-trigger it — and the data file
+# is in tests.yml's and codeql.yml's `paths-ignore`, so a refresh commit does
+# not burn a full matrix run either. `audit.yml` and `secrets.yml` stay
+# unfiltered and still gate the push.
+
+on:
+  schedule:
+    # Daily 06:38 UTC. Off the hour, because the top of the hour is when every
+    # cron on GitHub fires at once and jobs queue; and off every slot the
+    # other schedules already take: audit 04:12, codeql Wed 03:47, secrets
+    # 05:26, scorecard Sat 02:23, and dependabot's Wednesday 05:17.
+    - cron: '38 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A group so two scheduled runs cannot collide, and — as every concurrency
+  # group is — a CANCELLATION boundary. cancel-in-progress is FALSE on
+  # purpose: a manual dispatch must not cancel a refresh that is halfway
+  # through a push to main. A run only ends when it ends.
+  group: timed-timings
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # The download is one artifact set per candidate run; the cap bounds a
+    # mirror that stops responding rather than holding a runner for hours.
+    timeout-minutes: 30
+
+    permissions:
+      contents: write  # the commit and its fast-forward push to main
+      actions: read    # the workflow-run and artifact reads
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # A scheduled run checks out the default branch — main — which is
+          # what the refresh writes back to.
+          ref: main
+          # Nothing else in this job pushes over the token; the commit step
+          # pushes over the deploy key and uses no credentials from here.
+          persist-credentials: false
+
+      - name: List the recent tests runs on main
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        # Values reach the script through the environment, never through
+        # `${{ }}` inside it, so nothing the API answers is expanded as
+        # shell. `--paginate` and `Cache-Control: no-cache`: the list is
+        # read fresh, every time. A list step must not run a pipe at all: it
+        # needs a file per output and a `<<EOF` heredoc, and a pipe would
+        # take the heredoc as a `cat` argument — the reason the candidate
+        # list is rendered into the file and then counted, rather than
+        # piped through `head`.
+        run: |
+          gh api -H "Cache-Control: no-cache" --paginate \
+            "repos/$REPOSITORY/actions/workflows/tests.yml/runs?branch=main&per_page=100" \
+            --jq '.workflow_runs[]
+                   | select(.event == "push" and .status == "completed")
+                   | .id' > "$RUNNER_TEMP/run-ids"
+          count="$(grep -c . "$RUNNER_TEMP/run-ids")"
+          echo "Listed $count completed push runs of tests on main." >&2
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Download the cell artifacts
+        id: download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_IDS: ${{ steps.runs.outputs.count }}
+          # refresh_timings.py's SAMPLE_RUNS: three is the smallest median
+          # that ignores one outlier run.
+          SAMPLE: "3"
+        # The selection the refresher's docstring describes, done here
+        # because the refresher reads a tree and never the API: walk the
+        # candidates newest first, take the first run that produced any cell
+        # artifact at all as the expected cell set, and keep the most recent
+        # SAMPLE runs carrying that exact set. A run is also stepped over
+        # when a cell has no reference reading — that is a run from before
+        # the cells measured the reference workload, and its weights are in
+        # seconds, not reference-multiples. There is no search depth of its
+        # own: the whole list of completed push runs is walked until SAMPLE
+        # complete ones are found, which on a day like 2026-09-25 (a red
+        # `suites` leg in four of the six newest runs) reaches back through
+        # tens of runs to the last green one.
+        #
+        # gh, not actions/download-artifact: that action reads the CURRENT
+        # run's artifacts, and these belong to older runs. `gh run download`
+        # lays each artifact out under a directory named after it, so a
+        # cell lands at runs/<run-id>/speed-durations-<cell>/ — the `<cell>`
+        # half of the name the planner generated.
+        run: |
+          mkdir -p runs
+          set -euo pipefail
+          runs="$(mktemp)"
+          : > "$runs"
+          # The reference set is adopted from the first run that produced a
+          # cell artifact AND its reference readings: a run from before the
+          # cells measured the reference workload has a complete cell set of
+          # the OLD partition in seconds, and the partition that is about to
+          # be refreshed is the first one with a unit.
+          expected=""
+          kept=0
+          reached=0
+          # read -r, one line per run: the run ids are newline-separated
+          # (SC2013), and a `for` over words would be wrong the moment one
+          # of them carried anything but digits.
+          while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            reached=$((reached + 1))
+            # One line per cell artifact name, so the cell loop below can
+            # read them as lines: a cell name with a space in it would
+            # otherwise split into two names in a word-split loop.
+            gh api -H "Cache-Control: no-cache" \
+              "repos/$REPOSITORY/actions/runs/$id/artifacts" \
+              --jq '.artifacts[].name | select(startswith("speed-durations-"))' \
+              | sed 's/^speed-durations-//' | sort > "$RUNNER_TEMP/names"
+            names="$(cat "$RUNNER_TEMP/names")"
+            if [ -z "$names" ]; then
+              echo "run $id: no cell artifacts; stepped over"
+              continue
+            fi
+            if [ -z "$expected" ]; then
+              expected="$names"
+              echo "run $id: cell set is $(grep -c . <<< "$expected") cells"
+            elif [ "$names" != "$expected" ]; then
+              echo "run $id: a different cell set; stepped over"
+              continue
+            fi
+            rm -rf "runs/$id"
+            if ! gh run download "$id" -n 'speed-durations-*' -D "runs/$id" \
+                 >"download-$id.log" 2>&1; then
+              echo "run $id: the download failed:"; sed 's/^/  /' "download-$id.log"
+              rm -rf "runs/$id"
+              continue
+            fi
+            missing=0
+            # read -r over the set: a cell name is a directory the planner
+            # made, so it never carries a newline, and an empty read is the
+            # end of the set rather than a cell.
+            while IFS= read -r cell; do
+              [ -n "$cell" ] || continue
+              if [ ! -f "runs/$id/speed-durations-$cell/reference.json" ]; then
+                echo "run $id, cell $cell: no reference.json; stepped over"
+                missing=1
+              fi
+            done <<< "$expected"
+            if [ "$missing" -ne 0 ]; then
+              # A cell that measured but lost its unit is a broken
+              # measurement, and the reference set this run would otherwise
+              # adopt is exactly that run's: while nothing has been kept
+              # yet, step over the whole run AND release the set, so the
+              # next candidate can be judged on its own readings. Once a
+              # run is kept the set is confirmed, and a later run without a
+              # reading is merely incomplete.
+              rm -rf "runs/$id"
+              if [ -z "$(cat "$runs")" ]; then
+                expected=""
+              fi
+              continue
+            fi
+            echo "$id" >> "$runs"
+            kept=$((kept + 1))
+            if [ "$kept" -ge "$SAMPLE" ]; then
+              break
+            fi
+          done < "$RUNNER_TEMP/run-ids"
+          {
+            echo "### Suite timings refresh"
+            echo
+            echo "Looked at $reached completed \`tests\` runs on main."
+            if [ "$kept" -eq 0 ]; then
+              echo "None produced a complete set of cell artifacts with a"
+              echo "reference reading in every cell, so nothing was downloaded"
+              echo "and nothing was written."
+            else
+              echo "Downloaded $kept complete run(s): $(tr '\n' ' ' < "$runs")."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$kept" -eq 0 ]; then
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "count=$kept" >> "$GITHUB_OUTPUT"
+          echo "runs=$(tr '\n' ' ' < "$runs")" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh the data file
+        if: steps.download.outputs.count != '0'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        # `--out` and `--tree` default to this checkout. The refresher writes
+        # only when a weight moved beyond its margin, a suite appeared or
+        # disappeared, or the target no longer satisfies the margin; the
+        # message it prints (to stderr) says which, and a scheduled refresh
+        # that finds nothing to say is a no-op, not a commit.
+        run: |
+          # stderr, not through a pipe: `… | tee` would report tee's exit
+          # status, so a refusal the refresher named on stderr would be a
+          # green step. The redirect keeps the script's own status.
+          python3 scripts/ci/refresh_timings.py --runs-root runs \
+            2>> "$GITHUB_STEP_SUMMARY"
+          # A diff of a path that does not exist is a usage error on stdout
+          # and a nonzero exit, so an unstaged rename or a checkout that
+          # never ran cannot hide behind an empty diff block.
+          git diff --text -- .github/suite-timings.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the change
+        if: steps.download.outputs.count != '0'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        # The planner and the refresher's own suites run BEFORE the commit,
+        # never after: a commit to main that no gate would have admitted is
+        # the one outcome this workflow must not produce.
+        run: |
+          python3 tests/test_timed_planner.py
+          python3 tests/test_timed_refresh.py
+
+      - name: Commit the refresh
+        # A deploy key, not the built-in token, and the difference is not a
+        # preference. `main requires green checks` names `coverage` and
+        # `speed` among its required contexts, so a commit pushed from here
+        # has no green checks yet and the ruleset refuses it. GitHub Actions
+        # cannot be added as a bypass actor either: the API answers "must be
+        # part of the ruleset source or owner organization". A deploy key
+        # can, it is scoped to this one repository rather than to an account,
+        # and revoking it is deleting one key. This is the same key, the same
+        # transport and the same identity the `coverage` job's ratchet uses.
+        if: ${{ !cancelled() && steps.download.outputs.count != '0'
+                && env.RATCHET_SSH_KEY != '' }}
+        env:
+          RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
+          REPO: ${{ github.repository }}
+          # The run that measured, for the commit message: a `${{ }}` in the
+          # message would be expanded by GitHub, but an env value is the
+          # repository's own identifier read the same way the baseline step
+          # reads its payload SHAs.
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if git diff --quiet -- .github/suite-timings.json; then
+            echo "No weight moved; nothing to commit."
+            exit 0
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$RATCHET_SSH_KEY" > ~/.ssh/ratchet
+          chmod 600 ~/.ssh/ratchet
+          # Pinned, not scanned: ssh-keyscan would trust whatever answers, and
+          # this is the one step in the workflow holding a write credential.
+          # The value is github.com's published ed25519 host key (GET /meta).
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/suite-timings.json
+          # No co-author trailer: no model authored this commit.
+          git commit -m "ci: refresh suite timings from run $RUN_ID"
+          # HEAD:main, never a force: `main history is append-only` carries
+          # deletion and non_fast_forward with no bypass actors at all, so
+          # overwriting someone's commit to record a duration is both
+          # impossible and never the right trade.
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/ratchet -o IdentitiesOnly=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
+          if git push "git@github.com:${REPO}.git" HEAD:main; then
+            exit 0
+          fi
+          # A rejected push is usually main moving while this ran, and failing
+          # the job for that would be failing a routine refresh for an
+          # ordinary concurrent push. Distinguish it rather than swallowing
+          # it: if the remote really did move past the commit this run
+          # measured, the next push raises instead and there is nothing wrong
+          # here. If it did not, the push failed for some other reason and
+          # this job should say so.
+          git fetch --quiet "git@github.com:${REPO}.git" main
+          if [ "$(git rev-parse HEAD^)" = "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "the refresh push was rejected while main stood still" >&2
+            exit 1
+          fi
+          echo 'Main moved while this run measured; the next push raises instead.' \
+            >> "$GITHUB_STEP_SUMMARY"
