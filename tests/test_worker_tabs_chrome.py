@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """The chrome-calling handlers in extension/worker/tabs.js.
 
-Each test asserts the posted postResult payload (the handler's answer) and
-the chrome calls it made. A handler that returned a right answer through the
-wrong calls, or made the right calls but posted the wrong answer, fails.
+Each test asserts the posted postResult payload (the handler's answer)
+together with the chrome calls the handler made.
 """
 import sys
 from pathlib import Path
