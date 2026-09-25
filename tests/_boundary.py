@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import (  # noqa: E402
-    ENVIRONMENT, SCENARIO_PLANS, run_node_program)
+    ENVIRONMENT, RESULT, SCENARIO_PLANS, run_node_program)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _boundary_scenarios import SCENARIOS  # noqa: E402
 from _hotfix_quota_scenario import HOTFIX_SCENARIOS  # noqa: E402
@@ -47,8 +47,7 @@ def _run(scenario, background_path=None, payload=None):
     return outcome
 
 
-def _assert_scenario_gate(scenario, gate: dict) -> None:
-    planned = SCENARIO_PLANS[scenario]
+def _assert_plan_clean(planned: dict, gate: dict) -> None:
     assert_gate_clean(
         contract_faults=gate.get('contractFaults', []),
         records=gate.get('records', []), refused=gate.get('refused', []),
@@ -56,6 +55,10 @@ def _assert_scenario_gate(scenario, gate: dict) -> None:
         stream_answered=gate.get('streamAnswered', []),
         planned=list(planned['planned']),
         planned_stream=list(planned['planned_stream']))
+
+
+def _assert_scenario_gate(scenario, gate: dict) -> None:
+    _assert_plan_clean(SCENARIO_PLANS[scenario], gate)
 
 
 def run_extension_result_boundary(scenario):
@@ -66,9 +69,16 @@ def run_extension_hotfix_quota(plan):
     """Drive the hotfix store's byte bound through the shipped worker."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension hotfix path'
+    # One dispatched command per step and one posted result for each, so the
+    # result count is the caller's step count. The gate is given the same
+    # list: a request past it is refused, and the run is checked against it.
+    declared = dict(SCENARIO_PLANS['hotfix-quota'])
+    declared['planned'] = (list(declared['planned'])
+                           + [RESULT] * len(plan['steps']))
+    program = HARNESS + '\nplan = ' + json.dumps(declared) + ';\n'
     try:
         result = run_node_program(
-            node, HARNESS,
+            node, program,
             [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
             cwd=ROOT, payload=json.dumps(plan))
     except subprocess.TimeoutExpired:
@@ -84,7 +94,9 @@ def run_extension_hotfix_quota(plan):
         'the hotfix-quota scenario produced no answer: the worker stopped '
         f'answering (rc={result.returncode}, '
         f'stderr={result.stderr[:400]!r})')
-    return json.loads(result.stdout)
+    outcome = json.loads(result.stdout)
+    _assert_plan_clean(declared, outcome['gate'])
+    return outcome['result']
 
 
 def run_extension_capability_routes(routes, background_path=None):
