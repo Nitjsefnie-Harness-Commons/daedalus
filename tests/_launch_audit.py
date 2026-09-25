@@ -29,7 +29,7 @@ def launch_refusals(source, here, bound_sink=None):
     safe_names = set(dir(builtins))
     partial_aliases = {'functools.partial', 'partial'}
     import_module_aliases = {'importlib.import_module', 'import_module',
-                             '__import__'}
+                             '__import__', 'builtins.__import__'}
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
@@ -151,10 +151,12 @@ def launch_refusals(source, here, bound_sink=None):
 
     refusals = []
     defined_names = set()
+    subprocess_names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == 'subprocess' and alias.asname:
+                    subprocess_names.add(alias.asname)
                     refusals.append(
                         f'{here}:{node.lineno} aliases the subprocess '
                         f'import as {alias.asname}')
@@ -166,6 +168,8 @@ def launch_refusals(source, here, bound_sink=None):
                     safe_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
             if node.module == 'subprocess':
+                subprocess_names.update(
+                    alias.asname or alias.name for alias in node.names)
                 refusals.append(
                     f'{here}:{node.lineno} from-imports subprocess')
             else:
@@ -254,7 +258,10 @@ def launch_refusals(source, here, bound_sink=None):
                     bound.add(name)
                     changed = True
     binding_map = {}
+    ambiguous = set()
     for name, value in bindings:
+        if name in binding_map:
+            ambiguous.add(name)
         binding_map[name] = value
 
     def resolve_argv(expr):
@@ -263,7 +270,10 @@ def launch_refusals(source, here, bound_sink=None):
         Unwraps a left-nested `+` chain and follows a plain name through
         the bindings table, both bounded by _ARGV_UNWRAP_CAP, so a
         tuple-concatenated or name-held git argv is classified rather than
-        refused as unreadable.
+        refused as unreadable. A name bound more than once in the module
+        resolves to None (unreadable): last-wins is a guess, and a guess
+        that lands on a non-git head would assert a provable non-git for a
+        git launch.
         """
         seen = set()
         for _ in range(_ARGV_UNWRAP_CAP):
@@ -271,7 +281,8 @@ def launch_refusals(source, here, bound_sink=None):
                 expr = expr.left
                 continue
             if isinstance(expr, ast.Name):
-                if expr.id in seen or expr.id not in binding_map:
+                if expr.id in seen or expr.id in ambiguous \
+                        or expr.id not in binding_map:
                     return None
                 seen.add(expr.id)
                 expr = binding_map[expr.id]
@@ -281,6 +292,28 @@ def launch_refusals(source, here, bound_sink=None):
             return None
         return None
 
+    def head_is_ambiguous(expr):
+        """Did the argv's resolution hit a name bound more than once?
+
+        Such a head is a guess, not a reading, so it is a bound site in its
+        own right (in scope) rather than the residual dynamic-argv boundary.
+        """
+        seen = set()
+        for _ in range(_ARGV_UNWRAP_CAP):
+            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+                expr = expr.left
+                continue
+            if isinstance(expr, ast.Name):
+                if expr.id in seen or expr.id not in binding_map:
+                    return False
+                if expr.id in ambiguous:
+                    return True
+                seen.add(expr.id)
+                expr = binding_map[expr.id]
+                continue
+            return False
+        return False
+
     def resolve_constant(element):
         """An argv element's string constant, following a name chain.
 
@@ -288,7 +321,8 @@ def launch_refusals(source, here, bound_sink=None):
         seen-guard bounded by _ARGV_UNWRAP_CAP, the same idiom as
         resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
         ...])`) reaches its constant and a self-referential one (`A = A`)
-        stops instead of looping.
+        stops instead of looping. A name bound more than once resolves to
+        None (unreadable), for the same last-wins reason as resolve_argv.
         """
         seen = set()
         for _ in range(_ARGV_UNWRAP_CAP):
@@ -297,6 +331,7 @@ def launch_refusals(source, here, bound_sink=None):
                 return element.value
             if not (isinstance(element, ast.Name)
                     and element.id in binding_map
+                    and element.id not in ambiguous
                     and element.id not in seen):
                 return None
             seen.add(element.id)
@@ -338,18 +373,16 @@ def launch_refusals(source, here, bound_sink=None):
 
         A for-target bound to a sequence of argv literals (the launch runs
         once per element) is git if ANY iteration's head is git, because
-        the loop runs them all and one refusal covers the site. Otherwise
-        the single head's label decides.
+        the loop runs them all and one refusal covers the site; otherwise
+        it is unreadable, never a non-git inferred from the loop shape. A
+        non-git label is only ever a single-head reading.
         """
         if container is None:
             return 'unreadable'
         if container.elts and isinstance(container.elts[0], (ast.List,
                                                              ast.Tuple)):
             labels = [head_label(element) for element in container.elts]
-            if 'git' in labels:
-                return 'git'
-            return 'non-git' if all(lab == 'non-git' for lab in labels) \
-                else 'unreadable'
+            return 'git' if 'git' in labels else 'unreadable'
         first_value, first_readable = first_word(container)
         if first_value == 'git':
             return 'git'
@@ -423,6 +456,37 @@ def launch_refusals(source, here, bound_sink=None):
                 refusals.append(
                     f'{here}:{node.lineno} calls through a receiver the '
                     'audit cannot resolve')
+
+    def mentions_subprocess(expr):
+        """Does this expression name subprocess, builtins, or the machinery?"""
+        tracked = {'subprocess', 'builtins'} | import_module_aliases \
+            | partial_aliases | bound | module_factories
+        return any(isinstance(sub, ast.Name) and sub.id in tracked
+                   for sub in ast.walk(expr))
+
+    def unplaced_bounded_call(node):
+        """A subprocess launch the analyser refused or skipped, with a
+        readable ``timeout=``. Reported as an unreadable bound site, never
+        accepted, so a spelling it refuses at source tier cannot hide a
+        bound from the tree-wide rule."""
+        func = node.func
+        if not any(keyword.arg == 'timeout' for keyword in node.keywords):
+            return False
+        if isinstance(func, ast.Attribute) \
+                and isinstance(func.value, ast.Name):
+            return func.value.id in ('subprocess',) \
+                or func.value.id in subprocess_names \
+                or func.value.id in bound
+        if isinstance(func, ast.Name):
+            return func.id in subprocess_names or func.id in bound
+        return mentions_subprocess(func)
+
+    if bound_sink is not None:
+        placed = {id(node) for node in launches}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and id(node) not in placed \
+                    and unplaced_bounded_call(node):
+                bound_sink.append((node.lineno, 'unreadable', 'unplaced'))
     if not launches:
         refusals.append(
             f'{here} declares no launch the audit can see through '
@@ -433,10 +497,16 @@ def launch_refusals(source, here, bound_sink=None):
         container = resolve_argv(argv) if argv is not None else None
         words = read_words(container)
         head = head_label(container)
+        if head == 'unreadable' and argv is not None \
+                and head_is_ambiguous(argv):
+            head = 'ambiguous'
+        # The refusal text never says "ambiguous": the head it names is the
+        # unreadable one; the sink keeps the guess-distinguishing label.
+        msg_head = 'unreadable' if head == 'ambiguous' else head
         if None in keywords:
             refusals.append(
                 f'{here}:{node.lineno} unpacks a keyword mapping the '
-                f'audit cannot read on a {head} launch')
+                f'audit cannot read on a {msg_head} launch')
             if bound_sink is not None:
                 bound_sink.append((node.lineno, head, 'unpack'))
             continue
@@ -444,7 +514,7 @@ def launch_refusals(source, here, bound_sink=None):
             refusals.append(
                 f'{here}:{node.lineno} carries a '
                 f'timeout={ast.dump(keywords["timeout"])} argument on a '
-                f'{head} launch')
+                f'{msg_head} launch')
             if bound_sink is not None:
                 bound_sink.append((node.lineno, head, 'timeout'))
         check = keywords.get('check')

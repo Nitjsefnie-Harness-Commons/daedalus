@@ -246,7 +246,7 @@ def test_real_workflow_diffs_binary_attributed_python_as_text(tmp):
 
     done = subprocess.run(
         command[:-2], cwd=repo, env=_COVERAGE_ENV,
-        capture_output=True, text=True, timeout=60)
+        capture_output=True, text=True)
     assert done.returncode == 0, (done.stdout, done.stderr)
     patch = done.stdout
     assert 'Binary files ' not in patch, patch
