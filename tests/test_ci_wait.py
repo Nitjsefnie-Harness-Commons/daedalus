@@ -471,6 +471,35 @@ def test_a_non_positive_timeout_is_refused(tmp):
             f'--timeout must be positive, got {value}\n'), err.getvalue()
 
 
+def test_a_malformed_sha_is_refused(tmp):
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    err = io.StringIO()
+    # --timeout 0 is an inert guard: with this refusal deleted the
+    # fall-through would reach a poll, and this stops it at the timeout
+    # refusal so the control still dies here, finitely, with no request.
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.main(['notasha', '--timeout', '0'])
+    assert code == 3, (code, err.getvalue())
+    assert err.getvalue() == (
+        "not a 40-character commit SHA: 'notasha'\n"), err.getvalue()
+
+
+def test_a_non_positive_interval_is_refused(tmp):
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    err = io.StringIO()
+    # --timeout 0 is the same inert guard: an interval of 0 deleted from
+    # here would reach a poll and then spin a wait that never advances.
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.main(['a' * 40, '--interval', '0', '--timeout', '0'])
+    assert code == 3, (code, err.getvalue())
+    assert err.getvalue() == (
+        '--interval must be positive, got 0\n'), err.getvalue()
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ciwait_')
 
