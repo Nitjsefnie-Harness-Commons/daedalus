@@ -113,12 +113,13 @@ function openDocument(url) {
   });
   const page = server.context;
   // Chrome's `location` is [LegacyUnforgeable]: evaluated source in the
-  // document cannot replace it, so the CDP channel's own check reads a value
-  // the page does not control. A writable plain property would let the double
-  // model an assignment Chrome refuses, and C6 would then establish the
-  // same-evaluation half of that ruling without the unforgeable half. The
-  // href stays writable because a same-document fragment change is a real
-  // navigation a page performs on itself.
+  // document cannot replace the binding, so the CDP channel's own check
+  // reads a value the page does not control. A writable plain property
+  // would let the double model an assignment Chrome refuses, and C6 would
+  // then establish the same-evaluation half of that ruling without the
+  // unforgeable half. The fields on the object stay ordinary writable data
+  // properties — that is Chrome's shape, and it is what a same-document
+  // fragment change writes.
   doc.location = fillLocation({}, url);
   Object.defineProperty(page, 'location', {
     value: doc.location, writable: false,
