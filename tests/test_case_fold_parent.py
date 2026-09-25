@@ -191,6 +191,26 @@ def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
     alias the guard exists to catch. This needs a parent that folds *and*
     holds symlinks, so it skips on a parent that cannot: a vfat image has
     no symlinks at all, and the conjunction is not reachable there.
+
+    ACCEPTANCE, shared with the two stream fixtures of the same shape: this
+    has never executed on a developer machine. The only reachable folding
+    parent on the box this branch was written on is a vfat image, which
+    holds no symlinks; a casefold ext4 could not be mounted (the kernel
+    exposes no `casefold` option) and `ciopfs` is not installed. These
+    three run on the macOS and Windows CI legs, where the host's own
+    volume folds and holds symlinks. The workflow takes **no step** to
+    obtain the symlink privilege those legs need: `tests.yml`'s `suites`
+    job is checkout, setup-python, pip cache, pip install, `run_tests.py`,
+    and nothing in `.github/workflows/` mentions symlinks, Developer Mode
+    or `SeCreateSymbolicLink`. It therefore rests on two ambient facts
+    rather than on the tree: the `windows-latest` image runs its account as
+    an administrator, which may create a symlink without Developer Mode,
+    and CPython's `os.symlink` on Windows asks for
+    `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`, which Developer Mode
+    would satisfy for a non-administrator. If a future runner image lacks
+    both, these three skip and the aggregate still passes -- so a
+    reviewer should read a Windows or macOS leg's `test_case_fold_parent`
+    line, not its exit code, before treating them as covered.
     """
     store = _load('result_store.py', 'fold_guard_symlink')
     work = _folding_token(_folding_parent(tmp), Path(tmp).name)
@@ -220,6 +240,20 @@ def test_the_guard_accepts_a_canonicalizing_resolver(tmp):
     replaced with one that canonicalises, decided on the *name it was
     asked about* so the injection fires whatever the host's own resolver
     does, and the marker is asserted.
+
+    ACCEPTANCE, and it is narrow on purpose. The relaxation needs a parent
+    that folds case **and** a resolver that canonicalises, and the
+    reviewer measured that pair to exist on Windows alone: a Linux or
+    macOS volume folds and its resolver does not, so the branch is
+    unreachable there, and the injection is the only way in. So this
+    fixture is exercised where the gate finds a folding parent that is not
+    a POSIX-resolver one -- the Windows legs, and the vfat image when it is
+    named -- and **a green Linux or macOS matrix carries no evidence at
+    all about the guard's relaxed comparison.** With the exact-case
+    comparison restored, every Linux leg of this repository is 6/6 in
+    `test_result_store` and 0/8 here; that is the property being
+    unreachable, not the fixture failing, and it is why the comparison
+    below is the only pin for it.
     """
     store = _load('result_store.py', 'fold_guard_canonical')
     work = _folding_token(_folding_parent(tmp), Path(tmp).name)
@@ -312,17 +346,31 @@ def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
 
 
 class _FrameSink:
-    """A wfile stand-in that records the frames the loop writes."""
+    """A wfile stand-in that records the frames the loop writes.
 
-    def __init__(self):
+    `on_first_frame` runs inside the first command's write, which is the
+    window the extension's own drain and the per-tab scan leave open: the
+    command has been handed to the writer but not yet unlinked, and
+    everything after it in this tick reads the same directory again. A
+    producer that publishes from here publishes into that window, which is
+    what the background does continuously and what a fixture that enqueues
+    everything up front cannot reproduce.
+    """
+
+    def __init__(self, on_first_frame=None):
         self.frames = []
-        self._ended = False
+        self._on_first_frame = on_first_frame
+        self._published = False
 
     def write(self, data):
         text = data.decode('utf-8')
         if text.startswith('event: command\n'):
             self.frames.append(
                 json.loads(text.split('\ndata: ', 1)[1].strip()))
+            if not self._published:
+                self._published = True
+                if self._on_first_frame is not None:
+                    self._on_first_frame()
 
     def flush(self):
         pass
@@ -347,14 +395,27 @@ def _one_tick(route, sink, cmd_dir, token, tab):
 
 
 def test_the_extension_queue_the_parent_folds_is_not_a_tabs(tmp):
-    """The extension's own queue, spelled `Extension`, is not drained.
+    """The extension's own queue, spelled `Extension`, is not drained twice.
 
     On a parent that folds, the per-tab scan finds the extension's own queue
     under a name that reads as a tab called `Extension`, and a scan that
-    compares the name to the reserved spelling drains the extension's own
-    command a second time, tagged for a tab that does not exist. The
-    verdict is the parent's, so it needs one; the case-sensitive twin is in
-    `test_stream_route`.
+    compares the name to the reserved spelling drains whatever is in there
+    a second time, tagged for a tab that does not exist.
+
+    What makes that reachable is the window this fixture publishes into: the
+    extension's own drain hands its first command to the writer and unlinks
+    it *after*, and the per-tab scan reads the same directory again later in
+    the same tick. A command published between those two steps is the
+    extension's own, and the background publishes continuously, so a fixture
+    that enqueues everything up front cannot see the state at all -- the
+    extension's own drain would have emptied the directory before the scan
+    ran. So the second command is published from inside the first frame's
+    write, which is inside that window.
+
+    The verdict is the parent's, so this needs one; the case-sensitive twin
+    is in `test_stream_route`. On a case-sensitive parent the old
+    comparison and the new one agree for every input a caller can produce,
+    so a green there carries no evidence about this branch of the scan.
     """
     route = _load('stream_route.py', 'fold_stream_queue')
     cq = route.command_queue
@@ -362,18 +423,25 @@ def test_the_extension_queue_the_parent_folds_is_not_a_tabs(tmp):
     cq.enqueue(work, 'tok', 'Extension', {'id': 'queued-for-extension'},
                command_ttl=90)
     cq.enqueue(work, 'tok', 'realtab', {'id': 'another-tab'}, command_ttl=90)
-    sink = _FrameSink()
+    sink = _FrameSink(on_first_frame=lambda: cq.enqueue(
+        work, 'tok', 'Extension', {'id': 'published-mid-tick'},
+        command_ttl=90))
 
     _one_tick(route, sink, work, 'tok', 'extension')
 
-    # The extension's own command is delivered exactly once, by the drain
-    # that owns it and with no tab tag; the other tab's once, with its own.
-    # A scan that read the folded name as a tab would deliver the first a
-    # second time, tagged 'Extension'.
-    assert sink.ids().count('queued-for-extension') == 1, sink.ids()
+    # The extension's own first command is delivered once, by the drain that
+    # owns it and with no tab tag, and the other tab's once with its own.
     assert sorted(zip(sink.ids(), sink.tags())) == [
         ('another-tab', 'realtab'),
         ('queued-for-extension', None)], sink.frames
+    # And the command published into the window is not delivered at all: a
+    # scan that read the folded name as a tab drains it here, tagged
+    # 'Extension' for a tab that does not exist.
+    assert 'published-mid-tick' not in sink.ids(), sink.ids()
+    # It is still queued, under whatever name the queue gave it: the scan
+    # left it alone rather than delivering it.
+    assert len(list((work / 'tok_Extension').iterdir())) == 1, (
+        sorted(p.name for p in (work / 'tok_Extension').iterdir()))
 
 
 def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
@@ -383,7 +451,9 @@ def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
     comparison right and is also what could swallow a tab: on a parent that
     folds, the entry answers to the extension's own name even when it is a
     link, and that is the issue's own point. Needs a parent that both folds
-    and holds symlinks, so it skips on one that cannot.
+    and holds symlinks, so it skips on one that cannot, and it has never
+    executed on a developer machine for the reason the guard's symlink
+    fixture above gives.
     """
     route = _load('stream_route.py', 'fold_stream_symlink')
     work = _folding_token(_folding_parent(tmp), Path(tmp).name)
@@ -410,6 +480,16 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
     cannot use, the two comparisons here are name comparisons a folding
     parent defeats. The verdict is the parent's; the case-sensitive twin is
     in `test_stream_service`.
+
+    DISCLOSURE, because unlike the guard's relaxation this is a platform
+    property and not a dropped capability. On a parent that folds nothing,
+    the reserved name resolves to no entry, `samefile` raises, and the
+    exact-case comparison and `same_entry` therefore agree for every input
+    a caller can produce -- so the two code paths are indistinguishable
+    there, and restoring the old comparisons leaves `test_stream_service`
+    34/34 as CI runs it. This fixture, on a folding parent, is the pin that
+    separates them; a case-sensitive leg's green says nothing about which
+    of the two is in the tree.
     """
     service = _load('stream_service.py', 'fold_stream_legacy')
     work = _folding_token(_folding_parent(tmp), Path(tmp).name)
@@ -435,9 +515,10 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
 def test_a_folded_symlinked_legacy_file_is_still_reserved(tmp):
     """A reserved legacy name reached through a symlink is still reserved.
 
-    Needs a parent that both folds and holds symlinks; the control is in
-    `test_stream_service`, where the same symlink is a tab's file because
-    the parent names nothing by it.
+    Needs a parent that both folds and holds symlinks, and has never
+    executed on a developer machine for the reason the guard's symlink
+    fixture above gives; the control is in `test_stream_service`, where the
+    same symlink is a tab's file because the parent names nothing by it.
     """
     service = _load('stream_service.py', 'fold_stream_legacy_symlink')
     work = _folding_token(_folding_parent(tmp), Path(tmp).name)
