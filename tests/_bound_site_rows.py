@@ -152,4 +152,32 @@ BOUND_SITE_ROWS = (
      "    return subprocess\n"
      "get.run(['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
+    # A `+` whose operand is not a string is not a constant. The row is
+    # here because dropping the string guard makes the fold raise
+    # TypeError instead of answering, and a park that rests on a row this
+    # branch has removed is not a park.
+    ('import-module-name-concat-with-a-non-string',
+     "import importlib\n"
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
+     "mod = importlib.import_module('sub' + 1)\n",
+     [(3, 'git', 'timeout')]),
+    # The two routes to the machinery that a spelling of `import ... as`
+    # does not name, and the parameter a module-level import's spelling
+    # shadows. All three are unproved, and a name the analyser cannot
+    # read is what the reduction exists to report.
+    ('machinery-reached-by-assignment-is-unproved',
+     "import importlib\n"
+     "import subprocess\n"
+     "il = importlib\n"
+     "mod = il.import_module('subprocess')\n"
+     "mod.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('parameter-shadows-a-module-import-is-unproved',
+     "import json\n"
+     "import subprocess\n"
+     "def go(json):\n"
+     "    return json.run(\n"
+     "        ['git', 'status'], check=True, timeout=30)\n",
+     [(4, 'unreadable', 'unplaced')]),
 )

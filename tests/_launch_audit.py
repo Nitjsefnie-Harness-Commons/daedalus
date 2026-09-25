@@ -28,6 +28,26 @@ CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
 
 
+def _parameters(node):
+    """The parameter names of a function, lambda or comprehension.
+
+    A parameter is a binding in its own scope whatever shares its
+    spelling, and the receiver resolver needs to know which names those
+    are. A comprehension has no `args`, so its loop names are the
+    parameters it binds.
+    """
+    args = getattr(node, 'args', None)
+    if args is None:
+        return {getattr(target, 'id', None) for generator in node.generators
+                for target in ast.walk(generator.target)} - {None}
+    names = {arg.arg for arg in
+             list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)}
+    for extra in (args.vararg, args.kwarg):
+        if extra is not None:
+            names.add(extra.arg)
+    return names
+
+
 def launch_refusals(source, here, bound_sink=None):
     """Every refusal limb one Python source's launches trip, naming its
     limb."""
@@ -249,6 +269,23 @@ def launch_refusals(source, here, bound_sink=None):
                 if isinstance(item.optional_vars, ast.Name):
                     bindings.append(
                         (item.optional_vars.id, item.context_expr))
+    # The function each node sits in, and that function's parameters. A
+    # parameter and a module-level import of the same name are different
+    # bindings, and only one of them is readable.
+    function_scopes = {}
+    parameter_names = {}
+    scope_walk: list[tuple] = [(tree, None)]
+    while scope_walk:
+        node, scope = scope_walk.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.Lambda)):
+                function_scopes[id(child)] = child
+                parameter_names[id(child)] = _parameters(child)
+                scope_walk.append((child, child))
+            else:
+                function_scopes[id(child)] = scope
+                scope_walk.append((child, scope))
     binding_map = {}
     ambiguous = set()
     for name, value in bindings:
@@ -408,23 +445,60 @@ def launch_refusals(source, here, bound_sink=None):
                     f'{here}:{node.lineno} calls through a receiver the '
                     'audit cannot resolve')
 
-    def mentions_subprocess(expr):
-        """Does this expression name subprocess, builtins, or the machinery?"""
-        tracked = {'subprocess', 'builtins'} | import_module_aliases \
-            | partial_aliases | bound | module_factories
-        return any(isinstance(sub, ast.Name) and sub.id in tracked
-                   for sub in ast.walk(expr))
+    def machinery_route(held):
+        """Is this call the import machinery, by any route that reaches it?
+
+        `import importlib as il` is one route and `il = importlib` is
+        another, and the two differ in the spelling the callee carries.
+        So the callee's base is followed through the bindings before the
+        comparison: a name bound to the module and then used to call its
+        member is the same machinery call.
+        """
+        if not isinstance(held, ast.Call):
+            return False
+        if normalize(callee_of(held)) in import_module_aliases:
+            return True
+        func = held.func
+        if not isinstance(func, ast.Attribute) \
+                or not isinstance(func.value, ast.Name):
+            return False
+        base, seen = func.value.id, set()
+        while base in binding_map and base not in seen \
+                and base not in ambiguous:
+            seen.add(base)
+            target = binding_map[base]
+            if not isinstance(target, ast.Name):
+                return False
+            base = target.id
+        return f'{base}.{func.attr}' in import_module_aliases
 
     def proved_fixed(receiver):
         """Is this receiver PROVED a fixed, non-launch value?
 
         Proof is the whole standard and it is deliberately narrow: a bare
-        name this module binds and the analyser read, and nothing else. A
-        method parameter is not proved, because nothing in the module says
-        what the caller passed. An attribute or a subscript is not proved
-        at all, because the analyser cannot know what `self.mod` or
-        `ns[key]` holds — and a receiver it cannot know is a receiver it
-        must not pass over.
+        name this module binds and the analyser read, and nothing else. Four
+        things are named and each is unreadable rather than unknown: a
+        PARAMETER, which is a different binding from a module-level
+        import of the same name in a different scope; an attribute or a
+        subscript, because the analyser cannot know what `self.mod` or
+        `ns[key]` holds; a name bound to a call the IMPORT MACHINERY
+        makes, by any route that reaches it — `import importlib as il`,
+        `il = importlib`, and the callee's base is followed through the
+        bindings precisely so the two spellings are one case; and a name
+        bound to `getattr`, which hands back whatever the module holds.
+
+        A name the module binds to some OTHER call is proved, because
+        the call itself is then the fixed value. A receiver the analyser
+        cannot prove is one it must not pass over.
+
+        The family that is NOT closed is the same shape stated without
+        the spellings: a module reached through a name the analyser
+        cannot read the origin of — a user's own factory that returns
+        one, a module bound by an `except ... as` clause, an attribute
+        held on an object. Each is the machinery route taken one step
+        further from a name the bindings table holds, and the residual
+        list names the family rather than the members it has been seen
+        in.
         """
         if not isinstance(receiver, ast.Name):
             return False
@@ -432,15 +506,21 @@ def launch_refusals(source, here, bound_sink=None):
                 or receiver.id in subprocess_names
                 or receiver.id == 'subprocess'):
             return False
+        # A parameter is a DIFFERENT binding from a module-level import
+        # of the same name, in a different scope, and this one the
+        # analyser cannot read. Sharing a spelling is not sharing a
+        # binding.
+        if receiver.id in parameter_names.get(
+                id(function_scopes.get(id(receiver))), ()):
+            return False
         held = binding_map.get(receiver.id)
+        if machinery_route(held):
+            return False
         if isinstance(held, ast.Call):
             # A call is proved only when the call itself is the fixed
-            # value. The import machinery is not: its argument decides
-            # what it returns, and an argument the analyser cannot read
-            # leaves the module itself unknown — which is exactly the
-            # #1099 spelling.
-            called = normalize(callee_of(held))
-            return called not in import_module_aliases and called != 'getattr'
+            # value, which `getattr` is not: it hands back whatever the
+            # module holds under the name it is given.
+            return normalize(callee_of(held)) != 'getattr'
         return True
 
     def unplaced_bounded_call(node):
@@ -468,11 +548,7 @@ def launch_refusals(source, here, bound_sink=None):
         receiver = func.value if isinstance(func, ast.Attribute) else func
         if not proved_fixed(receiver):
             return True
-        if isinstance(func, ast.Attribute) \
-                and isinstance(receiver, ast.Name) \
-                and receiver.id in subprocess_names:
-            return True
-        return derives(receiver, bound) or mentions_subprocess(func)
+        return False
 
     if bound_sink is not None:
         placed = {id(node) for node in launches}
