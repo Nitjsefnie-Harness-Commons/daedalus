@@ -62,6 +62,11 @@ LAUNCH_REFUSAL_ROWS = (
     ('no-plain-import',
      "subprocess.run(['git', 'status'], check=True)\n",
      'declares no plain "import subprocess"'),
+    ('dunder-import-launch',
+     "import subprocess\n"
+     "sp = __import__('subprocess')\n"
+     "sp.run(['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
     ('unpack-derived-name-assignment',
      "import subprocess\n"
      "launcher = subprocess.run\n"

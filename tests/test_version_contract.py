@@ -119,7 +119,7 @@ def _versioned_git_tree(tmp):
                  ['git', 'commit', '-qm', 'versioned tree']):
         subprocess.run(
             argv, cwd=str(copy_root), env=_util.child_coverage('scrub'),
-            capture_output=True, text=True, timeout=60, check=True)
+            capture_output=True, text=True, check=True)
     return copy_root, checker
 
 
