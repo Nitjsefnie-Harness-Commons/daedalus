@@ -50,8 +50,8 @@ def _delivered(outcome):
 
 
 def test_a_fix_reaches_the_document_that_asked_and_only_that_one(tmp):
-    del tmp
     """C1: the asking document is a live document the tab is not showing.
+    del tmp
 
     A prerendered document is live in the tab before it is activated, so it
     asks for replay while a different document is the one on screen. A tab
@@ -81,8 +81,8 @@ def test_a_fix_reaches_the_document_that_asked_and_only_that_one(tmp):
 
 
 def test_a_fix_does_not_reach_the_document_that_replaced_the_asker(tmp):
-    del tmp
     """C2: the asking document navigated before the injection landed.
+    del tmp
 
     The request was true when it was made. A tab-bound target delivers to
     whatever holds the tab at injection time, which is the next document.
@@ -106,8 +106,8 @@ def test_a_fix_does_not_reach_the_document_that_replaced_the_asker(tmp):
 
 
 def test_a_navigation_between_the_probe_and_the_injection_also_refuses(tmp):
-    del tmp
     """C2 again, at the other point the tab can move underneath the replay.
+    del tmp
 
     The probe is the first browser call and the injection the second, so a
     tab-bound channel has a window between them. Binding only the probe
@@ -127,8 +127,8 @@ def test_a_navigation_between_the_probe_and_the_injection_also_refuses(tmp):
 
 
 def test_a_refused_probe_does_not_fall_through_to_the_cdp_channel(tmp):
-    del tmp
     """A document-bound probe that throws is a refusal, not a routing step.
+    del tmp
 
     The CDP channel is tab-bound, so falling through to it after the
     document the request named is refused is exactly the delivery this
@@ -148,7 +148,6 @@ def test_a_refused_probe_does_not_fall_through_to_the_cdp_channel(tmp):
 
 
 def test_a_fix_scoped_to_a_site_does_not_run_on_another_site(tmp):
-    del tmp
     """C3: the fix is stored for one site and the page is a different one."""
     outcome = run_hotfix_case({
         'documents': [ELSEWHERE],
@@ -165,11 +164,12 @@ def test_a_fix_scoped_to_a_site_does_not_run_on_another_site(tmp):
     assert 'skipped 1 hotfix(es) by site scope' in _logs(outcome)[1], outcome
     assert SCOPE in _logs(outcome)[1], outcome
     assert 'fix1' in _logs(outcome)[1], outcome
+    del tmp
 
 
 def test_a_fix_scoped_to_a_site_does_run_on_that_site(tmp):
-    del tmp
     """C4: the anti-vacuity half of C3.
+    del tmp
 
     Without this, C3 is satisfied by a scope filter that matches nothing at
     all — the same defect the store-time refusal prevents, arriving by
@@ -186,8 +186,8 @@ def test_a_fix_scoped_to_a_site_does_run_on_that_site(tmp):
 
 
 def test_a_scope_that_does_not_parse_is_refused_at_store_time(tmp):
-    del tmp
     """C5: an unparseable scope is refused, and a parseable one is stored.
+    del tmp
 
     The refusal half is the property; the acceptance half is what stops it
     from being satisfied by refusing every scope.
@@ -215,8 +215,8 @@ def test_a_scope_that_does_not_parse_is_refused_at_store_time(tmp):
 
 
 def test_the_cdp_channel_runs_nothing_when_the_live_document_differs(tmp):
-    del tmp
     """C6: the CDP channel is tab-bound, so it carries its own check.
+    del tmp
 
     `window.location` is unforgeable in Chrome, so a comparison inside the
     evaluation that runs the fix cannot be spoofed by the page, and one
@@ -248,8 +248,8 @@ def test_the_cdp_channel_runs_nothing_when_the_live_document_differs(tmp):
 
 
 def test_a_fix_with_a_top_level_var_and_await_still_reaches_global_scope(tmp):
-    del tmp
     """C7: the CDP guard is a statement, not a wrapper.
+    del tmp
 
     An IIFE would move the fix's own `var` and function declarations out of
     global scope and turn its top-level `await` into a syntax error, so
