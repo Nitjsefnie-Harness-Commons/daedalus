@@ -12,7 +12,7 @@ are one contract, and because the routes suite is at the repository's
 The properties are host-independent by construction: every fixture here
 runs on a case-sensitive filesystem, and the folding-parent half of the same
 contract is pinned against a real case-folding parent in
-`test_result_routes.test_a_folded_target_is_one_directory_and_one_stripe`.
+`test_case_fold_parent.test_a_folded_target_is_one_directory_and_one_stripe`.
 """
 import errno
 import os
@@ -152,7 +152,14 @@ def test_a_compat_consume_of_an_absent_delivery_takes_no_stripe(tmp):
     assert not _slot(res_dir, token).exists(), 'the slot was not consumed'
     assert not delivery_file.exists()
     # The scan found no owner, so the directory it hands the stripe is the
-    # token's own broadcast target -- also not there, also refused.
+    # token's own broadcast target -- also not there, also refused. This row
+    # is a record of what the selector answered, not a control on the branch
+    # that reads it: with the branch deleted the selector still answers
+    # None and the failure is the `with` on it, which is what the consume
+    # assertions above and the read fixture beside them catch. It does bite
+    # one mutation on its own -- an absent entry keyed by name instead of
+    # refused -- which is recorded here so nobody reads it as the pin for
+    # the branch.
     assert stripes == [(token, 'refused')], stripes
 
 
@@ -205,9 +212,12 @@ def test_the_post_hands_the_stripe_a_directory_not_a_name(tmp):
     """What it hands the selector is the directory, on any filesystem.
 
     The stripe is keyed on the directory, so the argument has to be the
-    directory and not a name a route derived from it. This is the call shape
-    a case-sensitive host can see; the folded pair is pinned against a real
-    case-folding parent in `test_result_routes`.
+    directory and not a name a route derived from it. This is the call shape,
+    and a case-sensitive host is the only place it can be seen: the pair
+    that is one entry under two spellings only exists there, and that half
+    is pinned against a real case-folding parent in
+    `test_case_fold_parent`, and against a symlinked second name in
+    `test_delivery_stripes`.
     """
     routes = _load('stripe_transition_call_shape')
     store = routes.result_store

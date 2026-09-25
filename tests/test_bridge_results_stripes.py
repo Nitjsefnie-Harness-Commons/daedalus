@@ -111,7 +111,7 @@ def test_delivery_post_waits_for_its_target_stripe_only(tmp):
     # The stripe is keyed on the target directory, so the holder and the
     # request are compared on the directory and not on a name. The folded
     # case, where two spellings of one directory must still agree, is
-    # pinned in test_result_routes against a real case-folding parent.
+    # pinned in test_case_fold_parent against a real case-folding parent.
     target_key = str(_target_dir(tmp, held_tab))
 
     def failure_message():
