@@ -50,10 +50,12 @@ call bound, a route that cannot establish its head) publishes NOTHING and exits
 nonzero: an invented verdict is worse than a missing one. A PER-HEAD failure
 (one head's compare unreadable, or its write failing) still writes that head's
 RED verdict where it can, skips it loudly where it cannot, and never abandons
-the rest. A head that MOVED under the run is reported on stderr and skipped
-WITHOUT failing the run: its new head receives its own verdict from its own
-`pull_request_target` event, so a concurrent push is not a write failure. All
-print a loud line to stderr.
+the rest. A head that MOVED under the run -- its revalidation READ and named
+a different sha -- is reported on stderr and skipped WITHOUT failing the
+run: its new head receives its own verdict from its own `pull_request_target`
+event. A revalidation that could not be READ is a failure: nothing is known
+about that head, and a skip that learned nothing must not read as a clean
+one. All print a loud line to stderr.
 
 THE BOUND. Per open pull request the worst case is, for each of G gate
 commits, one compare, plus one head revalidation, one check-runs listing, a
@@ -277,11 +279,10 @@ def head_verdict(read, repository, head, gates):
 
 
 def current_head(read, repository, number):
-    """The pull request's current head sha, or None if it cannot be read."""
-    try:
-        payload = _one(read, _api(f'repos/{repository}/pulls/{number}'))
-    except QueryError:
-        return None
+    """The pull request's current head sha. Raises QueryError when the read
+    fails -- a sha that could not be learned is not evidence of a move. None
+    is a read carrying no 40-hex sha, and reads as "not the enumerated one"."""
+    payload = _one(read, _api(f'repos/{repository}/pulls/{number}'))
     head = payload.get('head') if isinstance(payload, dict) else None
     sha = head.get('sha') if isinstance(head, dict) else None
     return sha if _hex40(sha) else None
@@ -363,10 +364,10 @@ def required_calls(head_count, gate_count):
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
     """Publish a verdict for each head. Returns (exit_code, published), the
-    exit code nonzero iff at least one write FAILED; a head that moved is
-    not a failure (READING FAILURES above). A head whose write fails is
-    skipped loudly and the run continues: one transient failure must not
-    abandon the later heads, which include stale ones waiting for a red.
+    exit code nonzero iff a per-head step FAILED (a write, or a revalidation
+    that could not be read); a head that moved is not. A head whose write
+    fails is skipped loudly and the run continues: one transient failure must
+    not abandon the later heads, which include stale ones waiting for a red.
     `dry_run` computes and reports but publishes nothing.
     """
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
@@ -379,29 +380,33 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
     published = []
     failed = 0
     for head in heads:
-        if current_head(read, repository, head['number']) != head['sha']:
-            print(f'gate freshness: head of pull request '
-                  f'{head["number"]} moved; skipping', file=sys.stderr)
-            continue
-        verdict = head_verdict(read, repository, head, gates)
-        if current_head(read, repository, head['number']) != head['sha']:
-            print(f'gate freshness: head of pull request '
-                  f'{head["number"]} moved; skipping', file=sys.stderr)
-            continue
-        if dry_run:
-            print(f'PR #{head["number"]} {head["sha"][:12]} '
-                  f'{verdict.conclusion:>7} [{verdict.kind}] '
-                  f'{verdict.summary}')
-        else:
-            try:
+        # One handler names the phase the read seam failed in: only the two
+        # revalidations and the write raise. A moved head `continue`s inside
+        # the try, so it never reaches it.
+        phase = 'read the head of'
+        try:
+            if current_head(read, repository, head['number']) != head['sha']:
+                print(f'gate freshness: head of pull request '
+                      f'{head["number"]} moved; skipping', file=sys.stderr)
+                continue
+            verdict = head_verdict(read, repository, head, gates)
+            if current_head(read, repository, head['number']) != head['sha']:
+                print(f'gate freshness: head of pull request '
+                      f'{head["number"]} moved; skipping', file=sys.stderr)
+                continue
+            phase = 'publish the verdict for'
+            if dry_run:
+                print(f'PR #{head["number"]} {head["sha"][:12]} '
+                      f'{verdict.conclusion:>7} [{verdict.kind}] '
+                      f'{verdict.summary}')
+            else:
                 publish(read, repository, head['sha'], verdict.conclusion,
                         verdict.title, verdict.summary, details_url)
-            except QueryError as error:
-                print(f'gate freshness: could not publish the verdict for '
-                      f'pull request {head["number"]}: {error}; skipping',
-                      file=sys.stderr)
-                failed += 1
-                continue
+        except QueryError as error:
+            print(f'gate freshness: could not {phase} pull request '
+                  f'{head["number"]}: {error}; skipping', file=sys.stderr)
+            failed += 1
+            continue
         published.append(verdict)
     return (1 if failed else 0), published
 

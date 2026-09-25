@@ -37,9 +37,15 @@ def _pr(number, sha=HEAD, base='main', owner='octo', ref='feature'):
 
 
 def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
-               fail_listing_for=()):
+               fail_listing_for=(), moved_to=None, unreadable=(),
+               fails_from=None):
     """The per-head flow. `moved` changes the head after the first read;
-    `fail_listing_for` names heads whose listing fails."""
+    `fail_listing_for` names heads whose listing fails; `moved_to` is the
+    sha a pull request missing from `current` has moved to. A
+    `GET /pulls/<n>` raises QueryError, as a transient 502 would, for the
+    numbers in `unreadable` (so one head can fail beside a readable one) or
+    for every read from the `fails_from`-th onward (so a revalidation can
+    fail only at the second one)."""
     state = {'reads': 0}
 
     def read(argv):
@@ -50,10 +56,12 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
                 method = argv[index + 1].upper()
         if re.search(r'/pulls/\d+$', target):
             number = int(target.rsplit('/', 1)[1])
-            if number not in current:
-                raise m.QueryError('HTTP 404')
+            fails = number in unreadable or (
+                fails_from is not None and state['reads'] + 1 >= fails_from)
             state['reads'] += 1
-            sha = current[number]
+            if fails:
+                raise m.QueryError('HTTP 502')
+            sha = current.get(number, moved_to)
             if moved is not None and state['reads'] > 1:
                 sha = moved
             return _encode({'head': {'sha': sha}})
@@ -81,9 +89,10 @@ def _flow_read(m, gates, current, published, heads_missing=(), moved=None,
 
 # ---- main(): the two trigger routes ----
 
-def _main_env(tmp, event_name, event, monkey=None):
+def _main_env(tmp, event_name, event, monkey=None, moved=None):
     """Run main() with GITHUB_* env and a fake gh_read; return (code,
-    calls)."""
+    calls). `moved` names a pull request whose revalidation reads back a
+    different sha than the enumeration saw."""
     m = _mod()
     event_path = Path(tmp) / 'event.json'
     event_path.write_text(json.dumps(event), encoding='utf-8')
@@ -102,7 +111,9 @@ def _main_env(tmp, event_name, event, monkey=None):
             return _encode({'status': 'ahead',
                             'merge_base_commit': {'sha': gate}})
         if re.search(r'/pulls/\d+$', target):
-            return _encode({'head': {'sha': HEAD}})
+            number = int(target.rsplit('/', 1)[1])
+            return _encode({'head': {'sha': 'e' * 40 if number == moved
+                                     else HEAD}})
         if '/check-runs?' in target and 'GET' in argv:
             return ''
         if 'POST' in argv or 'PATCH' in argv:
@@ -139,6 +150,20 @@ def test_the_push_route_publishes_for_every_open_head(tmp):
     assert code == 0, code
     assert any('state=open' in c for c in calls)
     assert len(published) == 2, published
+
+
+def test_the_push_route_exits_zero_when_a_head_moved_under_the_run(tmp):
+    """`main()`'s return value is what CI sees: a head pushed to while the
+    run walked must not turn an unrelated `main` push red, and must not cost
+    the run the healthy head. This drives `main()` with a moved head, so a
+    future edit to its return cannot reintroduce this issue's own bug -- a
+    run that fails because it published for fewer heads than it walked --
+    one layer above where `process()` is pinned."""
+    code, calls, published = _main_env(tmp, 'push', {
+        'open_pulls': [_pr(7), _pr(8)]}, moved=7)
+    assert code == 0, f'a moved head must not fail the main run: {calls}'
+    assert published == ['repos/o/r/check-runs'], published
+    assert len(calls) > 1, 'the run published without walking any head'
 
 
 def test_the_pull_request_target_route_publishes_for_that_head(tmp):
@@ -305,7 +330,7 @@ def test_a_head_that_moved_is_skipped_not_published_onto(tmp):
     del tmp
     m = _mod()
     published = []
-    read = _flow_read(m, {'.pylintrc': [G1]}, {7: 'z' * 40}, published)
+    read = _flow_read(m, {'.pylintrc': [G1]}, {}, published, moved_to='z' * 40)
     code, verdicts, err = _process_capturing_stderr(
         m, read, m.select_heads([_pr(7)]))
     assert published == [], 'published onto a superseded SHA'
@@ -328,6 +353,58 @@ def test_a_head_that_moves_between_decision_and_write_is_skipped(tmp):
     assert _MOVED in err, 'a moved head must still be reported on stderr'
 
 
+def test_an_unreadable_head_revalidation_fails_the_run_not_a_move(tmp):
+    """A revalidation that could not be READ is not evidence the head moved:
+    the run learned nothing about this head, so it exits nonzero and says it
+    could not read, rather than reporting a clean skip."""
+    del tmp
+    m = _mod()
+    published = []
+    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
+                      unreadable=(7,))
+    code, verdicts, err = _process_capturing_stderr(
+        m, read, m.select_heads([_pr(7)]))
+    assert published == [], 'published onto a head that was never revalidated'
+    assert verdicts == []
+    assert code == 1, 'an unreadable revalidation must fail the run'
+    assert _MOVED not in err, 'an unreadable read was reported as a move'
+    assert 'could not read' in err and 'pull request 7' in err, err
+
+
+def test_a_head_that_becomes_unreadable_before_the_write_fails_the_run(tmp):
+    """The second revalidation has the same contract as the first: a read that
+    fails there is a failure of the run, not a move."""
+    del tmp
+    m = _mod()
+    published = []
+    read = _flow_read(m, {'.pylintrc': [G1]}, {7: HEAD}, published,
+                      fails_from=2)
+    code, _, err = _process_capturing_stderr(m, read,
+                                             m.select_heads([_pr(7)]))
+    assert published == [], 'published onto a head that was never revalidated'
+    assert code == 1, 'an unreadable revalidation must fail the run'
+    assert _MOVED not in err, 'an unreadable read was reported as a move'
+    assert 'could not read' in err and 'pull request 7' in err, err
+
+
+def test_a_healthy_sibling_still_publishes_beside_an_unreadable_head(tmp):
+    """An unreadable head is a per-head failure: the later head still gets its
+    verdict."""
+    del tmp
+    m = _mod()
+    published = []
+    bad = '9' * 40
+    read = _flow_read(m, {'.pylintrc': [G1]}, {7: bad, 8: HEAD}, published,
+                      unreadable=(7,))
+    code, verdicts, err = _process_capturing_stderr(
+        m, read, m.select_heads([_pr(7, sha=bad), _pr(8)]))
+    assert published == [('repos/o/r/check-runs', 'POST')], published
+    assert code == 1, 'an unreadable revalidation must fail the run'
+    assert len(verdicts) == 1
+    assert verdicts[0].conclusion == 'success'
+    assert 'could not read' in err, err
+
+
 def _writing_read(m, published, current, **flow):
     """A `_flow_read` whose recorded writes carry the head sha each was
     written onto, so a test can say which head was written. `m` is the
@@ -339,9 +416,12 @@ def _writing_read(m, published, current, **flow):
         before = len(published)
         answer = base(argv)
         if len(published) > before:
-            sha = next(field[len('head_sha='):] for field in argv
-                       if field.startswith('head_sha='))
-            published[-1] = (sha, 'POST')
+            for field in argv:
+                if field.startswith('head_sha='):
+                    published[-1] = (field[len('head_sha='):], 'POST')
+                    break
+            else:
+                raise AssertionError('a recorded write carried no head_sha=')
         return answer
     return read
 
@@ -360,19 +440,25 @@ def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
 
 
 def test_a_moved_head_and_a_write_failure_and_a_healthy_head(tmp):
-    """Rules out "exit nonzero if anything was skipped" and "always exit 0",
-    each of which the one-directional tests let through."""
+    """Kills `return 0` and `return 2 if failed`. It does NOT rule out "exit
+    nonzero if anything was skipped": under that shape the run has a failed
+    write too and the verdict is 1 either way. The one-directional tests rule
+    that direction out (`test_a_moved_head_...` wants 0 with no failure;
+    `test_the_run_fails_when_the_only_head_cannot_be_published` wants 1 with
+    no success)."""
     del tmp
     m = _mod()
     published = []
     bad_sha = 'b' * 40
-    heads = m.select_heads([_pr(7), _pr(8, sha=bad_sha), _pr(9)])
+    good_sha = 'd' * 40
+    heads = m.select_heads([_pr(7), _pr(8, sha=bad_sha),
+                            _pr(9, sha=good_sha)])
     read = _writing_read(m, published,
-                         current={7: 'e' * 40, 8: bad_sha, 9: HEAD},
+                         current={7: 'e' * 40, 8: bad_sha, 9: good_sha},
                          fail_listing_for=(bad_sha,))
     code, verdicts = m.process(read, 'o/r', heads, [('.pylintrc', G1)], RUN)
     assert code == 1, 'the failed write must still fail the run'
-    assert published == [(HEAD, 'POST')], published
+    assert published == [(good_sha, 'POST')], published
     assert len(verdicts) == 1
     assert verdicts[0].conclusion == 'success'
 
@@ -383,7 +469,8 @@ def test_a_head_is_revalidated_before_the_decision(tmp):
     m = _mod()
     published = []
     asked = []
-    base = _flow_read(m, {'.pylintrc': [G1]}, {7: 'z' * 40}, published)
+    base = _flow_read(m, {'.pylintrc': [G1]}, {}, published,
+                      moved_to='z' * 40)
 
     def read(argv):
         target = next(t for t in argv if t.startswith('repos/'))
