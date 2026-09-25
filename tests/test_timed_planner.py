@@ -289,6 +289,31 @@ def test_a_bound_below_every_heavy_count_still_bounds_the_cells(tmp):
     assert 'test_h1.py, test_h2.py' in summary, summary
 
 
+def test_a_bound_of_one_with_every_suite_heavy_returns_a_matrix(tmp):
+    """The reviewer's repro: no cell to choose among is still a plan.
+
+    A bound of one with every suite over the target leaves the heavy
+    suites no cell of their own, so the first cell opens on the
+    heaviest suite. Before this row the placement asked `min()` to
+    choose among zero cells and the planner answered with a raw
+    ValueError on a schema-valid file.
+    """
+    suites = ['test_a.py', 'test_b.py', 'test_c.py']
+    weights = {'test_a.py': 20.0, 'test_b.py': 15.0, 'test_c.py': 12.0}
+    plan, out = _plan(
+        tmp, suites, _data(weights, target=10.0, max_cells=1))
+    assert len(plan.matrix) == 1, plan.matrix
+    placed = sorted(name for cell in plan.cells for name in cell.suites)
+    assert placed == sorted(suites), plan.cells
+    assert len(placed) == len(set(placed)), placed
+    assert out.strip(), 'the CLI printed no matrix'
+    single, _out = _plan(Path(tmp) / 'single', ['test_s.py'],
+                         _data({'test_s.py': 20.0}, target=10.0,
+                               max_cells=1))
+    assert single.matrix == [
+        {'group': 'cell-01', 'suites': 'test_s.py'}], single.matrix
+
+
 def test_a_target_of_zero_is_a_refusal_with_its_reason(tmp):
     tree = _tree(tmp, ['test_a.py'])
     path = _write(Path(tmp) / 'zero.json', _data(
@@ -357,8 +382,8 @@ def test_a_missing_timings_file_is_a_named_refusal(tmp):
         '--tree', str(tree), '--timings', str(Path(tmp) / 'absent.json')])
     assert stderr.startswith('plan_timed_matrix:'), stderr
     assert 'no timings data at' in stderr, stderr
-    assert planner.main([
-        '--tree', str(tree), '--timings', str(Path(tmp) / 'absent.json')]) == 1
+    _run(planner, [
+        '--tree', str(tree), '--timings', str(Path(tmp) / 'absent.json')], 1)
 
 
 def _captured_stderr(planner, args):
@@ -413,8 +438,7 @@ def test_the_schema_rejects_a_field_it_does_not_own(tmp):
     stderr = _captured_stderr(
         _planner(), ['--tree', str(tree), '--timings', str(path)])
     assert 'unknown field: surprise' in stderr, stderr
-    assert _planner().main([
-        '--tree', str(tree), '--timings', str(path)]) == 1
+    _run(_planner(), ['--tree', str(tree), '--timings', str(path)], 1)
 
 
 def test_the_schema_requires_provenance_and_type_checks_it(tmp):
@@ -443,13 +467,12 @@ def test_the_schema_requires_provenance_and_type_checks_it(tmp):
         stderr = _captured_stderr(
             _planner(), ['--tree', str(tree), '--timings', str(path)])
         assert reason in stderr, (fields, stderr)
-        assert _planner().main([
-            '--tree', str(tree), '--timings', str(path)]) == 1
+        _run(_planner(), ['--tree', str(tree), '--timings', str(path)], 1)
     # A file that says where its numbers came from is read.
     data = _data({'test_a.py': 1.0}, measured_from='tests run 1', runs=1)
     path = _write(Path(tmp) / 'ok.json', data)
-    assert _planner().main([
-        '--tree', str(tree), '--timings', str(path)]) == 0
+    out = _run(_planner(), ['--tree', str(tree), '--timings', str(path)])
+    assert '\n' not in out, repr(out)
 
 
 def test_the_planner_refuses_a_tree_with_no_suites(tmp):
