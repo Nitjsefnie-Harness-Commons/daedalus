@@ -1,15 +1,17 @@
-"""Ask a parent whether it folds case, for the fixtures that must know.
+"""The parent-capability questions this tree's fixtures must ask first.
 
-The gate in `test_case_fold_parent.py` and the case-sensitive twins beside it
-ask one question of one kind of directory — does this parent resolve a name
-that differs only in case to the entry it already spells? — and a fixture
-that asserts a verdict has to know which host it is on before it asserts it.
-So the question lives here once.
+Three capabilities, independent of each other, and none of them a property of
+`os.name`: whether the parent resolves a name differing only in case to the
+entry it spells, whether it will hold a symlink, and whether it will give
+one file a second name. A vfat parent answers no, no, no; an ext4 parent
+yes, yes, yes; a case-insensitive volume that holds symlinks is yes to the
+first two and the fixtures below are not the ones that need the third.
 
-It is asked of the filesystem and never of `os.name`: a macOS or Windows
-volume folds, an ext4 or vfat volume does not, and `posixpath.normcase` is
-the identity on POSIX while `ntpath.normcase` lower-cases, so neither says
-anything about the *volume*.
+So a fixture that asserts one verdict of one of those questions, or that
+builds a shape the parent may not hold, asks it here rather than branching on
+the platform -- and asks about the operation it actually performs. The gate
+in `test_case_fold_parent.py` and the case-sensitive twins beside it share
+the first question for exactly that reason.
 """
 import os
 from pathlib import Path
@@ -59,3 +61,32 @@ def require_case_sensitive(root, what, other_half):
         _util.skip(
             f'{root} folds case, so "{what}" cannot be asked of it here; '
             f'that half is pinned in {other_half}')
+
+
+def require_second_name(root, what, operation, label):
+    """Skip unless `root` can give one file a second name.
+
+    `operation` is the call the caller is about to make -- `os.link` or
+    `os.symlink` -- because the two are separate capabilities and a parent
+    may refuse one while allowing the other. `what` names the property the
+    caller was about to pin, so the skip says what is still pinned
+    elsewhere rather than only that something did not run.
+    """
+    first = Path(root) / f'daedalus-link-probe-a{os.getpid()}'
+    second = Path(root) / f'daedalus-link-probe-b{os.getpid()}'
+    try:
+        first.write_text('', encoding='utf-8')
+        try:
+            operation(first, second)
+        except OSError as why:
+            # The probe's own paths are noise in a skip line; the operation
+            # and the reason are what a reader needs.
+            _util.skip(
+                f'{root} cannot {label}, so "{what}" cannot be built here '
+                f'({why.strerror or type(why).__name__})')
+    finally:
+        for probe in (first, second):
+            try:
+                probe.unlink()
+            except OSError:
+                pass
