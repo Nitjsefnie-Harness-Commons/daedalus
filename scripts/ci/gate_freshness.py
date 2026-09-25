@@ -363,11 +363,10 @@ def required_calls(head_count, gate_count):
 def process(read, repository, heads, gates, details_url, call_budget=None,
             dry_run=False):
     """Publish a verdict for each head. Returns (exit_code, published), the
-    exit code nonzero iff at least one write FAILED. A head that moved under
-    the run is reported and skipped without failing it: its new head gets its
-    own verdict from its own `pull_request_target` event. A head whose write
-    fails is skipped loudly and the run continues: one transient failure must
-    not abandon the later heads, which include stale ones waiting for a red.
+    exit code nonzero iff at least one write FAILED; a head that moved is
+    not a failure (READING FAILURES above). A head whose write fails is
+    skipped loudly and the run continues: one transient failure must not
+    abandon the later heads, which include stale ones waiting for a red.
     `dry_run` computes and reports but publishes nothing.
     """
     budget = (DEFAULT_CALL_BUDGET if call_budget is None else call_budget)
