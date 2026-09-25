@@ -14,7 +14,7 @@ _WRITE_MODES = frozenset({'w', 'a', 'x', 'wb', 'ab', 'xb'})
 _NAMESPACES = frozenset({'globals', 'vars', 'locals'})
 _PURE_NAMES = frozenset({
     'AssertionError', 'Path', 'SystemExit', 'ValueError', 'all', 'any',
-    'dict', 'len', 'list', 'locals', 'repr', 'sorted', 'str'})
+    'compile', 'dict', 'len', 'list', 'locals', 'repr', 'sorted', 'str'})
 _PURE_IMPORTS = frozenset({
     ('_util', 'child_coverage'),
     ('pathlib', 'Path'),

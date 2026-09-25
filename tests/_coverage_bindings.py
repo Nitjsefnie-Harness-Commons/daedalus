@@ -7,6 +7,13 @@ from _coverage_memo import nodes as memo_nodes
 _LAUNCHERS = frozenset(
     {'run', 'Popen', 'call', 'check_call', 'check_output'})
 
+# A header binds names: a decorator binds the decorated name, and a
+# signature binds its parameters. Each form carries one, both or neither.
+_HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                 ast.Lambda)
+_DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_SIGNED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
 
 def _is_launch_value(value, facts):
     if isinstance(value, ast.Name):
@@ -19,6 +26,21 @@ def _is_launch_value(value, facts):
 
 def _names_one_of(value, names):
     return isinstance(value, ast.Name) and value.id in names
+
+
+def _header_values(node):
+    """The values a definition header binds, decorators and defaults."""
+    if isinstance(node, _DECORATED_FORMS):
+        decorators = node.decorator_list
+    else:
+        decorators = []
+    if isinstance(node, _SIGNED_FORMS):
+        defaults = [*node.args.defaults,
+                    *(value for value in node.args.kw_defaults
+                      if value is not None)]
+    else:
+        defaults = []
+    return [*decorators, *defaults]
 
 
 def _bound_values(node, facts):
@@ -48,11 +70,8 @@ def _bound_values(node, facts):
                 if item.optional_vars is not None]
     if isinstance(node, ast.NamedExpr):
         return [(node.lineno, node.value)]
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-        defaults = [*node.args.defaults,
-                    *(value for value in node.args.kw_defaults
-                      if value is not None)]
-        return [(value.lineno, value) for value in defaults]
+    if isinstance(node, _HEADER_FORMS):
+        return [(value.lineno, value) for value in _header_values(node)]
     if isinstance(node, ast.Match) and any(
             _pattern_binds(case.pattern) for case in node.cases):
         return [(node.lineno, node.subject)]
@@ -121,19 +140,41 @@ def _call_receiver_parts(value):
         yield from _carried_parts(callee)
 
 
+def _call_argument_parts(value):
+    """Every value a call's arguments carry, starred forms included."""
+    arguments = [*value.args,
+                 *(keyword.value for keyword in value.keywords)]
+    for argument in arguments:
+        yield from _carried_parts(argument)
+
+
+def _carries_launcher(parts, facts):
+    """A launcher, or the module a receiver reads one from."""
+    return any(_names_one_of(part, facts.subprocess_modules)
+               or _is_launch_value(part, facts)
+               for part in parts)
+
+
+def _carries_launch_value(parts, facts):
+    """A launcher itself. A bare module name is not one: the alias walk
+    follows that wherever it is bound, and only the receiver position
+    reads a launcher out of the module it is handed."""
+    return any(_is_launch_value(part, facts) for part in parts)
+
+
 def _unfollowable_launcher_bindings(tree, facts):
     """Lines binding or calling a launcher the alias walk cannot follow."""
     lines = []
     for node in memo_nodes(tree):
         for line, value in _bound_values(node, facts):
-            if any(_names_one_of(part, facts.subprocess_modules)
-                   or _is_launch_value(part, facts)
-                   for part in _carried_parts(value)):
+            if _carries_launcher(_carried_parts(value), facts):
                 lines.append(line)
         if (isinstance(node, ast.Call)
                 and not _has_cwd_control(node)
-                and any(_names_one_of(part, facts.subprocess_modules)
-                        or _is_launch_value(part, facts)
-                        for part in _call_receiver_parts(node))):
+                and (_carries_launcher(_call_receiver_parts(node), facts)
+                     or _carries_launch_value(_call_argument_parts(node),
+                                              facts))):
             lines.append(node.lineno)
-    return lines
+    # One line carries one verdict: a call that also sits in a binding
+    # position is reached by both arms, and the reader needs it said once.
+    return list(dict.fromkeys(lines))

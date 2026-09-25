@@ -179,10 +179,13 @@ def test_an_import_bound_twice_resolves_to_neither_binding(tmp):
     text = _module_text(target)
     needle = "    copy_test_tree(root)\n"
     assert needle in text, 'the copy helper shape changed'
-    call = text[:text.index(needle)].count('\n') + 1
+    calls, start = [], 0
+    while needle in text[start:]:
+        start = text.index(needle, start) + len(needle)
+        calls.append(text[:start].count('\n'))
     assert control_write_violations(target, root) == [
         f'tests/test_coverage_environment.py:{call}: copy_test_tree '
-        'callable is unresolved']
+        'callable is unresolved' for call in calls]
 
 
 def test_a_starred_argument_does_not_make_path_replace_pure(tmp):

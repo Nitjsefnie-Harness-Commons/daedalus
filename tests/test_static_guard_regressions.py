@@ -13,6 +13,7 @@ from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings)
 from _owned_writes import copy_test_tree  # noqa: E402
 import test_coverage_bindings as _coverage_suite  # noqa: E402
+import test_coverage_unfollowable_forms as _form_suite  # noqa: E402
 from test_coverage_bindings import (  # noqa: E402
     test_each_new_binding_and_match_arm_is_mutation_sensitive as _run_mutants)
 
@@ -366,7 +367,9 @@ def test_real_tree_refuses_each_complete_binding_bypass(tmp):
     anchor = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
     assert anchor in source, 'the coverage declaration shape changed'
     original = target.read_bytes()
-    for name, unsafe, marker, explicit in _coverage_suite._binding_snippets():
+    for name, unsafe, marker, explicit in (
+            _coverage_suite._binding_snippets()
+            + _form_suite._unfollowable_snippets()):
         mutated, line = _coverage_suite._inserted_line(
             source, anchor, unsafe, marker)
         try:
