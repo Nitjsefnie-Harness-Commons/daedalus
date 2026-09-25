@@ -73,13 +73,10 @@ def register(token, tab):
     Streams come in two kinds. An *addressed* stream is a delivery to one
     connection on one `(token, tab)`: a reconnect with an equal key evicts
     its predecessor. A *subscription* — the dashboard, and only the exact
-    dashboard target name — is a fan-out: every connection on that name
-    receives every event, so a subscription neither replaces nor is
-    replaced. A tabless stream never replaces and is never replaced. The
-    kind is recorded per entry so the dashboard drain can find the live
-    subscribers of a token and their cursors; a reader who cannot see the
-    criterion here would assume every stream is addressed. The caller owns
-    the returned pair: it stops when the event is set and passes both values
+    dashboard target name — is a fan-out, so it neither replaces nor is
+    replaced. A tabless stream is never replaced. The kind is recorded per
+    entry so the dashboard drain can find a token's live subscribers and
+    their cursors. The caller owns the returned pair and passes both values
     to `unregister` when the connection ends.
     """
     key = (token, tab) if tab else None
@@ -88,8 +85,7 @@ def register(token, tab):
     with _stream_lock:
         # None is not an identity another connection can claim. A tabless
         # stream is still registered under its per-connection id so health can
-        # see it, while any number of tabless connections may coexist. A
-        # subscription coexists with its peers rather than evicting them.
+        # see it, while any number of tabless connections may coexist.
         if key is not None and not subscription:
             for old_id, old in list(_active_streams.items()):
                 if old['key'] == key:
@@ -276,25 +272,20 @@ def every_subscription_past(token, name):
 
     Plain lexicographic comparison orders these names because
     `notify_dashboard` publishes each event under the
-    `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns, whose
-    milliseconds and counter are both allocated under `command_fs_lock`. The
+    `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns. The
     counter is monotonic, so within one millisecond — and across counter
-    increases — byte order is publish order regardless of the clock; the
-    twenty-digit field keeps the padding from overflowing the way a
-    six-digit field did. Across *different* milliseconds the millisecond
-    prefix decides, so the stem is publish-ordered only while the wall clock
-    does not step backwards between two publishes; a backwards step places a
-    later event's name below an earlier one's. That hole is pre-existing for
-    command ordering, and this cursor makes it a loss for a connected
-    dashboard window. That is the whole warrant for a name-ordered cursor: a
-    stem that is not ordered by publish order (a random suffix, an
-    overflowing counter field, or a backwards clock) sorts arbitrarily,
+    increases — byte order is publish order regardless of the clock; across
+    *different* milliseconds the wall-clock millisecond prefix decides, so a
+    backwards clock step places a later event's name below an earlier one's.
+    That hole is pre-existing for command ordering; this cursor makes it a
+    loss for a connected dashboard window. This is the whole warrant for a
+    name-ordered cursor: a stem not ordered by publish order (a random suffix,
+    an overflowing counter field, or a backwards clock) sorts arbitrarily,
     lands below a window's cursor, and is dropped as already-consumed. The
     same-millisecond, counter-boundary and cursor-invariant controls fail if
-    this property stops holding. A
-    subscription that has registered but not yet drained carries no cursor and
-    blocks, the conservative join; the TTL sweep is the backstop for a
-    connection that never drains at all.
+    this property stops holding. A subscription that has registered but not
+    yet drained carries no cursor and blocks, the conservative join; the TTL
+    sweep is the backstop for a connection that never drains at all.
     """
     with _stream_lock:
         for entry in _active_streams.values():

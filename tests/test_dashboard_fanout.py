@@ -4,12 +4,9 @@
 Several dashboard windows on one token each receive every event published
 while they are connected. Registration keeps both alive (neither replaces the
 other), the drain keeps a per-connection cursor so removal waits for every
-live subscriber, and the client drops a replayed event id. These controls pin
-each limb: the exemption is exact-name, the removal is a join over live
-cursors, a fresh window starts at the head of the retained queue, a
-redelivery after a drain with the same cursor reaches nobody, an expired
-entry is taken for everyone, and a publisher cannot forge the bridge's own
-event id or kind.
+live subscriber, and the client drops a replayed event id. The controls below
+pin each limb; the drain's stop-and-retry behaviour is in
+test_dashboard_drain_blocking.
 """
 import itertools
 import json
@@ -76,7 +73,7 @@ def test_a_second_dashboard_subscription_logs_no_replacement(tmp):
     assert not b_killed.is_set()
     assert 'REPLACED' not in out.getvalue(), out.getvalue()
 
-    # The other direction of the boundary: an ordinary named tab replaces.
+    # The other direction: an ordinary named tab still replaces.
     _c_id, c_killed = service.register(token, 'chrome1')
     with _captured() as out:
         _d_id, d_killed = service.register(token, 'chrome1')
@@ -248,8 +245,6 @@ def test_a_failed_frame_write_leaves_the_entry_and_the_cursor(tmp):
     assert entry.exists(), 'the entry was unlinked despite a failed write'
     assert delivered_frames == [], delivered_frames
 
-    # The cursor must not have moved, so the next drain redelivers the
-    # event instead of skipping it as already-consumed.
     redelivered = drain.drain_dashboard(qdir, token, killed, command_ttl=90,
                                         frame_writer=delivered_frames.append)
     assert redelivered == 1, redelivered
@@ -387,7 +382,6 @@ def test_an_expired_entry_past_a_subscriber_cursor_is_not_delivered(tmp):
         qdir, token, killed, command_ttl=90,
         frame_writer=frames.append) == 1
 
-    # An earlier-named entry appears, already expired, behind the cursor.
     stale = _write_event(qdir, '0000000000001_00000001', type='result')
     old = time.time() - 500
     os.utime(stale, (old, old))
@@ -420,7 +414,7 @@ def test_a_same_millisecond_event_is_delivered_after_the_first(tmp):
     """Two events in one millisecond, the second published after the first
     was consumed: the second is still delivered, and a following drain
     delivers nothing. The published stems must be byte-ordered in publish
-    order (`<ms:013d>_<counter:06d>`), which is the sole warrant for the
+    order (`<ms:013d>_<counter:020d>`), which is the sole warrant for the
     cursor's name ordering. On the random-hex stem the second sorts below
     the cursor, is skipped as already-consumed, and is unlinked — the event
     is lost for a connected window and the evidence is removed."""
