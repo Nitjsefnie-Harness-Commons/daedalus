@@ -63,7 +63,7 @@ def test_open_tab_creates_the_url_and_posts_the_new_tab(tmp):
         [CREATE, [{'url': 'https://a.example.com'}]]], outcome
     assert _timed_result(outcome) == {
         'tabId': 100,
-        'url': 'https://www.a.example.com',
+        'url': 'https://a.example.com#resolved',
         'windowId': 1,
     }, outcome
 
@@ -81,7 +81,7 @@ def test_open_tab_carries_active_pinned_and_window_options(tmp):
     }]]], outcome
     assert _timed_result(outcome) == {
         'tabId': 100,
-        'url': 'https://www.a.example.com',
+        'url': 'https://a.example.com#resolved',
         'windowId': 1,
     }, outcome
 
@@ -114,9 +114,9 @@ def test_open_tabs_creates_every_url_in_order(tmp):
     ], outcome
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://www.a.example.com',
+            {'tabId': 100, 'url': 'https://a.example.com#resolved',
              'windowId': 1},
-            {'tabId': 101, 'url': 'https://www.b.example.com',
+            {'tabId': 101, 'url': 'https://b.example.com#resolved',
              'windowId': 1},
         ],
         'errors': [],
@@ -136,9 +136,9 @@ def test_open_tabs_carries_options_into_every_create(tmp):
     ], outcome
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://www.a.example.com',
+            {'tabId': 100, 'url': 'https://a.example.com#resolved',
              'windowId': 1},
-            {'tabId': 101, 'url': 'https://www.b.example.com',
+            {'tabId': 101, 'url': 'https://b.example.com#resolved',
              'windowId': 1},
         ],
         'errors': [],
@@ -153,7 +153,7 @@ def test_open_tabs_partial_rejection_carries_the_reason(tmp):
         createReject={'https://b.example.com': 'cannot open b'})
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://www.a.example.com',
+            {'tabId': 100, 'url': 'https://a.example.com#resolved',
              'windowId': 1},
         ],
         'errors': [{'url': 'https://b.example.com',
@@ -169,7 +169,7 @@ def test_open_tabs_non_error_rejection_is_stringified(tmp):
         createReject={'https://b.example.com': 42})
     assert _timed_result(outcome) == {
         'opened': [
-            {'tabId': 100, 'url': 'https://www.a.example.com',
+            {'tabId': 100, 'url': 'https://a.example.com#resolved',
              'windowId': 1},
         ],
         'errors': [{'url': 'https://b.example.com', 'error': '42'}],
