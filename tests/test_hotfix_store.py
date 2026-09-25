@@ -275,7 +275,7 @@ def test_a_refused_store_releases_the_lock_for_the_next_operation(tmp):
     # room the clear made was there.
     assert admitted['error'] is None, admitted
     assert admitted['result'] == {'stored': 'after', 'total': 1,
-                                  'permanent': False}, admitted
+                                  'permanent': False, 'match': None}, admitted
     assert [fix['id'] for fix in admitted['fixes']] == ['after'], admitted
 
 
