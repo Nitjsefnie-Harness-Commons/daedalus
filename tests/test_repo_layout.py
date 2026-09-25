@@ -25,6 +25,7 @@ BRIDGE_PACKAGE = (
     'atomic_file.py',
     'command_queue.py',
     'config.py',
+    'dashboard_drain.py',
     'data_root_lock.py',
     'delivery_stripes.py',
     'env_config.py',

@@ -20,6 +20,16 @@ let generation = 0;
 let currentToken = '';
 let lastEventTs = 0;
 
+// The dashboard is a fan-out subscription, so a reconnecting window is
+// re-sent whatever a slower peer still had queued — the same id can arrive
+// twice. Keep a bounded set of dispatched ids and drop a repeat, or a
+// reconnect re-fills the event log with duplicates and inflates the rate
+// counter. The bound caps memory for a window left open for days; past it
+// the oldest ids are forgotten, and a replay that old is already outside
+// the command TTL the bridge keeps entries for, so it cannot recur.
+const dispatchedIds = new Set();
+const MAX_DISPATCHED_IDS = 512;
+
 export function subscribe(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
@@ -47,6 +57,14 @@ function emit(raw) {
   // Only dispatch our own event frames. Broadcast eval commands
   // that happen to reach this stream lack kind='event' and are ignored.
   if (payload && payload.kind === 'event') {
+    const id = payload.id;
+    if (id != null) {
+      if (dispatchedIds.has(id)) return;  // replayed on reconnect
+      dispatchedIds.add(id);
+      if (dispatchedIds.size > MAX_DISPATCHED_IDS) {
+        dispatchedIds.delete(dispatchedIds.values().next().value);
+      }
+    }
     dispatch(payload);
   }
 }

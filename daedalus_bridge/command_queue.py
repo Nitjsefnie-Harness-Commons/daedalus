@@ -20,6 +20,12 @@ _seq_counter = itertools.count(1)
 _cmd_events = {}  # {token: threading.Event}
 _cmd_events_lock = threading.Lock()
 
+# The one name of the dashboard target. Every site that spells it — the
+# notify publisher, the stream service's subscription check, the stream
+# route's dashboard branch, the extension's skipped legacy file — reads it
+# from here, so the criterion for "this is the dashboard" is defined once.
+DASHBOARD_TAB = 'dashboard'
+
 # Set by the stream service, which owns the refusal registry, so the TTL
 # sweep can retire a queue name whose occupant it unlinked. None when nothing
 # registered, so the queue module stands alone.
@@ -290,7 +296,7 @@ def notify_dashboard(cmd_dir, token, payload):
     if path_safety.bad_token(token):
         return
     try:
-        queue_name, _ = command_target_names(token, 'dashboard')
+        queue_name, _ = command_target_names(token, DASHBOARD_TAB)
         dash_dir = path_safety.under(cmd_dir, queue_name, secret=token)
     except ValueError:
         return
@@ -298,8 +304,11 @@ def notify_dashboard(cmd_dir, token, payload):
         with command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
             event_id = f'{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}'
+            # The bridge's own id and kind are written AFTER the payload: a
+            # fan-out client dedups on id, so a publisher must not be able
+            # to forge one, nor to fake the kind the reader dispatches on.
             _publish(dash_dir, event_id,
-                     {'id': event_id, 'kind': 'event', **payload})
+                     {**payload, 'id': event_id, 'kind': 'event'})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
         # The stream connect line's by-design residual; alert 124 is a
