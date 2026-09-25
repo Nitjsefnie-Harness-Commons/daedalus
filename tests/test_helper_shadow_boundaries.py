@@ -292,6 +292,9 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
             'from os import _load_queue', '_load_queue = 1'), None),
         ('test_plain_import.py', _mod(
             'import json as _load_queue', '_load_queue = 1'), None),
+        ('test_plain_in_tree.py', _mod(
+            'import _command_candidates', '_command_candidates = 1'),
+         '_command_candidates'),
         ('test_no_import.py', _mod(
             'def _load_queue():', '    pass'), None),
         ('test_comp_inner.py', suite(
