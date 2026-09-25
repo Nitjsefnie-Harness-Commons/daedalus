@@ -350,9 +350,9 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     as is a `**`-unpacked mapping on it (which could hide a timeout); a name
     bound more than once in a module reads `unreadable`, never a guessed
     non-git. Second, a subprocess call the analyser does not place but that
-    carries a `timeout=` it can see in the source (behind an import alias, a
-    from-import, or a receiver it refuses) is reported at `unreadable`, never
-    accepted.
+    carries a bound the source shows (a `timeout=`, or a `**`-unpacked mapping,
+    behind an import alias, a from-import, or a receiver it refuses or cannot
+    derive) is reported at `unreadable`, never accepted.
 
     The residual boundary, a reader is expected to implement against these
     shapes. A placed launch whose head is a dynamic expression (a parameter,

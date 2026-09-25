@@ -21,4 +21,14 @@ BOUND_SITE_ROWS = (
      "def probe():\n"
      "    sp.run(['git', 'status'], check=True, timeout=30)\n",
      [(3, 'unreadable', 'unplaced')]),
+    # Negative space of the widened unplaced class: the sys.modules receiver
+    # recognition treats ANY sys.modules[...] as a subprocess-derived module,
+    # so a non-subprocess module reached that way is refused too. That
+    # over-refusal is deliberate and fail-closed (zero live sites); this pins
+    # widened boundary, and deleting the derives receiver path turns it red.
+    ('sys-modules-negative-space',
+     "import sys\n"
+     "def probe():\n"
+     "    sys.modules['json'].dumps({}, **{'timeout': 30})\n",
+     [(3, 'unreadable', 'unplaced')]),
 )
