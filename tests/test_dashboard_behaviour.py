@@ -7,6 +7,7 @@ it, a consume that failed is not a result, every tab selector reads one
 controller, and no value reaches innerHTML. These run the shipped modules in
 a Node VM rather than reading them where a run can answer instead.
 """
+import contextlib
 import json
 import re
 import subprocess
@@ -534,6 +535,8 @@ def _controlled_run(platform, *specs, before_popen=None):
     with patch.object(sys, 'platform', platform), \
             patch.object(_dashnode.shutil, 'which', return_value='/node'), \
             patch.object(_dashnode.subprocess, 'Popen', popen), \
+            patch.object(_dashnode, '_dashboard_child_gate',
+                         contextlib.nullcontext), \
             patch.object(_dashnode, '_cancel_windows_synchronous_io',
                          cancel_reader, create=True), \
             patch.object(_dashnode.time, 'monotonic', lambda: next(clock)), \
