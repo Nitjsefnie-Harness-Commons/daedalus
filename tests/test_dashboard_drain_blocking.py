@@ -69,17 +69,13 @@ def test_a_contended_entry_is_retried_not_skipped(tmp):
     finally:
         release.set()
         holder.join()
-    # B stopped at the contended head and delivered nothing this pass.
     assert contended == 0, (
         'the losing consumer skipped the contended entry and delivered past '
         f'it: {contended}')
     assert b_frames == [], b_frames
-    # The cursor must not have advanced past the contended entry.
     assert service.subscription_cursor(b_killed) < head, (
         'the cursor advanced past an unconsumed entry', head)
 
-    # Once the holder is gone, B receives the contended entry AND the one
-    # behind it — nothing was stranded.
     got = []
     assert drain.drain_dashboard(
         qdir, token, b_killed, command_ttl=90, frame_writer=got.append) == 2
@@ -138,8 +134,7 @@ def test_an_unparseable_entry_survives_until_the_sweep_clears_it(tmp):
     assert broken.exists(), 'the unparseable entry was removed before TTL'
     assert frames == [], frames
 
-    # The sweep is the backstop: it vacates the entry on age, clearing the
-    # block so the entries behind it flow.
+    # The sweep is the backstop: vacates on age, clearing the block.
     old = time.time() - 500
     os.utime(broken, (old, old))
     cq.collect_expired(cmd_dir, 90)
