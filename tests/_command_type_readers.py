@@ -5,22 +5,30 @@ Not a suite itself; the controls that observe these readers live in
 of the thing it counts -- the dispatch switch's case labels, the type
 literals the shipped clients transmit -- rather than the spelling of a call,
 and refuses any reference shape it cannot enumerate, naming the file, the
-line and the shape. Two censuses per client surface keep "no reference
+line and the shape. Three censuses per client surface keep "no reference
 found" from reading as "nothing to check": the send helper must be defined
-exactly once, and at least one reference to it must exist.
+exactly once, at least one reference to it must exist, and at least one
+direct call must exist.
 
 What is refused, precisely
 -------------------------
-A client may reach its send helper in four ways, and three are enumerated
-and the fourth is refused:
+A client may reach its send helper in FIVE ways, and this list is the
+recognition claim the refusals are checked against -- it was wrong at four
+until an aliased import clause proved it:
 
 1. ``ext_cmd('_id', 'cookies')`` / ``bridge.ext_cmd(...)`` / ``extCmd(...)``
-   -- a direct call whose type argument is a plain string literal. READ.
-2. ``from .invoke import ext_cmd`` / ``import { extCmd }`` -- a binding
-   clause. COUNTED as a reference, never treated as a call.
+   -- a direct call whose type argument is a plain string literal, with no
+   starred argument that would move the value out of the second position.
+   READ.
+2. ``from .invoke import ext_cmd`` / ``import { extCmd }`` -- a PLAIN
+   binding clause. COUNTED as a reference, never treated as a call.
 3. ``def ext_cmd`` / ``function extCmd`` -- the single definition. COUNTED,
    and the definition census requires exactly one per surface.
-4. anything else that names the identifier -- a binding, a collection
+4. ``from .invoke import ext_cmd as send`` / ``import { extCmd as send }``
+   -- an ALIASED binding clause. A call through the second name is a
+   reference no walk of the first name can see, so the alias itself is
+   where it is REFUSED, with file, line and shape.
+5. anything else that names the identifier -- a binding, a collection
    member, a decorator, a parenthesised name, or a STRING equal to the
    helper's name, which is how a dynamic lookup such as
    ``getattr(bridge, 'ext_cmd')`` or ``globalThis['extCmd']`` reaches the
@@ -229,6 +237,13 @@ def python_sent_types(paths, watched, callee_is_attribute):
                     definitions.append(f'{relative}:{node.lineno}')
                 continue
             if isinstance(node, ast.alias):
+                if node.name == watched and node.asname is not None:
+                    _refuse(
+                        f'{relative}:{node.lineno}',
+                        f'an import alias binds {watched} to the second name '
+                        f'{node.asname!r}. A call through that name is a '
+                        'reference this enumeration never sees, so the '
+                        f'import must name {watched} itself')
                 if node.asname == watched:
                     _refuse(
                         f'{relative}:{node.lineno}',
@@ -256,6 +271,15 @@ def python_sent_types(paths, watched, callee_is_attribute):
                     f'{at}: {watched} is called in a shape this enumeration '
                     'does not read; every call must name the command type as '
                     'its second positional argument')
+                starred = [position for position, argument
+                           in enumerate(parent.args)
+                           if isinstance(argument, ast.Starred)]
+                assert not starred, (
+                    f'{at}: the call unpacks a starred argument at position '
+                    f'{starred[0]}, so the value that would land in the '
+                    'second position is not the second argument written '
+                    'here; this enumeration reads written arguments, not '
+                    'the call they produce')
                 assert len(parent.args) >= 2, (
                     f'{at}: {watched} passes no second positional argument, '
                     'so the command type it sends is not enumerable here')
@@ -300,6 +324,10 @@ def python_sent_types(paths, watched, callee_is_attribute):
     assert references, (
         f'the {watched} surface holds no reference to {watched} at all; a '
         'renamed helper is a refusal, not an empty sent set')
+    assert call_sites, (
+        f'the {watched} surface references {watched} but holds no direct '
+        f'call to it; a surface that sends nothing is a refusal, not an '
+        'empty sent set')
     return literals, forwardings, call_sites
 
 
@@ -351,17 +379,23 @@ def dashboard_sent_types(paths=None):
         text = path.read_text(encoding='utf-8')
         mask = js_mask(text)
         for match in re.finditer(r'\bextCmd\b', mask):
-            references += 1
             at = f'{relative}:{_line_of(text, match.start())}'
             if re.search(r'\bfunction\s+$', mask[:match.start()]):
                 definitions += 1
                 continue
+            references += 1
             after = match.end()
             while after < len(mask) and mask[after].isspace():
                 after += 1
             following = mask[after] if after < len(mask) else ''
             if following != '(':
                 if _is_import_binding(mask, match.start()):
+                    aliased = re.match(r'\s+as\s+[\w$]+', mask[match.end():])
+                    assert aliased is None, (
+                        f'{at}: an import alias binds extCmd to a second '
+                        f'name. A call through that name is a reference '
+                        f'this enumeration never sees, so the import must '
+                        f'name extCmd itself')
                     continue
                 _refuse(
                     at,
