@@ -279,6 +279,78 @@ def test_failed_net_capture_setup_leaves_no_capture_and_no_attachment(tmp):
     }, actual
 
 
+def test_cdp_and_net_capture_share_one_attachment_per_tab(tmp):
+    """The debugger attachment has one owner: a capture or a cdp session.
+
+    Each feature reuses an attachment the other already holds rather than
+    attaching over it, a transient cdp leaves an attachment and its sticky
+    bookkeeping exactly as it found them, and stopping a capture never
+    detaches an attachment a kept cdp session still needs. Two tabs are used
+    so the second ordering starts from a clean attachment.
+    """
+    del tmp
+    actual = run_extension_result_boundary('net-capture-ownership')
+    held = {'cdpSession': False, 'netCapture': False}
+    assert actual == {
+        # Tab 7: the capture attaches, and the transient cdp over it reuses
+        # that attachment — one attach total, no detach, capture still held.
+        'capture': {
+            'result': {'capturing': True, 'tabId': 7}, 'error': None,
+            'calls': {'attachCalls': 1, 'detachCalls': 0},
+            'attached': True,
+            'state': {'cdpSession': False, 'netCapture': True},
+        },
+        'cdpOverCapture': {
+            'result': {}, 'error': None,
+            'calls': {'attachCalls': 1, 'detachCalls': 0},
+            'attached': True,
+            'state': {'cdpSession': False, 'netCapture': True},
+        },
+        # The stop has no other owner left, so it gives the attachment back.
+        'stopCapture': {
+            'result': {'stopped': True, 'tabId': 7, 'count': 0,
+                       'requests': []},
+            'error': None,
+            'calls': {'attachCalls': 1, 'detachCalls': 1},
+            'attached': False,
+            'state': held,
+        },
+        # Tab 8: the kept session attaches and records itself.
+        'keepSession': {
+            'result': {}, 'error': None,
+            'calls': {'attachCalls': 2, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': False},
+        },
+        # A transient cdp over the kept session reuses the attachment and
+        # leaves the sticky session standing.
+        'transientOverKept': {
+            'result': {}, 'error': None,
+            'calls': {'attachCalls': 2, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': False},
+        },
+        # The capture over the kept session reuses the attachment too — the
+        # attach count does not rise a third time.
+        'captureOverKept': {
+            'result': {'capturing': True, 'tabId': 8}, 'error': None,
+            'calls': {'attachCalls': 2, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': True},
+        },
+        # Stopping the capture leaves the kept session — and the attachment
+        # it still needs — in place: no detach.
+        'stopOverKept': {
+            'result': {'stopped': True, 'tabId': 8, 'count': 0,
+                       'requests': []},
+            'error': None,
+            'calls': {'attachCalls': 2, 'detachCalls': 1},
+            'attached': True,
+            'state': {'cdpSession': True, 'netCapture': False},
+        },
+    }, actual
+
+
 def test_concurrent_hotfix_stores_both_survive(tmp):
     """Two stores dispatched together must both be in the record afterwards."""
     del tmp

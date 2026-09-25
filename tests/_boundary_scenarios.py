@@ -322,6 +322,49 @@ async function runNetCapture() {
   return { outcomes, attachCalls, detachCalls };
 }
 
+async function runNetCaptureOwnership() {
+  // One attachment owner per tab: a cdp command and a net capture reuse each
+  // other's attachment instead of attaching over it, a transient cdp leaves
+  // an attachment it found exactly as it was, and stopping a capture never
+  // detaches an attachment a kept cdp session still needs.
+  const readState = (tabId) => {
+    const keys = JSON.parse(vm.runInContext(
+      'JSON.stringify([Object.keys(_cdpSessions),'
+      + ' Object.keys(_netCaptures)])', context));
+    return {
+      cdpSession: keys[0].includes(String(tabId)),
+      netCapture: keys[1].includes(String(tabId)),
+    };
+  };
+  const run = async (type, tabId, extra) => {
+    context.stepCommand = Object.assign(
+      { id: type, type, tabId, _did: type + '-' + tabId }, extra);
+    await vm.runInContext('dispatchCommand(stepCommand)', context);
+    const posted = resultPayloads[resultPayloads.length - 1];
+    return { result: posted.result, error: posted.error,
+      calls: { attachCalls, detachCalls }, attached: debuggerAttached,
+      state: readState(tabId) };
+  };
+
+  // Tab 7: capture first, then a transient cdp over it, then stop the
+  // capture with no other owner left.
+  const capture = await run('net-capture', 7);
+  const cdpOverCapture = await run('cdp', 7, { method: 'Runtime.enable' });
+  const stopCapture = await run('net-capture-stop', 7);
+
+  // Tab 8: kept cdp session first, then a transient cdp that reuses it, then
+  // a capture over the kept session, then stop that capture — the kept
+  // session must survive the stop and keep the attachment.
+  const keepSession = await run(
+    'cdp', 8, { method: 'Runtime.enable', keep_session: true });
+  const transientOverKept = await run('cdp', 8, { method: 'Runtime.enable' });
+  const captureOverKept = await run('net-capture', 8);
+  const stopOverKept = await run('net-capture-stop', 8);
+
+  return { capture, cdpOverCapture, stopCapture,
+    keepSession, transientOverKept, captureOverKept, stopOverKept };
+}
+
 async function runHotfixRace() {
   context.storeCommands = ['fix-a', 'fix-b'].map((fixId) => ({
     id: 'store-' + fixId,
@@ -604,6 +647,7 @@ async function run() {
   if (scenario === 'screenshot-reject') return runScreenshotReject();
   if (scenario === 'screenshot-target') return runScreenshotTarget();
   if (scenario === 'net-capture') return runNetCapture();
+  if (scenario === 'net-capture-ownership') return runNetCaptureOwnership();
   if (scenario === 'hotfix-race') return runHotfixRace();
   if (scenario === 'block-rule-restart') return runBlockRuleRestart();
   if (scenario === 'unblock-zero') return runUnblockZero();

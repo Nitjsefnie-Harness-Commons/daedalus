@@ -131,6 +131,7 @@ let tabQueryResolver;
 let nextTimerId = 0;
 let attachCalls = 0;
 let detachCalls = 0;
+let debuggerAttached = false;
 const workerSourcePaths = new WeakMap();
 
 // chrome.storage.local hands back a structured clone, so a reader that has not
@@ -276,8 +277,18 @@ const chrome = {
     onDetach: eventTarget(detachListeners),
     attach: async () => {
       attachCalls++;
-      if (scenario !== 'net-capture') {
+      if (scenario !== 'net-capture'
+        && scenario !== 'net-capture-ownership') {
         throw new Error('debugger unavailable in residual relay test');
+      }
+      if (scenario === 'net-capture-ownership') {
+        // The browser refuses a second attachment to one tab, so a feature
+        // that attaches over another's held attachment fails loudly.
+        if (debuggerAttached) {
+          throw new Error('Another debugger is already attached');
+        }
+        debuggerAttached = true;
+        return;
       }
       // Attempt 1 models a tab another client already owns; attempt 2 attaches
       // but fails to enable the domain.
@@ -286,9 +297,11 @@ const chrome = {
     },
     detach: async () => {
       detachCalls++;
+      debuggerAttached = false;
     },
     sendCommand: async (_target, method) => {
-      if (method === 'Network.enable' && attachCalls === 2) {
+      if (method === 'Network.enable' && attachCalls === 2
+        && scenario === 'net-capture') {
         throw new Error('Network.enable failed');
       }
       return {};
