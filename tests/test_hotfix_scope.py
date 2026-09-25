@@ -149,6 +149,7 @@ def test_a_refused_probe_does_not_fall_through_to_the_cdp_channel(tmp):
 
 def test_a_fix_scoped_to_a_site_does_not_run_on_another_site(tmp):
     """C3: the fix is stored for one site and the page is a different one."""
+    del tmp
     outcome = run_hotfix_case({
         'documents': [ELSEWHERE],
         'current': 0,
@@ -157,24 +158,24 @@ def test_a_fix_scoped_to_a_site_does_not_run_on_another_site(tmp):
     })
     assert outcome['delivered'].get('doc-1') == [], outcome
     assert _delivered(outcome) == {}, outcome
-    # The skip is reported rather than folded silently into the replayed
-    # total, so an operator reading the console can see the fix did not run.
+    # The replayed count is what ran — zero here — and the skip is its own
+    # line, so neither number reads as a success the fix never was.
     assert len(_logs(outcome)) == 2, outcome
-    assert 'replayed 1 hotfix(es)' in _logs(outcome)[0], outcome
+    assert _logs(outcome)[0] == (
+        '[Daedalus] replayed 0 hotfix(es) on tab 7'), outcome
     assert 'skipped 1 hotfix(es) by site scope' in _logs(outcome)[1], outcome
     assert SCOPE in _logs(outcome)[1], outcome
     assert 'fix1' in _logs(outcome)[1], outcome
-    del tmp
 
 
 def test_a_fix_scoped_to_a_site_does_run_on_that_site(tmp):
     """C4: the anti-vacuity half of C3.
-    del tmp
 
     Without this, C3 is satisfied by a scope filter that matches nothing at
     all — the same defect the store-time refusal prevents, arriving by
     another route.
     """
+    del tmp
     outcome = run_hotfix_case({
         'documents': [SITE],
         'current': 0,
@@ -269,6 +270,164 @@ def test_a_fix_with_a_top_level_var_and_await_still_reaches_global_scope(tmp):
     })
     assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
     assert outcome['globals'] == {'doc-1.daedalusTopLevel': 'kept'}, outcome
+    assert not _errors(outcome), outcome
+
+
+def test_the_replayed_count_names_the_fixes_that_ran(tmp):
+    """The success count is what ran, not the whole eligible set.
+
+    A count that includes the fixes a scope kept away is a success number
+    for work that did not happen, and it is the number an operator reads to
+    decide whether the fix they stored is live.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [ELSEWHERE],
+        'current': 0,
+        'asker': 0,
+        'fixes': [
+            {'id': 'fix1', 'code': FIX, 'match': SCOPE},
+            {'id': 'fix2', 'code': "daedalusHits.push('fix2')"},
+        ],
+    })
+    # The anti-vacuity half: one fix really did reach the document, so a
+    # count of zero would be a broken counter rather than a wrong one.
+    assert _delivered(outcome) == {'doc-1': ['fix2']}, outcome
+    assert _logs(outcome)[0] == (
+        '[Daedalus] replayed 1 hotfix(es) on tab 7'), outcome
+    assert 'skipped 1 hotfix(es)' in _logs(outcome)[1], outcome
+
+
+def test_re_storing_a_scoped_fix_keeps_the_scope_it_had(tmp):
+    """A store that omits `match` must not widen the fix it replaces.
+
+    `permanent` is carried over from the record the store already holds when
+    a command leaves it out, because a command that means "update the code"
+    does not mean "drop the flag". A scope is a boundary, so the same
+    omission must not turn a fix for one site into a fix for every site —
+    and the dashboard's own edit re-stores with no `match` at all.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE],
+        'ask': False,
+        'store': [
+            {'id': 'store-scoped', 'fixId': 'scoped', 'code': '1',
+             'match': SCOPE},
+            # The ordinary "the code changed" call: same id, no match.
+            {'id': 'store-again', 'fixId': 'scoped', 'code': '2'},
+            # And the anti-vacuity half: a store that DOES name a scope
+            # replaces it, so preserving is not a field nothing can update.
+            {'id': 'store-rescoped', 'fixId': 'scoped', 'code': '3',
+             'match': '*://*.example.com/*'},
+        ],
+    })
+    posted = {row['id']: row for row in outcome['posted']}
+    assert posted['store-again']['error'] is None, outcome
+    assert posted['store-again']['result']['match'] == SCOPE, outcome
+    assert posted['store-rescoped']['error'] is None, outcome
+    assert posted['store-rescoped']['result']['match'] == (
+        '*://*.example.com/*'), outcome
+    assert outcome['stored'] == [
+        {'id': 'scoped', 'match': '*://*.example.com/*'}], outcome
+
+
+def test_a_wildcard_host_scope_covers_the_domain_and_its_subdomains(tmp):
+    """`*.example.com` is how an operator writes "this site and everything
+    under it", and Chrome's host wildcard means exactly that.
+
+    A scope that compiles to a required leading label instead accepts the
+    pattern at store time and then never fires on the domain it names, which
+    is a boundary the operator believes exists and largely does not.
+    """
+    del tmp
+    for page in ('https://example.com/cart',
+                 'https://shop.example.com/cart',
+                 'https://a.b.example.com/cart'):
+        outcome = run_hotfix_case({
+            'documents': [page],
+            'current': 0,
+            'asker': 0,
+            'fixes': [{'id': 'fix1', 'code': FIX,
+                       'match': '*://*.example.com/*'}],
+        })
+        assert _delivered(outcome) == {'doc-1': ['fix1']}, (page, outcome)
+
+
+def test_a_scope_matches_a_host_whatever_case_it_is_written_in(tmp):
+    """A host is case-insensitive, and a URL parser has already folded the
+    one the browser reports.
+
+    A pattern written `*://EXAMPLE.com/*` is accepted at store time, so a
+    case-sensitive comparison makes it a second spelling of a scope that
+    never matches.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE],
+        'current': 0,
+        'asker': 0,
+        'fixes': [{'id': 'fix1', 'code': FIX,
+                   'match': '*://SHOP.Example.COM/*'}],
+    })
+    assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
+    assert not _errors(outcome), outcome
+
+
+def test_a_request_the_worker_cannot_bind_runs_nothing(tmp):
+    """No document id, no url, or a url that names no page: all refused.
+
+    Chrome supplies all three on a content-script message, so none of these
+    is a real page's path. They are here because the branch that refuses
+    them is production code, and a branch nothing exercises is a branch
+    nobody has read.
+    """
+    del tmp
+    for omitted, sender in (
+            ({'senderOmits': ['documentId']}, 'no documentId'),
+            ({'senderOmits': ['url']}, 'no url'),
+            ({'senderUrl': '/relative/path'}, 'no absolute url')):
+        outcome = run_hotfix_case({
+            'documents': [SITE],
+            'current': 0,
+            'asker': 0,
+            'fixes': [{'id': 'fix1', 'code': FIX}],
+            **omitted,
+        })
+        assert _delivered(outcome) == {}, (sender, outcome)
+        assert outcome['submitted'] == [], (sender, outcome)
+        assert outcome['injections'] == [], (sender, outcome)
+        assert _errors(outcome) == [
+            '[Daedalus] hotfix replay on tab 7 ran nothing: the request '
+            'named no document, or a url that names no page'], (sender,
+                                                                outcome)
+
+
+def test_a_fragment_change_does_not_refuse_a_cdp_routed_fix(tmp):
+    """The CDP check must be no finer than the MAIN channel's document
+    binding, or the two channels disagree about the same page.
+
+    A fragment change is not a navigation: the document is the same one, the
+    tab still holds it, and the MAIN channel — which binds by document —
+    would have delivered to it. Comparing the whole `location.href` refuses
+    a fix whose document never changed.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE],
+        'current': 0,
+        'asker': 0,
+        'probe': False,
+        'relocateAt': 'before-cdp-evaluate',
+        'relocateTo': SITE + '#checkout',
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    })
+    # The tab still holds the one document it held, and it is the one the
+    # request named: a fragment change opened nothing and retired nothing.
+    assert set(outcome['delivered']) == {'doc-1'}, outcome
+    assert outcome['current'] == 'doc-1', outcome
+    assert len(outcome['submitted']) == 1, outcome
+    assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
     assert not _errors(outcome), outcome
 
 
