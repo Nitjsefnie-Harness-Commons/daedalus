@@ -633,14 +633,12 @@ bounded(work, 'work that settles only after a real delay', 4000).then(
     assert report['cpuMs'] < budget, (report, budget)
 
 
-# The gate serialises dashboard Node children across processes. Both children
-# wait for one shared start target, then each records it is inside the gate and
-# waits, under a bound charging serviced time, for the other to record the
-# same; the first cannot leave until the second joins. Ungated they therefore
-# overlap by construction, not by a timestamp pair a loaded scheduler could
-# serialise. Green: a child waited out the bound (the gate kept the other out
-# by design). Red: a child saw the other inside (gate-less only).
-_GATE_ESCAPE_S, _RENDEZVOUS_MS = 120, 1500
+# Both children wait for one shared start, then each records it is inside the
+# gate and waits, under a bound, for the other to join; the first cannot leave
+# until the second does, so ungated they overlap by construction. Green: waited
+# the bound out (gate kept the other out); Red: saw the other (gate-less only).
+_GATE_ESCAPE_S = 120
+_RENDEZVOUS_MS = _dashnode._DASHBOARD_STEP_TIMEOUT_S * 1000 // 3
 _GATE_WORKER = (
     'import sys, time\nsys.path.insert(0, "tests")\nimport _dashnode\n'
     'while time.time() < float(sys.argv[1]): time.sleep(0.005)\n'
@@ -650,9 +648,11 @@ _GATE_WORKER = (
 _RENDEZVOUS = r"""
 const fs = require('fs'), a = process.argv, m = a[1] + '/' + a[2];
 const y = a[1] + '/' + a[3];
-fs.writeFileSync(m, '');
+const live = (f) => { try { process.kill(+fs.readFileSync(f, 'utf8'), 0);
+  return 1; } catch (e) { return 0; } };
+fs.writeFileSync(m, String(process.pid));
 const o = () => new Promise((r) => { const c = () =>
-  (fs.existsSync(y) ? r(1) : _dashnodeSetTimeout(c, 20)); c(); });
+  (live(y) ? r(1) : _dashnodeSetTimeout(c, 20)); c(); });
 (async () => {
   let saw = false;
   try { await bounded(o(), 'other', RENDEZVOUS_MS); saw = true; } catch (e) {}
@@ -674,10 +674,16 @@ def test_two_dashboard_children_cannot_be_inside_the_gate_together(tmp):
     workers = [
         subprocess.Popen(
             _gate_worker(target, _RENDEZVOUS, str(inside), me, you, steps=1),
-            cwd=_dashnode.ROOT, stdout=subprocess.PIPE,
+            cwd=_util.ROOT, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True)
         for me, you in (('a', 'b'), ('b', 'a'))]
-    out = [worker.communicate(timeout=_GATE_ESCAPE_S) for worker in workers]
+    try:
+        out = [worker.communicate(timeout=_GATE_ESCAPE_S)
+               for worker in workers]
+    finally:
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
     records = [json.loads(text) for worker, (text, _e) in zip(workers, out)
                if worker.returncode == 0]
     assert len(records) == 2, [
