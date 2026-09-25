@@ -62,6 +62,61 @@ os.chdir(sys.argv[2])
 {_WRAPPED_MARKER}sys.executable, '-c', {_CHILD!r}, sys.argv[1]])
 '''
 
+# Three callees that register the launcher and call it later: on a
+# thread, on stack exit, and at finalisation. None is named like a
+# launcher, and each really spawns. These are the rows that stop a tuned
+# name list being cheap, because a gate that excludes them has to list
+# them, and the next name written is not on the list.
+_REGISTERED = (
+    ('test_to_thread_probe.py', 'asyncio.to_thread(',
+     f'''\
+import asyncio
+import os
+import subprocess
+import sys
+
+
+async def go():
+    return await asyncio.to_thread(
+        subprocess.run, [sys.executable, '-c', {_CHILD!r}, sys.argv[1]])
+
+
+os.chdir(sys.argv[2])
+asyncio.run(go())
+'''),
+    ('test_exit_stack_probe.py', 'stack.callback(subprocess.run, ',
+     f'''\
+import os
+import subprocess
+import sys
+from contextlib import ExitStack
+
+
+stack = ExitStack()
+os.chdir(sys.argv[2])
+stack.callback(subprocess.run, [sys.executable, '-c', {_CHILD!r}, sys.argv[1]])
+stack.close()
+'''),
+    ('test_finalize_probe.py', 'weakref.finalize(',
+     f'''\
+import os
+import subprocess
+import sys
+import weakref
+
+
+class _Held:
+    pass
+
+
+held = _Held()
+finalizer = weakref.finalize(
+    held, subprocess.run, [sys.executable, '-c', {_CHILD!r}, sys.argv[1]])
+os.chdir(sys.argv[2])
+finalizer()
+'''),
+)
+
 _BINDING_MESSAGE = 'a launcher is bound through a form the guard cannot follow'
 
 
@@ -106,6 +161,25 @@ def test_a_wrapped_launch_really_inherits_the_moved_cwd(tmp):
     copy_test_tree(root)
     _planted(root, tmp, 'test_wrapped_launch_probe.py', _WRAPPED_PROBE,
              _WRAPPED_MARKER)
+
+
+def test_a_registered_launch_really_inherits_the_moved_cwd(tmp):
+    """A launcher registered with a thread, a stack or a finaliser runs.
+
+    All three probes share one copied tree, so the guard judges them in
+    one scan and each is then run in turn. What each child wrote about
+    its own working directory and the collector is what is asserted;
+    nothing here is a timing bound.
+    """
+    root = Path(tmp) / 'tree'
+    copy_test_tree(root)
+    before = _coverage_environment_violations(root)
+    for name, marker, source in _REGISTERED:
+        _planted(root, tmp, name, source, marker)
+    assert not any(v.startswith('tests/test_to_thread_probe.py')
+                   or v.startswith('tests/test_exit_stack_probe.py')
+                   or v.startswith('tests/test_finalize_probe.py')
+                   for v in before), before
 
 
 if __name__ == '__main__':
