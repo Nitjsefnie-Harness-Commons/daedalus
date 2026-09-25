@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Launchers a `cwd=`-less call carries, run for real beside the verdict.
 
-The guard refuses each module statically. Running the same module is what
-shows the refusal is worth making: the child really does land in the
-directory the module chdir'd into, with the collector still in its
-environment, and nothing in the module declares either.
+The guard refuses each module statically. Running it is what shows the
+refusal is worth making: the child really does land in the directory
+the module chdir'd into, with the collector still in its environment
+and nothing declaring either.
 
-Both probes are here because the argument rule is the one under review.
-A decorator binds the launcher; a wrapper handed one invokes it. Neither
-needs a callee this guard recognises, which is why the rule judges the
-value it carries rather than the name it is called.
+None of these needs a callee this guard recognises — a decorator binds
+the launcher, a wrapper is handed one, a thread, a stack and a
+finaliser are given one — which is why the rule judges the value an
+argument carries rather than the name of the callee it is carried to.
 """
 import os
 import subprocess
@@ -62,11 +62,9 @@ os.chdir(sys.argv[2])
 {_WRAPPED_MARKER}sys.executable, '-c', {_CHILD!r}, sys.argv[1]])
 '''
 
-# Three callees that register the launcher and call it later: on a
-# thread, on stack exit, and at finalisation. None is named like a
-# launcher, and each really spawns. These are the rows that stop a tuned
-# name list being cheap, because a gate that excludes them has to list
-# them, and the next name written is not on the list.
+# Three callees that are handed the launcher and call it later: on a
+# thread, on stack exit, and at finalisation. Each really spawns. What
+# they cost a name list is argued in test_coverage_unfollowable_forms.
 _REGISTERED = (
     ('test_to_thread_probe.py', 'asyncio.to_thread(',
      f'''\
@@ -120,17 +118,25 @@ finalizer()
 _BINDING_MESSAGE = 'a launcher is bound through a form the guard cannot follow'
 
 
+def _clean_tree(root):
+    """A tree the control owns, copied, and clean before anything is put in.
+
+    The scan is the control's precondition: a copied tree carrying a
+    violation would mean the refusal below could not be attributed to
+    the probe. One scan for the whole tree, not one per probe.
+    """
+    copy_test_tree(root)
+    assert not _coverage_environment_violations(root)
+
+
 def _planted(root, tmp, name, source, marker):
     """Write a probe into a tree this control owns, and read the verdict."""
     probe = root / 'tests' / name
     report = Path(tmp) / 'child.txt'
-    before = _coverage_environment_violations(root)
     probe.write_text(source, encoding='utf-8')
     planted = _coverage_environment_violations(root)
     line = source[:source.index(marker)].count('\n') + 1
-    relative = f'tests/{name}'
-    assert f'{relative}:{line}: {_BINDING_MESSAGE}' in planted, planted
-    assert not any(v.startswith(f'{relative}:') for v in before), before
+    assert f'tests/{name}:{line}: {_BINDING_MESSAGE}' in planted, planted
     env = dict(os.environ)
     env['COVERAGE_PROCESS_START'] = 'planted'
     result = subprocess.run(
@@ -144,7 +150,7 @@ def _planted(root, tmp, name, source, marker):
 def test_a_decorated_launch_really_inherits_the_moved_cwd(tmp):
     """The guard refuses it; the child lands where the module stands."""
     root = Path(tmp) / 'tree'
-    copy_test_tree(root)
+    _clean_tree(root)
     _planted(root, tmp, 'test_decorated_launch_probe.py', _DECORATED_PROBE,
              _DECORATED_MARKER)
 
@@ -158,7 +164,7 @@ def test_a_wrapped_launch_really_inherits_the_moved_cwd(tmp):
     is the position this rule judges.
     """
     root = Path(tmp) / 'tree'
-    copy_test_tree(root)
+    _clean_tree(root)
     _planted(root, tmp, 'test_wrapped_launch_probe.py', _WRAPPED_PROBE,
              _WRAPPED_MARKER)
 
@@ -166,20 +172,15 @@ def test_a_wrapped_launch_really_inherits_the_moved_cwd(tmp):
 def test_a_registered_launch_really_inherits_the_moved_cwd(tmp):
     """A launcher registered with a thread, a stack or a finaliser runs.
 
-    All three probes share one copied tree, so the guard judges them in
-    one scan and each is then run in turn. What each child wrote about
-    its own working directory and the collector is what is asserted;
-    nothing here is a timing bound.
+    They share one copied tree, scanned once clean and then once per
+    probe, and each is run in turn. What each child wrote about its own
+    working directory and the collector is what is asserted; nothing
+    here is a timing bound.
     """
     root = Path(tmp) / 'tree'
-    copy_test_tree(root)
-    before = _coverage_environment_violations(root)
+    _clean_tree(root)
     for name, marker, source in _REGISTERED:
         _planted(root, tmp, name, source, marker)
-    assert not any(v.startswith('tests/test_to_thread_probe.py')
-                   or v.startswith('tests/test_exit_stack_probe.py')
-                   or v.startswith('tests/test_finalize_probe.py')
-                   for v in before), before
 
 
 if __name__ == '__main__':

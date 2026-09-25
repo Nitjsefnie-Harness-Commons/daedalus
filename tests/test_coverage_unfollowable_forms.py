@@ -128,13 +128,9 @@ class Go:
 def _launching_callee_cases():
     """Callees that invoke what they are handed, named or not.
 
-    Every row here reaches a child when run, and every row's callee is a
-    name this guard has no reason to call a launcher. A rule that judged
-    the callee's name would have to list all six to keep these rows
-    clean, which is part of why the rule judges the value instead. It
-    is not the whole reason: the runtime probes for the same three
-    shapes in test_coverage_decorated_launch.py are what a tuned list
-    cannot satisfy without naming them, and they are launched for real.
+    A rule that judged the callee's name would have to list all six to
+    keep these rows clean. `_opaque_callee_cases` says what that is
+    worth and what it is not.
     """
     return (
         ('thread target', """import subprocess
@@ -167,24 +163,19 @@ list(map(subprocess.run, [['python3', 'child.py']]))
 def _opaque_callee_cases():
     """A launcher handed to a callee whose name says nothing.
 
-    The other tables here name their callees — `operator.call`,
-    `Thread`, `submit` — so a guard that gated its argument rule on a
-    list of those names would satisfy every one of them. These rows
-    raise the cost of such a gate: the names below carry no
-    information, the rule is indifferent to all of them, and a list has
-    to name them too to keep them clean.
+    The other tables name their callees, so a gate listing those names
+    satisfies every one of them. These rows raise its cost: the names
+    below carry no information and a list has to name them too.
 
-    That is what they buy, and it is a smaller claim than it first looks.
-    Indifference is a property no finite sample of names can witness: a
-    gate naming all five of these as well as every other name in this
-    file satisfies every row here and every row in every other table,
-    and the suite stays green. What the rows are a real defence against
-    is the mistake that actually happened — a gate tuned to the
-    committed rows — because that gate has to be written against these
-    rows too, and the more of them there are the more it costs. The
-    runtime probes in test_coverage_decorated_launch.py are what stop a
-    tuned list being cheap, because a gate that excludes
-    `asyncio.to_thread` or `weakref.finalize` has to list those too.
+    That is the whole of what they buy. Indifference is not a property
+    any finite sample of names can witness — a gate naming all five of
+    these and every other name in this file leaves every row of every
+    table in this file green. What they defend against is the mistake
+    that happened, a gate tuned to the committed rows, because that
+    gate must be written against these rows too. The runtime probes in
+    test_coverage_decorated_launch.py are what reject it: a gate has to
+    list `asyncio.to_thread`, `ExitStack.callback` and
+    `weakref.finalize` as well, and those three appear in no table here.
     """
     return (
         ('single letter', """import subprocess
