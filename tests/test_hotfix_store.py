@@ -49,6 +49,16 @@ VERSION = _background_version()
 # worker sums below it. The relationship is checked, not the constants: the
 # two caps are numbers the modules own, and what must hold is that they fit.
 CHROME_AREA_BYTES = 10 * 1024 * 1024
+# The other count-bounded term the 3 MiB reserve is sized against: the
+# segment-origin allowlist, charged as Chrome charges it — a stored
+# canonical origin is one JSON string in a stored array, so an entry
+# costs the origin's own length plus the two quotes and the comma that
+# join it to its neighbours. The ledger's term is the 22 KB the worker
+# comments name for 1000 `<ms>_<counter>` delivery ids. The control
+# below holds the RELATIONSHIP between the terms, not these numerals.
+CANONICAL_ORIGIN = 'https://example.com'
+JSON_ENTRY_OVERHEAD = 3
+LEDGER_TERM_BYTES = 22 * 1000
 
 
 def _declared(source, name):
@@ -65,6 +75,12 @@ def _hotfix_quota():
     return _declared(
         (EXTENSION_ROOT / 'worker' / 'hotfixes.js').read_text(
             encoding='utf-8'), 'HOTFIX_QUOTA_BYTES')
+
+
+def _segment_origin_cap():
+    return _declared(
+        (EXTENSION_ROOT / 'worker' / 'segment_mint.js').read_text(
+            encoding='utf-8'), 'SEGMENT_ORIGIN_CAP')
 
 
 def _charge(version, fixes):
@@ -265,14 +281,16 @@ def test_a_refused_store_releases_the_lock_for_the_next_operation(tmp):
 
 def test_the_two_quotas_leave_the_reserve_the_comment_promises(tmp):
     """GM's aggregate and the hotfix record's cap both fit inside Chrome's
-    `local` area, and the reserve left is the 3 MiB the worker comments
-    name.
+    `local` area, the reserve left is the 3 MiB the worker comments name,
+    and the other count-bounded term it is sized against stays under the
+    delivery-id ledger's.
 
     This is a CLAIM ABOUT VALUES, so it is checked independently of
-    either module's exported constant: the three numbers are read out of
-    the shipped source and the relationship is asserted in words. A cap
-    that grew past the area would be caught here by name rather than by
-    an incidental fixture that overflows first.
+    every module's exported constant: the numbers are read out of the
+    shipped sources and the relationships are asserted in words. A cap
+    that grew past the area, or an allowlist that outgrew the ledger it
+    is compared against, would be caught here by name rather than by an
+    incidental fixture that overflows first.
     """
     del tmp
     gm_total = _declared(
@@ -287,6 +305,15 @@ def test_the_two_quotas_leave_the_reserve_the_comment_promises(tmp):
         f'({CHROME_AREA_BYTES})')
     assert CHROME_AREA_BYTES - gm_total - hotfix_quota == 3 * 1024 * 1024, (
         'the reserve the worker comments promise is no longer 3 MiB')
+    origin_cap = _segment_origin_cap()
+    assert origin_cap > 0, origin_cap
+    per_entry = len(CANONICAL_ORIGIN) + JSON_ENTRY_OVERHEAD
+    allowlist_term = origin_cap * per_entry
+    assert allowlist_term < LEDGER_TERM_BYTES, (
+        f'SEGMENT_ORIGIN_CAP ({origin_cap}) at {per_entry} bytes per '
+        f'entry ({allowlist_term} bytes) is no longer under the '
+        f'delivery-id ledger\'s term ({LEDGER_TERM_BYTES} bytes) the '
+        'worker comments size the 3 MiB reserve against')
 
 
 def main():
