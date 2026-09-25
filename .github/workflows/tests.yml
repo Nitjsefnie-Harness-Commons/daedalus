@@ -1204,6 +1204,16 @@ jobs:
                && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # The published matrix. Declared here in the same shape `changes` uses
+    # for its own: actionlint types `needs.<job>.outputs` from the
+    # PRODUCER's declared `outputs:`, so a producer that declares none types
+    # as `{}` and every `needs.plan-matrix.outputs.<name>` read below is
+    # reported as a property of an empty object — the `timed` job's matrix
+    # expression included. One red actionlint finding is a red `actionlint`
+    # job, which is in `aggregate`'s `needs:`, which is a required status
+    # context on main: the declaration is what keeps the speed gate runnable.
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
 
     steps:
       - name: Check out the head
@@ -1404,20 +1414,18 @@ jobs:
     # `timed`'s own `if:` already requires a green `plan-matrix`, so the
     # default is only ever read by a job that does not run.
     #
-    # The two actionlint findings on this job are the price of that value,
-    # and the shape that silences them — a placeholder `include` row beside
-    # the expression — is the one shape that could put a live cell on the
-    # runner: the repository's actionlint 1.7.12 rejects `include` beside
-    # `matrix` as a schema violation (GitHub accepts it, because a
-    # `matrix` VALUE supersedes an `include`), and a later actionlint
-    # accepts it and reads the row as the matrix's keys. Measured over the
-    # shapes the runner's evaluator would compute (/tmp probe: planned →
-    # 2 cells; planner skipped → `[]` → 0 cells; `include` alone → 1
-    # placeholder cell with empty suites, which the instrument would time
-    # as EVERY suite), the expression is the only shape that cannot put an
-    # unintended cell on the runner, and it is kept for that reason. The
-    # two findings are named in the report; the gate must accept the two
-    # lines, or ignore them by regex, before this job can be merged.
+    # The matrix is a bare expression, and that is what keeps the runner's
+    # cells the planner's cells: a `strategy.include` row beside it — the
+    # shape actionlint reads as a matrix's declared keys — is a live cell
+    # on any runner that does not cross the row out, carrying empty suites,
+    # which the instrument reads as "time every suite". So no row is here,
+    # and the `|| '[]'` default above is the whole of the skipped-planner
+    # story. What makes that shape lint-clean is on the PRODUCER: with
+    # `plan-matrix.outputs.matrix` declared, actionlint types
+    # `needs.plan-matrix.outputs` as an object with that key and the
+    # expression checks; without the declaration it typed the object as
+    # empty and reported the read as a property of `{}` — one red finding
+    # in a required gate, not a shape limit.
     #
     # `group` is the key first because GitHub truncates a matrix job's
     # display name — today's `catchall` cell is already cut off
@@ -1643,7 +1651,6 @@ jobs:
       # different unit. The file lands at reports/reference.json, which
       # `refresh_timings.py` reads as the cell's `{"seconds": …}`.
       - name: Measure the reference
-        id: reference
         if: steps.baseline.outputs.point != ''
         env:
           REFERENCE_OPTIONS: ${{ steps.probe.outputs.reference_options }}
