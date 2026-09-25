@@ -5,6 +5,7 @@ Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
 import inspect
+import json
 import os
 import re
 import subprocess
@@ -639,6 +640,56 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         failure = _harness_failure(
             harness, module, step_timeout=0.5)
         assert message in failure, (name, failure)
+
+
+_MS, _ESCAPE = 500, 60
+# A node child busy-waits a fixed span so two starts intersect and a serialized
+# pair is disjoint; Date.now advances while unscheduled, so it is a floor.
+_WORKER = '''
+import sys, time
+sys.path.insert(0, "tests")
+import _dashnode
+while time.time() < {target}: time.sleep(0.005)
+h = _dashnode.DashboardNodeHarness({src!r}, 0, arguments=({arg}))
+print(_dashnode.run_dashboard_node(h).stdout)
+'''
+_BUSY = ('const t=Date.now();while(Date.now()-t<%d){}\n'
+         'process.stdout.write(JSON.stringify([t,Date.now()]));') % _MS
+_HOLD = ('require("fs").writeFileSync(process.argv[1],"held");'
+         'setTimeout(()=>process.exit(0),2000);')
+
+
+def _spawn(src, *extra, target=0.0, arg=''):
+    script = _WORKER.format(target=target, src=src, arg=arg)
+    return subprocess.Popen(
+        [sys.executable, '-c', script, *extra], cwd=behaviour.ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def test_dashboard_node_children_never_overlap_across_processes(tmp):
+    del tmp
+    # A shared start time removes launch stagger, so only the gate can.
+    target = time.time() + 2
+    both = [_spawn(_BUSY, target=target) for _ in range(2)]
+    out = [worker.communicate(timeout=_ESCAPE) for worker in both]
+    (first, second) = (json.loads(text) for text, _e in out)
+    assert not (first[0] < second[1] and second[0] < first[1]), (
+        f'dashboard Node children overlapped: {first!r}, {second!r}')
+
+
+def test_gate_is_released_by_the_os_when_the_holder_is_killed(tmp):
+    marker = Path(tmp) / 'held'
+    holder = _spawn(_HOLD, marker, target=0, arg='sys.argv[1],')
+    escape = time.monotonic() + 10
+    while not marker.exists() and holder.poll() is None:
+        assert time.monotonic() < escape, 'the holder never took the gate'
+        time.sleep(0.02)
+    holder.kill()
+    holder.wait(timeout=_ESCAPE)
+    # The waiter proceeds only if the killed holder's lock was released.
+    waiter = _spawn(_BUSY)
+    out = waiter.communicate(timeout=_ESCAPE)
+    assert waiter.returncode == 0, out[1]
 
 
 def main():
