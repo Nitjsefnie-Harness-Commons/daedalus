@@ -442,10 +442,11 @@ def test_a_moved_head_beside_a_healthy_head_publishes_the_healthy_one(tmp):
 def test_a_moved_head_and_a_write_failure_and_a_healthy_head(tmp):
     """Kills `return 0` and `return 2 if failed`. It does NOT rule out "exit
     nonzero if anything was skipped": under that shape the run has a failed
-    write too and the verdict is 1 either way. The one-directional tests rule
-    that direction out (`test_a_moved_head_...` wants 0 with no failure;
-    `test_the_run_fails_when_the_only_head_cannot_be_published` wants 1 with
-    no success)."""
+    write too and the verdict is 1 either way. The moved-only tests rule that
+    out (`test_a_moved_head_...` wants 0 with no failure;
+    `test_a_moved_head_beside_a_healthy_head_...` wants 0 with one published);
+    `test_the_run_fails_when_the_only_head_cannot_be_published` rules out
+    `failed and published`."""
     del tmp
     m = _mod()
     published = []
