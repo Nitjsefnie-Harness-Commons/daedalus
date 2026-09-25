@@ -125,6 +125,42 @@ class Go:
     )
 
 
+def _launching_callee_cases():
+    """Callees that invoke what they are handed, named or not.
+
+    Every row here reaches a child when run, and every row's callee is a
+    name this guard has no reason to call a launcher. A rule that judged
+    the callee's name would leave all six clean and lose all six, which
+    is the whole reason the rule judges the value instead.
+    """
+    return (
+        ('thread target', """import subprocess
+from threading import Thread
+Thread(target=subprocess.run)
+""", 'Thread(target='),
+        ('executor submit', """import subprocess
+from concurrent.futures import ThreadPoolExecutor
+executor = ThreadPoolExecutor()
+executor.submit(subprocess.run)
+""", 'executor.submit('),
+        ('mock side effect', """import subprocess
+from unittest.mock import Mock
+Mock(side_effect=subprocess.run)
+""", 'Mock(side_effect='),
+        ('atexit register', """import atexit
+import subprocess
+atexit.register(subprocess.run)
+""", 'atexit.register('),
+        ('wrapped launcher', """import subprocess
+from functools import partial
+partial(subprocess.run)(['python3', 'child.py'])
+""", 'partial(subprocess.run)('),
+        ('map a launcher', """import subprocess
+list(map(subprocess.run, [['python3', 'child.py']]))
+""", 'list(map('),
+    )
+
+
 def _lambda_default_cases():
     """A lambda default binds its parameter as surely as a def's does."""
     return (
@@ -194,24 +230,11 @@ def go():
         ('builtin callee argument', """import operator
 operator.call(len, ['x'])
 """),
-        # A launcher handed to a callee that only compares, inspects or
-        # looks it up is mentioned there, not given to be invoked. These
-        # three were clean on the base guard and refused by the argument
-        # arm before it learned the difference.
-        ('assertIs', """import subprocess
-from unittest.mock import patch
-with patch('subprocess.run') as patched:
-    assertIs(subprocess.run, patched)
-"""),
-        ('assertIn', """import subprocess
-registry = {}
-assertIn(subprocess.run, registry)
-"""),
-        ('callable query', """import subprocess
-callable(subprocess.run)
-"""),
-        # The module-name split: a bare module is a receiver-only signal,
-        # because only the receiver reads a launcher out of the module.
+        # The module-name split, and the only distinction here that is not
+        # a name test: a bare module is a launcher only where the receiver
+        # reads a launch method off it, and an argument carries no such
+        # read. A launcher — an attribute that names one, or a name bound
+        # to one — is refused wherever it appears.
         ('module handed to patch', """import subprocess
 from unittest import mock
 with mock.patch.object(subprocess, 'run'):
@@ -231,6 +254,11 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT)
 def test_a_decorated_definition_refuses_a_hidden_launcher(tmp):
     del tmp
     _refused(_decorator_cases())
+
+
+def test_a_launching_callee_refuses_a_hidden_launcher(tmp):
+    del tmp
+    _refused(_launching_callee_cases())
 
 
 def test_a_lambda_default_refuses_a_hidden_launcher(tmp):
@@ -300,6 +328,9 @@ _ARGUMENT_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_cwd_less_call_argument_refuses_a_hidden_launcher('
     'None)')
+_LAUNCHING_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_launching_callee_refuses_a_hidden_launcher(None)')
 _LAMBDA_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_lambda_default_refuses_a_hidden_launcher(None)')
@@ -342,20 +373,15 @@ _ARGUMENTS = (
     "    for argument in arguments:\n"
     "        yield from _carried_parts(argument)\n",
     "def _call_argument_parts(value):\n    yield from ()\n")
-# The predicate that tells a launcher handed to a callee from one merely
-# mentioned there. Forcing it true must turn the assertIs/assertIn/callable
-# rows red, which is what says the narrowing is load-bearing.
-_LAUNCHER_CALLEE = (
-    "    return (name in _LAUNCHERS\n"
-    "            or _names_one_of(function, facts.launch_callables))\n",
-    "    return True\n")
-# A bare module name is a receiver-only signal. Judging it in an argument
-# too must turn the module handed to patch.object rows red.
+# A bare module name is a launcher only where a launch method is read off
+# it. Judging it in an argument position too must turn the module handed
+# to patch.object rows red.
 _MODULE_IN_ARGUMENT = (
-    "                         and _carries_launch_value(\n"
-    "                             _call_argument_parts(node), facts)))):\n",
-    "                         and _carries_launcher(\n"
-    "                             _call_argument_parts(node), facts)))):\n")
+    "                     or _carries_launch_value(_call_argument_parts("
+    "node),\n"
+    "                                              facts))):\n",
+    "                     or _carries_launcher(_call_argument_parts(node),\n"
+    "                                         facts))):\n")
 _STARRED = (
     "    elif isinstance(value, ast.Starred):\n"
     "        yield from _carried_parts(value.value)\n",
@@ -370,7 +396,8 @@ _UNFOLLOWABLE_MUTATIONS = (
      _DECORATOR_INVOKE),
     ('lambda header form', 'bindings', (_HEADER_FORMS,), _LAMBDA_INVOKE),
     ('call arguments', 'bindings', (_ARGUMENTS,), _ARGUMENT_INVOKE),
-    ('launcher callee', 'bindings', (_LAUNCHER_CALLEE,), _CLEAN_INVOKE),
+    ('launching callee', 'bindings', (_ARGUMENTS,),
+     _LAUNCHING_INVOKE),
     ('module name in argument', 'bindings', (_MODULE_IN_ARGUMENT,),
      _CLEAN_INVOKE),
     ('starred call argument', 'bindings', (_STARRED,), _ARGUMENT_INVOKE),
