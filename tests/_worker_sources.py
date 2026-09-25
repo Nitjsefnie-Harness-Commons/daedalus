@@ -79,10 +79,10 @@ __CONTEXT__.importScripts = (...sourceNames) => {
         '__TRACE_REGISTRATION__', trace_registration)
 
 
-# The stream answer factory the eval-relay and CDP harnesses share. The
-# cross-file duplicate check cannot see JavaScript inside a Python string, so
-# a copied factory would not be caught; one copy here is what keeps the two
-# from drifting.
+# The stream answer factory the eval-relay, CDP, overlap and boundary
+# harnesses share. The cross-file duplicate check cannot see JavaScript inside
+# a Python string, so a copied factory would not be caught; one copy here is
+# what keeps the four from drifting.
 STREAM_RESPONSE = r"""
 function streamResponse(answer) {
   if (answer === 'hang') {
