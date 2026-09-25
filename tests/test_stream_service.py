@@ -11,7 +11,6 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _case_fold  # noqa: E402
 import _util  # noqa: E402
 from _service_loader import _load_service  # noqa: E402
 
@@ -575,39 +574,12 @@ def test_the_legacy_delivered_line_carries_no_full_token(tmp):
     assert 'tok-veri…' in line, line
 
 
-def test_legacy_extension_drain_skips_its_own_folded_name(tmp):
-    """The extension's and the dashboard's own files are their own.
-
-    A case-folding parent gives each of those files one entry under a
-    spelling of its own, and comparing the caller's spelling to the name on
-    disk calls a tab's file theirs. Delivering either here hands the
-    background a second copy of a command it already answered without a tag.
-    """
-    service = _load_service('stream_service_legacy_extension_fold')
-    command_dir = Path(tmp) / 'commands'
-    command_dir.mkdir()
-    tab = command_dir / 'tok_42.json'
-    extension = command_dir / 'tok_Extension.json'
-    dashboard = command_dir / 'tok_Dashboard.json'
-    tab.write_text('{"id":"tab"}', encoding='utf-8')
-    extension.write_text('{"id":"extension"}', encoding='utf-8')
-    dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
-    frames = []
-
-    with _case_fold.case_folding(command_dir):
-        delivered = service.drain_legacy_ext(
-            command_dir, 'tok', None,
-            extension_legacy_name='tok_extension.json',
-            command_ttl=100, frame_writer=frames.append)
-
-    assert delivered == 1, delivered
-    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
-    assert extension.exists(), extension
-    assert dashboard.exists(), dashboard
-
-
 def test_legacy_extension_drain_takes_a_folded_name_as_a_tab(tmp):
-    """The control: where the parent folds nothing, it is a tab's file."""
+    """Where the parent folds nothing, `Extension` is a tab's legacy file.
+
+    The other half of the reserved-name check; the half where the parent
+    does resolve it is in `test_case_fold_parent`, which needs one.
+    """
     service = _load_service('stream_service_legacy_extension_nofold')
     command_dir = Path(tmp) / 'commands'
     command_dir.mkdir()
@@ -646,36 +618,13 @@ def _symlinked_legacy_file(command_dir):
     return real, alias
 
 
-def test_legacy_drain_skips_a_folded_symlinked_reserved_file(tmp):
-    """A reserved name reached through a symlink is still reserved.
+def test_legacy_drain_takes_a_symlinked_tab_file(tmp):
+    """Where the parent folds nothing, that symlink is a tab's file.
 
-    The direction is the issue's own: on that parent the entry answers to the
-    extension's name, and this records that rather than leaving it to how
-    `samefile` happens to follow links.
-    """
-    service = _load_service('stream_service_legacy_folded_symlink')
-    command_dir = Path(tmp) / 'commands'
-    command_dir.mkdir()
-    real, alias = _symlinked_legacy_file(command_dir)
-    frames = []
-
-    with _case_fold.case_folding(command_dir):
-        delivered = service.drain_legacy_ext(
-            command_dir, 'tok', None,
-            extension_legacy_name='tok_extension.json',
-            command_ttl=100, frame_writer=frames.append)
-
-    assert delivered == 0, delivered
-    assert frames == [], frames
-    assert alias.is_symlink() and real.exists()
-
-
-def test_legacy_drain_takes_a_symlinked_tab_file_here(tmp):
-    """The control: the same symlink where the parent folds nothing.
-
-    `tok_extension.json` names nothing here, so the entry is a tab's file --
-    the behaviour the folded case changes, and the reason the check asks the
-    parent rather than folding the name itself.
+    `tok_extension.json` names nothing here, so the entry is a tab's and is
+    delivered as one -- the reason the check asks the parent rather than
+    folding the name itself. The folded half is in
+    `test_case_fold_parent`.
     """
     service = _load_service('stream_service_legacy_symlink_control')
     command_dir = Path(tmp) / 'commands'
