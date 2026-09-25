@@ -365,7 +365,7 @@ def _py_flow_violations(statements, pairs, rel, allowed_opaque_names,
                     for argument in node.args:
                         ordered = materialized_order(
                             consumer, argument, current)
-                        keys = literal_pair_keys(argument, current)
+                        keys = literal_pair_keys(argument, current, consumer)
                         current, yielded = consume_iterable(
                             argument, current, exhaust=True)
                         if ordered is None:
