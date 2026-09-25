@@ -7,6 +7,7 @@ from _pyroute_containers import SpreadContainer, iterated_key
 from _pyroute_indexing import reversed_read, static_slice_read
 from _pyroute_keys import (_UNRESOLVED_KEY, _UNSAFE_LITERAL, _literal_key,
                            _literal_value, _unhashable_key_sender)
+from _pyroute_pop import _unknown_lookup_default
 from _pyroute_positions import (alias_target_pairs, at_position,
                                 drop_shifted_positions, from_position,
                                 sequence_method_value)
@@ -213,14 +214,6 @@ def _setdefault_value(node, state):
                                   node.args[0] if node.args else None,
                                   state)))
     return _mapping_lookup(owner, key, default)
-
-
-def _unknown_lookup_default(node, state):
-    """A known default of a get or pop on an owner the model cannot read."""
-    if not isinstance(node.func, ast.Attribute) \
-            or node.func.attr not in ('get', 'pop') or len(node.args) < 2:
-        return None
-    return _known_value(node.args[1], state)
 
 
 def _mapping_lookup(owner, key, default):
