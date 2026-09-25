@@ -466,6 +466,128 @@ def test_a_file_scope_reaches_a_local_page_on_both_channels(tmp):
                                         ), (channel, outcome)
 
 
+PORTED = 'https://shop.example.com:8443/cart'
+QUERY_PAGE = 'https://shop.example.com/search?q=1'
+QUERY_SCOPE = '*://shop.example.com/search?q=1'
+
+
+def test_a_scoped_fix_reaches_a_page_on_another_port(tmp):
+    """A Chrome match pattern has no port, so a host scope covers its ports.
+
+    The site scope is matched against the URL with the port left off, which
+    is what an operator writing `*://shop.example.com/*` means and what
+    Chrome does. The DOCUMENT BINDING is the other comparison and keeps the
+    port: a port is a real discriminator between two documents on one host,
+    so dropping it there would weaken the boundary to fix a scope bug. This
+    control runs the CDP channel so it pins both at once — a binding that
+    dropped the port while the page side kept it would refuse here.
+    """
+    del tmp
+    for probe in (True, False):
+        outcome = run_hotfix_case({
+            'documents': [PORTED],
+            'current': 0,
+            'asker': 0,
+            'probe': probe,
+            'fixes': [{'id': 'fix1', 'code': FIX, 'match': SCOPE}],
+        })
+        channel = 'MAIN' if probe else 'CDP'
+        assert _delivered(outcome) == {'doc-1': ['fix1']}, (channel, outcome)
+        assert not _errors(outcome), (channel, outcome)
+        assert outcome['submitted'] == ([] if probe
+                                        else [{'replMode': True,
+                                               'awaitPromise': False}]
+                                        ), (channel, outcome)
+
+
+def test_a_scope_may_name_the_query_it_wants(tmp):
+    """The query is part of what a scope can name, and of the identity it
+    is matched against.
+
+    A path with a query term is a scope an operator can write and expect to
+    fire on one page and not another, so the `search` term has to be in the
+    value the pattern is compared against. Without it, this pattern is
+    accepted at store time and matches nothing — the class of defect a
+    stored scope the operator believes exists and does not.
+    """
+    del tmp
+    for page, delivers in ((QUERY_PAGE, True),
+                           ('https://shop.example.com/search', False)):
+        outcome = run_hotfix_case({
+            'documents': [page],
+            'current': 0,
+            'asker': 0,
+            'fixes': [{'id': 'fix1', 'code': FIX, 'match': QUERY_SCOPE}],
+        })
+        assert _delivered(outcome) == ({'doc-1': ['fix1']} if delivers
+                                       else {}), (page, outcome)
+        # A scope that does not match is a reported skip, not a refusal, so
+        # the negative half is pinned on the skip line rather than on an
+        # error the code does not raise.
+        skipped = [line for line in _logs(outcome) if 'by site scope' in line]
+        assert len(skipped) == (0 if delivers else 1), (page, outcome)
+        assert not _errors(outcome), (page, outcome)
+
+
+def test_a_stored_scope_that_does_not_parse_runs_nothing(tmp):
+    """A record written outside the store must not read as no scope at all.
+
+    The store refuses a pattern that does not parse, so a record carrying
+    one was written some other way — `chrome.storage.local` is writable
+    from the extension's own pages. Reading an unusable scope as an absent
+    one is the one direction that WIDENS: the fix would run on every site
+    instead of the one it was scoped to. The unscoped fix in the same
+    record runs, so the page is not simply refusing everything.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE],
+        'current': 0,
+        'asker': 0,
+        'fixes': [
+            {'id': 'unusable', 'code': "daedalusHits.push('unusable')",
+             'match': 'ht!tp:/nonsense'},
+            {'id': 'plain', 'code': "daedalusHits.push('plain')"},
+        ],
+    })
+    # The anti-vacuity half: the same record, the same page, one fix with no
+    # scope at all — and it runs. So a refused scope is a decision, not a
+    # dead page.
+    assert _delivered(outcome) == {'doc-1': ['plain']}, outcome
+    assert not _errors(outcome), outcome
+    assert len(_logs(outcome)) == 2, outcome
+    assert 'replayed 1 hotfix(es)' in _logs(outcome)[0], outcome
+    assert 'skipped 1 hotfix(es) by site scope' in _logs(outcome)[1], outcome
+    assert 'does not parse' in _logs(outcome)[1], outcome
+
+
+def test_a_file_scope_naming_a_host_is_refused_at_store_time(tmp):
+    """A `file:` pattern has no host to name; `file://localhost/*` is not a
+    narrower scope, it is not a pattern.
+
+    The `file` branch in `_parseMatch` requires the empty host, and this is
+    the arm that makes the branch mean anything — without it a host
+    position on a `file:` pattern would compile to a scope that can never
+    match the one page shape `file:` pages have.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [LOCAL_PAGE],
+        'ask': False,
+        'store': [
+            {'id': 'store-hosted', 'fixId': 'hosted', 'code': FIX,
+             'match': 'file://localhost/*'},
+            {'id': 'store-plain', 'fixId': 'plain', 'code': FIX,
+             'match': FILE_SCOPE},
+        ],
+    })
+    posted = {row['id']: row for row in outcome['posted']}
+    assert posted['store-hosted']['error'], outcome
+    assert posted['store-hosted']['result'] is None, outcome
+    assert posted['store-plain']['error'] is None, outcome
+    assert outcome['stored'] == [{'id': 'plain', 'match': FILE_SCOPE}], outcome
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='hotfixscope_')
 

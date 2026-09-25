@@ -89,8 +89,10 @@ let documentSeq = 0;
 let navigated = false;
 
 // A document's `location`, with the components a real Location carries. The
-// CDP channel reads `origin`, `pathname` and `search` off it, so a double
-// carrying only `href` would model a page the channel cannot read.
+// CDP channel reads `protocol`, `host`, `pathname` and `search` off it, so
+// a double carrying only `href` would model a page the channel cannot
+// read, and one carrying `origin` instead of `host` would model a page
+// whose authority is not the one the channel compares.
 const LOCATION_FIELDS = ['href', 'origin', 'protocol', 'host', 'hostname',
                          'port', 'pathname', 'search', 'hash'];
 function fillLocation(target, url) {
