@@ -7,13 +7,13 @@ namespace of every process started there. The bridge's modules live in the
 """
 import ast
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 
@@ -77,8 +77,7 @@ MCP_OLD_NAMES = (
 
 # The launches exempt from the tree-wide no-wall-clock-bound rule, keyed by
 # (repo-relative path, enclosing function) so an edit above a site cannot
-# move a row onto the wrong launch. Each value names the bound that replaces
-# the launch's own, or why it cannot be a bounded git launch.
+# move a row onto the wrong launch.
 BOUNDED_GIT_LAUNCHES = {
     ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root'):
         'a standalone skill script an operator runs by hand; no suite or '
@@ -97,11 +96,6 @@ BOUNDED_GIT_LAUNCHES = {
         'bound sits above it, so a wedged git hangs an operator with '
         'nothing to surface it',
 }
-
-_BOUND_SITE = re.compile(
-    r'^(?P<here>.+):(?P<line>\d+) (?P<kind>carries a timeout=|'
-    r'unpacks a keyword mapping the audit cannot read)'
-    r'.* on a (?P<head>git|non-git|unreadable) launch$')
 
 
 def _clone(root, target):
@@ -158,27 +152,20 @@ def _enclosing_function(tree, line):
 
 
 def _bound_sites(source, here):
-    """Every in-scope bound site in one source as (path, function, refusal).
+    """Every in-scope bound site in one source as (path, function, note).
 
-    A site is in scope only when the launch's head reads as the constant
-    ``git``: a readable ``timeout=`` or a ``**``-unpacked keyword mapping
-    (which could hide a timeout) on such a launch. A refusal the strict
-    pattern cannot parse is returned as its own site, so a bound the
-    parser cannot read fails closed rather than passing as an accept.
+    The analyser computes each launch's head, so this consumes its
+    structured classification rather than re-parsing the human-readable
+    refusal; a message-format change cannot move the rule. A launch whose
+    head the analyser could not read is out of scope by its own stated
+    boundary, named on the refusal rather than dropped.
     """
     tree = ast.parse(source)
     sites = []
-    for refusal in _launch_refusals(source, here):
-        if 'carries a timeout=' not in refusal \
-                and 'unpacks a keyword mapping' not in refusal:
-            continue
-        match = _BOUND_SITE.match(refusal)
-        if match is None:
-            sites.append((here, '<unparsed>', refusal))
-            continue
-        if match.group('head') == 'git':
-            function = _enclosing_function(tree, int(match.group('line')))
-            sites.append((here, function, refusal))
+    for line, head, kind in bound_sites(source, here):
+        if head == 'git':
+            function = _enclosing_function(tree, line)
+            sites.append((here, function, f'{here}:{line} {kind} git launch'))
     return sites
 
 

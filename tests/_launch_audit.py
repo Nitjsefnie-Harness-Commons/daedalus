@@ -13,20 +13,23 @@ CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
 
 # A concat/literal chain deeper than this is not a shape the tree spells;
-# the cap keeps a self-referential binding from spinning the head read. The
-# constant bounds loop passes, and the terminal value is checked at the top
-# of each pass, so the chain actually resolvable is one shorter than it.
+# the cap keeps a self-referential binding from spinning the head read. It
+# bounds the unwrap passes of each resolver, so a name chain or concat
+# longer than the cap stops at the cap and the head is reported unreadable
+# (the name path resolves one hop fewer than the concat path, because its
+# terminal value is only checked on the next pass).
 _ARGV_UNWRAP_CAP = 8
 
 
-def launch_refusals(source, here):
+def launch_refusals(source, here, bound_sink=None):
     """Every refusal limb one Python source's launches trip, naming its
     limb."""
     import builtins
     tree = ast.parse(source)
     safe_names = set(dir(builtins))
     partial_aliases = {'functools.partial', 'partial'}
-    import_module_aliases = {'importlib.import_module', 'import_module'}
+    import_module_aliases = {'importlib.import_module', 'import_module',
+                             '__import__'}
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
@@ -306,19 +309,51 @@ def launch_refusals(source, here):
             return []
         return [resolve_constant(element) for element in container.elts]
 
+    def is_interpreter(element):
+        return (isinstance(element, ast.Attribute)
+                and isinstance(element.value, ast.Name)
+                and element.value.id == 'sys'
+                and element.attr == 'executable')
+
     def first_word(container):
         """The head's string constant and whether the audit could read it.
 
         A head element bound to a name resolves to its constant, so
-        `[GIT, 'status']` with `GIT = 'git'` classifies as a git launch. A
-        head element that is not a readable string constant is unreadable,
-        never a provable non-git: on the exemption path a wrong non-git
-        label would silently widen the exempt set.
+        `[GIT, 'status']` with `GIT = 'git'` classifies as a git launch.
+        A literal `sys.executable` head is read as a known non-git
+        interpreter. Any other head that is not a readable string constant
+        is unreadable, never a provable non-git: on the exemption path a
+        wrong non-git label would silently widen the exempt set.
         """
         if container is None or not container.elts:
             return (None, container is not None)
-        value = resolve_constant(container.elts[0])
+        first = container.elts[0]
+        if is_interpreter(first):
+            return (None, True)
+        value = resolve_constant(first)
         return (value, value is not None)
+
+    def head_label(container):
+        """git / non-git / unreadable for one launch's resolved argv.
+
+        A for-target bound to a sequence of argv literals (the launch runs
+        once per element) is git if ANY iteration's head is git, because
+        the loop runs them all and one refusal covers the site. Otherwise
+        the single head's label decides.
+        """
+        if container is None:
+            return 'unreadable'
+        if container.elts and isinstance(container.elts[0], (ast.List,
+                                                             ast.Tuple)):
+            labels = [head_label(element) for element in container.elts]
+            if 'git' in labels:
+                return 'git'
+            return 'non-git' if all(lab == 'non-git' for lab in labels) \
+                else 'unreadable'
+        first_value, first_readable = first_word(container)
+        if first_value == 'git':
+            return 'git'
+        return 'non-git' if first_readable else 'unreadable'
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) \
@@ -397,23 +432,21 @@ def launch_refusals(source, here):
         argv = node.args[0] if node.args else None
         container = resolve_argv(argv) if argv is not None else None
         words = read_words(container)
-        first_value, first_readable = first_word(container)
-        if first_value == 'git':
-            head = 'git'
-        elif first_readable:
-            head = 'non-git'
-        else:
-            head = 'unreadable'
+        head = head_label(container)
         if None in keywords:
             refusals.append(
                 f'{here}:{node.lineno} unpacks a keyword mapping the '
                 f'audit cannot read on a {head} launch')
+            if bound_sink is not None:
+                bound_sink.append((node.lineno, head, 'unpack'))
             continue
         if 'timeout' in keywords:
             refusals.append(
                 f'{here}:{node.lineno} carries a '
                 f'timeout={ast.dump(keywords["timeout"])} argument on a '
                 f'{head} launch')
+            if bound_sink is not None:
+                bound_sink.append((node.lineno, head, 'timeout'))
         check = keywords.get('check')
         if not (isinstance(check, ast.Constant) and check.value is True):
             refusals.append(
@@ -432,11 +465,8 @@ def launch_refusals(source, here):
                 f'{here}:{node.lineno} builds an argv the audit '
                 'cannot read')
         if words and words[0] != 'git':
-            interpreter = (container is not None
-                           and isinstance(container.elts[0], ast.Attribute)
-                           and isinstance(container.elts[0].value, ast.Name)
-                           and container.elts[0].value.id == 'sys'
-                           and container.elts[0].attr == 'executable')
+            interpreter = (container is not None and container.elts
+                           and is_interpreter(container.elts[0]))
             if not interpreter:
                 refusals.append(
                     f"{here}:{node.lineno} argv does not start with the "
@@ -452,3 +482,16 @@ def launch_refusals(source, here):
                     f'{here}:{node.lineno} clones without the silencing '
                     + ', '.join(f'-c {name}' for name in missing))
     return refusals
+
+
+def bound_sites(source, here):
+    """The analyser's own (lineno, head, kind) for every bounded launch.
+
+    `kind` is 'timeout' (a readable `timeout=`) or 'unpack' (a
+    `**`-unpacked keyword mapping, which could hide a timeout). A caller
+    consumes this instead of re-parsing the human-readable refusal, so a
+    message-format change cannot move a guard that keys on the head.
+    """
+    sink = []
+    launch_refusals(source, here, bound_sink=sink)
+    return sink
