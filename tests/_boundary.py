@@ -42,14 +42,17 @@ def _run(scenario, background_path=None, payload=None):
     outcome = json.loads(result.stdout)
     # The real harness always emits a {result, gate} object; the argv- and
     # temp-file controls deliberately substitute a stub program that emits
-    # something else, and they are not exercising the gate.
+    # something else, and they are not exercising the gate. `result` is the
+    # key that object always carries, so it is read by index: `.get` would
+    # type the runner's answer as Optional and make every scenario that
+    # subscripts it a type error, for a key the harness cannot omit.
     if isinstance(outcome, dict) and 'gate' in outcome:
         _assert_scenario_gate(scenario, outcome['gate'])
-        return outcome.get('result')
+        return outcome['result']
     return outcome
 
 
-def _assert_scenario_gate(scenario, gate):
+def _assert_scenario_gate(scenario, gate: dict) -> None:
     planned = SCENARIO_PLANS[scenario]
     assert_gate_clean(
         contract_faults=gate.get('contractFaults', []),

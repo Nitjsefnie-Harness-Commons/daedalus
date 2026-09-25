@@ -17,6 +17,7 @@ recorded, so an invented fetch fails the scenario.
 import ast
 import sys
 from pathlib import Path
+from typing import TypeGuard
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -321,7 +322,9 @@ _LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
 _UNRESOLVED = 'unresolved'
 
 
-def _is_def(node):
+def _is_def(
+        node: ast.AST,
+) -> TypeGuard[ast.FunctionDef | ast.AsyncFunctionDef]:
     return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
 
 

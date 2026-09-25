@@ -22,8 +22,9 @@ def _output_text(value):
     return value.strip()
 
 
-def client_states(processes, grace,
-                  killed_pipe_release=_KILLED_CLIENT_PIPE_RELEASE_S):
+def client_states(processes, grace: float | None,
+                  killed_pipe_release: float =
+                  _KILLED_CLIENT_PIPE_RELEASE_S):
     """What each same-id client was doing when the harness gave up.
 
     The harness reports only its own timeout, and the `finally` below kills
