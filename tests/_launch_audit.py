@@ -492,12 +492,26 @@ def launch_refusals(source, here, bound_sink=None):
                 and isinstance(node.ctx, ast.Store) \
                 and node.id not in bound:
             safe_names.add(node.id)
-        if isinstance(node, ast.Assign) \
-                and not all(isinstance(t, ast.Name) for t in node.targets) \
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) \
+                and node.value is not None \
                 and derives(node.value, bound):
-            refusals.append(
-                f'{here}:{node.lineno} unpacks subprocess-derived values '
-                'the audit cannot follow')
+            # Two target shapes, two limbs. A tuple or list target unpacks
+            # the value into names the bindings table never records. An
+            # attribute or subscript target binds it to a place receiver
+            # resolution cannot read, which is not an unpacking. A name
+            # target is recorded and needs neither.
+            targets = node.targets if isinstance(node, ast.Assign) \
+                else [node.target]
+            if any(isinstance(t, (ast.Tuple, ast.List))
+                   for t in targets):
+                refusals.append(
+                    f'{here}:{node.lineno} unpacks subprocess-derived '
+                    'values the audit cannot follow')
+            elif not all(isinstance(t, ast.Name) for t in targets):
+                refusals.append(
+                    f'{here}:{node.lineno} binds a subprocess-derived '
+                    'value to an attribute or subscript target the audit '
+                    'cannot follow')
         if isinstance(node, (ast.For, ast.AsyncFor)) \
                 and not isinstance(node.target, ast.Name) \
                 and derives(node.iter, bound):

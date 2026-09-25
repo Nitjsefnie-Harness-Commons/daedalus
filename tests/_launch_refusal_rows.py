@@ -1,10 +1,10 @@
 """The synthetic snippets that red-exercise the repo-layout audit's
 refusal limbs, at least one row per refusal site in both tiers: the
 per-launch limbs, and the source-tier limbs (import aliases,
-from-imports, the no-plain-import gate, unpack-derived names,
-eval/exec, machinery members, undefined names, receiver resolution
-through an import name, a class body attribute or a namespace key, and
-no visible launch)."""
+from-imports, the no-plain-import gate, unpack-derived names, bound
+non-name assignment targets, eval/exec, machinery members, undefined
+names, receiver resolution through an import name, a class body
+attribute or a namespace key, and no visible launch)."""
 LAUNCH_REFUSAL_ROWS = (
     ('clone-without-init.defaultBranch',
      "import subprocess\n"
@@ -79,6 +79,30 @@ LAUNCH_REFUSAL_ROWS = (
      "for word, flag in launcher(['git', 'status'], check=True):\n"
      "    pass\n",
      'unpacks subprocess-derived values the audit cannot follow'),
+    # A target that binds rather than unpacks gets its own limb, and the
+    # three spellings it can arrive in are separate targets.
+    ('attribute-target-subprocess-assignment',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "class Runner:\n"
+     "    def __init__(self):\n"
+     "        self.mod = subprocess\n",
+     'binds a subprocess-derived value to an attribute or subscript '
+     'target the audit cannot follow'),
+    ('subscript-target-subprocess-assignment',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "def probe(target):\n"
+     "    target[0] = subprocess\n",
+     'binds a subprocess-derived value to an attribute or subscript '
+     'target the audit cannot follow'),
+    ('annotated-attribute-target-subprocess-assignment',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "def probe():\n"
+     "    self.mod: object = subprocess\n",
+     'binds a subprocess-derived value to an attribute or subscript '
+     'target the audit cannot follow'),
     ('eval-call',
      "import subprocess\n"
      "subprocess.run(['git', 'status'], check=True)\n"
