@@ -6,9 +6,8 @@ postResult payloads alongside every recorded chrome call. The suites supply
 the plan and assert the answer and the calls together; this module never
 decides what a handler should do.
 
-The chrome surface is the shared stub (tests/_worker_sources.chrome_stub)
-plus the scenario deltas the tab handlers need; the retained eventTarget is
-the shared helper (tests/_worker_sources.event_target_stub).
+The chrome surface is the shared stub plus the tab-handler deltas; the
+retained eventTarget is the shared helper (both in tests/_worker_sources).
 
 The plan may also ask for the deferred surface. `runTimers` makes the
 setTimeout stand-in run and record its callback; `fetchTimings` seeds the
@@ -64,8 +63,7 @@ function record(api, args) {
 
 // A plan can name a chrome surface that must reject, so a handler's catch
 // arm is reachable and the ordering of its postResult against the chrome
-// call is observable. The call is recorded before it rejects, exactly as the
-// create double records before throwing.
+// call is observable. The call is recorded before it rejects.
 function maybeReject(api) {
   const reject = (plan.chromeReject || {})[api];
   if (reject === undefined) return;
@@ -80,8 +78,7 @@ const DEFAULT_ACTIVE_TABS = [
     + event_target_stub()
     + chrome_stub(f"'{TOKEN}'", f"'{SERVER}'", '(() => ({}))')
     + r"""
-// The tab handlers drive chrome surfaces the shared CDP stub does not
-// model, so these are the scenario deltas layered on top of it.
+// Scenario deltas over the shared stub: the surfaces it does not model.
 chrome.tabs.query = function(query, callback) {
   // Boot's registerAllTabs calls query with a callback and an empty query.
   // Answer it off the record so only the handlers' own promise-form
@@ -287,7 +284,9 @@ def run_tabs(commands, **plan):
     """Run the worker VM over `commands`; return calls/posted/outcomes.
 
     `plan` carries the fake chrome's behaviour: `activeTabs` (what
-    tabs.query resolves), `createReject` (url -> rejection message).
+    tabs.query resolves), `createReject` (url -> rejection message),
+    `chromeReject` (chrome api -> rejection message) and `createSyncReject`
+    (url -> a synchronous create failure).
     """
     node = shutil.which('node')
     assert node, 'node is required to execute the worker'
