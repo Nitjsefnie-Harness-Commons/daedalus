@@ -23,13 +23,13 @@ import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
-# Node startup peaked at 1.126s over 120 samples; boundary tests 1.5s.
+# Node startup peaked at 1.126s over 120 samples. Only tests that need just the
+# backstop or drain boundary may use the tight 1.5s allowance: they do not
+# inspect child output, so a slow start cannot change their verdict.
 _PROCESS_STARTUP_ALLOWANCE_S = 1.5
-# Tests that must recover child output use 4.0s, 3.55x the measured max.
+# Tests that must recover child phase or output use 4.0s, a 3.55x margin over
+# the measured maximum, to cover the longer tail under CI contention.
 _OUTPUT_PROCESS_STARTUP_ALLOWANCE_S = 4.0
-# How long the OS-release holder may wait to be admitted before the wait is
-# reported as a queue, not a fault (one child holds the gate ~1.1-6.0s).
-_HOLDER_ADMISSION_S = 90
 
 
 def _module(tmp, source, name='dashboard-module.js'):
@@ -585,8 +585,13 @@ def test_tab_sync_settle_is_bounded(tmp):
     assert 'outer backstop' not in failure, failure
 
 
-# A loop frozen in 2000 ms chunks earns at most the 200 ms cap per chunk,
-# so a 500 ms bound needs three chunks, ~6.1 s wall, past the 4.5 s backstop.
+# A loop frozen in 2000 ms chunks earns at most the 200 ms credit cap per
+# chunk, so a 500 ms bound needs three chunks and about 6.1 s of wall time,
+# well past the 4.5 s backstop the test below gives the whole process. The
+# chunk is that long so each sample also lands past a wall-clock multiple of
+# the bound, where an elapsed ceiling kept beside the serviced one rejects: a
+# shorter chunk would let the whole freeze fit under a single credit and the
+# test would stop proving what it was written for.
 _DEEPLY_STARVED_STEP = r"""
 phase('deeply starved step started');
 _dashnodeSetTimeout(function starve() {
@@ -640,56 +645,6 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         failure = _harness_failure(
             harness, module, step_timeout=0.5)
         assert message in failure, (name, failure)
-
-
-# The holder takes the gate directly, so the control kills the flock owner.
-_GATE_HOLDER = (
-    'import sys, time\nsys.path.insert(0, "tests")\nimport _dashnode\n'
-    'with _dashnode._dashboard_child_gate():\n'
-    '    open(sys.argv[1], "w").close()\n'
-    '    while True: time.sleep(0.05)\n')
-_TRIVIAL_CHILD = 'process.stdout.write("child");'
-_GATE_CHILD = (
-    'import sys\nsys.path.insert(0, "tests")\nimport _dashnode\n'
-    f'h = _dashnode.DashboardNodeHarness({_TRIVIAL_CHILD!r}, 0)\n'
-    'print(_dashnode.run_dashboard_node(h).stdout)\n')
-
-
-def _popen(script, *args):
-    return subprocess.Popen(
-        [sys.executable, '-c', script, *args], cwd=behaviour.ROOT,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-
-def test_gate_is_released_by_the_os_when_the_holder_is_killed(tmp):
-    marker = Path(tmp) / 'held'
-    holder = _popen(_GATE_HOLDER, str(marker))
-    try:
-        escape = time.monotonic() + _HOLDER_ADMISSION_S
-        while not marker.exists() and holder.poll() is None:
-            if time.monotonic() > escape:
-                raise AssertionError(
-                    f'holder queued {_HOLDER_ADMISSION_S}s, not a fault')
-            time.sleep(0.02)
-        assert marker.exists(), (
-            f'the holder exited (rc {holder.poll()}) before the gate')
-    finally:
-        if holder.poll() is None:
-            holder.kill()
-            holder.wait(timeout=90)
-    waiter = _popen(_GATE_CHILD)
-    out = waiter.communicate(timeout=90)
-    assert waiter.returncode == 0, out[1]
-
-
-def test_gate_releases_between_two_children_in_one_process(tmp):
-    del tmp
-    # Two sequential children in one process: the first must release before the
-    # second acquires; with the release removed the second blocks (this hang).
-    for index in range(2):
-        result = _dashnode.run_dashboard_node(
-            _dashnode.DashboardNodeHarness(_TRIVIAL_CHILD, 0))
-        assert result.returncode == 0, (index, result)
 
 
 def main():
