@@ -161,4 +161,152 @@ BOUND_SITE_ROWS = (
      "mod = importlib.import_module(a)\n"
      "subprocess.run(['git', 'status'], check=True)\n",
      []),
+    # The foldable module-name family. Every one of these hands
+    # `import_module` an expression Python folds to the string
+    # `subprocess` and the resolver does not, so no bound site is emitted
+    # and the tree-wide rule has nothing to read. The rows live HERE and
+    # not in LAUNCH_REFUSAL_ROWS because the predicate that consumes them
+    # is `bound_sites`: a refusal string would not stand in for the site
+    # the rule never gets. Each is a ratchet — it goes red if the family
+    # is ever taught, which is a decision rather than an accident.
+    ('module-name-folded-by-an-f-string',
+     "import importlib\n"
+     "import subprocess\n"
+     "name = 'subprocess'\n"
+     "mod = importlib.import_module(f\"{name}\")\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-folded-by-percent-format',
+     "import importlib\n"
+     "import subprocess\n"
+     "name = 'subprocess'\n"
+     "mod = importlib.import_module('%s' % name)\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-folded-by-str-format',
+     "import importlib\n"
+     "import subprocess\n"
+     "name = 'subprocess'\n"
+     "mod = importlib.import_module('{0}'.format(name))\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-folded-by-str-join',
+     "import importlib\n"
+     "import subprocess\n"
+     "name = 'subprocess'\n"
+     "mod = importlib.import_module(''.join((name,)))\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-indexed-from-a-tuple-literal',
+     "import importlib\n"
+     "import subprocess\n"
+     "pair = ('subprocess', 1)\n"
+     "mod = importlib.import_module(pair[0])\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-indexed-from-a-dict-literal',
+     "import importlib\n"
+     "import subprocess\n"
+     "mapping = {'k': 'subprocess'}\n"
+     "mod = importlib.import_module(mapping['k'])\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-name-bound-by-a-walrus',
+     "import importlib\n"
+     "import subprocess\n"
+     "mod = importlib.import_module(held := 'subprocess')\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(4, 'git', 'timeout')]),
+    ('module-name-name-chain-past-the-cap',
+     "import importlib\n"
+     "import subprocess\n"
+     "n0 = 'subprocess'\n"
+     "n1 = n0\n"
+     "n2 = n1\n"
+     "n3 = n2\n"
+     "n4 = n3\n"
+     "n5 = n4\n"
+     "n6 = n5\n"
+     "n7 = n6\n"
+     "n8 = n7\n"
+     "mod = importlib.import_module(n8)\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n",
+     [(13, 'git', 'timeout')]),
+    # The MISS sentinel. A base that binds the name twice stores None for
+    # it, and a base read BEFORE the one that binds the string stops the
+    # resolution there. Reading an absent entry as the stored None instead
+    # would drop that first candidate and let the later base through,
+    # which is the one difference a reader cannot see from the code alone.
+    ('ambiguous-base-attribute-does-not-hide-a-later-binding',
+     "import subprocess\n"
+     "ns = {}\n"
+     "class Root:\n"
+     "    key = 'json'\n"
+     "    key = 'subprocess'\n"
+     "class Near:\n"
+     "    key = 'subprocess'\n"
+     "class Holder(Root, Near):\n"
+     "    def go(self):\n"
+     "        return ns[self.key].run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     []),
+    # A `global` in a class body writes the module's name, so it is not a
+    # class attribute and `self.gmod` is not the module at runtime.
+    ('global-declared-class-body-name-is-not-a-class-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    global gmod\n"
+     "    gmod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.gmod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     []),
+    # One property, one walk. The class NAMESPACE binding the fixpoint
+    # uses and the class ATTRIBUTE table a receiver reads come from the
+    # same pass, so a name a class body binds under a condition is visible
+    # both as the class name and as an attribute. Reading only the
+    # namespace's direct statements dropped the conditional half, and the
+    # two tables then disagreed about one class.
+    ('class-namespace-and-attribute-read-the-same-walk',
+     "import subprocess\n"
+     "FLAG = True\n"
+     "class Direct:\n"
+     "    mod = subprocess\n"
+     "class Conditional:\n"
+     "    if FLAG:\n"
+     "        mod = subprocess\n"
+     "first = Direct\n"
+     "second = Conditional\n"
+     "def go():\n"
+     "    one = first.mod.run(\n"
+     "        ['git', 'status'], check=True, timeout=30)\n"
+     "    return second.mod.run(\n"
+     "        ['git', 'status'], check=True, timeout=30)\n",
+     [(11, 'unreadable', 'unplaced'), (13, 'unreadable', 'unplaced')]),
+    # A walrus is an expression rather than a statement, so no statement
+    # list names it; the class body binds the name and this walk must too.
+    ('class-body-walrus-is-a-class-namespace-binding',
+     "import subprocess\n"
+     "class Base:\n"
+     "    if (held := subprocess):\n"
+     "        mod = held\n"
+     "handle = Base\n"
+     "def go():\n"
+     "    return handle.mod.run(\n"
+     "        ['git', 'status'], check=True, timeout=30)\n",
+     [(7, 'unreadable', 'unplaced')]),
+    # A base name resolves in the enclosing scope and then falls back to
+    # the module's globals, so a class statement inside a function still
+    # reaches the module-level class it never names itself.
+    ('base-falls-back-to-the-module-globals',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "def build():\n"
+     "    class Child(Base):\n"
+     "        def go(self):\n"
+     "            return self.mod.run(\n"
+     "                ['git', 'status'], check=True, timeout=30)\n",
+     [(7, 'git', 'timeout')]),
 )
