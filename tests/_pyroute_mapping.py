@@ -697,6 +697,15 @@ def store_deferred_target(target, value, state, removing=False,
         replacement = DeferredInstance(attributes, owner.identity)
         replace_deferred_storage(state, owner, replacement)
         sync_cells(state, {owner_name})
+    elif isinstance(target, ast.Attribute) and owner is None \
+            and owner_name and is_deferred_value(value):
+        # An attribute store on a base the model holds nothing for still
+        # names a value, and the use site spells the same base and attribute.
+        # Recording it against the base is what lets a later
+        # `args.box.pop(0)` place the element it removes, rather than
+        # dropping a value the model had and reading the call unproved.
+        state.callables[owner_name] = DeferredInstance({target.attr: value})
+        sync_cells(state, {owner_name})
     elif isinstance(target, ast.Subscript) \
             and isinstance(target.value, ast.Name):
         literal = _literal_key(target.slice, state)

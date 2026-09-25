@@ -182,22 +182,24 @@ SELECTIONS = [
      'h.ext_cmd = relay()\nvals = (h, "ext_cmd", None, None)\n'
      'try:\n    x = getattr(*vals)\nexcept TypeError:\n'
      '    x = ordinary', 'x()', False),
-    # ---- Excluded shapes: each a labelled tripwire. -----------------------
-    # Direct-invocation form, no alias binding. Tracked by daedalus issue 979.
+    # ---- Formerly excluded shapes: each a labelled tripwire, now caught. ---
+    # The direct-invocation and nested-selection forms of daedalus issue 979.
+    # They read clean while a selection the model can resolve is seeded only
+    # at a binding; seeding it wherever it is read closes the use site.
     ('getattr-direct-invoke-const (979)', 'class H: pass\nh = H(); '
-     'h.ext_cmd = relay()', 'getattr(h, "ext_cmd")()', (True, False)),
+     'h.ext_cmd = relay()', 'getattr(h, "ext_cmd")()', (True, True)),
     ('getattr-direct-invoke-dynamic (979)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()\nname = "ext_cmd"', 'getattr(h, name)()',
-     (True, False)),
+     (True, True)),
     # Nested-selection forms, the same use-site mechanism as 979.
     ('getattr-nested-const (979)', 'class H: pass\nh = H(); '
-     'h.ext_cmd = relay()', '[getattr(h, "ext_cmd")][0]()', (True, False)),
+     'h.ext_cmd = relay()', '[getattr(h, "ext_cmd")][0]()', (True, True)),
     ('getattr-nested-dynamic (979)', 'class H: pass\nh = H(); '
      'h.ext_cmd = relay()\nname = "ext_cmd"', '[getattr(h, name)][0]()',
-     (True, False)),
+     (True, True)),
     # Issue 959's shape with the binding moved inside the expression, so the
     # seeding (whole-RHS only) never reaches the getattr. Same mechanism as
     # 979.
     ('getattr-nested-absent-default (979)', 'class H: pass\nh = H()\n'
-     'x = [getattr(h, "missing", relay())][0]', 'x()', (True, False)),
+     'x = [getattr(h, "missing", relay())][0]', 'x()', (True, True)),
 ]
