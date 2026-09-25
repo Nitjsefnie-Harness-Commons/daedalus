@@ -252,6 +252,7 @@
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
 !/tests/_bridge.py
+!/tests/_bridge_fake_oracle_harness.py
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
 !/tests/_cli_arg_audit_resolver.py
@@ -313,6 +314,7 @@
 !/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_overlap.py
+!/tests/_overlap_clients.py
 !/tests/_owned_writes.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
@@ -400,6 +402,7 @@
 !/tests/test_cli_segment_origins.py
 !/tests/test_cli_waits.py
 !/tests/test_client_credentials.py
+!/tests/test_client_states.py
 !/tests/test_cmdqueue.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
