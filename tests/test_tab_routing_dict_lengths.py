@@ -163,8 +163,11 @@ def test_star_count_opaque_star_sender_after_reports(tmp):
     assert _star_count(tmp, 'opaque_star_sender_after') == (1, 1)
 
 
-def test_star_count_opaque_star_sender_after_is_unprovable(tmp):
-    assert _star_count(tmp, 'opaque_star_sender_after', clean=True) == (0, 1)
+def test_star_count_resolved_star_sender_after_stays_clean(tmp):
+    # An attribute store on a base the model holds nothing for still names a
+    # value, so a star of it yields what it held and the sender it might have
+    # held does not leak into every position.
+    assert _star_count(tmp, 'opaque_star_sender_after', clean=True) == (0, 0)
 
 
 def test_star_count_or_uncounted_reports(tmp):
