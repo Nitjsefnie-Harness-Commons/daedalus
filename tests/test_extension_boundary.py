@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -47,9 +48,17 @@ def test_v8_coverage_attributes_the_shipped_background_script(tmp):
     background_path = EXTENSION_ROOT / 'background.js'
     env = dict(os.environ)
     env['NODE_V8_COVERAGE'] = str(coverage)
-    result = subprocess.run(
-        [node, '-e', HARNESS, str(background_path), 'capacity'],
-        cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+    with tempfile.TemporaryDirectory() as directory:
+        program = Path(directory) / 'harness.js'
+        # `-e` puts the whole 47 KB HARNESS on the command line, over the
+        # 32767-character Windows CreateProcess limit (WinError 206); a file
+        # keeps it short on every platform. The prologue drops the script
+        # path so argv[1] stays the background path ENVIRONMENT reads.
+        program.write_text(
+            'process.argv.splice(1, 1);' + HARNESS, encoding='utf-8')
+        result = subprocess.run(
+            [node, str(program), str(background_path), 'capacity'],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     dumps = sorted(coverage.glob('*.json'))
