@@ -271,6 +271,7 @@
 !/tests/_cmdqueue.py
 !/tests/_cmdqueue_faults.py
 !/tests/_command_candidates.py
+!/tests/_command_type_readers.py
 !/tests/_completion.py
 !/tests/_control_calls.py
 !/tests/_control_writes.py
