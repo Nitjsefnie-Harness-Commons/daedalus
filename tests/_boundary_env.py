@@ -131,7 +131,10 @@ let tabQueryResolver;
 let nextTimerId = 0;
 let attachCalls = 0;
 let detachCalls = 0;
-let debuggerAttached = false;
+// Real Chrome holds the debugger attachment per tab, so the double refuses a
+// second attach only to a tab that is ALREADY held, not to any tab while some
+// other tab is held.
+const debuggerAttached = new Set();
 const workerSourcePaths = new WeakMap();
 
 // chrome.storage.local hands back a structured clone, so a reader that has not
@@ -275,7 +278,7 @@ const chrome = {
   debugger: {
     onEvent: eventTarget(),
     onDetach: eventTarget(detachListeners),
-    attach: async () => {
+    attach: async (target) => {
       attachCalls++;
       if (scenario !== 'net-capture'
         && scenario !== 'net-capture-ownership') {
@@ -283,11 +286,12 @@ const chrome = {
       }
       if (scenario === 'net-capture-ownership') {
         // The browser refuses a second attachment to one tab, so a feature
-        // that attaches over another's held attachment fails loudly.
-        if (debuggerAttached) {
+        // that attaches over another's held attachment fails loudly. A
+        // DIFFERENT tab may be attached at the same time.
+        if (debuggerAttached.has(target.tabId)) {
           throw new Error('Another debugger is already attached');
         }
-        debuggerAttached = true;
+        debuggerAttached.add(target.tabId);
         return;
       }
       // Attempt 1 models a tab another client already owns; attempt 2 attaches
@@ -295,9 +299,9 @@ const chrome = {
       if (attachCalls === 1) throw new Error('Another debugger"""
     r""" is already attached');
     },
-    detach: async () => {
+    detach: async (target) => {
       detachCalls++;
-      debuggerAttached = false;
+      debuggerAttached.delete(target.tabId);
     },
     sendCommand: async (_target, method) => {
       if (method === 'Network.enable' && attachCalls === 2

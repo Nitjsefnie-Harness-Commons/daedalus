@@ -83,10 +83,10 @@ async function handleNetCapture(cmd) {
       return postResult(cmd._execution, { already: true, tabId: chromeTabId, buffered: _netCaptures[chromeTabId].requests.length }, null, 'extension');
     }
 
-    // A kept CDP session already owns the attachment; reuse it rather than
-    // attaching over it, and give it back only if this call created it.
-    const held = Boolean(_cdpSessions[chromeTabId])
-      || Boolean(_netCaptures[chromeTabId]);
+    // The `already` return above ruled out an existing capture, so only a kept
+    // CDP session can hold the attachment here; reuse it and give it back only
+    // if this call created it.
+    const held = Boolean(_cdpSessions[chromeTabId]);
 
     // Publish the capture only once attach AND Network.enable have succeeded.
     // A half-set-up capture would make the next call answer `already: true`
