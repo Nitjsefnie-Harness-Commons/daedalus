@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""The timings file's two bounds, and the sentence that explains them.
+"""The timings file's two bounds, and the prose that explains them.
 
-`target_cell_weight` and `max_cells` are not measurements: they are the
-file's two policy numbers, and they are coupled by construction to
-`CELL_WEIGHT_MARGIN` in `plan_timed_matrix.py` and to nothing else. The
+WHAT THIS MODULE OWNS. Two things, and both are the file's reader-facing
+contract rather than the planner's packing. The first is the coupling
+between `target_cell_weight` and `max_cells` and the planner's
+`CELL_WEIGHT_MARGIN`: those two numbers are not measurements, the
 planner only NOTES a target the margin forbids -- it still prints a full
 matrix and exits 0 -- and `read_timings` type-checks the number without
-knowing what it means. So the coupling needs an owner, and the owner is
-this module: `verify_target` is the chokepoint the refresher calls
-before every write, and `basis_sentence` is the text the file carries
-so a reader of the file alone knows what the two numbers are and on
-what measurement.
+knowing what it means, so `verify_target` is the chokepoint the refresher
+calls before every write. The second is the file's `basis` field: the
+whole paragraph a reader of the data file alone reads -- which run,
+which units, which per-suite method, the target's basis, the cell bound,
+the suites the measurements do not cover, and the command that re-derives
+it all. The name says bounds, and the prose is most of the file; it stays
+here because it is the same authority, rebuilt from the same write.
 
 THE TARGET IS DERIVED, NOT CHOSEN. `derive_target` returns the smallest
 step at which the planner's own balance guarantee holds on the weights
@@ -25,7 +28,8 @@ the bound balances is a refusal rather than a number nobody can act
 on. The step is five in whatever unit the file carries -- seconds
 before the reference workload exists, reference-multiples after, where
 five is a coarser physical step because one multiple is a whole
-reference workload.
+reference workload. The margin's own measured basis is in
+`plan_timed_matrix`'s module docstring, beside the constant it explains.
 
 Every write carries a basis, seed or refresh, rebuilt from the numbers
 of that write rather than preserved from an older one: a sentence that
@@ -37,11 +41,11 @@ import statistics
 
 try:
     from plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, SCHEMA_VERSION, suite_names)
+        CELL_WEIGHT_MARGIN, suite_names)
     from plan_timed_matrix import plan as plan_matrix
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, SCHEMA_VERSION, suite_names)
+        CELL_WEIGHT_MARGIN, suite_names)
     from scripts.ci.plan_timed_matrix import plan as plan_matrix
 
 # The step between candidate targets, in the file's own units.
@@ -60,22 +64,25 @@ def plan_is_balanced(tree, data):
     return max(loads) <= statistics.median(loads) * (1 + CELL_WEIGHT_MARGIN)
 
 
-def _candidate(weights, target, max_cells, units):
-    return {'schema_version': SCHEMA_VERSION,
-            'target_cell_weight': float(target),
-            'max_cells': max_cells, 'units': units,
-            'suite_weights': weights, 'measured_from': 'derive', 'runs': 1}
+def _candidate(weights, target, max_cells):
+    """The probe `plan()` is asked about: the three fields it reads.
+
+    Not a data file -- `read_timings` never sees this dict, and the
+    fields it does not carry (schema version, provenance, units) cannot
+    reach a write from here.
+    """
+    return {'target_cell_weight': float(target),
+            'max_cells': max_cells,
+            'suite_weights': weights}
 
 
-def derive_target(tree, weights, max_cells, units):
+def derive_target(tree, weights, max_cells):
     """The smallest target the balance guarantee allows, in TARGET_STEPs.
 
     At a target the margin forbids, a heavy suite sits alone in its
     cell while the median cell stays small, and the ratio crosses the
     margin; raising the target lets more suites share cells and the
-    median rises under the heavy one. `units` is the file's own unit,
-    carried into the probe so the candidate never asserts one the
-    weights are not in.
+    median rises under the heavy one.
     """
     total = sum(weights.values())
     if total <= 0 or max_cells < 1:
@@ -83,8 +90,7 @@ def derive_target(tree, weights, max_cells, units):
     for target in range(TARGET_STEP, int(total) + TARGET_STEP, TARGET_STEP):
         if math.ceil(total / target) > max_cells:
             continue
-        if plan_is_balanced(
-                tree, _candidate(weights, target, max_cells, units)):
+        if plan_is_balanced(tree, _candidate(weights, target, max_cells)):
             return float(target)
     return float(math.ceil(total / max_cells / TARGET_STEP) * TARGET_STEP)
 
@@ -100,8 +106,7 @@ def verify_target(tree, data, max_cells):
     if plan_is_balanced(tree, data):
         return data['target_cell_weight'], ''
     recorded = data['target_cell_weight']
-    target = derive_target(
-        tree, data['suite_weights'], max_cells, data['units'])
+    target = derive_target(tree, data['suite_weights'], max_cells)
     if not plan_is_balanced(tree, dict(data,
                                        target_cell_weight=target)):
         raise BoundsError(
@@ -130,7 +135,7 @@ def _plural(count, word):
 
 
 def basis_sentence(tree, data, cells, estimated):
-    """The file's `seeded` field: both bounds, their basis, and the rest.
+    """The file's `basis` field: both bounds, their basis, and the rest.
 
     `cells` is the number of cells the measured run(s) ran -- the
     concurrency today's matrix is measured against -- and `estimated`
