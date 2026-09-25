@@ -49,14 +49,25 @@ measurements, or a suite left them. Otherwise nothing is written and
 the reason is printed, so a scheduled refresh that finds nothing to
 say is a no-op, not a commit.
 
+THE BOUNDS. `target_cell_weight` and `max_cells` are not measurements;
+they are the file's two policy numbers, coupled to the planner's
+`CELL_WEIGHT_MARGIN` by construction and to nothing else, and the
+planner only notes a target the margin forbids before exiting 0. So
+before every write -- seed or refresh -- the target is verified
+against the margin with the weights being written and re-derived
+rather than written through when the margin forbids it
+(`timings_bounds`, the chokepoint), and the file carries a `seeded`
+field naming both bounds, their measured basis and the tree suites the
+measurements do not cover, rebuilt from the numbers of that write so
+it cannot go stale the way a preserved sentence would.
+
 UNITS. Weights are reference-multiples. A file in seconds is rescaled
 into them -- the target with the weights, by the same factor -- so the
 cell target keeps the wall-clock load it was derived from; a target
 left in seconds beside weights in multiples would be a bound on
 nothing. The seed mode (`--seed`) writes the first file from a single
 run's RAW seconds, because the reference workload does not exist until
-the timed job runs it, and records that fact in the file's `seeded`
-field with the measured basis for the target and the cell bound.
+the timed job runs it, and says so in that same field.
 
   python3 scripts/ci/refresh_timings.py --runs-root runs/ --out FILE
   python3 scripts/ci/refresh_timings.py --runs-root seed/ --out FILE \
@@ -71,15 +82,16 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
-    from plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, SCHEMA_VERSION, PlanError, read_timings,
-        suite_names)
-    from plan_timed_matrix import plan as plan_matrix
+    from plan_timed_matrix import PlanError, SCHEMA_VERSION, read_timings
+    from timings_bounds import (
+        BoundsError, basis_sentence, derive_target, estimated_count,
+        plan_is_balanced, verify_target)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, SCHEMA_VERSION, PlanError, read_timings,
-        suite_names)
-    from scripts.ci.plan_timed_matrix import plan as plan_matrix
+        PlanError, SCHEMA_VERSION, read_timings)
+    from scripts.ci.timings_bounds import (
+        BoundsError, basis_sentence, derive_target, estimated_count,
+        plan_is_balanced, verify_target)
 
 # The share a recomputed weight may differ from the recorded one before
 # the file is rewritten: runner noise and a suite's own jitter move a
@@ -95,14 +107,6 @@ SAMPLE_RUNS = 3
 # and `warmup` are not. The cell names, unlike these, are generated.
 _ROUND_PREFIX = 'head-'
 _REFERENCE_FILE = 'reference.json'
-_TARGET_STEP = 5
-_SEED_NOTE = ('raw seconds, from one run, not reference-normalized: the '
-              'reference workload does not run in the timed job until the '
-              'planner lands beside it, so this run took no reading to '
-              'normalize by. The first scheduled refresh replaces every '
-              'number here with reference-normalized medians over main '
-              'runs, which is why `units` is the one place this fact is '
-              'recorded.')
 
 
 class RefreshError(Exception):
@@ -261,13 +265,19 @@ def _unit_scale(old_units, reference):
 
 
 def _moved(recorded, computed):
-    """Suites whose weight moved beyond the margin, with both numbers."""
+    """Suites whose weight moved beyond the margin, with both numbers.
+
+    A recorded weight of zero -- which the seed's millisecond rounding
+    can produce for a sub-millisecond suite -- has no relative move to
+    measure, and any new positive weight is infinitely far from it, so
+    it counts as moved rather than dividing by it.
+    """
     moved = []
     for suite, old in sorted(recorded.items()):
         new = computed.get(suite)
         if new is None:
             continue
-        if abs(new - old) / old > WEIGHT_MARGIN:
+        if old <= 0 or abs(new - old) / old > WEIGHT_MARGIN:
             moved.append((suite, old, new))
     return moved
 
@@ -295,13 +305,19 @@ def _reasons(existing, computed):
     return reasons
 
 
-def _written(weights, target, max_cells, run_ids):
+def _rounded(weight):
+    """Four decimals, but never zero: the schema refuses a zero weight."""
+    value = round(weight, 4)
+    return value if value > 0 else weight
+
+
+def _written(weights, target, max_cells, run_ids, units):
     return {
         'schema_version': SCHEMA_VERSION,
         'target_cell_weight': target,
         'max_cells': max_cells,
-        'units': 'reference-multiples',
-        'suite_weights': {suite: round(weight, 4)
+        'units': units,
+        'suite_weights': {suite: _rounded(weight)
                           for suite, weight in sorted(weights.items())},
         'measured_from': ', '.join(str(run_id) for run_id in run_ids),
         'runs': len(run_ids),
@@ -312,11 +328,24 @@ def _write(path, data):
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
 
 
+def _attach_basis(tree, data, cells):
+    """The file's `seeded` field: the basis of both bounds, rebuilt now."""
+    data['seeded'] = basis_sentence(
+        tree, data, cells, estimated_count(tree, data))
+    return data
+
+
 def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None):
     """Recompute the file from the runs; return the message, or refuse.
 
-    The caller owns the exit code; `RefreshError` is the refusal.
+    The caller owns the exit code; `RefreshError` and `BoundsError` are
+    the refusals. The target is verified against the margin BEFORE the
+    decision to write, so a forbidden target is re-derived even when no
+    weight moved -- the file cannot be left in a state the shipped
+    margin forbids, and the re-derivation is itself a reason to write.
     """
+    if tree is None:
+        tree = _REPO_ROOT
     existing = read_timings(out)
     runs = discover_runs(runs_root)
     selected, report = select(runs, wanted)
@@ -326,23 +355,26 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None):
                 f'{len(report["incomplete"])} with a different cell set); '
                 f'wrote nothing to {out}')
     medians, reference = _median_weights(selected)
-    reasons = _reasons(existing, medians)
     run_ids = [run_id for run_id, _w, _r in selected]
     where = (f'median over runs {", ".join(str(r) for r in run_ids)} '
              f'(sample {len(run_ids)}, {len(medians)} suites); '
              + _reached_message(report))
+    scale = _unit_scale(existing['units'], reference)
+    data = _written(medians, existing['target_cell_weight'] * scale,
+                    existing['max_cells'], run_ids, 'reference-multiples')
+    target, note = verify_target(tree, data, data['max_cells'])
+    data['target_cell_weight'] = target
+    reasons = _reasons(existing, medians)
+    if note:
+        reasons.append(note)
     if not reasons:
         return (f'{out} unchanged: no weight moved beyond '
                 f'{WEIGHT_MARGIN:.0%} of its recorded value; '
-                f'no suite appeared or disappeared; {where}; wrote nothing')
-    scale = _unit_scale(existing['units'], reference)
-    data = _written(medians, existing['target_cell_weight'] * scale,
-                    existing['max_cells'], run_ids)
+                f'no suite appeared or disappeared; the target holds the '
+                f'margin; {where}; wrote nothing')
+    _attach_basis(tree, data, len(selected[0][2]))
     _write(out, data)
-    estimated = _estimated(tree, data) if tree is not None else []
-    return (f'wrote {out}: ' + '; '.join(reasons) + f'; {where}'
-            + (f'; {len(estimated)} tree suites estimated'
-               if estimated else ''))
+    return f'wrote {out}: ' + '; '.join(reasons) + f'; {where}'
 
 
 def _reached_message(report):
@@ -352,48 +384,6 @@ def _reached_message(report):
                + ')' if report['incomplete'] else '')
             + (f' ({report["empty"]} with no cell artifacts)'
                if report['empty'] else ''))
-
-
-def _estimated(tree, data):
-    """Tree suites the file records nothing about (the planner estimates)."""
-    recorded = data['suite_weights']
-    return [name for name in suite_names(tree) if name not in recorded]
-
-
-def _balanced(decision):
-    """Whether the planner's own balance guarantee holds for this plan."""
-    loads = [cell.weight for cell in decision.cells]
-    if not loads:
-        return False
-    return max(loads) <= statistics.median(loads) * (1 + CELL_WEIGHT_MARGIN)
-
-
-def derive_target(tree, weights, max_cells):
-    """The smallest target the balance guarantee allows, in 5-second steps.
-
-    More cells is a shorter critical path, and the cell count falls as
-    the target rises, so the smallest target that still balances packs
-    the most cells that fit the bound. The guarantee is the planner's
-    own `CELL_WEIGHT_MARGIN`, checked with the planner itself: at a
-    lower target a heavy suite sits alone in its cell while the median
-    cell stays small, and the ratio crosses the margin.
-    """
-    total = sum(weights.values())
-    if total <= 0 or max_cells < 1:
-        return float(_TARGET_STEP)
-    for target in range(_TARGET_STEP, int(total) + _TARGET_STEP,
-                        _TARGET_STEP):
-        if math.ceil(total / target) > max_cells:
-            continue
-        data = {'schema_version': SCHEMA_VERSION,
-                'target_cell_weight': float(target),
-                'max_cells': max_cells, 'units': 'seconds',
-                'suite_weights': weights, 'measured_from': 'seed',
-                'runs': 1}
-        if _balanced(plan_matrix(tree, data)):
-            return float(target)
-    return float(math.ceil(total / max_cells / _TARGET_STEP)
-                 * _TARGET_STEP)
 
 
 def seed(runs_root, out, tree):
@@ -414,46 +404,18 @@ def seed(runs_root, out, tree):
         raise RefreshError(f'run {run_id} carries no suite durations')
     max_cells = len(cells)
     target = derive_target(tree, seconds, max_cells)
-    total = sum(seconds.values())
-    decision = plan_matrix(tree, {
-        'schema_version': SCHEMA_VERSION,
-        'target_cell_weight': target, 'max_cells': max_cells,
-        'units': 'seconds', 'suite_weights': seconds,
-        'measured_from': str(run_id), 'runs': 1})
-    loads = [cell.weight for cell in decision.cells]
-    data = {
-        'schema_version': SCHEMA_VERSION,
-        'target_cell_weight': target,
-        'max_cells': max_cells,
-        'units': 'seconds',
-        'suite_weights': {suite: round(value, 3)
-                          for suite, value in sorted(seconds.items())},
-        'measured_from': str(run_id),
-        'runs': 1,
-        'seeded': (
-            f'{_SEED_NOTE} Each suite is the mean of its measured head-round '
-            f'totals in tests run {run_id}; the warm-up round is discarded '
-            f'and the base side is another tree, so neither is counted. '
-            f'target_cell_weight {target:g}: this run measured {total:.1f} s '
-            f'across {len(seconds)} suites, which is '
-            f'{math.ceil(total / target)} cells at that target; it is the '
-            f'smallest {_TARGET_STEP}-second step at which the planner\'s '
-            f'balance guarantee holds (heaviest cell {max(loads):.1f} s '
-            f'against a {statistics.median(loads):.1f} s median, margin '
-            f'{CELL_WEIGHT_MARGIN:g}) and the count fits the bound. '
-            f'max_cells {max_cells}: the {max_cells} cells this run measured '
-            f'are the concurrency the repository runs today, so the bound is '
-            f'that number and the planner clamps and names the target if the '
-            f'count ever reaches it. A run on a pull request rather than '
-            f'main, because main\'s newest fully measured run was 97 commits '
-            f'stale and covered fewer suites: strictly fresher data for a '
-            f'one-time seed, and the first scheduled refresh re-derives '
-            f'everything from main.'),
-    }
+    data = _written(seconds, target, max_cells, [run_id], 'seconds')
+    if not plan_is_balanced(tree, data):
+        raise BoundsError(
+            f'run {run_id}: no target within max_cells {max_cells} balances '
+            f'its weights at the margin; split the heaviest suite or raise '
+            f'max_cells by hand')
+    _attach_basis(tree, data, max_cells)
     _write(out, data)
     return (f'seeded {out} from tests run {run_id}: {len(seconds)} suites '
-            f'measured, total {total:.1f} s, target_cell_weight {target:g}, '
-            f'max_cells {max_cells}, units seconds')
+            f'measured, total {sum(seconds.values()):.1f} s, '
+            f'target_cell_weight {target:g}, max_cells {max_cells}, '
+            f'units seconds')
 
 
 def _parser():
@@ -487,7 +449,7 @@ def main(argv=None):
         else:
             message = refresh(Path(args.runs_root), out, args.runs,
                               Path(args.tree))
-    except (RefreshError, PlanError) as error:
+    except (RefreshError, BoundsError, PlanError) as error:
         print(f'refresh_timings: {error}', file=sys.stderr)
         return 1
     print(message, file=sys.stderr)
