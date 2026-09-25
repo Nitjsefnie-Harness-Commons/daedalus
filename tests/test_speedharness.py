@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _processtree  # noqa: E402
 import _speedharness  # noqa: E402
 import _util  # noqa: E402
 
@@ -65,7 +66,13 @@ def test_the_harness_timeout_kills_grandchildren_and_keeps_output(tmp):
 
 
 def test_the_harness_bounds_cleanup_when_tree_kill_fails(tmp):
-    """A failed tree kill still raises the original timeout with evidence."""
+    """A failed tree kill still raises the original timeout with evidence.
+
+    The kill-and-report sequence now lives in `_processtree`, shared with the
+    Node gate's launcher, so the seam this test forces the failure through is
+    the shared one. The expected diagnostic is unchanged by that move, which is
+    the point: one sequence, two callers, one description of what it did.
+    """
 
     class FakeProcess:
         pid = 123
@@ -86,7 +93,7 @@ def test_the_harness_bounds_cleanup_when_tree_kill_fails(tmp):
     process = FakeProcess()
     with mock.patch.object(_speedharness.subprocess, 'Popen',
                            return_value=process), \
-            mock.patch.object(_speedharness, '_kill_process_tree',
+            mock.patch.object(_processtree, '_kill_tree',
                               return_value='simulated tree-kill failure'):
         try:
             _speedharness.run_workflow_script(
