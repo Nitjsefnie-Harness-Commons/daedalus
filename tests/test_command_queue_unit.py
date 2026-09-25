@@ -262,7 +262,9 @@ def test_notify_dashboard_delivers_non_ascii_titles_through_the_drain(tmp):
 
 def test_next_seq_is_lexically_increasing_and_well_formed(_tmp):
     queue = _load_queue('command_queue_next_seq')
-    first, second = queue.next_seq(), queue.next_seq()
+    commands = Path(_tmp) / 'commands'
+    first = queue.next_seq(commands)
+    second = queue.next_seq(commands)
     assert first < second, (first, second)
     for value in (first, second):
         assert (tuple(map(len, value.split('_'))) == (13, 20)
