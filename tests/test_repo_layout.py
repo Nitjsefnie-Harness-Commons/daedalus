@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
+from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 
 ROOT = _util.ROOT
@@ -353,12 +354,16 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     from-import, or a receiver it refuses) is reported at `unreadable`, never
     accepted.
 
-    The residual boundary: a placed launch whose head is a dynamic expression
-    (a slice, comprehension, or return value) reads `unreadable` and, as a
-    single placed launch, is not re-examined for git. The shipped tree's one
-    such git launch, `git diff` at `test_diff_coverage.py:247`, had its
-    bound dropped this branch, so no such site is live; a future one is the
-    filed boundary issue, not enforced here.
+    The residual boundary, a reader is expected to implement against these
+    shapes. A placed launch whose head is a dynamic expression (a parameter,
+    a call, a slice, a comprehension, a starred argument, or a return value)
+    reads `unreadable` and, as a single placed launch, is not re-examined for
+    git. An unplaced receiver the analyser cannot place or derive is out of
+    scope too: a module obtained by `exec` into a namespace dict, a module
+    whose name is computed (`import_module(name)`), and a method-attribute
+    receiver (`self.mod.run(...)`). The shipped tree holds none of these as a
+    bounded git launch, so the summary sentence is true of it; a future one
+    is the filed boundary issue, not enforced here.
 
     The allowance is pinned from both sides: a live site with no row, a
     row matching zero or more than one live site, and a row whose function
@@ -459,6 +464,20 @@ def test_the_head_label_separates_git_non_git_and_unreadable(tmp):
                  if 'carries a timeout=' in r]
         assert len(bound) == 1, (label, bound)
         assert f'on a {label} launch' in bound[0], (label, bound[0])
+
+
+def test_the_sink_pins_the_unplaced_and_ambiguous_branches(tmp):
+    """The analyser's structured sink emits an unplaced and an ambiguous
+    bound site for the two fail-closed branches.
+
+    Neither branch emits a refusal string, so LAUNCH_REFUSAL_ROWS cannot
+    watch them; deleting the unplaced path or the ambiguity mechanism would
+    otherwise leave the suite green while the branch's own headline finding
+    went blind. Each row asserts the analyser's own bound_sites output.
+    """
+    del tmp
+    for label, source, expected in BOUND_SITE_ROWS:
+        assert bound_sites(source, label) == expected, label
 
 
 if __name__ == '__main__':

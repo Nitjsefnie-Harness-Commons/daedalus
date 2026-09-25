@@ -254,6 +254,7 @@
 # ─── tests ───
 !/tests/
 !/tests/_bash_resolver_scan.py
+!/tests/_bound_site_rows.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
