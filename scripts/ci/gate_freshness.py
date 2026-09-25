@@ -381,8 +381,7 @@ def process(read, repository, heads, gates, details_url, call_budget=None,
     failed = 0
     for head in heads:
         # One handler names the phase the read seam failed in: only the two
-        # revalidations and the write raise. A moved head `continue`s inside
-        # the try, so it never reaches it.
+        # revalidations and the write raise.
         phase = 'read the head of'
         try:
             if current_head(read, repository, head['number']) != head['sha']:
