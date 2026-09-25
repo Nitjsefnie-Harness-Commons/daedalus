@@ -18,9 +18,10 @@ the hand-rolled loops this replaces conflate:
 
 Two distinctions the loops got wrong are deliberate. Zero runs on the SHA is
 a waiting state, never success, and an exit 2 says which wait it was: no run
-ever appeared, or named runs were still open. The SHA is PINNED, unlike the
-sibling watcher re-resolving the head each poll: a push landing mid-wait
-must not turn the answer into one about a commit nobody asked about.
+ever appeared, or named runs were still open, or the bound fell inside a
+rate-limit pause. The SHA is PINNED, unlike the sibling watcher re-resolving
+the head each poll: a push landing mid-wait must not turn the answer into one
+about a commit nobody asked about.
 
 A rate-limit refusal is the one exception to the exit-3 rule, and
 deliberate: a refusal is a known wait, not a failed query, so the wait says
@@ -211,6 +212,10 @@ def main(argv=None):
         return 3
     if args.interval <= 0:
         print(f'--interval must be positive, got {args.interval}',
+              file=sys.stderr)
+        return 3
+    if args.timeout <= 0:
+        print(f'--timeout must be positive, got {args.timeout}',
               file=sys.stderr)
         return 3
     try:
