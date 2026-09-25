@@ -4,7 +4,8 @@ per-launch limbs, and the source-tier limbs (import aliases,
 from-imports, the no-plain-import gate, unpack-derived names, bound
 non-name assignment targets, eval/exec, machinery members, undefined
 names, receiver resolution through an import name, a class body
-attribute or a namespace key, and no visible launch)."""
+attribute (own or inherited) or a namespace key, and no visible
+launch)."""
 LAUNCH_REFUSAL_ROWS = (
     ('clone-without-init.defaultBranch',
      "import subprocess\n"
@@ -354,4 +355,121 @@ LAUNCH_REFUSAL_ROWS = (
      "def probe(data):\n"
      "    return data.replace('a', 'b')\n",
      'declares no launch the audit can see through'),
+    # Attribute lookup walks the bases, so a base's class body binds the
+    # receiver too. The receiver's spelling is not what decides it.
+    ('inherited-class-attribute-receiver',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('two-level-inherited-class-attribute-receiver',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Mid(Base):\n"
+     "    pass\n"
+     "class Leaf(Mid):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('classmethod-attribute-receiver-through-inheritance',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Child(Base):\n"
+     "    @classmethod\n"
+     "    def go(cls):\n"
+     "        return cls.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('type-self-attribute-receiver',
+     "import subprocess\n"
+     "class Runner:\n"
+     "    mod = subprocess\n"
+     "    def go(self):\n"
+     "        return type(self).mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # Where two branches of a diamond bind the name differently, either
+    # derived value is taken: no C3 linearisation, so report.
+    ('diamond-inheritance-derives-from-either-branch',
+     "import json\n"
+     "import subprocess\n"
+     "class Left:\n"
+     "    mod = json\n"
+     "class Right(Left):\n"
+     "    mod = subprocess\n"
+     "class Far(Left):\n"
+     "    pass\n"
+     "class Both(Right, Far):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # The override, in both directions: the derived class's own table wins,
+    # so a subclass that rebinds the name to something else is not a launch
+    # and one that rebinds it to subprocess is.
+    ('subclass-override-binding-the-attribute-to-subprocess',
+     "import json\n"
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = json\n"
+     "class Child(Base):\n"
+     "    mod = subprocess\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('subclass-override-binding-the-attribute-to-another-module',
+     "import json\n"
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "class Child(Base):\n"
+     "    mod = json\n"
+     "    def go(self):\n"
+     "        return self.mod.dumps({})\n",
+     'declares no launch the audit can see through'),
+    # An attribute whose own base carries no class body binding: the inner
+    # class is unreadable, so the name does not resolve either way.
+    ('unbound-inner-attribute-does-not-resolve',
+     "import subprocess\n"
+     "class Runner:\n"
+     "    inner = None\n"
+     "    def go(self):\n"
+     "        return self.inner.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'declares no launch the audit can see through'),
+    # A namespace key held in a class body attribute reads like any other
+    # receiver.
+    ('class-body-attribute-names-a-namespace-key',
+     "import subprocess\n"
+     "ns = {}\n"
+     "class Runner:\n"
+     "    key = 'subprocess'\n"
+     "    def go(self):\n"
+     "        return ns[self.key].run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # Negative space of the widened subscript class: a key reading
+    # 'subprocess' derives whatever the base, so a mapping with nothing to
+    # do with modules is read as one. Deliberate and fail-closed, no live
+    # site; deleting the derives key path turns this row red.
+    ('subscript-key-on-an-unrelated-base-derives-alike',
+     "import os\n"
+     "import subprocess\n"
+     "os.environ['subprocess'].run(\n"
+     "    ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # A list target unpacks exactly as a tuple target does.
+    ('list-target-subprocess-assignment',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "[sp, other] = [subprocess, 1]\n",
+     'unpacks subprocess-derived values the audit cannot follow'),
 )

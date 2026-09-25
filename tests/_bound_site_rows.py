@@ -104,4 +104,49 @@ BOUND_SITE_ROWS = (
      "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
      "mods['subprocess'].run(['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced'), (3, 'git', 'timeout')]),
+    # A base this module does not define carries no readable table, so the
+    # attribute it would bind does not resolve: the class that binds the
+    # name in its own body places a site and the one that inherits it from
+    # an imported mixin places none.
+    ('inherited-attribute-resolves-an-unresolvable-base-does-not',
+     "import subprocess\n"
+     "from mixins import Helper\n"
+     "class Early:\n"
+     "    mod = subprocess\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n"
+     "class Late(Helper):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     [(6, 'git', 'timeout')]),
+    # The same split on a namespace key: a class body attribute resolves,
+    # a constructor's own assignment does not.
+    ('class-body-attribute-key-resolves-init-attribute-key-does-not',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
+     "ns = {}\n"
+     "class Runner:\n"
+     "    def __init__(self):\n"
+     "        self.key = 'subprocess'\n"
+     "    def go(self):\n"
+     "        return ns[self.key].run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     [(2, 'git', 'timeout')]),
+    # A `+` whose operand is not a string is not a constant. Both rows
+    # answer with a verdict; dropping the string guard on the constant
+    # makes the fold raise TypeError instead, which is what pins it.
+    ('import-module-name-concat-with-a-non-string',
+     "import importlib\n"
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
+     "mod = importlib.import_module('sub' + 1)\n",
+     [(3, 'git', 'timeout')]),
+    ('subscript-key-concat-with-a-non-string',
+     "import subprocess\n"
+     "subprocess.run(['git', 'status'], check=True, timeout=30)\n"
+     "ns = {}\n"
+     "ns['sub' + 1].dumps({})\n",
+     [(2, 'git', 'timeout')]),
 )

@@ -255,6 +255,7 @@
 
 # ─── tests ───
 !/tests/
+!/tests/_argv_read.py
 !/tests/_bash_resolver_scan.py
 !/tests/_bound_site_rows.py
 !/tests/_boundary.py
