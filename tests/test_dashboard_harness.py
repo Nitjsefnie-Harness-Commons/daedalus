@@ -642,9 +642,8 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
 
 
 # The holder takes the gate directly, so the control kills the process owning
-# the flock with no node grandchild and no self-expiry a slow marker poll could
-# turn into a silent pass; the killed holder's flock is dropped by the OS, so a
-# real dashboard child proceeds only if that release happened.
+# the flock with no grandchild and no self-expiry; the killed holder's flock
+# is dropped by the OS, so a real dashboard child proceeds only if it was.
 _GATE_HOLDER = (
     'import sys, time\nsys.path.insert(0, "tests")\nimport _dashnode\n'
     'with _dashnode._dashboard_child_gate():\n'
@@ -664,12 +663,16 @@ def test_gate_is_released_by_the_os_when_the_holder_is_killed(tmp):
         [sys.executable, '-c', _GATE_HOLDER, str(marker)],
         cwd=behaviour.ROOT, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True)
-    escape = time.monotonic() + 20
-    while not marker.exists() and holder.poll() is None:
-        assert time.monotonic() < escape, 'the holder never took the gate'
-        time.sleep(0.02)
-    holder.kill()
-    holder.wait(timeout=90)
+    try:
+        escape = time.monotonic() + 20
+        while not marker.exists() and holder.poll() is None:
+            assert time.monotonic() < escape, 'the holder never took the gate'
+            time.sleep(0.02)
+        assert marker.exists(), 'the holder never took the gate'
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=90)
     waiter = subprocess.Popen(
         [sys.executable, '-c', _GATE_CHILD], cwd=behaviour.ROOT,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

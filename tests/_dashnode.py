@@ -1,13 +1,10 @@
 """The dashboard suites' Node harness process boundary.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 The dashboard behaviour suite runs shipped JavaScript modules in short Node
 processes. This helper keeps process setup and captured failures consistent.
 
-The shared DOM scaffold the section harnesses mount shipped modules into
-lives here as `DOM`, so the suites driving dashboard sections share one
-copy of it.
+The shared DOM scaffold the section harnesses mount shipped modules into lives
+here as `DOM`, so the suites driving dashboard sections share one copy.
 
 The JavaScript `bounded` helper races settlement but cannot cancel the losing
 work or any handles that work owns. A caller that recovers from its timeout
@@ -23,6 +20,7 @@ content is preserved and must not match the whitespace-tolerant bound pattern.
 """
 import contextlib
 import ctypes
+import errno
 import hashlib
 import importlib
 import os
@@ -41,8 +39,8 @@ from _repo import ROOT
 
 
 # Enough DOM for `h`, `field`, `clear` and the selectors each section uses.
-# Every click on an element is recorded with the href it carried, so a
-# synthesized download anchor is seen the same way a rendered one is.
+# Every click is recorded with the href it carried, so a synthesized download
+# anchor is seen the same way a rendered one is.
 DOM = r"""
 import { pathToFileURL } from 'node:url';
 phase('dashboard harness started');
@@ -154,8 +152,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 _DASHBOARD_STEP_TIMEOUT_S = 5
 _DASHBOARD_PROCESS_GRACE_S = 5
 # Healthy post-kill drains take single-digit to low-hundreds of milliseconds,
-# while an inherited pipe writer held one beyond 3.6s. One second leaves room
-# for scheduling jitter without letting a genuinely held pipe stall diagnosis.
+# while an inherited pipe writer held one beyond 3.6s.
 _DASHBOARD_DRAIN_TIMEOUT_S = 1
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 
@@ -508,7 +505,7 @@ def _format_timeout_attempt(record):
 
 
 # A loaded windows-latest leg cold-started several node.exe at once and left
-# one unscheduled past every bound (issue 1030), which no wider bound fixes.
+# one unscheduled past every bound (issue 1030); no wider bound fixes that.
 def _dashboard_gate_path():
     digest = hashlib.sha256(str(ROOT).encode('utf-8')).hexdigest()
     return Path(tempfile.gettempdir()) / f'daedalus-node-{digest}.lock'
@@ -522,15 +519,19 @@ def _block_until_locked(handle):
             try:
                 msvcrt.locking(handle, msvcrt.LK_LOCK, 1)
                 return
-            except OSError:
-                continue
+            except OSError as failure:
+                if failure.errno in (errno.EACCES, errno.EAGAIN,
+                                     errno.EDEADLK):
+                    continue
+                raise
     fcntl = importlib.import_module('fcntl')
     fcntl.flock(handle, fcntl.LOCK_EX)
 
 
 @contextlib.contextmanager
 def _dashboard_child_gate():
-    # The OS drops the flock on holder death, so an unbounded wait is safe.
+    # The OS drops the flock on holder death, and a live holder is bounded by
+    # the waits inside _run_dashboard_node_once, so the acquire needs no bound.
     try:
         handle = os.open(_dashboard_gate_path(), os.O_CREAT | os.O_RDWR)
     except OSError as failure:
@@ -563,6 +564,7 @@ def _run_dashboard_node_once(
         *map(str, harness.arguments),
     ]
     with _dashboard_child_gate():
+        # duration_s measures the child from admission, not the gate queue.
         started = time.monotonic()
         process = subprocess.Popen(
             command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -641,9 +643,7 @@ def _run_dashboard_node_once(
                 duration_s=time.monotonic() - started,
             )
             # A retry must wait out a first child whose cleanup cannot finish;
-            # once the Windows reader cleanup settled, that objection is gone
-            # even though the drain timed out. Other platforms have no reader
-            # cleanup to recover through.
+            # once the Windows reader cleanup settled, that objection is gone.
             cleanup_completed = not cleanup_failed
             timeout_failure = _DashboardOuterTimeout(
                 record, retryable=drain_outcome == 'completed' or (
