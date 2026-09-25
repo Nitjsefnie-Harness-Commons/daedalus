@@ -11,6 +11,7 @@ import difflib
 import io
 import json
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -461,29 +462,63 @@ def _smallest_balancing_target(planner, tree, weights, max_cells):
 def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     """The committed prose is the CURRENT generator's, character for character.
 
-    The data file's `basis` is written by `timings_bounds.basis_sentence`
-    and nothing else, so it is recomputable from the file's own numbers
-    plus the tree: a seeded file measured `max_cells` cells, which is
-    what `seed()` passed, so `max_cells` is the cell count the sentence
-    needs. The committed prose outlived the generator that wrote it once
-    -- a sentence the shipped generator cannot emit stayed in the file
-    and nothing went red, because the stale text was still TRUE of the
-    seed that produced it. A recomputation is what tells the two apart.
+    The `basis` field is written by `timings_bounds.basis_sentence` and
+    nothing else, and it splits by clause owner. FILE-OWNED are the numbers
+    and prose the file records: the recorded-weight total, the target's cell
+    count and balance figures, the `max_cells` bound and its basis, the
+    provenance and re-derive sentences. TREE-OWNED is the estimate list: the
+    suites the tree carried at the last write the runs did not measure.
 
-    It is also the estimate list: adding a suite to the tree changes the
-    plan, and a `basis` that still names the old count is a sentence
-    about a tree that no longer exists.
+    The boundary is not where it first looks. The target clause's cell
+    count, heaviest cell and median come from `plan_matrix`, and the plan
+    packs the tree's ESTIMATED suites in at the median recorded weight, so
+    those figures move when the live tree gains an unmeasured suite -- on a
+    merge-tree checkout this file's median moved 61.47 -> 61.52. They are
+    file-owned only relative to the file's OWN suite set, so the control
+    derives that set FROM the file -- the recorded weights plus the
+    estimated names the file's own clause lists -- and compares the whole
+    sentence to the generator byte for byte over it. Recomputing over the
+    working tree is the defect: the file describes its HEAD, the `suites`
+    job checks out `refs/pull/N/merge`, and every time `main` gained a
+    suite the merge tree disagreed with a committed artifact. Never reading
+    the live tree makes a moved-on tree green by construction.
+
+    This keeps the original protection: a sentence the shipped generator
+    cannot emit stayed in the committed file once -- the phrase equating the
+    bound with the measured cells -- and nothing went red, since the stale
+    text was still true of the seed that produced it. That phrase is in the
+    file-owned `max_cells` clause, so a planted `the bound is that number`
+    fails the byte-for-byte compare. The tree-owned clause is also checked
+    structurally, from the file alone: its count equals the names it lists,
+    and its total is the recorded weights plus that count.
     """
-    del tmp
     planner = _planner()
     bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
                         'timings_bounds')
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    basis = data['basis']
+    match = re.search(
+        r"(\d+) of the tree's (\d+) suites are not measured by these runs"
+        r".*?: (.+?) Re-derive with ", basis)
+    if match is None:
+        assert 'every suite in the tree is measured' in basis, basis
+        count, total, listed = 0, None, []
+    else:
+        count, total = int(match.group(1)), int(match.group(2))
+        listed = [name.strip() for name in match.group(3).split(',')]
+        # The tree-owned clause, checked from the file alone: the count it
+        # states is the names it lists, and the tree it totals is the
+        # recorded weights plus those names.
+        assert count == len(listed), (count, listed)
+        assert total == len(data['suite_weights']) + count, (
+            total, len(data['suite_weights']), count)
+    suites = sorted(set(data['suite_weights']) | set(listed))
+    tree = _tree(tmp, suites)
     recomputed = bounds.basis_sentence(
-        ROOT, data, data['max_cells'], bounds.estimated_count(ROOT, data))
-    if recomputed != data['basis']:
+        tree, data, data['max_cells'], bounds.estimated_count(tree, data))
+    if recomputed != basis:
         raise AssertionError('\n'.join(difflib.unified_diff(
-            data['basis'].split('. '), recomputed.split('. '),
+            basis.split('. '), recomputed.split('. '),
             'committed', 'generator', lineterm='', n=0)))
 
 
