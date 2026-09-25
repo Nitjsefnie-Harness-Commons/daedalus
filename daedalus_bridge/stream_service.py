@@ -229,15 +229,6 @@ def drain_queue(qdir, chrome_tab, killed_event, *, command_ttl,
     return count
 
 
-def _entry_for(killed_event):
-    """The registry entry this connection owns, or None."""
-    with _stream_lock:
-        for entry in _active_streams.values():
-            if entry['killed'] is killed_event:
-                return entry
-    return None
-
-
 def subscription_cursor(killed_event):
     """This dashboard connection's cursor, seeded on the first call.
 
