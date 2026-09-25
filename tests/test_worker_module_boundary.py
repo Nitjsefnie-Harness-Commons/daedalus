@@ -13,6 +13,7 @@ from _boundary import (observe_extension_worker_paths,  # noqa: E402
                        run_extension_command_result)
 from _jsread import js_mask  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _worker_routes import ROUTES  # noqa: E402
 from _worker_runtime import observe_worker_runtime  # noqa: E402
 from _worker_sources import (directive_entries,  # noqa: E402
                              worker_source_paths)
@@ -240,8 +241,9 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     non-command ownership contract, define its handlers. Before probing, the
     guard requires unique handler ownership and exact, duplicate-sensitive
     route-symbol coverage. A route row for an unloaded module is also refused.
-    Command types are runtime-probe inputs, not an exhaustive inventory of the
-    dispatch surface.
+    The command types come from the shared route table, which
+    test_worker_command_types checks against the dispatch switch and against
+    every shipped client in both directions.
 
     The probe checks replaceability first. A separate runtime observation
     requires one function-instantiation write before source execution and no
@@ -259,43 +261,7 @@ def test_each_worker_capability_lives_in_its_own_module(tmp):
     also passes, because the module is genuinely on the runtime route.
     """
     del tmp
-    routes = [
-        ('worker/capture.js', 'handleScreenshot', 'screenshot'),
-        ('worker/cookies.js', 'handleCookies', 'cookies'),
-        ('worker/cookies.js', 'handleSetCookie', 'set-cookie'),
-        ('worker/cookies.js', 'handleRemoveCookie', 'remove-cookie'),
-        ('worker/cookies.js', 'handleClearCookies', 'clear-cookies'),
-        ('worker/blocking.js', 'handleBlockRequests', 'block-requests'),
-        ('worker/blocking.js', 'handleUnblockRequests', 'unblock-requests'),
-        ('worker/blocking.js', 'handleListBlockRules', 'list-block-rules'),
-        ('worker/tabs.js', 'handleCloseTab', 'close-tab'),
-        ('worker/tabs.js', 'handleOpenTab', 'open-tab'),
-        ('worker/tabs.js', 'handleOpenTabs', 'open-tabs'),
-        ('worker/tabs.js', 'handleFocusTab', 'focus-tab'),
-        ('worker/tabs.js', 'handleNavigate', 'navigate'),
-        ('worker/tabs.js', 'handleReload', 'reload'),
-        ('worker/tabs.js', 'handleInjectCss', 'inject-css'),
-        ('worker/tabs.js', 'handleRemoveCss', 'remove-css'),
-        ('worker/tabs.js', 'handleExtReload', 'ext-reload'),
-        ('worker/tabs.js', 'handleFetchTimings', 'fetch-timings'),
-        ('worker/cdp.js', 'handleCdp', 'cdp'),
-        ('worker/netcapture.js', 'handleNetCapture', 'net-capture'),
-        ('worker/netcapture.js', 'handleNetCaptureStop', 'net-capture-stop'),
-        ('worker/netcapture.js', 'handleNetCaptureGet', 'net-capture-get'),
-        ('worker/hotfixes.js', 'handleStoreHotfix', 'store-hotfix'),
-        ('worker/hotfixes.js', 'handleClearHotfix', 'clear-hotfix'),
-        ('worker/hotfixes.js', 'handleClearAllHotfixes',
-         'clear-all-hotfixes'),
-        ('worker/hotfixes.js', 'handleListHotfixes', 'list-hotfixes'),
-        ('worker/hotfixes.js', 'handleSetPermanent', 'set-permanent'),
-        ('worker/segment_mint.js', 'handleAllowSegmentOrigin',
-         'allow-segment-origin'),
-        ('worker/segment_mint.js', 'handleRevokeSegmentOrigin',
-         'revoke-segment-origin'),
-        ('worker/segment_mint.js', 'handleListSegmentOrigins',
-         'list-segment-origins'),
-        ('worker/evaluate.js', 'handleEval', 'eval'),
-    ]
+    routes = ROUTES
     duplicate_routes = sorted(
         route for route, count in Counter(routes).items() if count > 1)
     assert not duplicate_routes, (
@@ -486,8 +452,9 @@ def test_worker_module_directives_resolve_to_worker_symbols(tmp):
     """Best-effort directive check against runtime worker symbols.
 
     Export-derived exact route-symbol coverage and the per-handler runtime
-    probe are the primary guarantee. Command types remain probe input rather
-    than an exhaustive dispatch inventory. This secondary graph catches
+    probe are the primary guarantee. Command types are the shared route
+    table's, checked as an exhaustive inventory by
+    test_worker_command_types. This secondary graph catches
     ordinary typos cheaply. Usage remains a best-effort text check: an object
     method key can look like a consumer, and a regex body is blanked rather
     than read. The platform allowlist is trusted input, not proof of a
