@@ -120,10 +120,12 @@ def delivery_result_paths(res_dir, token, tab, did):
     root = delivery_root(res_dir)
     key = path_safety.derived_component(result_key(token, tab))
     delivery_dir = path_safety.under(root, key, secret=token)
-    # The stripe is keyed on the entry's own name, so the resolved directory
-    # must be the one-to-one namespace entry that key names -- under the
-    # spelling this filesystem gives it, which is not always the spelling the
-    # caller used -- and not an alias standing in for another entry.
+    # A delivery must not be written through an alias, whatever the stripe
+    # is keyed on: the resolved directory has to be the namespace entry that
+    # key names -- under the spelling this filesystem gives it, which is not
+    # always the spelling the caller used -- and not a name standing in for a
+    # different entry. The stripe is keyed on the entry's identity, not on a
+    # name at all; see `delivery_stripe_key`.
     alias_attempts = []
     parent_matches = path_safety.same_path(
         delivery_dir.parent, root, alias_attempts)
