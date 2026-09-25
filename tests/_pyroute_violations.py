@@ -1,8 +1,9 @@
 """The finding half of the Python tab-routing guard: what one call routes.
 
-Its own module so the flow module, which sits exactly at its size ceiling,
-keeps the lines the flow needs. Nothing here reads or writes flow state; the
-call, the tracked payload keys and the resolved sender are the whole input.
+Its own module so the flow module, which sat exactly at its size ceiling when
+this was split out of it, keeps the lines the flow needs. Nothing here reads
+or writes flow state; the call, the tracked payload keys and the resolved
+sender are the whole input.
 """
 import ast
 
