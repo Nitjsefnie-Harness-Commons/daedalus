@@ -263,20 +263,22 @@ def every_subscription_past(token, name):
 
     Plain lexicographic comparison orders these names because
     `notify_dashboard` publishes each event under the
-    `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns. The
-    counter is monotonic, so within one millisecond — and across counter
-    increases — byte order is publish order regardless of the clock; across
-    *different* milliseconds the wall-clock millisecond prefix decides, so a
-    backwards clock step places a later event's name below an earlier one's.
-    That hole is pre-existing for command ordering; this cursor makes it a
-    loss for a connected dashboard window. This is the whole warrant for a
-    name-ordered cursor: a stem not ordered by publish order (a random suffix,
-    an overflowing counter field, or a backwards clock) sorts arbitrarily,
-    lands below a window's cursor, and is dropped as already-consumed. The
-    same-millisecond, counter-boundary and cursor-invariant controls fail if
-    this property stops holding. A subscription that has registered but not
-    yet drained carries no cursor and blocks, the conservative join; the TTL
-    sweep is the backstop for a connection that never drains at all.
+    `<ms:013d>_<counter:020d>` stem `command_queue.next_seq` returns, which
+    is publish-ordered: the counter is monotonic within a millisecond and
+    across counter increases regardless of the clock, and the millisecond
+    prefix is not raw wall-clock time — every mint clamps it to a mark that
+    the seed set strictly above every parseable survivor on disk. A backwards
+    clock step therefore does not place a later event below an earlier one,
+    within a process or across a restart, so the hole this cursor once turned
+    into a loss is closed. This is the whole warrant for a name-ordered
+    cursor: a stem not ordered by publish order (a random suffix, an
+    overflowing counter field, or a millisecond minted below a survivor)
+    sorts arbitrarily, lands below a window's cursor, and is dropped as
+    already-consumed. The same-millisecond, counter-boundary,
+    narrow-survivor and cursor-invariant controls fail if this property stops
+    holding. A subscription that has registered but not yet drained carries no
+    cursor and blocks, the conservative join; the TTL sweep is the backstop
+    for a connection that never drains at all.
     """
     with _stream_lock:
         for entry in _active_streams.values():

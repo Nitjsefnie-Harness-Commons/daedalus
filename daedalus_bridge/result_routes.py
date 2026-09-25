@@ -44,8 +44,10 @@ def accept_result(res_dir, cmd_dir, token, body, max_delivery_results):
     print(
         f'[RESULT] tab={tab_id[:8] if tab_id else "none"} '
         f'id={log_safe(body.get("id", ""))}', flush=True)
-    # Full server-observed roundtrip: _did's leading ms is the enqueue
-    # instant (same clock as now), so no skew. Skip if _did is absent or
+    # Server-observed roundtrip against the enqueue instant. _did's leading ms
+    # is the clamped order-mark, not raw clock: after a backwards clock step
+    # it runs ahead of the wall clock, so a command minted before the clock
+    # catches up reports a negative roundtrip_ms. Skip if _did is absent or
     # malformed. _did remains internal on the extension wire. Surface its
     # value as deliveryId so waiters can correlate a result with this
     # invocation.

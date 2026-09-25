@@ -133,10 +133,14 @@ def test_the_seed_ignores_unparseable_neighbours(tmp):
     survivor = '0000000006000_00000000000000000009'
     _write_entry(qdir, survivor, id='old')
     # Foreign neighbours: a legacy single-file drop name, a name that is not
-    # a stem at all, and a command file minted by an older six-digit bridge.
+    # a stem at all, a command file minted by an older six-digit bridge, a
+    # 13-character non-numeric millisecond field (reaching the isdigit guard),
+    # and a file at the commands root (reaching the per-queue is_dir filter).
     (qdir / f'{TOKEN}_{TAB}.json').write_text('{}', encoding='utf-8')
     (qdir / 'not-a-stem.json').write_text('{}', encoding='utf-8')
     (qdir / '0000000007000_000001.json').write_text('{}', encoding='utf-8')
+    (qdir / 'aaaaaaaaaaaaa_000001.json').write_text('{}', encoding='utf-8')
+    (cmd_dir / f'{TOKEN}.json').write_text('{}', encoding='utf-8')
 
     cq = _load_queue('ordering_unparseable')
     clock = _Clock(4.0)
@@ -150,6 +154,40 @@ def test_the_seed_ignores_unparseable_neighbours(tmp):
     # The foreign names are ignored, not consumed or removed by the seed.
     assert (qdir / 'not-a-stem.json').exists()
     assert (qdir / '0000000007000_000001.json').exists()
+
+
+def test_a_narrow_counter_survivor_raises_the_mark(tmp):
+    """A survivor whose counter is the released bridge's six digits still
+    holds the mark above it.
+
+    The seed exists to protect the upgrade path this branch itself opens
+    (6→20 counter), and at an *equal* millisecond a zero-padded 20-digit
+    counter sorts below any 6-digit counter with a nonzero leading digit,
+    whatever its value — so rebasing the counter alone cannot rescue it. The
+    seed must honour every parseable survivor's millisecond and take the
+    mark strictly above. The survivor here is the ONLY parseable entry and
+    its millisecond is above the stepped-back clock, so the control dies the
+    moment the narrow field is ignored (the mark then rests on the raw
+    clock, below the survivor) and passes only when the parse reads the six
+    digits and the mark lands above.
+    """
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = cmd_dir / f'{TOKEN}_{TAB}'
+    qdir.mkdir(parents=True)
+    survivor = '1757389120000_000042'  # released-bridge stem: 6-digit counter
+    _write_entry(qdir, survivor, id='old')
+
+    cq = _load_queue('ordering_narrow_survivor')
+    clock = _Clock(1_757_389_119.999)  # one second behind the survivor
+    saved = _on(clock, cq)
+    try:
+        minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
+                               command_ttl=90)
+    finally:
+        setattr(cq, 'time', saved)
+    assert minted > survivor, (
+        'the narrow-counter survivor was ignored and the mark rested on the '
+        'stepped-back clock', minted, survivor)
 
 
 def test_the_seed_is_taken_once_not_per_mint(tmp):
