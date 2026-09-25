@@ -76,17 +76,15 @@ MCP_OLD_NAMES = (
     'mcp_transport.py',
 )
 
-# The launches exempt from the tree-wide no-wall-clock-bound rule, keyed by
-# (repo-relative path, enclosing function) so an edit above a site cannot
-# move a row onto the wrong launch.
 BOUNDED_GIT_LAUNCHES = {
     # Every in-scope bound site in the tracked tree, keyed by
     # (path, line, function) so an allowance is for THAT site: a second
-    # bounded call in an already-allowed function is a different site
-    # and needs a row of its own. Each reason says what the call is and
-    # why it cannot hang a git launch; a receiver the analyser cannot
-    # prove is reported rather than passed, and this table is that
-    # report's disposition.
+    # bounded call in an already-allowed function is a different site and
+    # needs a row of its own, and an edit above a site cannot move a row
+    # onto another launch. Each reason says what the call is and why it
+    # cannot hang a git launch; a receiver the analyser cannot prove is
+    # reported rather than passed, and this table is that report's
+    # disposition.
     ('.claude/skills/changing-daedalus/watch_all.py', 362, '_aggregate'):
         'a queue read with a deadline: the queue is drained,'
         'nothing is launched',
@@ -516,8 +514,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
 
     The allowance is pinned from both sides: a live site with no row, a
     row matching zero or more than one live site, and a row whose function
-    no longer holds a site all fail. Matching is on the exact (path,
-    function) pair, so a launch in a different function of an allowed
+    no longer holds a site all fail. Matching is on the exact (path, line,
+    function) key, so a launch in a different function of an allowed
     module, or a second launch in an allowed function, is a refusal — the
     exemption cannot be widened by a prefix or substring match.
     """
@@ -622,8 +620,7 @@ def test_the_sink_pins_the_unplaced_and_ambiguous_branches(tmp):
 
     Neither branch emits a refusal string, so LAUNCH_REFUSAL_ROWS cannot
     watch them; deleting the unplaced path or the ambiguity mechanism would
-    otherwise leave the suite green while the branch's own headline finding
-    went blind. Each row asserts the analyser's own bound_sites output.
+    otherwise leave the suite green.
     """
     del tmp
     for label, source, expected in BOUND_SITE_ROWS:

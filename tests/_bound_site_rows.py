@@ -29,8 +29,8 @@ BOUND_SITE_ROWS = (
      [(3, 'unreadable', 'unplaced')]),
     # Negative space of the widened receiver class: a key reading
     # 'subprocess' derives whatever the base, so a mapping that has
-    # nothing to do with modules is read as one. Deliberate, fail-closed,
-    # no live site; deleting the derives key path turns this row red.
+    # nothing to do with modules is read as one. Deliberate and
+    # fail-closed; deleting the derives key path turns this row red.
     ('sys-modules-negative-space',
      "import sys\n"
      "def probe():\n"
@@ -43,9 +43,8 @@ BOUND_SITE_ROWS = (
      "    ['git', 'status'], check=True, timeout=30)\n",
      [(3, 'git', 'timeout')]),
     # The unplaced arm is the whole of the second way a site comes in
-    # scope, and each row here is a receiver the analyser cannot PROVE
-    # is a fixed, non-launch value. The fixture carries the bounded call
-    # in every case; the row asserts the line that call is on.
+    # scope, and each row here is a receiver the analyser cannot PROVE is
+    # a fixed, non-launch value.
     ('unproved-parameter-receiver-is-reported',
      "import subprocess\n"
      "def probe(process):\n"
@@ -102,7 +101,7 @@ BOUND_SITE_ROWS = (
     # A name bound to the import machinery is not a proved value: the
     # argument decides what it returns, and an argument the resolver
     # cannot read leaves the module itself unknown. This is the whole of
-    # issue #1099's residual, and the fixture carries the bounded launch.
+    # issue #1099's residual.
     ('machinery-call-binding-is-not-proved',
      "import importlib\n"
      "import subprocess\n"
@@ -154,8 +153,7 @@ BOUND_SITE_ROWS = (
      [(4, 'unreadable', 'unplaced')]),
     # A `+` whose operand is not a string is not a constant. The row is
     # here because dropping the string guard makes the fold raise
-    # TypeError instead of answering, and a park that rests on a row this
-    # branch has removed is not a park.
+    # TypeError instead of answering.
     ('import-module-name-concat-with-a-non-string',
      "import importlib\n"
      "import subprocess\n"
