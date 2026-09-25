@@ -1,33 +1,38 @@
-"""The same-id overlap harness and its client-process diagnostics.
+"""The same-id overlap harness, and its clients' diagnostics beside it.
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The Node VM drives concurrent cookie commands through the shipped background
-worker, while the Python helpers keep its subprocesses observable when an
-overlap stalls.
+worker on the shared gate; the Python helpers keep its subprocesses
+observable when an overlap stalls. The client-process half — the scripted
+result server, the real same-id client overlap and the evidence they report —
+lives in `_overlap_clients`, which imports this module's driver.
 """
-import contextlib
-import http.server
 import json
-import os
 import re
 import shutil
 import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _cmdqueue  # noqa: E402
 import _drain  # noqa: E402
 import _util  # noqa: E402
 # The kill-release floor stays reachable at the spelling the suite pins.
 # pylint: disable-next=unused-import
-from _clientstate import (  # noqa: E402,F401
-    _KILLED_CLIENT_PIPE_RELEASE_S, assert_clients_exited, client_states)
+from _clientstate import _KILLED_CLIENT_PIPE_RELEASE_S  # noqa: E402,F401
+from _stream_fake import STRICT_FETCH, assert_gate_clean  # noqa: E402
+from _worker_sources import STREAM_RESPONSE  # noqa: E402
 
 _STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
+
+# The bridge origin a child is handed when no real result server is
+# configured. The gate refuses a request whose origin it does not permit, and
+# the old fake's relative `test-bridge` server URL has no origin at all, so
+# the synthetic path needs a real one for the gate to accept it.
+SYNTHETIC_BRIDGE = 'https://synthetic-bridge.example.com'
+SYNC = 'POST /sync-tabs'
+RESULT = 'POST /result'
 
 
 _BACKGROUND_OVERLAP_HARNESS = r"""
@@ -36,14 +41,15 @@ const vm = require('vm');
 const nodeCrypto = require('crypto');
 
 const [backgroundPath, commandsText, orderText, resultBase, token,
-  waitBetweenText, innerWaitText] = process.argv.slice(1);
+  waitBetweenText, innerWaitText] = process.argv.slice(1, 8);
 const commands = JSON.parse(commandsText);
 const completionOrder = JSON.parse(orderText);
 const waitBetween = waitBetweenText === '1';
 const innerWaitMs = Number(innerWaitText);
-const bridgeUrl = resultBase || 'test-bridge';
+const bridgeUrl = resultBase || 'SYNTHETIC_BRIDGE';
 const pendingCookies = new Map();
 const postAttempts = [];
+const forwardedBodies = new Map();
 const settledDispatches = new Set();
 const nativeFetch = globalThis.fetch;
 
@@ -57,6 +63,23 @@ function response(status, data) {
   };
 }
 
+// The shared gate's in-scope contract. The gate answers only what the
+// scenario declared and records every request it sees; `workerFetch` below
+// hands the gate a bridge-relative or absolute URL.
+const BRIDGE_URL = bridgeUrl;
+const streamFetches = [];
+const resultPosts = [];
+const nonStreamFetches = [];
+const refusedFetches = [];
+const badOrigins = [];
+// The plan rides last on the command line (the driver appends it as JSON
+// text), so read it here and parse only when it arrived as text.
+const gatePlanArg = process.argv[process.argv.length - 1];
+const plan = typeof gatePlanArg === 'string'
+  ? JSON.parse(gatePlanArg) : gatePlanArg;
+""" + STREAM_RESPONSE + r"""
+""" + STRICT_FETCH + r"""
+
 function attemptRecord(payload, result, body) {
   return {
     id: payload.id,
@@ -69,27 +92,50 @@ function attemptRecord(payload, result, body) {
   };
 }
 
-async function bridgeFetch(target, init = {}) {
-  const url = String(target);
+// A declared forward is answered by the real server, not by the gate: the
+// attempt goes out through the real `fetch` and the server's own answer is
+// what the worker sees. The record's status is the real one, stamped only
+// once the answer is in. The attempt's own attribution (which owner, which
+// id) is the wrapper's, because the gate sees a fetch, not the owner behind
+// it.
+async function forwardRequest(target, init, entry) {
+  const result = await nativeFetch(target, init);
+  const body = await result.text();
+  forwardedBodies.set(result, body);
+  entry.status = result.status;
+  return result;
+}
+
+// The worker's server URL is what `config.serverUrl` holds, and a child with
+// no real result server is handed a real https origin for it. A URL the gate
+// derives from config is already absolute; the temporary workers in the
+// suites that reuse this harness post to `test-bridge/result`, the old fake's
+// placeholder server with no origin, so a relative target is resolved
+// against the bridge origin the gate permits, with the placeholder segment
+// dropped — the request is the same `/result` route the worker would make
+// against a real bridge, and the gate must see it as that route.
+// Every result POST is recorded as an attempt whichever path answered it —
+// the gate's own status, forwarded real status, or a 599 refusal — because
+// the harness's completion wait decides "the work for this owner is over" on
+// a recorded 2xx, and a refusal must read as a failure, not as silence.
+async function workerFetch(target, init = {}) {
+  const raw = String(target);
+  const url = /^https?:\/\//.test(raw)
+    ? raw : BRIDGE_URL + '/' + raw.replace(/^test-bridge\//, '');
   if (url.endsWith('/result') && init.method === 'POST') {
     const payload = JSON.parse(init.body);
-    if (resultBase) {
-      const result = await nativeFetch(target, init);
-      const body = await result.text();
-      const record = attemptRecord(payload, result, body);
-      postAttempts.push(record);
-      if (!record.ok) {
-        process.stderr.write('[post-failure] owner=' + record.owner
-          + ' id=' + record.id + ' _did=' + record.deliveryId
-          + ' status ' + record.status + ' body ' + record.body + '\n');
-      }
-      return result;
+    const answer = await bridgeFetch(url, init);
+    const record = attemptRecord(
+      payload, answer, forwardedBodies.get(answer) || '');
+    if (!record.ok) {
+      process.stderr.write('[post-failure] owner=' + record.owner
+        + ' id=' + record.id + ' _did=' + record.deliveryId
+        + ' status ' + record.status + ' body ' + record.body + '\n');
     }
-    postAttempts.push(attemptRecord(payload, response(200, { ok: true }), ''));
-    return response(200, { ok: true });
+    postAttempts.push(record);
+    return answer;
   }
-  if (url.includes('/stream?')) return response(503, { error: 'disabled' });
-  return response(200, { ok: true });
+  return bridgeFetch(url, init);
 }
 
 function eventTarget() {
@@ -160,7 +206,7 @@ const chrome = {
 
 const context = vm.createContext({
   chrome,
-  fetch: bridgeFetch,
+  fetch: workerFetch,
   crypto: { randomUUID: nodeCrypto.randomUUID },
   AbortController,
   TextDecoder,
@@ -310,12 +356,25 @@ function ownerPosted(owner) {
   const settleLabel = 'all dispatchCommand calls to settle';
   step(settleLabel);
   await bounded(Promise.all(executions), settleLabel, innerWaitMs);
-  process.stdout.write(JSON.stringify(postAttempts.filter(
-    (item) => item.ok).map((item) => ({
-    id: item.id,
-    owner: item.owner,
-    deliveryId: item.deliveryId,
-  }))));
+  process.stdout.write(JSON.stringify({
+    posted: postAttempts.filter(
+      (item) => item.ok).map((item) => ({
+        id: item.id,
+        owner: item.owner,
+        deliveryId: item.deliveryId,
+      })),
+    // The gate's own record, so the Python side compares the whole recorded
+    // list against the plan this run declared. A run that fails before here
+    // (a stall, a missing completion) has no record, and the harness's own
+    // failure is the report.
+    gate: {
+      records: nonStreamFetches,
+      refused: refusedFetches,
+      badOrigins,
+      streamAnswered: streamFetches.map((f) => f.answered),
+      contractFaults: gateContractFaults,
+    },
+  }));
   step('the overlap harness finished');
 })().catch((error) => {
   const text = (error.stack || String(error)) + '\n';
@@ -326,10 +385,45 @@ function ownerPosted(owner) {
 
 _OVERLAP_INNER_WAIT_S = 15
 
-# Publication and healthy exits may move together: expiry on a killed client's
-# pipes means a broken drain, not a busy runner; the parameter only forces it.
-_CLIENT_COMMAND_WAIT_S = 15
-_FAILED_CLIENT_GRACE_S = 1
+# The recording this harness's scenarios make today, on the pre-change tree,
+# measured with a temporary recorder (no tracked file changed): the shipped
+# background's boot opens the stream once, syncs the tab list once itself and
+# once on the stream's connect, then each dispatched command posts one
+# result. A child with a real result base forwards that one result route to
+# the real server; a child without one gets the gate's ordinary 200. The
+# stream is answered `hang` — a connected 200 whose body never yields — so the
+# boot fetch is one fetch, the count is the same on every run, and the stream
+# loop parks instead of reconnecting on a wall clock. The temporary workers the
+# suites splice in place of the background (a `loadConfig` that resolves, a
+# `dispatchCommand` that posts) make no stream or sync call at all, so a
+# caller running one of those declares `boot=False`.
+BOOT = [SYNC, SYNC]
+
+
+def overlap_plan(commands, result_base='', boot=True, results=None):
+    """The gate plan for one overlap run, from the recording above.
+
+    `commands` is the command list the harness dispatches; one result POST per
+    command is what the worker makes. `results` overrides that count for a
+    worker that retries its POST (the shipped worker retries a 5xx three
+    times, so a scenario that answers the first attempt 5xx declares three).
+    `result_base` names a real local server, so `POST /result` is declared as
+    a forward: recorded and debited like any other request, but answered by
+    the real server rather than the gate. The stream fetch is declared as the
+    stream answer queue, not as a route: the gate keeps stream fetches out of
+    the non-stream record.
+    """
+    plan = {
+        'planned': (BOOT if boot else []) + [RESULT] * (
+            len(commands) if results is None else results),
+        'statuses': ['hang'] if boot else [],
+    }
+    if result_base:
+        plan['hosts'] = [result_base]
+        plan['forwards'] = {RESULT: result_base}
+    else:
+        plan['hosts'] = [SYNTHETIC_BRIDGE]
+    return plan
 
 
 def overlap_child_timeout(order, wait_between,
@@ -361,8 +455,17 @@ def overlap_child_timeout(order, wait_between,
 
 def run_background_overlap(background, commands, order, result_base='',
                            token='overlap-token', wait_between=False,
-                           inner_wait=_OVERLAP_INNER_WAIT_S, outer_slack=0):
-    """Run same-id cookie commands through the shipped background worker."""
+                           inner_wait=_OVERLAP_INNER_WAIT_S, outer_slack=0,
+                           boot=True, results=None):
+    """Run same-id cookie commands through the shipped background worker.
+
+    Every run is driven on the shared gate: the plan is this run's recording
+    (`overlap_plan`), the child appends it to its own command line, and the
+    record the gate kept is checked with `assert_gate_clean` before the
+    posted results are handed back, so a request outside the plan — an
+    invented route, a result POST past the one per command, a foreign origin
+    — is refused, recorded, and fails the caller.
+    """
     # Fabricated suite-runner trees copy _util.py without this helper.
     from _worker_sources import import_scripts_stub
 
@@ -371,7 +474,9 @@ def run_background_overlap(background, commands, order, result_base='',
         raise AssertionError(
             'node is required to execute the extension worker')
     harness = _BACKGROUND_OVERLAP_HARNESS.replace(
-        '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context'))
+        '__IMPORT_SCRIPTS_STUB__', import_scripts_stub('context')).replace(
+            'SYNTHETIC_BRIDGE', SYNTHETIC_BRIDGE)
+    plan = overlap_plan(commands, result_base, boot, results)
     attempts = 2
     records = []
     for attempt in range(1, attempts + 1):
@@ -381,7 +486,7 @@ def run_background_overlap(background, commands, order, result_base='',
             [node, '-e', harness, str(background),
              json.dumps(commands), json.dumps(order), result_base, token,
              '1' if wait_between else '0',
-             str(round(inner_wait * attempt * 1000))],
+             str(round(inner_wait * attempt * 1000)), json.dumps(plan)],
             cwd=_util.ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True)
         try:
@@ -415,108 +520,15 @@ def run_background_overlap(background, commands, order, result_base='',
     if records:
         sys.stderr.write(
             f'overlap harness recovered after outer timeout: {records[0]}\n')
-    return json.loads(stdout)
-
-
-def _drain_text(value):
-    """A drained pipe's bytes or None, as the str the messages below embed.
-
-    A timed-out drain hands back the still-unread bytes, or None for a pipe
-    with nothing unread; these strings are rendered into failure messages the
-    step-trace reader recovers labels from, so the trailing newline of a
-    captured stream is kept rather than stripped.
-    """
-    if value is None:
-        return ''
-    if isinstance(value, bytes):
-        return value.decode('utf-8', 'replace')
-    return value
-
-
-def _wait_for_client_commands(queue, count):
-    commands = _cmdqueue.wait_for_commands(
-        queue, count, _CLIENT_COMMAND_WAIT_S)
-    if commands is None:
-        raise AssertionError(
-            'timed out waiting for both same-id client commands')
-    return commands
-
-
-@contextlib.contextmanager
-def _slow_result_server(post_delay=0, post_status=200, post_statuses=None,
-                        post_body=None):
-    statuses = list(post_statuses or [post_status])
-    status_lock = threading.Lock()
-    status_index = 0
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.rfile.read(int(self.headers['Content-Length']))
-            if post_delay:
-                time.sleep(post_delay)
-            nonlocal status_index
-            with status_lock:
-                index = min(status_index, len(statuses) - 1)
-                status_index += 1
-            status = statuses[index]
-            body = post_body
-            if body is None:
-                body = b'{}' if status == 200 else b'{"error":"no"}'
-            if isinstance(body, str):
-                body = body.encode('utf-8')
-            try:
-                self.send_response(status)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # A delayed POST can outlive the child the backstop killed,
-                # so writing to its closed socket is expected.
-                pass
-
-        def do_GET(self):
-            time.sleep(60)
-            body = b'{"pending":false}'
-            try:
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                # The test deliberately ends the peer while this is pending,
-                # so its closed socket is expected to reset here.
-                pass
-
-        # pylint: disable-next=redefined-builtin
-        def log_message(self, format, *args):
-            del format, args
-
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_port}'
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join()
-
-
-def _harness_failure(background, inner_wait=1, commands=None, order=None,
-                     result_base='', wait_between=False, outer_slack=0):
-    commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
-    order = order or ['owner-a']
-    try:
-        run_background_overlap(
-            background, commands, order, result_base=result_base,
-            wait_between=wait_between, inner_wait=inner_wait,
-            outer_slack=outer_slack)
-    except AssertionError as failure:
-        return str(failure)
-    except subprocess.TimeoutExpired as failure:
-        raise AssertionError(
-            f'bare TimeoutExpired after {failure.timeout}s') from failure
-    raise AssertionError('the stalled overlap harness unexpectedly succeeded')
+    outcome = json.loads(stdout)
+    gate = outcome['gate']
+    assert_gate_clean(
+        contract_faults=gate['contractFaults'],
+        records=gate['records'], refused=gate['refused'],
+        bad_origins=gate['badOrigins'],
+        stream_answered=gate['streamAnswered'],
+        planned=list(plan['planned']), planned_stream=list(plan['statuses']))
+    return outcome['posted']
 
 
 def _assert_step_trace(failure, labels):
@@ -537,120 +549,34 @@ def _assert_step_trace(failure, labels):
             ) from mismatch
 
 
-def client_env():
-    """A client environment, minus any bridge coordinates this process has."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    for key in ('TOKEN', 'ID'):
-        env.pop(key, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    return env
+def _harness_failure(background, inner_wait=1, commands=None, order=None,
+                     result_base='', wait_between=False, outer_slack=0,
+                     boot=True, results=None):
+    commands = commands or [{'id': '_cookies', 'domain': 'owner-a'}]
+    order = order or ['owner-a']
+    try:
+        run_background_overlap(
+            background, commands, order, result_base=result_base,
+            wait_between=wait_between, inner_wait=inner_wait,
+            outer_slack=outer_slack, boot=boot, results=results)
+    except AssertionError as failure:
+        return str(failure)
+    except subprocess.TimeoutExpired as failure:
+        raise AssertionError(
+            f'bare TimeoutExpired after {failure.timeout}s') from failure
+    raise AssertionError('the stalled overlap harness unexpectedly succeeded')
 
 
-def cookie_client_argv(owner):
-    """The argv of a real `cookies` client for one owner."""
-    return [
-        sys.executable, '-c',
-        'from daedalus_cli.cli import main; main()',
-        'cookies', '--domain', owner, '--timeout', '120',
-    ]
+def _drain_text(value):
+    """A drained pipe's bytes or None, as the str the messages below embed.
 
-
-def _client_failure_diagnostics(bridge_log, docroot):
-    """The announcement, the log tail and the deliveries, for one diagnosis.
-
-    The announcement is selected out of the whole log rather than left to the
-    tail: it names which bridge this was, and a client dying mid-request
-    makes the bridge print enough afterwards to push it out of the window.
+    A timed-out drain hands back the still-unread bytes, or None for a pipe
+    with nothing unread; these strings are rendered into failure messages the
+    step-trace reader recovers labels from, so the trailing newline of a
+    captured stream is kept rather than stripped.
     """
-    announced = _util.listening_line(bridge_log) or 'no announcement captured'
-    tail = ''.join(bridge_log[-40:]).strip() or 'no bridge log captured'
-    root = Path(docroot) / 'results' / 'deliveries'
-    lines = []
-    for path in sorted(root.rglob('*.json')):
-        try:
-            record = json.loads(path.read_text(encoding='utf-8'))
-        except FileNotFoundError:
-            # A client's consume deleted it after listing: retained, not lost.
-            continue
-        relative = path.relative_to(root).as_posix()
-        lines.append(
-            f"{relative}: deliveryId {record['deliveryId']}")
-    delivery = '\n'.join(lines) or 'no delivery retained'
-    return (f'bridge announcement:\n{announced.strip()}\n'
-            f'bridge log tail:\n{tail}\ndelivery state:\n{delivery}')
-
-
-def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
-                               token, background, *,
-                               stop_clients_after_enqueue=False):
-    """Drive real same-id CLI clients and preserve both failure surfaces.
-
-    With `stop_clients_after_enqueue` the clients are stopped once their
-    commands are queued, so a manufactured diagnosis cannot race a consume.
-    """
-    owners = ('owner-a', 'owner-b')
-    bridge_env = {'TOKEN': '', 'DAEDALUS_TOKEN': token}
-    bridge_log = []
-    with _util.bridge(
-            tmp, env=bridge_env, output=bridge_log) as (base, docroot):
-        client_env = dict(env)
-        client_env.update({
-            'DAEDALUS_URL': base,
-            'DAEDALUS_TOKEN': token,
-        })
-        processes = {
-            owner: subprocess.Popen(
-                client_argv(owner), cwd=str(_util.ROOT), env=client_env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding='utf-8')
-            for owner in owners
-        }
-        try:
-            queue = Path(docroot) / 'commands' / f'{token}_extension'
-            queued = _wait_for_client_commands(queue, len(owners))
-            by_owner = {command['domain']: command for command in queued}
-            assert set(by_owner) == set(owners), by_owner
-            commands = [by_owner[owner] for owner in owners]
-            if stop_clients_after_enqueue:
-                for process in processes.values():
-                    _drain.kill_and_drain(process)
-                alive = [owner for owner, process in processes.items()
-                         if process.poll() is None]
-                assert not alive, f'clients survived their stop: {alive}'
-            try:
-                posted = run_background_overlap(
-                    background, commands, completion_order,
-                    result_base=base, token=token, wait_between=False)
-            except AssertionError as failure:
-                states = client_states(
-                    processes, grace=_FAILED_CLIENT_GRACE_S)
-                raise AssertionError(
-                    f'{failure}; clients: '
-                    f'{states}\n'
-                    f'{_client_failure_diagnostics(bridge_log, docroot)}'
-                ) from failure
-            # The client's own `--timeout` bounds it, so waiting here needs no
-            # wall-clock margin of its own: one that outlived its result would
-            # only be killed while about to finish on its own.
-            states = client_states(processes, grace=None)
-            try:
-                assert_clients_exited(states, posted)
-            except AssertionError as failure:
-                raise AssertionError(
-                    f'{failure}\n'
-                    f'{_client_failure_diagnostics(bridge_log, docroot)}'
-                ) from failure
-            results = {}
-            for owner, state in states.items():
-                foreign = owners[1] if owner == owners[0] else owners[0]
-                results[owner] = {
-                    'returncode': state['returncode'],
-                    'ownResult': owner in state['stdout'],
-                    'foreignResult': foreign in state['stdout'],
-                    'stderr': state['stderr'],
-                }
-            return results
-        finally:
-            for process in processes.values():
-                _drain.kill_and_drain(process)
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        return value.decode('utf-8', 'replace')
+    return value
