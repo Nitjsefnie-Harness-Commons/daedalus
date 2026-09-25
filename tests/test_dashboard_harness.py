@@ -4,6 +4,7 @@
 Each stall is driven through a real Node subprocess so the suite checks the
 exact evidence returned to Python rather than the helpers' source text.
 """
+import contextlib
 import inspect
 import os
 import re
@@ -22,13 +23,13 @@ import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
 _HOST_REALM_KEEPALIVE = "setInterval(() => {}, 10);\n"
-# Loaded Node startup peaked at 1.126s across 120 samples. Tests that only
-# need the backstop or drain boundary keep 1.5s; they do not inspect child
-# output, so a slow start cannot change their verdict.
+# Node startup peaked at 1.126s over 120 samples; boundary tests 1.5s.
 _PROCESS_STARTUP_ALLOWANCE_S = 1.5
-# Tests that must recover child phase or output use 4.0s, a 3.55x margin over
-# the measured maximum, to cover the longer tail under CI contention.
+# Tests that must recover child output use 4.0s, 3.55x the measured max.
 _OUTPUT_PROCESS_STARTUP_ALLOWANCE_S = 4.0
+# How long the OS-release holder may wait to be admitted before the wait is
+# reported as a queue, not a fault (one child holds the gate ~1.1-6.0s).
+_HOLDER_ADMISSION_S = 90
 
 
 def _module(tmp, source, name='dashboard-module.js'):
@@ -239,9 +240,8 @@ bounded(work, 'work using a timer stub', 100).then(
 def test_successful_bound_clears_its_real_timeout(tmp):
     """A settled step leaves no diagnostic timer holding Node open."""
     del tmp
-    # 120000 ms dwarfs the suite's 5s process backstop, so an uncleared
-    # timer is caught by that backstop as a discrete failure instead of
-    # racing a wall-clock margin.
+    # 120000 ms dwarfs the 5s backstop, so an uncleared timer fails
+    # discretely, not as a wall-clock margin race.
     source = r"""
 globalThis.clearTimeout = () => {};
 bounded(Promise.resolve('settled'), 'successful work', 120000).then(
@@ -273,9 +273,8 @@ setInterval(() => {}, 10);
     assert 'dashboard node outer timeout after' not in failure, (
         'a retry=False failure is not the retry-loop verdict')
     if sys.platform.startswith('win'):
-        # On Windows the killed parent's inherited handles do not hold the
-        # pipes, so the drain completes there; observed on a windows-latest
-        # CI record (drain outcome: completed, drain took 0.000s).
+        # On Windows the killed parent does not hold the pipes, so the
+        # drain completes there (a CI record: took 0.000s).
         assert 'drain outcome: completed' in failure, failure
     else:
         assert 'drain timed out: yes' in failure, failure
@@ -290,21 +289,23 @@ def test_process_creation_delay_does_not_inflate_drain_time(tmp):
         time.sleep(_dashnode._DASHBOARD_DRAIN_TIMEOUT_S + 0.2)
         return real_popen(*args, **kwargs)
 
+    # The gated delayed spawn would hold the lock 1.2s per suite; a no-op here.
     _dashnode.subprocess.Popen = delayed_popen
-    try:
-        failure = _harness_failure(
-            "phase('delayed process started'); setInterval(() => {}, 10);",
-            process_grace=_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
-    finally:
-        _dashnode.subprocess.Popen = real_popen
+    with patch.object(_dashnode, '_dashboard_child_gate',
+                      contextlib.nullcontext):
+        try:
+            failure = _harness_failure(
+                "phase('delayed process started'); setInterval(() => {}, 10);",
+                process_grace=_PROCESS_STARTUP_ALLOWANCE_S, retry=False)
+        finally:
+            _dashnode.subprocess.Popen = real_popen
     assert _backstop_seconds(failure) == 1.5, failure
     assert 'attempt 1:' in failure, (
         'a retry=False failure reports its one attempt record')
     assert 'dashboard node outer timeout after' not in failure, (
         'a retry=False failure is not the retry-loop verdict')
-    # A drain reported "timed out" has always consumed its full budget, so
-    # a sub-second one means the window began at spawn — the mutant this
-    # test exists to catch. A genuinely slow drain times out at >= 1.0s.
+    # A "timed out" drain spent its budget; a sub-second one means the
+    # window began at spawn — the mutant this test catches.
     assert 'drain timed out: yes; drain took 0.' not in failure, failure
 
 
@@ -312,9 +313,13 @@ def test_node_output_is_decoded_as_utf8_under_an_ascii_locale(tmp):
     """Node's UTF-8 pipes do not depend on Python's host locale."""
     del tmp
     probe = r'''
+import contextlib
 import sys
 sys.path.insert(0, 'tests')
 import _dashnode
+
+# A decode control: the gate would charge its bound other children's queue.
+_dashnode._dashboard_child_gate = contextlib.nullcontext
 
 source = """
 process.stdout.write(Buffer.from('7374646f757420636166c3a9ff', 'hex'));
@@ -580,11 +585,8 @@ def test_tab_sync_settle_is_bounded(tmp):
     assert 'outer backstop' not in failure, failure
 
 
-# A loop frozen in 2000 ms chunks earns at most the 200 ms credit cap per
-# chunk, so a 500 ms bound needs three chunks and about 6.1 s of wall time,
-# well past the 4.5 s backstop the test below gives the whole process. The
-# chunk is that long so each sample also lands past a wall-clock multiple of
-# the bound, where an elapsed ceiling kept beside the serviced one rejects.
+# A loop frozen in 2000 ms chunks earns at most the 200 ms cap per chunk,
+# so a 500 ms bound needs three chunks, ~6.1 s wall, past the 4.5 s backstop.
 _DEEPLY_STARVED_STEP = r"""
 phase('deeply starved step started');
 _dashnodeSetTimeout(function starve() {
@@ -617,9 +619,8 @@ def test_starvation_past_the_backstop_is_reported_by_the_backstop(tmp):
         step_timeout=0.5,
         process_grace=_OUTPUT_PROCESS_STARTUP_ALLOWANCE_S)
     assert 'outer backstop timed out after 4.5s' in failure, failure
-    # The verdict also quotes the child's argv, and that carries the
-    # prelude's own source, so a rejection and a bound record are looked
-    # for in the quoted stderr rather than anywhere in the verdict.
+    # The verdict quotes the child's argv (the prelude source), so a
+    # rejection and bound record are found in the quoted stderr.
     tail = ("last phase: deeply starved step started; stdout: ''; "
             r"stderr: '[phase] deeply starved step started\n'")
     assert tail in failure, failure
@@ -641,41 +642,42 @@ def test_shipped_catch_tails_flush_through_leave(tmp):
         assert message in failure, (name, failure)
 
 
-# The holder takes the gate directly, so the control kills the process owning
-# the flock with no grandchild and no self-expiry; the killed holder's flock
-# is dropped by the OS, so a real dashboard child proceeds only if it was.
+# The holder takes the gate directly, so the control kills the flock owner.
 _GATE_HOLDER = (
     'import sys, time\nsys.path.insert(0, "tests")\nimport _dashnode\n'
     'with _dashnode._dashboard_child_gate():\n'
     '    open(sys.argv[1], "w").close()\n'
     '    while True: time.sleep(0.05)\n')
+_TRIVIAL_CHILD = 'process.stdout.write("child");'
 _GATE_CHILD = (
     'import sys\nsys.path.insert(0, "tests")\nimport _dashnode\n'
-    'src = \'process.stdout.write("child");\'\n'
-    'h = _dashnode.DashboardNodeHarness(src, 0)\n'
+    f'h = _dashnode.DashboardNodeHarness({_TRIVIAL_CHILD!r}, 0)\n'
     'print(_dashnode.run_dashboard_node(h).stdout)\n')
-_TRIVIAL_CHILD = 'process.stdout.write("child");'
+
+
+def _popen(script, *args):
+    return subprocess.Popen(
+        [sys.executable, '-c', script, *args], cwd=behaviour.ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
 def test_gate_is_released_by_the_os_when_the_holder_is_killed(tmp):
     marker = Path(tmp) / 'held'
-    holder = subprocess.Popen(
-        [sys.executable, '-c', _GATE_HOLDER, str(marker)],
-        cwd=behaviour.ROOT, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True)
+    holder = _popen(_GATE_HOLDER, str(marker))
     try:
-        escape = time.monotonic() + 20
+        escape = time.monotonic() + _HOLDER_ADMISSION_S
         while not marker.exists() and holder.poll() is None:
-            assert time.monotonic() < escape, 'the holder never took the gate'
+            if time.monotonic() > escape:
+                raise AssertionError(
+                    f'holder queued {_HOLDER_ADMISSION_S}s, not a fault')
             time.sleep(0.02)
-        assert marker.exists(), 'the holder never took the gate'
+        assert marker.exists(), (
+            f'the holder exited (rc {holder.poll()}) before the gate')
     finally:
         if holder.poll() is None:
             holder.kill()
             holder.wait(timeout=90)
-    waiter = subprocess.Popen(
-        [sys.executable, '-c', _GATE_CHILD], cwd=behaviour.ROOT,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    waiter = _popen(_GATE_CHILD)
     out = waiter.communicate(timeout=90)
     assert waiter.returncode == 0, out[1]
 
@@ -683,9 +685,7 @@ def test_gate_is_released_by_the_os_when_the_holder_is_killed(tmp):
 def test_gate_releases_between_two_children_in_one_process(tmp):
     del tmp
     # Two sequential children in one process: the first must release before the
-    # second acquires. With the release removed, the second blocks on a lock
-    # this process still holds; the mutant's signature is this hang, not a
-    # named assertion, and pinning the release limb accepts it.
+    # second acquires; with the release removed the second blocks (this hang).
     for index in range(2):
         result = _dashnode.run_dashboard_node(
             _dashnode.DashboardNodeHarness(_TRIVIAL_CHILD, 0))
