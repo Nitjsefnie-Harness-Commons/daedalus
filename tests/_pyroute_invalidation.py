@@ -282,10 +282,12 @@ def _invalidate(state, container, operands=()):
     with one position from before the mutation. The identity is kept, so an
     alias bound to the same container is invalidated with it.
 
-    `star_display` is deliberately left at its default. Its only reader is the
-    shifted-position rule, and the join above has already made that rule a
-    no-op on this container -- so setting it bought nothing a row could pin,
-    and a plant flipping it to True survives every suite.
+    `star_display` is deliberately left at its default: the join above has
+    already made the shifted-position rule a no-op on this container, so
+    setting it would say nothing the value does not. A plant that sets it
+    anyway is caught -- by `test_tab_routing`, by this branch's own suite,
+    and by `test_tab_routing_sequence_reads` -- so the field is pinned, not
+    merely inert.
     """
     names = {name for name, value in state.callables.items()
              if isinstance(value, DeferredContainer)
