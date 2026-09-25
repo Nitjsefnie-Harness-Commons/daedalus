@@ -283,9 +283,16 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
-    result = run_node_program(node, program, arguments, cwd,
-                              payload=plan, timeout=timeout)
+def run_gate(node, program, arguments, *, cwd, plan):
+    """Drive a `node <file>` harness against a plan and read its one answer.
+
+    Carries no wall bound of its own, for the reason `run_inline_gate`
+    gives: these harness children are bounded by their own attempt counts,
+    and a slow correct run must not become an intermittent failure — a
+    genuine deadlock is better surfaced as a hung job under the suite's
+    ceiling than as a flaky timeout.
+    """
+    result = run_node_program(node, program, arguments, cwd, payload=plan)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

@@ -10,7 +10,6 @@ projection of the record.
 """
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -76,20 +75,17 @@ def run_extension_hotfix_quota(plan):
     declared['planned'] = (list(declared['planned'])
                            + [RESULT] * len(plan['steps']))
     program = HARNESS + '\nplan = ' + json.dumps(declared) + ';\n'
-    try:
-        result = run_node_program(
-            node, program,
-            [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
-            cwd=ROOT, payload=json.dumps(plan))
-    except subprocess.TimeoutExpired:
-        # The worker never finished the plan. The command sequence the
-        # plan holds would have to have stopped answering, which is what a
-        # critical section that never released looks like from outside.
-        raise AssertionError(
-            'the hotfix-quota scenario timed out: the worker stopped '
-            'answering a command it had been given') from None
+    result = run_node_program(
+        node, program,
+        [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
+        cwd=ROOT, payload=json.dumps(plan))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
+    # A worker that stops answering settles as an empty stdout — a promise
+    # that never resolves drains node's loop and the child exits — so this is
+    # the assertion that names it. A worker wedged in a loop that never
+    # returns does not reach it, and ends as a hung job under the suite's
+    # ceiling instead.
     assert result.stdout.strip(), (
         'the hotfix-quota scenario produced no answer: the worker stopped '
         f'answering (rc={result.returncode}, '
