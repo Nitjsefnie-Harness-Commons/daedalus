@@ -43,11 +43,14 @@ it is the silence the maintainer ruled out. The median is taken over
 the selected runs and `runs` records that sample -- a median over one
 run is still a median; a file that silently claimed three is not.
 
-THE WRITE. The file is rewritten only when a weight moved beyond
+THE WRITE. The file is rewritten when a weight moved beyond
 `WEIGHT_MARGIN` of the recorded one, a suite appeared in the
-measurements, or a suite left them. Otherwise nothing is written and
-the reason is printed, so a scheduled refresh that finds nothing to
-say is a no-op, not a commit.
+measurements, a suite left them, or the recorded target was re-derived
+because the margin forbade it -- that last reason depends on the tree,
+through the planner, so the decision is not a function of the
+measurements alone. Otherwise nothing is written and the reason is
+printed, so a scheduled refresh that finds nothing to say is a no-op,
+not a commit.
 
 THE BOUNDS. `target_cell_weight` and `max_cells` are not measurements;
 they are the file's two policy numbers, coupled to the planner's
@@ -403,7 +406,7 @@ def seed(runs_root, out, tree):
     if not seconds:
         raise RefreshError(f'run {run_id} carries no suite durations')
     max_cells = len(cells)
-    target = derive_target(tree, seconds, max_cells)
+    target = derive_target(tree, seconds, max_cells, 'seconds')
     data = _written(seconds, target, max_cells, [run_id], 'seconds')
     if not plan_is_balanced(tree, data):
         raise BoundsError(
