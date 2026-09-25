@@ -389,55 +389,55 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
 
 
 _WAIT_HARNESS = (
-    'import time\n'
     'from daedalus_cli import transport\n'
-    'calls = []\n'
-    'calls_timeout = []\n'
-    'PENDING = %s\n'
+    'class _Clock:\n'
+    '    def __init__(self):\n'
+    '        self.now, self.sleeps = 1000.0, []\n'
+    '    def monotonic(self):\n'
+    '        return self.now\n'
+    '    def sleep(self, seconds):\n'
+    '        self.sleeps.append(seconds)\n'
+    '        self.now += seconds\n'
+    'transport.time = _Clock()\n'
+    'calls, calls_timeout = [], []\n'
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
     '    calls_timeout.append(timeout)\n'
     '    calls.append(path)\n'
-    '    if PENDING:\n'
-    '        return {"pending": True}\n'
     '    if "consume=1" in path:\n'
     '        return {"consumed": True, "resultGeneration": "g1"}\n'
     '    return {"id": "c1", "deliveryId": "d1", "resultGeneration": "g1",\n'
     '            "result": 7, "error": None}\n'
     'transport._request = fake_api\n'
-    'start = time.monotonic()\n'
-    'res = transport.wait_for_result("c1", "extension", "d1", %s)\n'
-    'print("ELAPSED", round(time.monotonic() - start, 3))\n'
+    'res = transport.wait_for_result("c1", "extension", "d1", 2)\n'
+    'print("SLEEPS", *transport.time.sleeps)\n'
     'print("POLLS", len(calls))\n'
     'print("BOUNDED", all(t is not None and t > 0 for t in calls_timeout[:1]))\n'
     'print("RESULT", res if res is None else res["result"])\n')
 
 
 def _wait_harness_output(stdout):
-    """(elapsed, polls, result) from one _WAIT_HARNESS run."""
-    fields = {}
-    for line in stdout.splitlines():
-        key, _, value = line.partition(' ')
-        if key in ('ELAPSED', 'POLLS', 'RESULT'):
-            fields[key] = value
-    return float(fields['ELAPSED']), int(fields['POLLS']), fields['RESULT']
+    """(sleeps, polls, result) from one _WAIT_HARNESS run."""
+    fields = dict(
+        line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
+    return ([float(v) for v in fields['SLEEPS'].split()],
+            int(fields['POLLS']), fields['RESULT'])
 
 
 def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
     """An already available result must not cost a fixed half second.
 
     The waiter slept its whole interval before the first poll, so every
-    command that waited for a result paid 500ms of dead time even when the
-    result was already in the slot. The MCP poller had the same shape and was
-    already fixed; this is the CLI half.
+    command that waited paid 500ms even with the result already in the
+    slot. A virtual clock records the sleeps the loop REQUESTS, so this
+    pins the ramp's opening: macOS read 0.357s against a 0.25s bound.
     """
     del tmp
-    r = run_python(_WAIT_HARNESS % ('False', '2'), cli_env(DAEDALUS_TOKEN=TOK))
+    r = run_python(_WAIT_HARNESS, cli_env(DAEDALUS_TOKEN=TOK))
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    elapsed, polls, result = _wait_harness_output(r.stdout)
+    sleeps, polls, result = _wait_harness_output(r.stdout)
     assert result == '7', r.stdout
-    # One peek and one conditional consume, and neither waited on a timer.
     assert polls == 2, r.stdout
-    assert elapsed < 0.25, (elapsed, r.stdout)
+    assert sleeps == [0.02], r.stdout
 
 
 def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
