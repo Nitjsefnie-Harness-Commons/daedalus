@@ -3,12 +3,12 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 The helpers here keep the subprocesses of an overlap run observable: a
-scripted result server that answers a chosen status, the harness-failure
-message the suites read a step trace from, the environment and argv of a real
-`cookies` client, and the same-id client overlap that drives two real clients
-and a real bridge and reports both client and harness evidence. They live
-beside the Node harness itself in `_overlap`, which re-exports them, so the
-suites' `from _overlap import ...` keeps reading one module.
+scripted result server that answers a chosen status, the environment and argv
+of a real `cookies` client, and the same-id client overlap that drives two
+real clients and a real bridge and reports both client and harness evidence.
+They live beside the Node harness itself in `_overlap`, which holds the
+driver they call back into; every suite imports each name from the module
+that now owns it.
 """
 import contextlib
 import http.server

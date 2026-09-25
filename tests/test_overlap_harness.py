@@ -351,9 +351,14 @@ def test_shipped_worker_terminal_5xx_fails_fast_with_clipped_diagnostics(tmp):
         '_did': 'did-terminal',
     }]
     with _slow_result_server(post_statuses=[500], post_body=long_body) as base:
+        # The worker's own retry loop makes three attempts against a terminal
+        # 5xx (measured: 500, then two more), so the plan declares all three.
+        # This run fails before the gate's whole-list check, so the refusals
+        # this count governs are enforced by the plan's count, not asserted
+        # here — which is why the count must be the real one.
         failure = _harness_failure(
             _SHIPPED_BACKGROUND, inner_wait=2, commands=commands,
-            order=['owner-a'], result_base=base)
+            order=['owner-a'], result_base=base, results=3)
     clipped = 'x' * 200 + '...'
     assert 'outer backstop' not in failure, failure
     assert ('the result POST for owner-a failed: '
