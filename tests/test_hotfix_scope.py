@@ -29,6 +29,8 @@ from _hotfixharness import run_hotfix_case  # noqa: E402
 SITE = 'https://shop.example.com/cart'
 ELSEWHERE = 'https://other.example.com/page'
 SCOPE = '*://shop.example.com/*'
+LOCAL_PAGE = 'file:///Users/op/page.html'
+FILE_SCOPE = 'file:///*'
 # The fix every control replays: it announces itself to the document that
 # received it, so `delivered` answers "which document got it" rather than
 # "which call was made".
@@ -429,6 +431,39 @@ def test_a_fragment_change_does_not_refuse_a_cdp_routed_fix(tmp):
     assert len(outcome['submitted']) == 1, outcome
     assert _delivered(outcome) == {'doc-1': ['fix1']}, outcome
     assert not _errors(outcome), outcome
+
+
+def test_a_file_scope_reaches_a_local_page_on_both_channels(tmp):
+    """`file:` is in the scope grammar, and the extension holds file access.
+
+    The manifest matches `<all_urls>`, so a local HTML file is a page the
+    operator visits and a scope they can write. A `file:` url has no
+    origin — `URL.origin` is the string `"null"` for it — so an identity
+    built from `origin` cannot be matched by a pattern compiled from the
+    pattern's own text, and a stored `file:///*` scope silently stops
+    firing. Both channels are covered because the identity is compared on
+    each: the worker's projection against the scope, and the page's own
+    against the worker's.
+    """
+    del tmp
+    for probe in (True, False):
+        outcome = run_hotfix_case({
+            'documents': [LOCAL_PAGE],
+            'current': 0,
+            'asker': 0,
+            'probe': probe,
+            'fixes': [{'id': 'fix1', 'code': FIX, 'match': FILE_SCOPE}],
+        })
+        channel = 'MAIN' if probe else 'CDP'
+        assert _delivered(outcome) == {'doc-1': ['fix1']}, (channel, outcome)
+        assert not _errors(outcome), (channel, outcome)
+        # The anti-vacuity half: the page really was the one the request
+        # named, and the channel the case selected is the one that ran.
+        assert outcome['current'] == 'doc-1', (channel, outcome)
+        assert outcome['submitted'] == ([] if probe
+                                        else [{'replMode': True,
+                                               'awaitPromise': False}]
+                                        ), (channel, outcome)
 
 
 def main():
