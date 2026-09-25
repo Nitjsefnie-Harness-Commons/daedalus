@@ -86,6 +86,17 @@ export function mount(container) {
                   catch (e) { toast(errMsg(e), 'err'); }
                 }),
               }, hf.permanent ? 'make temp' : 'make perm'),
+              // Only where there is a scope to take away. It widens where
+              // the fix runs, so it is armed like the flag beside it and
+              // carries the row's own code — a store refuses a fix with
+              // none, and the operator's source is what must survive.
+              hf.match ? h('button', {
+                class: 'ghost sm',
+                onclick: armedAction(async () => {
+                  try { await extCmd('store-hotfix', { fixId: hf.id, code: hf.code, clearScope: true }); toast('scope cleared', 'ok'); load(); }
+                  catch (e) { toast(errMsg(e), 'err'); }
+                }, { confirmLabel: 'confirm clear scope' }),
+              }, 'clear scope') : null,
               h('button', {
                 class: 'ghost sm', onclick: () => {
                   root.querySelector('[data-role=id]').value = hf.id;

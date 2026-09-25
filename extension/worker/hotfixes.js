@@ -316,12 +316,17 @@ async function handleStoreHotfix(cmd) {
   try {
     if (!cmd.fixId || !cmd.code) return postResult(
       cmd._execution, null, 'Missing fixId or code', 'extension');
-    if (cmd.match !== undefined && cmd.match !== null
-        && !_parseMatch(cmd.match)) {
+    // The clear is a boolean beside the scope, not a value in it.
+    const clearing = cmd.clearScope === true;
+    const stated = cmd.match !== undefined && cmd.match !== null;
+    if (clearing ? stated : (stated && !_parseMatch(cmd.match))) {
       return postResult(cmd._execution, null,
-        'Unusable match pattern: '
-        + (typeof cmd.match === 'string' ? cmd.match
-          : JSON.stringify(cmd.match)),
+        clearing
+          ? 'clearScope asks for the scope to go, so it cannot travel with'
+            + ' a match pattern'
+          : 'Unusable match pattern: '
+            + (typeof cmd.match === 'string' ? cmd.match
+              : JSON.stringify(cmd.match)),
         'extension');
     }
     const outcome = await _withHotfixLock(async () => {
@@ -334,9 +339,10 @@ async function handleStoreHotfix(cmd) {
                       : (existing ? existing.permanent === true : false);
       // Carried over the way `permanent` is: a store leaving the field out
       // means "update the code", and dropping a scope would widen a fix for
-      // one site into a fix for every site.
-      const match = (cmd.match === undefined || cmd.match === null)
-        ? (existing ? existing.match : undefined) : cmd.match;
+      // one site into a fix for every site. `clearing` takes it away.
+      const match = clearing ? undefined
+        : (cmd.match === undefined || cmd.match === null)
+          ? (existing ? existing.match : undefined) : cmd.match;
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
       const entry = {
         id: cmd.fixId, code: cmd.code, ts: Date.now(), permanent,

@@ -284,9 +284,16 @@ def build_parser():
     s.add_argument('--permanent', action='store_true',
                    help='Mark fix as permanent '
                         '(survives extension version bumps)')
-    s.add_argument('--match', metavar='PATTERN',
-                   help='Scope the fix to the documents whose URL this '
-                        'Chrome match pattern matches (default: every site)')
+    # Set a scope or take it away, never both: the two spell the same field
+    # on the record, so a command carrying both asks for two states of it.
+    scope = s.add_mutually_exclusive_group()
+    scope.add_argument('--match', metavar='PATTERN',
+                       help='Scope the fix to the documents whose URL this '
+                            'Chrome match pattern matches (default: every '
+                            'site)')
+    scope.add_argument('--clear-scope', action='store_true',
+                       help="Remove the fix's site scope, leaving its code "
+                            'and its permanent flag as they are')
 
     # clear-hotfix (extension)
     s = sub.add_parser('clear-hotfix', help='Remove a specific hotfix')

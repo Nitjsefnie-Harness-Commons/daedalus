@@ -448,6 +448,7 @@ async function waitFor(predicate) {
     stored: (storageStore[HOTFIX_KEY] || { fixes: [] }).fixes.map((fix) => ({
       id: fix.id, match: fix.match === undefined ? null : fix.match,
     })),
+    record: (storageStore[HOTFIX_KEY] || {}).fixes || [],
     armings: timers.filter((timer) => !timer.cleared).map((t) => t.delay),
   }), () => process.exit(0));
 })().catch((error) => {
