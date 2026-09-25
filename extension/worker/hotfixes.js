@@ -68,9 +68,8 @@ function _parseMatch(match) {
   } else if (host === '' || !_matchableHost(host)) {
     return null;
   }
-  // A URL parser has already folded the host of the url being matched, so
-  // folding the pattern's own host is what makes the comparison work at all
-  // for a host written in any case.
+  // A URL parser has folded the host of the url being matched, so the
+  // pattern's own host is folded to be comparable with it.
   return { scheme: scheme[1], host: host.toLowerCase(), path };
 }
 
@@ -82,8 +81,7 @@ function _matchableHost(host) {
 }
 
 // Chrome's host wildcard covers the bare host and every subdomain, so
-// `*.example.com` is "this domain and everything under it" — a repeated
-// leading label, not a required one.
+// `*.example.com` is a repeated leading label, not a required one.
 function _scopeHost(host) {
   if (host === '') return '';
   if (host === '*') return '[^/]+';
@@ -324,10 +322,9 @@ async function handleStoreHotfix(cmd) {
       const permanent = (cmd.permanent === true) ? true
                       : (cmd.permanent === false) ? false
                       : (existing ? existing.permanent === true : false);
-      // Carried over the same way `permanent` is: a store that leaves the
-      // field out means "update the code", and dropping a scope here would
-      // widen a fix for one site into a fix for every site. A store that
-      // names a scope replaces it.
+      // Carried over the way `permanent` is: a store that leaves the field
+      // out means "update the code", and dropping a scope would widen a fix
+      // for one site into a fix for every site. A named scope replaces it.
       const match = (cmd.match === undefined || cmd.match === null)
         ? (existing ? existing.match : undefined) : cmd.match;
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
