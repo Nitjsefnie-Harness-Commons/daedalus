@@ -53,10 +53,6 @@ _SEQUENCE_KINDS = ('list', 'tuple', 'set')
 # names is the type, not an instance of it, so its first argument is the
 # receiver the bound form writes as `func.value`.
 _CONTAINER_TYPES = frozenset({'dict', 'list', 'set'})
-# A receiver the model resolved no container behind: the value is what a
-# selection of an unknown name, or of a call, or of a nested subscript, leaves
-# unproved.
-_UNRESOLVED_RECEIVERS = (ast.Call, ast.NamedExpr, ast.Subscript, ast.Attribute)
 
 
 def _own_nodes(statement):
@@ -198,25 +194,6 @@ def _held_mutation(func, state):
     return (value.owner,) if isinstance(value, DeferredMethod) else ()
 
 
-def _mutated_receiver(call, state):
-    """The receiver whose container this call failed to resolve, or None. A
-    plain name that tracks no container is an ordinary untracked list, and
-    there is no recorded fact for the guard to fail closed about."""
-    if isinstance(call.func, ast.Attribute):
-        receiver = call.func.value
-    elif isinstance(call.func, ast.Call):
-        selection = _attribute_selection(call.func, state)
-        receiver = selection[0] if selection is not None else None
-    else:
-        return None
-    if isinstance(receiver, ast.Call) \
-            and _attribute_selection(receiver, state) is not None:
-        # A selection the model cannot fold stands in for the receiver: what
-        # it selected may be the container, and nothing says it is not.
-        return receiver
-    return receiver if isinstance(receiver, _UNRESOLVED_RECEIVERS) else None
-
-
 def _store_targets(statement):
     """The targets a statement stores into or deletes. A tuple target nests,
     and `x[0:1], y = v` parses as one tuple target rather than two."""
@@ -315,28 +292,6 @@ def _invalidate(state, container, operands=()):
     sync_cells(state, names)
 
 
-def _fail_closed(call, state):
-    """Whether a mutating call's receiver is one the model could not resolve,
-    which leaves the call's own value unproved: the model cannot show the
-    mutation touched nothing it tracks, so it must not read as a clean one."""
-    receiver = _mutated_receiver(call, state)
-    return receiver is not None \
-        and not _containers(_receiver_value(receiver, state))
-
-
-def unproved_call(node, state, unprovable):
-    """The value a mutating call must answer with, given a receiver the model
-    could not resolve to a container.
-
-    This is the value-resolution point, so the token a statement binds from it
-    is the unproved one. A store that runs after the binding has already read
-    the value changes nothing, which is why the token is written here and not
-    in the store path.
-    """
-    return unprovable if isinstance(node, ast.Call) \
-        and _fail_closed(node, state) else None
-
-
 def invalidate_unmodelled(statement, state, claimed=()):
     """Drop the facts of every tracked container this statement mutates in
     place by a path the model does not follow.
@@ -344,9 +299,9 @@ def invalidate_unmodelled(statement, state, claimed=()):
     `claimed` names the calls and statements a precise handler already
     applied, so a mutation the model followed keeps its exact result. Every
     other mutation fails closed: the container's recorded values join the
-    unknown slot and its count becomes unknown. A receiver the model could
-    not resolve is the call's own value's business, and `unproved_call` owns
-    it.
+    unknown slot and its count becomes unknown, so a later read answers with
+    everything the container could hold rather than with one position from
+    before the mutation.
     """
     claimed = set(claimed)
     done = set()

@@ -50,6 +50,23 @@ def _assignment_values(target, value, state):
     yield target, value
 
 
+def bound_value(expression, state):
+    """What a binding takes from an expression.
+
+    A method taken off a tracked container names that container, so a name
+    bound to it still says what a call through the name mutates. Only the
+    binding reads that: a bare `x.pop` read for its value needs nothing, and
+    resolving it everywhere would split every state a bare method reference
+    appears in for a fact no other reader wants."""
+    value = _known_value(expression, state)
+    if value is None and isinstance(expression, ast.Attribute) \
+            and expression.attr in CONTAINER_MUTATORS:
+        owner = _known_value(expression.value, state)
+        if isinstance(owner, DeferredContainer):
+            return DeferredMethod(owner, expression.attr)
+    return value
+
+
 def apply_assignment_bindings(targets, value, state, binder):
     entries = [entry for target in targets
                if isinstance(target, (ast.Name, ast.Tuple, ast.List))
@@ -57,7 +74,7 @@ def apply_assignment_bindings(targets, value, state, binder):
     aliases = {}
     # Pending RHS references must follow storage mutations, but not rebindings.
     for target, expression in entries:
-        state.evaluated[id(target)] = _known_value(expression, state) \
+        state.evaluated[id(target)] = bound_value(expression, state) \
             if isinstance(expression, ast.AST) else expression
         if isinstance(target, ast.Name):
             bindings = ({}, {}, {})
@@ -298,11 +315,6 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
             _selected_values(owner, node.attr, attribute=True))
         if value is not None:
             return value
-        if isinstance(owner, DeferredContainer) \
-                and node.attr in CONTAINER_MUTATORS:
-            # A method taken off a tracked container names the container, so a
-            # binding of it (`f = x.pop`) still says what `f(0)` mutates.
-            return DeferredMethod(owner, node.attr)
     if isinstance(node, ast.Call):
         owner = _known_value(node.func, state)
         if isinstance(owner, DeferredClass):
@@ -516,8 +528,9 @@ def _apply_setdefault(state, call, owner_name):
             owner = DeferredContainer({}, None, 'dict', call)
             state.callables[owner_name] = owner
         if literal not in owner.items:
-            replace_container(state, owner_name, owner,
-                              {**owner.items, literal: default})
+            items = dict(owner.items)
+            items[literal] = default
+            replace_container(state, owner_name, owner, items)
         return
     if isinstance(owner, DeferredContainer):
         value = merge_yielded((owner.items.get(DYNAMIC_KEY), default))

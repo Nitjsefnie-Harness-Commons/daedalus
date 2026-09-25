@@ -1,7 +1,6 @@
 """Resolve deferred expression values against live flow state."""
 import ast
 
-from _pyroute_invalidation import unproved_call
 from _pyroute_mapping import (_selected_values, apply_assignment_bindings,
                               resolve_expression_value)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
@@ -248,23 +247,28 @@ def seed_selection_value(value, state):
     A nested selection -- the receiver of `getattr(args, "box").pop(0)` -- is
     never the assignment's own value, so the seeding that reaches a binding
     directly does not reach it, and a receiver the model holds would resolve
-    to nothing."""
-    cached = state.evaluated.get(id(value))
+    to nothing.
+
+    The carrier scan is gated on what THIS evaluation found, not on what the
+    cache already holds. A node that once resolved to the unprovable sender
+    keeps that cached, and re-reading the cache would re-walk the whole
+    subtree for every later pass over the same node -- which is what a guard
+    that re-analyses a body does constantly."""
     selected = _selection_value(value, state)
-    if selected is not None:
-        state.evaluated[id(value)] = selected
-        cached = selected
-    if cached == UNPROVABLE_SENDER:
-        parts = [item for item in (_known_value(child, state)
-                                   for child in ast.walk(value))
-                 if is_deferred_value(item)]
-        parts += [item for item in _generator_operand_yields(value, state)
-                  if is_deferred_value(item)]
-        if parts:
-            carriers = (reachable_callables(DeferredAlternatives(tuple(parts)))
-                        if selected == UNPROVABLE_SENDER else ())
-            state.evaluated[id(value)] = merge_yielded(
-                [cached, *parts, *carriers])
+    if selected is None:
+        return
+    state.evaluated[id(value)] = selected
+    if selected != UNPROVABLE_SENDER:
+        return
+    parts = [item for item in (_known_value(child, state)
+                               for child in ast.walk(value))
+             if is_deferred_value(item)]
+    parts += [item for item in _generator_operand_yields(value, state)
+              if is_deferred_value(item)]
+    if parts:
+        carriers = reachable_callables(DeferredAlternatives(tuple(parts)))
+        state.evaluated[id(value)] = merge_yielded(
+            [selected, *parts, *carriers])
 
 
 def seed_unprovable_selection(value, state):
@@ -288,8 +292,7 @@ def seed_then_resolve(node, state, generator_factory, sender_resolver,
     seed_selection_value(node, state)
     value = resolve_expression_value(node, state, generator_factory,
                                      sender_resolver, unprovable_sender)
-    unproved = unproved_call(node, state, unprovable_sender)
-    return value if unproved is None else unproved
+    return value
 
 
 def rebind_augmented(node, names, state):
