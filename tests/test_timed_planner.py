@@ -129,11 +129,10 @@ def test_no_cell_exceeds_the_median_cell_by_more_than_the_stated_margin(
     # repository's own suite names, at targets across the range the
     # run was measured at, and on a runner twice as slow. The heavy
     # tail sits alone in its cells at the lower targets, so the ratio
-    # is `heaviest / median` there; the module docstring carries the
-    # numbers this margin has to cover. The values are the run's
-    # (36070301583) own per-suite medians, recorded here so the
-    # guarantee is checked against the real distribution before the
-    # data file lands with Task 2.
+    # is `heaviest / median` there. The values are run 36070301583's own
+    # per-suite medians; `plan_timed_matrix`'s module docstring is where
+    # the margin's measured basis lives, and this fixture is the same
+    # run's data rather than a second telling of it.
     measured = {
         'test_watcher_budget.py': 76.2, 'test_command_queue.py': 35.8,
         'test_cli.py': 32.3, 'test_overlap_harness.py': 31.5,
@@ -377,6 +376,31 @@ def test_a_suite_with_no_recorded_weight_is_placed_and_named(tmp):
                        'estimated.txt')
     assert 'test_unknown.py' in summary, summary
     assert 'estimated' in summary, summary
+
+
+def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
+    """The estimate is a median, and a fixture only a median survives.
+
+    THREE recorded weights, lopsided: the recorded weights sum to 12 and
+    their median is 1 where their mean is 4. One cell holds the whole
+    tree, so the plan's own cell weight carries the estimate the planner
+    gave the fourth suite, and the expectation is the guard's own
+    condition -- `statistics.median` of what the file recorded -- rather
+    than a number chosen here. A planner that estimated at the mean
+    would place the same suite at 4 and every other assertion in the
+    suite would still pass: the two-equals/one-recorded fixtures the
+    rest of this file uses are exactly the shapes on which the two
+    statistics agree.
+    """
+    suites = ['test_a.py', 'test_b.py', 'test_c.py', 'test_new.py']
+    recorded = {'test_a.py': 1.0, 'test_b.py': 1.0, 'test_c.py': 10.0}
+    plan, _out = _plan(tmp, suites, _data(recorded, target=1.0, max_cells=1))
+    assert plan.estimated == ['test_new.py'], plan.estimated
+    estimate = statistics.median(list(recorded.values()))
+    assert estimate != statistics.mean(list(recorded.values())), recorded
+    assert len(plan.cells) == 1, plan.cells
+    assert plan.cells[0].weight == sum(recorded.values()) + estimate, (
+        plan.cells[0], 'the estimate is not the recorded median')
 
 
 def test_the_packing_is_deterministic(tmp):
