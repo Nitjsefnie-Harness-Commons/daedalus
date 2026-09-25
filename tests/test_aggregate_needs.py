@@ -39,14 +39,26 @@ def test_the_declared_exemptions_are_the_jobs_left_over(tmp):
     assert not _exemption_drift(load(_REAL)), _exemption_drift(load(_REAL))
 
 
-def test_the_real_aggregate_names_ten_jobs_and_two_descendants(tmp):
-    """Today's shape, pinned so a change is a decision and not a drift."""
+def test_the_real_aggregate_covers_its_graph_derived_shape(tmp):
+    """Today's shape, pinned so a change is a decision and not a drift.
+
+    The aggregate's `needs:` is the graph's own complement -- every job
+    that is not the aggregate, not one of its descendants (which wait on
+    it instead) and not exempt -- so the set is re-derived from the jobs
+    rather than pinned at a count a new neighbour moves.
+    """
     del tmp
     workflow = load(_REAL)
     needs = _needs_of(workflow.jobs)
-    assert len(needs[AGGREGATE]) == 10, sorted(needs[AGGREGATE])
-    assert _descendants(needs) == {'timed', 'speed'}, _descendants(needs)
+    descendants = _descendants(needs)
+    derived = set(workflow.jobs) - {AGGREGATE} - descendants - EXEMPT
+    assert needs[AGGREGATE] == derived, sorted(
+        needs[AGGREGATE] ^ derived)
+    assert descendants == {'timed', 'speed'}, descendants
     assert EXEMPT == {'diff-coverage'}, EXEMPT
+    # plan-matrix plans from the data file alone, so it needs nothing but
+    # the change classifier and is not a descendant of the aggregate.
+    assert needs['plan-matrix'] == {'changes'}, sorted(needs['plan-matrix'])
 
 
 def test_the_exemption_is_still_documented_in_the_workflow(tmp):

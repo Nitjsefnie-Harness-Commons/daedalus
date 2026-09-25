@@ -76,9 +76,9 @@ def test_timing_selects_one_area_of_a_partition(tmp):
 def test_timing_selection_excludes_the_suites_an_except_names(tmp):
     """`--except` drops what its globs match, before `--only` is applied.
 
-    The complement of the named groups is how the catch-all cell takes
-    everything the named groups do not match: `--only '*'` minus every named
-    glob is exactly that complement, on whatever tree the cell lands on.
+    The planner's cells are exact partitions, so no generated cell passes
+    `--except` today; the instrument still offers the flag and the timed
+    job keeps it wired, so its semantics stay pinned here.
     """
     assert _report_names(
         tmp, ('--only', '*', '--except', 'test_cli*.py')) == [

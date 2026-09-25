@@ -9,6 +9,7 @@ import contextlib
 import io
 import json
 import random
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -102,6 +103,23 @@ def test_every_suite_file_runs_in_exactly_one_cell(tmp):
     assert len(placed) == len(set(placed)), placed
     for name in placed:
         assert (Path(tmp) / 'tree' / 'tests' / name).exists(), name
+
+
+def test_the_generated_group_names_are_unique_and_check_run_safe(tmp):
+    """A plan emits at least one cell whose groups are unique and safe.
+
+    The `timed` job's `name:` is static, so a cell's `group` value is
+    what reaches the check-run name GitHub builds for it.
+    """
+    plan, _out = _plan(
+        tmp, [f'test_{index:02d}.py' for index in range(12)],
+        _data({f'test_{index:02d}.py': float(20 - index)
+               for index in range(12)}))
+    groups = [cell['group'] for cell in plan.matrix]
+    assert groups, 'the plan emitted no matrix cell'
+    assert len(groups) == len(set(groups)), groups
+    for group in groups:
+        assert re.fullmatch(r'[a-z0-9][a-z0-9-]*', group), group
 
 
 def test_no_cell_exceeds_the_median_cell_by_more_than_the_stated_margin(
