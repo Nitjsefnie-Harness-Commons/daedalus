@@ -507,19 +507,16 @@ def _format_timeout_attempt(record):
         f'stdout: {record.stdout!r}; stderr: {record.stderr!r}')
 
 
-# A loaded windows-latest leg cold-started several node.exe at once and could
-# leave one unscheduled past every bound (issue 1030), which no wider bound
-# fixes; a primitive that guarantees the schedule replaces hoping for it.
+# A loaded windows-latest leg cold-started several node.exe at once and left
+# one unscheduled past every bound (issue 1030), which no wider bound fixes.
 def _dashboard_gate_path():
     digest = hashlib.sha256(str(ROOT).encode('utf-8')).hexdigest()
-    return (Path(tempfile.gettempdir())
-            / f'daedalus-dashboard-node-{digest}.lock')
+    return Path(tempfile.gettempdir()) / f'daedalus-node-{digest}.lock'
 
 
 def _block_until_locked(handle):
     if os.name == 'nt':
         msvcrt = importlib.import_module('msvcrt')
-        # LK_LOCK raises after its own retries; retry so the wait is unbounded.
         while True:
             os.lseek(handle, 0, os.SEEK_SET)
             try:
@@ -533,10 +530,13 @@ def _block_until_locked(handle):
 
 @contextlib.contextmanager
 def _dashboard_child_gate():
-    # The lock lives on the open handle, so the OS releases it when the holder
-    # dies: that is what makes waiting for the gate safe with no bound, since
-    # a killed holder cannot strand the next one.
-    handle = os.open(_dashboard_gate_path(), os.O_CREAT | os.O_RDWR)
+    # The OS drops the flock on holder death, so an unbounded wait is safe.
+    try:
+        handle = os.open(_dashboard_gate_path(), os.O_CREAT | os.O_RDWR)
+    except OSError as failure:
+        raise OSError(
+            f'gate lock {_dashboard_gate_path()}, temp dir must be '
+            f'writable: {failure}') from failure
     try:
         _block_until_locked(handle)
         yield

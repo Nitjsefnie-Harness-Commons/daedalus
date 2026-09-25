@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
@@ -630,6 +631,59 @@ bounded(work, 'work that settles only after a real delay', 4000).then(
     assert report['value'] == 'settled', result
     budget = report['waitedMs'] * _IDLE_BOUND_CPU_SHARE
     assert report['cpuMs'] < budget, (report, budget)
+
+
+# The gate serialises dashboard Node children across processes. Both children
+# wait for one shared start target, then each records it is inside the gate and
+# waits, under a bound charging serviced time, for the other to record the
+# same; the first cannot leave until the second joins. Ungated they therefore
+# overlap by construction, not by a timestamp pair a loaded scheduler could
+# serialise. Green: a child waited out the bound (the gate kept the other out
+# by design). Red: a child saw the other inside (gate-less only).
+_GATE_ESCAPE_S, _RENDEZVOUS_MS = 120, 1500
+_GATE_WORKER = (
+    'import sys, time\nsys.path.insert(0, "tests")\nimport _dashnode\n'
+    'while time.time() < float(sys.argv[1]): time.sleep(0.005)\n'
+    'a = tuple(sys.argv[2:])\n'
+    'h = _dashnode.DashboardNodeHarness(%r, %d, arguments=a)\n'
+    'print(_dashnode.run_dashboard_node(h).stdout)\n')
+_RENDEZVOUS = r"""
+const fs = require('fs'), a = process.argv, m = a[1] + '/' + a[2];
+const y = a[1] + '/' + a[3];
+fs.writeFileSync(m, '');
+const o = () => new Promise((r) => { const c = () =>
+  (fs.existsSync(y) ? r(1) : _dashnodeSetTimeout(c, 20)); c(); });
+(async () => {
+  let saw = false;
+  try { await bounded(o(), 'other', RENDEZVOUS_MS); saw = true; } catch (e) {}
+  fs.unlinkSync(m);
+  process.stdout.write(JSON.stringify({ saw }), () => process.exit(0));
+})();
+""".replace('RENDEZVOUS_MS', str(_RENDEZVOUS_MS))
+
+
+def _gate_worker(target, source, *args, steps=0):
+    return [sys.executable, '-c', _GATE_WORKER % (source, steps),
+            repr(target), *args]
+
+
+def test_two_dashboard_children_cannot_be_inside_the_gate_together(tmp):
+    inside = Path(tmp) / 'inside'
+    inside.mkdir()
+    target = time.time() + 1
+    workers = [
+        subprocess.Popen(
+            _gate_worker(target, _RENDEZVOUS, str(inside), me, you, steps=1),
+            cwd=_dashnode.ROOT, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True)
+        for me, you in (('a', 'b'), ('b', 'a'))]
+    out = [worker.communicate(timeout=_GATE_ESCAPE_S) for worker in workers]
+    records = [json.loads(text) for worker, (text, _e) in zip(workers, out)
+               if worker.returncode == 0]
+    assert len(records) == 2, [
+        (worker.returncode, text) for worker, (text, _e) in zip(workers, out)]
+    assert not any(record['saw'] for record in records), (
+        f'two dashboard children were inside the gate together: {records}')
 
 
 def main():
