@@ -203,9 +203,48 @@ def test_a_narrow_counter_survivor_raises_the_mark(tmp):
                                command_ttl=90)
     finally:
         setattr(cq, 'time', saved)
+    # Assert the branch, not the outcome: the minted millisecond must equal
+    # survivor_ms + 1, a value the real wall clock cannot produce in a test.
+    # Asserting only `minted > survivor` would pass on the real clock (2026 is
+    # above the hard-coded 2025 survivor) if the seed were ever bypassed, so
+    # the control would go vacuous with the defect present.
+    assert int(minted.split('_', 1)[0]) == 1_757_389_120_001, (
+        'the mark did not land on survivor_ms + 1; the seed was bypassed or '
+        'the narrow field was ignored', minted)
+    assert minted > survivor, (minted, survivor)
+
+
+def test_a_survivor_at_the_millisecond_ceiling_does_not_overflow_the_field(
+        tmp):
+    """A survivor whose millisecond is the largest the 13-digit field holds
+    must not push the mark to 14 digits.
+
+    `{ms:013d}` is a minimum width, not a fixed one: at a survivor of
+    9999999999999 the unclamped `highest + 1` printed as
+    10000000000000_... and sorted below every 13-digit entry — the exact
+    inversion this module exists to prevent, and a silent dashboard loss. The
+    seed clamps the mark to the field's width, so a mint stays 13 digits and
+    is ordered by the counter against a same-millisecond 20-digit survivor.
+    """
+    cmd_dir = Path(tmp) / 'commands'
+    qdir = cmd_dir / f'{TOKEN}_{TAB}'
+    qdir.mkdir(parents=True)
+    survivor = '9999999999999_00000000000000000001'  # largest 13-digit ms
+    _write_entry(qdir, survivor, id='old')
+
+    cq, order = _fresh_queue('ordering_ms_ceiling')
+    clock = _Clock(1.0)  # far below the survivor
+    saved = _on(clock, order)
+    try:
+        minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
+                               command_ttl=90)
+    finally:
+        setattr(cq, 'time', saved)
+    assert len(minted.split('_', 1)[0]) == 13, (
+        'the mark overflowed the 13-digit field', minted)
     assert minted > survivor, (
-        'the narrow-counter survivor was ignored and the mark rested on the '
-        'stepped-back clock', minted, survivor)
+        'a mint at the millisecond ceiling sorted below its survivor',
+        minted, survivor)
 
 
 def test_the_seed_is_taken_once_not_per_mint(tmp):
