@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _repo import ROOT, git_index  # noqa: E402
 
 
 def _planner():
@@ -30,6 +30,11 @@ def _tree(tmp, suites):
     (tree / 'tests').mkdir(parents=True, exist_ok=True)
     for name in suites:
         (tree / 'tests' / name).write_text('pass\n', encoding='utf-8')
+    # The planner enumerates the TRACKED tree, so a fixture tree is a
+    # git checkout with these files in its index; `git ls-files` reads
+    # the index, so no commit is made or needed.
+    git_index(tree, 'init', '-q')
+    git_index(tree, 'add', '--', 'tests/')
     return tree
 
 
@@ -521,10 +526,64 @@ def test_the_planner_refuses_a_tree_with_no_suites(tmp):
     """Nothing to time is a refusal, the instrument's own rule."""
     tree = Path(tmp) / 'bare'
     (tree / 'tests').mkdir(parents=True)
+    # A git checkout whose index holds no suite file: the tracked-tree
+    # enumeration is empty, so this is the `no suites` refusal and not
+    # the git failure the enumeration would raise on a non-checkout.
+    git_index(tree, 'init', '-q')
     path = _write(Path(tmp) / 't5.json', _data({}))
     stderr = _captured_stderr(_planner(), [
         '--tree', str(tree), '--timings', str(path)])
     assert 'no suites found under' in stderr, stderr
+
+
+def test_an_untracked_suite_file_is_not_a_suite(tmp):
+    """A file no commit contains is not planned, even in tests/.
+
+    The CI defect: a neighbouring suite run left a `tests/test_*.py` in
+    the working tree, the planner enumerated the DIRECTORY, and the
+    stray took a cell and a place in the data file's basis sentence
+    while the committed file still described the tracked 243. The
+    universe is the TRACKED tree, so a stray written after the fixture's
+    `git add` is invisible: the suite list, and the cell matrix, are the
+    same with and without it.
+    """
+    planner = _planner()
+    suites = ['test_alpha.py', 'test_beta.py', 'test_gamma.py']
+    tree = _tree(tmp, suites)
+    data = _data({name: 1.0 for name in suites}, max_cells=4)
+    before = planner.plan(tree, data)
+    assert planner.suite_names(tree) == suites, before.matrix
+    (tree / 'tests' / 'test_scratch_probe.py').write_text(
+        'pass\n', encoding='utf-8')
+    names = planner.suite_names(tree)
+    assert 'test_scratch_probe.py' not in names, names
+    assert names == suites, names
+    after = planner.plan(tree, data)
+    assert after.matrix == before.matrix, (before.matrix, after.matrix)
+    placed = sorted(name for cell in after.cells for name in cell.suites)
+    assert placed == sorted(suites), placed
+
+
+def test_a_tree_that_is_not_a_checkout_is_a_named_refusal(tmp):
+    """The enumeration fails CLOSED when the tracked set is unreadable.
+
+    A plan built from an empty set would time nothing, which is worse
+    than a refusal a reader can act on, so a tree git cannot list is a
+    named `PlanError` rather than a silent empty plan. git is present
+    here; the tree is simply not a checkout.
+    """
+    planner = _planner()
+    tree = Path(tmp) / 'not-a-checkout'
+    (tree / 'tests').mkdir(parents=True)
+    (tree / 'tests' / 'test_a.py').write_text('pass\n', encoding='utf-8')
+    message = None
+    try:
+        planner.suite_names(tree)
+    except planner.PlanError as error:
+        message = str(error)
+    assert message is not None, 'a non-checkout tree planned without refusal'
+    assert 'cannot list tracked suites' in message, message
+    assert 'git checkout' in message, message
 
 
 def main():

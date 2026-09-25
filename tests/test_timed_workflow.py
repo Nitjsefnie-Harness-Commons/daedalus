@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _repo import ROOT, git_index  # noqa: E402
 from _speedharness import (  # noqa: E402
     run_workflow_script, workflow_script, write_executable)
 from _wfgraph import _job_section  # noqa: E402
@@ -582,6 +582,11 @@ def test_the_except_env_is_empty_because_no_plan_carries_an_except_key(tmp):
     names = [f'test_{index:02d}.py' for index in range(6)]
     for name in names:
         (tree / 'tests' / name).write_text('pass\n', encoding='utf-8')
+    # The planner enumerates the TRACKED tree, so the fixture is a git
+    # checkout with these files in its index (`git ls-files` reads the
+    # index, so no commit is made or needed).
+    git_index(tree, 'init', '-q')
+    git_index(tree, 'add', '--', 'tests/')
     data = {'target_cell_weight': 10.0, 'max_cells': 4, 'units': 'seconds',
             'suite_weights': {name: float(7 - index)
                               for index, name in enumerate(names)}}
