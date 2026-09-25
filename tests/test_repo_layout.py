@@ -363,11 +363,11 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     shapes. A placed launch whose head is a dynamic expression (a parameter,
     a call, a slice, a comprehension, a starred argument, or a return value)
     reads `unreadable` and, as a single placed launch, is not re-examined for
-    git. An unplaced receiver the analyser cannot place or derive is out of
-    scope too: a module obtained by `exec` into a namespace dict, a module
-    whose name is computed (`import_module(name)`), and a method-attribute
-    receiver (`self.mod.run(...)`). The shipped tree holds none of these as a
-    bounded git launch, so the summary sentence is true of it; a future one
+    git. So is a receiver the analyser cannot trace to `subprocess`: a
+    module name it cannot read (`import_module(argument)` on a parameter),
+    and a class attribute the class body does not bind (`type(self).mod`, or
+    `self.mod` set in a constructor). The shipped tree holds none of these as
+    a bounded git launch, so the summary sentence is true of it; a future one
     is the filed boundary issue, not enforced here.
 
     The allowance is pinned from both sides: a live site with no row, a

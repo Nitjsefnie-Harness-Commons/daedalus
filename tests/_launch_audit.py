@@ -4,8 +4,12 @@ Given one Python source, names every refusal limb its subprocess
 launches trip, so a caller can assert the launch carries no wall-clock
 bound, fails loudly, and is readable argv. The wall-clock-bound refusal
 names the argv head (git / non-git / unreadable) so a tree-wide caller
-can keep the rule to git launches. Lives beside the suite, not in it,
-so the suite file stays under its size ceiling.
+can keep the rule to git launches. A receiver is resolved rather than
+declared unreadable: a module reached through a name held in a variable,
+through a class body attribute, or through a run-time namespace key is
+traced to `subprocess`; what stays unreadable is named by the helper
+that narrows the class. Lives beside the suite, not in it, so the suite
+file stays under its size ceiling.
 """
 import ast
 
@@ -33,6 +37,11 @@ def launch_refusals(source, here, bound_sink=None):
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
+    # The class body each node sits in, and the attributes that body
+    # binds, so an attribute receiver is read against the class that binds
+    # it rather than by name alone. Both are filled by the walks below.
+    class_scopes = {}
+    class_attributes = {}
 
     def normalize(called):
         """Map a machinery alias's member to its canonical spelling."""
@@ -58,7 +67,10 @@ def launch_refusals(source, here, bound_sink=None):
         if isinstance(value, ast.Name):
             return (value.id == 'subprocess' or value.id in bound
                     or value.id in module_factories)
-        if isinstance(value, (ast.Attribute, ast.NamedExpr)):
+        if isinstance(value, ast.Attribute):
+            return attribute_derives(value, bound) \
+                or derives(value.value, bound)
+        if isinstance(value, ast.NamedExpr):
             return derives(value.value, bound)
         if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
             return any(derives(elt, bound) for elt in value.elts)
@@ -84,16 +96,19 @@ def launch_refusals(source, here, bound_sink=None):
                     and isinstance(base.value, ast.Name) \
                     and base.value.id == 'sys' and base.attr == 'modules':
                 return True
+            if resolve_string(value.slice) == 'subprocess':
+                return True
             return derives(base, bound)
         if isinstance(value, ast.Call):
             called = normalize(callee_of(value))
             if called in partial_aliases and any(
                     derives(arg, bound) for arg in value.args):
                 return True
-            if called in import_module_aliases \
-                    and any(isinstance(arg, ast.Constant)
-                            and arg.value == 'subprocess'
-                            for arg in value.args):
+            if called in import_module_aliases and any(
+                    resolve_string(argument) == 'subprocess'
+                    for argument in list(value.args) + [
+                        keyword.value for keyword in value.keywords
+                        if keyword.arg == 'name']):
                 return True
             if called == 'getattr' and any(
                     derives(arg, bound) for arg in value.args):
@@ -112,6 +127,39 @@ def launch_refusals(source, here, bound_sink=None):
                 return any(derives(arg, bound) for arg in value.args)
             return any(derives(arg, bound) for arg in value.args)
         return False
+
+    attribute_active = set()
+
+    def attribute_derives(value, bound):
+        """Does this attribute read as a value derived from subprocess?
+
+        The value the enclosing class body binds to this attribute's name,
+        keyed on the class rather than the name alone, so `self.mod.run(...)`
+        reaches a class body `mod = subprocess` and two classes binding one
+        name to different values resolve independently. A name bound twice
+        in one class body resolves to nothing, for the same
+        last-wins-is-a-guess reason as the module table. A class binding no
+        such attribute does not reach the module table either: attribute
+        lookup walks the instance and its class, never the enclosing
+        module's globals.
+
+        Three receivers stay outside this class: one assigned in a method
+        body (`self.mod = subprocess` in a constructor), which is the
+        residual boundary the module docstring names; one reached through
+        its own base (`self.inner.mod`), which resolves against the outer
+        class and so fails closed; and one the class reaches dynamically
+        (`type(self).mod`), which has no class body binding to read.
+        """
+        table = class_attributes.get(id(class_scopes.get(id(value))), {})
+        if value.attr not in table:
+            return False
+        held = table[value.attr]
+        if held is None or id(value) in attribute_active:
+            return False
+        attribute_active.add(id(value))
+        derived = derives(held, bound)
+        attribute_active.discard(id(value))
+        return derived
 
     def resolves_safe(expr):
         """Is this receiver provably free of subprocess-derived values?"""
@@ -229,14 +277,95 @@ def launch_refusals(source, here, bound_sink=None):
                 bindings.append((node.target.id, node.iter))
         elif isinstance(node, ast.ClassDef):
             defined_names.add(node.name)
+            attributes = {}
             for statement in node.body:
                 if isinstance(statement, ast.Assign):
                     bindings.append((node.name, statement.value))
+                    assigned = [(target.id, statement.value)
+                                for target in statement.targets
+                                if isinstance(target, ast.Name)]
+                elif isinstance(statement, ast.AnnAssign) \
+                        and statement.value is not None \
+                        and isinstance(statement.target, ast.Name):
+                    assigned = [(statement.target.id, statement.value)]
+                else:
+                    continue
+                for name, held in assigned:
+                    attributes[name] = None if name in attributes else held
+            class_attributes[id(node)] = attributes
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if isinstance(item.optional_vars, ast.Name):
                     bindings.append(
                         (item.optional_vars.id, item.context_expr))
+    binding_map = {}
+    ambiguous = set()
+    for name, value in bindings:
+        if name in binding_map:
+            ambiguous.add(name)
+        binding_map[name] = value
+    scope_walk: list[tuple] = [(tree, None)]
+    while scope_walk:
+        node, scope = scope_walk.pop()
+        for child in ast.iter_child_nodes(node):
+            class_scopes[id(child)] = scope
+            scope_walk.append(
+                (child, child if isinstance(child, ast.ClassDef) else scope))
+
+    def resolve_constant(element):
+        """An argv element's string constant, following a name chain.
+
+        Resolves a name through the bindings table to a fixpoint behind a
+        seen-guard bounded by _ARGV_UNWRAP_CAP, the same idiom as
+        resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
+        ...])`) reaches its constant and a self-referential one (`A = A`)
+        stops instead of looping. A name bound more than once resolves to
+        None (unreadable), for the same last-wins reason as resolve_argv.
+        """
+        seen = set()
+        for _ in range(_ARGV_UNWRAP_CAP):
+            if isinstance(element, ast.Constant) \
+                    and isinstance(element.value, str):
+                return element.value
+            if not (isinstance(element, ast.Name)
+                    and element.id in binding_map
+                    and element.id not in ambiguous
+                    and element.id not in seen):
+                return None
+            seen.add(element.id)
+            element = binding_map[element.id]
+        return None
+
+    def resolve_string(element, seen=None):
+        """A string constant behind a `+` concat as well as a name chain.
+
+        The chain resolve_constant follows, extended to fold a `+` whose
+        two sides both read: a module name or a namespace key is as often
+        assembled from halves as written whole. A concat with a side that
+        does not read is not a constant, so it resolves to None rather
+        than to the readable half. The argv words keep resolve_constant,
+        which does not fold: a head word it cannot read stays an
+        unreadable head, never one this resolver invented.
+        """
+        seen = set() if seen is None else seen
+        for _ in range(_ARGV_UNWRAP_CAP):
+            if isinstance(element, ast.BinOp) \
+                    and isinstance(element.op, ast.Add):
+                left = resolve_string(element.left, set(seen))
+                right = resolve_string(element.right, set(seen))
+                return None if left is None or right is None else left + right
+            if isinstance(element, ast.Constant) \
+                    and isinstance(element.value, str):
+                return element.value
+            if not (isinstance(element, ast.Name)
+                    and element.id in binding_map
+                    and element.id not in ambiguous
+                    and element.id not in seen):
+                return None
+            seen.add(element.id)
+            element = binding_map[element.id]
+        return None
+
     bound = set()
     module_factories = set()
     launcher_factories = set()
@@ -257,12 +386,6 @@ def launch_refusals(source, here, bound_sink=None):
                     launcher_factories.add(name)
                     bound.add(name)
                     changed = True
-    binding_map = {}
-    ambiguous = set()
-    for name, value in bindings:
-        if name in binding_map:
-            ambiguous.add(name)
-        binding_map[name] = value
 
     def resolve_argv(expr):
         """The argv's literal list/tuple, or None when it is dynamic.
@@ -313,30 +436,6 @@ def launch_refusals(source, here, bound_sink=None):
                 continue
             return False
         return False
-
-    def resolve_constant(element):
-        """An argv element's string constant, following a name chain.
-
-        Resolves a name through the bindings table to a fixpoint behind a
-        seen-guard bounded by _ARGV_UNWRAP_CAP, the same idiom as
-        resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
-        ...])`) reaches its constant and a self-referential one (`A = A`)
-        stops instead of looping. A name bound more than once resolves to
-        None (unreadable), for the same last-wins reason as resolve_argv.
-        """
-        seen = set()
-        for _ in range(_ARGV_UNWRAP_CAP):
-            if isinstance(element, ast.Constant) \
-                    and isinstance(element.value, str):
-                return element.value
-            if not (isinstance(element, ast.Name)
-                    and element.id in binding_map
-                    and element.id not in ambiguous
-                    and element.id not in seen):
-                return None
-            seen.add(element.id)
-            element = binding_map[element.id]
-        return None
 
     def read_words(container):
         """A literal list/tuple's string words, names resolved; else None."""
@@ -450,6 +549,17 @@ def launch_refusals(source, here, bound_sink=None):
             refusals.append(
                 f'{here}:{node.lineno} calls through a receiver the '
                 'audit cannot resolve')
+        elif isinstance(func, ast.Attribute) \
+                and not isinstance(func.value, ast.Name) \
+                and derives(func.value, bound) \
+                and resolves_safe(func.value):
+            # A receiver the Name arms cannot carry — an attribute or a
+            # namespace subscript — that derives to subprocess is a launch.
+            # A bare name stays out: a Name that derives without being
+            # bound is a module factory, a callable rather than the module.
+            # Gated on resolves_safe so the sys.modules blanket refusal
+            # below still holds.
+            launches.append(node)
         elif isinstance(func, ast.Attribute):
             unresolved = not resolves_safe(func.value)
             if unresolved:
