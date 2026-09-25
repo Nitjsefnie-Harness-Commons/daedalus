@@ -32,3 +32,15 @@ def iter_tree_files(root):
     assert paths, 'Git returned no tracked release paths'
     for path in paths:
         yield root / os.fsdecode(path)
+
+
+def git_index(root, *args):
+    """Run a git command against `root`'s index, raising on failure.
+
+    A fixture the CI planner reads has to be a git checkout, because the
+    planner enumerates the TRACKED tree through `git ls-files`; `init`
+    plus `add` populates the index, which is what `ls-files` reads, so
+    no commit is made or needed.
+    """
+    subprocess.run(['git', '-C', str(root), *args], check=True,
+                   capture_output=True, timeout=30)
