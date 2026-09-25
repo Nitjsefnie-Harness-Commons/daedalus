@@ -8,14 +8,10 @@ handed a real sig would compare the sig with itself and mint anyway. These
 run the substituted text the way the bridge does, wrapped as an async
 function body, against a stubbed `window.GM`, and read which branch ran.
 
-The example's own `fetch` goes through the shared gate on the bridge origin
-the substituted text carries: each scenario declares the requests the
-substituted example makes, the gate answers only those and refuses and
-records everything else, and `assert_gate_clean` reads that record. The
-`GM.xmlhttpRequest` stub answers the playlist read and leaves the segment
-read unresolved, as it always has, so the run reads the status, learns
-nothing from it, and parks on the first segment it tries to relay — the
-recording the plan below is taken from.
+The `GM.xmlhttpRequest` stub answers the playlist read and leaves the segment
+read unresolved, so the run reads the status, learns nothing from it, and
+parks on the first segment it tries to relay — the recording the plan below
+is taken from.
 """
 import sys
 from pathlib import Path
@@ -41,9 +37,7 @@ FIXED = {
 # — and then relays its first segment through the unresolved read. The
 # status is declared as refused-not-ok on purpose: "the relay is not wired"
 # is a claim about the status answer, not a blanket fallback for every
-# route, so a plan that gave the example a 200 status would be a different
-# test. The status read goes to the bridge origin the substituted text
-# carries, so the gate keys it on the bare route.
+# route.
 STATUS = 'GET /segment-status?job=relay_job-1'
 
 _HARNESS = r"""
@@ -54,9 +48,7 @@ const plan = typeof planArg === 'string'
   ? JSON.parse(planArg) : planArg;
 const calls = [];
 
-// The shared gate's in-scope contract. The gate answers only what the
-// scenario declared and records every request the substituted example makes;
-// the example's own SERVER constant is the bridge origin the gate permits,
+// The example's own SERVER constant is the bridge origin the gate permits,
 // so its status and segment reads key on the same route the real bridge
 // would see.
 const BRIDGE_URL = 'https://bridge.example.com';

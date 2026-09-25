@@ -1,14 +1,8 @@
 """The overlap harness's client-process diagnostics.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
-The helpers here keep the subprocesses of an overlap run observable: a
-scripted result server that answers a chosen status, the environment and argv
-of a real `cookies` client, and the same-id client overlap that drives two
-real clients and a real bridge and reports both client and harness evidence.
-They live beside the Node harness itself in `_overlap`, which holds the
-driver they call back into; every suite imports each name from the module
-that now owns it.
+The helpers here keep the subprocesses of an overlap run observable. They live
+beside the Node harness itself in `_overlap`, which holds the driver they call
+back into; every suite imports each name from the module that now owns it.
 """
 import contextlib
 import http.server
@@ -128,8 +122,8 @@ def _client_failure_diagnostics(bridge_log, docroot):
     """The announcement, the log tail and the deliveries, for one diagnosis.
 
     The announcement is selected out of the whole log rather than left to the
-    tail: it names which bridge this was, and a client dying mid-request
-    makes the bridge print enough afterwards to push it out of the window.
+    tail: a client dying mid-request makes the bridge print enough afterwards
+    to push it out of the window.
     """
     announced = _util.listening_line(bridge_log) or 'no announcement captured'
     tail = ''.join(bridge_log[-40:]).strip() or 'no bridge log captured'
@@ -152,11 +146,7 @@ def _client_failure_diagnostics(bridge_log, docroot):
 def run_same_id_client_overlap(tmp, completion_order, client_argv, env,
                                token, background, *,
                                stop_clients_after_enqueue=False):
-    """Drive real same-id CLI clients and preserve both failure surfaces.
-
-    With `stop_clients_after_enqueue` the clients are stopped once their
-    commands are queued, so a manufactured diagnosis cannot race a consume.
-    """
+    """Drive real same-id CLI clients and preserve both failure surfaces."""
     import _overlap  # noqa: E402  pylint: disable=import-outside-toplevel
 
     owners = ('owner-a', 'owner-b')

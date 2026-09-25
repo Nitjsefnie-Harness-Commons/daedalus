@@ -1,7 +1,5 @@
 """The shared gate's own probe harness, driven without a worker.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 The probe drives the gate directly: every request is one the scenario chose,
 and the answer, the record, the refusal and the contract fault come back for
 the oracle rows in `test_bridge_fake_oracle.py` to pin. A real local server
@@ -29,10 +27,7 @@ const chunkCalls = [];
 // A real local server stands in for the upstream a forward names: the gate
 // must reach it through `forwardRequest` and return ITS answer, so the probe
 // records the real server's own status — a distinctive 4xx the gate would
-// never synthesise — and how many requests actually arrived. `upstreamStatus`
-// and `upstreamThrows` decide what the server (or the hook) does for a
-// declared forward; `noForwardHook` withholds forwardRequest so the
-// splice-time contract check can be exercised on its own.
+// never synthesise — and how many requests actually arrived.
 const http = require('http');
 const forwardedFetches = [];
 const upstream = { hits: 0, status: 418, body: 'upstream said no' };
@@ -59,8 +54,7 @@ function response(status, data) {
 
 function streamResponse(answer) {
   // The gate routes every stream answer through this factory, so a harness
-  // that serves 'hang' models the connected-but-idle body here. The hang test
-  // reds if this factory stops building it.
+  // that serves 'hang' models the connected-but-idle body here.
   if (answer === 'hang') {
     return {
       ok: true,
@@ -125,8 +119,8 @@ async function run() {
     const answer = await bridgeFetch(step.url, init);
     statuses.push(answer.status);
     // A stream answer's body shape is the hang the watchdog exercises: a
-    // connected 200 whose reader never settles. Recorded so the oracle can
-    // pin it without awaiting a promise that (correctly) never resolves.
+    // connected 200 whose reader never settles. Recorded without awaiting a
+    // promise that (correctly) never resolves.
     if (step.url.includes('/stream?')) {
       streamBodies.push(
         answer && answer.body
@@ -161,9 +155,7 @@ async function main() {
       upstreamServer.listen(0, '127.0.0.1', resolve);
     });
     // A forward names the origin its target lives on; 'UPSTREAM' is this
-    // real server's origin, filled in once it is listening. A plan that
-    // already names an origin ('KEEP') keeps it, so a wrong-origin forward
-    // is expressible.
+    // real server's origin, filled in once it is listening.
     const origin = `http://127.0.0.1:${upstreamServer.address().port}`;
     for (const key of Object.keys(plan.forwards)) {
       if (plan.forwards[key] === 'UPSTREAM') plan.forwards[key] = origin;

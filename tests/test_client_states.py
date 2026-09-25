@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""The client-state helper's own record, and what a client exit announces.
-
-These are the same-id overlap clients' observable states: a client that
-outlives its grace, one that is killed mid-write, one whose pipes are held
-open by a grandchild, and the record a silent non-zero exit produces. The
-overlap harness that drives them is in `test_overlap_harness.py`; the helper
-itself is in `_clientstate.py` and the callers in `_overlap_clients.py`.
-"""
+"""The client-state helper's own record, and what a client exit announces."""
 import subprocess
 import sys
 import time
@@ -56,8 +49,7 @@ class _KillRecordsOwnStatus:
 
     Windows `Popen.kill()` is `TerminateProcess(handle, 1)` and POSIX's is
     SIGKILL, so `proc.returncode` after that kill describes the kill rather
-    than the client. The post-kill drain completes with nothing on either
-    stream, which is what the reported Windows record showed.
+    than the client.
     """
 
     stdout = None
@@ -134,11 +126,8 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
 
     The killed client has already written to its pipe and its grandchild keeps
     that pipe open, so the second drain expires whatever the reader won in the
-    window. What the fixture proves is that the recorded state still comes out
-    self-consistent through that expiry: still running, no exit status of its
-    own, and the timeout recorded rather than raised. Whether the reader won
-    the pipe's contents before the deadline is a wall-clock race, so the
-    contents themselves are pinned against a stub by the client-state suite.
+    window. The contents are pinned against a stub by the client-state suite,
+    not raced here.
     """
     ready_path = Path(tmp) / 'grandchild.ready'
     client = (
