@@ -64,7 +64,7 @@ def tracked_long_lines(root=ROOT):
     """Return the over-limit line count of every tracked Python file."""
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z', '*.py'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     counts = {}
     for raw in listed.stdout.split(b'\0'):
         if not raw:

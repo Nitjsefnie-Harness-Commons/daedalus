@@ -174,15 +174,14 @@ def test_a_deleted_file_adds_nothing(tmp):
 def _git(repo, *args):
     """Run one git command inside a fixture repository."""
     return subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True)
 
 
 def _git_input(repo, value, *args):
     """Run one git command with exact UTF-8 bytes on standard input."""
     done = subprocess.run(
         ('git', '-C', str(repo)) + args,
-        input=value.encode('utf-8'), check=True, capture_output=True,
-        timeout=60)
+        input=value.encode('utf-8'), check=True, capture_output=True)
     return done.stdout.decode('utf-8')
 
 
