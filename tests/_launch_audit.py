@@ -7,22 +7,23 @@ names the argv head (git / non-git / unreadable) so a tree-wide caller
 can keep the rule to git launches. A receiver is resolved rather than
 declared unreadable: a module reached through a name held in a variable,
 through a class body attribute, or through a run-time namespace key is
-traced to `subprocess`; what stays unreadable is named by the helper
-that narrows the class. Lives beside the suite, not in it, so the suite
-file stays under its size ceiling.
+traced to `subprocess`. What stays unreadable is named where it is
+narrowed: the class-attribute residuals in attribute_derives, the
+module-name residual in resolve_string. Lives beside the suite, not in
+it, so the suite file stays under its size ceiling.
 """
 import ast
+
+from _argv_read import ARGV_UNWRAP_CAP
+from _argv_read import ArgvReader
 
 CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
 
-# A concat/literal chain deeper than this is not a shape the tree spells;
-# the cap keeps a self-referential binding from spinning the head read. It
-# bounds the unwrap passes of each resolver, so a name chain or concat
-# longer than the cap stops at the cap and the head is reported unreadable
-# (the name path resolves one hop fewer than the concat path, because its
-# terminal value is only checked on the next pass).
-_ARGV_UNWRAP_CAP = 8
+
+# The absent table entry, so a base that binds the name to nothing is not
+# read as a class that binds it to None.
+_MISS = object()
 
 
 def launch_refusals(source, here, bound_sink=None):
@@ -42,6 +43,7 @@ def launch_refusals(source, here, bound_sink=None):
     # it rather than by name alone. Both are filled by the walks below.
     class_scopes = {}
     class_attributes = {}
+    local_classes = {}
 
     def normalize(called):
         """Map a machinery alias's member to its canonical spelling."""
@@ -130,6 +132,52 @@ def launch_refusals(source, here, bound_sink=None):
 
     attribute_active = set()
 
+    def inherited_classes(scope):
+        """scope's locally defined bases, left to right and depth first.
+
+        A base the module does not bind to a class — an imported mixin, a
+        base built at run time, a subscripted `Generic[T]` — is not
+        resolvable here and is skipped. It is a residual the docstring
+        names, and it is the one an inherited attribute can hide behind.
+        """
+        found = []
+        seen = set()
+        pending = list(scope.bases) if scope is not None else []
+        while pending:
+            base = pending.pop(0)
+            if not isinstance(base, ast.Name):
+                continue
+            node = local_classes.get(base.id)
+            if node is None or id(node) in seen:
+                continue
+            seen.add(id(node))
+            found.append(node)
+            pending = list(node.bases) + pending
+        return found
+
+    def attribute_values(value):
+        """The values this attribute can read, nearest reading first.
+
+        The enclosing class's own table first, so an override shadows
+        every base and a subclass binding the name to something that does
+        not derive is not a launch. Then each locally defined base in
+        inheritance order, because Python reads an attribute a base binds.
+        That order is left to right, depth first, which is the MRO's own
+        order wherever the attribute is bound in one place; a diamond that
+        binds it on both branches yields both, and either deriving is
+        enough — the audit computes no C3 linearisation, and reporting is
+        the fail-closed reading.
+        """
+        scope = class_scopes.get(id(value))
+        own = class_attributes.get(id(scope), {})
+        if value.attr in own:
+            yield own[value.attr]
+            return
+        for base in inherited_classes(scope):
+            held = class_attributes.get(id(base), {}).get(value.attr, _MISS)
+            if held is not _MISS:
+                yield held
+
     def attribute_derives(value, bound):
         """Does this attribute read as a value derived from subprocess?
 
@@ -139,27 +187,36 @@ def launch_refusals(source, here, bound_sink=None):
         name to different values resolve independently. A name bound twice
         in one class body resolves to nothing, for the same
         last-wins-is-a-guess reason as the module table. A class binding no
-        such attribute does not reach the module table either: attribute
-        lookup walks the instance and its class, never the enclosing
-        module's globals.
+        such attribute reads its bases instead, and a class binding one
+        shadows them. No class falls through to the module table: attribute
+        lookup walks the instance, its class and its bases, never the
+        enclosing module's globals.
 
-        Three receivers stay outside this class: one assigned in a method
-        body (`self.mod = subprocess` in a constructor), which is the
-        residual boundary the module docstring names; one reached through
-        its own base (`self.inner.mod`), which resolves against the outer
-        class and so fails closed; and one the class reaches dynamically
-        (`type(self).mod`), which has no class body binding to read.
+        The receiver's shape does not matter to any of that, so
+        `type(self).mod` resolves exactly as `self.mod` does. What is left
+        outside the class, each named here and pinned by a row:
+
+        - an attribute bound in a method body (`self.mod = subprocess` in
+          a constructor) is not a class body binding and does not resolve;
+        - a base the module does not define, so an inherited attribute
+          behind an imported mixin does not resolve;
+        - a subclass override the analyser cannot read resolves as its
+          own value rather than falling back to the base, which is the
+          same last-wins rule as above;
+        - an attribute reached through another attribute's value
+          (`self.inner.mod`) resolves against this class when this class
+          binds the name, and to nothing when it does not: the value of
+          `self.inner` is not readable, so the inner class cannot be.
         """
-        table = class_attributes.get(id(class_scopes.get(id(value))), {})
-        if value.attr not in table:
-            return False
-        held = table[value.attr]
-        if held is None or id(value) in attribute_active:
-            return False
-        attribute_active.add(id(value))
-        derived = derives(held, bound)
-        attribute_active.discard(id(value))
-        return derived
+        for held in attribute_values(value):
+            if held is None or id(value) in attribute_active:
+                continue
+            attribute_active.add(id(value))
+            derived = derives(held, bound)
+            attribute_active.discard(id(value))
+            if derived:
+                return True
+        return False
 
     def resolves_safe(expr):
         """Is this receiver provably free of subprocess-derived values?"""
@@ -293,6 +350,7 @@ def launch_refusals(source, here, bound_sink=None):
                 for name, held in assigned:
                     attributes[name] = None if name in attributes else held
             class_attributes[id(node)] = attributes
+            local_classes[node.name] = node
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if isinstance(item.optional_vars, ast.Name):
@@ -304,6 +362,7 @@ def launch_refusals(source, here, bound_sink=None):
         if name in binding_map:
             ambiguous.add(name)
         binding_map[name] = value
+    reader = ArgvReader(binding_map, ambiguous)
     scope_walk: list[tuple] = [(tree, None)]
     while scope_walk:
         node, scope = scope_walk.pop()
@@ -312,43 +371,27 @@ def launch_refusals(source, here, bound_sink=None):
             scope_walk.append(
                 (child, child if isinstance(child, ast.ClassDef) else scope))
 
-    def resolve_constant(element):
-        """An argv element's string constant, following a name chain.
-
-        Resolves a name through the bindings table to a fixpoint behind a
-        seen-guard bounded by _ARGV_UNWRAP_CAP, the same idiom as
-        resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
-        ...])`) reaches its constant and a self-referential one (`A = A`)
-        stops instead of looping. A name bound more than once resolves to
-        None (unreadable), for the same last-wins reason as resolve_argv.
-        """
-        seen = set()
-        for _ in range(_ARGV_UNWRAP_CAP):
-            if isinstance(element, ast.Constant) \
-                    and isinstance(element.value, str):
-                return element.value
-            if not (isinstance(element, ast.Name)
-                    and element.id in binding_map
-                    and element.id not in ambiguous
-                    and element.id not in seen):
-                return None
-            seen.add(element.id)
-            element = binding_map[element.id]
-        return None
-
     def resolve_string(element, seen=None):
         """A string constant behind a `+` concat as well as a name chain.
 
-        The chain resolve_constant follows, extended to fold a `+` whose
-        two sides both read: a module name or a namespace key is as often
-        assembled from halves as written whole. A concat with a side that
-        does not read is not a constant, so it resolves to None rather
-        than to the readable half. The argv words keep resolve_constant,
-        which does not fold: a head word it cannot read stays an
-        unreadable head, never one this resolver invented.
+        The chain ArgvReader.resolve_constant follows, extended to fold a
+        `+` whose two sides both read: a module name or a namespace key is
+        as often assembled from halves as written whole, and a key reached
+        through a class body attribute reads like any other receiver. A
+        concat with a side that does not read is not a constant, so it
+        resolves to None rather than to the readable half. The argv words
+        keep resolve_constant, which does not fold: a head word it cannot
+        read stays an unreadable head, never one this resolver invented.
+
+        Two module-name residuals sit here rather than in attribute_derives,
+        because this resolver is what declines them: an argument the caller
+        computed (`import_module(name)` on a parameter), and a concat with
+        an operand that does not read (`import_module('subprocess' + suffix)`).
+        An attribute key bound in a method body is the attribute_derives
+        residual, not this one, and follows it.
         """
         seen = set() if seen is None else seen
-        for _ in range(_ARGV_UNWRAP_CAP):
+        for _ in range(ARGV_UNWRAP_CAP):
             if isinstance(element, ast.BinOp) \
                     and isinstance(element.op, ast.Add):
                 left = resolve_string(element.left, set(seen))
@@ -357,6 +400,14 @@ def launch_refusals(source, here, bound_sink=None):
             if isinstance(element, ast.Constant) \
                     and isinstance(element.value, str):
                 return element.value
+            if isinstance(element, ast.Attribute):
+                held = next(iter(attribute_values(element)), None)
+                if held is None or id(element) in attribute_active:
+                    return None
+                attribute_active.add(id(element))
+                read = resolve_string(held, set(seen))
+                attribute_active.discard(id(element))
+                return read
             if not (isinstance(element, ast.Name)
                     and element.id in binding_map
                     and element.id not in ambiguous
@@ -386,106 +437,6 @@ def launch_refusals(source, here, bound_sink=None):
                     launcher_factories.add(name)
                     bound.add(name)
                     changed = True
-
-    def resolve_argv(expr):
-        """The argv's literal list/tuple, or None when it is dynamic.
-
-        Unwraps a left-nested `+` chain and follows a plain name through
-        the bindings table, both bounded by _ARGV_UNWRAP_CAP, so a
-        tuple-concatenated or name-held git argv is classified rather than
-        refused as unreadable. A name bound more than once in the module
-        resolves to None (unreadable): last-wins is a guess, and a guess
-        that lands on a non-git head would assert a provable non-git for a
-        git launch.
-        """
-        seen = set()
-        for _ in range(_ARGV_UNWRAP_CAP):
-            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
-                expr = expr.left
-                continue
-            if isinstance(expr, ast.Name):
-                if expr.id in seen or expr.id in ambiguous \
-                        or expr.id not in binding_map:
-                    return None
-                seen.add(expr.id)
-                expr = binding_map[expr.id]
-                continue
-            if isinstance(expr, (ast.List, ast.Tuple)):
-                return expr
-            return None
-        return None
-
-    def head_is_ambiguous(expr):
-        """Did the argv's resolution hit a name bound more than once?
-
-        Such a head is a guess, not a reading, so it is a bound site in its
-        own right (in scope) rather than the residual dynamic-argv boundary.
-        """
-        seen = set()
-        for _ in range(_ARGV_UNWRAP_CAP):
-            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
-                expr = expr.left
-                continue
-            if isinstance(expr, ast.Name):
-                if expr.id in seen or expr.id not in binding_map:
-                    return False
-                if expr.id in ambiguous:
-                    return True
-                seen.add(expr.id)
-                expr = binding_map[expr.id]
-                continue
-            return False
-        return False
-
-    def read_words(container):
-        """A literal list/tuple's string words, names resolved; else None."""
-        if container is None:
-            return []
-        return [resolve_constant(element) for element in container.elts]
-
-    def is_interpreter(element):
-        return (isinstance(element, ast.Attribute)
-                and isinstance(element.value, ast.Name)
-                and element.value.id == 'sys'
-                and element.attr == 'executable')
-
-    def first_word(container):
-        """The head's string constant and whether the audit could read it.
-
-        A head element bound to a name resolves to its constant, so
-        `[GIT, 'status']` with `GIT = 'git'` classifies as a git launch.
-        A literal `sys.executable` head is read as a known non-git
-        interpreter. Any other head that is not a readable string constant
-        is unreadable, never a provable non-git: on the exemption path a
-        wrong non-git label would silently widen the exempt set.
-        """
-        if container is None or not container.elts:
-            return (None, container is not None)
-        first = container.elts[0]
-        if is_interpreter(first):
-            return (None, True)
-        value = resolve_constant(first)
-        return (value, value is not None)
-
-    def head_label(container):
-        """git / non-git / unreadable for one launch's resolved argv.
-
-        A for-target bound to a sequence of argv literals (the launch runs
-        once per element) is git if ANY iteration's head is git, because
-        the loop runs them all and one refusal covers the site; otherwise
-        it is unreadable, never a non-git inferred from the loop shape. A
-        non-git label is only ever a single-head reading.
-        """
-        if container is None:
-            return 'unreadable'
-        if container.elts and isinstance(container.elts[0], (ast.List,
-                                                             ast.Tuple)):
-            labels = [head_label(element) for element in container.elts]
-            return 'git' if 'git' in labels else 'unreadable'
-        first_value, first_readable = first_word(container)
-        if first_value == 'git':
-            return 'git'
-        return 'non-git' if first_readable else 'unreadable'
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) \
@@ -624,11 +575,12 @@ def launch_refusals(source, here, bound_sink=None):
     for node in launches:
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
         argv = node.args[0] if node.args else None
-        container = resolve_argv(argv) if argv is not None else None
-        words = read_words(container)
-        head = head_label(container)
+        container = reader.resolve_argv(argv) \
+            if argv is not None else None
+        words = reader.read_words(container)
+        head = reader.head_label(container)
         if head == 'unreadable' and argv is not None \
-                and head_is_ambiguous(argv):
+                and reader.head_is_ambiguous(argv):
             head = 'ambiguous'
         # The refusal text never says "ambiguous": the head it names is the
         # unreadable one; the sink keeps the guess-distinguishing label.
@@ -666,7 +618,7 @@ def launch_refusals(source, here, bound_sink=None):
                 'cannot read')
         if words and words[0] != 'git':
             interpreter = (container is not None and container.elts
-                           and is_interpreter(container.elts[0]))
+                           and reader.is_interpreter(container.elts[0]))
             if not interpreter:
                 refusals.append(
                     f"{here}:{node.lineno} argv does not start with the "
