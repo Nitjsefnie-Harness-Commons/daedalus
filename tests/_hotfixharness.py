@@ -58,7 +58,9 @@ const storageStore = {
 let sequence = 0;
 
 function eventTarget(listeners = null) {
-  return { addListener(listener) { if (listeners) listeners.push(listener); } };
+  return {
+    addListener(listener) { if (listeners) listeners.push(listener); },
+  };
 }
 function response(status, data) {
   return {
