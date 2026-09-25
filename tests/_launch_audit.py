@@ -21,7 +21,6 @@ configuration of its own.
 """
 import ast
 
-from _argv_read import ARGV_UNWRAP_CAP
 from _argv_read import ArgvReader
 
 CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
@@ -113,7 +112,7 @@ def launch_refusals(source, here, bound_sink=None):
                     and isinstance(base.value, ast.Name) \
                     and base.value.id == 'sys' and base.attr == 'modules':
                 return True
-            if resolve_string(value.slice) == 'subprocess':
+            if reader.resolve_string(value.slice) == 'subprocess':
                 return True
             return derives(base, bound)
         if isinstance(value, ast.Call):
@@ -122,7 +121,7 @@ def launch_refusals(source, here, bound_sink=None):
                     derives(arg, bound) for arg in value.args):
                 return True
             if called in import_module_aliases and any(
-                    resolve_string(argument) == 'subprocess'
+                    reader.resolve_string(argument) == 'subprocess'
                     for argument in list(value.args) + [
                         keyword.value for keyword in value.keywords
                         if keyword.arg == 'name']):
@@ -278,7 +277,8 @@ def launch_refusals(source, here, bound_sink=None):
         node, scope = scope_walk.pop()
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.Lambda)):
+                                  ast.Lambda, ast.ListComp, ast.SetComp,
+                                  ast.DictComp, ast.GeneratorExp)):
                 function_scopes[id(child)] = child
                 parameter_names[id(child)] = _parameters(child)
                 scope_walk.append((child, child))
@@ -292,42 +292,6 @@ def launch_refusals(source, here, bound_sink=None):
             ambiguous.add(name)
         binding_map[name] = value
     reader = ArgvReader(binding_map, ambiguous)
-
-    def resolve_string(element, seen=None):
-        """A string constant behind a `+` concat as well as a name chain.
-
-        The chain ArgvReader.resolve_constant follows, extended to fold a
-        `+` whose two sides both read, because a module name is as often
-        assembled from halves as written whole. A concat with a side that
-        does not read is not a constant, so it resolves to None rather
-        than to the readable half. A name bound more than once, or one
-        that feeds itself, resolves to nothing: the first is a guess and
-        the second is a cycle.
-
-        This is the #1099 mechanism and it is kept for that reason alone.
-        Every spelling it still cannot read — an argument the caller
-        computed, a `+` with an operand that does not read, a string a
-        `format` or a `join` builds — is covered by the unplaced arm
-        below rather than by a row here.
-        """
-        seen = set() if seen is None else seen
-        for _ in range(ARGV_UNWRAP_CAP):
-            if isinstance(element, ast.BinOp) \
-                    and isinstance(element.op, ast.Add):
-                left = resolve_string(element.left, set(seen))
-                right = resolve_string(element.right, set(seen))
-                return None if left is None or right is None else left + right
-            if isinstance(element, ast.Constant) \
-                    and isinstance(element.value, str):
-                return element.value
-            if not (isinstance(element, ast.Name)
-                    and element.id in binding_map
-                    and element.id not in ambiguous
-                    and element.id not in seen):
-                return None
-            seen.add(element.id)
-            element = binding_map[element.id]
-        return None
 
     bound = set()
     module_factories = set()
@@ -377,9 +341,15 @@ def launch_refusals(source, here, bound_sink=None):
         if isinstance(node, (ast.For, ast.AsyncFor)) \
                 and not isinstance(node.target, ast.Name) \
                 and derives(node.iter, bound):
-            refusals.append(
-                f'{here}:{node.lineno} unpacks subprocess-derived values '
-                'the audit cannot follow')
+            if isinstance(node.target, (ast.Tuple, ast.List)):
+                refusals.append(
+                    f'{here}:{node.lineno} unpacks subprocess-derived '
+                    'values the audit cannot follow')
+            else:
+                refusals.append(
+                    f'{here}:{node.lineno} binds a subprocess-derived '
+                    'value to an attribute or subscript target the audit '
+                    'cannot follow')
     launches = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -514,16 +484,28 @@ def launch_refusals(source, here, bound_sink=None):
         if machinery_route(held):
             return False
         if isinstance(held, ast.Call):
-            return normalize(callee_of(held)) != 'getattr'
+            if normalize(callee_of(held)) == 'getattr':
+                return False
+            # A call is proved when the analyser can name what it calls:
+            # a bare name this module accounts for, or an attribute on
+            # one. A bare name it cannot account for is a factory whose
+            # origin is invisible, and a factory's ARGUMENT decides what
+            # it returns exactly as it decides for `import_module` — so a
+            # factory result is no more proved than a machinery one.
+            origin = callee_of(held)
+            while origin and '.' in origin:
+                origin = origin.rsplit('.', 1)[0]
+            return origin in safe_names and origin not in bound
         return True
 
     def unplaced_bounded_call(node):
         """Every bounded call whose receiver is not a PROVED fixed value.
 
-        A call carrying a readable `timeout=` or a `**`-unpacked mapping
-        is a bounded call, whatever it calls. That is the whole of the
-        second arm of the launch policy, and it is what makes the policy
-        decidable rather than a list of spellings. A receiver reached
+        A call carrying a `timeout=` or a `**`-unpacked mapping is a
+        bounded call, whatever it calls and whatever the timeout reads.
+        That is the whole of the second arm of the launch policy, and it
+        is what makes the policy decidable rather than a list of
+        spellings. A receiver reached
         through an import name held in a variable, through a class
         attribute, or through a run-time namespace is not proved, so it is
         reported at `unreadable` — the rule then demands a refusal or an
