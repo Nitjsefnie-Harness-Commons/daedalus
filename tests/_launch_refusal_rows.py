@@ -247,8 +247,11 @@ LAUNCH_REFUSAL_ROWS = (
      "mod = importlib.import_module(name)\n"
      "mod.dumps({})\n",
      'declares no launch the audit can see through'),
-    # Issue #1100: the receiver is a class attribute. The analyser does
-    # not read it — it reports the launch, which is what puts it in scope.
+    # Issue #1100: the receiver is a class attribute. The row pins the
+    # NO-VISIBLE-LAUNCH gate — the analyser does not place this launch.
+    # What puts it in scope is the unplaced bound site from a different
+    # code path, pinned as `class-attribute-receiver-is-reported` in
+    # BOUND_SITE_ROWS; the two together are #1100's coverage.
     ('class-attribute-receiver-is-reported',
      "import subprocess\n"
      "class Runner:\n"
@@ -276,4 +279,19 @@ LAUNCH_REFUSAL_ROWS = (
      "import subprocess\n"
      "print('git status')\n",
      'declares no launch the audit can see through'),
+    # A loop target takes the same split as an assignment target: a
+    # tuple unpacks, a subscript binds.
+    ('subscript-for-target-subprocess-launch',
+     "import subprocess\n"
+     "launcher = subprocess.run\n"
+     "for ns[0] in launcher(['git', 'status'], check=True):\n"
+     "    pass\n",
+     'binds a subprocess-derived value to an attribute or subscript '
+     'target the audit cannot follow'),
+    ('tuple-for-target-subprocess-launch',
+     "import subprocess\n"
+     "launcher = subprocess.run\n"
+     "for word, flag in launcher(['git', 'status'], check=True):\n"
+     "    pass\n",
+     'unpacks subprocess-derived values the audit cannot follow'),
 )

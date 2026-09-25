@@ -114,7 +114,8 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_drain.py', 33, 'kill_and_drain'):
         'the reap that follows that drain, on the same dead process',
     ('tests/_realbrowser_workers.py', 115, '_devtools_targets'):
-        'an HTTP read whose timeout is the bound itself',
+        'an HTTP read: a socket, not a git process, and the'
+        ' timeout is the bound itself',
     ('tests/_realbrowser_workers.py', 89, '_retire_browser'):
         'a browser-process wait while retiring it',
     ('tests/_realbrowser_workers.py', 92, '_retire_browser'):
@@ -132,17 +133,20 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_util.py', 496, 'bridge'):
         'a helper waiting for a port line; the caller bounds it',
     ('tests/_util.py', 556, 'get'):
-        'the GET helper called with a keyword mapping; it opens a'
-        'connection',
+        'an HTTP helper opening a socket; no git '
+        'process is behind it',
     ('tests/_util.py', 560, 'get_json'):
-        'the JSON GET helper the same way',
+        'an HTTP helper opening a socket; no git '
+        'process is behind it',
     ('tests/_util.py', 574, 'header_stream'):
-        'a connection constructor whose timeout bounds the TCP'
-        'setup',
+        'a connection constructor: it opens a socket and returns'
+        ' a client, and no git process sits behind a socket',
     ('tests/_util.py', 565, 'post_json'):
-        'the JSON POST helper the same way',
+        'an HTTP helper opening a socket; no git '
+        'process is behind it',
     ('tests/_util.py', 549, 'request'):
-        'an HTTP read whose timeout is the bound itself',
+        'an HTTP read: a socket, not a git process, and the'
+        ' timeout is the bound itself',
     ('tests/test_aggregate_gate.py', 324,
      'test_every_single_dependency_result_is_tabled'):
         'a table builder called with a keyword mapping; it builds a'
@@ -152,7 +156,8 @@ BOUNDED_GIT_LAUNCHES = {
         'the same table builder, keyed from a zipped mapping',
     ('tests/test_bridge_startup.py', 616,
      'test_dashboard_responses_refuse_cross_origin_framing'):
-        'an HTTP read whose timeout is the bound itself',
+        'an HTTP read: a socket, not a git process, and the'
+        ' timeout is the bound itself',
     ('tests/test_dashboard_behaviour.py', 529, 'popen'):
         'a test double constructed with a keyword mapping; it'
         'records, it does not launch',
@@ -161,8 +166,8 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
         'the reap after that wait, on the same process',
     ('tests/test_mcp_server.py', 122, '_mcp_request'):
-        'a connection constructor whose timeout bounds the TCP'
-        'setup',
+        'a connection constructor: it opens a socket and returns'
+        ' a client, and no git process sits behind a socket',
     ('tests/test_mcp_server.py', 111, '_surface_responder_errors'):
         'a thread join on a thread the fixture started',
     ('tests/test_mcp_server.py', 940, 'callers'):
@@ -174,8 +179,8 @@ BOUNDED_GIT_LAUNCHES = {
         'its timeout',
     ('tests/test_mcp_server.py', 1149,
      'test_bearer_middleware_rejects_duplicate_authorization_headers'):
-        'a connection constructor whose timeout bounds the TCP'
-        'setup',
+        'a connection constructor: it opens a socket and returns'
+        ' a client, and no git process sits behind a socket',
     ('tests/test_mcp_server.py', 1429,
      'test_mcp_port_zero_announces_the_actual_bound_port'):
         'an assertion on a bound event the module sets; the wait IS'
@@ -211,8 +216,8 @@ BOUNDED_GIT_LAUNCHES = {
         'a test double delegating with its arguments; it launches'
         'nothing of its own',
     ('tests/test_stream_lifecycle.py', 38, '_open_stream'):
-        'a connection constructor whose timeout bounds the TCP'
-        'setup',
+        'a connection constructor: it opens a socket and returns'
+        ' a client, and no git process sits behind a socket',
     ('tests/test_suite_runner.py', 399,
      'test_output_close_failure_reaps_the_spawned_suite'):
         'a suite-process wait inside the reaping the test asserts',
@@ -540,6 +545,12 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         assert live.get(key), (
             f'BOUNDED_GIT_LAUNCHES row {key} has no live bounded git '
             'launch; a stale allowance is a refusal')
+    # The keying is what carries the anti-prefix promise, so it is
+    # checked rather than asserted in prose: a (path,) key alone, the
+    # loosest prefix the sentence forbids, would let one row stand for
+    # every site in a module.
+    assert all(len(key) == 3 for key in BOUNDED_GIT_LAUNCHES), (
+        'every BOUNDED_GIT_LAUNCHES key names a site, not a module')
     for key in sorted(BOUNDED_GIT_LAUNCHES):
         count = len(live.get(key, ()))
         assert count == 1, (
