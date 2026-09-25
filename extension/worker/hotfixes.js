@@ -52,7 +52,7 @@ async function _replayViaCdp(chromeTabId, code) {
   }
 }
 
-async function _replayHotfix(chromeTabId, code) {
+async function _replayHotfix(chromeTabId, code, reportChannel) {
   let useMainWorld = false;
   try {
     const probe = await chrome.scripting.executeScript({
@@ -63,6 +63,7 @@ async function _replayHotfix(chromeTabId, code) {
     useMainWorld = probe[0]?.result === true;
   } catch (_) {}
   if (useMainWorld) {
+    reportChannel('MAIN-world');
     let results;
     try {
       results = await chrome.scripting.executeScript({
@@ -85,6 +86,7 @@ async function _replayHotfix(chromeTabId, code) {
     if (res && typeof res === 'object' && res.e) return res.e;
     return null;
   }
+  reportChannel('CDP');
   return _replayViaCdp(chromeTabId, code);
 }
 
@@ -100,15 +102,21 @@ async function handleHotfixReplay(chromeTabId) {
   const failures = [];
   for (const hf of fixes) {
     let failure;
+    // The replay picks its channel at run time, so the bound's refusal
+    // carries the one that actually ran; a fix wedged in its own probe
+    // reached none and is named without one.
+    let channel = '';
     try {
       // The bound covers the WHOLE per-fix operation — the routing decision,
       // the probe and the inject — not only the injection call, so a fix
       // that wedges anywhere in its own replay cannot stop the fixes after
       // it on this or any later load of the page.
       failure = await _raceMainWorldEval(
-        _replayHotfix(chromeTabId, hf.code), 'hotfix fix');
+        _replayHotfix(chromeTabId, hf.code, (c) => { channel = c; }),
+        'hotfix fix');
     } catch (error) {
-      failure = error && (error.message || String(error));
+      const detail = error && (error.message || String(error));
+      failure = (channel ? channel + ' ' : '') + detail;
     }
     if (failure) failures.push(hf.id + ': ' + failure);
   }

@@ -22,6 +22,7 @@ from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
                                run_main_world_eval_inside,
                                run_hotfix_replay_timeout,
                                run_hotfix_replay_probe_hang,
+                               run_hotfix_replay_cdp_timeout,
                                run_hotfix_replay_inside)
 from _repo import ROOT  # noqa: E402
 
@@ -297,6 +298,29 @@ def test_a_stuck_hotfix_fix_does_not_block_a_later_fix(tmp):
     assert not allClear, outcome
 
 
+def test_a_cdp_routed_stuck_fix_names_the_channel_that_ran(tmp):
+    """A probe answering false routes the fix to CDP, and the bound wraps
+    that dispatch exactly as it wraps a MAIN-world injection.
+
+    An operator reading a MAIN-world label for a fix that never entered the
+    MAIN world is sent to the wrong subsystem, so the channel in the refusal
+    is the one the replay actually took.
+    """
+    del tmp
+    outcome = run_hotfix_replay_cdp_timeout()
+    assert outcome['armed'] is True, outcome
+    # Both fixes dispatched through CDP and were bounded there.
+    assert outcome['dispatches'] == 2, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
+    errors = _replay_errors(outcome['replay'])
+    assert len(errors) == 1, outcome
+    assert errors[0]['text'] == (
+        '[Daedalus] hotfix replay failed on tab 7: '
+        + f'fix1: CDP hotfix fix timed out after {_SETTLE_MS} ms; '
+        + f'fix2: CDP hotfix fix timed out after {_SETTLE_MS} ms'), outcome
+    assert outcome['remaining'] == [], outcome
+
+
 def test_the_replay_bound_covers_the_whole_per_fix_operation(tmp):
     """A wedged probe is bounded too: the bound is not injection-only.
 
@@ -312,7 +336,11 @@ def test_the_replay_bound_covers_the_whole_per_fix_operation(tmp):
     assert outcome['ranSecond'] is True, outcome
     errors = _replay_errors(outcome['replay'])
     assert len(errors) == 1, outcome
-    assert f'timed out after {_SETTLE_MS} ms' in errors[0]['text'], outcome
+    # The fix wedged before its channel was chosen, so the refusal names
+    # none: the operator must not be sent to a channel the fix never took.
+    assert errors[0]['text'] == (
+        '[Daedalus] hotfix replay failed on tab 7: '
+        + f'fix1: hotfix fix timed out after {_SETTLE_MS} ms'), outcome
 
 
 def test_a_hotfix_fix_settling_inside_the_bound_is_not_a_failure(tmp):

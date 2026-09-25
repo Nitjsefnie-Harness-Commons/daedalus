@@ -33,6 +33,7 @@ const evalResolvers = {};
 const bgConsole = [];
 const messageListeners = [];
 const deadlineHistory = [];
+const cdpDispatches = [];
 let hotfixStore = null;
 let probeCount = 0;
 let injectionSeq = 0;
@@ -144,6 +145,10 @@ chrome.scripting.executeScript = async (injection) => {
       // reached: only a bound over the whole operation contains it.
       return new Promise(() => {});
     }
+    // A page whose CSP refuses dynamic compilation. The probe runs for real
+    // everywhere else; this mode needs the answer that routes the fix to
+    // CDP, which then has a dispatch to wedge on.
+    if (mode === 'replay-cdp-timeout') return [{ result: false }];
   }
   pageContext.__args = injection.args || [];
   const source = '(' + injection.func.toString() + ')(...__args)';
@@ -154,9 +159,17 @@ chrome.scripting.executeScript = async (injection) => {
 };
 
 chrome.debugger.attach = async () => {
+  if (mode === 'replay-cdp-timeout') return;
   throw new Error('cdp unused in bound harness');
 };
-chrome.debugger.sendCommand = async () => ({});
+chrome.debugger.sendCommand = async (target, method) => {
+  if (method !== 'Runtime.evaluate') return {};
+  cdpDispatches.push(method);
+  // A wedged dispatch is the CDP-routed counterpart of a never-settling
+  // page promise: the per-fix bound is what contains it.
+  if (mode === 'replay-cdp-timeout') return new Promise(() => {});
+  return {};
+};
 
 const context = vm.createContext({
   chrome,
@@ -205,6 +218,19 @@ function delay() {
 async function waitForResult(predicate) {
   for (let attempt = 0; attempt < 1000; attempt++) {
     if (predicate()) return true;
+    await delay();
+  }
+  return predicate();
+}
+
+// Steps the clock to the next armed deadline, yielding between steps so a
+// settled await can arm the one after it. Replay reports only once every
+// fix has settled, and each fix arms only after the one before it.
+async function stepUntilSettled(predicate) {
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    if (predicate()) return true;
+    const at = nextDeadline();
+    if (at !== null) advanceClock(at);
     await delay();
   }
   return predicate();
@@ -349,6 +375,27 @@ async function run() {
     };
   }
 
+  if (mode === 'replay-cdp-timeout') {
+    hotfixStoreFor([
+      { id: 'fix1', code: 'await new Promise(() => {})' },
+      { id: 'fix2', code: 'await new Promise(() => {})' },
+    ]);
+    vm.runInContext('handleHotfixReplay(7)', context);
+    const armed = await waitForResult(
+      () => clock.armed.size > 0);
+    // Both fixes dispatch through CDP and wedge there, so the second fix's
+    // bound is armed only once the first has been refused.
+    const reported = await stepUntilSettled(
+      () => replayConsole().length > 0);
+    return {
+      armed,
+      reported,
+      dispatches: cdpDispatches.length,
+      ...observed(),
+      replay: replayConsole(),
+    };
+  }
+
   if (mode === 'replay-inside') {
     hotfixStoreFor([
       {
@@ -419,6 +466,10 @@ def run_hotfix_replay_timeout():
 
 def run_hotfix_replay_probe_hang():
     return _run_bound_child('replay-probe-hang')
+
+
+def run_hotfix_replay_cdp_timeout():
+    return _run_bound_child('replay-cdp-timeout')
 
 
 def run_hotfix_replay_inside():
