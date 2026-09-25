@@ -423,7 +423,7 @@ kbd {
 }
 .sl-pair { display: inline-flex; gap: 6px; align-items: baseline; }
 .sl-k { color: var(--text-dimmer); text-transform: uppercase; letter-spacing: 0.1em; font-size: 9.5px; }
-.sl-v { color: var(--text); }
+.sl-v, .sl-meta { color: var(--text); }
 .sl-sep { color: var(--text-dimmer); }
 .sl-spacer { flex: 1; }
 

@@ -106,27 +106,31 @@ SITES = [
     # names a different element and is not a site — which a pattern-wide
     # re.IGNORECASE would lose (#522).
     #
-    # Only the rail site admits attributes after `class`. The footer renders
-    # four more `sl-v` cells carrying `data-meta`, and a second version span
-    # written `<span class='sl-v' id='x'>` is that same shape, so admitting
-    # either admits all five and refuses the tree the checker must pass.
-    # `rail-foot` names one element, so it takes the whole region; the status
-    # line takes whitespace alone, leaving a status-line duplicate that
-    # carries any attribute as the residual.
+    # Both sites admit the whole trailing attribute region, so a duplicate
+    # written with any attribute after `class` is refused whatever that
+    # attribute is. Admitting the region is only sound while each site class
+    # names exactly one element in the markup: the footer rendered four
+    # more `sl-v` cells carrying `data-meta`, and a second version span
+    # written `<span class='sl-v' id='x'>` is that same shape, so a
+    # status-line region admitted every attribute it also admitted the
+    # tree's own four cells (#522, closed by 538). Those cells now carry
+    # `sl-meta` of their own, and both classes name one element each, so
+    # the region costs no attribute-name exceptions and no new enumeration
+    # in the regex.
     #
     # Well-formed markup walks linearly. A malformed tag (an unclosed quote)
-    # makes every anchor walk to that quote — quadratic. The rail lookahead's
-    # trailing region is a second unbounded walk — cubic in k: k anchors over
-    # k `class='rail-foot' ` runs with no `>v` after them. The shape
+    # makes every anchor walk to that quote — quadratic. Each lookahead's
+    # trailing region is a second unbounded walk — cubic in k: k anchors
+    # over k `class='rail-foot' ` runs with no `>v` after them. The shape
     # `'<div ' * k + "class='rail-foot' " * k + 'a' * k` reproduces it —
     # catastrophic without the lookahead, bounded with it — and where the
     # cost detonates depends on the interpreter, so no timings are recorded
     # here. A capped walk was declined: a cap re-introduces a silent false
-    # negative beyond the cap. The lookahead asserts only what the rest
+    # negative beyond the cap. Each lookahead asserts only what the rest
     # already requires — the tag's first `>` outside a quoted value carries
-    # the `v` — so it prunes without matching less. No test can catch its
-    # removal, the cost returns silently, and a later cleanup must not drop
-    # it as dead weight.
+    # the value, and the rail's carries the `v` — so it prunes without
+    # matching less. No test can catch its removal, the cost returns
+    # silently, and a later cleanup must not drop it as dead weight.
     ('dashboard/index.html', 'dashboard rail footer',
      r'''<(?i:div)(?=(?:[^>'"]|'[^']*'|"[^"]*")*>v)'''
      r'''[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
@@ -139,13 +143,15 @@ SITES = [
      r'''(?:[\t\n\f\r ](?:[^>'"]|'[^']*'|"[^"]*")*)?>v'''
      r'''(?P<v>[^ <]*)'''),
     ('dashboard/index.html', 'dashboard status line',
-     r'''<(?i:span)[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
+     r'''<(?i:span)(?=(?:[^>'"]|'[^']*'|"[^"]*")*>[^<]*</(?i:span)>)'''
+     r'''[\t\n\f\r ]+(?:(?:[^>'"]|'[^']*'|"[^"]*")*?'''
      r'''[\t\n\f\r ])?'''
      r'''(?i:class)[\t\n\f\r ]*=[\t\n\f\r ]*'''
      r'''(?:(?P<q>['"])[\t\n\f\r ]*'''
      r'''(?:[^<>'"\t\n\f\r ]+[\t\n\f\r ]+)*sl-v'''
      r'''(?:[\t\n\f\r ]+[^<>'"\t\n\f\r ]+)*[\t\n\f\r ]*(?P=q)'''
-     r'''|sl-v)[\t\n\f\r ]*>'''
+     r'''|sl-v)'''
+     r'''(?:[\t\n\f\r ](?:[^>'"]|'[^']*'|"[^"]*")*)?>'''
      r'''(?P<v>[^<]*)</(?i:span)>'''),
     # The published wheel is a version claim about the wire format, so it is
     # checked like any other site. pyproject reads this same attribute, so

@@ -5,7 +5,10 @@ HTML lets one element be written several ways: an unquoted attribute value,
 uppercase tag and attribute names, further attributes after `class`, and
 whitespace before the `>`. A second version element written any of those ways
 used to match nothing at all, so the checker reported a tree consistent while
-the page rendered two different versions (522).
+the page rendered two different versions (522). The status line was the one
+site still pinned to whitespace after `class`, because four of its cells
+shared the class; they moved onto `sl-meta` so the site admits the whole
+trailing region like the rail footer (538).
 """
 import sys
 from pathlib import Path
@@ -55,6 +58,19 @@ _STATUS_SPELLINGS = {
     'unquoted_space_before_gt': '<span class=sl-v >9.9.9</span>',
     'unquoted_gt_in_earlier_attribute': (
         "<span title='a>b' class=sl-v>9.9.9</span>"),
+    # The trailing-attribute rows the status site admits now (538): any
+    # attribute after `class` is a duplicate, named no way. The four status
+    # cells that made the region ambiguous moved onto `sl-meta`, so `sl-v`
+    # names one element in the markup and the region no longer admits them.
+    'trailing_attribute': "<span class='sl-v' id='x'>9.9.9</span>",
+    'data_attribute': "<span class='sl-v' data-meta='x'>9.9.9</span>",
+    'uppercase_trailing_attribute': "<SPAN CLASS='sl-v' ID='X'>9.9.9</SPAN>",
+    'unquoted_trailing_attribute': '<span class=sl-v id=x>9.9.9</span>',
+    'attribute_before_class': "<span id='x' class='sl-v'>9.9.9</span>",
+    'spaced_equals_trailing_attribute': (
+        "<span class = 'sl-v' id = 'x'>9.9.9</span>"),
+    'quoted_gt_in_trailing_attribute': (
+        "<span class='sl-v' title='a>b'>9.9.9</span>"),
 }
 
 
@@ -121,6 +137,47 @@ def test_trailing_attribute_rail_duplicate_is_refused(tmp_path):
         tmp_path, _RAIL_SPELLINGS['trailing_attribute'], _RAIL)
 
 
+def test_trailing_attribute_status_line_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['trailing_attribute'], _STATUS)
+
+
+def test_data_attribute_status_line_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['data_attribute'], _STATUS)
+
+
+def test_uppercase_trailing_attribute_status_line_duplicate_is_refused(
+        tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['uppercase_trailing_attribute'], _STATUS)
+
+
+def test_unquoted_trailing_attribute_status_line_duplicate_is_refused(
+        tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['unquoted_trailing_attribute'], _STATUS)
+
+
+def test_attribute_before_class_status_line_duplicate_is_refused(tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['attribute_before_class'], _STATUS)
+
+
+def test_spaced_equals_trailing_attribute_status_line_duplicate_is_refused(
+        tmp_path):
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['spaced_equals_trailing_attribute'],
+        _STATUS)
+
+
+def test_status_line_trailing_region_reads_a_quoted_gt_whole(tmp_path):
+    """A `>` inside a later attribute value does not end the tag early."""
+    _assert_duplicate_spelling_refused(
+        tmp_path, _STATUS_SPELLINGS['quoted_gt_in_trailing_attribute'],
+        _STATUS)
+
+
 def test_space_before_gt_rail_duplicate_is_refused(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _RAIL_SPELLINGS['space_before_gt'], _RAIL)
@@ -175,17 +232,55 @@ def test_trailing_region_reads_a_quoted_gt_whole(tmp_path):
         tmp_path, "<div class='rail-foot' title='a>b'>v9.9.9</div>", _RAIL)
 
 
-def test_status_line_cells_sharing_the_class_are_not_sites(tmp_path):
-    """A status cell with a trailing attribute cannot be told from a version.
+def test_status_line_shipped_class_names_one_element(tmp_path):
+    """The trailing region rests on this class naming one element.
 
-    The footer renders four `sl-v` cells carrying `data-meta`, and a second
-    version span written `<span class='sl-v' id='x'>` has exactly that shape,
-    so a status-line pattern admitting one admits all five and refuses the
-    tree it exists to pass. The rail class names a single element, so that
-    site takes the whole trailing region; this one is pinned to whitespace.
+    The footer rendered four more `sl-v` cells carrying `data-meta`, and a
+    duplicate written `<span class='sl-v' id='x'>` had that same shape, so
+    the region could not be admitted without also admitting the tree's own
+    cells. The four moved onto `sl-meta` (538); the site counts the one
+    real element exactly once.
     """
+    copy_root = Path(tmp_path) / 'tree'
+    checker = _copy_versioned_tree(copy_root)
+    text = (copy_root / 'dashboard' / 'index.html').read_text(
+        encoding='utf-8')
+    assert text.count('class="sl-v"') == 1, text
+    _assert_one_dashboard_match(copy_root, checker, _STATUS)
+
+
+def test_shipped_meta_cells_are_not_status_line_sites(tmp_path):
+    """The class the four status cells moved to is not a version class."""
     _assert_markup_is_not_a_site(
-        tmp_path, "<span class='sl-v' id='x'>9.9.9</span>", _STATUS)
+        tmp_path, "<span class='sl-meta' data-meta='x'>9.9.9</span>", _STATUS)
+
+
+def test_uppercase_status_line_class_value_with_attribute_is_not_a_site(
+        tmp_path):
+    """A trailing attribute does not admit a case-folded class value."""
+    _assert_markup_is_not_a_site(
+        tmp_path, "<span class='SL-V' id='x'>9.9.9</span>", _STATUS)
+
+
+def test_status_line_trailing_attribute_without_whitespace_is_not_a_site(
+        tmp_path):
+    """HTML separates attributes by whitespace, so `'id=` is not one."""
+    _assert_markup_is_not_a_site(
+        tmp_path, "<span class='sl-v'id='x'>9.9.9</span>", _STATUS)
+
+
+def test_unterminated_trailing_quote_is_not_a_status_line_site(tmp_path):
+    """An attribute value that never closes leaves the tag unclosed."""
+    _assert_markup_is_not_a_site(
+        tmp_path, '<span class=\'sl-v\' title="a> ordinary>9.9.9</span>',
+        _STATUS)
+
+
+def test_status_line_class_token_suffix_with_attribute_is_not_a_site(
+        tmp_path):
+    """The token-boundary rule survives the widened trailing region."""
+    _assert_markup_is_not_a_site(
+        tmp_path, "<span class='sl-value' id='x'>9.9.9</span>", _STATUS)
 
 
 def test_uppercase_rail_class_value_is_not_a_site(tmp_path):
@@ -299,6 +394,22 @@ def test_repeated_class_runs_without_a_close_do_not_flip_the_verdict(
         tmp_path,
         '<div ' * anchors + "class='rail-foot' " * anchors + 'a' * anchors,
         _RAIL)
+
+
+def test_repeated_status_line_class_runs_without_a_close_do_not_flip(
+        tmp_path):
+    """The same shape over the status-line region, which now takes one too.
+
+    Both sites' trailing regions are a second unbounded walk; the lookahead
+    each carries prunes it. This pins the verdict on that shape for the
+    status line, not the lookahead's presence, for the reason its rail twin
+    records.
+    """
+    anchors = 200
+    _assert_markup_is_not_a_site(
+        tmp_path,
+        '<span ' * anchors + "class='sl-v' " * anchors + 'a' * anchors,
+        _STATUS)
 
 
 def test_canonical_tree_passes_and_set_preserves_dashboard_markup(tmp_path):
