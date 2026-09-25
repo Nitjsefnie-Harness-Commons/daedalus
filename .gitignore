@@ -89,6 +89,7 @@
 !/.github/workflows/scorecard.yml
 !/.github/workflows/secrets.yml
 !/.github/workflows/tests.yml
+!/.github/workflows/timed-timings.yml
 !/.github/workflows/version.yml
 
 # ─── daedalus_bridge ───
