@@ -52,6 +52,8 @@ async function _eligibleHotfixes() {
 const MATCH_SCHEME = /^(\*|http|https|file):\/\//;
 const MATCH_LABEL = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$/;
 
+const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 function _parseMatch(match) {
   if (typeof match !== 'string' || /\s/.test(match)) return null;
   const scheme = MATCH_SCHEME.exec(match);
@@ -66,7 +68,10 @@ function _parseMatch(match) {
   } else if (host === '' || !_matchableHost(host)) {
     return null;
   }
-  return { scheme: scheme[1], host, path };
+  // A URL parser has already folded the host of the url being matched, so
+  // folding the pattern's own host is what makes the comparison work at all
+  // for a host written in any case.
+  return { scheme: scheme[1], host: host.toLowerCase(), path };
 }
 
 function _matchableHost(host) {
@@ -76,28 +81,52 @@ function _matchableHost(host) {
   return bare.split('.').every((label) => MATCH_LABEL.test(label));
 }
 
-// Matched as one string, because a parsed comparison would have to re-decide
-// the pattern's own grammar rather than Chrome's.
-function _matchesScope(parsed, url) {
-  const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const scheme = parsed.scheme === '*' ? 'https?' : parsed.scheme;
-  const host = parsed.host === '' ? '' : (parsed.host === '*' ? '[^/]+'
-    : parsed.host.split('.').map(
-      (label) => label === '*' ? '[^./]+' : literal(label)).join('\\.'));
-  const path = literal(parsed.path).replace(/\\\*/g, '.*');
-  return new RegExp('^' + scheme + '://' + host + path + '$').test(url);
+// Chrome's host wildcard covers the bare host and every subdomain, so
+// `*.example.com` is "this domain and everything under it" — a repeated
+// leading label, not a required one.
+function _scopeHost(host) {
+  if (host === '') return '';
+  if (host === '*') return '[^/]+';
+  const wildcard = host.startsWith('*.');
+  const labels = (wildcard ? host.slice(2) : host).split('.');
+  return (wildcard ? '(?:[^./]+\\.)*' : '')
+    + labels.map((label) => literal(label)).join('\\.');
 }
 
-// Matched against the URL the browser reports for the sender, with no
-// fallback: a scoped fix whose sender named no usable URL runs nowhere.
-function _scopeRefusal(fix, senderUrl) {
+// Matched as one string, because a parsed comparison would have to re-decide
+// the pattern's own grammar rather than Chrome's.
+function _matchesScope(parsed, identity) {
+  const scheme = parsed.scheme === '*' ? 'https?' : parsed.scheme;
+  const path = literal(parsed.path).replace(/\\\*/g, '.*');
+  return new RegExp('^' + scheme + '://' + _scopeHost(parsed.host) + path
+                    + '$').test(identity);
+}
+
+// What the CDP channel compares and what the site scope is matched against.
+// The fragment is left out: a hash change is not a new document, and the
+// MAIN channel, which binds by document, would still deliver to it. Chrome
+// supplies this on every content-script message, so a null here is a
+// request the worker cannot bind rather than a page's path.
+function _pageIdentity(url) {
+  if (typeof url !== 'string' || url === '') return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin + parsed.pathname + parsed.search;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Matched against the page the browser reported for the sender, with no
+// fallback: a scoped fix whose sender named no page runs nowhere.
+function _scopeRefusal(fix, identity) {
   if (typeof fix.match !== 'string') return '';
   const parsed = _parseMatch(fix.match);
+  // The store refuses a pattern that does not parse, so a record carrying
+  // one was written outside the store — the on-disk record is operator-
+  // reachable, and an unusable scope must not be read as no scope at all.
   if (!parsed) return 'scope ' + fix.match + ' does not parse';
-  if (typeof senderUrl !== 'string' || senderUrl === '') {
-    return 'scoped to ' + fix.match + ' and the sender named no url';
-  }
-  if (!_matchesScope(parsed, senderUrl)) {
+  if (!_matchesScope(parsed, identity)) {
     return 'scoped to ' + fix.match + ' and this page is not it';
   }
   return '';
@@ -106,13 +135,14 @@ function _scopeRefusal(fix, senderUrl) {
 // A tab id names a tab, not a document. Both MAIN-channel calls therefore
 // name the document the request carried, and the answer's own documentId is
 // checked against it. The CDP channel is tab-bound and cannot name one, so
-// its check lives inside the evaluation that runs the fix:
-// `window.location` is unforgeable in Chrome, and one evaluation leaves no
-// window between the check and the run.
+// its check lives inside the evaluation that runs the fix: `location` is
+// [LegacyUnforgeable] in Chrome, so the page cannot spoof what it reads,
+// and one evaluation leaves no window between the check and the run.
 const DOCUMENT_GONE = 'the document that asked for this fix is no longer'
   + ' the tab\'s live document';
+const PAGE_IDENTITY = 'location.origin + location.pathname + location.search';
 
-async function _replayViaCdp(chromeTabId, senderUrl, code) {
+async function _replayViaCdp(chromeTabId, identity, code) {
   // A capture or a kept session already owns the attachment; reuse it and
   // leave it in place, because detaching would end that capture or session.
   const held = Boolean(_cdpSessions[chromeTabId])
@@ -127,8 +157,9 @@ async function _replayViaCdp(chromeTabId, senderUrl, code) {
     // `var` and function declarations out of global scope and turn its
     // top-level `await` into a syntax error, so every stored fix written
     // that way would stop working.
-    const expression = 'if (location.href !== ' + JSON.stringify(senderUrl)
-      + ') throw new Error(' + JSON.stringify(DOCUMENT_GONE) + ');\n'
+    const expression = 'if (' + PAGE_IDENTITY + ' !== '
+      + JSON.stringify(identity) + ') throw new Error('
+      + JSON.stringify(DOCUMENT_GONE) + ');\n'
       + code;
     const evaluated = await chrome.debugger.sendCommand(
       { tabId: chromeTabId }, 'Runtime.evaluate',
@@ -147,9 +178,9 @@ async function _replayViaCdp(chromeTabId, senderUrl, code) {
   }
 }
 
-async function _replayHotfix(chromeTabId, documentId, senderUrl, code,
+async function _replayHotfix(chromeTabId, documentId, identity, code,
                              reportChannel) {
-  let useMainWorld = false;
+  let useMainWorld;
   try {
     const probe = await chrome.scripting.executeScript({
       target: { tabId: chromeTabId, documentIds: [documentId] },
@@ -194,7 +225,7 @@ async function _replayHotfix(chromeTabId, documentId, senderUrl, code,
     return null;
   }
   reportChannel('CDP');
-  return _replayViaCdp(chromeTabId, senderUrl, code);
+  return _replayViaCdp(chromeTabId, identity, code);
 }
 
 async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
@@ -207,18 +238,22 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
   }
   if (fixes.length === 0) return;
   // Every channel delivers to the document the request named, and the site
-  // scope is matched against a URL the browser reports, so a request
-  // carrying neither can be bound to nothing and runs nothing.
-  if (typeof documentId !== 'string' || documentId === ''
-      || typeof senderUrl !== 'string' || senderUrl === '') {
+  // scope is matched against the page the browser reported, so a request
+  // carrying neither can be bound to nothing and runs nothing. Chrome
+  // supplies all three on every content-script message, so no real page
+  // reaches this; the refusal is what a shape the worker cannot bind gets.
+  const identity = _pageIdentity(senderUrl);
+  if (typeof documentId !== 'string' || documentId === '' || !identity) {
     console.error('[Daedalus] hotfix replay on tab ' + chromeTabId
-                  + ' ran nothing: the request named no document or url');
+                  + ' ran nothing: the request named no document, or a url'
+                  + ' that names no page');
     return;
   }
   const failures = [];
   const skipped = [];
+  let ran = 0;
   for (const hf of fixes) {
-    const outOfScope = _scopeRefusal(hf, senderUrl);
+    const outOfScope = _scopeRefusal(hf, identity);
     if (outOfScope) {
       skipped.push(hf.id + ': ' + outOfScope);
       continue;
@@ -234,7 +269,7 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
       // that wedges anywhere in its own replay cannot stop the fixes after
       // it on this or any later load of the page.
       failure = await _raceMainWorldEval(
-        _replayHotfix(chromeTabId, documentId, senderUrl, hf.code,
+        _replayHotfix(chromeTabId, documentId, identity, hf.code,
                       (c) => { channel = c; }),
         'hotfix fix');
     } catch (error) {
@@ -242,6 +277,7 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
       failure = (channel ? channel + ' ' : '') + detail;
     }
     if (failure) failures.push(hf.id + ': ' + failure);
+    else ran++;
   }
   // Reported here rather than in the page: a page console is not where an
   // operator looks, and a page that refuses the fix is exactly the page whose
@@ -250,12 +286,12 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
     console.error('[Daedalus] hotfix replay failed on tab ' + chromeTabId
                   + ': ' + failures.join('; '));
   } else {
-    console.log('[Daedalus] replayed ' + fixes.length + ' hotfix(es) on tab '
+    console.log('[Daedalus] replayed ' + ran + ' hotfix(es) on tab '
                 + chromeTabId);
   }
   // Separate from the failure aggregation: a fix the operator deliberately
-  // scoped away from this page is not an error, but counting it in the
-  // replayed total would read as a success it never was.
+  // scoped away from this page is not an error, and the replayed count
+  // above excludes it, so neither line reports it as work that happened.
   if (skipped.length > 0) {
     console.log('[Daedalus] skipped ' + skipped.length
                 + ' hotfix(es) by site scope on tab ' + chromeTabId
@@ -275,7 +311,10 @@ async function handleStoreHotfix(cmd) {
     if (cmd.match !== undefined && cmd.match !== null
         && !_parseMatch(cmd.match)) {
       return postResult(cmd._execution, null,
-        'Unusable match pattern: ' + cmd.match, 'extension');
+        'Unusable match pattern: '
+        + (typeof cmd.match === 'string' ? cmd.match
+          : (JSON.stringify(cmd.match) ?? typeof cmd.match)),
+        'extension');
     }
     const outcome = await _withHotfixLock(async () => {
       const data = await chrome.storage.local.get([HOTFIX_KEY]);
@@ -285,11 +324,17 @@ async function handleStoreHotfix(cmd) {
       const permanent = (cmd.permanent === true) ? true
                       : (cmd.permanent === false) ? false
                       : (existing ? existing.permanent === true : false);
+      // Carried over the same way `permanent` is: a store that leaves the
+      // field out means "update the code", and dropping a scope here would
+      // widen a fix for one site into a fix for every site. A store that
+      // names a scope replaces it.
+      const match = (cmd.match === undefined || cmd.match === null)
+        ? (existing ? existing.match : undefined) : cmd.match;
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
       const entry = {
         id: cmd.fixId, code: cmd.code, ts: Date.now(), permanent,
       };
-      if (cmd.match) entry.match = cmd.match;
+      if (match) entry.match = match;
       stored.fixes.push(entry);
       // Measured on the composed record, after the replaced fixId has
       // stopped counting, and refused before the write: an eviction would
@@ -303,7 +348,7 @@ async function handleStoreHotfix(cmd) {
       await chrome.storage.local.set({ [HOTFIX_KEY]: stored });
       return {
         stored: cmd.fixId, total: stored.fixes.length, permanent,
-        match: cmd.match || null,
+        match: match || null,
       };
     });
     await postResult(cmd._execution, outcome, null, 'extension');

@@ -88,6 +88,17 @@ let currentDocument = null;
 let documentSeq = 0;
 let navigated = false;
 
+// A document's `location`, with the components a real Location carries. The
+// CDP channel reads `origin`, `pathname` and `search` off it, so a double
+// carrying only `href` would model a page the channel cannot read.
+const LOCATION_FIELDS = ['href', 'origin', 'protocol', 'host', 'hostname',
+                         'port', 'pathname', 'search', 'hash'];
+function fillLocation(target, url) {
+  const parsed = new URL(url);
+  for (const field of LOCATION_FIELDS) target[field] = parsed[field];
+  return target;
+}
+
 // One document is one REPL context: the same global the MAIN-world
 // injection compiles into and the same global a CDP expression runs in, so
 // a fix that reached the wrong document is visible in the wrong array.
@@ -101,7 +112,17 @@ function openDocument(url) {
     terminal: false, prompt: '',
   });
   const page = server.context;
-  page.location = { href: url };
+  // Chrome's `location` is [LegacyUnforgeable]: evaluated source in the
+  // document cannot replace it, so the CDP channel's own check reads a value
+  // the page does not control. A writable plain property would let the double
+  // model an assignment Chrome refuses, and C6 would then establish the
+  // same-evaluation half of that ruling without the unforgeable half. The
+  // href stays writable because a same-document fragment change is a real
+  // navigation a page performs on itself.
+  doc.location = fillLocation({}, url);
+  Object.defineProperty(page, 'location', {
+    value: doc.location, writable: false,
+  });
   page.daedalusHits = doc.hits;
   page.performance = performance;
   // An evaluation that throws never reaches the REPL's callback; it is
@@ -133,6 +154,18 @@ function navigateAt(point) {
   if (spec.navigateAt !== point || navigated) return;
   navigated = true;
   navigate(spec.navigateTo);
+}
+
+// A fragment change is not a navigation: the document is the same one, the
+// tab still holds it, and only its url moved. Modelled apart from
+// `navigate` so a control can put the two document identities in conflict
+// without retiring the document.
+function relocateAt(point) {
+  if (spec.relocateAt !== point) return;
+  // The location OBJECT is unforgeable, so a fragment change writes the
+  // document's own object in place rather than rebinding the global.
+  fillLocation(currentDocument.location, spec.relocateTo);
+  currentDocument.url = spec.relocateTo;
 }
 
 // ─── the fake browser ───
@@ -212,8 +245,8 @@ async function sendCommand(_target, method, params) {
     awaitPromise: params.awaitPromise === true,
   });
   navigateAt('before-cdp-evaluate');
+  relocateAt('before-cdp-evaluate');
   const answer = await evaluateIn(currentDocument, params.expression);
-  process.stderr.write('DBG ' + JSON.stringify(answer) + '\n');
   if (answer.exception) {
     return {
       result: { objectId: 'cdp-result' },
@@ -362,12 +395,20 @@ async function waitFor(predicate) {
   // the worker's boot lines.
   if (spec.ask !== false) {
     const marked = bgConsole.length;
+    const senderUrl = spec.senderUrl === undefined ? asker.url
+      : spec.senderUrl;
     const sender = {
       tab: { id: TAB_ID },
       documentId: asker.id,
-      url: asker.url,
-      origin: new URL(asker.url).origin,
+      url: senderUrl,
+      origin: '',
     };
+    try { sender.origin = new URL(senderUrl).origin; } catch (_) {}
+    // What Chrome left off the sender. A content-script message carries all
+    // three, so a case that omits one is a shape the real browser does not
+    // produce — the point is to pin what the worker does with a request it
+    // cannot bind rather than to model a page.
+    for (const field of spec.senderOmits || []) delete sender[field];
     for (const listener of messageListeners) {
       listener({ type: 'replayHotfixes' }, sender, () => {});
     }
