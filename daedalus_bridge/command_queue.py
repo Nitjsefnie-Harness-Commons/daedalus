@@ -334,12 +334,18 @@ def notify_dashboard(cmd_dir, token, payload):
 def next_seq():
     """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>.
 
-    Both the millisecond prefix and the counter are fixed width, so byte
-    order is the order the counter was taken. Callers take this under
-    `command_fs_lock` — the same lock the publish is taken under — so the
-    stem cannot be handed out in an order the writes do not follow.
+    The millisecond prefix is fixed width and the counter is padded to
+    twenty digits, so byte order is the order the counter was taken. The
+    bound is the counter staying below 10**20: no 64-bit counter reaches
+    that (2**64 < 10**20), and `itertools.count` is the only source. A
+    narrower field (six digits was the original) inverts order at the
+    first overflow — 999999 formats as six digits but 1000000 as seven,
+    and '1' < '9' — which the dashboard cursor turns into a lost event.
+    Callers take this under `command_fs_lock`, the same lock the publish
+    is taken under, so a stem cannot be handed out in an order the writes
+    do not follow.
     """
-    return f'{int(time.time() * 1000):013d}_{next(_seq_counter):06d}'
+    return f'{int(time.time() * 1000):013d}_{next(_seq_counter):020d}'
 
 
 # ─── Per-token wake events: writers signal, SSE streams wait
