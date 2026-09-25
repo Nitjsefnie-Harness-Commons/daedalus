@@ -4,19 +4,25 @@ Given one Python source, names every refusal limb its subprocess
 launches trip, so a caller can assert the launch carries no wall-clock
 bound, fails loudly, and is readable argv. The wall-clock-bound refusal
 names the argv head (git / non-git / unreadable) so a tree-wide caller
-can keep the rule to git launches. A receiver is resolved rather than
-declared unreadable: a module reached through a name held in a variable,
-through a class body attribute, or through a run-time namespace key is
-traced to `subprocess`. What stays unreadable is named where it is
-narrowed: the class-attribute residuals in attribute_derives, the
-module-name residual in resolve_string. Lives beside the suite, not in
-it, so the suite file stays under its size ceiling.
+can keep the rule to git launches.
+
+The wall-clock policy has two arms and both are decidable. A launch the
+analyser can place, with a head that reads as the constant `git`, is
+refused. Any OTHER call carrying a `timeout=` or a `**`-unpacked mapping
+is reported as an `unplaced` site at an unreadable head unless its
+receiver is PROVED a fixed, non-launch value — a bare name this module
+binds and the analyser read, and nothing else. A receiver the analyser
+cannot prove is never passed over, so a bounded git launch cannot reach
+the tree however the module was obtained or reached, without a refusal or
+an allowance row.
+
+Only the argv and head reading lives in `_argv_read.py`. It binds no
+configuration of its own.
 """
 import ast
 
 from _argv_read import ARGV_UNWRAP_CAP
 from _argv_read import ArgvReader
-from _class_index import ClassIndex
 
 CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
@@ -34,7 +40,6 @@ def launch_refusals(source, here, bound_sink=None):
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
-    index = ClassIndex(tree)
 
     def normalize(called):
         """Map a machinery alias's member to its canonical spelling."""
@@ -61,8 +66,7 @@ def launch_refusals(source, here, bound_sink=None):
             return (value.id == 'subprocess' or value.id in bound
                     or value.id in module_factories)
         if isinstance(value, ast.Attribute):
-            return attribute_derives(value, bound) \
-                or derives(value.value, bound)
+            return derives(value.value, bound)
         if isinstance(value, ast.NamedExpr):
             return derives(value.value, bound)
         if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
@@ -119,51 +123,6 @@ def launch_refusals(source, here, bound_sink=None):
                     return False
                 return any(derives(arg, bound) for arg in value.args)
             return any(derives(arg, bound) for arg in value.args)
-        return False
-
-    attribute_active = set()
-
-    def attribute_derives(value, bound):
-        """Does this attribute read as a value derived from subprocess?
-
-        The value the enclosing class body binds to this attribute's name,
-        keyed on the class rather than the name alone, so `self.mod.run(...)`
-        reaches a class body `mod = subprocess` and two classes binding one
-        name to different values resolve independently. A name bound twice
-        in one class body resolves to nothing, for the same
-        last-wins-is-a-guess reason as the module table. A class binding no
-        such attribute reads its bases instead, and a class binding one
-        shadows them. No class falls through to the module table: attribute
-        lookup walks the instance, its class and its bases, never the
-        enclosing module's globals.
-
-        The receiver's shape does not matter to any of that, so
-        `type(self).mod` resolves exactly as `self.mod` does. What is left
-        outside the class, each named here and pinned by a row:
-
-        - an attribute bound in a method body (`self.mod = subprocess` in
-          a constructor) is not a class body binding and does not resolve;
-        - a base the analyser cannot read — qualified, subscripted or
-          built at run time — so an inherited attribute behind one does
-          not resolve;
-        - a base name the enclosing scope binds more than once, which
-          yields every class it could name rather than guessing one;
-        - a subclass override the analyser cannot read resolves as its
-          own value rather than falling back to the base, which is the
-          same last-wins rule as above;
-        - an attribute reached through another attribute's value
-          (`self.inner.mod`) resolves against this class when this class
-          binds the name, and to nothing when it does not: the value of
-          `self.inner` is not readable, so the inner class cannot be.
-        """
-        for held in index.attribute_values(value):
-            if held is None or id(value) in attribute_active:
-                continue
-            attribute_active.add(id(value))
-            derived = derives(held, bound)
-            attribute_active.discard(id(value))
-            if derived:
-                return True
         return False
 
     def resolves_safe(expr):
@@ -282,8 +241,9 @@ def launch_refusals(source, here, bound_sink=None):
                 bindings.append((node.target.id, node.iter))
         elif isinstance(node, ast.ClassDef):
             defined_names.add(node.name)
-            bindings.extend((node.name, value)
-                            for value in index.class_body_binds(node))
+            for statement in node.body:
+                if isinstance(statement, ast.Assign):
+                    bindings.append((node.name, statement.value))
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 if isinstance(item.optional_vars, ast.Name):
@@ -301,20 +261,18 @@ def launch_refusals(source, here, bound_sink=None):
         """A string constant behind a `+` concat as well as a name chain.
 
         The chain ArgvReader.resolve_constant follows, extended to fold a
-        `+` whose two sides both read: a module name or a namespace key is
-        as often assembled from halves as written whole, and a key reached
-        through a class body attribute reads like any other receiver. A
-        concat with a side that does not read is not a constant, so it
-        resolves to None rather than to the readable half. The argv words
-        keep resolve_constant, which does not fold: a head word it cannot
-        read stays an unreadable head, never one this resolver invented.
+        `+` whose two sides both read, because a module name is as often
+        assembled from halves as written whole. A concat with a side that
+        does not read is not a constant, so it resolves to None rather
+        than to the readable half. A name bound more than once, or one
+        that feeds itself, resolves to nothing: the first is a guess and
+        the second is a cycle.
 
-        Two module-name residuals sit here rather than in attribute_derives,
-        because this resolver is what declines them: an argument the caller
-        computed (`import_module(name)` on a parameter), and a concat with
-        an operand that does not read (`import_module('subprocess' + suffix)`).
-        An attribute key bound in a method body is the attribute_derives
-        residual, not this one, and follows it.
+        This is the #1099 mechanism and it is kept for that reason alone.
+        Every spelling it still cannot read — an argument the caller
+        computed, a `+` with an operand that does not read, a string a
+        `format` or a `join` builds — is covered by the unplaced arm
+        below rather than by a row here.
         """
         seen = set() if seen is None else seen
         for _ in range(ARGV_UNWRAP_CAP):
@@ -326,14 +284,6 @@ def launch_refusals(source, here, bound_sink=None):
             if isinstance(element, ast.Constant) \
                     and isinstance(element.value, str):
                 return element.value
-            if isinstance(element, ast.Attribute):
-                held = next(iter(index.attribute_values(element)), None)
-                if held is None or id(element) in attribute_active:
-                    return None
-                attribute_active.add(id(element))
-                read = resolve_string(held, set(seen))
-                attribute_active.discard(id(element))
-                return read
             if not (isinstance(element, ast.Name)
                     and element.id in binding_map
                     and element.id not in ambiguous
@@ -465,28 +415,64 @@ def launch_refusals(source, here, bound_sink=None):
         return any(isinstance(sub, ast.Name) and sub.id in tracked
                    for sub in ast.walk(expr))
 
+    def proved_fixed(receiver):
+        """Is this receiver PROVED a fixed, non-launch value?
+
+        Proof is the whole standard and it is deliberately narrow: a bare
+        name this module binds and the analyser read, and nothing else. A
+        method parameter is not proved, because nothing in the module says
+        what the caller passed. An attribute or a subscript is not proved
+        at all, because the analyser cannot know what `self.mod` or
+        `ns[key]` holds — and a receiver it cannot know is a receiver it
+        must not pass over.
+        """
+        if not isinstance(receiver, ast.Name):
+            return False
+        if (receiver.id not in safe_names or receiver.id in bound
+                or receiver.id in subprocess_names
+                or receiver.id == 'subprocess'):
+            return False
+        held = binding_map.get(receiver.id)
+        if isinstance(held, ast.Call):
+            # A call is proved only when the call itself is the fixed
+            # value. The import machinery is not: its argument decides
+            # what it returns, and an argument the analyser cannot read
+            # leaves the module itself unknown — which is exactly the
+            # #1099 spelling.
+            called = normalize(callee_of(held))
+            return called not in import_module_aliases and called != 'getattr'
+        return True
+
     def unplaced_bounded_call(node):
-        """A subprocess launch the analyser refused or skipped, carrying a
-        bound the source shows: a readable ``timeout=`` or a ``**``-unpacked
-        mapping that could hide one. Reported as an unreadable bound site,
-        never accepted, so a spelling it refuses at source tier cannot hide
-        a bound from the tree-wide rule. The receiver is recognised by the
-        analyser's own ``derives`` predicate, which reaches ``sys.modules
-        [...]``, a subprocess-derived binding and the import machinery; the
-        refused import spellings (``subprocess_names``) and a name walk for
-        receivers no expression predicate reaches (a getattr call) are kept
-        because ``derives`` cannot see either."""
+        """Every bounded call whose receiver is not a PROVED fixed value.
+
+        A call carrying a readable `timeout=` or a `**`-unpacked mapping
+        is a bounded call, whatever it calls. It is reported unless the
+        receiver is provably a fixed, non-launch value, and proof is
+        narrow on purpose: a bare name this module binds and the analyser
+        read, and nothing else.
+
+        That is the whole of the second arm of the launch policy, and it
+        is what makes the policy decidable rather than a list of
+        spellings. A receiver reached through an import name held in a
+        variable, through a class attribute, or through a run-time
+        namespace is not proved, so it is reported at `unreadable` — the
+        rule then demands a refusal or an allowance row for it, and a
+        bounded git launch cannot pass the tree however the module was
+        obtained or reached.
+        """
         func = node.func
         if not any(keyword.arg == 'timeout' or keyword.arg is None
                    for keyword in node.keywords):
             return False
-        if isinstance(func, ast.Attribute):
-            return (derives(func.value, bound)
-                    or (isinstance(func.value, ast.Name)
-                        and func.value.id in subprocess_names))
-        if isinstance(func, ast.Name):
-            return func.id in subprocess_names or derives(func, bound)
-        return derives(func, bound) or mentions_subprocess(func)
+        receiver = func.value if isinstance(func, ast.Attribute) else func
+        if not proved_fixed(receiver):
+            return True
+        if isinstance(func, ast.Attribute) \
+                and isinstance(receiver, ast.Name) \
+                and receiver.id in subprocess_names:
+            return True
+        return derives(receiver, bound) or mentions_subprocess(func)
 
     if bound_sink is not None:
         placed = {id(node) for node in launches}
