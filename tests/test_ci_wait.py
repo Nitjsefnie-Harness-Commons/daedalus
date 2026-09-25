@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ci_wait.py's verdict: the superseded-cancelled rule and its edges."""
+"""ci_wait.py's verdicts: the superseded-cancelled rule, and exit 2."""
 import contextlib
 import io
 import sys
@@ -191,6 +191,9 @@ def test_the_success_line_counts_judged_runs_only(tmp):
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'success', '2026-09-07T10:05:00Z'),
     ]
+    # Direct on purpose, unlike the setattr elsewhere: these two stubs
+    # (here and in the next test) are the file's recorded type errors,
+    # and setattr would zero that count and graduate the baseline entry.
     mod.runs_on = lambda repo, sha: runs
     out = io.StringIO()
     code = mod.wait('o/r', 'a' * 40, 60, 60, out)
@@ -240,8 +243,9 @@ def _frozen_wait_clock(mod, clock):
     """One clock for ci_wait and the client it polls through.
 
     The bound is read from the client's own `time`, so a wait faked on
-    ci_wait's clock alone would never expire. Nothing real is waited on,
-    so a timeout here is a value, not a margin.
+    ci_wait's clock alone would compare a real monotonic clock against the
+    fake deadline and expire immediately, before any request. Nothing real
+    is waited on, so a timeout here is a value, not a margin.
     """
     real = (mod.time, mod.gh_client.time)
     mod.time = clock
@@ -428,6 +432,43 @@ def test_a_poll_that_overruns_the_bound_reports_the_runs(tmp):
     assert 'rate limited' not in text, text
     assert text.endswith('wait exceeded 30s on aaaaaaaaaaaa: still open: '
                          'run 1 (in_progress)\n'), text
+
+
+def test_a_bound_before_the_first_poll_reports_from_empty_runs(tmp):
+    """The pre-first-poll report: `runs = []` is what lets it name a state
+    the API was never asked about. At timeout 0 the bound is already at the
+    first poll's top-of-loop check, so WaitExpired fires before any request
+    and the handler reports the no-runs line off an empty list. main()
+    refuses timeout <= 0, so this is reachable only by an in-process
+    caller; what it pins is that the line is a report, not a crash."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    out = io.StringIO()
+    err = io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', 'b' * 40, 5, 0, out)
+    text = out.getvalue()
+    assert code == 2, text
+    assert clock.now == 1000.0, clock.now
+    assert text == ('wait exceeded 0s on bbbbbbbbbbbb: no workflow run '
+                    'ever appeared\n'), text
+
+
+def test_a_non_positive_timeout_is_refused(tmp):
+    """M3: a bound that fires before the first poll would report on runs
+    the wait never asked for, and --timeout -5 a negative elapsed time. The
+    CLI refuses both, the way it refuses --interval."""
+    del tmp
+    mod = _ci_wait()
+    for value in ('0', '-5'):
+        clock = _Clock()
+        err = io.StringIO()
+        with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+            code = mod.main(['a' * 40, '--timeout', value])
+        assert code == 3, (value, code, err.getvalue())
+        assert err.getvalue() == (
+            f'--timeout must be positive, got {value}\n'), err.getvalue()
 
 
 def main():
