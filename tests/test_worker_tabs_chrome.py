@@ -199,6 +199,9 @@ def test_open_tabs_outer_catch_posts_the_create_failure(tmp):
                  urls=['https://a.example.com', 'https://b.example.com'])],
         createSyncReject={'https://a.example.com': 'planned sync failure'})
     assert _error(outcome) == 'planned sync failure', outcome
+    # One create is on record because the map aborted on the first url.
+    assert apis(outcome, CREATE) == [
+        [CREATE, [{'url': 'https://a.example.com'}]]], outcome
 
 
 # ─── handleFocusTab ───
@@ -225,6 +228,9 @@ def test_focus_tab_update_rejection_posts_the_message(tmp):
     outcome = run_tabs([command(type='focus-tab', tabId=5)],
                        chromeReject={'tabs.update': 'planned update failure'})
     assert _error(outcome) == 'planned update failure', outcome
+    # A handler that posts the error without calling update dies here.
+    assert apis(outcome, UPDATE, WINDOW) == [
+        [UPDATE, [5, {'active': True}]]], outcome
 
 
 # ─── handleNavigate ───
@@ -275,6 +281,8 @@ def test_navigate_update_rejection_posts_the_message(tmp):
                                 url='https://new.example.com')],
                        chromeReject={'tabs.update': 'planned update failure'})
     assert _error(outcome) == 'planned update failure', outcome
+    assert apis(outcome, UPDATE) == [
+        [UPDATE, [5, {'url': 'https://new.example.com'}]]], outcome
 
 
 # ─── handleReload ───
@@ -330,6 +338,8 @@ def test_reload_rejection_posts_the_message(tmp):
     outcome = run_tabs([command(type='reload', tabId=5)],
                        chromeReject={'tabs.reload': 'planned reload failure'})
     assert _error(outcome) == 'planned reload failure', outcome
+    assert apis(outcome, RELOAD) == [
+        [RELOAD, [5, {'bypassCache': False}]]], outcome
 
 
 # ─── handleInjectCss ───
@@ -456,6 +466,10 @@ def test_remove_css_removal_rejection_posts_the_message(tmp):
                        chromeReject={
                            'scripting.removeCSS': 'planned removal failure'})
     assert _error(outcome) == 'planned removal failure', outcome
+    assert apis(outcome, REMOVE) == [[REMOVE, [{
+        'target': {'tabId': 5, 'allFrames': False},
+        'css': CSS,
+    }]]], outcome
 
 
 def main():

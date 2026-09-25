@@ -124,8 +124,7 @@ def test_ext_reload_defers_the_reload_and_posts_the_version(tmp):
 
 def test_ext_reload_runs_the_reload_when_the_timer_fires(tmp):
     del tmp
-    # The stand-in runs the deferred callback in the same tick, so the
-    # reload is observable with no wall-clock margin and no sleep.
+    # The stand-in runs the callback in the same tick: no sleep needed.
     outcome = run_tabs([command(type='ext-reload')], runTimers=True)
     assert _result(outcome) == {
         'reloading': True, 'version': VERSION}, outcome

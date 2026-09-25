@@ -199,9 +199,10 @@ def event_target_stub():
     stand-in, `addListener(l) { if (listeners) listeners.push(l); }` with
     every call site passing the default `null`, discarded every
     registration, so nothing a harness registered ever dispatched
-    (issue #1015). This one always retains and exposes the array, so a
-    harness can dispatch to it. Call shape: `eventTarget()` yields
-    `{ addListener, listeners }`.
+    (issue #1015). This one ALWAYS retains the listener and exposes it as
+    `listeners`; it adds no dispatch/hasListener/removeListener of its own,
+    so a harness dispatches by iterating that array. Call shape:
+    `eventTarget()` yields `{ addListener, listeners }`.
     """
     return r"""
 function eventTarget() {
