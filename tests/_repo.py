@@ -27,7 +27,7 @@ def iter_tree_files(root):
     """
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z'], capture_output=True,
-        check=True, timeout=30)
+        check=True)
     paths = [path for path in listed.stdout.split(b'\0') if path]
     assert paths, 'Git returned no tracked release paths'
     for path in paths:

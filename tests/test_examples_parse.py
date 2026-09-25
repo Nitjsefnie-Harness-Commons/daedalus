@@ -24,7 +24,7 @@ def _tracked_examples():
     """Return the tracked JavaScript examples from Git, not a fixed list."""
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', 'examples/*.js'],
-        capture_output=True, check=True, text=True, timeout=30)
+        capture_output=True, check=True, text=True)
     return [line for line in listed.stdout.splitlines() if line]
 
 

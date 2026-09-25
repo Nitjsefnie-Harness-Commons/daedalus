@@ -310,6 +310,7 @@
 !/tests/_jsroute_sweep_grammar.py
 !/tests/_jsroute_tab.py
 !/tests/_jsroute_timeline.py
+!/tests/_launch_audit.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
 !/tests/_mcp_code_eval.py

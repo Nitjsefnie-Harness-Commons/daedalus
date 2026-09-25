@@ -641,11 +641,11 @@ def test_the_tree_does_not_claim_a_version_it_already_released(tmp):
     version = next(v for p, d, v in checker.collect() if (p, d) == checker.CANONICAL)
     tag = subprocess.run(
         ['git', '-C', str(ROOT), 'rev-list', '-n', '1', f'v{version}'],
-        capture_output=True, text=True, check=False, timeout=30)
+        capture_output=True, text=True, check=False)
     if tag.returncode != 0:
         return  # no such tag: the version is unspent, which is the point
     head = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'],
-                          capture_output=True, text=True, check=True, timeout=30)
+                          capture_output=True, text=True, check=True)
     assert tag.stdout.strip() == head.stdout.strip(), (
         f'the tree claims version {version}, which tag v{version} already '
         f'published at {tag.stdout.strip()[:12]}; bump every site with '

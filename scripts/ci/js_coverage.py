@@ -44,7 +44,7 @@ def tracked_sources(root):
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z', '--',
          'extension', 'dashboard'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     paths = []
     for raw in listed.stdout.split(b'\0'):
         if not raw:

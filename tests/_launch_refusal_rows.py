@@ -19,8 +19,9 @@ LAUNCH_REFUSAL_ROWS = (
      'clones without the silencing -c advice.detachedHead=false'),
     ('argv-not-a-list-literal',
      "import subprocess\n"
-     "argv = ['git', 'clone']\n"
-     "subprocess.run(argv, check=True)\n",
+     "def build():\n"
+     "    return ['git', 'clone']\n"
+     "subprocess.run(build(), check=True)\n",
      'builds an argv the audit cannot read'),
     ('head-not-the-git-constant',
      "import subprocess\n"

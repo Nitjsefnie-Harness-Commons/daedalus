@@ -273,7 +273,7 @@ def test_the_audit_covers_every_python_dependency_surface(tmp):
         encoding='utf-8')
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z', 'requirements*.txt'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     requirement_files = [
         os.fsdecode(path) for path in listed.stdout.split(b'\0') if path]
     assert requirement_files, 'no requirements file is tracked'
@@ -565,7 +565,7 @@ def test_dependabot_watches_every_manifest_kind_the_repo_tracks(tmp):
     }
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
-        check=True, timeout=30)
+        check=True)
     tracked = {os.fsdecode(path)
                for path in listed.stdout.split(b'\0') if path}
     required = {'github-actions'} if any(

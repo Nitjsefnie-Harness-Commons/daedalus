@@ -288,7 +288,7 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
 
 def _git(repo, *args):
     return subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                          capture_output=True, text=True, timeout=60,
+                          capture_output=True, text=True,
                           env=_util.child_coverage('scrub'))
 
 

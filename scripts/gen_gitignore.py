@@ -95,6 +95,19 @@ def _git_failure(repo, command, failure):
     return 1
 
 
+def _check_ignore(root, tracked):
+    """Run `git check-ignore` over the tracked paths, or return the failure."""
+    try:
+        return subprocess.run(
+            ['git', '-C', str(root), 'check-ignore', '-z', '--no-index',
+             '--stdin'],
+            input='\0'.join(tracked), capture_output=True, text=True,
+            timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError,
+            UnicodeDecodeError) as failure:
+        return failure
+
+
 def main(repo):
     root = Path(repo)
     shown = _log_safe(repo)
@@ -124,15 +137,9 @@ def main(repo):
         out += [f'!/{path}' for path in by_dir[directory]]
     (root / '.gitignore').write_text('\n'.join(out) + '\n', encoding='utf-8')
 
-    try:
-        ignored = subprocess.run(
-            ['git', '-C', str(root), 'check-ignore', '-z', '--no-index',
-             '--stdin'],
-            input='\0'.join(tracked), capture_output=True, text=True,
-            timeout=GIT_TIMEOUT)
-    except (OSError, subprocess.SubprocessError,
-            UnicodeDecodeError) as failure:
-        return _git_failure(repo, 'check-ignore', failure)
+    ignored = _check_ignore(root, tracked)
+    if isinstance(ignored, BaseException):
+        return _git_failure(repo, 'check-ignore', ignored)
     if ignored.returncode not in (0, 1):
         detail = ignored.stderr.strip()
         suffix = f':\n{_log_safe(detail)}' if detail else ''

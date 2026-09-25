@@ -64,7 +64,7 @@ REMEDY_FOR = {
 def tracked_test_modules(root=ROOT):
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z', '--', TEST_GLOB],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     return {raw.decode('utf-8', 'surrogateescape')
             for raw in listed.stdout.split(b'\0') if raw}
 
