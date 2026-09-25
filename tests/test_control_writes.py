@@ -130,6 +130,22 @@ def test_recognises_a_keyword_open(tmp):
     ]
 
 
+def test_recognises_compile_as_a_pure_call(tmp):
+    """A control compiling a case is not a writer, and is read as pure.
+
+    `compile` is what lets a control prove a fabricated source is a
+    program rather than merely parseable, so the entry that permits it
+    has to be pinned here: without it every such control reads as an
+    unmodelled call.
+    """
+    source = Path(tmp) / 'pure-compile.py'
+    source.write_text(
+        "def test_control(tmp):\n"
+        "    compile('value = 1', '<case>', 'exec')\n",
+        encoding='utf-8')
+    assert _violations(source) == []
+
+
 def test_refuses_a_comprehension_rebound_owned_name(tmp):
     """A comprehension target shadowing tmp does not inherit ownership."""
     source = Path(tmp) / 'comprehension-target.py'

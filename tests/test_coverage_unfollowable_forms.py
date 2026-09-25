@@ -107,6 +107,37 @@ import subprocess
 def go():
     pass
 """, '@subprocess.run'),
+        # A bare launcher is an attribute, never a call, so these three
+        # rows cannot be satisfied by the call-argument arm: each dies
+        # when its own form leaves the header set on its own.
+        ('bare launcher on async', """import os
+import subprocess
+@subprocess.run
+async def go():
+    pass
+""", '@subprocess.run'),
+        ('bare launcher on class', """import os
+import subprocess
+@subprocess.run
+class Go:
+    pass
+""", '@subprocess.run'),
+    )
+
+
+def _lambda_default_cases():
+    """A lambda default binds its parameter as surely as a def's does."""
+    return (
+        ('lambda default', """import os
+import subprocess
+go = lambda launcher=subprocess.run: launcher
+go(['python3', 'child.py'])
+""", 'go = lambda'),
+        ('lambda keyword default', """import os
+import subprocess
+go = lambda *, launcher=subprocess.run: launcher
+go(['python3', 'child.py'])
+""", 'go = lambda'),
     )
 
 
@@ -163,6 +194,33 @@ def go():
         ('builtin callee argument', """import operator
 operator.call(len, ['x'])
 """),
+        # A launcher handed to a callee that only compares, inspects or
+        # looks it up is mentioned there, not given to be invoked. These
+        # three were clean on the base guard and refused by the argument
+        # arm before it learned the difference.
+        ('assertIs', """import subprocess
+from unittest.mock import patch
+with patch('subprocess.run') as patched:
+    assertIs(subprocess.run, patched)
+"""),
+        ('assertIn', """import subprocess
+registry = {}
+assertIn(subprocess.run, registry)
+"""),
+        ('callable query', """import subprocess
+callable(subprocess.run)
+"""),
+        # The module-name split: a bare module is a receiver-only signal,
+        # because only the receiver reads a launcher out of the module.
+        ('module handed to patch', """import subprocess
+from unittest import mock
+with mock.patch.object(subprocess, 'run'):
+    pass
+"""),
+        ('module in a plain argument', """import subprocess
+import operator
+operator.call(subprocess, ['x'])
+"""),
         ('cwd declared call', """import subprocess
 from _repo import ROOT
 subprocess.run(['python3', 'child.py'], cwd=ROOT)
@@ -173,6 +231,11 @@ subprocess.run(['python3', 'child.py'], cwd=ROOT)
 def test_a_decorated_definition_refuses_a_hidden_launcher(tmp):
     del tmp
     _refused(_decorator_cases())
+
+
+def test_a_lambda_default_refuses_a_hidden_launcher(tmp):
+    del tmp
+    _refused(_lambda_default_cases())
 
 
 def test_a_cwd_less_call_argument_refuses_a_hidden_launcher(tmp):
@@ -237,18 +300,62 @@ _ARGUMENT_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_cwd_less_call_argument_refuses_a_hidden_launcher('
     'None)')
+_LAMBDA_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_lambda_default_refuses_a_hidden_launcher(None)')
+_CLEAN_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_launcher_free_headers_and_arguments_stay_clean(None)')
 
+# The decorator half of the header set, removed on its own. Narrowing it to
+# FunctionDef alone must turn the async and class rows red, which is what
+# says the two forms are reached by this arm and not by the argument arm.
 _DECORATORS = (
     "    if isinstance(node, _DECORATED_FORMS):\n", "    if False:\n")
+_DECORATED_FORMS = (
+    "_DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, "
+    "ast.ClassDef)\n",
+    "_DECORATED_FORMS = (ast.FunctionDef,)\n")
+# The two halves of that set removed on their own, so the async row and the
+# class row are each shown to be reached by this arm rather than by the
+# argument arm that sat behind them.
+_DECORATED_NO_ASYNC = (
+    "_DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, "
+    "ast.ClassDef)\n",
+    "_DECORATED_FORMS = (ast.FunctionDef, ast.ClassDef)\n")
+_DECORATED_NO_CLASS = (
+    "_DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, "
+    "ast.ClassDef)\n",
+    "_DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef)\n")
+# A lambda default binds its parameter as surely as a def's, so the header
+# set that routes it must still carry Lambda.
+_HEADER_FORMS = (
+    "_HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,\n"
+    "                 ast.Lambda)\n",
+    "_HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)\n")
 _ARGUMENTS = (
-    "                and (_carries_launcher(_call_receiver_parts(node), "
-    "facts)\n"
-    "                     or _carries_launch_value(_call_argument_parts("
-    "node),\n"
-    "                                              facts))):\n",
-    "                and (_carries_launcher(_call_receiver_parts(node), "
-    "facts)\n"
-    "                     or False)):\n")
+    "def _call_argument_parts(value):\n"
+    '    """Every value a call\'s arguments carry, starred forms '
+    'included."""\n'
+    "    arguments = [*value.args,\n"
+    "                 *(keyword.value for keyword in value.keywords)]\n"
+    "    for argument in arguments:\n"
+    "        yield from _carried_parts(argument)\n",
+    "def _call_argument_parts(value):\n    yield from ()\n")
+# The predicate that tells a launcher handed to a callee from one merely
+# mentioned there. Forcing it true must turn the assertIs/assertIn/callable
+# rows red, which is what says the narrowing is load-bearing.
+_LAUNCHER_CALLEE = (
+    "    return (name in _LAUNCHERS\n"
+    "            or _names_one_of(function, facts.launch_callables))\n",
+    "    return True\n")
+# A bare module name is a receiver-only signal. Judging it in an argument
+# too must turn the module handed to patch.object rows red.
+_MODULE_IN_ARGUMENT = (
+    "                         and _carries_launch_value(\n"
+    "                             _call_argument_parts(node), facts)))):\n",
+    "                         and _carries_launcher(\n"
+    "                             _call_argument_parts(node), facts)))):\n")
 _STARRED = (
     "    elif isinstance(value, ast.Starred):\n"
     "        yield from _carried_parts(value.value)\n",
@@ -256,7 +363,16 @@ _STARRED = (
 
 _UNFOLLOWABLE_MUTATIONS = (
     ('decorator list', 'bindings', (_DECORATORS,), _DECORATOR_INVOKE),
+    ('decorated forms', 'bindings', (_DECORATED_FORMS,), _DECORATOR_INVOKE),
+    ('decorated forms without async', 'bindings', (_DECORATED_NO_ASYNC,),
+     _DECORATOR_INVOKE),
+    ('decorated forms without class', 'bindings', (_DECORATED_NO_CLASS,),
+     _DECORATOR_INVOKE),
+    ('lambda header form', 'bindings', (_HEADER_FORMS,), _LAMBDA_INVOKE),
     ('call arguments', 'bindings', (_ARGUMENTS,), _ARGUMENT_INVOKE),
+    ('launcher callee', 'bindings', (_LAUNCHER_CALLEE,), _CLEAN_INVOKE),
+    ('module name in argument', 'bindings', (_MODULE_IN_ARGUMENT,),
+     _CLEAN_INVOKE),
     ('starred call argument', 'bindings', (_STARRED,), _ARGUMENT_INVOKE),
 )
 
