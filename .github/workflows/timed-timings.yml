@@ -55,9 +55,13 @@ jobs:
     # mirror that stops responding rather than holding a runner for hours.
     timeout-minutes: 30
 
+    # No contents: write: the commit step pushes over `secrets.RATCHET_SSH_KEY`
+    # — the deploy key the ruleset admits — and this job's own token use is
+    # `gh api` reads of workflow runs and artifacts, exactly as the
+    # `coverage` ratchet runs under the workflow default with the same
+    # deploy key and the same push.
     permissions:
-      contents: write  # the commit and its fast-forward push to main
-      actions: read    # the workflow-run and artifact reads
+      actions: read  # the workflow-run and artifact reads
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -97,7 +101,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          RUN_IDS: ${{ steps.runs.outputs.count }}
           # refresh_timings.py's SAMPLE_RUNS: three is the smallest median
           # that ignores one outlier run.
           SAMPLE: "3"
@@ -132,6 +135,7 @@ jobs:
           expected=""
           kept=0
           reached=0
+          query_failed=0
           # read -r, one line per run: the run ids are newline-separated
           # (SC2013), and a `for` over words would be wrong the moment one
           # of them carried anything but digits.
@@ -141,10 +145,28 @@ jobs:
             # One line per cell artifact name, so the cell loop below can
             # read them as lines: a cell name with a space in it would
             # otherwise split into two names in a word-split loop.
-            gh api -H "Cache-Control: no-cache" \
-              "repos/$REPOSITORY/actions/runs/$id/artifacts" \
-              --jq '.artifacts[].name | select(startswith("speed-durations-"))' \
-              | sed 's/^speed-durations-//' | sort > "$RUNNER_TEMP/names"
+            #
+            # TOLERATED: a failing artifacts call for ONE candidate. The
+            # per-run tolerance the download step already has, for the
+            # same reason — one flaky API answer would otherwise end the
+            # whole walk under `set -euo pipefail`, and the cost of that is
+            # a day of staleness for a call that has nothing to do with the
+            # other candidates. What is NOT tolerated: a walk that keeps
+            # fewer runs than SAMPLE BECAUSE calls failed is not reported
+            # as the search it was — the log names every run that was
+            # stepped over and why, the summary below counts the failed
+            # queries when they cost the walk a run, and a walk that found
+            # nothing is a no-op, not a success.
+            if ! gh api -H "Cache-Control: no-cache" \
+                 "repos/$REPOSITORY/actions/runs/$id/artifacts" \
+                 --jq '.artifacts[].name' \
+                 > "$RUNNER_TEMP/artifact-names"; then
+              echo "run $id: the artifacts query failed; stepped over"
+              query_failed=$((query_failed + 1))
+              continue
+            fi
+            sed -n 's/^speed-durations-//p' "$RUNNER_TEMP/artifact-names" \
+              | sort > "$RUNNER_TEMP/names"
             names="$(cat "$RUNNER_TEMP/names")"
             if [ -z "$names" ]; then
               echo "run $id: no cell artifacts; stepped over"
@@ -205,6 +227,11 @@ jobs:
               echo "and nothing was written."
             else
               echo "Downloaded $kept complete run(s): $(tr '\n' ' ' < "$runs")."
+              if [ "$query_failed" -ne 0 ] && [ "$kept" -lt "$SAMPLE" ]; then
+                echo "$query_failed candidate run(s) were stepped over because"
+                echo "their artifacts query failed, so the sample is $kept"
+                echo "runs rather than $SAMPLE; every reason is in the log."
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$kept" -eq 0 ]; then
@@ -212,7 +239,6 @@ jobs:
             exit 0
           fi
           echo "count=$kept" >> "$GITHUB_OUTPUT"
-          echo "runs=$(tr '\n' ' ' < "$runs")" >> "$GITHUB_OUTPUT"
 
       - name: Refresh the data file
         if: steps.download.outputs.count != '0'
