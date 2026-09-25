@@ -1,6 +1,6 @@
 /* exported _cdpSessions, handleCdp, _cdpError */
 /* exported _releaseCdpObjects, _cdpSettle */
-/* global postResult */
+/* global postResult, _netCaptures */
 
 // chromeTabId -> true while a sticky CDP session is held
 const _cdpSessions = {};
@@ -20,9 +20,13 @@ async function handleCdp(cmd) {
     chromeTabId = typeof chromeTabId === 'number'
       ? chromeTabId : parseInt(chromeTabId);
 
-    const heldBefore = !!_cdpSessions[chromeTabId];
+    // A capture or a kept CDP session already owns the attachment; reuse it
+    // and leave it in place, because detaching would end that capture or
+    // session. This call detaches only the attachment it created itself.
+    const held = Boolean(_cdpSessions[chromeTabId])
+      || Boolean(_netCaptures[chromeTabId]);
     const keep = !!cmd.keep_session;
-    if (!heldBefore) {
+    if (!held) {
       await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
     }
     if (keep) _cdpSessions[chromeTabId] = true;
@@ -31,7 +35,7 @@ async function handleCdp(cmd) {
         { tabId: chromeTabId }, cmd.method, cmd.params || {});
       await postResult(cmd._execution, result, null, 'extension');
     } finally {
-      if (!keep) {
+      if (!keep && !held) {
         delete _cdpSessions[chromeTabId];
         try {
           await chrome.debugger.detach({ tabId: chromeTabId });
