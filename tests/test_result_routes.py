@@ -426,46 +426,6 @@ def test_a_compat_consume_removes_the_delivery_copy_in_the_passed_root(tmp):
     assert not delivery.exists(), 'the delivery copy under this root stayed'
 
 
-def _recorded_locks(store):
-    """Record each stripe acquisition as (directory, key, lock id).
-
-    All three, because each answers a different question. The directory is
-    what the caller named; the key is what the stripe is decided on, and it
-    is the half that is exact -- two keys can share one of 64 stripes by
-    chance, so a lock count alone would let a keying mutation through once
-    in sixty-four runs; and the lock identity is the consequence, which one
-    key always produces.
-    """
-    seen = []
-    real_lock_for = store.delivery_lock_for
-    real_key_for = store.delivery_stripe_key
-
-    def recording_lock_for(target_dir):
-        lock = real_lock_for(target_dir)
-        # The key is asked for, not remembered: the selector has just asked
-        # the filesystem, and this is the only place a second answer exists.
-        # That costs an extra stat inside the wrapper, which is safe here
-        # because the folding shim is idempotent -- but a recorder that took
-        # a reading of its own for convenience could consume an injected
-        # ordering, which is the hazard the other suite's recorder warns
-        # about.
-        seen.append((target_dir, real_key_for(target_dir), id(lock)))
-        return lock
-
-    store.delivery_lock_for = recording_lock_for
-    try:
-        yield seen
-    finally:
-        store.delivery_lock_for = real_lock_for
-
-
-def _one_stripe(seen):
-    """The directories named, the distinct keys, and the stripes reached."""
-    return ([Path(d).name for d, _k, _l in seen],
-            len({key for _d, key, _l in seen}),
-            len({lock for _d, _k, lock in seen}))
-
-
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='resultroutes_')
