@@ -415,21 +415,21 @@ _WAIT_HARNESS = (
 
 def _wait_harness_output(stdout):
     """(sleeps, polls, result); a zero-sleep waiter prints SLEEPS []."""
-    fields = dict(
+    out = dict(  # ''.split(' ', 1) is ['']: a spaceless line must not parse
         line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
-    return (json.loads(fields['SLEEPS']), int(fields['POLLS']),
-            fields['RESULT'])
+    return (json.loads(out['SLEEPS']), int(out['POLLS']), out['RESULT'])
 
 
-def test_the_result_wait_polls_before_it_sleeps_the_full_interval(tmp):
-    """An already available result must not cost a fixed half second.
+def test_the_result_wait_records_the_ramp_opening_sleep(tmp):
+    """The one sleep an available result costs is the ramp's opening.
 
     The waiter charged every waited command its whole interval up front,
     so an available result still cost 500ms. The MCP poller had that
     shape and was fixed first. A virtual clock records the sleeps the
     loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
-    against a 0.25s bound. The fake charges the sleep, not the request;
-    the budget it cannot see is test_cli_result_wait.py's.
+    against a 0.25s bound. The fake charges the sleep, not the request:
+    the request budget is the stalled-poll test's here, and the backoff
+    is test_cli_result_wait.py's.
     """
     del tmp
     r = run_python(_WAIT_HARNESS, cli_env(DAEDALUS_TOKEN=TOK))
