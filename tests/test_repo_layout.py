@@ -83,21 +83,21 @@ MCP_OLD_NAMES = (
 # site are both refusals.
 BOUNDED_GIT_LAUNCHES = {
     ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root'):
-        'a standalone skill script an operator runs by hand; rev-parse '
-        'reads the repository and can block behind another writer, and no '
-        'suite or CI bound sits above it to surface a hang',
+        'a standalone skill script an operator runs by hand; no suite or '
+        'CI bound sits above it, so a wedged git hangs an operator with '
+        'nothing to surface it',
     ('.claude/skills/changing-daedalus/watch_all.py', '_repo_slug'):
-        'a standalone skill script an operator runs by hand; remote '
-        'get-url reads the repository config and can block behind another '
-        'writer, with no enclosing bound above it',
+        'a standalone skill script an operator runs by hand; no enclosing '
+        'bound sits above it, so a wedged git hangs an operator with '
+        'nothing to surface it',
     ('scripts/gen_gitignore.py', '_check_ignore'):
-        'a standalone generator an operator runs by hand; check-ignore '
-        'reads the ignore rules for the whole tracked set and can block '
-        'behind another writer of the index, with no enclosing bound',
+        'a standalone generator an operator runs by hand; no enclosing '
+        'bound sits above it, so a wedged git hangs an operator with '
+        'nothing to surface it',
     ('scripts/gen_gitignore.py', 'main'):
-        'a standalone generator an operator runs by hand; ls-files reads '
-        'the index and can block behind another writer of the index, with '
-        'no suite or CI bound above it to surface a hang',
+        'a standalone generator an operator runs by hand; no suite or CI '
+        'bound sits above it, so a wedged git hangs an operator with '
+        'nothing to surface it',
 }
 
 _BOUND_SITE = re.compile(
@@ -148,14 +148,15 @@ def _tracked_python(root=ROOT):
 
 def _enclosing_function(tree, line):
     """The innermost function whose body spans `line`, else '<module>'."""
-    best = None
+    best_lineno = -1
+    best_name = '<module>'
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             end = getattr(node, 'end_lineno', node.lineno)
-            if node.lineno <= line <= end \
-                    and (best is None or node.lineno > best[0]):
-                best = (node.lineno, node.name)
-    return best[1] if best else '<module>'
+            if node.lineno <= line <= end and node.lineno > best_lineno:
+                best_lineno = node.lineno
+                best_name = node.name
+    return best_name
 
 
 def _bound_sites(source, here):
@@ -436,6 +437,37 @@ def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
         assert len(row_refusals) == 1 and limb in row_refusals[0], (
             f'{label}: expected one refusal naming {limb!r}, '
             f'got {row_refusals}')
+
+
+def test_the_head_label_separates_git_non_git_and_unreadable(tmp):
+    """A bound launch's head label distinguishes a git head, a readable
+    non-git constant, and an unreadable head.
+
+    The analyser enforces the bound only on a git head, so a head it cannot
+    read must never be labelled a provable non-git: on the exemption path
+    that would silently widen the exempt set. The name-bound git shape is
+    the real-target case (planted as a tracked module and caught by the
+    tree-wide rule); no tracked bounded launch has an unreadable head to
+    plant, so the unresolved-name shape is pinned here against the real
+    analyser, and the two non-git shapes are pinned beside it so a cheaper
+    reading that maps both unreadable and non-git to one label dies.
+    """
+    del tmp
+    shapes = (
+        ('GIT = \'git\'\n'
+         'subprocess.run([GIT, \'status\'], capture_output=True,\n'
+         '               check=True, timeout=30)', 'git'),
+        ('subprocess.run([\'node\', \'x\'], capture_output=True,\n'
+         '               check=True, timeout=30)', 'non-git'),
+        ('subprocess.run([cmd, \'status\'], capture_output=True,\n'
+         '               check=True, timeout=30)', 'unreadable'),
+    )
+    for body, label in shapes:
+        bound = [r for r in _launch_refusals(
+            'import subprocess\n' + body, 'probe')
+            if 'carries a timeout=' in r]
+        assert len(bound) == 1, (label, bound)
+        assert f'on a {label} launch' in bound[0], (label, bound[0])
 
 
 if __name__ == '__main__':

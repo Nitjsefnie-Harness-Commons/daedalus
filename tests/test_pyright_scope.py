@@ -49,7 +49,7 @@ def _tests_config():
 def _tracked_python():
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z', '*.py'],
-        capture_output=True)
+        capture_output=True, check=True)
     paths = [path for path in listed.stdout.decode(
         'utf-8', 'surrogateescape').split('\0') if path]
     assert paths, 'Git returned no tracked Python files'
