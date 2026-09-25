@@ -641,4 +641,39 @@ LAUNCH_REFUSAL_ROWS = (
      "        return self.mod.run(\n"
      "            ['git', 'status'], check=True, timeout=30)\n",
      'carries a timeout='),
+    # A base name resolves in the enclosing scope and then falls back to
+    # the module's globals, so a class statement inside a function still
+    # reaches the module-level class it never names itself.
+    ('base-falls-back-to-the-module-globals',
+     "import subprocess\n"
+     "def build():\n"
+     "    class Base:\n"
+     "        mod = subprocess\n"
+     "    class Child(Base):\n"
+     "        def go(self):\n"
+     "            return self.mod.run(\n"
+     "                ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    ('base-reached-through-a-module-level-alias',
+     "import subprocess\n"
+     "class Base:\n"
+     "    mod = subprocess\n"
+     "Alias = Base\n"
+     "class Child(Alias):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
+    # A walrus is an expression, not a statement, so no statement list
+    # names it: the class body binds the name and the walk must too.
+    ('class-body-walrus-binds-the-attribute',
+     "import subprocess\n"
+     "class Base:\n"
+     "    if (held := subprocess):\n"
+     "        mod = held\n"
+     "class Child(Base):\n"
+     "    def go(self):\n"
+     "        return self.mod.run(\n"
+     "            ['git', 'status'], check=True, timeout=30)\n",
+     'carries a timeout='),
 )

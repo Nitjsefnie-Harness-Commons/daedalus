@@ -22,11 +22,6 @@ CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
                           'advice.detachedHead=false')
 
 
-# The absent table entry, so a base that binds the name to nothing is not
-# read as a class that binds it to None.
-_MISS = object()
-
-
 def launch_refusals(source, here, bound_sink=None):
     """Every refusal limb one Python source's launches trip, naming its
     limb."""
