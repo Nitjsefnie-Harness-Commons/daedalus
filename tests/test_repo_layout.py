@@ -163,9 +163,10 @@ def _bound_sites(source, here):
     tree = ast.parse(source)
     sites = []
     for line, head, kind in bound_sites(source, here):
-        if head == 'git':
+        if head in ('git', 'ambiguous') or kind == 'unplaced':
             function = _enclosing_function(tree, line)
-            sites.append((here, function, f'{here}:{line} {kind} git launch'))
+            sites.append((here, function,
+                          f'{here}:{line} {kind} bound launch'))
     return sites
 
 
@@ -342,13 +343,22 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     or that runs as a standalone tool with nothing above it to catch a
     hang, keeps a bound and a table row naming it.
 
-    A site is in scope only when the head reads as the constant `git`,
-    through a `+` concat or a name bound to a literal, to a cap of
-    _ARGV_UNWRAP_CAP. A `**`-unpacked keyword mapping on a git launch is
-    in scope: a mapping the audit cannot read can hide a timeout. A
-    readable non-git head is provably not a git launch; an unreadable head
-    is the analyser's stated boundary, named on the refusal so nothing is
-    silently dropped.
+    A site is in scope two ways. A launch the analyser places and whose head
+    reads as the constant `git` (through a `+` concat, a single-bound name, or
+    a container of argv literals, to a cap of _ARGV_UNWRAP_CAP) is refused,
+    as is a `**`-unpacked mapping on it (which could hide a timeout); a name
+    bound more than once in a module reads `unreadable`, never a guessed
+    non-git. Second, a subprocess call the analyser does not place but that
+    carries a `timeout=` it can see in the source (behind an import alias, a
+    from-import, or a receiver it refuses) is reported at `unreadable`, never
+    accepted.
+
+    The residual boundary: a placed launch whose head is a dynamic expression
+    (a slice, comprehension, or return value) reads `unreadable` and, as a
+    single placed launch, is not re-examined for git. The shipped tree's one
+    such git launch, `git diff` at `test_diff_coverage.py:247`, had its
+    bound dropped this branch, so no such site is live; a future one is the
+    filed boundary issue, not enforced here.
 
     The allowance is pinned from both sides: a live site with no row, a
     row matching zero or more than one live site, and a row whose function
@@ -412,30 +422,41 @@ def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
 
 def test_the_head_label_separates_git_non_git_and_unreadable(tmp):
     """A bound launch's head label distinguishes a git head, a readable
-    non-git constant, and an unreadable head.
+    non-git constant, an unreadable head, a container of argvs, and the
+    interpreter.
 
     The analyser enforces the bound only on a git head, so a head it cannot
     read must never be labelled a provable non-git: on the exemption path
     that would silently widen the exempt set. The name-bound git shape is
     proven against the real tree-wide rule by a plant; no tracked bounded
     launch has an unreadable head to plant, so the unresolved-name shape
-    is pinned here against the real analyser, with the non-git shapes
-    beside it so a reading that collapses the labels dies.
+    is pinned here against the real analyser, with the other shapes beside
+    it. The container shape pins the multi-argv branch (deleting it leaves
+    this shape unlabelled) and the interpreter shape pins the sys.executable
+    recognition in first_word, so neither branch is a line with no entry.
     """
     del tmp
     shapes = (
-        ('GIT = \'git\'\n'
-         'subprocess.run([GIT, \'status\'], capture_output=True,\n'
-         '               check=True, timeout=30)', 'git'),
-        ('subprocess.run([\'node\', \'x\'], capture_output=True,\n'
-         '               check=True, timeout=30)', 'non-git'),
-        ('subprocess.run([cmd, \'status\'], capture_output=True,\n'
-         '               check=True, timeout=30)', 'unreadable'),
+        ('import subprocess\n'
+         'GIT = \'git\'\n'
+         'subprocess.run([GIT, \'status\'], check=True, timeout=30)', 'git'),
+        ('import subprocess\n'
+         'for argv in ([\'git\', \'init\'], [\'git\', \'add\']):\n'
+         '    subprocess.run(argv, check=True, timeout=30)', 'git'),
+        ('import subprocess\n'
+         'subprocess.run([\'node\', \'x\'], check=True, timeout=30)',
+         'non-git'),
+        ('import subprocess\n'
+         'import sys\n'
+         'subprocess.run([sys.executable, \'pass\'], check=True, timeout=30)',
+         'non-git'),
+        ('import subprocess\n'
+         'subprocess.run([cmd, \'status\'], check=True, timeout=30)',
+         'unreadable'),
     )
     for body, label in shapes:
-        bound = [r for r in _launch_refusals(
-            'import subprocess\n' + body, 'probe')
-            if 'carries a timeout=' in r]
+        bound = [r for r in _launch_refusals(body, 'probe')
+                 if 'carries a timeout=' in r]
         assert len(bound) == 1, (label, bound)
         assert f'on a {label} launch' in bound[0], (label, bound[0])
 
