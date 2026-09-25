@@ -190,3 +190,25 @@ const chrome = {
             .replace('__TOKEN__', token)
             .replace('__SERVER__', server)
             .replace('__SEND_COMMAND__', send_command))
+
+
+def event_target_stub():
+    """The event-target stand-in that RETAINS the listeners registered on it.
+
+    Chrome's event objects keep every listener added to them. An earlier
+    stand-in, `addListener(l) { if (listeners) listeners.push(l); }` with
+    every call site passing the default `null`, discarded every
+    registration, so nothing a harness registered ever dispatched
+    (issue #1015). This one always retains and exposes the array, so a
+    harness can dispatch to it. Call shape: `eventTarget()` yields
+    `{ addListener, listeners }`.
+    """
+    return r"""
+function eventTarget() {
+  const listeners = [];
+  return {
+    addListener(listener) { listeners.push(listener); },
+    listeners,
+  };
+}
+"""
