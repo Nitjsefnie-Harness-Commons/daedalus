@@ -79,6 +79,50 @@ def test_a_clear_that_is_not_a_boolean_is_refused(tmp):
     assert posted['store-false']['result']['match'] is None, accepted
 
 
+def test_a_null_match_is_absent_rather_than_a_refusal_or_a_clear(tmp):
+    """`match: null` is a value, and the store reads it as absent.
+
+    The two fields do not treat a missing value alike, and the difference is
+    load-bearing enough that the architecture reference states it: `match`
+    folds `null` into "absent" before it decides anything, so a command
+    carrying it keeps the scope and is not refused, while `clearScope` reads
+    every present non-boolean as a refusal and `null` is one of them. A
+    command carrying both clears through the flag — the null `match` neither
+    prevents the clear nor adds a refusal.
+
+    Pinning the asymmetry is what lets `AGENTS.md` say it. A summary that
+    calls every other `match` value a refusal is true until this fold moves,
+    and after it moves the summary is false and nothing here has noticed.
+    """
+    del tmp
+    seed = {'id': 'fix1', 'code': FIX, 'match': SCOPE, 'permanent': False}
+    keeps = run_hotfix_case({
+        'documents': [SITE], 'ask': False, 'fixes': [seed],
+        'store': [{'id': 'store-null', 'fixId': 'fix1', 'code': '2',
+                   'match': None}],
+    })
+    assert keeps['posted'][0]['error'] is None, keeps
+    assert keeps['posted'][0]['result']['match'] == SCOPE, keeps
+    assert keeps['stored'] == [{'id': 'fix1', 'match': SCOPE}], keeps
+    clears = run_hotfix_case({
+        'documents': [SITE], 'ask': False, 'fixes': [seed],
+        'store': [{'id': 'store-null-clear', 'fixId': 'fix1', 'code': '2',
+                   'match': None, CLEAR_FIELD: True}],
+    })
+    assert clears['posted'][0]['error'] is None, clears
+    assert clears['posted'][0]['result']['match'] is None, clears
+    assert clears['stored'] == [{'id': 'fix1', 'match': None}], clears
+    # The other half of the asymmetry, on the same record: `null` IS a
+    # refusal in the clear's own field.
+    refused = run_hotfix_case({
+        'documents': [SITE], 'ask': False, 'fixes': [seed],
+        'store': [{'id': 'store-null-clear', 'fixId': 'fix1',
+                   'code': 'clobbered', CLEAR_FIELD: None}],
+    })
+    assert refused['record'] == [seed], refused
+    assert refused['posted'][0]['error'], refused
+
+
 def test_a_cleared_scope_runs_the_fix_where_the_scope_had_excluded_it(tmp):
     """C12: a scope can be removed, and the fix runs again where it could not.
 
