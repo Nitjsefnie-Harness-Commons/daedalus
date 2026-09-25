@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """No tests module may shadow a shared-helper import it also binds locally.
 
-Many shared helper modules live under `tests/`. A re-paste of any of
-them — the same function body pasted directly below the line that imports
-it — binds one module-level name twice. The local definition wins, the
-suite reads its own copy, and the shared defect the helper exists to
-exercise stays invisible. The owned names are derived from each importing
-file's own import statement, so no maintained list of names or per-module
-table can drift out of step with the tree.
+A re-paste — the same function body pasted directly below the line that
+imports it — binds one module-level name twice. The local definition
+wins, the suite reads its own copy, and the shared defect the helper
+exists to exercise stays invisible. The owned names are derived from
+each importing file's own import statement, so no maintained list of
+names or per-module table can drift out of step with the tree.
 
 The boundary is a name bound during MODULE EXECUTION, not one that merely
 sits as a direct child of the module body: a re-paste nested under `if
@@ -23,22 +22,19 @@ A def, class, comprehension or lambda body is its own namespace, so a
 rebinding there is not a module-scope shadow and a walrus inside a
 comprehension or lambda is not collected. A walrus in a comprehension's
 outermost iterable would bind in the enclosing scope, but CPython rejects
-that source at compile time, so no committed module carries the form and
-it is not collected. An import binds the name it brings INTO the module,
-so an aliased import `X as _Y` is shadowed only by a rebind of `_Y`, never
-of `X`. A name the file binds with no import from a sibling tests module,
-or an import from outside the tests tree, is not a shadow. A module the
-detector cannot parse fails the control, naming the file, rather than
-being silently dropped.
+that source at compile time, so it is not collected. An import binds the
+name it brings INTO the module, so an aliased import `X as _Y` is
+shadowed only by a rebind of `_Y`. A name the file binds with no import
+from a sibling tests module, or an import from outside the tests tree, is
+not a shadow. A module the detector cannot parse fails the control, naming
+the file, rather than being silently dropped.
 
 What this control does not see, by design: a re-paste whose import was
 deleted along with it is a duplicate body, not a shadow; a `from X
 import *`, whose names the rule cannot enumerate; a `def` that
 re-implements a shared helper's name without importing it at all; a suite
 that imports another suite whole and reads its privates; and a dynamic
-rebind through `globals()[...] = ...`, `exec` or `importlib`. The rule is
-complete over the static rebinding forms, and the difference is the honest
-thing to publish.
+rebind through `globals()[...] = ...`, `exec` or `importlib`.
 """
 import ast
 import subprocess
@@ -59,10 +55,8 @@ Shadow = namedtuple(
 
 
 def _target_names(target):
-    """Names a target binds, unpacking tuples, lists and starred names.
-
-    An attribute or subscript target binds no module name, so `x.name = 1`
-    and `d['k'] = 1` contribute nothing.
+    """An attribute or subscript target binds no module name, so
+    `x.name = 1` and `d['k'] = 1` contribute nothing.
     """
     if isinstance(target, ast.Name):
         return [target.id]
@@ -80,10 +74,9 @@ def _scan(tree):
     """Return (imports, binds) for what module execution establishes.
 
     imports maps a name to {import line: set of source module stems};
-    binds maps a name to the set of lines that bind it. Only statements
-    that execute in module scope are collected, so a def, class,
-    comprehension or lambda body — which has its own namespace — is never
-    descended into.
+    binds maps a name to the set of lines that bind it. A def, class,
+    comprehension or lambda body is its own namespace, so a rebinding
+    there is not collected.
     """
     imports = {}
     binds = {}
@@ -173,13 +166,8 @@ def _scan(tree):
 
 
 def _shadow_findings(sources):
-    """Names a tests module imports from a sibling and also binds itself.
-
-    `sources` maps a path to its source text. A shadow is a name the file
-    binds during module execution that it also imports from a module in
-    the same tests tree. Returns one Shadow per shadowing name, each
-    carrying the import and binding lines. A module that does not parse
-    fails the control, naming the file, rather than being dropped.
+    """A module that does not parse fails the control, naming the file,
+    rather than being dropped.
     """
     stems = {Path(path).stem for path in sources}
     findings = []
@@ -242,11 +230,6 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         'def _poll_queue_reads():', '    return 1'))
     write('tests/_pyroute_core.py',
           _mod('def dict_assignments():', '    return 1'))
-    # The design-change discriminating set: a re-paste nested under if, a
-    # walrus, a for target, a try/except fallback (reported) and a
-    # class-body rebinding (not reported), each isolating one form. The
-    # third element of each case is the name it must be reported under, or
-    # None when the rule must not report it.
     alias = _mod(
         'from _cmdqueue import (POLL_DELAY as _SHARED_POLL_DELAY,',
         '                       _poll_queue_reads)')
@@ -265,7 +248,6 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
             '        return 1'), '_load_queue'),
         ('test_e.py', suite(
             'class K:', '    _load_queue = 1'), None),
-        # One case per remaining binder, each the sole reason it fires.
         ('test_asyncdef.py', suite(
             'async def _load_queue():', '    pass'), '_load_queue'),
         ('test_class.py', suite(
@@ -306,7 +288,6 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         ('test_pyroute_clean.py', _mod(
             'from _pyroute_core import dict_assignments as _dict_assignments',
             'dict_assignments = _dict_assignments'), None),
-        # Near-misses: wrong scope, wrong source, or no source at all.
         ('test_from_os.py', _mod(
             'from os import _load_queue', '_load_queue = 1'), None),
         ('test_plain_import.py', _mod(
@@ -331,8 +312,7 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
     findings = _shadow_findings(sources)
     found = {(item.path, item.name) for item in findings}
     assert found == expected, sorted(found ^ expected)
-    # The report names the import and binding lines; the set comparison
-    # above holds with every lineno collapsed to 0, so pin them here.
+    # The set comparison above ignores linenos, so pin them here.
     walrus = next(item for item in findings
                   if item.path == 'tests/test_b.py')
     assert walrus.import_lines == [1], walrus
