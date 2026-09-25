@@ -25,11 +25,11 @@ from _mainworldharness import (run_main_world_eval_timeout,  # noqa: E402
                                run_hotfix_replay_probe_hang,
                                run_hotfix_replay_cdp_timeout,
                                run_hotfix_replay_inside)
-from _repo import ROOT  # noqa: E402
 
-# The chosen MAIN-world settlement ceiling, in ms. Matches the CDP settlement
-# bound so one caller sees the same limit whichever channel the source-free
-# probe selects.
+# The chosen MAIN-world settlement ceiling, in ms. Deliberately equal to the
+# CDP settlement bound so one caller sees the same limit whichever channel
+# the source-free probe selects; the two are pinned independently, by this
+# suite and by tests/test_starvation_bounds.py.
 _SETTLE_MS = 10000
 # A settlement driven to here is strictly inside the correct bound, so a
 # control that halves or quarters the ceiling crosses it and goes red.
@@ -232,16 +232,17 @@ def test_page_eval_relay_world_is_namespaced_and_not_page_overridable(tmp):
 
 
 def test_a_main_world_eval_that_never_settles_reports_the_bound(tmp):
-    """A page promise that never settles cannot hold the eval worker.
-
-    `exec x 'await new Promise(()=>{})'` used to await `executeScript` with
-    no deadline, so the caller timed out and could retry a command that had
-    already run. The bound is armed worker-side, and crossing it posts one
-    ordinary result through the same channel every other failure uses.
+    """`exec x 'await new Promise(()=>{})'` used to await `executeScript`
+    with no deadline, so the caller timed out and could retry a command that
+    had already run. The bound is armed worker-side, and crossing it posts
+    one ordinary result through the same channel every other failure uses.
     """
     del tmp
     outcome = run_main_world_eval_timeout()
     assert outcome['armed'] is True, outcome
+    # The probe's arming and the injection's are the same ceiling; a second
+    # or differently-timed one would be a different entry here.
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
     # Nothing is posted while the page promise is open; the single result
     # appears only once the worker-side bound has been crossed.
     assert outcome['postedBeforeClock'] == 0, outcome
@@ -249,22 +250,27 @@ def test_a_main_world_eval_that_never_settles_reports_the_bound(tmp):
     assert len(outcome['posted']) == 1, outcome
     posted = outcome['posted'][0]
     assert posted['result'] is None, outcome
-    # The error names the bound that was exceeded, and keeps its channel.
-    detail = posted['error'] or ''
-    assert f'timed out after {_SETTLE_MS} ms' in detail, outcome
+    # The whole refusal, not a substring: the channel is the part a caller
+    # keys on, and a number alone would survive a dropped label.
+    assert posted['error'] == (
+        'MAIN-world eval failed: MAIN-world eval timed out after '
+        + f'{_SETTLE_MS} ms'), outcome
     assert posted['world'] == 'page-main', outcome
+    # Nothing left armed once the race has settled: a leaked one-shot timer
+    # delays an MV3 worker suspend.
+    assert outcome['remaining'] == [], outcome
 
 
 def test_a_main_world_eval_settling_inside_the_bound_returns_its_value(tmp):
-    """A settlement just inside the bound is not a timeout.
-
-    The clock is driven to strictly inside the window before the page promise
-    resolves, so a ceiling that fires early is caught by the assertion on the
-    real value rather than passing because nothing was ever crossed.
+    """The clock is driven to strictly inside the window before the page
+    promise resolves, so a ceiling that fires early is caught by the
+    assertion on the real value rather than passing because nothing was ever
+    crossed.
     """
     del tmp
     outcome = run_main_world_eval_inside()
     assert outcome['armed'] is True, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
     assert outcome['got'] is True, outcome
     assert len(outcome['posted']) == 1, outcome
     posted = outcome['posted'][0]
@@ -274,6 +280,8 @@ def test_a_main_world_eval_settling_inside_the_bound_returns_its_value(tmp):
     # A settled envelope still carries its own timing, the channel identity
     # intact, so a caller can tell which channel answered.
     assert isinstance(posted['exec_ms'], (int, float)), outcome
+    # The fast settle is the one that must tear its timer down.
+    assert outcome['remaining'] == [], outcome
 
 
 def test_a_wedged_eval_probe_does_not_hold_the_worker(tmp):
@@ -300,9 +308,7 @@ def test_a_wedged_eval_probe_does_not_hold_the_worker(tmp):
 
 
 def test_a_stuck_hotfix_fix_does_not_block_a_later_fix(tmp):
-    """A never-settling fix is bounded and the next fix still runs.
-
-    Replay is sequential, so one fix whose MAIN-world injection never
+    """Replay is sequential, so one fix whose MAIN-world injection never
     settles stopped every later stored fix on every load of that page, with
     nothing in the console. The per-fix refusal must reach the operator's
     only surface and name the limit it enforced.
@@ -310,16 +316,18 @@ def test_a_stuck_hotfix_fix_does_not_block_a_later_fix(tmp):
     del tmp
     outcome = run_hotfix_replay_timeout()
     assert outcome['armed'] is True, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
     assert outcome['fix1Started'] is True, outcome
     # The stuck fix is the only thing that fails; the fix after it runs.
     assert outcome['ranSecond'] is True, outcome
     errors = _replay_errors(outcome['replay'])
     assert len(errors) == 1, outcome
-    report = errors[0]['text']
-    assert 'fix1' in report, outcome
-    assert f'timed out after {_SETTLE_MS} ms' in report, outcome
+    assert errors[0]['text'] == (
+        '[Daedalus] hotfix replay failed on tab 7: fix1: '
+        + f'MAIN-world hotfix fix timed out after {_SETTLE_MS} ms'), outcome
     allClear = [e for e in outcome['replay'] if e['level'] == 'log']
     assert not allClear, outcome
+    assert outcome['remaining'] == [], outcome
 
 
 def test_a_cdp_routed_stuck_fix_names_the_channel_that_ran(tmp):
@@ -346,15 +354,14 @@ def test_a_cdp_routed_stuck_fix_names_the_channel_that_ran(tmp):
 
 
 def test_the_replay_bound_covers_the_whole_per_fix_operation(tmp):
-    """A wedged probe is bounded too: the bound is not injection-only.
-
-    The first fix's source-free probe never answers, so its injection is
+    """The first fix's source-free probe never answers, so its injection is
     never reached. A bound placed around the injection alone would sit
     downstream of the hang and let this fix stop the ones after it.
     """
     del tmp
     outcome = run_hotfix_replay_probe_hang()
     assert outcome['armed'] is True, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
     # The wedged fix never reached its own source; the later fix still ran.
     assert outcome['fix1Ran'] is False, outcome
     assert outcome['ranSecond'] is True, outcome
@@ -365,41 +372,46 @@ def test_the_replay_bound_covers_the_whole_per_fix_operation(tmp):
     assert errors[0]['text'] == (
         '[Daedalus] hotfix replay failed on tab 7: '
         + f'fix1: hotfix fix timed out after {_SETTLE_MS} ms'), outcome
+    assert outcome['remaining'] == [], outcome
 
 
 def test_a_hotfix_fix_settling_inside_the_bound_is_not_a_failure(tmp):
-    """A fix settling just inside the bound is not a reported failure."""
     del tmp
     outcome = run_hotfix_replay_inside()
     assert outcome['armed'] is True, outcome
+    assert outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], outcome
     assert outcome['cleared'] is True, outcome
     assert outcome['ranSecond'] is True, outcome
     assert not outcome['errors'], outcome
     assert outcome['clear'], outcome
+    # Both fixes settled inside the window, so both bounds tore down.
+    assert outcome['remaining'] == [], outcome
 
 
-def test_the_eval_and_replay_paths_share_one_bound(tmp):
-    """One constant governs both paths; neither mints a second ceiling.
+def test_the_eval_and_replay_paths_arm_only_the_named_ceiling(tmp):
+    """The deadlines are read from the two real runs, not from source text.
 
-    The eval path's armed deadline and the number the replay refusal names
-    are read from the two real runs, so a ceiling that drifts between the
-    modules is visible here rather than only to an operator mid-replay.
+    A source-text pin cannot see a second ceiling worded so the refusal
+    string never mentions a second number, nor a stray worker timer, so
+    what the control observes is the armings themselves: each operation
+    arms the one deadline the constant names, and no other.
     """
     del tmp
     eval_outcome = run_main_world_eval_timeout()
     replay_outcome = run_hotfix_replay_timeout()
-    # Both real runs name the same ceiling: the eval refusal the caller
-    # receives, and the replay refusal the operator sees.
-    eval_error = eval_outcome['posted'][0]['error'] or ''
-    assert f'timed out after {_SETTLE_MS} ms' in eval_error, eval_outcome
-    error = _replay_errors(replay_outcome['replay'])[0]['text']
-    assert f'timed out after {_SETTLE_MS} ms' in error, replay_outcome
-    # The ceiling is minted once, in the module that owns the helper; the
-    # replay module calls it rather than re-deriving the number.
-    hotfix_source = (ROOT / 'extension' / 'worker' / 'hotfixes.js').read_text(
-        encoding='utf-8')
-    assert '_raceMainWorldEval' in hotfix_source, hotfix_source
-    assert 'timed out after' not in hotfix_source, hotfix_source
+    assert eval_outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], eval_outcome
+    assert replay_outcome['deadlines'] == [_SETTLE_MS, _SETTLE_MS], (
+        replay_outcome)
+    # The refusal each side receives names the same ceiling, in full.
+    assert eval_outcome['posted'][0]['error'] == (
+        'MAIN-world eval failed: MAIN-world eval timed out after '
+        + f'{_SETTLE_MS} ms'), eval_outcome
+    replay_errors = _replay_errors(replay_outcome['replay'])
+    assert len(replay_errors) == 1, replay_outcome
+    assert replay_errors[0]['text'] == (
+        '[Daedalus] hotfix replay failed on tab 7: fix1: '
+        + f'MAIN-world hotfix fix timed out after {_SETTLE_MS} ms'), (
+            replay_outcome)
 
 
 def main():
