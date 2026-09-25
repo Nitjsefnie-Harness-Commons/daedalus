@@ -36,32 +36,43 @@ _seeded = False
 _name_vacated = None
 
 
-def _parse_stem(name):
-    """`(millisecond, counter)` for a stem in our own grammar, else None.
+_COUNTER_WIDTH = 20
 
-    Grammar is `<13 digits>_<20 digits>.json`. Anything else — a legacy
-    `<token>_<tab>.json` drop, a non-stem, a temp, or an older bridge's
-    narrower field — is None, so the seed ignores it without raising.
+
+def _parse_stem(name):
+    """`(millisecond, counter, width)` for a stem, else None.
+
+    A stem is `<13 digits>_<N digits>.json` for any width N — the current
+    bridge writes 20, a released one 6, and the seed must read both because
+    it protects the upgrade path between them. The mark honours the
+    millisecond; the counter is rebased only from same-width entries. A
+    legacy drop, a non-stem, a temp, or a non-numeric field is None, ignored
+    without raising.
     """
     if name.startswith('.') or not name.endswith('.json'):
         return None
     millisecond, separator, counter = name[:-len('.json')].partition('_')
-    if separator != '_' or len(millisecond) != 13 or len(counter) != 20:
+    if separator != '_' or len(millisecond) != 13 or not counter:
         return None
     if not (millisecond.isascii() and millisecond.isdigit()
             and counter.isascii() and counter.isdigit()):
         return None
-    return int(millisecond), int(counter)
+    return int(millisecond), int(counter), len(counter)
 
 
 def _seed_from_disk(cmd_dir):
-    """Raise the mark and counter above every entry surviving on disk.
+    """Raise the mark strictly above every survivor on disk, the counter
+    above every same-width one.
 
-    One-shot, before the first mint, under `command_fs_lock`. A restart
-    resets the in-process mark and counter, so ordering is re-established
-    from disk, not the wall clock. Each surviving entry in our grammar
-    contributes its millisecond and counter; other names are ignored, and an
-    unreadable root is not a barrier (the clamp then rests on the clock).
+    One-shot, before the first mint, under `command_fs_lock`: a restart
+    resets the in-process state, so ordering is re-established from disk, not
+    the clock. The mark honours every parseable survivor's millisecond and
+    lands one above, so a fresh entry wins on millisecond alone — needed
+    because at an equal millisecond a zero-padded 20-digit counter sorts
+    below a narrower one with a nonzero leading digit, whatever its value.
+    The counter is rebased only from same-width entries. The scan is bounded
+    in practice by the TTL sweep, which empties aged entries and their empty
+    queues; a non-directory or unreadable one is ignored, not raised on.
     """
     global _ms_mark, _seq_counter, _seeded
     highest_millisecond = 0
@@ -72,16 +83,18 @@ def _seed_from_disk(cmd_dir):
         queues = []
     for queue in queues:
         try:
-            children = list(os.scandir(queue.path))
+            children = [entry for entry in os.scandir(queue.path)
+                        if entry.is_file()]
         except OSError:
             continue
         for child in children:
             parsed = _parse_stem(child.name)
             if parsed is not None:
-                millisecond, counter = parsed
+                millisecond, counter, width = parsed
                 highest_millisecond = max(highest_millisecond, millisecond)
-                highest_counter = max(highest_counter, counter)
-    _ms_mark = highest_millisecond
+                if width == _COUNTER_WIDTH:
+                    highest_counter = max(highest_counter, counter)
+    _ms_mark = highest_millisecond + 1
     _seq_counter = itertools.count(highest_counter + 1)
     _seeded = True
 
@@ -97,9 +110,9 @@ def claim(key):
     """Claim one logical queue key without holding a lock during delivery.
 
     The key is the logical target name; consumers using the same spelling
-    cannot both claim. Aliasing is refused in the read, not here: a
-    symlinked or multiply-named object is refused by the identity check in
-    `open_command_candidate`, so two names for one object cannot deliver it.
+    cannot both claim. Aliasing is refused in the read, not here: a linked
+    or multiply-named object is refused by the identity check in
+    `open_command_candidate`.
     """
     if not isinstance(key, str) or not key:
         raise TypeError('claim key must be a non-empty string')
@@ -146,9 +159,9 @@ def _identity(stat_result):
     the TTL sweep makes room for. The change time is a best-effort second
     discriminator, not a generation: a coarse clock gives two objects in one
     tick one value, and an outside `utime`/`chmod` re-logs the same object
-    once more (a log line, never a delivery or an unlink). Where ctime
-    cannot separate two objects the sweep's `on_name_vacated` retire decides
-    the last case; this is kept for when no retire runs.
+    once more. Where ctime cannot separate two objects the sweep's
+    `on_name_vacated` retire decides the last case; this is kept for when no
+    retire runs.
     """
     return (stat_result.st_dev, stat_result.st_ino, stat_result.st_ctime_ns)
 
@@ -179,17 +192,15 @@ def open_command_candidate(path):
     when neither the descriptor nor the name can be stat'd. Refused: a
     symlinked name, a non-regular or multiply-named object, and a name that
     stopped naming the opened object. A symlink is refused where the platform
-    offers ``O_NOFOLLOW`` (a broken one included, since the open refuses the
-    link before its target) and elsewhere by the identity check, so a linked
-    name delivers nothing either way; a platform without ``O_NOFOLLOW``
-    reports a broken link as absence. ``reason`` is None only when the name
-    named nothing — absence, not refusal.
+    offers ``O_NOFOLLOW`` (a broken one included) and elsewhere by the
+    identity check, so a linked name delivers nothing either way; a platform
+    without ``O_NOFOLLOW`` reports a broken link as absence. ``reason`` is
+    None only when the name named nothing — absence, not refusal.
 
     No exception escapes: a failing open or stat is itself a refusal, and a
     refused candidate is never removed here. Callers read and decide with the
     descriptor open, then act with it closed, because Windows cannot unlink a
-    file it still holds open; a visible final name may still have an older
-    non-atomic writer, so a caller whose parse fails must leave it in place.
+    file it still holds open; a parse failure must leave the name in place.
     """
     # O_NONBLOCK keeps a FIFO named like a command file from hanging the
     # drain on an open with no writer; a no-op for regular files, absent on
@@ -241,11 +252,9 @@ def on_name_vacated(callback):
 
     The sweep is the one moment that knows a name is free, and a replacement
     object can be indistinguishable from the recorded one (see `_identity`),
-    so the registry retires the name here rather than guess.
-
-    Contract: the callback runs INSIDE the sweep, holding the non-reentrant
-    `command_fs_lock`; it must not re-enter that lock (a self-deadlock in a
-    daemon thread nothing monitors) and must not raise.
+    so the registry retires the name here rather than guess. The callback
+    runs INSIDE the sweep holding the non-reentrant `command_fs_lock`; it
+    must not re-enter that lock and must not raise.
     """
     global _name_vacated
     _name_vacated = callback
@@ -280,8 +289,7 @@ def remove_expired(path, now, ttl, legacy=False):
         if _name_vacated is not None:
             # A successful unlink frees the name, so retire it rather than
             # leave a record for a gone object; the callback runs under
-            # command_fs_lock, so guard it — a raising one must not kill the
-            # sweeper.
+            # command_fs_lock, so guard it — a raising one must not kill it.
             key = (legacy_key(path.name) if legacy
                    else queue_key(path.parent.name, path.name))
             try:
@@ -301,7 +309,7 @@ def _publish(qdir, stem, document):
     The drain decodes UTF-8 and skips dot-prefixed names, so the encoding is
     fixed here rather than left to the locale -- a code-page file is
     undecodable on Windows and stays queued until the TTL sweep -- and the
-    final name only appears complete. Under `command_fs_lock`.
+    final name only appears complete.
     """
     tmp, destination = qdir / f'.{stem}.tmp', qdir / f'{stem}.json'
     try:
@@ -310,9 +318,9 @@ def _publish(qdir, stem, document):
         atomic_file.replace_atomically(str(tmp), str(destination))
     except (OSError, UnicodeEncodeError):
         # A refused publish must not leave its hidden temp behind: the
-        # zero-byte artifact would sit in the queue until the background
-        # collector's TTL sweep; rollback as result_store's atomic write,
-        # plus the encode failure write_text raises after creating it.
+        # zero-byte artifact would sit in the queue until the collector's TTL
+        # sweep; rollback as result_store's atomic write, plus the encode
+        # failure write_text raises after creating it.
         try:
             tmp.unlink()
         except OSError:
@@ -324,9 +332,8 @@ def _publish(qdir, stem, document):
 
 
 # ─── Dashboard event queue ───
-# Directory-per-token queue: commands/{token}_dashboard/<ms>_<counter>.json
-# Directory form (not a single file) because concurrent writes to one file
-# truncate each other.
+# Directory-per-token: commands/{token}_dashboard/<ms>_<counter>.json, so
+# concurrent writes do not truncate each other.
 def notify_dashboard(cmd_dir, token, payload):
     """Enqueue a dashboard SSE event. No-op if its queue cannot be named."""
     if path_safety.bad_token(token):
@@ -341,8 +348,8 @@ def notify_dashboard(cmd_dir, token, payload):
             dash_dir.mkdir(parents=True, exist_ok=True)
             # The fan-out drain's cursor orders events by name, so the stem
             # must be publish-ordered; both callers take `next_seq` under
-            # this same lock the publish is under, so a stem cannot be
-            # handed out in an order the writes do not follow.
+            # this lock the publish is under, so a stem is not handed out in
+            # an order the writes do not follow.
             event_id = next_seq(cmd_dir)
             # The bridge's own id and kind go AFTER the payload: the client
             # dedups on id, so a publisher must not forge one or the kind.
@@ -350,8 +357,7 @@ def notify_dashboard(cmd_dir, token, payload):
                      {**payload, 'id': event_id, 'kind': 'event'})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
-        # By-design residual; alert 124 is a false positive dismissed on the
-        # Security tab: this prefix prints, not the credential (issue 890).
+        # By-design residual; this prefix prints, not the credential (890).
         print(f'[DASH-NOTIFY-FAIL] '
               f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 
@@ -367,15 +373,17 @@ def next_seq(cmd_dir):
 
     Both fields are fixed width, so byte order is the order the two
     components were issued. The millisecond is not raw wall-clock time: each
-    mint takes `max(now, _ms_mark)` and raises the mark, and the mark and
-    counter are seeded once, before the first mint, from the highest values
-    on disk (`_seed_from_disk`). So a backwards clock step — within a process
-    or across a restart that left entries queued — never mints below one
-    already issued or surviving, and the queue's FIFO holds; the seed is what
-    ties a fresh process to the millisecond of the entries it inherits. The
-    width is the bound: order holds while the counter is below 10**20, which
-    `itertools.count` does not itself cap. Callers hold `command_fs_lock`; the
-    seed and clamp rely on it.
+    mint takes `max(now, _ms_mark)` and raises the mark, and once, before the
+    first mint, the seed honours every parseable survivor's millisecond and
+    takes the mark strictly above the highest (`_seed_from_disk`). So a
+    backwards clock step — within a process or across a restart that left
+    entries queued — never mints a stem below one already issued or
+    surviving, and the queue's FIFO holds. That the guarantee spans *every*
+    survivor width, not just the current one, is exactly why the seed honours
+    each millisecond and lands one above rather than rebasing the counter
+    alone. The width is the bound: order holds while the counter is below
+    10**20, which `itertools.count` does not itself cap. Callers hold
+    `command_fs_lock`; the seed and clamp rely on it.
     """
     global _ms_mark
     if not _seeded:
@@ -384,8 +392,7 @@ def next_seq(cmd_dir):
     return f'{_ms_mark:013d}_{next(_seq_counter):020d}'
 
 
-# ─── Per-token wake events: writers signal, SSE streams wait
-# (near-zero latency) ───
+# ─── Per-token wake events: writers signal, SSE streams wait ───
 def event(token):
     with _cmd_events_lock:
         ev = _cmd_events.get(token)
@@ -399,9 +406,9 @@ def _live_duplicate(qdir, cmd, command_ttl):
     """Return the delivery id of a live queued copy of `cmd`, or None.
 
     A live candidate is a complete, non-hidden `.json` entry young enough to
-    be delivered — `remove_expired`'s boundary — read through the same
-    descriptor check the drain uses. A refused or unreadable entry matches
-    nothing: a delivery the drain will not make is not a live delivery.
+    be delivered — `remove_expired`'s boundary — read through the drain's own
+    descriptor check. A refused or unreadable entry matches nothing: a
+    delivery the drain will not make is not a live delivery.
     """
     now = time.time()
     try:
@@ -433,11 +440,10 @@ def enqueue(cmd_dir, token, tab, cmd, *, command_ttl):
     """Append a command to the target's directory queue.
 
     Returns ``(delivery_id, duplicate)``. While an identical copy of `cmd`
-    is still queued for the target, a retry admits nothing and returns the
-    live delivery's id: a caller whose wait timed out cannot retract what
-    it queued, so its retry must wait on the first execution instead of
-    queueing a second one. Refuses an unsafe `tab` itself: this is the single
-    place the value becomes a directory name.
+    is still queued, a retry admits nothing and returns the live delivery's
+    id: a caller whose wait timed out cannot retract what it queued, so its
+    retry must wait on the first execution. Refuses an unsafe `tab`: this is
+    the single place the value becomes a directory name.
     """
     if tab and path_safety.unsafe_component(tab):
         raise ValueError(f'unsafe tab component: {tab!r}')
