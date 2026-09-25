@@ -257,8 +257,7 @@ def test_every_status_line_cell_is_styled_like_the_version_cell(tmp):
     The contrast control reads the custom properties, so it cannot see a
     cell whose class no rule styles at all: dropping `sl-meta` from the
     `.sl-v, .sl-meta` selector list leaves four status cells uncoloured and
-    that control green. This one resolves each shipped cell's class to the
-    colour it declares, which is the fact the selector list exists to keep.
+    that control green.
     """
     del tmp
     markup = (ROOT / 'dashboard' / 'index.html').read_text(encoding='utf-8')
