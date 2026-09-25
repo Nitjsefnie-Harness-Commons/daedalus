@@ -269,6 +269,18 @@ TOOL_COMMANDS = {
         ({'match': '*://*.example.com/*'},
          [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
                match='*://*.example.com/*')]),
+        # The empty pattern is the extension's refusal, not this surface's:
+        # swallowing it would turn "refused" into "kept the old scope".
+        ({'match': ''},
+         [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
+               match='')]),
+        # The clear travels beside the scope, never in its place, and an
+        # unstated clear is not sent.
+        ({'clear_scope': True},
+         [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1',
+               clearScope=True)]),
+        ({'clear_scope': False},
+         [_ext('_store_hf', 'store-hotfix', fixId='fix', code='1 + 1')]),
     ],
     'clear_hotfix': [({}, [_ext('_clear_hf', 'clear-hotfix', fixId='fix')])],
     'clear_hotfixes': [
@@ -383,7 +395,11 @@ TOOL_REFUSALS = {
     ],
     'inject_css': [({'css': ''}, ValueError, 'css required')],
     'remove_css': [({'css': ''}, ValueError, 'css required')],
-    'store_hotfix': [({'code': ''}, ValueError, 'code required')],
+    'store_hotfix': [
+        ({'code': ''}, ValueError, 'code required'),
+        ({'match': '*://*.example.com/*', 'clear_scope': True}, ValueError,
+         'clear_scope asks for the scope to go'),
+    ],
     'net_capture': [
         ({'max_requests': 'many'}, ValueError,
          'max_requests must be an integer'),

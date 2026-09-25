@@ -11,11 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+import _cli_parse  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
 run_cli = _cli_dispatch.run_cli
+refused = _cli_parse.refused
 
 SCOPE = '*://*.example.com/*'
 STORED = {'stored': 'fix', 'total': 1, 'permanent': False, 'match': None}
@@ -49,6 +51,47 @@ def test_store_hotfix_leaves_an_unstated_scope_unsaid(tmp):
         ('_store_hf', 'store-hotfix',
          {'fixId': 'fix', 'code': 'console.log(1)'}),
     ], recorded.calls
+
+
+def test_store_hotfix_can_ask_for_the_scope_to_be_removed(tmp):
+    """C12, CLI direction: `--clear-scope` reaches the extension as the
+    clear, not as a pattern.
+
+    The pattern an operator clears is the one they wrote, and the extension
+    is the only place that can decide whether a value is a pattern, so the
+    CLI states the instruction and forwards the code. Nothing here re-decides
+    the grammar.
+    """
+    del tmp
+    recorded, _out = run_cli(
+        ['store-hotfix', 'fix', '--code', 'console.log(1)', '--clear-scope'],
+        [STORED])
+
+    assert recorded.calls == [
+        ('_store_hf', 'store-hotfix',
+         {'fixId': 'fix', 'code': 'console.log(1)', 'clearScope': True}),
+    ], recorded.calls
+
+
+def test_store_hotfix_refuses_a_clear_alongside_a_scope(tmp):
+    """The two instructions are mutually exclusive at the parser, so there
+    is no argv that sends both.
+
+    Honouring either one would apply a decision the operator did not make,
+    and the loser is a scope they believe is set.
+    """
+    del tmp
+    code, err = refused(['store-hotfix', 'fix', '--code', 'console.log(1)',
+                         '--match', SCOPE, '--clear-scope'])
+
+    assert code == 2, err
+    assert '--clear-scope' in err, err
+    # The anti-vacuity half: the two flags on their own are each accepted, so
+    # the refusal above is the pair and not either flag.
+    assert _cli_parse.accepted(
+        ['store-hotfix', 'fix', '--code', 'x', '--match', SCOPE])
+    assert _cli_parse.accepted(
+        ['store-hotfix', 'fix', '--code', 'x', '--clear-scope'])
 
 
 def test_list_hotfixes_prints_the_scope_it_read_back(tmp):

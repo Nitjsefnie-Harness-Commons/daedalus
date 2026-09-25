@@ -70,6 +70,18 @@ function scopeCell(id) {
 function clickEdit(id) {
   rowFor(id).byText('edit').click();
 }
+// An armed button answers its first click by arming and un-arming itself on
+// a timer, so a click is what a browser's pending timer would not allow.
+function clickArmed(id, label) {
+  const immediate = globalThis.setTimeout;
+  const held = [];
+  globalThis.setTimeout = (callback) => { held.push(callback); return 0; };
+  const button = rowFor(id).byText(label);
+  button.click();
+  globalThis.setTimeout = immediate;
+  button.click();
+  return held.length;
+}
 function form() {
   return {
     match: container.find('[data-role=match]').value,
@@ -84,6 +96,11 @@ const rendered = {
 const headers = container.find('[data-role=list]').all()
   .filter((el) => el.tag === 'th')
   .map((el) => el.textContent.trim());
+const rowLabels = {};
+for (const id of ['scoped', 'bare']) {
+  rowLabels[id] = rowFor(id).all()
+    .filter((el) => el.tag === 'button').map((el) => el.textContent);
+}
 clickEdit('scoped');
 await bounded(settle(), 'edit a scoped fix', _dashnodeStepTimeoutMs);
 const scopedForm = form();
@@ -100,10 +117,18 @@ await bounded(settle(), 'edit an unscoped fix', _dashnodeStepTimeoutMs);
 const bareForm = form();
 container.find('[data-role=store]').click();
 await bounded(settle(), 'store an unscoped fix', _dashnodeStepTimeoutMs);
+listed = { version: '1.0', fixes: [
+  { id: 'scoped', ts: 1750000000000, code: 'console.log(1)', match: SCOPE },
+] };
+container.find('[data-role=refresh]').click();
+await bounded(settle(), 'refresh onto the scoped fix again',
+               _dashnodeStepTimeoutMs);
+clickArmed('scoped', 'clear scope');
+await bounded(settle(), 'clear a scope', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  rendered, headers, scopedForm, bareForm, commands: commands.filter(
-    (c) => c.type === 'store-hotfix'),
+  rendered, headers, rowLabels, scopedForm, bareForm,
+  commands: commands.filter((c) => c.type === 'store-hotfix'),
 }));
 phase('dashboard harness finished');
 })().catch(leave);
@@ -112,7 +137,7 @@ phase('dashboard harness finished');
 
 def _hotfix_scope(_tmp):
     harness = _dashnode.DashboardNodeHarness(
-        _HOTFIX_HARNESS, bounded_steps=7, module=True, arguments=(
+        _HOTFIX_HARNESS, bounded_steps=9, module=True, arguments=(
             ROOT / 'dashboard' / 'sections' / 'hotfixes.js',))
     return json.loads(_dashnode.run_dashboard_node(harness).stdout)
 
@@ -160,6 +185,35 @@ def test_a_hotfix_stored_without_a_scope_reads_as_having_none(_tmp):
     assert seen['bareForm']['match'] == '', seen
     # Absent travels as absent: an empty pattern would be refused by the
     # extension as one that does not parse.
+    assert 'match' not in seen['commands'][1], seen
+
+
+def test_the_row_removes_a_scope_without_rewriting_the_code(_tmp):
+    """C12, dashboard direction: the control that asks for a scope to go.
+
+    The panel is where an operator who scoped a fix too narrowly comes to
+    widen it again, and a scope that can only be set leaves them editing the
+    code to work around it. The command carries the code the row already
+    shows — a store refuses a fix with none, and the operator's own source is
+    what must survive — and the clear beside it rather than in place of a
+    pattern.
+    """
+    seen = _hotfix_scope(_tmp)
+
+    clear = seen['commands'][2]
+    # The anti-vacuity half: the button is on the SCOPED row, and the two
+    # stores above it are the same panel sending a scope and sending none.
+    assert 'clear scope' in seen['rowLabels']['scoped'], seen
+    # Nothing to take away on a fix that carries no scope, so nothing is
+    # offered: a button on both rows is one the unscoped row cannot use.
+    assert 'clear scope' not in seen['rowLabels']['bare'], seen
+    assert clear['fixId'] == 'scoped', seen
+    assert clear['code'] == 'console.log(1)', seen
+    assert clear['clearScope'] is True, seen
+    # Not a pattern, and not the absent that means "keep": the panel has to
+    # say remove, or the extension keeps the scope the operator is looking at.
+    assert 'match' not in clear, seen
+    assert seen['commands'][0]['match'] == '*://*.example.com/*', seen
     assert 'match' not in seen['commands'][1], seen
 
 
