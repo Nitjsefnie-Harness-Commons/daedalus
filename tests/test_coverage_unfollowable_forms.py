@@ -161,6 +161,63 @@ list(map(subprocess.run, [['python3', 'child.py']]))
     )
 
 
+def _opaque_callee_cases():
+    """A launcher handed to a callee whose name says nothing.
+
+    The other tables here name their callees — `operator.call`,
+    `Thread`, `submit` — and a guard that gated its argument rule on a
+    list of those names would satisfy every one of them. That is the
+    enumeration this branch removed, and a table keyed on callee
+    spellings cannot catch its return. These rows cannot be tuned to:
+    the callee names below are arbitrary, and the rule is indifferent to
+    all of them, so a gate has to name these too to keep them clean and
+    there is no reason for it to.
+    """
+    return (
+        ('single letter', """import subprocess
+f(subprocess.run)
+""", 'f(subprocess.run)'),
+        ('arbitrary verb', """import subprocess
+consume(subprocess.run)
+""", 'consume(subprocess.run)'),
+        ('arbitrary noun', """import subprocess
+holder(subprocess.run, ['python3', 'child.py'])
+""", 'holder('),
+        ('keyword under an arbitrary callee', """import subprocess
+dispatch(subprocess.run, argv=['python3', 'child.py'])
+""", 'dispatch('),
+        ('alias handed on', """import subprocess
+from subprocess import run
+send(run)
+""", 'send('),
+    )
+
+
+def _query_shape_cases():
+    """A launcher mentioned to a callee that inspects it is still refused.
+
+    These three were clean on the base guard and released by a narrowing
+    that read the callee's name to decide whether it would invoke what
+    it was given. They are exactly where a future narrowing would release
+    them again, so the verdict is pinned here rather than left to the
+    absence of a test.
+    """
+    return (
+        ('assertIs', """import subprocess
+from unittest.mock import patch
+with patch('subprocess.run') as patched:
+    assertIs(subprocess.run, patched)
+""", 'assertIs('),
+        ('assertIn', """import subprocess
+registry = {}
+assertIn(subprocess.run, registry)
+""", 'assertIn('),
+        ('callable query', """import subprocess
+callable(subprocess.run)
+""", 'callable('),
+    )
+
+
 def _lambda_default_cases():
     """A lambda default binds its parameter as surely as a def's does."""
     return (
@@ -261,6 +318,16 @@ def test_a_launching_callee_refuses_a_hidden_launcher(tmp):
     _refused(_launching_callee_cases())
 
 
+def test_an_opaque_callee_refuses_a_hidden_launcher(tmp):
+    del tmp
+    _refused(_opaque_callee_cases())
+
+
+def test_a_query_shape_stays_refused(tmp):
+    del tmp
+    _refused(_query_shape_cases())
+
+
 def test_a_lambda_default_refuses_a_hidden_launcher(tmp):
     del tmp
     _refused(_lambda_default_cases())
@@ -324,13 +391,23 @@ def _unfollowable_snippets():
 _DECORATOR_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_decorated_definition_refuses_a_hidden_launcher(None)')
+# One needle, one row: the issue-620 argument table, the launching table,
+# the opaque-callee table and the query table all reach the argument arm,
+# so splitting them across rows would pin one change twice and read as
+# more changes than there are.
 _ARGUMENT_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_cwd_less_call_argument_refuses_a_hidden_launcher('
-    'None)')
-_LAUNCHING_INVOKE = (
+    'None); form_suite.test_a_launching_callee_refuses_a_hidden_'
+    'launcher(None); form_suite.test_an_opaque_callee_refuses_a_hidden_'
+    'launcher(None); form_suite.test_a_query_shape_stays_refused(None)')
+# The enumeration this branch removed, put back where it was. The
+# opaque-callee rows are what catch it: their callee names carry no
+# information, so no list can be tuned to satisfy them.
+_ENUMERATION_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_launching_callee_refuses_a_hidden_launcher(None)')
+    'form_suite.test_an_opaque_callee_refuses_a_hidden_launcher(None); '
+    'form_suite.test_a_query_shape_stays_refused(None)')
 _LAMBDA_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_lambda_default_refuses_a_hidden_launcher(None)')
@@ -373,9 +450,40 @@ _ARGUMENTS = (
     "    for argument in arguments:\n"
     "        yield from _carried_parts(argument)\n",
     "def _call_argument_parts(value):\n    yield from ()\n")
+# The enumeration this branch removed, reinstated in front of the arm. The
+# list holds the callee and keyword names the case tables name, so it is
+# the strongest form of the mistake: a gate tuned to satisfy every row.
+# Only the opaque-callee rows catch it, because their callee names
+# carry no information and a list cannot be tuned to them.
+_ENUMERATION = (
+    "def _unfollowable_launcher_bindings(tree, facts):\n",
+    "_INVOKING = frozenset({'call', 'partial', 'map', 'Thread',\n"
+    "                       'submit', 'register', 'side_effect'})\n"
+    "\n"
+    "\n"
+    "def _invoking_callee(node):\n"
+    "    function = node.func\n"
+    "    if isinstance(function, ast.Attribute):\n"
+    "        name = function.attr\n"
+    "    elif isinstance(function, ast.Name):\n"
+    "        name = function.id\n"
+    "    else:\n"
+    "        name = ''\n"
+    "    return name in _INVOKING or any(\n"
+    "        keyword.arg in _INVOKING for keyword in node.keywords)\n"
+    "\n"
+    "\n"
+    "def _unfollowable_launcher_bindings(tree, facts):\n")
 # A bare module name is a launcher only where a launch method is read off
 # it. Judging it in an argument position too must turn the module handed
 # to patch.object rows red.
+_ENUMERATION_ARM = (
+    "                     or _carries_launch_value(_call_argument_parts("
+    "node),\n"
+    "                                              facts))):",
+    "                     or (_invoking_callee(node)\n"
+    "                         and _carries_launch_value(\n"
+    "                             _call_argument_parts(node), facts)))):")
 _MODULE_IN_ARGUMENT = (
     "                     or _carries_launch_value(_call_argument_parts("
     "node),\n"
@@ -396,8 +504,8 @@ _UNFOLLOWABLE_MUTATIONS = (
      _DECORATOR_INVOKE),
     ('lambda header form', 'bindings', (_HEADER_FORMS,), _LAMBDA_INVOKE),
     ('call arguments', 'bindings', (_ARGUMENTS,), _ARGUMENT_INVOKE),
-    ('launching callee', 'bindings', (_ARGUMENTS,),
-     _LAUNCHING_INVOKE),
+    ('callee-name enumeration', 'bindings',
+     (_ENUMERATION, _ENUMERATION_ARM), _ENUMERATION_INVOKE),
     ('module name in argument', 'bindings', (_MODULE_IN_ARGUMENT,),
      _CLEAN_INVOKE),
     ('starred call argument', 'bindings', (_STARRED,), _ARGUMENT_INVOKE),
