@@ -192,17 +192,21 @@ def test_a_fresh_subscription_receives_entries_queued_when_it_connected(tmp):
 
 
 def test_a_second_drain_with_the_same_cursor_delivers_nothing(tmp):
-    """Resetting the cursor each drain would redeliver the whole retained
-    queue; the cursor makes the second pass a no-op."""
+    """Resetting the cursor each drain would redeliver an entry this
+    connection already consumed. The entry has to still be on disk across
+    the two drains for the second pass to be able to see it, so a peer
+    registers but never drains and holds the removal back."""
     service, drain = _service('fanout_same_cursor')
     token = 'tok'
     qdir = _queue(service, tmp, token)
-    _write_event(qdir, '0000000000001_00000001', type='result')
+    entry = _write_event(qdir, '0000000000001_00000001', type='result')
     frames = []
     _sub_id, killed = service.register(token, DASHBOARD)
+    _peer_id, _peer_killed = service.register(token, DASHBOARD)
 
     first = drain.drain_dashboard(
         qdir, token, killed, command_ttl=90, frame_writer=frames.append)
+    assert entry.exists(), 'the fixture unlinked before the second drain'
     second = drain.drain_dashboard(
         qdir, token, killed, command_ttl=90, frame_writer=frames.append)
 
