@@ -102,14 +102,18 @@ function _matchesScope(parsed, identity) {
 
 // What the CDP channel compares and what the site scope is matched against.
 // The fragment is left out: a hash change is not a new document, and the
-// MAIN channel, which binds by document, would still deliver to it. Chrome
-// supplies this on every content-script message, so a null here is a
-// request the worker cannot bind rather than a page's path.
+// MAIN channel, which binds by document, would still deliver to it. The
+// authority is spelled out rather than folded into `origin` because
+// `file:` has none — its origin is the string "null", which a pattern
+// compiled from the pattern's own text can never match. Chrome supplies
+// this on every content-script message, so a null here is a request the
+// worker cannot bind rather than a page's path.
 function _pageIdentity(url) {
   if (typeof url !== 'string' || url === '') return null;
   try {
     const parsed = new URL(url);
-    return parsed.origin + parsed.pathname + parsed.search;
+    return parsed.protocol + '//' + parsed.host + parsed.pathname
+      + parsed.search;
   } catch (_) {
     return null;
   }
@@ -138,7 +142,8 @@ function _scopeRefusal(fix, identity) {
 // and one evaluation leaves no window between the check and the run.
 const DOCUMENT_GONE = 'the document that asked for this fix is no longer'
   + ' the tab\'s live document';
-const PAGE_IDENTITY = 'location.origin + location.pathname + location.search';
+const PAGE_IDENTITY = 'location.protocol + \'//\' + location.host'
+  + ' + location.pathname + location.search';
 
 async function _replayViaCdp(chromeTabId, identity, code) {
   // A capture or a kept session already owns the attachment; reuse it and
@@ -311,7 +316,7 @@ async function handleStoreHotfix(cmd) {
       return postResult(cmd._execution, null,
         'Unusable match pattern: '
         + (typeof cmd.match === 'string' ? cmd.match
-          : (JSON.stringify(cmd.match) ?? typeof cmd.match)),
+          : String(JSON.stringify(cmd.match))),
         'extension');
     }
     const outcome = await _withHotfixLock(async () => {
