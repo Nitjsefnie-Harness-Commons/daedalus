@@ -9,10 +9,11 @@ any other callee does so when it spells one readably (`cwd=`, a `**`
 spread of a mapping literal naming `cwd`, or `dict(cwd=...)`); a
 launcher bound where the alias walk cannot follow — a decorator list
 binds the decorated name as a default binds its parameter — or carried
-anywhere in a `cwd=`-less call is refused there; a root owner reached
-any way but a plain attribute read stops proving ROOT; a star import
-removes the builtin-dict exemption; and `chdir` or `fchdir` on any base
-or through a from-import alias moves the cwd launches inherit.
+by a `cwd=`-less call the guard reads as invoking what it is given, is
+refused there; a root owner reached any way but a plain attribute read
+stops proving ROOT; a star import removes the builtin-dict exemption;
+and `chdir` or `fchdir` on any base or through a from-import alias
+moves the cwd launches inherit.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`), an owner or
@@ -20,6 +21,18 @@ chdir reached by a call result, a call argument carrying the subprocess
 module bare rather than a launcher read off it
 (`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
 on an unrecognised callee.
+
+The carrier walk has its own depth, and it is shallower than the syntax
+it reads. It descends through a call's own arguments, through
+containers, subscripts and a callee chain, and it stops at a leaf it
+does not recognise: a conditional expression, a boolean operator, a
+lambda body, an f-string and a subscript's slice each hide a launcher
+from every arm here, in the argument position and in the decorator and
+assignment binding positions alike. That leaf handling is pre-existing,
+shared by all the arms, and unchanged on this branch; it is filed as
+issue #1114, which is where the fix belongs. The `carry a launcher`
+clauses above are true of the leaves the walk does reach, and only of
+those.
 """
 import ast
 
