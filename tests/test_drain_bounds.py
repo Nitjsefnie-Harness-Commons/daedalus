@@ -251,10 +251,18 @@ def drain(process):
 """) == []
 
 
-def test_the_real_cross_scope_shape_is_the_speedharness(tmp):
+def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
+    """The kill-and-report sequence is one helper, and both callers use it.
 
+    The shape used to live in `_speedharness.py` and is now the shared
+    `tests/_processtree.py`, because the Node gate's launcher needs the same
+    thing and a second copy of it is the defect issue #1094 records. So
+    this reads the shape at its new home, asserts both callers call the one
+    helper rather than re-implementing it, and keeps the bounded reap and
+    the clean analysis it asserted before the move.
+    """
     del tmp
-    relative = 'tests/_speedharness.py'
+    relative = 'tests/_processtree.py'
     source = (ROOT / relative).read_text(encoding='utf-8')
     tree = ast.parse(source)
     lines = source.splitlines()
@@ -262,19 +270,29 @@ def test_the_real_cross_scope_shape_is_the_speedharness(tmp):
     for function in ast.walk(tree):
         if not isinstance(function, ast.FunctionDef):
             continue
-        if function.name == '_kill_process_tree':
+        if function.name == '_kill_tree':
             stops = function
-        elif function.name == '_reap_process':
+        elif function.name == '_reap':
             drains = function
     assert stops is not None and drains is not None
     assert any('process.kill()' in lines[node.lineno - 1]
                for node in ast.walk(stops)
                if isinstance(node, ast.Call)), lines
-    assert any('process.wait(timeout=_CLEANUP_TIMEOUT)'
+    assert any('process.wait(timeout=cleanup_timeout)'
                in lines[node.lineno - 1]
                for node in ast.walk(drains)
                if isinstance(node, ast.Call)), lines
     assert scan._analyze(relative, source) == []
+    for caller in ('tests/_speedharness.py', 'tests/_noderun.py'):
+        text = (ROOT / caller).read_text(encoding='utf-8')
+        assert 'cleanup_process_tree(' in text, caller
+        # No second copy: neither caller defines a kill or a reap of its own.
+        assert not any(
+            isinstance(node, ast.FunctionDef)
+            and node.name in ('_kill_process_tree', '_reap_process',
+                              '_kill_tree', '_reap')
+            for node in ast.walk(ast.parse(text))), caller
+        assert scan._analyze(caller, text) == []
 
 
 def test_a_non_kill_unbounded_drain_is_not_flagged(tmp):
