@@ -227,6 +227,67 @@ def test_the_result_wait_outlives_a_truncated_peek(tmp):
     assert peeks == ['/result?tab=tab4&delivery=d1'] * 3, seen
 
 
+_WAIT_HARNESS = (
+    'import inspect\nfrom daedalus_cli import transport\n'
+    'class _Clock:\n'
+    '    def __init__(self):\n'
+    '        self.now, self.sleeps = 1000.0, []\n'
+    '    def monotonic(self):\n'
+    '        return self.now\n'
+    '    def sleep(self, seconds):\n'
+    '        self.sleeps.append(seconds)\n'
+    '        self.now += seconds\n'
+    'transport.time = _Clock()\n'
+    'calls = []\n'
+    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
+    '    calls.append(path)\n'
+    '    if "consume=1" in path:\n'
+    '        return {"consumed": True, "resultGeneration": "g1"}\n'
+    '    return {"id": "c1", "deliveryId": "d1", "resultGeneration": "g1",\n'
+    '            "result": 7, "error": None}\n'
+    'transport._request = fake_api\n'
+    'res = transport.wait_for_result("c1", "extension", "d1", 2)\n'
+    'sig = inspect.signature(transport.wait_for_result)\n'
+    'print("SLEEPS", transport.time.sleeps)\n'
+    'print("INTERVAL", sig.parameters["interval"].default)\n'
+    'print("POLLS", len(calls))\n'
+    'print("RESULT", res if res is None else res["result"])\n')
+
+
+def _wait_harness_output(stdout):
+    """(sleeps, polls, result, interval); a zero-sleep waiter prints []."""
+    out = dict(  # ''.split(' ', 1) is ['']: a spaceless line must not parse
+        line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
+    return (json.loads(out['SLEEPS']), int(out['POLLS']), out['RESULT'],
+            float(out['INTERVAL']))
+
+
+def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
+    """The one sleep an available result costs is the ramp's opening.
+
+    The waiter charged every waited command its whole interval up front,
+    so an available result still cost 500ms. The MCP poller had that
+    shape and was fixed first. A virtual clock records the sleeps the
+    loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
+    against a 0.25s bound. The fake charges the sleep, not the request,
+    so the request budget is tests/test_cli.py's stalled-poll test, and
+    the backoff is test_cli_result_wait.py's.
+
+    The opening is also held BELOW the interval this call waits on, and
+    that default is read off the signature rather than restated here, so
+    a default lowered to meet the opening -- the flat-interval shape this
+    control exists against -- reds instead of passing unnoticed.
+    """
+    del tmp
+    r = run_python(_WAIT_HARNESS, cli_env(DAEDALUS_TOKEN=TOK))
+    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
+    sleeps, polls, result, interval = _wait_harness_output(r.stdout)
+    assert result == '7', r.stdout
+    assert polls == 2, r.stdout
+    assert sleeps == [0.02], r.stdout
+    assert sleeps[0] < interval, r.stdout
+
+
 def test_the_result_wait_reports_a_timeout_when_every_peek_is_cut_off(tmp):
     """Retrying is bounded by the deadline, and ends the usual way."""
     del tmp

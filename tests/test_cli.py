@@ -388,58 +388,6 @@ def test_waiter_leaves_a_foreign_result_in_place(tmp):
         assert body.get('result') == 'not yours', body
 
 
-_WAIT_HARNESS = (
-    'from daedalus_cli import transport\n'
-    'class _Clock:\n'
-    '    def __init__(self):\n'
-    '        self.now, self.sleeps = 1000.0, []\n'
-    '    def monotonic(self):\n'
-    '        return self.now\n'
-    '    def sleep(self, seconds):\n'
-    '        self.sleeps.append(seconds)\n'
-    '        self.now += seconds\n'
-    'transport.time = _Clock()\n'
-    'calls = []\n'
-    'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
-    '    calls.append(path)\n'
-    '    if "consume=1" in path:\n'
-    '        return {"consumed": True, "resultGeneration": "g1"}\n'
-    '    return {"id": "c1", "deliveryId": "d1", "resultGeneration": "g1",\n'
-    '            "result": 7, "error": None}\n'
-    'transport._request = fake_api\n'
-    'res = transport.wait_for_result("c1", "extension", "d1", 2)\n'
-    'print("SLEEPS", transport.time.sleeps)\n'
-    'print("POLLS", len(calls))\n'
-    'print("RESULT", res if res is None else res["result"])\n')
-
-
-def _wait_harness_output(stdout):
-    """(sleeps, polls, result); a zero-sleep waiter prints SLEEPS []."""
-    out = dict(  # ''.split(' ', 1) is ['']: a spaceless line must not parse
-        line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
-    return (json.loads(out['SLEEPS']), int(out['POLLS']), out['RESULT'])
-
-
-def test_the_result_wait_records_the_ramp_opening_sleep(tmp):
-    """The one sleep an available result costs is the ramp's opening.
-
-    The waiter charged every waited command its whole interval up front,
-    so an available result still cost 500ms. The MCP poller had that
-    shape and was fixed first. A virtual clock records the sleeps the
-    loop REQUESTS, so this pins the ramp's opening: macOS read 0.357s
-    against a 0.25s bound. The fake charges the sleep, not the request:
-    the request budget is the stalled-poll test's here, and the backoff
-    is test_cli_result_wait.py's.
-    """
-    del tmp
-    r = run_python(_WAIT_HARNESS, cli_env(DAEDALUS_TOKEN=TOK))
-    assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
-    sleeps, polls, result = _wait_harness_output(r.stdout)
-    assert result == '7', r.stdout
-    assert polls == 2, r.stdout
-    assert sleeps == [0.02], r.stdout
-
-
 def test_a_stalled_poll_cannot_outlast_the_requested_timeout(tmp):
     """The timeout bounds the whole wait, not just the top of each lap.
 
