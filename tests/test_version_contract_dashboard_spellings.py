@@ -47,6 +47,10 @@ _RAIL_SPELLINGS = {
     'unquoted_space_before_gt': '<div class=rail-foot >v9.9.9</div>',
     'unquoted_gt_in_earlier_attribute': (
         "<div title='a>b' class=rail-foot>v9.9.9</div>"),
+    'quoted_lt_in_trailing_attribute': (
+        "<div class='rail-foot' title='a<b'>v9.9.9</div>"),
+    'double_quoted_lt_in_trailing_attribute': (
+        '<div class="rail-foot" data-x="a<b">v9.9.9</div>'),
 }
 _STATUS_SPELLINGS = {
     'unquoted': '<span class=sl-v>9.9.9</span>',
@@ -245,6 +249,19 @@ def test_trailing_region_reads_a_quoted_gt_whole(tmp_path):
     """A `>` inside a later attribute value does not end the tag early."""
     _assert_duplicate_spelling_refused(
         tmp_path, "<div class='rail-foot' title='a>b'>v9.9.9</div>", _RAIL)
+
+
+def test_trailing_region_reads_a_quoted_lt_whole(tmp_path):
+    """A `<` inside a later attribute value does not end the tag early.
+
+    Both quote spellings, so the twin is not itself a single-spelling
+    control: a region narrowed at `<` inside one of them fails here
+    whichever of the two it is.
+    """
+    for name in ('quoted_lt_in_trailing_attribute',
+                 'double_quoted_lt_in_trailing_attribute'):
+        _assert_duplicate_spelling_refused(
+            Path(tmp_path) / name, _RAIL_SPELLINGS[name], _RAIL)
 
 
 def test_status_line_shipped_class_names_one_element(tmp_path):
