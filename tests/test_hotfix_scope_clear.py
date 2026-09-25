@@ -34,6 +34,51 @@ from test_hotfix_scope import (  # noqa: E402
 CLEAR_FIELD = 'clearScope'
 
 
+def test_a_clear_that_is_not_a_boolean_is_refused(tmp):
+    """A flag the store cannot read is a refusal, not a silent keep.
+
+    The clear is read as `=== true`, so a hand-written command carrying `1`
+    or `'true'` is a value the store cannot act on. Answering it with
+    success and leaving the scope exactly where it was is the swallowed
+    instruction this command exists to end, reached through a spelling no
+    shipped surface sends — so it is unreachable except by a credentialed
+    operator writing the command by hand, and it must still fail closed.
+    `handleSetPermanent` refuses a non-boolean `permanent` the same way.
+    """
+    del tmp
+    seed = {'id': 'fix1', 'code': FIX, 'match': SCOPE, 'permanent': False}
+    for value in ('true', 1):
+        outcome = run_hotfix_case({
+            'documents': [SITE], 'ask': False, 'fixes': [seed],
+            'store': [{'id': 'store-truthy', 'fixId': 'fix1',
+                       'code': 'clobbered', CLEAR_FIELD: value}],
+        })
+        assert outcome['record'] == [seed], (value, outcome)
+        assert outcome['posted'][0]['error'], (value, outcome)
+        assert outcome['posted'][0]['result'] is None, (value, outcome)
+    # The anti-vacuity half: real booleans on the same field and the same
+    # fix are still accepted, so the refusal above reads the value's type
+    # rather than the field's presence, and `false` is a value meaning
+    # "leave the scope alone" rather than an error.
+    accepted = run_hotfix_case({
+        'documents': [SITE], 'ask': False, 'fixes': [seed],
+        'store': [
+            {'id': 'store-truthy', 'fixId': 'fix1', 'code': 'clobbered',
+             CLEAR_FIELD: 'true'},
+            {'id': 'store-true', 'fixId': 'fix1', 'code': '2',
+             CLEAR_FIELD: True},
+            {'id': 'store-false', 'fixId': 'fix1', 'code': '3',
+             CLEAR_FIELD: False},
+        ],
+    })
+    posted = {row['id']: row for row in accepted['posted']}
+    errors = [row['error'] for row in accepted['posted']]
+    assert errors[1:] == [None, None], accepted
+    assert 'clearScope' in errors[0], accepted
+    assert posted['store-true']['result']['match'] is None, accepted
+    assert posted['store-false']['result']['match'] is None, accepted
+
+
 def test_a_cleared_scope_runs_the_fix_where_the_scope_had_excluded_it(tmp):
     """C12: a scope can be removed, and the fix runs again where it could not.
 

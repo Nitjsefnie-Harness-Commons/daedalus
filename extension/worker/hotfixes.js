@@ -317,6 +317,12 @@ async function handleStoreHotfix(cmd) {
     if (!cmd.fixId || !cmd.code) return postResult(
       cmd._execution, null, 'Missing fixId or code', 'extension');
     // The clear is a boolean beside the scope, not a value in it.
+    if (cmd.clearScope !== undefined
+        && typeof cmd.clearScope !== 'boolean') {
+      return postResult(cmd._execution, null,
+        'clearScope must be a boolean, not '
+        + JSON.stringify(cmd.clearScope), 'extension');
+    }
     const clearing = cmd.clearScope === true;
     const stated = cmd.match !== undefined && cmd.match !== null;
     if (clearing ? stated : (stated && !_parseMatch(cmd.match))) {
