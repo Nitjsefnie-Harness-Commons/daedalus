@@ -26,11 +26,9 @@ def _names_a_mapping(side, value):
 
 
 def set_operands(operator, left, right, state):
-    """The two operand values when this is a set operation, else None.
-
-    A mapping operand keeps the merge that already handles it; an operation
-    over a set is one whatever the other side proves itself to be.
-    """
+    """A mapping operand keeps the merge that already handles it; an
+    operation over a set is one whatever the other side proves itself
+    to be."""
     if not isinstance(operator, SET_OPERATORS):
         return None
     sides = (left, right)
@@ -52,13 +50,9 @@ def _elements(value):
 
 
 def fold_set_operation(operator, operands, node):
-    """The set a set operation's result must still hold.
-
-    `A | B`, `A ^ B` and `A & B` are subsets of `A | B` and `A - B` a subset
-    of `A`, so this joins both operands for the first three and the left
-    alone for the last -- the most precise each rule permits. A set has no
-    positions and equal elements collapse at runtime, so the elements join
-    one dynamic slot.
+    """`A | B`, `A ^ B` and `A & B` are subsets of `A | B` and `A - B` a
+    subset of `A`, so this joins both operands for the first three and the
+    left alone for the last -- the most precise each rule permits.
     """
     sides = operands[:1] if isinstance(operator, ast.Sub) else operands
     joined = merge_yielded(
