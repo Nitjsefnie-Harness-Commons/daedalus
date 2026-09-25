@@ -69,6 +69,7 @@
 !/.github/PULL_REQUEST_TEMPLATE.md
 !/.github/ci-thresholds.json
 !/.github/dependabot.yml
+!/.github/suite-timings.json
 
 # ─── .github/ISSUE_TEMPLATE ───
 !/.github/
@@ -234,6 +235,8 @@
 !/scripts/ci/line_lengths.py
 !/scripts/ci/plan_timed_matrix.py
 !/scripts/ci/ratchet.py
+!/scripts/ci/reference_workload.py
+!/scripts/ci/refresh_timings.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
 !/scripts/ci/thresholds.py
@@ -575,6 +578,7 @@
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
 !/tests/test_timed_planner.py
+!/tests/test_timed_refresh.py
 !/tests/test_timing_selection.py
 !/tests/test_type_errors.py
 !/tests/test_unresolved_routes.py
