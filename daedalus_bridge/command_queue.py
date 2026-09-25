@@ -6,7 +6,6 @@ import os
 import stat
 import threading
 import time
-import uuid
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge.log_safe import log_safe
@@ -288,7 +287,7 @@ def _publish(qdir, stem, document):
 
 
 # ─── Dashboard event queue ───
-# Directory-per-token queue: commands/{token}_dashboard/<ts>_<uuid>.json
+# Directory-per-token queue: commands/{token}_dashboard/<ms>_<counter>.json
 # Directory form (not single file) because concurrent writes to one file
 # truncate each other.
 def notify_dashboard(cmd_dir, token, payload):
@@ -303,7 +302,15 @@ def notify_dashboard(cmd_dir, token, payload):
     try:
         with command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
-            event_id = f'{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}'
+            # Share enqueue's monotonic stem so byte order is publish order
+            # within and across milliseconds: the fan-out drain's cursor
+            # orders events by name, so two events in one millisecond must
+            # not order by a random suffix or the later one sorts below a
+            # window's cursor and is dropped as already-consumed. Both
+            # callers take `next_seq` under this same `command_fs_lock` the
+            # publish is taken under, so the counter and the write it names
+            # cannot fall out of order.
+            event_id = next_seq()
             # The bridge's own id and kind are written AFTER the payload: a
             # fan-out client dedups on id, so a publisher must not be able
             # to forge one, nor to fake the kind the reader dispatches on.
@@ -325,7 +332,13 @@ def notify_dashboard(cmd_dir, token, payload):
 # Legacy single-file drops (commands/{token}[_{tab}].json) are still delivered
 # for the documented raw-write escape hatch.
 def next_seq():
-    """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>."""
+    """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>.
+
+    Both the millisecond prefix and the counter are fixed width, so byte
+    order is the order the counter was taken. Callers take this under
+    `command_fs_lock` — the same lock the publish is taken under — so the
+    stem cannot be handed out in an order the writes do not follow.
+    """
     return f'{int(time.time() * 1000):013d}_{next(_seq_counter):06d}'
 
 
