@@ -37,10 +37,12 @@ const GM_QUOTA_BYTES = 1024 * 1024;
 // Chrome's own enforcement stays the backstop — the extension asks for no
 // `unlimitedStorage`, so a browser cap is still there under this one. The 3 MB
 // reserve spends on the extension's own four keys — daedalus-token,
-// daedalus-server, daedalus-segment-origins, daedalus-seen-dids — of which
-// the ledger is the largest term: count-capped at 1000 entries, and a delivery
-// id is `<ms>_<counter>`, so 1000 of them is on the order of 22 KB and the
-// reserve is roughly 140x that term. Only `gm:` keys are summed: the
+// daedalus-server, daedalus-segment-origins, daedalus-seen-dids. It is sized
+// against the largest of them that a machine keeps count-bounded: the ledger,
+// capped at 1000 entries, and a delivery id is `<ms>_<counter>`, so 1000 of them
+// is on the order of 22 KB and the reserve is roughly 140x that term.
+// `daedalus-segment-origins` has no count cap, but only an operator adds to it
+// and a page cannot write a `daedalus-` key. Only `gm:` keys are summed: the
 // extension's own keys are what the reserve pays for, not page budget.
 const GM_TOTAL_QUOTA_BYTES = 5 * 1024 * 1024;
 
