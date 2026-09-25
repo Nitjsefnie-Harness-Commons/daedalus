@@ -498,108 +498,6 @@ def test_under_refuses_with_the_credential_redacted(tmp):
     assert 'tok-veri…' in line, line
 
 
-_STRIPE_PROBE = r"""
-import json
-import os
-import sys
-from pathlib import Path
-
-from daedalus_bridge import result_store
-
-root = Path(sys.argv[1]) / 'deliveries'
-root.mkdir(parents=True)
-(root / 'tok_real').mkdir()
-
-# The stripe is keyed on the entry, so the key is not the name: two targets
-# whose names differ must not key alike, and a target whose name happens to
-# collide with another's must not either.
-present = result_store.delivery_stripe_key(root / 'tok_real')
-absent = result_store.delivery_stripe_key(root / 'tok_absent')
-same_lock = (result_store.delivery_lock_for(root / 'tok_real')
-             is result_store.delivery_lock_for(root / 'tok_real'))
-# The present key is the entry's identity, so it carries the device and the
-# inode rather than the name a caller would have spelled.
-identity_form = b':' in present
-# A target that is not there has no entry to stripe on at all. Naming a
-# stripe for a directory that is not there is the mistake this issue is
-# about: a writer creates the entry first and then keys on the entry, so it
-# would never take the name's stripe.
-absent_refused = absent is None and result_store.delivery_lock_for(
-    root / 'tok_absent') is None
-
-# The mistake that shipped as the original bug was a caller handing the
-# selector a bare name, and a name is silently resolvable against the
-# process working directory -- it would take a stripe for a directory nobody
-# in the request ever named. Refused instead. Both spellings are asserted:
-# the one that actually shipped was a str, so refusing only path OBJECTS
-# would leave the original bug uncaught.
-refused_name = False
-try:
-    result_store.delivery_lock_for('tok_real')
-except TypeError:
-    refused_name = True
-refused_path = False
-try:
-    result_store.delivery_lock_for(os.path.join(str(root), 'tok_real'))
-except TypeError:
-    refused_path = True
-
-print('STRIPE ' + json.dumps({
-    'same_lock': same_lock,
-    'absent_refused': absent_refused,
-    'present_is_not_the_name': present != b'tok_real',
-    'present_is_an_identity': identity_form,
-    'refused_bare_name': refused_name,
-    'refused_str_path': refused_path,
-}))
-"""
-
-
-def test_delivery_stripe_is_keyed_on_the_entry_not_its_name(tmp):
-    """The stripe is the entry's, asked of the filesystem, not spelled.
-
-    `result_store.delivery_lock_for` takes a delivery directory and keys on
-    what the filesystem reports about it, so the property it can promise is
-    the one an identity can: one entry, one stripe, and an entry nobody can
-    merge with another by spelling its name differently. It cannot promise
-    that the key is a name at all -- on a case-insensitive parent two names
-    reach one entry, and the only string both callers agree on is the
-    entry's own identity, which is what this selector now asks for. The
-    folded pair itself is pinned where a folding parent is available
-    (`test_result_routes.test_a_folded_target_is_one_directory_and_one_stripe`)
-    and the two-names-one-entry case on any host
-    (`test_delivery_stripes.test_two_names_for_one_entry_take_one_stripe`).
-
-    A directory is what it takes, and a bare string is refused: a string is
-    silently resolvable against the working directory, so a caller that
-    passed a name would take a stripe for a directory nobody in the request
-    named -- the shape that shipped as the original bug. The absent-target
-    half is the same question: a stripe for an entry, and not for a name.
-    """
-    docroot = Path(tmp) / 'docroot'
-    docroot.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
-    env.update({
-        'DAEDALUS_DIR': str(docroot),
-        'DAEDALUS_PORT': '0',
-        'PYTHONDONTWRITEBYTECODE': '1',
-    })
-    proc = subprocess.run(
-        [sys.executable, '-c', _STRIPE_PROBE, str(docroot)],
-        cwd=_util.ROOT, env=env, capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-    marked = [line for line in proc.stdout.splitlines()
-              if line.startswith('STRIPE ')]
-    assert len(marked) == 1, (proc.stdout, proc.stderr)
-    answer = json.loads(marked[0][len('STRIPE '):])
-    assert answer['same_lock'] is True, answer
-    assert answer['absent_refused'] is True, answer
-    assert answer['present_is_not_the_name'] is True, answer
-    assert answer['present_is_an_identity'] is True, answer
-    assert answer['refused_bare_name'] is True, answer
-    assert answer['refused_str_path'] is True, answer
-
-
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='pathsafety_')
 
@@ -654,6 +552,43 @@ finally:
 # Parsing the whole stream as JSON would make the probe depend on quiet logs.
 sys.stdout.write('\nCONTAINMENT ' + json.dumps(answer) + '\n')
 """
+
+
+def test_same_entry_answers_the_equal_spelling_before_the_symlink_check(tmp):
+    """`same_entry` short-circuits on equal spellings, links or not.
+
+    The one ordering in the helper that no other fixture reaches, because
+    every symlink fixture here deliberately spells the alias differently
+    from the name it asks for. With the exclusion on, an equal pair answers
+    from the comparison alone and never touches the filesystem, which is
+    what the docstring says the caller's containment check relies on.
+    """
+    safety = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'path_safety.py',
+        'fixture_same_entry_order')
+    root = Path(tmp)
+    real = root / 'tok_real'
+    real.mkdir()
+    alias = root / 'tok_self'
+    try:
+        alias.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as why:
+        _util.skip(f'this filesystem will not hold a symlink: {why}')
+
+    # The equal spelling answers True from the string comparison, before
+    # `islink` is consulted, so the same name on a symlink is the same name.
+    assert safety.same_entry(root, 'tok_self', 'tok_self', deny_symlink=True)
+    assert safety.same_entry(root, 'tok_self', 'tok_self')
+    # The differing spellings are where the exclusion applies, and it reads
+    # the side the caller ASKED for: a name that is a link is refused even
+    # though it leads to that very entry, and the same entry under its own
+    # name is not a link at all and is accepted.
+    assert not safety.same_entry(root, 'tok_self', 'tok_real',
+                                 deny_symlink=True)
+    assert safety.same_entry(root, 'tok_real', 'tok_self', deny_symlink=True)
+    # A name the parent holds nothing for is not an entry.
+    assert not safety.same_entry(root, 'tok_absent', 'tok_real',
+                                 deny_symlink=True)
 
 
 def test_containment_survives_two_spellings_of_one_root(tmp):

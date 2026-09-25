@@ -31,6 +31,7 @@ everywhere.
 import contextlib
 import json
 import os
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -86,13 +87,28 @@ def _folding_parent(tmp):
                'named by DAEDALUS_CASE_FOLD_ROOT')
 
 
-def _folding_token(root, name):
-    """A fresh subdirectory of the real folding parent to work in."""
-    target = root / name
-    if target.exists():
-        _util.skip(f'{target} is already there from an earlier run')
-    target.mkdir(parents=True)
-    return target
+@contextlib.contextmanager
+def _folding_work(root, name):
+    """A work tree on the folding parent, removed again on the way out.
+
+    The runner's `TemporaryDirectory` is not on this parent, so a tree left
+    here would outlive the run and turn the next one into eight skips at
+    exit 0 -- a green that executes nothing, which is the worst answer a
+    gate can give. Clearing what is there and removing what it made is what
+    makes a second run against the same root a first-class run.
+
+    `test_the_work_tree_is_created_and_removed_for_every_invocation` pins
+    that, and it runs without a folding parent at all, because the property
+    is the helper's lifecycle rather than anything the parent answers.
+    """
+    work = root / name
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    try:
+        yield work
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _symlinks(root):
@@ -162,6 +178,31 @@ def _roots(work):
 DELIVERY_CAP = 8
 
 
+def test_the_work_tree_is_created_and_removed_for_every_invocation(tmp):
+    """A second run against the same root runs, rather than skipping.
+
+    The gate's work tree cannot live in the runner's `TemporaryDirectory`,
+    which is not on the folding parent, so a tree left there outlives the
+    run. A leftover that makes the next run skip is a green that executes
+    nothing, so the helper clears what is there and removes what it made --
+    and this pins that without a folding parent at all, because the property
+    is the helper's lifecycle and not anything a parent answers.
+
+    The stale-tree case is the one that matters: the first invocation leaves
+    a file behind, the second must find a clean tree rather than skip.
+    """
+    root = Path(tmp)
+    first = root / 'work'
+    with _folding_work(root, 'work') as work:
+        (work / 'left-behind').write_text('stale', encoding='utf-8')
+    assert first.exists() is False, 'the work tree outlived its invocation'
+    with _folding_work(root, 'work') as work:
+        assert work.is_dir(), work
+        assert list(work.iterdir()) == [], sorted(
+            p.name for p in work.iterdir())
+    assert first.exists() is False, 'the work tree outlived its invocation'
+
+
 def test_the_guard_accepts_a_name_the_parent_folds(tmp):
     """A spelling the parent folds onto another one is the same target.
 
@@ -171,17 +212,19 @@ def test_the_guard_accepts_a_name_the_parent_folds(tmp):
     filed. Both spellings are accepted here and resolve to one entry.
     """
     store = _load('result_store.py', 'fold_guard_accepts')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    res_dir = work / 'results'
-    on_disk = res_dir / 'deliveries' / 'foldtoken_Foo'
-    on_disk.mkdir(parents=True)
-    folded, _folded_file = store.delivery_result_paths(
-        res_dir, 'foldtoken', 'foo', '123_1')
-    exact, _exact_file = store.delivery_result_paths(
-        res_dir, 'foldtoken', 'Foo', '123_1')
-    assert os.path.samefile(folded, exact), (folded, exact)
-    assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
-        'foldtoken_Foo']
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        res_dir = work / 'results'
+        on_disk = res_dir / 'deliveries' / 'foldtoken_Foo'
+        on_disk.mkdir(parents=True)
+        folded, _folded_file = store.delivery_result_paths(
+            res_dir, 'foldtoken', 'foo', '123_1')
+        exact, _exact_file = store.delivery_result_paths(
+            res_dir, 'foldtoken', 'Foo', '123_1')
+        assert os.path.samefile(folded, exact), (folded, exact)
+        assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
+            'foldtoken_Foo']
 
 
 def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
@@ -213,20 +256,22 @@ def test_the_guard_still_refuses_a_symlink_the_parent_folds(tmp):
     line, not its exit code, before treating them as covered.
     """
     store = _load('result_store.py', 'fold_guard_symlink')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    _symlinks(work)
-    res_dir = work / 'results'
-    real = res_dir / 'deliveries' / 'foldalias_real'
-    real.mkdir(parents=True)
-    alias = res_dir / 'deliveries' / 'foldalias_Ext'
-    alias.symlink_to(real, target_is_directory=True)
-    refused = False
-    try:
-        store.delivery_result_paths(res_dir, 'foldalias', 'ext', '123_1')
-    except ValueError:
-        refused = True
-    assert refused, 'a symlinked alias was accepted'
-    assert not list(real.iterdir()), list(real.iterdir())
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        _symlinks(work)
+        res_dir = work / 'results'
+        real = res_dir / 'deliveries' / 'foldalias_real'
+        real.mkdir(parents=True)
+        alias = res_dir / 'deliveries' / 'foldalias_Ext'
+        alias.symlink_to(real, target_is_directory=True)
+        refused = False
+        try:
+            store.delivery_result_paths(res_dir, 'foldalias', 'ext', '123_1')
+        except ValueError:
+            refused = True
+        assert refused, 'a symlinked alias was accepted'
+        assert not list(real.iterdir()), list(real.iterdir())
 
 
 def test_the_guard_accepts_a_canonicalizing_resolver(tmp):
@@ -256,37 +301,39 @@ def test_the_guard_accepts_a_canonicalizing_resolver(tmp):
     below is the only pin for it.
     """
     store = _load('result_store.py', 'fold_guard_canonical')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    res_dir = work / 'results'
-    on_disk = res_dir / 'deliveries' / 'canontok_Foo'
-    on_disk.mkdir(parents=True)
-    real_realpath = os.path.realpath
-    asked = {}
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        res_dir = work / 'results'
+        on_disk = res_dir / 'deliveries' / 'canontok_Foo'
+        on_disk.mkdir(parents=True)
+        real_realpath = os.path.realpath
+        asked = {}
 
-    def canonical_realpath(path):
-        """Answer with the on-disk spelling, as `ntpath.realpath` would."""
-        if os.path.basename(os.fsdecode(path)) == 'canontok_foo':
-            asked['name'] = True
-        resolved = real_realpath(path)
-        name = os.path.basename(resolved)
-        if name == 'canontok_foo':
-            return resolved[:-len('canontok_foo')] + 'canontok_Foo'
-        return resolved
+        def canonical_realpath(path):
+            """Answer with the on-disk spelling, as `ntpath.realpath` would."""
+            if os.path.basename(os.fsdecode(path)) == 'canontok_foo':
+                asked['name'] = True
+            resolved = real_realpath(path)
+            name = os.path.basename(resolved)
+            if name == 'canontok_foo':
+                return resolved[:-len('canontok_foo')] + 'canontok_Foo'
+            return resolved
 
-    os.path.realpath = canonical_realpath
-    try:
+        os.path.realpath = canonical_realpath
         try:
-            paths = store.delivery_result_paths(
-                res_dir, 'canontok', 'foo', '123_1')
-        except ValueError:
-            accepted = False
-        else:
-            accepted = True
-    finally:
-        os.path.realpath = real_realpath
-    assert asked.get('name'), 'the resolver was never asked the case'
-    assert accepted, 'the guard refused a name the parent folds'
-    assert paths[0].name == 'canontok_Foo', paths[0].name
+            try:
+                paths = store.delivery_result_paths(
+                    res_dir, 'canontok', 'foo', '123_1')
+            except ValueError:
+                accepted = False
+            else:
+                accepted = True
+        finally:
+            os.path.realpath = real_realpath
+        assert asked.get('name'), 'the resolver was never asked the case'
+        assert accepted, 'the guard refused a name the parent folds'
+        assert paths[0].name == 'canontok_Foo', paths[0].name
 
 
 def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
@@ -300,49 +347,52 @@ def test_a_folded_target_is_one_directory_and_one_stripe(tmp):
     is not the only thing a folding parent changes, and `open()` folds too.
     """
     root = _folding_parent(tmp)
-    work = _folding_token(root, Path(tmp).name)
-    routes = _load('result_routes.py', 'fold_routes_one_stripe')
-    store = routes.result_store
-    res_dir, cmd_dir = _roots(work)
-    token = 'realfoldtok'
-    with _recording_locks(store) as seen:
-        first = routes.accept_result(
-            res_dir, cmd_dir, token,
-            {'tabId': 'Foo', 'id': 'one', '_did': '1700000000000_a'},
-            DELIVERY_CAP)
-        second = routes.accept_result(
-            res_dir, cmd_dir, token,
-            {'tabId': 'foo', 'id': 'two', '_did': '1700000000000_b'},
-            DELIVERY_CAP)
-        landed = sorted(path.name for path in (
-            res_dir / 'deliveries' / f'{token}_Foo').iterdir())
-        read = routes.fetch_result(
-            res_dir, token, {'tab': ['foo'], 'delivery': ['1700000000000_b']})
-        kept = routes.fetch_result(
-            res_dir, token,
-            {'tab': ['Foo'], 'consume': ['1'],
-             'expected': ['1700000000000_not_this_one']})
-        consumed = routes.fetch_result(
-            res_dir, token, {'tab': ['foo'], 'consume': ['1']})
-    names, keys, stripes = _one_stripe(seen)
-    assert first == (200, {'ok': True}), first
-    assert second == (200, {'ok': True}), second
-    assert read[0] == 200 and read[1].get('id') == 'two', read
-    assert kept == (200, {'consumed': False}), kept
-    assert consumed[0] == 200 and consumed[1].get('id') == 'two', consumed
-    assert not (res_dir / 'deliveries' / f'{token}_Foo' / (
-        '1700000000000_b.json')).exists(), 'the consumed copy stayed'
-    # One entry on disk, both results in it, and one key for the lot.
-    assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
-        f'{token}_Foo'], sorted(
-            p.name for p in (res_dir / 'deliveries').iterdir())
-    assert landed == ['1700000000000_a.json', '1700000000000_b.json'], (
-        landed)
-    # Two spellings reached it, which is the divergence the fixture exists
-    # to drive, and one key and one lock came out the other side.
-    assert set(names) == {f'{token}_Foo', f'{token}_foo'}, names
-    assert keys == 1, seen
-    assert stripes == 1, seen
+    parent = root
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        routes = _load('result_routes.py', 'fold_routes_one_stripe')
+        store = routes.result_store
+        res_dir, cmd_dir = _roots(work)
+        token = 'realfoldtok'
+        with _recording_locks(store) as seen:
+            first = routes.accept_result(
+                res_dir, cmd_dir, token,
+                {'tabId': 'Foo', 'id': 'one', '_did': '1700000000000_a'},
+                DELIVERY_CAP)
+            second = routes.accept_result(
+                res_dir, cmd_dir, token,
+                {'tabId': 'foo', 'id': 'two', '_did': '1700000000000_b'},
+                DELIVERY_CAP)
+            landed = sorted(path.name for path in (
+                res_dir / 'deliveries' / f'{token}_Foo').iterdir())
+            read = routes.fetch_result(
+                res_dir, token,
+                {'tab': ['foo'], 'delivery': ['1700000000000_b']})
+            kept = routes.fetch_result(
+                res_dir, token,
+                {'tab': ['Foo'], 'consume': ['1'],
+                 'expected': ['1700000000000_not_this_one']})
+            consumed = routes.fetch_result(
+                res_dir, token, {'tab': ['foo'], 'consume': ['1']})
+        names, keys, stripes = _one_stripe(seen)
+        assert first == (200, {'ok': True}), first
+        assert second == (200, {'ok': True}), second
+        assert read[0] == 200 and read[1].get('id') == 'two', read
+        assert kept == (200, {'consumed': False}), kept
+        assert consumed[0] == 200 and consumed[1].get('id') == 'two', consumed
+        assert not (res_dir / 'deliveries' / f'{token}_Foo' / (
+            '1700000000000_b.json')).exists(), 'the consumed copy stayed'
+        # One entry on disk, both results in it, and one key for the lot.
+        assert sorted(p.name for p in (res_dir / 'deliveries').iterdir()) == [
+            f'{token}_Foo'], sorted(
+                p.name for p in (res_dir / 'deliveries').iterdir())
+        assert landed == ['1700000000000_a.json', '1700000000000_b.json'], (
+            landed)
+        # Two spellings reached it, which is the divergence the fixture exists
+        # to drive, and one key and one lock came out the other side.
+        assert set(names) == {f'{token}_Foo', f'{token}_foo'}, names
+        assert keys == 1, seen
+        assert stripes == 1, seen
 
 
 class _FrameSink:
@@ -419,29 +469,32 @@ def test_the_extension_queue_the_parent_folds_is_not_a_tabs(tmp):
     """
     route = _load('stream_route.py', 'fold_stream_queue')
     cq = route.command_queue
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    cq.enqueue(work, 'tok', 'Extension', {'id': 'queued-for-extension'},
-               command_ttl=90)
-    cq.enqueue(work, 'tok', 'realtab', {'id': 'another-tab'}, command_ttl=90)
-    sink = _FrameSink(on_first_frame=lambda: cq.enqueue(
-        work, 'tok', 'Extension', {'id': 'published-mid-tick'},
-        command_ttl=90))
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        cq.enqueue(work, 'tok', 'Extension', {'id': 'queued-for-extension'},
+                   command_ttl=90)
+        cq.enqueue(work, 'tok', 'realtab', {'id': 'another-tab'},
+                   command_ttl=90)
+        sink = _FrameSink(on_first_frame=lambda: cq.enqueue(
+            work, 'tok', 'Extension', {'id': 'published-mid-tick'},
+            command_ttl=90))
 
-    _one_tick(route, sink, work, 'tok', 'extension')
+        _one_tick(route, sink, work, 'tok', 'extension')
 
-    # The extension's own first command is delivered once, by the drain that
-    # owns it and with no tab tag, and the other tab's once with its own.
-    assert sorted(zip(sink.ids(), sink.tags())) == [
-        ('another-tab', 'realtab'),
-        ('queued-for-extension', None)], sink.frames
-    # And the command published into the window is not delivered at all: a
-    # scan that read the folded name as a tab drains it here, tagged
-    # 'Extension' for a tab that does not exist.
-    assert 'published-mid-tick' not in sink.ids(), sink.ids()
-    # It is still queued, under whatever name the queue gave it: the scan
-    # left it alone rather than delivering it.
-    assert len(list((work / 'tok_Extension').iterdir())) == 1, (
-        sorted(p.name for p in (work / 'tok_Extension').iterdir()))
+        # The extension's own first command is delivered once, by the drain
+        # owns it and with no tab tag, and the other tab's once with its own.
+        assert sorted(zip(sink.ids(), sink.tags())) == [
+            ('another-tab', 'realtab'),
+            ('queued-for-extension', None)], sink.frames
+        # And the command published into the window is not delivered at all: a
+        # scan that read the folded name as a tab drains it here, tagged
+        # 'Extension' for a tab that does not exist.
+        assert 'published-mid-tick' not in sink.ids(), sink.ids()
+        # It is still queued, under whatever name the queue gave it: the scan
+        # left it alone rather than delivering it.
+        assert len(list((work / 'tok_Extension').iterdir())) == 1, (
+            sorted(p.name for p in (work / 'tok_Extension').iterdir()))
 
 
 def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
@@ -456,21 +509,23 @@ def test_a_folded_symlinked_reserved_queue_is_still_reserved(tmp):
     fixture above gives.
     """
     route = _load('stream_route.py', 'fold_stream_symlink')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    _symlinks(work)
-    real = work / 'tok_behind_the_link'
-    real.mkdir()
-    (real / '1700000000000_000001.json').write_text(
-        '{"id":"behind-the-link"}', encoding='utf-8')
-    alias = work / 'tok_Extension'
-    alias.symlink_to(real, target_is_directory=True)
-    sink = _FrameSink()
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        _symlinks(work)
+        real = work / 'tok_behind_the_link'
+        real.mkdir()
+        (real / '1700000000000_000001.json').write_text(
+            '{"id":"behind-the-link"}', encoding='utf-8')
+        alias = work / 'tok_Extension'
+        alias.symlink_to(real, target_is_directory=True)
+        sink = _FrameSink()
 
-    _one_tick(route, sink, work, 'tok', 'extension')
+        _one_tick(route, sink, work, 'tok', 'extension')
 
-    assert sink.ids() == [], sink.ids()
-    assert [p.name for p in real.iterdir()], 'a reserved entry was drained'
-    assert alias.is_symlink()
+        assert sink.ids() == [], sink.ids()
+        assert [p.name for p in real.iterdir()], 'a reserved entry was drained'
+        assert alias.is_symlink()
 
 
 def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
@@ -492,24 +547,26 @@ def test_the_extensions_own_legacy_file_the_parent_folds(tmp):
     of the two is in the tree.
     """
     service = _load('stream_service.py', 'fold_stream_legacy')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    tab = work / 'tok_42.json'
-    extension = work / 'tok_Extension.json'
-    dashboard = work / 'tok_Dashboard.json'
-    tab.write_text('{"id":"tab"}', encoding='utf-8')
-    extension.write_text('{"id":"extension"}', encoding='utf-8')
-    dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
-    frames = []
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        tab = work / 'tok_42.json'
+        extension = work / 'tok_Extension.json'
+        dashboard = work / 'tok_Dashboard.json'
+        tab.write_text('{"id":"tab"}', encoding='utf-8')
+        extension.write_text('{"id":"extension"}', encoding='utf-8')
+        dashboard.write_text('{"id":"dashboard"}', encoding='utf-8')
+        frames = []
 
-    delivered = service.drain_legacy_ext(
-        work, 'tok', None,
-        extension_legacy_name='tok_extension.json',
-        command_ttl=100, frame_writer=frames.append)
+        delivered = service.drain_legacy_ext(
+            work, 'tok', None,
+            extension_legacy_name='tok_extension.json',
+            command_ttl=100, frame_writer=frames.append)
 
-    assert delivered == 1, delivered
-    assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
-    assert extension.exists(), extension
-    assert dashboard.exists(), dashboard
+        assert delivered == 1, delivered
+        assert frames == [{'id': 'tab', 'chromeTab': '42'}], frames
+        assert extension.exists(), extension
+        assert dashboard.exists(), dashboard
 
 
 def test_a_folded_symlinked_legacy_file_is_still_reserved(tmp):
@@ -521,22 +578,24 @@ def test_a_folded_symlinked_legacy_file_is_still_reserved(tmp):
     same symlink is a tab's file because the parent names nothing by it.
     """
     service = _load('stream_service.py', 'fold_stream_legacy_symlink')
-    work = _folding_token(_folding_parent(tmp), Path(tmp).name)
-    _symlinks(work)
-    real = work / 'tok_42.json'
-    real.write_text('{"id":"tab"}', encoding='utf-8')
-    alias = work / 'tok_Extension.json'
-    alias.symlink_to(real)
-    frames = []
+    parent = _folding_parent(tmp)
+    name = Path(tmp).name
+    with _folding_work(parent, name) as work:
+        _symlinks(work)
+        real = work / 'tok_42.json'
+        real.write_text('{"id":"tab"}', encoding='utf-8')
+        alias = work / 'tok_Extension.json'
+        alias.symlink_to(real)
+        frames = []
 
-    delivered = service.drain_legacy_ext(
-        work, 'tok', None,
-        extension_legacy_name='tok_extension.json',
-        command_ttl=100, frame_writer=frames.append)
+        delivered = service.drain_legacy_ext(
+            work, 'tok', None,
+            extension_legacy_name='tok_extension.json',
+            command_ttl=100, frame_writer=frames.append)
 
-    assert delivered == 0, delivered
-    assert frames == [], frames
-    assert alias.is_symlink() and real.exists()
+        assert delivered == 0, delivered
+        assert frames == [], frames
+        assert alias.is_symlink() and real.exists()
 
 
 def main():

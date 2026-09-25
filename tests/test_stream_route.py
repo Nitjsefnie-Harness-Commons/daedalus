@@ -248,10 +248,21 @@ def test_each_scan_is_preceded_by_its_own_clear_and_idle_waits(tmp):
 
 
 def test_the_extension_stream_delivers_every_queue_it_owns(tmp):
+    """Each reserved target's own queue is delivered once, and no more.
+
+    The extension's and the dashboard's own queues are rows here, not only
+    on a case-folding parent: the dashboard's own queue is `tok_dashboard`
+    under the exact spelling on every host, and a scan whose reserved set
+    had lost that name would drain it as a tab's and hand the extension
+    every dashboard event a second time, tagged for a tab that does not
+    exist. That half needs no capability to reach, so its pin needs none.
+    """
     route = _load_route('stream_route_extension_queues')
     cq = route.command_queue
     root = Path(tmp)
     cq.enqueue(root, 'tok', 'extension', {'id': 'ext-queue'},
+               command_ttl=90)
+    cq.enqueue(root, 'tok', 'dashboard', {'id': 'dash-queue'},
                command_ttl=90)
     cq.enqueue(root, 'tok', 'other', {'id': 'per-tab'}, command_ttl=90)
     cq.enqueue(root, 'tok', '', {'id': 'broadcast-queue'}, command_ttl=90)
@@ -270,6 +281,11 @@ def test_the_extension_stream_delivers_every_queue_it_owns(tmp):
         'tab-legacy', 'broadcast-legacy'], sink.ids()
     assert sink.tags() == [
         None, None, 'other', None, 'other', None], sink.tags()
+    # The dashboard's own command is still queued: the extension stream
+    # neither delivered it nor consumed it.
+    assert 'dash-queue' not in sink.ids(), sink.ids()
+    assert [p.name for p in (root / 'tok_dashboard').iterdir()], (
+        "the dashboard's own queue was drained as a tab's")
 
 
 def test_a_named_tab_stream_reads_its_own_and_the_broadcast_targets(tmp):

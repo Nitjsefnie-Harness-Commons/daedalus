@@ -120,6 +120,16 @@ def same_entry(parent, name, other, deny_symlink=False):
     the same inode. A symlink standing in for a sibling directory answers
     the second and must not answer the first, so the exclusion stays with
     the call that needs it rather than burdening the ones that do not.
+
+    It applies only when the two spellings differ, because the equal-spelling
+    case is answered before the filesystem is consulted. That is safe for the
+    one caller that asks for it: a link reached under the name it is asked
+    for resolves either to that same entry -- and then the entry the caller
+    named is the entry it gets -- or elsewhere, and elsewhere means a
+    different parent, which `under`'s containment check refuses first.
+    `test_path_safety`'s
+    `test_same_entry_answers_the_equal_spelling_before_the_symlink_check`
+    pins the order this paragraph describes.
     """
     if name == other:
         return True
