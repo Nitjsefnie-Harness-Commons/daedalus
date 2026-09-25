@@ -1,12 +1,9 @@
-"""The same-id overlap harness, and its clients' diagnostics beside it.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
+"""The same-id overlap harness.
 
 The Node VM drives concurrent cookie commands through the shipped background
-worker on the shared gate; the Python helpers keep its subprocesses
-observable when an overlap stalls. The client-process half — the scripted
-result server, the real same-id client overlap and the evidence they report —
-lives in `_overlap_clients`, which imports this module's driver.
+worker on the shared gate. The client-process half — the scripted result
+server, the real same-id client overlap and the evidence they report — lives
+in `_overlap_clients`, which imports this module's driver.
 """
 import json
 import re
@@ -63,9 +60,6 @@ function response(status, data) {
   };
 }
 
-// The shared gate's in-scope contract. The gate answers only what the
-// scenario declared and records every request it sees; `workerFetch` below
-// hands the gate a bridge-relative or absolute URL.
 const BRIDGE_URL = bridgeUrl;
 const streamFetches = [];
 const resultPosts = [];
@@ -94,8 +88,7 @@ function attemptRecord(payload, result, body) {
 
 // A declared forward is answered by the real server, not by the gate: the
 // attempt goes out through the real `fetch` and the server's own answer is
-// what the worker sees. The record's status is the real one, stamped only
-// once the answer is in. The attempt's own attribution (which owner, which
+// what the worker sees. The attempt's own attribution (which owner, which
 // id) is the wrapper's, because the gate sees a fetch, not the owner behind
 // it.
 async function forwardRequest(target, init, entry) {
@@ -107,13 +100,12 @@ async function forwardRequest(target, init, entry) {
 }
 
 // The worker's server URL is what `config.serverUrl` holds, and a child with
-// no real result server is handed a real https origin for it. A URL the gate
-// derives from config is already absolute; the temporary workers in the
-// suites that reuse this harness post to `test-bridge/result`, the old fake's
-// placeholder server with no origin, so a relative target is resolved
-// against the bridge origin the gate permits, with the placeholder segment
-// dropped — the request is the same `/result` route the worker would make
-// against a real bridge, and the gate must see it as that route.
+// no real result server is handed a real https origin for it. The temporary
+// workers in the suites that reuse this harness post to `test-bridge/result`,
+// the old fake's placeholder server with no origin, so a relative target is
+// resolved against the bridge origin the gate permits, with the placeholder
+// segment dropped — the request is the same `/result` route the worker would
+// make against a real bridge, and the gate must see it as that route.
 // Every result POST is recorded as an attempt whichever path answered it —
 // the gate's own status, forwarded real status, or a 599 refusal — because
 // the harness's completion wait decides "the work for this owner is over" on
@@ -403,15 +395,10 @@ BOOT = [SYNC, SYNC]
 def overlap_plan(commands, result_base='', boot=True, results=None):
     """The gate plan for one overlap run, from the recording above.
 
-    `commands` is the command list the harness dispatches; one result POST per
-    command is what the worker makes. `results` overrides that count for a
-    worker that retries its POST (the shipped worker retries a 5xx three
-    times, so a scenario that answers the first attempt 5xx declares three).
-    `result_base` names a real local server, so `POST /result` is declared as
-    a forward: recorded and debited like any other request, but answered by
-    the real server rather than the gate. The stream fetch is declared as the
-    stream answer queue, not as a route: the gate keeps stream fetches out of
-    the non-stream record.
+    `results` overrides the one-result-per-command count for a worker that
+    retries its POST (the shipped worker retries a 5xx three times, so a
+    scenario that answers the first attempt 5xx declares three). `result_base`
+    names a real local server, so `POST /result` is declared as a forward.
     """
     plan = {
         'planned': (BOOT if boot else []) + [RESULT] * (
@@ -442,8 +429,7 @@ def overlap_child_timeout(order, wait_between,
     The inner bounds expire on serviced event-loop time rather than the wall
     clock, so a child starved of the CPU earns them more slowly than the wall
     clock measured here; starvation deep enough to outlast every inner bound
-    is reported by this backstop instead, which preserves the child's pipes
-    and last step.
+    is reported by this backstop instead.
 
     Outer slack is added once, on top of those allowances, so a caller whose
     inner bounds were shrunk can keep the backstop it had without paying the
@@ -459,12 +445,11 @@ def run_background_overlap(background, commands, order, result_base='',
                            boot=True, results=None):
     """Run same-id cookie commands through the shipped background worker.
 
-    Every run is driven on the shared gate: the plan is this run's recording
-    (`overlap_plan`), the child appends it to its own command line, and the
-    record the gate kept is checked with `assert_gate_clean` before the
-    posted results are handed back, so a request outside the plan — an
-    invented route, a result POST past the one per command, a foreign origin
-    — is refused, recorded, and fails the caller.
+    The plan is this run's recording (`overlap_plan`), and the record the
+    gate kept is checked with `assert_gate_clean` before the posted results
+    are handed back, so a request outside the plan — an invented route, a
+    result POST past the one per command, a foreign origin — is refused,
+    recorded, and fails the caller.
     """
     # Fabricated suite-runner trees copy _util.py without this helper.
     from _worker_sources import import_scripts_stub

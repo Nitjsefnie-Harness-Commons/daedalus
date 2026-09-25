@@ -13,13 +13,9 @@ from _worker_sources import import_scripts_stub  # noqa: E402
 
 REGISTER = 'POST /register'
 SYNC = 'POST /sync-tabs'
-# The recorded boot stream fetch, which every scenario makes once: the
-# worker's GET /stream answered 503. It is declared and asserted like the
-# non-stream routes, so the plan is the requests the real code makes.
 BOOT_STREAM = (503,)
 # Every scenario's recording, from a run of the shipped worker: boot opens the
-# stream, syncs the tab list, then one register post per fired timer. No route
-# is special-cased, so an invented call lands outside the plan and is refused.
+# stream, syncs the tab list, then one register post per fired timer.
 ONE = [SYNC, REGISTER]
 TWO = [SYNC, REGISTER, REGISTER]
 

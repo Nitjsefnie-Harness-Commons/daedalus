@@ -17,12 +17,8 @@ SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
 # Every scenario's recording, from a run of the shipped worker: boot opens the
 # stream and syncs the tab list, then the dispatch posts its result. The
-# eval-rejection scenario never posts one. The gate refuses a request outside
-# the plan by status and records it, so an invented call cannot pass here.
+# eval-rejection scenario never posts one.
 BOOT_RESULT = [SYNC, RESULT]
-# The recorded boot stream fetch, which every scenario makes once: the
-# worker's GET /stream answered 503. Declared and asserted like the
-# non-stream routes, so the plan is the requests the real code makes.
 BOOT_STREAM = (503,)
 
 _CLOSE_TAB_HARNESS = (r"""

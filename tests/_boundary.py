@@ -1,17 +1,11 @@
 """The extension-boundary scenarios, and how one is run.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 Each scenario drives the shipped background script through one boundary —
 relay capacity, delivery-id dedup across a restart, a rejected upload, a
 partitioned cookie — inside the fake browser from _boundary_env, and returns
-what the worker did as JSON.
-
-Every scenario runs on the shared bridge-fetch gate: the scenario declares the
-requests it makes (`SCENARIO_PLANS`), the gate answers only those and refuses
-and records everything else, and each runner here checks that record with
-`assert_gate_clean` before handing the scenario's own answer back. A request
-the worker invents is therefore loud even when the scenario reads only a
+what the worker did as JSON. Every run is checked against the scenario's
+declared plan with `assert_gate_clean` before the answer is handed back, so
+a request the worker invents is loud even when the scenario reads only a
 projection of the record.
 """
 import json
@@ -42,10 +36,9 @@ def _run(scenario, background_path=None, payload=None):
     outcome = json.loads(result.stdout)
     # The real harness always emits a {result, gate} object; the argv- and
     # temp-file controls deliberately substitute a stub program that emits
-    # something else, and they are not exercising the gate. `result` is the
-    # key that object always carries, so it is read by index: `.get` would
-    # type the runner's answer as Optional and make every scenario that
-    # subscripts it a type error, for a key the harness cannot omit.
+    # something else. `result` is read by index: `.get` would type the
+    # runner's answer as Optional and make every scenario that subscripts it
+    # a type error, for a key the harness cannot omit.
     if isinstance(outcome, dict) and 'gate' in outcome:
         _assert_scenario_gate(scenario, outcome['gate'])
         return outcome['result']

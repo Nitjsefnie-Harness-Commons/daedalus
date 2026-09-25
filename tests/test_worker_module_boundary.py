@@ -55,8 +55,7 @@ _WORKER_REDECLARATION_EXCEPTIONS = (
 )
 # The runtime observer runs the shipped background, whose boot opens the SSE
 # stream (answered 503) and syncs the tab list before the observer's
-# synchronous work. It declares exactly those two, so any further bridge post
-# the worker invents is refused by the shared gate and fails the suite.
+# synchronous work.
 _BOOT_PLAN = {'planned': ['POST /sync-tabs'], 'planned_stream': [503]}
 
 
@@ -211,8 +210,7 @@ def test_non_command_worker_ownership_is_structural(tmp):
         exported = _directive_names(sources[relative], 'exported')
         # Each key names one problem kind. Three carry a list of names; the
         # fourth carries a per-listener mapping, so the two shapes are kept in
-        # separate variables and merged — the alternative, one mapping typed
-        # `object`, moves the error to the merge.
+        # separate variables and merged.
         name_problems = {
             'missing bindings': sorted(set(owned) - set(details['bindings'])),
             'missing exports': sorted(set(owned) - exported),

@@ -1,18 +1,12 @@
 """The fake browser the extension-boundary scenarios run inside.
 
-Not a suite itself — run_tests.py only loads `test_*.py`.
-
 Chrome's own APIs, modelled closely enough that the shipped worker cannot
 tell: storage that hands back a structured clone, a debugger that counts its
 attachments, a fetch whose body arrives one chunk at a time, and a second
 context standing in for the worker Chrome restarts after idle suspension.
-The scenarios that drive it are in _boundary.
-
-Bridge traffic goes through the shared gate (`_stream_fake.STRICT_FETCH`):
-each scenario declares the requests it makes, the gate answers only those and
-refuses (and records) everything else, and the scenario reads that record.
-`SCENARIO_PLANS` is that declaration, one entry per scenario, injected below
-and read back by the runners in _boundary to `assert_gate_clean`.
+The scenarios that drive it are in _boundary; `SCENARIO_PLANS` below is each
+scenario's gate declaration, read back by the runners in _boundary to
+`assert_gate_clean`.
 """
 
 import json
@@ -49,19 +43,13 @@ def _blob(chunks):
 
 # Every scenario's declaration, recorded from a run of the shipped worker on
 # the pre-change tree (a temporary recorder in the old bridgeFetch, five runs
-# each, all stable). Boot opens the stream and, now that the tabs.query double
-# honours its callback, syncs the tab list; a restarted context repeats both,
-# so a restart scenario declares two of each. A request the worker invents is
-# outside the plan and is refused and recorded by the gate.
+# each, all stable). A restarted context repeats boot's stream and sync, so a
+# restart scenario declares two of each.
 SCENARIO_PLANS = {
-    # worker-sources returns the loader trace before its own loadConfig, but
-    # background.js's boot still opens the stream and syncs the tab list, so
-    # the drained gate records one of each.
     'worker-sources': {'planned': [SYNC], 'planned_stream': [503]},
-    # The runtime observer's default: a stub background (the binding controls)
-    # makes no bridge request. A caller observing the SHIPPED background must
-    # pass its own plan (the boot stream and sync); omitting it is a loud
-    # mismatch, not a silent pass.
+    # A stub background (the binding controls) makes no bridge request. A
+    # caller observing the SHIPPED background must pass its own plan;
+    # omitting it is a loud mismatch, not a silent pass.
     'worker-bindings': {'planned': [], 'planned_stream': []},
     'capability-routes': {'planned': [SYNC], 'planned_stream': [503]},
     'unknown-command': {'planned': [SYNC, RESULT], 'planned_stream': [503]},
@@ -383,9 +371,6 @@ function streamingResponse(chunkCount) {
   };
 }
 
-// The shared gate's in-scope contract. The gate answers only what the
-// scenario declared, refuses everything else by status, and records every
-// request it sees; the scenarios read that record.
 const BRIDGE_URL = 'https://initial.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -404,9 +389,8 @@ function chunkedResponse(count) {
 }
 """ + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
-// The scenarios read the gate's records, not a second fake: a projection of
-// nonStreamFetches into the {kind, url, token, id, error} rows the worker-
-// behaviour assertions consume, and the relay upload bodies they inspect.
+// A projection of the gate's records into the {kind, url, token, id, error}
+// rows the worker-behaviour assertions consume, not a second fake.
 const resultPayloads = resultPosts;
 function bridgeRequests() {
   return nonStreamFetches.map((record) => {
