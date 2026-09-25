@@ -64,6 +64,10 @@ class ArgvReader:
             element = self.binding_map[element.id]
         return None
 
+    # The seen-guards below are redundant with ARGV_UNWRAP_CAP: these
+    # resolvers do not recurse, so the cap bounds them and a guard cannot
+    # change an answer. They are kept as belt and braces, and may be
+    # deleted rather than defended.
     def resolve_argv(self, expr):
         """The argv's literal list/tuple, or None when it is dynamic.
 
