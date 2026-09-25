@@ -1,6 +1,5 @@
 """Shared lifecycle helpers for files waiting in the command queue."""
 import contextlib
-import itertools
 import json
 import os
 import stat
@@ -9,13 +8,13 @@ import time
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge.log_safe import log_safe
+from daedalus_bridge.queue_order import next_seq  # re-exported
 from daedalus_bridge import path_safety
 
 
 _lock = threading.Lock()
 _claimed = set()
 command_fs_lock = threading.Lock()
-_seq_counter = itertools.count(1)
 _cmd_events = {}  # {token: threading.Event}
 _cmd_events_lock = threading.Lock()
 
@@ -23,80 +22,10 @@ _cmd_events_lock = threading.Lock()
 # single criterion rather than a spelling repeated at each site.
 DASHBOARD_TAB = 'dashboard'
 
-# One-shot ordering state, re-established from disk before the first mint
-# (issue 1098): `_ms_mark` is the highest millisecond on disk, `_seq_counter`
-# rebased above the highest counter on disk. Touched only under
-# `command_fs_lock`, so seed and clamp cannot interleave (see `next_seq`).
-_ms_mark = 0
-_seeded = False
-
 # Set by the stream service, which owns the refusal registry, so the TTL
 # sweep can retire a name whose occupant it unlinked. None when nothing
 # registered, so this module stands alone.
 _name_vacated = None
-
-
-_COUNTER_WIDTH = 20
-
-
-def _parse_stem(name):
-    """`(millisecond, counter, width)` for a stem, else None.
-
-    A stem is `<13 digits>_<N digits>.json` for any width N — the current
-    bridge writes 20, a released one 6, and the seed must read both because
-    it protects the upgrade path between them. The mark honours the
-    millisecond; the counter is rebased only from same-width entries. A
-    legacy drop, a non-stem, a temp, or a non-numeric field is None, ignored
-    without raising.
-    """
-    if name.startswith('.') or not name.endswith('.json'):
-        return None
-    millisecond, separator, counter = name[:-len('.json')].partition('_')
-    if separator != '_' or len(millisecond) != 13 or not counter:
-        return None
-    if not (millisecond.isascii() and millisecond.isdigit()
-            and counter.isascii() and counter.isdigit()):
-        return None
-    return int(millisecond), int(counter), len(counter)
-
-
-def _seed_from_disk(cmd_dir):
-    """Raise the mark strictly above every survivor on disk, the counter
-    above every same-width one.
-
-    One-shot, before the first mint, under `command_fs_lock`: a restart
-    resets the in-process state, so ordering is re-established from disk, not
-    the clock. The mark honours every parseable survivor's millisecond and
-    lands one above, so a fresh entry wins on millisecond alone — needed
-    because at an equal millisecond a zero-padded 20-digit counter sorts
-    below a narrower one with a nonzero leading digit, whatever its value.
-    The counter is rebased only from same-width entries. The scan is bounded
-    in practice by the TTL sweep, which empties aged entries and their empty
-    queues; a non-directory or unreadable one is ignored, not raised on.
-    """
-    global _ms_mark, _seq_counter, _seeded
-    highest_millisecond = 0
-    highest_counter = 0
-    try:
-        queues = [entry for entry in os.scandir(cmd_dir) if entry.is_dir()]
-    except OSError:
-        queues = []
-    for queue in queues:
-        try:
-            children = [entry for entry in os.scandir(queue.path)
-                        if entry.is_file()]
-        except OSError:
-            continue
-        for child in children:
-            parsed = _parse_stem(child.name)
-            if parsed is not None:
-                millisecond, counter, width = parsed
-                highest_millisecond = max(highest_millisecond, millisecond)
-                if width == _COUNTER_WIDTH:
-                    highest_counter = max(highest_counter, counter)
-    _ms_mark = highest_millisecond + 1
-    _seq_counter = itertools.count(highest_counter + 1)
-    _seeded = True
 
 
 def command_target_names(token, tab=''):
@@ -318,9 +247,9 @@ def _publish(qdir, stem, document):
         atomic_file.replace_atomically(str(tmp), str(destination))
     except (OSError, UnicodeEncodeError):
         # A refused publish must not leave its hidden temp behind: the
-        # zero-byte artifact would sit in the queue until the collector's TTL
-        # sweep; rollback as result_store's atomic write, plus the encode
-        # failure write_text raises after creating it.
+        # zero-byte artifact would sit in the queue until the background
+        # collector's TTL sweep; rollback as result_store's atomic write,
+        # plus the encode failure write_text raises after creating it.
         try:
             tmp.unlink()
         except OSError:
@@ -332,8 +261,9 @@ def _publish(qdir, stem, document):
 
 
 # ─── Dashboard event queue ───
-# Directory-per-token: commands/{token}_dashboard/<ms>_<counter>.json, so
-# concurrent writes do not truncate each other.
+# Directory-per-token queue: commands/{token}_dashboard/<ms>_<counter>.json
+# Directory form (not a single file) because concurrent writes to one file
+# truncate each other.
 def notify_dashboard(cmd_dir, token, payload):
     """Enqueue a dashboard SSE event. No-op if its queue cannot be named."""
     if path_safety.bad_token(token):
@@ -347,9 +277,9 @@ def notify_dashboard(cmd_dir, token, payload):
         with command_fs_lock:
             dash_dir.mkdir(parents=True, exist_ok=True)
             # The fan-out drain's cursor orders events by name, so the stem
-            # must be publish-ordered; both callers take `next_seq` under
-            # this lock the publish is under, so a stem is not handed out in
-            # an order the writes do not follow.
+            # must be publish-ordered. Both callers take `next_seq` under
+            # this same lock the publish is taken under, so a stem cannot be
+            # handed out in an order the writes do not follow.
             event_id = next_seq(cmd_dir)
             # The bridge's own id and kind go AFTER the payload: the client
             # dedups on id, so a publisher must not forge one or the kind.
@@ -357,7 +287,9 @@ def notify_dashboard(cmd_dir, token, payload):
                      {**payload, 'id': event_id, 'kind': 'event'})
         event(token).set()  # wake the dashboard stream immediately
     except Exception as e:
-        # By-design residual; this prefix prints, not the credential (890).
+        # The stream connect line's by-design residual; alert 124 is a
+        # false positive, dismissed on the Security tab: this prefix
+        # prints, not the credential (issue 890).
         print(f'[DASH-NOTIFY-FAIL] '
               f'{path_safety.redacted(log_safe(e), token)}', flush=True)
 
@@ -368,28 +300,6 @@ def notify_dashboard(cmd_dir, token, payload):
 # commands to the same target queue instead of overwriting a single file.
 # Legacy single-file drops (commands/{token}[_{tab}].json) are still delivered
 # for the documented raw-write escape hatch.
-def next_seq(cmd_dir):
-    """Monotonic, lexically-sortable queue filename stem: <ms>_<counter>.
-
-    Both fields are fixed width, so byte order is the order the two
-    components were issued. The millisecond is not raw wall-clock time: each
-    mint takes `max(now, _ms_mark)` and raises the mark, and once, before the
-    first mint, the seed honours every parseable survivor's millisecond and
-    takes the mark strictly above the highest (`_seed_from_disk`). So a
-    backwards clock step — within a process or across a restart that left
-    entries queued — never mints a stem below one already issued or
-    surviving, and the queue's FIFO holds. That the guarantee spans *every*
-    survivor width, not just the current one, is exactly why the seed honours
-    each millisecond and lands one above rather than rebasing the counter
-    alone. The width is the bound: order holds while the counter is below
-    10**20, which `itertools.count` does not itself cap. Callers hold
-    `command_fs_lock`; the seed and clamp rely on it.
-    """
-    global _ms_mark
-    if not _seeded:
-        _seed_from_disk(cmd_dir)
-    _ms_mark = max(_ms_mark, int(time.time() * 1000))
-    return f'{_ms_mark:013d}_{next(_seq_counter):020d}'
 
 
 # ─── Per-token wake events: writers signal, SSE streams wait ───

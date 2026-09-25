@@ -51,6 +51,24 @@ def _qdir_name(module):
     return module.command_target_names(TOKEN, TAB)[0]
 
 
+def _fresh_queue(name):
+    """A by-path (command_queue, queue_order) pair, fresh for this test.
+
+    The seed is one-shot and process-global inside `queue_order`, so a plain
+    by-path load of `command_queue` would share one seed across every test in
+    this process and only the first would seed. Load `queue_order` by path
+    (fresh mark/counter/guard) and point this copy of `command_queue`'s
+    `next_seq` at it — `enqueue` resolves the module global at call time. The
+    mint's clock lives in `queue_order`, so tests step *its* `time`.
+    """
+    order = _util.load(
+        _util.ROOT / 'daedalus_bridge' / 'queue_order.py',
+        name=f'{name}_order')
+    queue = _load_queue(name)
+    setattr(queue, 'next_seq', order.next_seq)
+    return queue, order
+
+
 def _write_entry(qdir, stem, **fields):
     document = {'kind': 'event', '_did': stem}
     document.update(fields)
@@ -73,10 +91,10 @@ def test_a_backwards_clock_step_keeps_per_target_fifo(tmp):
     still sorts above the first, and a real drain delivers them in publish
     order. Removing the in-process clamp mints the second at the lower
     millisecond, the stems invert, and the drain delivers 'second' first."""
-    cq = _load_queue('ordering_backwards_step')
+    cq, order = _fresh_queue('ordering_backwards_step')
     cmd_dir = Path(tmp) / 'commands'
     clock = _Clock(5.0)
-    saved = _on(clock, cq)
+    saved = _on(clock, order)
     try:
         first, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'first'},
                               command_ttl=90)
@@ -107,9 +125,9 @@ def test_a_fresh_process_over_survivors_keeps_fifo(tmp):
     for index, stem in enumerate(survivors):
         _write_entry(qdir, stem, id=f'old{index}')
 
-    cq = _load_queue('ordering_restart')
+    cq, order = _fresh_queue('ordering_restart')
     clock = _Clock(4.0)  # stepped back below both survivors
-    saved = _on(clock, cq)
+    saved = _on(clock, order)
     try:
         minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
                                command_ttl=90)
@@ -142,9 +160,9 @@ def test_the_seed_ignores_unparseable_neighbours(tmp):
     (qdir / 'aaaaaaaaaaaaa_000001.json').write_text('{}', encoding='utf-8')
     (cmd_dir / f'{TOKEN}.json').write_text('{}', encoding='utf-8')
 
-    cq = _load_queue('ordering_unparseable')
+    cq, order = _fresh_queue('ordering_unparseable')
     clock = _Clock(4.0)
-    saved = _on(clock, cq)
+    saved = _on(clock, order)
     try:
         minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
                                command_ttl=90)
@@ -177,9 +195,9 @@ def test_a_narrow_counter_survivor_raises_the_mark(tmp):
     survivor = '1757389120000_000042'  # released-bridge stem: 6-digit counter
     _write_entry(qdir, survivor, id='old')
 
-    cq = _load_queue('ordering_narrow_survivor')
+    cq, order = _fresh_queue('ordering_narrow_survivor')
     clock = _Clock(1_757_389_119.999)  # one second behind the survivor
-    saved = _on(clock, cq)
+    saved = _on(clock, order)
     try:
         minted, _ = cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'new'},
                                command_ttl=90)
@@ -195,10 +213,10 @@ def test_the_seed_is_taken_once_not_per_mint(tmp):
     rescanned, planting a high-counter file after the first mint would raise
     the counter above it. One-shot: the second mint stays below the planted
     file, so the hot path never re-walks the commands root."""
-    cq = _load_queue('ordering_one_shot')
+    cq, order = _fresh_queue('ordering_one_shot')
     cmd_dir = Path(tmp) / 'commands'
     clock = _Clock(5.0)
-    saved = _on(clock, cq)
+    saved = _on(clock, order)
     try:
         cq.enqueue(cmd_dir, TOKEN, TAB, {'id': 'a'}, command_ttl=90)
         qdir = cmd_dir / _qdir_name(cq)
