@@ -265,7 +265,7 @@ def suite_names(tree):
     try:
         listed = subprocess.run(
             ['git', '-C', str(tree), 'ls-files', '-z', '--', 'tests/'],
-            capture_output=True, timeout=30)
+            capture_output=True)
     except (OSError, subprocess.SubprocessError) as error:
         raise PlanError(
             f'cannot list tracked suites under {tree}: {error}; the planner '
