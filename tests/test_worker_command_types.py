@@ -17,6 +17,13 @@ check". Each reader carries a completeness marker computed by a different
 mechanism from the extraction it counts: a raw token count against the
 comment-and-string blanked one, plus a depth-aware walk, for the switch; a
 raw substring count against a parsed call count for the dashboard.
+
+A marker nothing observes is a comment. The switch's arm marker is policed
+by a synthetic source that hides a case in a comment
+(`test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree`). The
+dashboard's marker has no such source and is only checked for agreement on
+the shipped tree, where the two counts cannot disagree; closing that is left
+to a later wave rather than claimed here.
 """
 import ast
 import re
@@ -99,12 +106,17 @@ def _switch_body(source, mask, path):
 def served_types(source=None, path=None):
     """The case labels `dispatchCommand` dispatches on, in source order.
 
-    Two markers, both live. The arm count is taken on the raw switch body
-    and again on the comment-and-string blanked one; a case the masker hid
-    makes the two disagree, so a regex that stopped matching cannot read as
-    an empty switch. The labels themselves come from a depth-aware walk, so
-    a `case` buried in a nested switch is refused by name instead of being
-    counted and dropped.
+    Two markers, both live and both observed. The arm count is taken on the
+    raw switch body and again on the comment-and-string blanked one; a case
+    the masker hid makes the two disagree, so a regex that stopped matching
+    cannot read as an empty switch. The labels themselves come from a
+    depth-aware walk, so a `case` buried in a nested switch is refused by
+    name instead of being counted and dropped.
+
+    The shipped switch body hides no case, so the first marker is policed by
+    a synthetic source in
+    `test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree` rather
+    than by anything in the tree.
     """
     if source is None:
         read = ROOT / 'extension' / 'background.js'
@@ -306,6 +318,36 @@ def test_a_case_label_that_is_not_a_plain_literal_is_refused(tmp):
         assert False, 'a computed case label was accepted'
 
 
+def test_a_case_hidden_in_a_comment_makes_the_arm_counts_disagree(tmp):
+    """The raw/masked arm marker fires, and names what it saw.
+
+    The shipped switch body holds no comment naming a case, so nothing in
+    the tree exercises this marker. Deleting the `js_mask` call outright
+    leaves every other test green, because the two counts then agree by
+    construction. This synthetic source is the only thing that observes the
+    marker being able to fail, so it is what keeps the masker policed.
+    """
+    del tmp
+    source = (
+        'function dispatchCommand(cmd) {\n'
+        '  switch (cmd.type) {\n'
+        '    // a case label in a comment is not an arm\n'
+        "    case 'cookies': return handleCookies(cmd);\n"
+        '    default: return null;\n'
+        '  }\n'
+        '}\n')
+    try:
+        served_types(source, 'background.js')
+    except AssertionError as error:
+        raised = str(error)
+    else:
+        raised = ''
+    assert 'the dispatch switch body holds 2 case tokens' in raised, (
+        'the arm marker did not report the comment-hidden case: '
+        f'{raised!r}')
+    assert 'the masked body 1' in raised, raised
+
+
 def test_a_second_switch_in_the_background_is_named(tmp):
     """A switch outside `dispatchCommand` fails rather than going unread."""
     del tmp
@@ -367,21 +409,20 @@ def test_every_served_type_is_sent_by_a_client_but_one(tmp):
     assert residual == sent, (
         f'served without a client: {sorted(residual - sent)}; '
         f'client without a served type: {sorted(sent - residual)}')
-    assert cli[1] | mcp[1] <= _FORWARDING_FILES, (
+    assert (cli[1] | mcp[1]) <= _FORWARDING_FILES, (
         'a client payload forwards its command type through a parameter '
         f'outside the two helper definitions: '
-        f'{sorted(cli[1] | mcp[1] - _FORWARDING_FILES)}')
+        f'{sorted((cli[1] | mcp[1]) - _FORWARDING_FILES)}')
     assert cli[2] and mcp[2], (
         f'no ext_cmd call site was read: cli={cli[2]}, mcp={mcp[2]}')
 
 
-def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
-    """Runtime evidence for the `eval` exception.
+def test_a_type_the_worker_does_not_serve_reaches_the_unknown_arm(tmp):
+    """The served-marker limb: an unserved type literal falls to `default`.
 
-    A type literal the worker does not serve reaches the default arm and
-    posts the unknown-command error. A command carrying only `code` reaches
-    the eval handler, and the sentinel sees no `type` field on it at all.
-    The code path is what selects `eval`.
+    Split from the eval limb on purpose. These two properties are broken by
+    different edits, and when they shared one function the first assertion
+    decided which of them ever ran.
     """
     del tmp
     marker = run_extension_command_result(
@@ -390,6 +431,18 @@ def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
         'result': None,
         'error': 'Unknown command type: probe-capability',
     }], marker
+
+
+def test_the_code_path_and_not_a_type_literal_reaches_eval(tmp):
+    """Runtime evidence for the `eval` exception, and nothing else.
+
+    A command carrying only `code` must reach the eval handler, and the
+    sentinel must see no `type` field on it. This observation is
+    unconditional: nothing in this function can prevent it from running, so
+    breaking the `code` -> `eval` derivation in the worker is reported here
+    even though every served-type test stays green.
+    """
+    del tmp
     observed = run_extension_capability_routes([{
         'symbol': 'handleEval',
         'publishedSymbols': ['handleEval', 'handleCookies'],
