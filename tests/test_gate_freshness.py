@@ -124,7 +124,7 @@ _FLAG_VALUE = re.compile(
 def _git_tracked(base):
     listed = subprocess.run(
         ['git', '-C', str(base), 'ls-files', '-z'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     return {os.fsdecode(name) for name in listed.stdout.split(b'\0') if name}
 
 

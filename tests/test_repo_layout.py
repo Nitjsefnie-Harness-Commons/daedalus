@@ -7,12 +7,14 @@ namespace of every process started there. The bridge's modules live in the
 """
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 
 ROOT = _util.ROOT
@@ -73,8 +75,35 @@ MCP_OLD_NAMES = (
     'mcp_transport.py',
 )
 
-CLONE_SILENCING_CONFIG = ('init.defaultBranch=main',
-                          'advice.detachedHead=false')
+# The launches exempt from the tree-wide no-wall-clock-bound rule, keyed by
+# (repo-relative path, enclosing function) so an unrelated edit above a site
+# cannot move a row onto the wrong launch. Each value names either the bound
+# that replaces the launch's own, or why the launch cannot be a bounded git
+# launch. Checked both ways: a live site with no row and a row with no live
+# site are both refusals.
+BOUNDED_GIT_LAUNCHES = {
+    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_root'):
+        'a standalone skill script an operator runs by hand; rev-parse '
+        'reads the repository and can block behind another writer, and no '
+        'suite or CI bound sits above it to surface a hang',
+    ('.claude/skills/changing-daedalus/watch_all.py', '_repo_slug'):
+        'a standalone skill script an operator runs by hand; remote '
+        'get-url reads the repository config and can block behind another '
+        'writer, with no enclosing bound above it',
+    ('scripts/gen_gitignore.py', '_check_ignore'):
+        'a standalone generator an operator runs by hand; check-ignore '
+        'reads the ignore rules for the whole tracked set and can block '
+        'behind another writer of the index, with no enclosing bound',
+    ('scripts/gen_gitignore.py', 'main'):
+        'a standalone generator an operator runs by hand; ls-files reads '
+        'the index and can block behind another writer of the index, with '
+        'no suite or CI bound above it to surface a hang',
+}
+
+_BOUND_SITE = re.compile(
+    r'^(?P<here>.+):(?P<line>\d+) (?P<kind>carries a timeout=|'
+    r'unpacks a keyword mapping the audit cannot read)'
+    r'.* on a (?P<head>git|non-git|unreadable) launch$')
 
 
 def _clone(root, target):
@@ -115,6 +144,47 @@ def _tracked_python(root=ROOT):
     assert not missing, (
         f'tracked Python paths missing or not regular files: {missing}')
     return paths
+
+
+def _enclosing_function(tree, line):
+    """The innermost function whose body spans `line`, else '<module>'."""
+    best = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, 'end_lineno', node.lineno)
+            if node.lineno <= line <= end \
+                    and (best is None or node.lineno > best[0]):
+                best = (node.lineno, node.name)
+    return best[1] if best else '<module>'
+
+
+def _bound_sites(source, here):
+    """Every in-scope bound site in one source as (path, function, refusal).
+
+    The rule is about git launches, so a site is in scope only when the
+    launch's head reads as the constant ``git``: a readable ``timeout=`` or
+    a ``**``-unpacked keyword mapping (which could hide a timeout) on such
+    a launch. A readable non-git head is provably not a git launch, and an
+    unreadable head is the analyser's stated boundary; the analyser still
+    names both on the refusal, so neither is silently dropped, and the
+    pull-request report lists every one with its head. A refusal the strict
+    pattern cannot parse is returned as its own site, so a bound the
+    parser cannot read fails closed rather than passing as an accept.
+    """
+    tree = ast.parse(source)
+    sites = []
+    for refusal in _launch_refusals(source, here):
+        if 'carries a timeout=' not in refusal \
+                and 'unpacks a keyword mapping' not in refusal:
+            continue
+        match = _BOUND_SITE.match(refusal)
+        if match is None:
+            sites.append((here, '<unparsed>', refusal))
+            continue
+        if match.group('head') == 'git':
+            function = _enclosing_function(tree, int(match.group('line')))
+            sites.append((here, function, refusal))
+    return sites
 
 
 def test_the_inventory_refuses_a_missing_tracked_python_file(tmp):
@@ -274,41 +344,85 @@ def test_the_root_holds_no_python_module_but_the_entry_points(tmp):
 
 
 def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
-    """A git subprocess here runs unbounded and fails loudly on failure.
+    """No git subprocess launch in the tracked tree carries a wall-clock
+    bound, except the ones BOUNDED_GIT_LAUNCHES allows by name.
 
-    Dropping the bound also drops the only hang-guard on a wedged local
-    clone; the issue's remedy accepts a hang surfacing as run_tests.py's
-    900-second suite bound ("SUITE TIMED OUT") instead of any wall-clock
-    margin here. The audit sees this file and the two modules this
-    change gave a git launch of its own — `tests/_scratch_index.py`
-    (the shared scratch-staging helper) and `tests/test_drain_bounds.py`
-    (its control). That set is where this change put a launch, not
-    every module that launches git: a bound elsewhere (e.g. the
-    pre-existing `ls-files` in `tests/_repo.py`) is not observed here,
-    and widening the set is a separate decision. The audit accepts only
-    a plain `import subprocess`, resolves every binding derived from
-    the module to a fixpoint (parameter defaults, for-targets, class
-    bodies, with-targets and def returns included), and follows
-    functools/importlib under any alias: an aliased or from-imported
-    subprocess, an eval-built launcher, an unresolvable callee or
-    receiver, or a keyword it cannot read is a refusal, never an
-    accept. Called bare names are censused against in-file
-    definitions, tracked bindings, imports and the runtime builtins
-    table; what remains outside that census is a builtin shadowed at
-    runtime, which a static read of this file cannot see, and a
-    decorated definition, which is trusted as its own callee — a
-    decorator returning a launcher sits outside the census by design.
-    Every `git clone` launch must carry each config in
-    CLONE_SILENCING_CONFIG through `-c`, so the helper's silencing
-    cannot be drifted back by a hand-spelled fixture clone; the missing
-    configs are named, and an argv that is not a list literal is a
-    refusal. A launch whose argv does not start with the constant 'git'
-    is refused; the one accepted non-git head is the literally spelled
-    sys.executable, whose spelling proves the launch runs the
-    interpreter rather than git. Matching the bare token `clone`
-    anywhere in a git argv is deliberate over-approximation: a
-    non-clone git command carrying that word must carry the silencing
-    configs too.
+    The audit's scope is the tracked tree, not a hand-written module list,
+    so a module added later is inside its reach with no hand edit. Each
+    tracked Python file is prefilted on the substring 'subprocess' before
+    the analyser runs: the analyser only understands launches spelled
+    through `subprocess`, so a source without that substring cannot hold a
+    launch it would see. The analyser's full resolution over the whole
+    tree is kept to a few seconds by that prefilter.
+
+    Dropping the bound also drops the only hang-guard on a wedged git
+    launch; the remedy accepts a hang surfacing as run_tests.py's
+    900-second suite bound ("SUITE TIMED OUT"), or the CI job's own
+    timeout-minutes, instead of a wall-clock margin that fires on a loaded
+    runner. A launch that only reads the local repository, or that sits
+    inside an enclosing bound, is bounded by that; a launch that can block
+    on a repository lock or the network, or that runs as a standalone tool
+    with nothing above it to catch a hang, keeps a bound and a table row
+    naming it. No site is ever fixed by widening a number or adding a
+    retry.
+
+    The head is read through a left-nested `+` concatenation and through a
+    plain name bound to a literal, both to a cap of _ARGV_UNWRAP_CAP, so a
+    tuple-concatenated or name-held git argv is classified rather than
+    refused as unreadable. A site is in scope only when the head reads as
+    the constant `git`. A `**`-unpacked keyword mapping on a git launch
+    is in scope, because a mapping the audit cannot read can hide a
+    timeout. A readable non-git head is provably not a git launch and an
+    unreadable head is the analyser's stated boundary; the analyser names
+    the head on every such refusal, so neither is silently dropped, and
+    the pull-request report lists each with its head and decision.
+
+    The allowance is an exemption, so it is pinned from both sides: a live
+    site with no table row fails, a table row matching zero or more than
+    one live site fails, and a table row whose function no longer holds a
+    site fails. Matching is on the exact (path, function) pair — a bounded
+    git launch in a different function of an allowed module, or a second
+    bounded git launch inside an allowed function, is a refusal, so the
+    exemption can never be widened by a cheaper prefix or substring match.
+    """
+    del tmp
+    live = {}
+    for path in _tracked_python():
+        source = (ROOT / path).read_text(encoding='utf-8',
+                                         errors='surrogateescape')
+        if 'subprocess' not in source:
+            continue
+        for site_path, function, refusal in _bound_sites(source, path):
+            live.setdefault((site_path, function), []).append(refusal)
+
+    unallowed = sorted(
+        f'{key[0]}::{key[1]} {sites}' for key, sites in live.items()
+        if key not in BOUNDED_GIT_LAUNCHES)
+    assert not unallowed, (
+        'bounded git launches with no BOUNDED_GIT_LAUNCHES row:\n'
+        + '\n'.join(unallowed))
+    for key in sorted(BOUNDED_GIT_LAUNCHES):
+        assert live.get(key), (
+            f'BOUNDED_GIT_LAUNCHES row {key} has no live bounded git '
+            'launch; a stale allowance is a refusal')
+    for key in sorted(BOUNDED_GIT_LAUNCHES):
+        count = len(live.get(key, ()))
+        assert count == 1, (
+            f'BOUNDED_GIT_LAUNCHES row {key} matches {count} live bounded '
+            'git launches; exactly one is required, so two bounded git '
+            'launches in one function must be given different functions')
+
+
+def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
+    """The three modules that carry the clone helper hold the deep launch
+    policy: fail loudly, clone silencing configs, readable argv, and the
+    whole _launch_refusals surface red-exercised by LAUNCH_REFUSAL_ROWS.
+
+    This set is exactly the modules that carry the clone helper, chosen
+    because the helper lives there; it is not a list of every module that
+    launches git. The wall-clock bound is enforced tree-wide by
+    test_no_git_subprocess_invocation_carries_a_wall_clock_bound, which
+    reads its scope from the tracked tree.
     """
     del tmp
     for name in ('test_repo_layout.py', '_scratch_index.py',
@@ -322,364 +436,6 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         assert len(row_refusals) == 1 and limb in row_refusals[0], (
             f'{label}: expected one refusal naming {limb!r}, '
             f'got {row_refusals}')
-
-
-def _launch_refusals(source, here):
-    """Every refusal limb one Python source's launches trip, naming its
-    limb."""
-    import builtins
-    tree = ast.parse(source)
-    safe_names = set(dir(builtins))
-    partial_aliases = {'functools.partial', 'partial'}
-    import_module_aliases = {'importlib.import_module', 'import_module'}
-    machinery = {'functools': {'partial': partial_aliases},
-                 'importlib': {'import_module': import_module_aliases}}
-    module_aliases = {}
-
-    def normalize(called):
-        """Map a machinery alias's member to its canonical spelling."""
-        if not called or '.' not in called:
-            return called
-        base, member = called.split('.', 1)
-        canonical = module_aliases.get(base)
-        if canonical:
-            return f'{canonical}.{member}'
-        return called
-
-    def callee_of(call):
-        """The call's callee as a spellable name, or None."""
-        if isinstance(call.func, ast.Attribute) \
-                and isinstance(call.func.value, ast.Name):
-            return f'{call.func.value.id}.{call.func.attr}'
-        if isinstance(call.func, ast.Name):
-            return call.func.id
-        return None
-
-    def derives(value, bound):
-        """Does this expression yield the module or one of its members?"""
-        if isinstance(value, ast.Name):
-            return (value.id == 'subprocess' or value.id in bound
-                    or value.id in module_factories)
-        if isinstance(value, (ast.Attribute, ast.NamedExpr)):
-            return derives(value.value, bound)
-        if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
-            return any(derives(elt, bound) for elt in value.elts)
-        if isinstance(value, ast.Dict):
-            return any(derives(item, bound)
-                       for item in value.values if item is not None)
-        if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            return (derives(value.elt, bound)
-                    or any(derives(g.iter, bound)
-                           for g in value.generators))
-        if isinstance(value, ast.DictComp):
-            return (derives(value.key, bound)
-                    or derives(value.value, bound)
-                    or any(derives(g.iter, bound)
-                           for g in value.generators))
-        if isinstance(value, ast.IfExp):
-            return derives(value.body, bound) or derives(value.orelse, bound)
-        if isinstance(value, ast.Lambda):
-            return derives(value.body, bound)
-        if isinstance(value, ast.Subscript):
-            base = value.value
-            if isinstance(base, ast.Attribute) \
-                    and isinstance(base.value, ast.Name) \
-                    and base.value.id == 'sys' and base.attr == 'modules':
-                return True
-            return derives(base, bound)
-        if isinstance(value, ast.Call):
-            called = normalize(callee_of(value))
-            if called in partial_aliases and any(
-                    derives(arg, bound) for arg in value.args):
-                return True
-            if called in import_module_aliases \
-                    and any(isinstance(arg, ast.Constant)
-                            and arg.value == 'subprocess'
-                            for arg in value.args):
-                return True
-            if called == 'getattr' and any(
-                    derives(arg, bound) for arg in value.args):
-                return True
-            if isinstance(value.func, ast.Attribute):
-                if isinstance(value.func.value, ast.Name) \
-                        and value.func.value.id == 'subprocess':
-                    return False
-                return derives(value.func.value, bound)
-            if isinstance(value.func, ast.Name):
-                if (value.func.id in bound
-                        or value.func.id in module_factories):
-                    return True
-                if value.func.id in defined_names:
-                    return False
-                return any(derives(arg, bound) for arg in value.args)
-            return any(derives(arg, bound) for arg in value.args)
-        return False
-
-    def resolves_safe(expr):
-        """Is this receiver provably free of subprocess-derived values?"""
-        if isinstance(expr, ast.Attribute):
-            return resolves_safe(expr.value)
-        if isinstance(expr, ast.Subscript):
-            base = expr.value
-            if isinstance(base, ast.Attribute) \
-                    and isinstance(base.value, ast.Name) \
-                    and base.value.id == 'sys' \
-                    and base.attr == 'modules':
-                return False
-            return resolves_safe(base)
-        if isinstance(expr, ast.Call):
-            called = callee_of(expr)
-            if called in ('eval', 'exec'):
-                return False
-            if called == 'getattr' or called in partial_aliases \
-                    or called in import_module_aliases:
-                return False
-            if isinstance(expr.func, ast.Name):
-                return expr.func.id in safe_names \
-                    and expr.func.id not in bound
-            if isinstance(expr.func, ast.Attribute):
-                if isinstance(expr.func.value, ast.Name):
-                    base = expr.func.value.id
-                    if base in bound or base in module_factories:
-                        return False
-                    if base == 'subprocess':
-                        return expr.func.attr == 'run'
-                    return base in safe_names
-                return resolves_safe(expr.func.value)
-            return False
-        if isinstance(expr, ast.Name):
-            return expr.id not in bound and expr.id != 'subprocess'
-        return True
-
-    refusals = []
-    defined_names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == 'subprocess' and alias.asname:
-                    refusals.append(
-                        f'{here}:{node.lineno} aliases the subprocess '
-                        f'import as {alias.asname}')
-                elif alias.name in machinery and '.' not in alias.name:
-                    module_aliases[alias.asname or alias.name] = alias.name
-                elif '.' in alias.name and not alias.asname:
-                    safe_names.add(alias.name.split('.')[0])
-                else:
-                    safe_names.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module == 'subprocess':
-                refusals.append(
-                    f'{here}:{node.lineno} from-imports subprocess')
-            else:
-                for alias in node.names:
-                    imported = f'{node.module}.{alias.name}'
-                    if imported in partial_aliases:
-                        partial_aliases.add(alias.asname or alias.name)
-                        defined_names.add(alias.asname or alias.name)
-                    elif imported in import_module_aliases:
-                        import_module_aliases.add(alias.asname
-                                                  or alias.name)
-                        defined_names.add(alias.asname or alias.name)
-                    else:
-                        safe_names.add(alias.asname or alias.name)
-    if not refusals and not any(
-            isinstance(node, ast.Import)
-            and any(alias.name == 'subprocess' and not alias.asname
-                    for alias in node.names)
-            for node in ast.walk(tree)):
-        refusals.append(
-            f'{here} declares no plain "import subprocess"; the launch '
-            'audit cannot vouch for any launch')
-    bindings = []
-    returns = []
-    yields = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            bindings.extend(
-                (target.id, node.value) for target in node.targets
-                if isinstance(target, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and node.value \
-                and isinstance(node.target, ast.Name):
-            bindings.append((node.target.id, node.value))
-        elif isinstance(node, ast.NamedExpr):
-            bindings.append((node.target.id, node.value))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defined_names.add(node.name)
-            args = node.args
-            defaults = args.defaults[-len(args.args):] \
-                if args.defaults else []
-            for arg, default in zip(args.args[-len(defaults):], defaults):
-                bindings.append((arg.arg, default))
-            for arg, default in zip(args.kwonlyargs, args.kw_defaults):
-                if default is not None:
-                    bindings.append((arg.arg, default))
-            returns.extend(
-                (node.name, statement.value)
-                for statement in ast.walk(node)
-                if isinstance(statement, ast.Return) and statement.value)
-            yields.extend(
-                (node.name, statement.value)
-                for statement in ast.walk(node)
-                if isinstance(statement, (ast.Yield, ast.YieldFrom))
-                and statement.value)
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
-            if isinstance(node.target, ast.Name):
-                bindings.append((node.target.id, node.iter))
-        elif isinstance(node, ast.ClassDef):
-            defined_names.add(node.name)
-            for statement in node.body:
-                if isinstance(statement, ast.Assign):
-                    bindings.append((node.name, statement.value))
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                if isinstance(item.optional_vars, ast.Name):
-                    bindings.append(
-                        (item.optional_vars.id, item.context_expr))
-    bound = set()
-    module_factories = set()
-    launcher_factories = set()
-    changed = True
-    while changed:
-        changed = False
-        for name, value in bindings:
-            if name not in bound and derives(value, bound):
-                bound.add(name)
-                changed = True
-        for name, value in returns + yields:
-            if name in module_factories or name in launcher_factories:
-                continue
-            if derives(value, bound):
-                if isinstance(value, ast.Name):
-                    module_factories.add(name)
-                else:
-                    launcher_factories.add(name)
-                    bound.add(name)
-                    changed = True
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) \
-                and isinstance(node.ctx, ast.Store) \
-                and node.id not in bound:
-            safe_names.add(node.id)
-        if isinstance(node, ast.Assign) \
-                and not all(isinstance(t, ast.Name) for t in node.targets) \
-                and derives(node.value, bound):
-            refusals.append(
-                f'{here}:{node.lineno} unpacks subprocess-derived values '
-                'the audit cannot follow')
-        if isinstance(node, (ast.For, ast.AsyncFor)) \
-                and not isinstance(node.target, ast.Name) \
-                and derives(node.iter, bound):
-            refusals.append(
-                f'{here}:{node.lineno} unpacks subprocess-derived values '
-                'the audit cannot follow')
-    launches = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        called = callee_of(node)
-        if called in ('eval', 'exec'):
-            refusals.append(
-                f'{here}:{node.lineno} calls {called}, which the audit '
-                'cannot resolve')
-        spelled = normalize(called)
-        if spelled and '.' in spelled:
-            module, member = spelled.split('.', 1)
-            if module in machinery \
-                    and member not in machinery[module]:
-                refusals.append(
-                    f'{here}:{node.lineno} calls {called}, which the '
-                    'audit cannot resolve')
-        if isinstance(func, ast.Name) \
-                and not (func.id in bound
-                         or func.id in module_factories
-                         or func.id in launcher_factories
-                         or func.id in defined_names
-                         or func.id in safe_names):
-            refusals.append(
-                f'{here}:{node.lineno} calls undefined name {func.id!r}, '
-                'which the audit cannot resolve')
-        if isinstance(func, ast.Attribute) \
-                and isinstance(func.value, ast.Name) \
-                and (func.value.id == 'subprocess'
-                     or func.value.id in bound):
-            launches.append(node)
-        elif isinstance(func, ast.Name) and func.id in bound:
-            launches.append(node)
-        elif isinstance(func, ast.NamedExpr) and func.target.id in bound:
-            launches.append(node)
-        elif isinstance(func, ast.Attribute) \
-                and isinstance(func.value, ast.Call) \
-                and isinstance(func.value.func, ast.Name) \
-                and func.value.func.id in module_factories:
-            launches.append(node)
-        elif isinstance(func, (ast.Call, ast.Subscript)):
-            refusals.append(
-                f'{here}:{node.lineno} calls through a receiver the '
-                'audit cannot resolve')
-        elif isinstance(func, ast.Attribute):
-            unresolved = not resolves_safe(func.value)
-            if unresolved:
-                refusals.append(
-                    f'{here}:{node.lineno} calls through a receiver the '
-                    'audit cannot resolve')
-    if not launches:
-        refusals.append(
-            f'{here} declares no launch the audit can see through '
-            '"subprocess" or a binding derived from it')
-    for node in launches:
-        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
-        if None in keywords:
-            refusals.append(
-                f'{here}:{node.lineno} unpacks a keyword mapping the '
-                'audit cannot read')
-            continue
-        if 'timeout' in keywords:
-            refusals.append(
-                f'{here}:{node.lineno} carries a '
-                f'timeout={ast.dump(keywords["timeout"])} argument')
-        check = keywords.get('check')
-        if not (isinstance(check, ast.Constant) and check.value is True):
-            refusals.append(
-                f'{here}:{node.lineno} does not fail loudly on a failed '
-                'git command')
-        if isinstance(node.func, ast.Attribute) \
-                and node.func.attr != 'run':
-            refusals.append(
-                f'{here}:{node.lineno} launches through '
-                f'{node.func.value.id}.{node.func.attr}, '
-                'which the audit does not see')
-        argv = node.args[0] if node.args else None
-        words = []
-        if isinstance(argv, ast.List):
-            words = [elt.value if isinstance(elt, ast.Constant)
-                     and isinstance(elt.value, str) else None
-                     for elt in argv.elts]
-        else:
-            refusals.append(
-                f'{here}:{node.lineno} builds an argv the audit '
-                'cannot read')
-        if words and words[0] != 'git':
-            head = argv.elts[0]
-            interpreter = (isinstance(head, ast.Attribute)
-                           and isinstance(head.value, ast.Name)
-                           and head.value.id == 'sys'
-                           and head.attr == 'executable')
-            if not interpreter:
-                refusals.append(
-                    f"{here}:{node.lineno} argv does not start with the "
-                    "constant 'git'")
-        if words and words[0] == 'git' and 'clone' in words:
-            declared = {words[i + 1]
-                        for i, slot in enumerate(words[:-1])
-                        if slot == '-c' and words[i + 1] is not None}
-            missing = [name for name in CLONE_SILENCING_CONFIG
-                       if name not in declared]
-            if missing:
-                refusals.append(
-                    f'{here}:{node.lineno} clones without the silencing '
-                    + ', '.join(f'-c {name}' for name in missing))
-    return refusals
 
 
 if __name__ == '__main__':

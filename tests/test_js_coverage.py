@@ -28,7 +28,7 @@ _SCRIPT = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
 def _git(root, *args):
     return subprocess.run(
         ['git', '-C', str(root), *args], capture_output=True,
-        check=True, text=True, timeout=30)
+        check=True, text=True)
 
 
 def _repository(tmp, sources):

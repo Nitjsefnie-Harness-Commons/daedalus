@@ -312,7 +312,7 @@ def test_every_shipped_javascript_file_is_modelled(tmp):
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z', '--',
          'extension', 'dashboard'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     paths = sorted(
         Path(raw.decode('utf-8', 'surrogateescape'))
         for raw in listed.stdout.split(b'\0')

@@ -70,7 +70,7 @@ def test_release_scanner_enumeration_matches_tracked_files(tmp):
     del tmp
     listed = subprocess.run(
         ['git', '-C', str(ROOT), 'ls-files', '-z'], capture_output=True,
-        check=True, timeout=30)
+        check=True)
     tracked = {
         ROOT / os.fsdecode(path)
         for path in listed.stdout.split(b'\0') if path

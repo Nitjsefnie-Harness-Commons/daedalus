@@ -51,7 +51,7 @@ def tracked_sizes(root=ROOT):
     """Return tracked Python and JavaScript module line counts."""
     listed = subprocess.run(
         ['git', '-C', str(root), 'ls-files', '-z', '*.py', '*.js'],
-        capture_output=True, check=True, timeout=30)
+        capture_output=True, check=True)
     sizes = {}
     for raw in listed.stdout.split(b'\0'):
         if not raw:
