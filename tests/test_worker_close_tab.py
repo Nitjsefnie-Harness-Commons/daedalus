@@ -9,17 +9,32 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import RELAY_CONTEXT  # noqa: E402
+from _worker_sources import RELAY_CONTEXT, event_target_stub  # noqa: E402
 
 TOKEN = 'close-token'
 SERVER = 'https://bridge.example.com'
 SYNC = 'POST /sync-tabs'
+UNREGISTER = 'POST /unregister'
 RESULT = 'POST /result'
-# Every scenario's recording, from a run of the shipped worker: boot opens the
-# stream and syncs the tab list, then the dispatch posts its result. The
-# eval-rejection scenario never posts one.
-BOOT_RESULT = [SYNC, RESULT]
+# The boot's stream answer, and the reason it never reconnects here.
 BOOT_STREAM = (503,)
+
+
+def _planned_requests(unregistered=0, posts_result=True):
+    """The routes a scenario's own removals put on the bridge.
+
+    Each closed tab unregisters through the worker's own onRemoved listener,
+    and the listener's deferred full sync is coalesced across the burst, so
+    a run that closed N tabs shows N unregisters and ONE extra sync however
+    many timers it armed. A scenario that closed nothing pays neither.
+    """
+    requests = [SYNC] + [UNREGISTER] * unregistered
+    if unregistered:
+        requests.append(SYNC)
+    if posts_result:
+        requests.append(RESULT)
+    return requests
+
 
 _CLOSE_TAB_HARNESS = (r"""
 const fs = require('fs');
@@ -47,14 +62,28 @@ function response(status, data) {
   };
 }
 
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
-  };
+// The window a removal reports, chosen here rather than derived from the tab
+// id the scenario supplied, so a listener that read it could not be echoing
+// the caller's own value back.
+const REMOVED_WINDOW_ID = 42;
+// The one target that fires: only the removal needs dispatching, and an
+// opt-in target is the only way a listener runs here at all.
+const onRemovedTarget = eventTarget([], true);
+
+// The timer the removal listener defers its registry sync behind. A timer
+// armed WHILE an event is being dispatched is collected and run once the
+// commands settle, so the worker's own coalescing decides the count: a
+// burst of removals schedules one sync, exactly as Chrome coalesces them.
+// Every other timer stays inert, so the stream's reconnect cannot loop.
+const deferredTimers = [];
+let dispatchingEvent = false;
+function setTimeoutStandIn(callback, _delay) {
+  if (!dispatchingEvent) return 1;
+  deferredTimers.push(callback);
+  return deferredTimers.length;
 }
 
+""" + event_target_stub() + r"""
 const chrome = {
   storage: {
     local: {
@@ -79,7 +108,7 @@ const chrome = {
   tabs: {
     onUpdated: eventTarget(),
     onCreated: eventTarget(),
-    onRemoved: eventTarget(),
+    onRemoved: onRemovedTarget,
     query(_query, callback) {
       if (plan.failQuery && _query.active) {
         throw new Error('planned chrome.tabs.query rejection');
@@ -98,6 +127,16 @@ const chrome = {
       const rejects = plan.reject || {};
       const message = rejects[String(tabId)];
       if (message !== undefined) throw new Error(message);
+      // Chrome announces a removal that happened; one that refused never
+      // fires. Chrome's own signature is (tabId, removeInfo).
+      dispatchingEvent = true;
+      try {
+        onRemovedTarget.dispatch(tabId, {
+          windowId: REMOVED_WINDOW_ID, isWindowClosing: false,
+        });
+      } finally {
+        dispatchingEvent = false;
+      }
     },
     sendMessage: async () => {
       throw new Error('unmodelled chrome.tabs.sendMessage');
@@ -119,6 +158,10 @@ function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
 """ + STRICT_FETCH + RELAY_CONTEXT + r"""
+// The shared context's timer is inert, which would strand the removal
+// listener's deferred sync; the stand-in above runs only what an event
+// dispatch armed, so nothing else the worker defers comes with it.
+context.setTimeout = setTimeoutStandIn;
 
 async function run() {
   vm.runInContext(
@@ -135,6 +178,7 @@ async function run() {
       outcomes.push({ settled: 'rejected', message: error.message });
     }
   }
+  for (const deferred of deferredTimers.splice(0)) deferred();
   return {
     removes: removeCalls,
     posted: resultPosts.map((p) => ({
@@ -158,9 +202,12 @@ run().then((result) => {
 """).replace('__TOKEN__', TOKEN).replace('__SERVER__', SERVER)
 
 
-def _run_close_tab(command, reject=None, fail_query=False, planned=None,
-                   planned_stream=BOOT_STREAM):
-    plan = {'commands': [command], 'planned': list(planned or BOOT_RESULT)}
+def _run_close_tab(command, reject=None, fail_query=False, unregistered=0,
+                   posts_result=True, planned_stream=BOOT_STREAM):
+    plan = {
+        'commands': [command],
+        'planned': _planned_requests(unregistered, posts_result),
+    }
     if reject is not None:
         plan['reject'] = reject
     if fail_query:
@@ -178,6 +225,9 @@ def _run_close_tab(command, reject=None, fail_query=False, planned=None,
         'removes': outcome['removes'],
         'posted': outcome['posted'],
         'outcomes': outcome['outcomes'],
+        'unregisters': [
+            record['body']['tabId'] for record in outcome['records']
+            if record['request'] == UNREGISTER],
     }
 
 
@@ -198,6 +248,7 @@ def _assert_wrong_shape(value):
             'error': 'tabIds must be an array',
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': [],
     }, outcome
 
 
@@ -242,12 +293,14 @@ def test_wrong_shape_tab_ids_is_rejected_even_with_tab_id(tmp):
         'result': None,
         'error': 'tabIds must be an array',
     }], outcome
+    assert outcome['unregisters'] == [], outcome
 
 
 def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
     del tmp
     outcome = _run_close_tab(
-        _command(type='eval', code='1'), fail_query=True, planned=[SYNC])
+        _command(type='eval', code='1'), fail_query=True,
+        posts_result=False)
     assert outcome == {
         'removes': [],
         'posted': [],
@@ -255,12 +308,13 @@ def test_settlement_recorder_captures_rejected_eval_dispatch(tmp):
             'settled': 'rejected',
             'message': 'planned chrome.tabs.query rejection',
         }],
+        'unregisters': [],
     }, outcome
 
 
 def test_mixed_type_tab_ids_are_parsed_and_closed_in_order(tmp):
     del tmp
-    outcome = _run_close_tab(_command(tabIds=[1, '2']))
+    outcome = _run_close_tab(_command(tabIds=[1, '2']), unregistered=2)
     assert outcome == {
         'removes': [1, 2],
         'posted': [{
@@ -270,6 +324,7 @@ def test_mixed_type_tab_ids_are_parsed_and_closed_in_order(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': ['1', '2'],
     }, outcome
 
 
@@ -285,12 +340,13 @@ def test_empty_tab_ids_answers_empty_close_result(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': [],
     }, outcome
 
 
 def test_tab_id_alone_is_closed(tmp):
     del tmp
-    outcome = _run_close_tab(_command(tabId=5))
+    outcome = _run_close_tab(_command(tabId=5), unregistered=1)
     assert outcome == {
         'removes': [5],
         'posted': [{
@@ -300,12 +356,14 @@ def test_tab_id_alone_is_closed(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': ['5'],
     }, outcome
 
 
 def test_null_tab_ids_falls_back_to_tab_id(tmp):
     del tmp
-    outcome = _run_close_tab(_command(tabId=5, tabIds=None))
+    outcome = _run_close_tab(
+        _command(tabId=5, tabIds=None), unregistered=1)
     assert outcome == {
         'removes': [5],
         'posted': [{
@@ -315,6 +373,7 @@ def test_null_tab_ids_falls_back_to_tab_id(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': ['5'],
     }, outcome
 
 
@@ -330,13 +389,15 @@ def test_missing_tab_ids_and_tab_id_answers_missing_error(tmp):
             'error': 'Missing tabId or tabIds',
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': [],
     }, outcome
 
 
 def test_one_remove_error_is_reported_while_other_tabs_close(tmp):
     del tmp
     outcome = _run_close_tab(
-        _command(tabIds=[1, '2', 3]), reject={'2': 'cannot close 2'})
+        _command(tabIds=[1, '2', 3]), reject={'2': 'cannot close 2'},
+        unregistered=2)
     assert outcome == {
         'removes': [1, 2, 3],
         'posted': [{
@@ -349,6 +410,7 @@ def test_one_remove_error_is_reported_while_other_tabs_close(tmp):
             'error': None,
         }],
         'outcomes': [{'settled': 'resolved'}],
+        'unregisters': ['1', '3'],
     }, outcome
 
 
