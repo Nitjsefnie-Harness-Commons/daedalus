@@ -22,9 +22,8 @@ from _stream_fake import (  # noqa: E402
 from _worker_sources import (  # noqa: E402
     chrome_stub, import_scripts_stub)
 
-# The starvation scenarios run with the freeze/thaw budget of their own (see
-# _FREEZE_RUN_TIMEOUT_S); the harness children the wall-timeout guard names do
-# not.
+# The starvation scenarios run with the freeze/thaw budget of their own; the
+# harness children the wall-timeout guard names do not.
 _ENV = _util.child_coverage('scrub')
 
 
@@ -209,10 +208,9 @@ drive().catch((error) => {
 });
 """).replace('__BRIDGE__', BRIDGE)
 
-# An outer backstop, not a bound on awaited work: the freeze control's child
-# spends its budget in one deliberate busy-wait, so a wedged child is the
-# only failure this ceiling can name.
-_FREEZE_RUN_TIMEOUT_S = 60
+# The freeze control's child spends its budget in one deliberate busy-wait
+# and ends on its own: a wedged child is the only failure here that never
+# ends, and the suite's ceiling is what names that, as it names every hung job.
 
 
 def _starve_run(mode):
@@ -220,8 +218,7 @@ def _starve_run(mode):
     outcome = run_gate(
         require_node(), _CDP_STARVE_HARNESS,
         [str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=ROOT, plan={'planned': list(BOOT_PLAN)},
-        timeout=_FREEZE_RUN_TIMEOUT_S)
+        cwd=ROOT, plan={'planned': list(BOOT_PLAN)})
     assert_gate_clean(
         contract_faults=outcome['contractFaults'],
         records=outcome['records'], refused=outcome['refused'],
@@ -282,11 +279,27 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
         outcome)
 
 
-# The modules the two harness children are launched through. The guard
-# resolves the launcher each harness actually calls (by the callee at its own
-# call site) and follows that call graph, so the verdict is bound to the
-# operation, not to one function name.
+# The modules every harness child is launched through: the gate helpers and
+# the neutral file launcher behind them. The guard resolves the launcher each
+# caller actually calls (by the callee at its own call site) and follows that
+# call graph, so the verdict is bound to the operation, not to one function
+# name.
 _LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
+# The harness modules that launch a child themselves, each also checked for
+# a `timeout=` at its own call sites.
+_HARNESS_MODULES = ('_relayharness.py', '_cdpharness.py')
+# The `subprocess` entry points a child is launched through, and what such a
+# launch may legitimately carry. A keyword outside the second is refused
+# rather than passed: the concept scan reads one spelling, and a bound renamed
+# to anything else would walk past it.
+_SUBPROCESS_LAUNCHES = frozenset(
+    {'run', 'Popen', 'call', 'check_call', 'check_output'})
+_BENIGN_LAUNCH_ARGS = frozenset({
+    'args', 'bufsize', 'capture_output', 'check', 'close_fds', 'cwd',
+    'encoding', 'env', 'errors', 'executable', 'extra_groups', 'group',
+    'input', 'pass_fds', 'restore_signals', 'shell', 'start_new_session',
+    'stderr', 'stdin', 'stdout', 'text', 'universal_newlines', 'umask',
+    'user'})
 # Sentinel for a callee that names a launcher-module entity but whose body the
 # walk cannot see. It is a refusal, not a skip: an unread body is a hole in
 # this audit, so the audit cannot certify it, and a bound hiding there would
@@ -327,20 +340,57 @@ def _module_class_aliases(tree, classes):
     return aliases
 
 
+def _subprocess_bindings(tree):
+    """The names in `tree` that call a `subprocess` launch, per binding form.
+
+    `import subprocess`, `import subprocess as sp` and `from subprocess
+    import run as launch` name one call three ways; a census reading only
+    one of them would miss a bound behind the other two.
+    """
+    modules = {'subprocess'}
+    members = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == 'subprocess':
+            members.update(alias.asname or alias.name
+                           for alias in node.names
+                           if alias.name in _SUBPROCESS_LAUNCHES)
+        elif isinstance(node, ast.Import):
+            modules.update(alias.asname or alias.name for alias in node.names
+                           if alias.name == 'subprocess')
+    return modules, members
+
+
+def _is_launch_call(call, launches):
+    """Whether a `Call` reaches a `subprocess` launch, by either binding."""
+    modules, members = launches
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return (func.attr in _SUBPROCESS_LAUNCHES
+                and getattr(func.value, 'id', None) in modules)
+    return isinstance(func, ast.Name) and func.id in members
+
+
 def _launcher_context(trees):
     """Index every function and method the launcher modules define.
 
     Bodies are keyed so a callee resolves by bare name, module-qualified
     attribute, `self.<m>` or `<Class>.<m>` / `<Class>().<m>`; collecting
-    class methods is what stops that route being an unseen hole.
+    class methods is what stops that route being an unseen hole. The
+    `subprocess` bindings are unioned across the modules: a launcher module
+    is a launcher module, so a name one of them imports for its launch is a
+    launch binding in all of them.
     """
     functions = {}
     methods = {}
     classes = set()
     local_classes = {}
     stems = set()
+    modules, members = {'subprocess'}, set()
     for name, tree in trees.items():
         stems.add(name[:-len('.py')])
+        bound_modules, bound_members = _subprocess_bindings(tree)
+        modules |= bound_modules
+        members |= bound_members
         classes.update(node.name for node in ast.walk(tree)
                        if isinstance(node, ast.ClassDef))
         for node in ast.walk(tree):
@@ -350,7 +400,8 @@ def _launcher_context(trees):
                 methods.update(_class_methods(node))
         local_classes.update(_module_class_aliases(tree, classes))
     return {'functions': functions, 'methods': methods, 'classes': classes,
-            'local_classes': local_classes, 'stems': stems}
+            'local_classes': local_classes, 'stems': stems,
+            'launches': (modules, members)}
 
 
 def _local_class_bindings(function, classes):
@@ -442,18 +493,43 @@ def _const_str(node):
     return None
 
 
-def _timeout_faults(function):
-    """Every place the deadline concept `timeout` appears in `function`.
+def _numeric_default_faults(function):
+    """Every parameter of `function` that defaults to a number.
+
+    A bound spelled under a word the concept scan does not read arrives
+    through a signature first, and a launcher module has no numeric
+    parameter that is not one.
+    """
+    args = function.args
+    positional = list(args.posonlyargs) + list(args.args)
+    defaults = list(args.defaults)
+    paired = list(zip(positional[len(positional) - len(defaults):], defaults))
+    paired.extend((arg, default)
+                  for arg, default in zip(args.kwonlyargs, args.kw_defaults)
+                  if default is not None)
+    return [(default.lineno, f'{arg.arg}= number default')
+            for arg, default in paired
+            if isinstance(default, ast.Constant)
+            and isinstance(default.value, (int, float))
+            and not isinstance(default.value, bool)]
+
+
+def _timeout_faults(function, launches):
+    """Every place a bound on the child appears in `function`.
 
     The concept, not the spelling of any one launch, is what keeps this from
-    moving when a route is missed. It enters a child three ways: a `timeout=`
-    keyword on any call, a `timeout` parameter, and a `'timeout'` key written
-    into a container a `**` spread forwards. A bare `**opts` with no `timeout`
-    anywhere is deliberately NOT a fault: a spread is not evidence of a bound.
+    moving when a route is missed. It enters a child five ways: a `timeout=`
+    keyword on any call, a `timeout` parameter, a parameter defaulting to a
+    number, a `'timeout'` key a `**` spread forwards, and an argument handed
+    to a `subprocess` launch that is not one of the launch's own arguments —
+    how a bound renamed to `deadline` or `wall` is caught. A bare `**opts`
+    with no `timeout` anywhere is deliberately NOT a fault: a spread is not
+    evidence of a bound.
     """
     faults = []
     if 'timeout' in _parameter_names(function):
         faults.append((function.lineno, 'timeout parameter'))
+    faults.extend(_numeric_default_faults(function))
     for node in ast.walk(function):
         if isinstance(node, ast.keyword) and node.arg == 'timeout':
             faults.append((node.lineno, 'timeout= keyword'))
@@ -464,6 +540,13 @@ def _timeout_faults(function):
         elif (isinstance(node, ast.Dict)
               and any(_const_str(k) == 'timeout' for k in node.keys)):
             faults.append((node.lineno, "'timeout' key in a dict"))
+        elif isinstance(node, ast.Call) and _is_launch_call(
+                node, launches):
+            faults.extend(
+                (keyword.value.lineno, f'{keyword.arg}= at a child launch')
+                for keyword in node.keywords
+                if keyword.arg is not None
+                and keyword.arg not in _BENIGN_LAUNCH_ARGS)
     return faults
 
 
@@ -489,7 +572,7 @@ def _census(entry_bodies, trees, ctx):
             continue
         current_class = key[1] if key[0] == 'method' else None
         locals_ = _local_class_bindings(body, ctx['classes'])
-        for fault in _timeout_faults(body):
+        for fault in _timeout_faults(body, ctx['launches']):
             faults.append((key, fault))
         for node in ast.walk(body):
             if not isinstance(node, ast.Call):
@@ -503,11 +586,13 @@ def _census(entry_bodies, trees, ctx):
 
 
 def _harness_entries(harness_tree, ctx):
-    """The launcher bodies a harness reaches, resolved off its call sites.
+    """The launcher bodies a tree reaches at its own call sites.
 
-    Returns `(entries, refusals)`.
+    Returns `(bodies, refusals)`, deduplicated. A caller entry reads only
+    the bodies: a caller is not audited code, so a launcher-module entity
+    it names without calling is no hole; for a harness module it is one.
     """
-    entries = []
+    bodies = []
     refusals = []
     for node in ast.walk(harness_tree):
         if not isinstance(node, ast.Call):
@@ -515,50 +600,71 @@ def _harness_entries(harness_tree, ctx):
         resolved = _resolve_callee(node, None, ctx, {})
         if resolved is _UNRESOLVED:
             refusals.append((node.lineno, _UNRESOLVED))
-        elif resolved:
-            entries.extend(resolved)
-    return entries, refusals
+            continue
+        for key in resolved or ():
+            if key not in bodies:
+                bodies.append(key)
+    return bodies, refusals
+
+
+def _caller_roots(tests_dir, ctx):
+    """The launcher bodies each module under `tests/` calls, per module.
+
+    Parsing the whole directory rather than naming today's callers is what
+    makes the entry set complete: a module that starts calling a launcher
+    later is on the graph without this guard being edited."""
+    roots = {}
+    for path in sorted(tests_dir.glob('*.py')):
+        bodies, _ = _harness_entries(
+            ast.parse(path.read_text(encoding='utf-8')), ctx)
+        if bodies:
+            roots[path.name] = bodies
+    return roots
 
 
 def test_the_harness_children_run_without_a_wall_timeout(tmp):
-    """The Surface D runners launch their children with no wall bound.
+    """Every harness child, inline or from a file, runs with no wall bound.
 
     A reintroduced wall backstop around an attempt-bounded child is the
     starvation rejection this branch removes. The guard resolves the launcher
-    each harness's own call sites reach (see `_resolve_callee` and
-    `_timeout_faults` for the resolve-or-refuse census and the deadline
-    concept it refuses).
+    each caller's own call sites reach (see `_resolve_callee` and
+    `_timeout_faults` for the resolve-or-refuse census and the bound concept
+    it refuses).
 
-    Enforced: no `timeout` concept, and no unread launcher-module body, on the
-    resolved call graph from each harness's launcher. Not enforced, and not
-    claimed to be, a deadline reached any other way: (1) the harness's own
-    JavaScript, which this guard's input language (Python `ast`) cannot see;
-    (2) a helper the launcher modules import from outside themselves;
-    (3) a `timeout` parameter defaulted inside a method reached through a
-    receiver the walk cannot type to a class; (4) a deadline
-    assembled without the word `timeout` — a clock comparison plus a kill, or
-    `signal.alarm`; (5) a launcher-module body the census does not put on the
-    graph by construction — a class constructor (a bare `C()` call resolves to
-    no body), a method reached through a subscript or other
+    The entry set is what makes the coverage whole: the harness modules
+    (each also checked for a `timeout=` at its own call sites) and every
+    module in `tests/` reaching a launcher body, derived from the directory
+    rather than listed. The census is the same for both, so a bound in
+    either launch is refused the same way, for the argument it hands the
+    child as well as for the word `timeout`.
+
+    Enforced: no bound concept, and no unread launcher-module body, on the
+    resolved call graph from every entry. Not enforced, and not claimed to
+    be, a deadline reached any other way: (1) the harness's own JavaScript,
+    which this guard's input language (Python `ast`) cannot see; (2) a helper
+    the launcher modules import from outside themselves; (3) a `timeout`
+    parameter defaulted inside a method reached through a receiver the walk
+    cannot type to a class; (4) a deadline assembled without any argument to
+    a child launch — a clock comparison plus a kill, or `signal.alarm`; (5) a
+    launcher-module body the census does not put on the graph by
+    construction — a class constructor (a bare `C()` call resolves to no
+    body), a method reached through a subscript or other
     non-Name/non-Attribute callee, or a decorator that replaces a body at
-    runtime; (6) a method inherited from a base class, which the census refuses
-    rather than follows, so a deadline-free launcher of that shape is a false
-    red.
+    runtime; (6) a method inherited from a base class, which the census
+    refuses rather than follows, so a bound-free launcher of that shape is a
+    false red.
 
-    (5) and (6) are parked: the property is currently true — none of those
-    forms is on the shipped launcher path — and the one-line remedy for (5)'s
-    constructor arm (in `_resolve_callee`, return the class's `__init__` key
-    for a bare class-name call instead of `[]`) is recorded here and
-    deliberately not applied, because it would not fix (6). Each mechanism is
-    named so the next maintainer can act on it, the way `_worker_sources.py`
-    names the duplicate check's blindness to string-literal JavaScript.
+    (5) and (6) are parked: the property is currently true, and the one-line
+    remedy for (5)'s constructor arm (in `_resolve_callee`, return the class's
+    `__init__` key for a bare class-name call instead of `[]`) is recorded here
+    and deliberately not applied, because it would not fix (6).
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
     trees = {name: ast.parse((tests_dir / name).read_text(encoding='utf-8'))
              for name in _LAUNCHER_MODULES}
     ctx = _launcher_context(trees)
-    for name in ('_relayharness.py', '_cdpharness.py'):
+    for name in _HARNESS_MODULES:
         tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
         sites = [node.lineno for node in ast.walk(tree)
                  if isinstance(node, ast.keyword) and node.arg == 'timeout']
@@ -567,6 +673,13 @@ def test_the_harness_children_run_without_a_wall_timeout(tmp):
         assert entries, (name, 'no launcher call resolved from the harness')
         faults = _census(entries, trees, ctx) + refusals
         assert not faults, (name, sorted(entries), faults)
+    roots = _caller_roots(tests_dir, ctx)
+    reached = {key for bodies in roots.values() for key in bodies}
+    gate = {('fn', 'run_gate', None), ('fn', 'run_node_program', None)}
+    assert gate <= reached, (sorted(reached), 'the file gate')
+    for name, bodies in sorted(roots.items()):
+        faults = _census(bodies, trees, ctx)
+        assert not faults, (name, sorted(bodies), faults)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):

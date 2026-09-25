@@ -14,12 +14,19 @@ from pathlib import Path
 import _util
 
 
-def run_node_program(node, program, arguments, cwd, payload=None, timeout=30):
+def run_node_program(node, program, arguments, cwd, payload=None):
     """Run a Node program from a closed, automatically cleaned file.
 
     `cwd` is positional so a caller that forwards its own `cwd` (the shared
     gate's `run_gate`) neither names a `cwd=` keyword the coverage guard would
     read as an undeclared launch nor has to restate the environment.
+
+    No wall bound of its own, for the reason `run_inline_gate` gives: these
+    children are bounded by their own attempt counts, and a slow correct run
+    on a loaded runner must not become an intermittent failure — a genuine
+    deadlock is better surfaced as a hung job under the suite's ceiling than
+    as a flaky timeout. `test_starvation_bounds.py` refuses the bound coming
+    back by any spelling.
 
     The child runs with `child_coverage('scrub')` evaluated **here, at
     launch**, not snapshotted at import. A module-level snapshot cannot be
@@ -39,4 +46,4 @@ def run_node_program(node, program, arguments, cwd, payload=None, timeout=30):
         return subprocess.run(
             [node, str(program_path), *arguments], cwd=cwd,
             env=_util.child_coverage('scrub'), capture_output=True,
-            text=True, encoding='utf-8', timeout=timeout)
+            text=True, encoding='utf-8')
