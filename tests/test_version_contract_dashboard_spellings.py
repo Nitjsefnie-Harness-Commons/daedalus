@@ -69,6 +69,10 @@ _STATUS_SPELLINGS = {
         "<span class = 'sl-v' id = 'x'>9.9.9</span>"),
     'quoted_gt_in_trailing_attribute': (
         "<span class='sl-v' title='a>b'>9.9.9</span>"),
+    'quoted_lt_in_trailing_attribute': (
+        "<span class='sl-v' title='a<b'>9.9.9</span>"),
+    'double_quoted_lt_in_trailing_attribute': (
+        '<span class="sl-v" data-x="a<b">9.9.9</span>'),
 }
 
 
@@ -174,6 +178,19 @@ def test_status_line_trailing_region_reads_a_quoted_gt_whole(tmp_path):
     _assert_duplicate_spelling_refused(
         tmp_path, _STATUS_SPELLINGS['quoted_gt_in_trailing_attribute'],
         _STATUS)
+
+
+def test_status_line_trailing_region_reads_a_quoted_lt_whole(tmp_path):
+    """A `<` inside a later attribute value does not end the tag early.
+
+    Both quote spellings, so the twin is not itself a single-spelling
+    control: a region narrowed at `<` inside one of them fails here
+    whichever of the two it is.
+    """
+    for name in ('quoted_lt_in_trailing_attribute',
+                 'double_quoted_lt_in_trailing_attribute'):
+        _assert_duplicate_spelling_refused(
+            Path(tmp_path) / name, _STATUS_SPELLINGS[name], _STATUS)
 
 
 def test_space_before_gt_rail_duplicate_is_refused(tmp_path):
