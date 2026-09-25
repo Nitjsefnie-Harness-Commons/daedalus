@@ -188,19 +188,33 @@ def test_the_work_tree_is_created_and_removed_for_every_invocation(tmp):
     and this pins that without a folding parent at all, because the property
     is the helper's lifecycle and not anything a parent answers.
 
-    The stale-tree case is the one that matters: the first invocation leaves
-    a file behind, the second must find a clean tree rather than skip.
+    The stale-tree case is the one that matters, and it has to be staged
+    from OUTSIDE the helper: a tree left by the first invocation is removed
+    by the very `finally` the second one runs under, so a fixture that makes
+    it inside the block never reaches the entry branch -- the branch where
+    a leftover would otherwise skip. So it is seeded here, as a tree the
+    helper did not make, and the second invocation has to clear it.
     """
     root = Path(tmp)
     first = root / 'work'
     with _folding_work(root, 'work') as work:
         (work / 'left-behind').write_text('stale', encoding='utf-8')
     assert first.exists() is False, 'the work tree outlived its invocation'
-    with _folding_work(root, 'work') as work:
-        assert work.is_dir(), work
-        assert list(work.iterdir()) == [], sorted(
-            p.name for p in work.iterdir())
-    assert first.exists() is False, 'the work tree outlived its invocation'
+    stale = first
+    stale.mkdir()
+    (stale / 'from-a-crashed-run').write_text('x', encoding='utf-8')
+    try:
+        with _folding_work(root, 'work') as work:
+            assert work.is_dir(), work
+            assert list(work.iterdir()) == [], sorted(
+                p.name for p in work.iterdir())
+    except _util.Skipped as exc:
+        # A gate that skips a leftover is the defect this pin exists for, and
+        # a skip here would be a skip: the runner would count it, the suite
+        # would exit 0, and the folding coverage would be gone while the
+        # aggregate read a pass. So the skip is turned into the failure.
+        raise AssertionError(f'the gate skipped a leftover: {exc}') from exc
+    assert not stale.exists(), 'a leftover from another run was not cleared'
 
 
 def test_the_guard_accepts_a_name_the_parent_folds(tmp):
