@@ -59,7 +59,8 @@ def test_list_hotfixes_prints_the_scope_it_read_back(tmp):
          'match': SCOPE},
     ]}])
 
-    assert SCOPE in out, repr(out)
+    assert SCOPE in [line for line in out.splitlines()
+                     if 'scoped' in line][0], repr(out)
 
 
 def test_list_hotfixes_prints_an_absent_scope_as_absent(tmp):

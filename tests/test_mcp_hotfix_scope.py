@@ -52,7 +52,7 @@ class _ToolRegistry:
 
 
 class _BridgeProbe:
-    """Records each call; answers the one screenshot needed by nothing here."""
+    """Records each ext_cmd call and answers with a fixed bridge marker."""
 
     def __init__(self, marker):
         self.marker = marker
