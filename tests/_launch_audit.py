@@ -277,15 +277,25 @@ def launch_refusals(source, here):
         return None
 
     def resolve_constant(element):
-        """An argv element's string constant, following a name binding."""
-        if isinstance(element, ast.Constant) \
-                and isinstance(element.value, str):
-            return element.value
-        if isinstance(element, ast.Name):
-            bound_value = binding_map.get(element.id)
-            if isinstance(bound_value, ast.Constant) \
-                    and isinstance(bound_value.value, str):
-                return bound_value.value
+        """An argv element's string constant, following a name chain.
+
+        Resolves a name through the bindings table to a fixpoint behind a
+        seen-guard bounded by _ARGV_UNWRAP_CAP, the same idiom as
+        resolve_argv, so a multi-step binding (`A = 'git'; B = A; run([B,
+        ...])`) reaches its constant and a self-referential one (`A = A`)
+        stops instead of looping.
+        """
+        seen = set()
+        for _ in range(_ARGV_UNWRAP_CAP):
+            if isinstance(element, ast.Constant) \
+                    and isinstance(element.value, str):
+                return element.value
+            if not (isinstance(element, ast.Name)
+                    and element.id in binding_map
+                    and element.id not in seen):
+                return None
+            seen.add(element.id)
+            element = binding_map[element.id]
         return None
 
     def read_words(container):
@@ -409,9 +419,11 @@ def launch_refusals(source, here):
                 'git command')
         if isinstance(node.func, ast.Attribute) \
                 and node.func.attr != 'run':
+            value = node.func.value
+            receiver = value.id if isinstance(value, ast.Name) else 'receiver'
             refusals.append(
                 f'{here}:{node.lineno} launches through '
-                f'{node.func.value.id}.{node.func.attr}, '
+                f'{receiver}.{node.func.attr}, '
                 'which the audit does not see')
         if container is None:
             refusals.append(
