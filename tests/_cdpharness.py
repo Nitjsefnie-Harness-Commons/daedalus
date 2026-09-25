@@ -194,7 +194,8 @@ async function runEval(id, code) {
   await runEval('throw', 'throw-case');
   await runEval('reject', 'reject-case');
   activeRoute = 'hotfix';
-  await vm.runInContext("_replayViaCdp(7, 'hotfix-case')", context);
+  await vm.runInContext(
+    "_replayViaCdp(7, 'https://page.example.com/', 'hotfix-case')", context);
   activeRoute = 'eval';
 
   context.pendingRemote = {

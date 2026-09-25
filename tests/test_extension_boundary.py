@@ -432,11 +432,13 @@ def test_concurrent_hotfix_stores_both_survive(tmp):
     assert actual == {
         'posted': [
             {
-                'result': {'stored': 'fix-a', 'total': 1, 'permanent': False},
+                'result': {'stored': 'fix-a', 'total': 1, 'permanent': False,
+                           'match': None},
                 'error': None,
             },
             {
-                'result': {'stored': 'fix-b', 'total': 2, 'permanent': False},
+                'result': {'stored': 'fix-b', 'total': 2, 'permanent': False,
+                           'match': None},
                 'error': None,
             },
         ],

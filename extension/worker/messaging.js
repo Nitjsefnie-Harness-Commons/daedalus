@@ -29,7 +29,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleGmStorage(msg, sender, sendResponse);
     return true;
   } else if (msg.type === 'replayHotfixes') {
-    if (sender.tab) handleHotfixReplay(sender.tab.id);
+    // The document identity and its URL travel with the request: a tab id
+    // names the tab, and the tab's live document is not the one that asked
+    // by the time the replay reaches the page.
+    if (sender.tab) {
+      handleHotfixReplay(sender.tab.id, sender.documentId, sender.url);
+    }
   } else if (msg.type === 'fetch') {
     // Cross-origin fetch relay — no CORS in service worker
     // Hard timeout: caller-provided or 60s default, prevents hung workers

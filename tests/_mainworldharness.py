@@ -133,6 +133,35 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
+// The tab's document. Chrome resolves a bare tab id to whatever the tab
+// holds at injection time and a documentIds target to the document it
+// names, and a documentId the answer carries back; the double models both
+// target shapes and refuses any other, so a binding it cannot see is never
+// quietly accepted.
+const PAGE_URL = 'https://page.example.com/';
+const documents = { 'doc-7': { id: 'doc-7', url: PAGE_URL, live: true } };
+let liveDocument = 'doc-7';
+
+function resolveTarget(target) {
+  if (!target || target.tabId === undefined) {
+    throw new Error('unmodelled injection target ' + JSON.stringify(target));
+  }
+  const shape = Object.keys(target).sort().join(',');
+  if (shape === 'tabId') return documents[liveDocument];
+  if (shape === 'documentIds,tabId') {
+    const named = target.documentIds;
+    if (!Array.isArray(named) || named.length !== 1) {
+      throw new Error('unmodelled documentIds ' + JSON.stringify(named));
+    }
+    const doc = documents[named[0]];
+    if (!doc || !doc.live) {
+      throw new Error('Cannot access contents of the page');
+    }
+    return doc;
+  }
+  throw new Error('unmodelled injection target ' + shape);
+}
+
 // The shared double's executeScript is inert and its debugger refuses every
 // call; both are replaced here. The live executeScript runs the injected
 // function in a page context, so a promise that never settles stays
@@ -143,6 +172,7 @@ chrome.scripting.executeScript = async (injection) => {
   if (injection.world !== 'MAIN') {
     throw new Error('unmodelled injection world ' + injection.world);
   }
+  const doc = resolveTarget(injection.target);
   if (injection.func.name === '_canUseMainWorldEval') {
     probeCount++;
     if ((mode === 'replay-probe-hang' || mode === 'eval-probe-hang')
@@ -155,14 +185,16 @@ chrome.scripting.executeScript = async (injection) => {
     // A page whose CSP refuses dynamic compilation. The probe runs for real
     // everywhere else; this mode needs the answer that routes the fix to
     // CDP, which then has a dispatch to wedge on.
-    if (mode === 'replay-cdp-timeout') return [{ result: false }];
+    if (mode === 'replay-cdp-timeout') {
+      return [{ documentId: doc.id, result: false }];
+    }
   }
   pageContext.__args = injection.args || [];
   const source = '(' + injection.func.toString() + ')(...__args)';
   // vm-load-exempt: runs the function the extension injected
   const result = await vm.runInContext(source, pageContext);
   delete pageContext.__args;
-  return [{ result }];
+  return [{ documentId: doc.id, result }];
 };
 
 chrome.debugger.attach = async () => {
@@ -380,7 +412,9 @@ async function run() {
       },
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
-    vm.runInContext('handleHotfixReplay(7)', context);
+    vm.runInContext(
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     const at = nextDeadline();
@@ -402,7 +436,9 @@ async function run() {
       { id: 'fix1', code: 'evalResolvers.fix1Ran = true' },
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
-    vm.runInContext('handleHotfixReplay(7)', context);
+    vm.runInContext(
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     const at = nextDeadline();
@@ -424,7 +460,9 @@ async function run() {
       { id: 'fix1', code: 'await new Promise(() => {})' },
       { id: 'fix2', code: 'await new Promise(() => {})' },
     ]);
-    vm.runInContext('handleHotfixReplay(7)', context);
+    vm.runInContext(
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     // Both fixes dispatch through CDP and wedge there, so the second fix's
@@ -449,7 +487,9 @@ async function run() {
       },
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
-    vm.runInContext('handleHotfixReplay(7)', context);
+    vm.runInContext(
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
     if (armed) advanceClock(9000);
