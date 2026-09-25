@@ -178,4 +178,49 @@ BOUND_SITE_ROWS = (
      "    return json.run(\n"
      "        ['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
+    # A comprehension binds its loop names, so one reaching a bounded
+    # call is a receiver the analyser cannot read.
+    ('comprehension-target-receiver-is-reported',
+     "import subprocess\n"
+     "def go(things):\n"
+     "    return [sp.run(\n"
+     "        ['git', 'status'], check=True, timeout=30) for sp in things]\n",
+     [(3, 'unreadable', 'unplaced')]),
+    # A factory the analyser cannot name is a receiver it cannot read,
+    # and a call on a name it CAN account for stays proved.
+    ('factory-origin-cannot-be-named-is-unproved',
+     "import subprocess\n"
+     "def get():\n"
+     "    return subprocess\n"
+     "mod = get()\n"
+     "mod.run(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('call-on-a-name-the-analyser-can-name-is-still-proved',
+     "import subprocess\n"
+     "def go():\n"
+     "    proc = subprocess.Popen(['git', 'status'])\n"
+     "    return proc.wait(timeout=30)\n",
+     []),
+    # `head_label`'s two container guarantees: a container is git when
+    # ANY element's head is, and a non-git element never makes a git one
+    # read as non-git.
+    ('argv-container-is-git-when-any-element-is',
+     "import subprocess\n"
+     "for argv in (['node', 'x'], ['git', 'status']):\n"
+     "    subprocess.run(argv, check=True, timeout=30)\n",
+     [(3, 'git', 'timeout')]),
+    ('argv-container-second-head-git-is-still-git',
+     "import subprocess\n"
+     "for argv in (['node', 'x'], ['git', 'status']):\n"
+     "    subprocess.run(argv, check=True, timeout=30)\n",
+     [(3, 'git', 'timeout')]),
+    # The positional-only spelling of the parameter the shadowed import
+    # row pins: a second spelling needs a row of its own.
+    ('positional-only-parameter-shadows-a-module-import',
+     "import json\n"
+     "import subprocess\n"
+     "def go(json, /):\n"
+     "    return json.run(\n"
+     "        ['git', 'status'], check=True, timeout=30)\n",
+     [(4, 'unreadable', 'unplaced')]),
 )

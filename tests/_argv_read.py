@@ -164,3 +164,37 @@ class ArgvReader:
         if first_value == 'git':
             return 'git'
         return 'non-git' if first_readable else 'unreadable'
+
+    def resolve_string(self, element, seen=None):
+        """A string constant behind a `+` concat as well as a name chain.
+
+        The same chain resolve_constant follows, extended to fold a `+`
+        whose two sides both read, because a module name is as often
+        assembled from halves as written whole. A concat with a side that
+        does not read is not a constant, so it resolves to None rather
+        than to the readable half. A name bound more than once, or one
+        that feeds itself, resolves to nothing: the first is a guess and
+        the second is a cycle.
+
+        This and resolve_constant are ONE algorithm with one extra arm,
+        and they are here together so the guard that stops a guess and
+        the guard that stops a cycle are written once.
+        """
+        seen = set() if seen is None else seen
+        for _ in range(ARGV_UNWRAP_CAP):
+            if isinstance(element, ast.BinOp) \
+                    and isinstance(element.op, ast.Add):
+                left = self.resolve_string(element.left, set(seen))
+                right = self.resolve_string(element.right, set(seen))
+                return None if left is None or right is None else left + right
+            if isinstance(element, ast.Constant) \
+                    and isinstance(element.value, str):
+                return element.value
+            if not (isinstance(element, ast.Name)
+                    and element.id in self.binding_map
+                    and element.id not in self.ambiguous
+                    and element.id not in seen):
+                return None
+            seen.add(element.id)
+            element = self.binding_map[element.id]
+        return None
