@@ -456,9 +456,9 @@ def test_a_bound_before_the_first_poll_reports_from_empty_runs(tmp):
 
 
 def test_a_non_positive_timeout_is_refused(tmp):
-    """M3: a bound that fires before the first poll would report on runs
-    the wait never asked for, and --timeout -5 a negative elapsed time. The
-    CLI refuses both, the way it refuses --interval."""
+    """A bound that fires before the first poll would report on runs the
+    wait never asked for, and --timeout -5 a negative elapsed time. The CLI
+    refuses both, the way it refuses --interval."""
     del tmp
     mod = _ci_wait()
     for value in ('0', '-5'):
