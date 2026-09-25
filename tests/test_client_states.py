@@ -68,7 +68,7 @@ class _KillRecordsOwnStatus:
         self._kill_status = kill_status
         self._drained = False
 
-    def communicate(self, timeout=None):
+    def communicate(self, timeout: float = 0.1):
         if self._drained:
             return '', ''
         self._drained = True
