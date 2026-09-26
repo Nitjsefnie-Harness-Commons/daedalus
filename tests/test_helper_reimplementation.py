@@ -72,17 +72,17 @@ is the conservative direction, but a module that ONLY splices one in is
 invisible here and must be right by construction.
 
 `JS_FLOOR` is this rule's own size floor, and it is scoped to it. The
-measurement it comes from: the rule reports 123 sites with no floor, 106
-with any floor at two, and 106 at three — so seventeen of them are
-one-line blocks and none at all is two lines. The class's shortest copy
-is three body lines, the `function eventTarget() { return { addListener()
-{} }; }` spelling, so three is the floor: it excludes the one-liner band
-and catches every spelling of the class, where one would catch trivial
-wrappers and fifteen, the Python value, would catch none of them. Two
-measures identically today, so nothing rides on that choice; three is the
-value the class's own shortest copy sets. Lowering `.pylintrc`'s
-`min-similarity-lines` instead would fire on ordinary Python, which is
-why the floor lives here.
+measurement it comes from, on this tree: the rule reports 107 sites with
+no floor, 84 with any floor at two, and 84 at three — so twenty-three of
+them are one-line blocks and none at all is two lines. The class's
+shortest copy is a three-line body, the `function eventTarget() { return
+{ addListener() {} }; }` spelling, so three is the floor: it excludes the
+one-liner band and catches every spelling of the class, where one would
+catch trivial wrappers and fifteen, the Python value, would catch none
+of them. Two measures identically, so nothing rides on that choice;
+three is the value the class's own shortest copy sets. Lowering
+`.pylintrc`'s `min-similarity-lines` instead would fire on ordinary
+Python, which is why the floor lives here.
 """
 import ast
 import subprocess
