@@ -289,6 +289,7 @@
 !/tests/_daedalus_env.py
 !/tests/_dashdom.py
 !/tests/_dashnode.py
+!/tests/_dashsection.py
 !/tests/_dashshell.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
@@ -485,6 +486,7 @@
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
+!/tests/test_dashsection_harness.py
 !/tests/test_dashshell_harness.py
 !/tests/test_dashshell_selectors.py
 !/tests/test_debugger_attachment.py
