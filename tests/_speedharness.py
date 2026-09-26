@@ -1,7 +1,8 @@
 """Extracting and executing the speed measurement's shell under GitHub's rules.
 
 The readers lift one job's step out of a workflow; the runner executes it
-under `bash -e` with stubbed neighbours on PATH.
+under `bash -e` with stubbed neighbours on PATH. `write_executable` is the
+coverage-comment harness's, the one copy both families read.
 """
 import os
 import signal
@@ -11,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _coverage_comment_workflow import write_executable  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 
 _CLEANUP_TIMEOUT = 5
@@ -29,12 +31,6 @@ def workflow_script(workflow, job, step_name):
             break
         lines.append(line[10:])
     return '\n'.join(lines)
-
-
-def write_executable(path, content):
-    """Write an executable test double beside the PATH the tests prefix."""
-    path.write_text(content, encoding='utf-8')
-    path.chmod(0o755)
 
 
 # Stands in for `gh api`: records each call flattened to one line, so a
