@@ -339,6 +339,10 @@ FRAME_NAMESPACE_PLANTS = (
      '    getattr = object.__getattribute__\n'
      "    _ = getattr(sys._getframe(), 'f_locals').get('undeclared_probe')\n",
      "getattr(sys._getframe(), 'f_locals')"),
+    ('class body', "class _Reach:\n    NS = sys._getframe()['f_locals']\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    _ = _Reach.NS.undeclared_probe\n',
+     "sys._getframe()['f_locals']"),
     ('mapping key, no member selected', '', 'def do_reload(args):\n',
      'def do_reload(args):\n    holder = helper()\n'
      "    _ = holder['args'].undeclared_probe\n", "holder['args']"),
