@@ -211,22 +211,13 @@ def test_counted_runaway_outruns_real_wall_time(_tmp):
 
 
 def test_virtual_clock_bounds_wait_by_real_wall_time(_tmp):
-    original_perf_counter = _cmdqueue.time.perf_counter
-    samples = iter((100.0, 106.0))
-
-    def perf_counter():
-        return next(samples)
-
     failure = None
-    _cmdqueue.time.perf_counter = perf_counter
-    try:
+    with _wall_time_past_limit():
         with _virtual_cmdqueue_clock() as (clock, events, _origin):
             try:
                 clock.sleep(2 ** -33)
             except AssertionError as caught:
                 failure = caught
-    finally:
-        _cmdqueue.time.perf_counter = original_perf_counter
     assert isinstance(failure, AssertionError), failure
     assert events == [], events
     message = str(failure).lower()
