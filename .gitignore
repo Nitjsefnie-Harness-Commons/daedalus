@@ -648,6 +648,7 @@
 !/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py
 !/tests/test_worker_netcapture.py
+!/tests/test_worker_netcapture_events.py
 !/tests/test_worker_register_throttle.py
 !/tests/test_worker_result_post.py
 !/tests/test_worker_route_guard.py

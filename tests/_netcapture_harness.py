@@ -171,25 +171,10 @@ function dispatchTo(target, argument) {
   for (const listener of target.listeners) listener(argument);
 }
 
-// The slice/live distinction is observable without reading an identity: a
-// scenario mutates the array the last answer returned, and a later capture
-// on the same tab shows whether the buffer the worker still holds moved.
-function mutateReturnedRequests(how) {
-  const last = resultPosts[resultPosts.length - 1];
-  const returned = last.result.requests;
-  if (how === 'clear') {
-    returned.length = 0;
-  } else if (how === 'overwrite') {
-    returned[0] = { requestId: how, url: how };
-  } else {
-    returned.push({ requestId: how, url: how });
-  }
-  return returned.length;
-}
-
-// What the worker POSTED, snapshotted at post time: a scenario step may go
-// on to mutate the object the parsed body produced, and the answer a test
-// reads must be the one the bridge was handed.
+// What the worker POSTED, snapshotted at post time. Nothing mutates it
+// afterwards: the gate's `JSON.parse(init.body)` hands back a fresh object
+// graph, so the posted array is already severed from the worker's buffer
+// and no scenario step can reach across that boundary.
 const answerSnapshots = [];
 
 async function runStep(step) {
@@ -212,10 +197,6 @@ async function runStep(step) {
   }
   if (step.debuggerDetached !== undefined) {
     dispatchTo(chrome.debugger.onDetach, step.debuggerDetached);
-    return;
-  }
-  if (step.mutateReturnedRequests !== undefined) {
-    mutateReturnedRequests(step.mutateReturnedRequests);
     return;
   }
   throw new Error('unmodelled step: ' + Object.keys(step).join(','));
@@ -427,6 +408,21 @@ def answers(outcome):
 
 def errors(outcome):
     return [post['error'] for post in outcome['posted']]
+
+
+def channels(outcome):
+    """The channel each answer was filed under, in post order.
+
+    postResult's fourth argument is the tabId a result is filed under, and
+    the repo routes a result by it. The `world` field beside it is a
+    separate extra the extension passes only for eval results.
+    """
+    return [post['tabId'] for post in outcome['posted']]
+
+
+def worlds(outcome):
+    """The world each answer was posted under, in post order."""
+    return [post['world'] for post in outcome['posted']]
 
 
 def entries(outcome, index=-1):
