@@ -308,8 +308,16 @@ let absent = null;
 try {
   response.formData();
 } catch (error) { absent = error.message; }
+let buffer = null;
+try {
+  await response.arrayBuffer();
+} catch (error) { buffer = error.message; }
+let copy = null;
+try {
+  response.clone();
+} catch (error) { copy = error.message; }
 report({ contentType: response.headers.get('content-type'),
-  header, blob, absent });
+  header, blob, absent, buffer, copy });
 })().catch(leave);
 """
 
@@ -489,6 +497,7 @@ def test_the_reader_exposes_every_settlement(_tmp):
     assert third == [{'kind': 'abort'}], third
     assert len(report['errors']) == 1, report['errors']
     assert 'connection reset' in report['errors'][0], report['errors']
+    assert report['afterClose'] is not None, report
     assert 'reader already settled' in report['afterClose'], report
 
 
@@ -550,6 +559,7 @@ def test_an_unimplemented_selector_fails_by_name(_tmp):
     assert '.rail-list > li' in report['combinator'], report
     assert report['unquoted'] is not None, report
     assert 'unreadable attribute value' in report['unquoted'], report
+    assert report['notAString'] is not None, report
     assert 'is not a selector' in report['notAString'], report
 
 
@@ -565,6 +575,7 @@ def test_the_observer_refuses_an_unmodelled_member(_tmp):
     assert report['seen'] == [['skipped:false:5',
                                'from-the-caller:true:90']], report
     assert report['observed'] == 1, report
+    assert report['unmodelled'] is not None, report
     assert 'not modelled: unobserveAll' in report['unmodelled'], report
     assert report['margin'] == '-80px 0px -60% 0px', report
 
@@ -599,6 +610,10 @@ def test_the_response_double_refuses_what_it_does_not_model(_tmp):
     assert 'blob not modelled' in report['blob'], report
     assert report['absent'] is not None, report
     assert 'member not modelled: formData' in report['absent'], report
+    assert report['buffer'] is not None, report
+    assert 'member not modelled: arrayBuffer' in report['buffer'], report
+    assert report['copy'] is not None, report
+    assert 'member not modelled: clone' in report['copy'], report
 
 
 def test_console_error_is_recorded_as_well_as_printed(_tmp):
