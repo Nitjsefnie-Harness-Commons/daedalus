@@ -44,6 +44,11 @@ CODE = "daedalusHits.push('fix1')"
 # told apart by what `list-hotfixes` answers — stated, not inherited from two
 # constants that happen to differ.
 FIXTURE_VERSION = '0.00.0-fixture'
+# What the double says when a case names both command keys. Carried here so
+# the control can tell that refusal from any other way a case can fail; the
+# double spells it independently, and a control that recomputed it from the
+# double's text would pass on a double that stopped refusing for it.
+BOTH_KEYS_REFUSAL = 'names both `commands` and `store`'
 
 
 def _declared(source_path, name):
@@ -525,6 +530,33 @@ def test_list_hotfixes_whose_record_read_is_refused_answers_the_reason(tmp):
     assert refused['posted'][0]['result'] is None, refused
 
 
+def test_the_seeded_record_version_is_one_the_worker_cannot_stamp(tmp):
+    """The double's OWN default is the discriminator, and this asserts it.
+
+    `FIXTURE_VERSION` above is this file's copy; the double carries its own,
+    and every case that does not pass `recordVersion` seeds with the double's
+    — across four consumer suites, and it is the wider of the two. Both
+    controls that read "the key is gone" off a version pass the parameter
+    explicitly, so the default was bypassed by both of them, and the only
+    thing standing behind it was a comment saying the worker cannot produce
+    it. Aligning the double's copy to the worker's own left the whole set
+    green.
+
+    The two copies are deliberately not the same binding. This file's
+    asserts the double's: reading the value out of the harness instead would
+    move the expectation with the mutation, which is the one thing a control
+    over it must not do.
+    """
+    del tmp
+    outcome = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED)
+    row = _rows(outcome)['list']
+    assert row['error'] is None, outcome
+    assert row['result']['version'] == FIXTURE_VERSION, (
+        'the double seeded the record with a version other than the one '
+        'this file asserts; the two copies have drifted')
+    assert row['result']['version'] != _version(), outcome
+
+
 def test_a_case_naming_both_command_spellings_is_refused(tmp):
     """Two spellings of one thing is a case the double cannot resolve.
 
@@ -534,12 +566,25 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     `data[HOTFIX_KEY] || {version, fixes: []}` default papers over the
     result. A case that would run neither list looks exactly like a case
     whose commands all did nothing.
+
+    The refusal is identified by its own words, not by the fact that node
+    exited nonzero. `run_hotfix_case` raises a bare `AssertionError` for
+    every failure the child can have, so a bare `except` would read "the
+    double refused" for a harness broken for any other reason at all — and
+    report the refusal working at a point where it was never reached.
     """
     del tmp
     try:
         _run([{'id': 'via-commands', 'fixId': 'first', 'code': CODE}],
              store=[{'id': 'via-store', 'fixId': 'second', 'code': CODE}])
-    except AssertionError:
+    except AssertionError as failure:
+        # `(returncode, stdout, stderr)` is what the helper puts in the
+        # assertion's message.
+        assert len(failure.args) == 1 and len(failure.args[0]) == 3, failure
+        _returncode, _stdout, stderr = failure.args[0]
+        assert BOTH_KEYS_REFUSAL in stderr, (
+            'the case failed, but not for the reason this control is about; '
+            f'the double said: {stderr!r}')
         return
     raise AssertionError(
         'a case naming both `commands` and `store` was accepted; the double '
