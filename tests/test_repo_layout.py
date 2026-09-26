@@ -663,10 +663,16 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     than once, and a target that is not a bare name. A cycle is the only
     thing the guard answers, so a cycle is the only shape that can tell
     whether it is there, and its absence is a loop rather than a value.
-    The count is what can tell that: the ceiling lives in the control,
-    `_step_ceiling`, and not in the analyser, so the guard leaving the
-    loop in a handful of steps is observed and its absence is an
-    assertion rather than a spin.
+    The count is what can tell that, and it is taken in a child process
+    so the tracer it needs cannot reach whatever tracer this suite is
+    already running under.
+
+    The second assertion is the control on that: an in-process tracer is
+    exactly the bug this shape of the bound was written to avoid, and
+    under `coverage run --parallel-mode` an in-process version left
+    `sys.gettrace()` as NoneType where it had been CTracer. The ceiling
+    lives in `_step_ceiling`, not in the analyser, so no guard's
+    behaviour depends on it.
     """
     del tmp
     source = ("import importlib\n"
@@ -674,7 +680,9 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
               "a = a\n"
               "mod = a.import_module('subprocess')\n"
               "mod.run(['git', 'status'], check=True, timeout=30)\n")
+    tracer = sys.gettrace()
     assert within_step_ceiling(source, 'cyclic-base') == []
+    assert sys.gettrace() is tracer
 
 
 if __name__ == '__main__':

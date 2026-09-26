@@ -223,11 +223,23 @@ BOUND_SITE_ROWS = (
      "    return json.run(\n"
      "        ['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
-    # The rows below are the CONTROLS for launch-audit clauses that mutate
-    # away to a green suite, so each names the clause it answers. A clause
-    # that is REDUNDANT needs no row: the comment at the clause says so and
-    # names the bound that guarantees it. A live clause with no row here is
-    # a hole in this table.
+    # The rows below are the CONTROLS for the guard clauses this change
+    # classified. The set is NAMED, not general, on purpose: a claim about
+    # every clause in the two analyser modules is open-ended, and each
+    # review round falsified the last round's version of it one arm further
+    # out. The named guards are the four limbs of proved_fixed's
+    # disjunction, the machinery_route loop, the four `seen` guards in
+    # _argv_read.py, the launcher-factory arm of the bound fixpoint, and
+    # the NamedExpr placement arm. Each is in one of two states, written
+    # at the clause as well as here:
+    #
+    #   CONTROLLED  a row below, or a control in test_repo_layout.py,
+    #               fails when the clause is deleted
+    #   NOT         no control, and the comment at the clause says which:
+    #               REDUNDANT (a named bound guarantees it), DEAD (no
+    #               input reaches it), or LOAD-BEARING and unpinned
+    #
+    # A named guard in neither state is a hole in this table.
     # A name that spelled a subprocess import and was then rebound to a
     # fixed value sits in `safe_names` and NOT in `bound`, so the
     # `subprocess_names` limb of proved_fixed is the only thing refusing
@@ -305,4 +317,26 @@ BOUND_SITE_ROWS = (
      "f = lambda *os: os(timeout=1)\n"
      "subprocess.run(['git', 'status'], check=True)\n",
      [(3, 'unreadable', 'unplaced')]),
+    # A PAIR, and the pair is the control: these two differ only in what
+    # the factory returns, and that difference is the whole boundary the
+    # launcher-factory arm of the bound fixpoint draws. Both are refused
+    # identically when the arm is deleted; only with it in place does a
+    # factory returning a LAUNCH read as one and a factory returning the
+    # MODULE read as unproved. The for-target spelling of the first shape
+    # reaches the same arm and changes no verdict this row does not
+    # already pin, so it is named here and not added.
+    ('launcher-factory-bare-name-receiver-is-a-placed-launch',
+     "import subprocess\n"
+     "def make():\n"
+     "    return subprocess.run\n"
+     "go = make()\n"
+     "go(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'git', 'timeout')]),
+    ('module-factory-bare-name-receiver-stays-unplaced',
+     "import subprocess\n"
+     "def get():\n"
+     "    return subprocess\n"
+     "go = get()\n"
+     "go(['git', 'status'], check=True, timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
 )
