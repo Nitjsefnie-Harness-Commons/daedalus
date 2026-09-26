@@ -8,6 +8,10 @@ it keeps its own import lines and its `__all__` re-export block, and
 nothing reads the re-export any more. A wrong reader here would fail
 every caller at once, so tests/test_coverage_comment_boundary.py pins
 the two refusals.
+
+`write_executable` is the one copy of that helper: tests/_speedharness.py
+imports it here rather than carrying a second body, and
+tests/test_coverage_comment_boundary.py pins both halves of what it does.
 """
 import json
 import os

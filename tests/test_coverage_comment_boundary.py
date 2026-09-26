@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -627,6 +628,24 @@ def test_the_shared_comment_harness_refuses_a_step_it_cannot_read(tmp):
         block = run_block(text, name)
         assert block.endswith('\n') and block.strip(), name
         assert '      - name:' not in block, (name, block)
+
+
+def test_the_shared_stub_writer_is_verbatim_and_executable(tmp):
+    """The one copy of this helper, pinned on both halves of what it does.
+
+    `tests/_speedharness.py` carried a byte-identical second definition
+    and six readers split between the two, with nothing in the tree
+    complaining: the shadow control needs an import beside the def and
+    this one needs a suite, so a duplicate body under a second name is
+    what neither reports. Bytes that gained a trailing newline would
+    reach every reader as a shell syntax error, and a mode that lost
+    its execute bits as a permission failure at run time.
+    """
+    target = Path(tmp) / 'bin' / 'gh'
+    target.parent.mkdir(parents=True)
+    write_executable(target, _GH_COMMENT_STUB)
+    assert target.read_bytes() == _GH_COMMENT_STUB.encode('utf-8')
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
 
 
 if __name__ == '__main__':
