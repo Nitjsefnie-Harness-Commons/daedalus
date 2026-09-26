@@ -7,11 +7,10 @@ one poll because the process exited. Nothing is inferred and no clock is
 read: the marker is in the log, so the log is complete by the time it is
 read, and two identical calls inside one poll are two.
 
-The figure is the largest call count in any one of the polls the run made.
-Not the first poll's: a bound that reads one poll bounds one poll, and a loop
-that starts spending an extra request from its third poll on is then
-measured as the poll before it - a number half the real cost, reported as a
-measurement.
+`measure` still reads the FIRST of the polls it observes, so a loop that
+grows from its third poll on is measured at the width it started at.
+`test_a_loop_that_grows_from_its_third_poll_costs_two` is red for exactly
+that, and reading the whole window is what turns it green.
 
 The module binds no fixture: a caller hands in the answers and the fake, so
 the same harness measures this tree's watchers and the base commit's. It is
@@ -128,10 +127,22 @@ def polls_in(calls):
 
 
 def measure(script, args, fake, interval, polls=POLLS):
-    """Calls per poll for one watcher: what one `--once` run asked for.
+    """Calls per poll for one watcher, read from the loop that runs it.
 
-    `interval` is passed so the printed hourly figure names the tick the
-    operator would set; `--once` reads no clock and spends no time asleep.
+    A poll is the set of log entries sharing one poll marker - the watcher
+    names its own boundary, because a poll's width is data-dependent and
+    only the watcher knows it. A `--once` invocation needs no marker: the
+    process exiting IS the boundary, so its whole log is one poll, and
+    `once` is where the base commit's scripts are measured, whose watchers
+    predate the marker and cannot carry one.
     """
-    seen = once(script, args + ['--interval', str(interval)], fake)
-    return len(seen), seen
+    child = Child(script, args + ['--interval', str(interval)], fake)
+    try:
+        # One marker more than the window needs, because a poll is only
+        # finished once the next one has begun.
+        await_polls(fake, polls + 1, child, f'{polls} poll(s)')
+    finally:
+        child.stop()
+    first = polls_in(fake.calls())[0][0]
+    return sum(1 for call in fake.calls() if call.get('poll') == first), [
+        call for call in fake.calls() if call.get('poll') == first]
