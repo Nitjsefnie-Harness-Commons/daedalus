@@ -20,7 +20,8 @@ on a member present in one and not the other, so the bucket cannot grow by
 omission. `test_an_unlisted_member_of_the_domain_is_rejected` hands the
 census a member of its own stated domain that it does not list and requires
 the census to consider it. `_SILENT` carries the members of the same domain
-that do read silent: each names the issue it is parked against, and
+that do read silent: each names the issue it is parked against, or records
+that the filing is still with the maintainer, and
 `test_every_silent_member_is_listed_and_not_refused` pins the measurement,
 so a repair turns this suite red on the commit that moves the member into
 `_AXES` rather than leaving it listed as unconsidered.
@@ -190,8 +191,9 @@ _SUBSCRIPT = ('subscript',)
 # has since put something else there, or a source the model folds and then
 # loses: the read answers the recorded value or its own default, so a
 # `relay()` the runtime really does call is reported nothing. Each names the
-# issue it is parked against, because the census's value is that its
-# unconsidered bucket is empty BY NAME. The fourth field is the clean cost of
+# issue it is parked against, or `None` where the filing is still with the
+# maintainer, because the census's value is that its unconsidered bucket is
+# empty BY NAME. The fourth field is the clean cost of
 # the read forms the member does NOT name, which its own shape already
 # reports through.
 _SILENT = {
@@ -214,18 +216,22 @@ _SILENT = {
     # store never reaches `_mark_unprovable` on the OWNER: the container lands
     # at `items=[]`, `length=None`, no unknown-key slot, and every read of it
     # answers a clean absence. The container reads join anyway, off the marked
-    # SOURCE name; the subscript binds the callable itself, which is #1010's
-    # invoke arm on a bare source and #1162's on a starred one. `dict(<name>)`
-    # is the same defect silent on all three forms, filed as 1163.
+    # SOURCE name. The subscript is silent on its own clean row, so the repair
+    # there is FREE -- not 1010's invoke arm, where the `tab` lives in the
+    # callee's body rather than at this call site. The starred rows are the
+    # same false green as 1162 and carry it; the two bare rows name no issue
+    # because the repair is free and the filing is with the maintainer.
+    # `dict(<name>)` is the same defect silent on all three forms, filed as
+    # 1163.
     'update-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {}\nd.update(o)', 1010, _SUBSCRIPT, (0, 1)),
+        _UNACCOUNTABLE + '\nd = {}\nd.update(o)', None, _SUBSCRIPT, (0, 1)),
     'update-unaccountable-name-star': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(**o)', 1162, _SUBSCRIPT, (0, 1)),
     'update-unaccountable-name-doubled': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(**{**o})', 1162, _SUBSCRIPT,
         (0, 1)),
     'ior-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {}\nd |= o', 1010, _SUBSCRIPT, (0, 1)),
+        _UNACCOUNTABLE + '\nd = {}\nd |= o', None, _SUBSCRIPT, (0, 1)),
 }
 
 
@@ -331,7 +337,7 @@ def test_every_silent_member_is_listed_and_not_refused(tmp):
     member's own split, so neither can be assumed."""
     assert not {store for store, _, _, _ in _SILENT.values()} \
         & set(_AXES.values())
-    assert all(isinstance(issue, int) and issue > 0
+    assert all(issue is None or (isinstance(issue, int) and issue > 0)
                for _, issue, _, _ in _SILENT.values())
     for label, (store, _, names, reported) in sorted(_SILENT.items()):
         for name, read in sorted(_READS.items()):
