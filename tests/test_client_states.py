@@ -17,10 +17,10 @@ import _util  # noqa: E402
 # client that is alive and wedged, and then only to name what never arrived.
 BOOT_DEADLINE = 120
 
-# The bound the publish wait is declared to carry. A control below reads the
-# bound back off the wait and pins it, which is the only way to notice it
-# being shortened: the client publishes the moment it boots, so the wait
-# never comes near its own deadline and no elapsed time ever reflects it.
+# A control below reads this bound back off the wait and pins it, which is
+# the only way to notice it being shortened: the client publishes the moment
+# it boots, so the wait never comes near its own deadline and no elapsed time
+# ever reflects it.
 PUBLISH_BOUND = 5
 
 
@@ -67,8 +67,6 @@ class _SteppingClock:
 def _wait_for_path(process, booted, path, clock=time.monotonic,
                    boot_bound=BOOT_DEADLINE):
     """Wait for the client to boot, then for the path it publishes.
-
-    Returns the boot bound and the publish bound this call applied.
 
     The bound above governs the boot so the one below covers the publish and
     not a fresh interpreter's startup. The boot marker is a file rather than
@@ -171,10 +169,8 @@ def test_the_boot_wait_names_a_client_that_stays_alive_and_never_boots(tmp):
     then wedges is the case the bound exists for, and a premature one refuses
     a healthy client with a message about the bound rather than the client.
 
-    The clock jumps past a short bound in one step, so the expiry is reached
-    by arithmetic in milliseconds rather than by two minutes of real waiting.
-    This control's subject IS the expiry, so the wait is the thing under
-    test here; no duration is compared against a threshold anywhere in it.
+    This control's subject IS the expiry, so the wait is the thing under test
+    here; no duration is compared against a threshold anywhere in it.
     """
     ready_path = Path(tmp) / 'wedged.ready'
     booted_path = Path(tmp) / 'wedged.booted'
