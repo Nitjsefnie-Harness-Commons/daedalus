@@ -24,28 +24,6 @@ BOOT_DEADLINE = 120
 PUBLISH_BOUND = 5
 
 
-class _FixedClock:
-    """A monotonic reading that never advances.
-
-    The control that pins the bounds needs a deadline's arithmetic to be
-    reproducible, and `(base + N) - base` reproduces N only when N is
-    exactly representable. A whole number of seconds is, over every
-    monotonic reading this box can produce -- the first base where it
-    stops is near 1e16, where the ulp of the reading is itself 2. A small
-    one can go either way: at this base both bounds come back exactly,
-    while a non-representable base such as 3.7 loses the smaller of them.
-    So the base is chosen for a negligible residue, not for a guarantee
-    of exactness, and a control that depends on exactness should say so
-    rather than inherit it.
-    """
-
-    def __init__(self, at=100.0):
-        self.at = at
-
-    def __call__(self):
-        return self.at
-
-
 class _SteppingClock:
     """A monotonic reading that advances a fixed step on every call.
 
@@ -56,6 +34,14 @@ class _SteppingClock:
     a frozen clock makes the gap between two windows zero whichever order
     they were taken in. `reads` is here so a control can tell that the
     clock it installed is the one the wait actually used.
+
+    Stepping is also what keeps the arithmetic exact. A control here
+    compares the interval a wait returns for equality, and
+    `(base + N) - base` reproduces N only when N is exactly
+    representable. A small step keeps the base small, which is where that
+    holds; an epoch-scale reading is large enough to lose a bound to its
+    own ulp, and is why this is not `time.monotonic`. So a control that
+    depends on exactness says so here rather than inheriting it.
     """
 
     def __init__(self, step):
