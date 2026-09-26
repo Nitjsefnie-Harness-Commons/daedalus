@@ -18,8 +18,7 @@ from _netcapture_harness import (  # noqa: E402
 
 # ─── _netCaptureLimit ───
 def test_the_limit_defaults_to_one_thousand_for_three_absent_spellings(tmp):
-    # A dropped key, an explicit null and an empty string: three
-    # spellings of "not supplied", each taking the default arm.
+    # A dropped key, an explicit null and an empty string are three.
     outcome = run_capture([], probes=['_netCaptureLimit(undefined)',
                                       '_netCaptureLimit(null)',
                                       "_netCaptureLimit('')"])
@@ -53,8 +52,7 @@ def test_the_limit_refuses_a_non_integer_with_its_message(tmp):
 
 
 def test_the_limit_refuses_every_value_below_one(tmp):
-    # -1 is the value the module's own comment records as once accepted: it
-    # evicted the only event on arrival and left an empty capture.
+    # -1 once evicted the only event on arrival, leaving an empty capture.
     outcome = run_capture([], probes=['_netCaptureLimit(0)',
                                       '_netCaptureLimit(-1)',
                                       '_netCaptureLimit(-1000000)'])
@@ -233,8 +231,7 @@ def test_the_oldest_is_evicted_past_the_limit(tmp):
          request(5, 'r1', 'https://a.example.com/one'),
          request(5, 'r2', 'https://a.example.com/two'),
          request(5, 'r3', 'https://a.example.com/three')])
-    # The survivors are named, not just counted: a count alone is satisfied
-    # by evicting the newest instead.
+    # Named, not just counted: a count alone is satisfied by pop().
     assert [entry['requestId'] for entry in over] == ['r2', 'r3'], over
     assert [entry['url'] for entry in over] == [
         'https://a.example.com/two', 'https://a.example.com/three'], over
