@@ -14,7 +14,7 @@ pair-keyed rule covers it for free, because the first declaration's row
 already matches the pair.
 
 It reads the base tree's own declarations rather than a list of the
-files the branch touched. That form is not a preference: 66 files carry
+files the branch touched. That form is not a preference: 71 files carry
 a row in the Python table and 27 in this one, this branch edits fifteen
 of those twenty-seven, and a path list cannot tell a site the branch
 wrote from one it did not. It cost this branch five renames in test

@@ -32,7 +32,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _branch_boundary import introduced_rows, js_digests  # noqa: E402
 from test_helper_reimplementation import (  # noqa: E402
-    JS_FLOOR, js_declarations, js_reimplementations, reimplementations)
+    BRANCH_BASES, JS_FLOOR, ROOT, js_declarations, js_reimplementations,
+    reimplementations)
+from _unconsolidated_js_names import (  # noqa: E402
+    UNCONSOLIDATED_JS_NAMES)
 
 # A three-statement body, which measures five lines from brace to brace
 # and so is above JS_FLOOR whatever the head around it says.
@@ -436,6 +439,19 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
     # reach the reader and `other` is still read.
     assert [item.name for item in js_declarations(
         {'tests/prose.py': prose})['tests/prose.py']] == ['other']
+
+
+def test_a_javascript_row_may_not_name_a_declaration_this_branch_added(tmp):
+    del tmp
+    introduced = introduced_rows(
+        UNCONSOLIDATED_JS_NAMES, js_digests, ROOT)
+    assert introduced is not None, (
+        'the JavaScript branch boundary could not be evaluated: this '
+        'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + '. '
+        'That is a refusal, not a pass — fetch the base and re-run.')
+    assert not introduced, (
+        'UNCONSOLIDATED_JS_NAMES rows excuse a declaration the base tree '
+        f'does not carry, so the branch wrote it: {introduced}')
 
 
 def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
