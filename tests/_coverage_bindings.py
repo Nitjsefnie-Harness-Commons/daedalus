@@ -105,12 +105,14 @@ def _bound_values(node, facts):
     if isinstance(node, ast.AugAssign):
         return [(node.lineno, node.value)]
     if isinstance(node, (ast.For, ast.AsyncFor)):
-        return [(node.lineno, node.iter)]
+        return [(node.lineno, node.iter), (node.lineno, node.target)]
     if isinstance(node, ast.comprehension):
-        return [(node.target.lineno, node.iter)]
+        return [(node.target.lineno, node.iter),
+                (node.target.lineno, node.target)]
     if isinstance(node, (ast.With, ast.AsyncWith)):
-        return [(node.lineno, item.context_expr) for item in node.items
-                if item.optional_vars is not None]
+        return [(node.lineno, part) for item in node.items
+                if item.optional_vars is not None
+                for part in (item.context_expr, item.optional_vars)]
     if isinstance(node, ast.NamedExpr):
         return [(node.lineno, node.value)]
     if isinstance(node, _HEADER_FORMS):
