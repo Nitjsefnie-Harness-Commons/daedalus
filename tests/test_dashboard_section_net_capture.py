@@ -37,6 +37,8 @@ const detailText = () => {
 };
 const sent = () => REQUESTS.filter((r) => r.target === '/command')
   .map((r) => r.body);
+const legs = () => REQUESTS.filter((r) => r.target.slice(0, 7) === '/result'
+  && r.target.indexOf('consume') < 0).length;
 """
 
 # One captured request. The three statuses are the three branches of the
@@ -126,6 +128,11 @@ def refusal(kind, message):
     return REFUSED % (kind, message)
 
 
+# A result leg that never matches: the loop spends its whole budget and
+# gives up, and the number of polls it spent is the budget.
+NEVER_ANSWERED = ("drive.route('/result?tab=extension',"
+                  " { pending: true });\n")
+
 REFUSE_POLL = refusal('net-capture-get', 'nothing running')
 REFUSE_START = refusal('net-capture', 'debugger refused')
 REFUSE_STOP = refusal('net-capture-stop', 'detach failed')
@@ -135,25 +142,29 @@ SETTLED = ('await bounded(settle(), "after the click",'
            ' _dashnodeStepTimeoutMs);\n')
 
 
-def scenario(body, *, setup=DEFAULT, answers=(), plan=shared.COMMAND):
+def scenario(body, *, setup=DEFAULT, answers=(), plan=shared.COMMAND,
+             by_type=True):
     """One child: seed the token, plan every answer, mount, then drive.
 
     `setup` lands first because the answer table is written in the scope
-    `setup` defines.
+    `setup` defines. `by_type=False` is for the give-up cases, which plan
+    the result leg themselves and would otherwise collide with the
+    answer table's route for the same target.
     """
+    table = shared.results(*answers) if by_type else ''
     return ('(async () => {\n' + shared.SEED + shared.PRELUDE + EXTRA
-            + shared.open_section(SECTION[0]) + setup + plan
-            + shared.results(*answers)
+            + shared.open_section(SECTION[0]) + setup + plan + table
             + 'const sub = new El("span");\n'
             + 'drive.selector("#s07 [data-sub]", sub);\n'
             + shared.MOUNT + shared.SETTLE + body
             + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=None, answers=(), plan=shared.COMMAND):
+def _run(body, *, setup=None, answers=(), plan=shared.COMMAND,
+         by_type=True):
     return run_scenario(
         scenario(body, setup=DEFAULT if setup is None else setup,
-                 answers=answers, plan=plan),
+                 answers=answers, plan=plan, by_type=by_type),
         sections=SECTION)
 
 
@@ -347,6 +358,53 @@ def test_stop_says_the_tab_and_what_it_captured(_tmp):
         'text': 'stopped  tab=11  captured=3', 'classes': ['green']}, report
     assert report['sub'] == '3 req', report
     assert report['rows'] == 3, report
+
+
+def test_a_start_that_never_answers_gives_up_at_fifteen_seconds(_tmp):
+    """`extCmd('net-capture', ...)` is called with no `opts`, so the
+    fifteen-second default is its budget. The budget is observable only as
+    the number of result polls the loop spends -- sixty at 250 ms each --
+    and that count is what a section calling with a different budget
+    would change."""
+    report = _run(_click('START')
+                  + 'report({ polls: legs(), status: said(),'
+                    '  toasts: toasts() });\n',
+                  plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
+    assert report['polls'] == 60, report
+    assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
+        report
+    assert report['toasts'][0]['type'] == 'err', report
+    assert report['toasts'][0]['text'].startswith(
+        'Timeout (15000ms) waiting for _net-capture_1_'), report
+
+
+def test_a_poll_that_never_answers_gives_up_at_thirty_seconds(_tmp):
+    """The other two commands pass `{ timeout: 30000 }` explicitly, so
+    each spends a hundred and twenty polls before it gives up where the
+    start above spends sixty. A panel that had dropped the option would
+    read identically right up to that count and no further."""
+    report = _run(_click('poll')
+                  + 'report({ polls: legs(), status: said() });\n',
+                  plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
+    assert report['polls'] == 120, report
+    assert report['status']['classes'] == ['red'], report
+    assert report['status']['text'].startswith(
+        'Timeout (30000ms) waiting for _net-capture-get_1_'), report
+
+
+def test_a_stop_that_never_answers_gives_up_at_thirty_seconds(_tmp):
+    """The stop shares the poll's budget, so the third of the three is the
+    second's count with a different command id in the message -- and the
+    stop reports a give-up by toast, where the poll renders it inline."""
+    report = _run(_click('STOP')
+                  + 'report({ polls: legs(), status: said(),'
+                    '  toasts: toasts() });\n',
+                  plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
+    assert report['polls'] == 120, report
+    assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
+        report
+    assert report['toasts'][0]['text'].startswith(
+        'Timeout (30000ms) waiting for _net-capture-stop_1_'), report
 
 
 def test_a_failed_poll_is_rendered_inline_in_red(_tmp):
