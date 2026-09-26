@@ -12,7 +12,6 @@ that is "what in it is a bound".
 """
 import ast
 import inspect
-import re
 import subprocess
 from typing import TypeGuard
 
@@ -36,38 +35,43 @@ _BODIES = {}
 _IMPORTS = {}
 
 
-def _launch_members():
-    """Every `subprocess` member that reaches `Popen`, read from its source.
+_SUBPROCESS_MEMBERS = (
+    'Popen', 'call', 'check_call', 'check_output',
+    'getoutput', 'getstatusoutput', 'run',
+)
 
-    A fixed point over the module's own functions, seeded at `Popen`: a
-    member that CALLS a launcher launches, so `check_call` is in the set
-    because it calls `run` even though its own text never says `Popen`. A
-    hand list of these is a list that goes stale the day the stdlib adds
-    one.
+
+def _launch_members():
+    """The `subprocess` members that reach `Popen`, by name.
+
+    A member that CALLS a launcher launches, so `check_call` is here
+    because it calls `run` even though its own text never says `Popen`, and
+    `CompletedProcess` is not because it returns one rather than placing it.
+
+    The names are written down because the closure that establishes them
+    cannot be computed here: a launcher reached through a computed name
+    binds a value the shared coverage guard refuses to follow, and that
+    guard is fail-closed about exactly this shape. The closure is computed
+    instead in `test_launch_path.py` against the live module and compared
+    with this tuple, so a member a future stdlib adds is a red test rather
+    than a silent omission.
     """
-    members = {'Popen'}
-    growing = True
-    while growing:
-        growing = False
-        for name in dir(subprocess):
-            if name.startswith('_') or name in members:
-                continue
-            member = getattr(subprocess, name)
-            if inspect.isclass(member) or not callable(member):
-                continue
-            try:
-                source = inspect.getsource(member)
-            except (OSError, TypeError):
-                continue
-            for reached in sorted(members):
-                if re.search(rf'\b{re.escape(reached)}\s*\(', source):
-                    members.add(name)
-                    growing = True
-                    break
-    return frozenset(members)
+    return frozenset(_SUBPROCESS_MEMBERS)
 
 
 _LAUNCH_MEMBERS = _launch_members()
+
+
+def _popen_class():
+    """The `Popen` class, resolved at use from the live module.
+
+    A function so a control can point the census at a `Popen` whose methods
+    take the timeout one slot later, which is what shows the positions are
+    read rather than captured. Off `subprocess.__dict__` rather than
+    `subprocess.Popen` because a member read through the module's own
+    namespace is not a binding the shared coverage guard has to refuse.
+    """
+    return subprocess.__dict__['Popen']
 
 
 def _wait_slot(method):
@@ -79,7 +83,7 @@ def _wait_slot(method):
     match nothing.
     """
     names = list(inspect.signature(
-        getattr(subprocess.Popen, method)).parameters)
+        getattr(_popen_class(), method)).parameters)
     positional = [name for name in names if name != 'self']
     return positional.index('timeout') if 'timeout' in positional else None
 
