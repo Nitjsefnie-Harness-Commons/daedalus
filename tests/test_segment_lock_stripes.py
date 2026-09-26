@@ -42,6 +42,7 @@ held_job = os.environ.get("SEG_HELD_JOB", "")
 park_job = os.environ.get("SEG_PARK_JOB", "")
 call_lock = threading.Lock()
 _ACQUIRE_GRACE = 0.25
+held = [0]
 last_acquirer = [None]
 dirty_calls = [0]
 
@@ -51,8 +52,15 @@ def note(name, text):
             handle.write(text + "\n")
 
 def provably_occupied():
-    """Whether some injected holder is inside a lock right now."""
-    return (gate / "holding").exists() or (gate / "parked").exists()
+    """Whether a lock is ACTUALLY held right now, counted not marked.
+
+    The count, not a marker file. A marker says a fixture announced it was
+    holding; the count says a thread is inside an acquire. They differ the
+    moment a holder is neutered — the announcement stays and the hold goes —
+    and a control that read the announcement would call that a held stripe
+    and report an overlap that never happened.
+    """
+    return held[0] > 0
 
 class Signalled:
     """A lock that records being ACQUIRED, not merely being chosen.
@@ -85,7 +93,12 @@ class Signalled:
             note(f"blocked-{self._job}", "waited")
             self._real.acquire()
         last_acquirer[0] = threading.get_ident()
-        if provably_occupied():
+        # Read BEFORE this acquire joins the count: the question is whether
+        # some OTHER lock was already held, and a lock counts itself the
+        # moment it is taken.
+        already = held[0] > 0
+        held[0] += 1
+        if already:
             # Two records, because the two questions differ. The global one
             # says a lock was taken while another was held, and names the
             # job that asked for it. The per-job one is that same fact keyed
@@ -97,6 +110,7 @@ class Signalled:
             note(f"overlap-{self._job}", "acquired-while-occupied")
         return self._real
     def __exit__(self, *exc):
+        held[0] -= 1
         self._real.release()
         return False
 
@@ -287,6 +301,19 @@ def _require_holder_holding(gate_dir):
             'reached it, so the property was never exercised')
 
 
+def _shared_lock_witness(gate_dir, held_job, unrelated):
+    """The two jobs were handed ONE lock object, with the ids.
+
+    This is the structural answer to "is the red the host or the lock?" — a
+    fact about lock identity that no amount of machine speed changes. The
+    control asserts it on the failure path, because a witness that only
+    appears in a log line nobody reads is not a control.
+    """
+    held = _job_lock_ids(gate_dir, held_job)
+    other = _job_lock_ids(gate_dir, unrelated)
+    return sorted(set(held) & set(other)), held, other
+
+
 def test_a_held_job_stripe_blocks_only_that_job(tmp):
     """A held job stripe blocks that job's segment write and nothing else.
 
@@ -334,9 +361,22 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
                 base, unrelated, sigs[unrelated], '0', payload=b'abcdef')
         except Exception as exc:  # pylint: disable=broad-except
             _require_holder_holding(gate_dir)
+            shared, held_ids, other_ids = _shared_lock_witness(
+                gate_dir, held_job, unrelated)
+            # The red is the lock, not a slow host: the two jobs were given
+            # one lock object. If they were not, this is some other fault and
+            # the message has to say so rather than borrow this explanation.
+            assert shared, (
+                'the unrelated write did not complete, but the two jobs were '
+                'NOT given one lock object, so this is not the single-lock '
+                f'defect: held={held_ids!r} unrelated={other_ids!r}\n'
+                f'{exc!r}')
             raise AssertionError(
                 'the unrelated job\'s segment write did not complete while '
                 f'the {held_job!r} stripe was held: {exc!r}\n'
+                f'witness: both jobs were handed the same lock object '
+                f'{shared!r} — held={held_ids!r} unrelated={other_ids!r}, '
+                'so this is the lock and not the host speed\n'
                 f'lock-calls: {_lock_calls(gate_dir)!r}') from exc
         assert status == 200, (status, body)
         _require_holder_holding(gate_dir)
@@ -349,14 +389,16 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
         assert set(unrelated_ids).isdisjoint({holder[1]}), (
             holder, unrelated_ids, _lock_calls(gate_dir))
         # Recorded, not sampled: the held job acquiring a lock while its own
-        # stripe is held IS the claim that it was not blocked. Asking whether
-        # the thread is still alive instead would be a sample of a moment,
-        # and it goes green by accident whenever the write is merely slow.
+        # stripe is held IS the claim that it was blocked, and it is a fact
+        # about an acquire rather than a moment's reading of a thread. The
+        # liveness sample that used to stand here went green whenever the
+        # write was merely slow, and it went RED whenever the hold was
+        # neutered even though the control's claim — an unrelated job's write
+        # completes — was satisfied. A fixture that announces it is holding
+        # without holding is not a block, and the seam now counts real holds
+        # rather than reading that announcement.
         overlap = _overlap_report(gate_dir, held_job)
         assert not overlap, overlap
-        assert held_thread.is_alive(), (
-            'the held job\'s write completed while its stripe was held: '
-            f'{_lock_calls(gate_dir)!r}')
 
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         held_thread.join(timeout=30)
