@@ -593,9 +593,8 @@ def test_two_overlapping_injections_cannot_both_pass_the_cap_check(_tmp):
     so it would pass under either order and pin nothing. `click()` does not
     await the handler, so two INJECTs fired without settling leave the first
     suspended at its `await` while the second runs the cap check. The write
-    precedes that `await`, so the second sees twenty and is refused; move the
-    write after it and the second sees nineteen and its `save` slices the
-    oldest away saying nothing.
+    precedes it, so the second sees twenty and is refused; move the write
+    after it and its `save` slices the oldest away saying nothing.
     """
     report = _store_after(
         'const css = container.find("[data-role=css]");\n'
@@ -630,8 +629,8 @@ def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
     The position path is pinned by NO case, and the two remove cases beside
     this one do not close that: each clicks its row at `i` 0 against a store
     the index and the search agree on, so the position mutation survives
-    them. Distinguishing the two needs a click on a row with `i` above 0 and
-    a three-record store, which is not built here.
+    them. Closing it needs a click on a row with `i` above 0 and a
+    three-record store, which is not built here.
     """
     report = _store_after(
         'const KEY = "daedalus-dash-css-sessions";\n'
@@ -650,7 +649,8 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     is built on. What reaches it first is not the cap check but the MOUNT:
     `renderSessions` runs before any click and its row map calls `.slice`, so
     the panel dies at the table. The cap check would have waved the same
-    `undefined` through -- against 20 is false -- so it belongs in `load()`.
+    `undefined` through -- against 20 is false -- so that guard belongs in
+    `load()`.
     """
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'

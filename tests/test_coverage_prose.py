@@ -21,12 +21,16 @@ go red the moment a shipped file grows; the ones that cannot are pointed at
 the run's own summary rather than copied into a file where nothing would
 notice them going stale.
 
-The scan reads DIGIT FORM. A figure written in words, or one attached to a
-name or a version — `V8`, `base64`, `Python 3.13`, `SHA-256` — is outside
-what it sees, and the case docstring says so rather than claiming
-completeness it does not have. This is deliberate: the alternative is a
-natural-language parser, and a prose gate is worth more when its own limits
-are written down than when it pretends to have none.
+The scan reads DIGIT FORM, and its exemptions are by SHAPE rather than by
+example, so the shapes are what is written down here: a figure written in
+words, a run that touches a letter or an underscore, a run carrying its own
+dot, and a run a hyphen runs into. All four are outside what it sees -- so
+`3.5 seconds` is as unchecked as `SHA-256`, and a maintainer must not read
+the familiar-looking second one as the boundary. The case docstring repeats
+this rather than claiming completeness the scan does not have. This is
+deliberate: the alternative is a natural-language parser, and a prose gate is
+worth more when its own limits are written down than when it pretends to have
+none.
 
 The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the number it is checking: if the
@@ -172,10 +176,11 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
 
     percents = re.findall(r'(\d+(?:\.\d+)?)\s*%', text)
     assert percents, (
-        'the paragraph states no percentage in digits, so the share it '
-        'expresses is not checked against anything -- and a percentage '
-        'written in words is exactly as unchecked as none at all, so both '
-        'are refused rather than passed')
+        'the paragraph states no percentage in digit form with a `%` sign, '
+        'so the share it expresses is not checked against anything. The '
+        'digits may well be there -- "about 1.03 percent" has them -- but '
+        'this reads the sign, and a percentage spelled in words is exactly '
+        'as unchecked as none at all, so both are refused rather than passed')
     for said in percents:
         decimals = len(said.split('.')[1]) if '.' in said else 0
         half = 0.5 * 10 ** -decimals
