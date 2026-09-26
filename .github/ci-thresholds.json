@@ -63,7 +63,7 @@
     "tests/test_ci_thresholds.py": 1,
     "tests/test_ci_wait.py": 2,
     "tests/test_ci_workflows.py": 6,
-    "tests/test_cli_arg_audit.py": 4,
+    "tests/test_cli_arg_audit.py": 3,
     "tests/test_client_credentials.py": 7,
     "tests/test_cmdqueue.py": 1,
     "tests/test_cmdqueue_injectors.py": 22,
