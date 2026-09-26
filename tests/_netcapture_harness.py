@@ -97,13 +97,21 @@ chrome.tabs.query = function(query, callback) {
   const tabs = plan.activeTabs || DEFAULT_ACTIVE_TABS;
   return Promise.resolve(tabs.map((tab) => ({ ...tab })));
 };
+// Real Chrome holds one debugger attachment per tab, and a protocol call to
+// a tab that holds none is refused. Modelling that is what lets a scenario
+// say whether an attachment is STILL STANDING, which a recorded detach
+// call alone cannot: the double that answers every sendCommand is the one
+// that hides a release the module had no right to make.
+const attached = new Set();
 chrome.debugger.attach = async (target, version) => {
   record('debugger.attach', [target, version]);
   maybeReject(plan.chromeReject, 'debugger.attach');
+  attached.add(target.tabId);
 };
 chrome.debugger.detach = async (target) => {
   record('debugger.detach', [target]);
   maybeReject(plan.chromeReject, 'debugger.detach');
+  attached.delete(target.tabId);
 };
 
 // The answer to a protocol call is the plan's, never the argument's: the
@@ -113,6 +121,11 @@ chrome.debugger.detach = async (target) => {
 const bodyAnswers = plan.bodies || {};
 async function handleDebuggerCommand(_target, method, params) {
   record('debugger.sendCommand', [{ tabId: _target.tabId }, method, params]);
+  if (!attached.has(_target.tabId)) {
+    throw new Error(
+      'Cannot send protocol message: tab ' + _target.tabId
+      + ' holds no debugger attachment');
+  }
   maybeReject(plan.sendCommandReject, method);
   if (method === 'Network.enable') return {};
   // A second modelled method, so a kept session and a capture can tell
@@ -375,10 +388,21 @@ def event(tab, method, **params):
                          'params': params}}
 
 
-def request(tab, request_id, url, post=None, **params):
-    sent = {'url': url, 'method': 'GET', 'headers': {}}
+def request(tab, request_id, url, method, headers, post=None, frame=None,
+            **params):
+    """One Network.requestWillBeSent event.
+
+    `method` and `headers` have no default on purpose: a fixture that
+    supplies the value the assertion reads back cannot tell a module that
+    reads the field from one that hardcodes it, so every call site names
+    its own. `frame` is left out of the event when None, which is what
+    the frameId default arm needs.
+    """
+    sent = {'url': url, 'method': method, 'headers': headers}
     if post is not None:
         sent['postData'] = post
+    if frame is not None:
+        params['frameId'] = frame
     return event(tab, 'Network.requestWillBeSent', requestId=request_id,
                  request=sent, **params)
 
