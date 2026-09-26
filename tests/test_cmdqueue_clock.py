@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _cmdqueue  # noqa: E402
+import _cmdqueue_faults  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _RUNAWAY_ELAPSED,
     _virtual_cmdqueue_clock,
@@ -239,11 +240,11 @@ def test_per_call_wall_budget_replaces_the_module_default(_tmp):
 
 
 def test_omitted_wall_budget_is_the_module_default(_tmp):
-    """The other margin of the module bound: quiet below it, tripping above.
+    """An omitted budget is the module's, sampled below it.
 
-    The wall bound control above trips on six seconds of reported elapsed
-    time; this one must stay quiet at four and a half, so neither margin of
-    the five-second bound has moved.
+    The bound is five seconds, so elapsed time under it is not a refusal. The
+    control beside this one samples the limit itself, and between them the
+    module's bound is five seconds and the comparison at it is inclusive.
     """
     positive = _cmdqueue.POLL_DELAY
     with _wall_time_past_limit(4.5):
@@ -252,6 +253,89 @@ def test_omitted_wall_budget_is_the_module_default(_tmp):
         assert events == [('sleep', positive)], events
         assert clock.monotonic() == origin + positive, (
             clock.monotonic(), origin, positive)
+
+
+def test_the_wall_bound_trips_exactly_at_its_limit(_tmp):
+    """A bound is inclusive, and this is the module's own value.
+
+    Elapsed time exactly at the limit trips the guard, which an exclusive
+    comparison would let through; the quiet probe below the limit is what
+    puts that limit at five seconds rather than merely above it.
+    """
+    failure = None
+    with _wall_time_past_limit(5.0):
+        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+            try:
+                clock.sleep(2 ** -33)
+            except AssertionError as caught:
+                failure = caught
+    assert isinstance(failure, AssertionError), failure
+    assert events == [], events
+    message = str(failure).lower()
+    assert 'wall' in message, message
+
+
+def test_a_zero_wall_budget_is_a_bound_not_an_absence(_tmp):
+    """Zero seconds is a bound every read meets, not the absence of one."""
+    failure = None
+    with _wall_time_past_limit():
+        with _virtual_cmdqueue_clock(
+                wall_budget=0.0) as (clock, events, _origin):
+            try:
+                clock.sleep(_cmdqueue.POLL_DELAY)
+            except AssertionError as caught:
+                failure = caught
+    assert isinstance(failure, AssertionError), failure
+    assert events == [], events
+    message = str(failure).lower()
+    assert 'wall' in message, message
+    assert _has_numeric_token(message, '0.000'), message
+
+
+def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
+    """The guard is consulted on reads as well as on sleeps.
+
+    A read loop that never ends is the runaway the wall bound exists for, and
+    `record_read` is the arm that would see it.
+    """
+    failure = None
+    with _wall_time_past_limit():
+        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+            try:
+                clock.record_read()
+            except AssertionError as caught:
+                failure = caught
+    assert isinstance(failure, AssertionError), failure
+    assert events == [], events
+    message = str(failure).lower()
+    assert 'wall' in message, message
+
+
+def test_the_module_bound_is_read_at_the_call(_tmp):
+    """A lowered module bound reaches a control that omits the budget.
+
+    A default bound in the signature would freeze the constant at import and
+    this control would stay quiet. Lowering the module's own constant is how
+    a later session checks what a control escapes — shrink the default it
+    escapes rather than loading the box — so that probe has to keep working.
+    """
+    failure = None
+    original = _cmdqueue_faults._RUNAWAY_WALL
+    _cmdqueue_faults._RUNAWAY_WALL = 0.0
+    try:
+        with _wall_time_past_limit(1.0):
+            with _virtual_cmdqueue_clock() as (clock, events, _origin):
+                try:
+                    clock.sleep(_cmdqueue.POLL_DELAY)
+                except AssertionError as caught:
+                    failure = caught
+    finally:
+        _cmdqueue_faults._RUNAWAY_WALL = original
+    assert isinstance(failure, AssertionError), failure
+    assert events == [], events
+    message = str(failure).lower()
+    assert 'wall' in message, message
+    assert _has_numeric_token(message, '0.000'), message
 
 
 def test_virtual_clock_rejects_non_finite_sleep_requests(_tmp):
