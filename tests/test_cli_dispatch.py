@@ -378,6 +378,46 @@ def test_wiring_restores_a_name_the_namespace_never_had(tmp):
             f'{name} was left on a namespace that never had it')
 
 
+def test_the_socket_seal_is_lifted_when_the_block_ends(tmp):
+    """The seal must not outlive the block that put it up.
+
+    Replacing the whole restore with `socket.socket.connect = refuse` — a
+    harness that seals and never unseals — leaves every consumer suite
+    green, because the damage is not a wrong value but a process-wide
+    refusal: nothing here needs a real socket afterwards, and the suites
+    that do are subprocess-driven and outside the harness entirely. The
+    failure it hides is order-dependent and silent, so it is pinned here
+    against the object that was there before, on the arm that returns and
+    on the arm that raises.
+    """
+    del tmp
+    original = socket.socket.connect
+
+    with _cli_dispatch.wired(types.SimpleNamespace(),
+                             _cli_dispatch.RecordingExtCmd([])):
+        assert socket.socket.connect is not original, (
+            'the seal must be up while a module is wired')
+
+    assert socket.socket.connect is original, (
+        'the seal outlived the block that put it up: '
+        f'{socket.socket.connect}')
+
+    def raises(space):
+        del space
+        raise ValueError('the handler blew up mid-command')
+
+    try:
+        drive(raises, [])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('the callable must be free to raise')
+
+    assert socket.socket.connect is original, (
+        'the seal outlived a handler that raised: '
+        f'{socket.socket.connect}')
+
+
 def test_asking_for_more_answers_than_were_supplied_fails_cleanly(tmp):
     """An exhausted answer queue is an assertion, not an IndexError.
 
