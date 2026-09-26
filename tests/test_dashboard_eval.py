@@ -7,7 +7,8 @@ with a tab selected (the selected-tab run beside it is the control),
 both Eval status surfaces - the pre-flight line and the post-run line
 - name the active tab, the settled status prefers the tab a result
 envelope names, the refusal sentence and the pre-flight label render
-whole, the timeout renders clamped, and the Settings caveat says the
+whole, the timeout renders clamped, a tab list the bridge refused says
+why in the select's own option, and the Settings caveat says the
 command runs once, in whichever tab is active. The eval harness drives
 dashboard/sections/eval.js through its own buttons in a small Node
 DOM; the settings harness mounts dashboard/sections/settings.js for
@@ -218,6 +219,62 @@ def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
     seen = json.loads(result.stdout)
     assert seen['highTimeout'].endswith('  timeout=60000ms'), seen
     assert seen['lowTimeout'].endswith('  timeout=1000ms'), seen
+
+
+_EVAL_TABS_FAIL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+(async () => {
+const listeners = [];
+const bus = { on: (fn) => listeners.push(fn) };
+const body = JSON.stringify({ error: 'tabs unavailable' });
+globalThis.fetch = async (target) => {
+  const where = String(target);
+  if (where.startsWith('/tabs')) {
+    return {
+      ok: false, status: 500,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ error: 'tabs unavailable' }),
+      text: async () => body,
+    };
+  }
+  throw new Error('unexpected fetch ' + where);
+};
+phase('dashboard module import started');
+const { mount } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+phase('dashboard call started');
+const container = new El('div');
+mount(container, bus);
+await bounded(settle(), 'eval tab selector render', _dashnodeStepTimeoutMs);
+const sel = container.find('[data-role=tab-select]');
+phase('dashboard call settled');
+process.stdout.write(JSON.stringify(
+  { options: sel.options.map((o) => o.textContent),
+    values: sel.options.map((o) => o.value) }));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=2, module=True, arguments=(
+    ROOT / 'dashboard' / 'sections' / 'eval.js',))
+
+
+def test_a_tab_list_the_bridge_refused_says_why_in_the_option(_tmp):
+    """`eval.js:71` is the one section that passes an `errorLabel` to
+    `bindTabSelector`, so a `/tabs` the bridge refuses reaches the
+    operator as the select's own option rather than as the silence the
+    other five sections settle for. `api.js:58` builds the message and
+    `errMsg` hands it back unchanged, so the option is asserted whole.
+
+    Nothing else mounts eval.js with `/tabs` answered a status, so
+    without this case the `errorLabel` render is unpinned tree-wide:
+    deleting `if (errorLabel) only(errorLabel(e));` from `_util.js:63`
+    leaves the rest of this file green.
+    """
+    result = _dashnode.run_dashboard_node(_EVAL_TABS_FAIL_HARNESS)
+    seen = json.loads(result.stdout)
+    assert seen['values'] == [''], seen
+    assert seen['options'] == ['(err: HTTP 500: tabs unavailable)'], seen
 
 
 _SETTINGS_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
