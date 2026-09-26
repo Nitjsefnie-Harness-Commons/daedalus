@@ -1,5 +1,7 @@
 // Dashboard section — shared DOM + formatting helpers.
 
+import { getToken, getServer } from '../api.js';
+
 export function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
   if (attrs) {
@@ -285,3 +287,28 @@ export function inlineEdit(cell, initial, originalText, onSubmit,
   input.select();
 }
 
+function maskToken(t) {
+  if (!t) return '(none)';
+  if (t.length <= 12) return t;
+  return t.slice(0, 8) + '…' + t.slice(-4);
+}
+
+function shortToken(t) {
+  if (!t) return '—';
+  return t.slice(0, 8) + '…';
+}
+
+function setAll(selector, text) {
+  for (const el of document.querySelectorAll(selector)) el.textContent = text;
+}
+
+// Both the entry point and the settings panel write these three cells, and
+// a second copy of the mask is how a twelve-character token came to read
+// verbatim at boot and masked a moment later.
+export function wireMetaBar() {
+  const token = getToken();
+  const server = getServer();
+  setAll('[data-meta="token"]', maskToken(token));
+  setAll('[data-meta="token-short"]', shortToken(token));
+  setAll('[data-meta="server"]', server || '(same origin)');
+}

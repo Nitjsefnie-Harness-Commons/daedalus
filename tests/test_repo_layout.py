@@ -161,7 +161,7 @@ BOUNDED_GIT_LAUNCHES = {
      'test_dashboard_responses_refuse_cross_origin_framing'):
         'an HTTP read: a socket, not a git process, and the'
         ' timeout is the bound itself',
-    ('tests/test_dashboard_behaviour.py', 530, 'popen'):
+    ('tests/test_dashboard_behaviour.py', 538, 'popen'):
         'a test double constructed with a keyword mapping; it'
         'records, it does not launch',
     ('tests/test_dashboard_gate.py', 102,

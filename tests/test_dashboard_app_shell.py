@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """What the dashboard's entry point does, each test pinned by the
 production change that turns it red."""
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _dashshell import run_scenario  # noqa: E402
+from _repo import ROOT  # noqa: E402
 
 _SERVER = 'https://example.com'
 _TOKEN = 'tok-abcdefghijklmnop'
@@ -307,6 +309,23 @@ report({ before, after: read() });
         _SERVER + '/tabs'], report['requests']
     assert report['after'] == report['before'], report
     assert report['unplanned'] == [], report
+
+
+def test_the_settings_panel_does_not_import_the_entry_point(_tmp):
+    """`sections/settings.js` reaching `app.js` closes a cycle: the entry
+    point imports the panel, so the panel importing the entry point makes
+    which body runs first depend on who was loaded first. It did, once,
+    for the meta-bar writer, and the writer now lives beside the panel in
+    `sections/_util.js`.
+
+    The specifiers are read rather than the text searched, so the whole
+    list is what a failure prints and a mention in a comment cannot
+    satisfy or break it."""
+    source = (ROOT / 'dashboard' / 'sections' / 'settings.js').read_text(
+        encoding='utf-8')
+    specifiers = re.findall(r"^import\s[^;]*?from\s+'([^']+)';", source, re.M)
+    assert '../app.js' not in specifiers, specifiers
+    assert './_util.js' in specifiers, specifiers
 
 
 def test_an_internal_sse_status_reaches_the_dot_and_both_status_texts(_tmp):
