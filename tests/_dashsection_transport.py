@@ -96,8 +96,10 @@ function jsonAnswer(data, status) {
 // the throw is the refusal: no section wraps its fetch in a catch that
 // turns one into a stream error, so a thrown refusal is readable and a
 // swallowed one is not. `byType` refuses through this same door rather
-// than a second one, so there is one strictness here and one control on
-// it.
+// than a second one, which is the whole of the answer-table strictness
+// this file claims one control for. It is not the only throw here:
+// `unmodelled()` is a separate door, it is not recorded, and nothing in
+// this file's suite controls it.
 function refuse(target) {
   REFUSALS.push({ n: REQUESTS.length, target: String(target) });
   throw new Error('unexpected request ' + String(target));
@@ -163,7 +165,12 @@ function resultAnswer(target, spec) {
   // unplanned target -- a double that answered it would be answering
   // something the scenario never declared.
   if (spec.byType !== undefined) {
-    if (!(command.type in spec.byType)) refuse(target);
+    // `hasOwnProperty`, not `in`: a command type named after an
+    // `Object.prototype` member is a name no scenario wrote, and `in`
+    // would find it on the prototype and answer a result nobody declared.
+    if (!Object.prototype.hasOwnProperty.call(spec.byType, command.type)) {
+      refuse(target);
+    }
     return jsonAnswer(Object.assign({}, anchored, spec.byType[command.type]));
   }
   // A plan may declare how many leading polls carry an envelope the

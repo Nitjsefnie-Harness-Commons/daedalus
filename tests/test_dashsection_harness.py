@@ -206,6 +206,26 @@ def test_a_result_plan_naming_one_command_type_refuses_the_rest(_tmp):
         {'n': 5, 'target': '/result?tab=extension'}], report
 
 
+def test_a_result_plan_refuses_a_name_no_scenario_wrote_that_in_would_find(
+        _tmp):
+    """`in` walks `Object.prototype`, so a command type named after one of
+    its members would be answered from a plan nobody declared -- the
+    refusal would not happen and, worse, would not be recorded. Eleven
+    spellings reach it, and the comment above the branch says a type the
+    scenario did not name is refused, so the claim is held here rather
+    than only corrected.
+
+    Every one of the five names is driven, so a fix that special-cased one
+    of them fails on the other four.
+    """
+    report = run_scenario(scenarios.BY_TYPE_PROTOTYPE, sections=('api.js',))
+    assert report['refused'] == 5, report
+    assert report['refusals'] == 5, report
+    refused = 'unexpected request /result?tab=extension'
+    assert report['seen'] == [refused] * 5, report
+    assert report['inherited'] == {}, report
+
+
 def test_a_duplicate_route_is_refused(_tmp):
     """A second plan for a target is a scenario bug, and answering it
     silently lets the second plan decide the answer to the first."""
