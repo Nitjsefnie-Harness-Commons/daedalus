@@ -28,15 +28,6 @@ from _yamlread import (  # noqa: E402
     step_scalar, step_scalars,
 )
 
-# The three suites that read this one kept their own import lines when these
-# seven names moved to _coverage_comment_workflow.py, so they still arrive
-# as attributes here. __all__ says they are re-exports, not dead imports.
-__all__ = (
-    '_GH_COMMENT_STUB',
-    '_run_artifact_check', '_run_block', '_run_comment_block',
-    '_run_shell_block', '_step_condition', '_workflow', '_write_executable',
-)
-
 
 def _step_outputs(path):
     return dict(line.split('=', 1) for line in path.read_text(
