@@ -27,9 +27,11 @@ HERE = Path(__file__).resolve().parent
 # selection_shaped_outside_the_scope recognises one shape of an unnamed refusal
 # - two or more positional arguments, returning the first by name - and nothing
 # for a one-argument helper, a later argument, a tuple, a bool, or a decision
-# nested inside a helper. permitted_namespace_read is the mirror of
-# _subscript_read and decides the exemption side; a refusal added there leaves
-# this control and the audit suite both green.
+# nested inside a helper. Two refusals in the resolver are in that blind set:
+# permitted_namespace_read is the mirror of _subscript_read and decides the
+# exemption side, and reflective_builtin_call RETURNS a refusal from inside an
+# unscoped function rather than delegating to one. A refusal added to either
+# leaves this control and the audit suite both green.
 SCOPE = (
     (HERE / '_cli_arg_audit_resolver.py', '_cli_arg_audit_resolver',
      ('frame_read', '_subscript_read', '_call_read',
@@ -205,9 +207,14 @@ def _conditions(source, names):
     Every arm of an if/elif chain is one however the chain is spelled, because
     an ``elif`` desugars to a nested ``if`` in the ``orelse`` and a refusal a
     keyword hides is one the walk would answer with silence. So is a decision
-    a return makes inline. A nested statement inside an arm is NOT descended
-    into: it has its own control flow, and a refusal there is invisible to
-    this control.
+    a return makes inline.
+
+    Four more refusals this walk does not reach, each named here rather than
+    counted: a refusal nested in a statement inside an arm, one inside a loop
+    or under ``try``/``except`` or ``with`` in a scoped function - none of
+    which is a top-level statement, and only a return is read - and a refusal
+    raised rather than returned, or raised through a helper, since no
+    ``ast.Raise`` is read at all.
     """
     starts = _line_starts(source)
     for function in ast.parse(source).body:
@@ -325,7 +332,18 @@ def _subject_loaded(copied):
              if module is not None})
 
 
-def _died(run):
+def _failed(run):
+    """Whether running a control raises, whatever it raises.
+
+    Not a type filter, and deliberately not one: a second assertion in the
+    same test going red is an AssertionError too, so a type filter would close
+    only the two exposures it looks like it closes. Attribution comes from
+    where this is called - a control that raises with the condition still in
+    place is reported, not counted. One row's control fails structurally rather
+    than by assertion - taking the walk's only yield leaves ``_package_roots``
+    a non-generator, so every control that walks the package raises TypeError,
+    and no control in the tree fails by assertion under that removal.
+    """
     try:
         run()
     except Exception:                      # noqa: BLE001
@@ -370,13 +388,16 @@ def _control(mutated, control, tmp):
 
     A control identifier that resolves to nothing is a failure, not a skip: a
     row that quietly checks nothing is the shape this whole control exists to
-    refuse.
+    refuse. That includes a name the audit suite's runner never calls - such a
+    callable still dies when the condition is removed, because the runner hands
+    it a temp dir where it expects a parser or a tree, so it would satisfy a
+    row through an argument shape rather than through the refusal it names.
     """
     kind, _, name = control.partition(':')
     if kind == 'test':
-        target = getattr(mutated, name, None)
-        assert callable(target), f'no control named {control}'
-        return lambda: target(tmp)
+        runnable = {test.__name__ for test in _util.collect(vars(mutated))}
+        assert name in runnable, f'no control named {control}'
+        return lambda: getattr(mutated, name)(tmp)
     assert kind == 'plant', f'unknown control kind in {control}'
     row = next((plant for plant in mutated.audit_support.FRAME_NAMESPACE_PLANTS
                 if plant[0] == name), None)
@@ -421,12 +442,17 @@ def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
             assert named, f'row {key} names no control'
             runners = [_control(mutated, control, tmp)
                        for control in named]
+            for control, run in zip(named, runners):
+                assert not _failed(run), (
+                    f'row {key} names {control}, which already fails with '
+                    f'the condition in place, so its death under the removal '
+                    f'would not be that control seeing the refusal go')
             with _condition_removed(
                     key, conditions[key], conditions) as removed:
                 survivors.extend(
                     f'{key} -> {control}\n    removed: {removed.strip()!r}'
                     for control, run in zip(named, runners)
-                    if not _died(run))
+                    if not _failed(run))
     left = sorted(name for name in SUBJECT_MODULES
                   if str(getattr(sys.modules.get(name), '__file__', ''))
                   .startswith(str(copied)))
