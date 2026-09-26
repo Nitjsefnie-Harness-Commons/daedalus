@@ -195,9 +195,17 @@ def test_dashboard_failed_consume_is_not_a_success(_tmp):
 _DASHBOARD_WORLD_HARNESS = _dashnode.DashboardNodeHarness(r"""
 phase('dashboard harness started');
 const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
 (async () => {
   phase('dashboard module import started');
-  const source = fs.readFileSync(process.argv[1], 'utf8');
+  // A data: URL has no base to resolve a relative specifier against, and
+  // `_util.js` now reaches `api.js` for the meta-bar writer, so that one
+  // specifier is rewritten to a file:// URL before the source is inlined.
+  const api = pathToFileURL(path.join(
+    path.dirname(process.argv[1]), '..', 'api.js')).href;
+  const source = fs.readFileSync(process.argv[1], 'utf8')
+    .split("'../api.js'").join("'" + api + "'");
   const moduleUrl = 'data:text/javascript;base64,'
     + Buffer.from(source).toString('base64');
   const dashboard = await bounded(

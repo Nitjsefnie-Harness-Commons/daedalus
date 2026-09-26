@@ -1,9 +1,8 @@
 // §12 SETTINGS — token, server URL, extension reload, active-tab caveat.
 
-import { h, field, spacer, clear, toast, errMsg, armedAction } from './_util.js';
+import { h, field, spacer, clear, toast, errMsg, armedAction, wireMetaBar } from './_util.js';
 import { getToken, setToken, getServer, setServer, extCmd, api } from '../api.js';
 import { restart as restartSse } from '../sse.js';
-import { wireMetaBar } from '../app.js';
 
 export function mount(container, bus) {
   const root = h('div', {},
