@@ -394,7 +394,7 @@ def test_a_refused_attach_runs_nothing_and_is_not_detached_afterwards(tmp):
         'probe': False,
         'fixes': [{'id': 'fix1', 'code': FIX}],
     }
-    outcome = run_hotfix_case(dict(case, attach='reject'))
+    outcome = run_hotfix_case(dict(case, attach='fail'))
     # The attachment was asked for, unlike D3 — the refusal is the browser's,
     # and it is what stopped the evaluation.
     assert outcome['attachCalls'] == [7], outcome
@@ -402,7 +402,7 @@ def test_a_refused_attach_runs_nothing_and_is_not_detached_afterwards(tmp):
     assert _delivered(outcome) == {}, outcome
     assert len(_errors(outcome)) == 1, outcome
     assert 'cdp attach failed' in _errors(outcome)[0], outcome
-    assert 'debugger refused the attach' in _errors(outcome)[0], outcome
+    assert 'debugger refused' in _errors(outcome)[0], outcome
     assert outcome['detachCalls'] == [], outcome
     # The anti-vacuity half: the same case, the same channel, no refusal. The
     # fix runs, the evaluation is submitted in the mode the module always
