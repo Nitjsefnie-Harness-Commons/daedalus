@@ -27,8 +27,11 @@ from daedalus_cli.cli import DISPATCH
 # The transport-level names a CLI handler module resolves out of its own
 # namespace. `invoke` carries the same set, so a handler that delegates to
 # the real `send_and_wait` reaches the same double the handler's own `api`
-# would have.
-WIRE_NAMES = ('api', 'ext_cmd', 'tab', 'token', 'wait_for_result')
+# would have. The list is the whole of what `commands_media` resolves out of
+# `transport` that opens a socket, so naming a module whose handlers use a
+# sixth one is a gap in this tuple rather than a gap in the harness.
+WIRE_NAMES = ('api', 'api_delete', 'api_raw', 'ext_cmd', 'tab', 'token',
+              'wait_for_result')
 
 _ABSENT = object()
 
@@ -69,11 +72,13 @@ class RecordingExtCmd:
     """Records every wire call a handler makes and replays canned answers.
 
     The name is the original one and stays: this records `ext_cmd`, and the
-    direct `api` / `wait_for_result` shape beside it. A `plan` makes the
-    recorder strict — each request the handler issues must be the next one
-    the test declared, down to the body field names and values, and every
-    declared request must be issued. Without a plan the recorder is
-    permissive, which is what the suites that predate it rely on.
+    direct `api` / `wait_for_result` shape beside it. `api_raw` and
+    `api_delete` are recorded too, for the media module's two call sites
+    that no other handler uses. A `plan` makes the recorder strict — each
+    request the handler issues must be the next one the test declared, down
+    to the body field names and values, and every declared request must be
+    issued. Without a plan the recorder is permissive, which is what the
+    suites that predate it rely on.
     """
 
     def __init__(self, answers, plan=None, target_tab='', token='clitok',
@@ -103,10 +108,26 @@ class RecordingExtCmd:
         return self._answer()
 
     def api(self, method, path, body=None, timeout=30, headers=None):
-        del timeout, headers
-        self._record({'via': 'api', 'method': method, 'path': path,
-                      'body': body})
+        del timeout
+        # `headers` is recorded only when a caller sent one, so a plan entry
+        # that declares no headers means "none were sent" and nothing else
+        # has to say so. `{}` and `None` are the same request on the wire —
+        # `transport._request` merges either into its own header dict.
+        entry = {'via': 'api', 'method': method, 'path': path, 'body': body}
+        if headers:
+            entry['headers'] = headers
+        self._record(entry)
         self.api_calls.append((method, path, body))
+        return self._answer()
+
+    def api_raw(self, method, path):
+        """`do_screenshot`'s download: the one call that wants bytes back."""
+        self._record({'via': 'api_raw', 'method': method, 'path': path})
+        return self._answer()
+
+    def api_delete(self, path, body):
+        """`do_uploads --delete`, the only body-carrying DELETE in the CLI."""
+        self._record({'via': 'api_delete', 'path': path, 'body': body})
         return self._answer()
 
     def wait_for_result(self, cmd_id, target_tab, delivery_id, timeout,

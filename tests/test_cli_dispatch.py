@@ -4,11 +4,16 @@
 These are tests OF tests/_cli_dispatch.py, so each drives a small local
 callable rather than a handler: a control parked in a consumer's suite
 welds that consumer to every future change here, and the red then arrives
-for a reason that has nothing to do with what the consumer tests. A failure
-here that names a module other than this one is a control in the wrong
-file.
+for a reason that has nothing to do with what the consumer tests. The two
+whose NAMES mention a handler are the exceptions, and each says in its
+docstring why it needs a real one. That is the boundary a reader can act
+on: a new control here that grows a second consumer announces itself by
+its name, because which module a traceback names tells you nothing — a
+failure inside either of those two names `daedalus_cli/commands_eval.py`
+for the most ordinary reason there is.
 """
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,8 +22,7 @@ import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli import commands_eval  # noqa: E402
-from daedalus_cli.output import MARK  # noqa: E402
+from daedalus_cli import SEGMENT_SIG_HEADER, commands_eval  # noqa: E402
 
 drive = _cli_dispatch.drive
 run_cli = _cli_dispatch.run_cli
@@ -27,7 +31,14 @@ TABS = {'via': 'api', 'method': 'GET', 'path': '/tabs', 'body': None}
 COMMAND = {'via': 'api', 'method': 'PUT', 'path': '/command',
            'body': {'token': 'clitok', 'id': 'job0', 'code': '1+1'}}
 STORE = {'via': 'ext_cmd', 'id': '_store_hf', 'type': 'store-hotfix',
-         'fields': {'fixId': 'fx'}, 'timeout': 10}
+         'fields': {'fixId': 'fx'}, 'timeout': 30}
+SEGMENT_STATUS_PATH = '/segment-status?job=j0'
+SEGMENT_STATUS = {'via': 'api', 'method': 'GET', 'path': SEGMENT_STATUS_PATH,
+                  'body': None, 'headers': {SEGMENT_SIG_HEADER: 'sigvalue'}}
+SCREENSHOT_PATH = '/screenshot?path=job0/shot.png'
+DOWNLOAD = {'via': 'api_raw', 'method': 'GET', 'path': SCREENSHOT_PATH}
+REMOVAL = {'via': 'api_delete', 'path': '/upload',
+           'body': {'token': 'clitok', 'id': 'job0'}}
 
 
 def _refused(fragment, call, answers, plan, **options):
@@ -46,7 +57,9 @@ def _ask(space):
 
 
 def _store(space):
-    space.ext_cmd('_store_hf', 'store-hotfix', fixId='fx')
+    # 30, not the 10 the signature defaults to: a recorder reporting a
+    # hardcoded 10 would agree with a control that never chooses a deadline.
+    space.ext_cmd('_store_hf', 'store-hotfix', 30, fixId='fx')
 
 
 def test_a_planned_request_that_arrives_is_accepted(tmp):
@@ -65,7 +78,7 @@ def test_a_planned_ext_cmd_that_arrives_is_accepted(tmp):
 
     assert recorded.calls == [
         ('_store_hf', 'store-hotfix', {'fixId': 'fx'})], recorded.calls
-    assert recorded.timeouts == [10], recorded.timeouts
+    assert recorded.timeouts == [30], recorded.timeouts
 
 
 def test_an_unplanned_request_is_refused(tmp):
@@ -111,6 +124,117 @@ def test_a_planned_request_whose_path_differs_is_refused(tmp):
     del tmp
     _refused('request 1 is not the one planned', _ask, [{}],
              [dict(TABS, path='/result')])
+
+
+def test_a_planned_request_carrying_headers_is_accepted(tmp):
+    """A header is part of the request, so a plan may name one.
+
+    `commands_media.do_segment_status` sends a job capability as a header
+    and this repository keeps that capability out of the request target on
+    purpose, so the header is the whole difference between a segment route
+    call and any other `/segment-status` call.
+    """
+    del tmp
+
+    def asks_status(space):
+        space.api('GET', SEGMENT_STATUS_PATH, None, 30,
+                  headers={SEGMENT_SIG_HEADER: 'sigvalue'})
+
+    recorded = drive(asks_status, [{}], [SEGMENT_STATUS])
+
+    assert recorded.issued == [SEGMENT_STATUS], recorded.issued
+
+
+def test_a_planned_request_that_omits_a_planned_header_is_refused(tmp):
+    """The same request without the header is a different request.
+
+    A recorder that dropped `headers` from what it recorded would pass
+    both plans, and the plan would then say nothing about the capability
+    at all.
+    """
+    del tmp
+
+    def asks_status(space):
+        space.api('GET', SEGMENT_STATUS_PATH, None, 30)
+
+    _refused('request 1 is not the one planned', asks_status, [{}],
+             [SEGMENT_STATUS])
+
+
+def test_a_planned_api_raw_request_that_arrives_is_accepted(tmp):
+    """The bytes-returning sibling is recorded, not passed through.
+
+    `do_screenshot`'s download is the only `api_raw` call in the CLI, and a
+    harness that did not fake it would write a real file from a real
+    socket.
+    """
+    del tmp
+
+    def downloads(space):
+        space.api_raw('GET', SCREENSHOT_PATH)
+
+    recorded = drive(downloads, [b'png-bytes'], [DOWNLOAD])
+
+    assert recorded.issued == [DOWNLOAD], recorded.issued
+
+
+def test_a_planned_api_raw_request_that_differs_is_refused(tmp):
+    """Same limb, refused: one component of the selector is the request."""
+    del tmp
+
+    def downloads(space):
+        space.api_raw('GET', SCREENSHOT_PATH)
+
+    _refused('request 1 is not the one planned', downloads, [b''],
+             [dict(DOWNLOAD, path='/screenshot?path=job0/other.png')])
+
+
+def test_a_planned_api_delete_request_that_arrives_is_accepted(tmp):
+    """The body-carrying DELETE is a third shape, and it is planned too."""
+    del tmp
+
+    def removes(space):
+        space.api_delete('/upload', {'token': 'clitok', 'id': 'job0'})
+
+    recorded = drive(removes, [{}], [REMOVAL])
+
+    assert recorded.issued == [REMOVAL], recorded.issued
+
+
+def test_a_planned_api_delete_request_whose_body_differs_is_refused(tmp):
+    """A DELETE that names another id is another namespace."""
+    del tmp
+
+    def removes(space):
+        space.api_delete('/upload', {'token': 'clitok', 'id': 'job0'})
+
+    _refused("'id': 'job0'", removes, [{}],
+             [dict(REMOVAL, body={'token': 'clitok', 'id': 'job9'})])
+
+
+def test_run_cli_refuses_a_plan_the_handler_never_fully_issued(tmp):
+    """The same check `drive` carries, on the path every consumer takes.
+
+    The only control for `assert_plan_consumed` drove `drive`, and no
+    consumer goes through `drive`. A `--no-result` navigation that issued
+    its command and then stopped is the shape this catches, so the plan
+    declares the wait it never made.
+    """
+    del tmp
+    body = {'token': 'clitok', 'id': '_nav',
+            'code': 'location.href = "https://example.com/"', 'tab': 'tab0'}
+    plan = [{'via': 'api', 'method': 'PUT', 'path': '/command',
+             'body': body},
+            {'via': 'wait_for_result', 'id': '_nav', 'tab': 'tab0',
+             'delivery': 'd0', 'timeout': 15, 'interval': 0.5}]
+    try:
+        run_cli(['navigate', 'https://example.com/'], [{'target': 'tab0'}],
+                module=commands_eval, plan=plan, target_tab='tab0',
+                token='clitok')
+    except AssertionError as error:
+        assert 'planned requests were never issued' in str(error), str(error)
+    else:
+        raise AssertionError('run_cli must refuse a plan it never consumed')
 
 
 def test_a_plan_entry_the_caller_never_issues_is_refused(tmp):
@@ -176,6 +300,51 @@ def test_a_passed_timeout_is_recorded(tmp):
         recorded.waits
 
 
+def test_the_clock_hands_out_its_readings_in_order(tmp):
+    """The clock is part of this harness, so its own contract is pinned here.
+
+    `do_ping`'s rendered `(250ms)` is a difference between two of these
+    readings, so the order matters as much as the values: a clock that
+    handed them out backwards would leave that suite green. The last
+    reading repeats rather than falling off the end, and the empty default
+    starts at zero — the `(0ms)` arm.
+    """
+    del tmp
+    seen = []
+
+    def reads(space):
+        seen.append(space.time.time())
+        seen.append(space.time.time())
+        seen.append(space.time.time())
+
+    drive(reads, [], clock=[1000.0, 1000.25])
+    assert seen == [1000.0, 1000.25, 1000.25], seen
+
+    seen.clear()
+    drive(reads, [], clock=())
+    assert seen == [0.0, 0.0, 0.0], seen
+
+
+def test_the_clock_delegates_an_undefined_name_to_the_real_time(tmp):
+    """`__getattr__` is what the two hotfix listing callers rest on.
+
+    `commands_content.do_list_hotfixes` and `commands_media.do_uploads`
+    format a timestamp with `time.strftime` and `time.localtime` through
+    this object, and neither call is faked. A clock without the delegation
+    raises AttributeError on both.
+    """
+    del tmp
+    seen = []
+
+    def formats(space):
+        seen.append(space.time.localtime is time.localtime)
+        seen.append(space.time.strftime is time.strftime)
+
+    drive(formats, [])
+
+    assert seen == [True, True], seen
+
+
 def test_the_target_tab_and_token_are_the_tests_own(tmp):
     """A handler reads both from its module globals, so both must be the
     test's to set — a wire body carrying a real credential is a leak."""
@@ -202,19 +371,21 @@ def test_run_cli_rebinds_the_module_it_is_given(tmp):
     Without it the fakes land on commands_content and every other handler
     runs against a live socket, which is the hardwiring this parameter
     exists to remove. A real handler of that module is driven here, so the
-    assertion is on the wire request it actually built.
+    assertion is on the wire request it actually built — deliberately not
+    on what it printed. This control asks `run_cli` a question about the
+    harness; an assertion on `invoke.send_and_wait`'s own `(3 bytes)`
+    rendering would turn a change to that sentence into a red here, which
+    is the coupling this suite exists to prevent.
     """
     del tmp
     plan = [dict(COMMAND, body={'token': 'clitok', 'id': 'job0',
                                 'code': '1+1', 'tab': 'tab7'})]
-    recorded, out = run_cli(
+    recorded, _out = run_cli(
         ['exec', 'job0', '1+1', '--no-result'], [{'target': 'tab7'}],
         module=commands_eval, plan=plan, target_tab='tab7', token='clitok')
 
     assert recorded.api_calls == [('PUT', '/command', plan[0]['body'])], \
         recorded.api_calls
-    arrow = MARK['out']
-    assert out == f'{arrow} job0 {arrow} tab7  (3 bytes)\n', repr(out)
 
 
 if __name__ == '__main__':
