@@ -34,12 +34,54 @@ from _yamlsteps import complete_job_mapping  # noqa: E402
 # ran both boundary controls where neither `origin/main` nor a local
 # `main` resolved.
 #
+def _is_the_tests_directory(node):
+    """Whether this expression IS the tests directory, read as a node.
+
+    A BinOp `a / "tests"` counts whatever the segment is. A bare Name or
+    attribute does not: `old_tests` is a different directory that happens
+    to end in the same five letters, and the unparsed-source test this
+    replaces called it a match.
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _is_the_tests_directory(node.right)
+    return (isinstance(node, ast.Constant) and node.value == 'tests')
+
+
+def _launches_a_tests_file(source):
+    """Whether this script LAUNCHES a file under tests/ directly.
+
+    `subprocess.run([sys.executable, "tests/test_x.py"])` runs a suite
+    without ever globbing for one, so a rule that only reads globs
+    misses it. Measured: the rule below would have caught this shape and
+    the glob-only rule does not, which is why both are asked.
+    """
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call)
+                and ast.unparse(node.func).endswith(
+                    ('subprocess.run', 'subprocess.Popen',
+                     'subprocess.check_call', 'subprocess.check_output',
+                     'os.system'))):
+            continue
+        for argument in node.args[:1]:
+            for inner in ast.walk(argument):
+                if (isinstance(inner, ast.Constant)
+                        and isinstance(inner.value, str)
+                        and inner.value.replace('\\', '/').startswith(
+                            'tests/')):
+                    return True
+    return False
+
+
 def _enumerates_the_tests_tree(source):
     """Whether this script ENUMERATES the tests tree itself.
 
-    A `.glob(...)`/`.rglob(...)` call whose RECEIVER names `tests` — so
-    `(ROOT / "tests").glob("test_*.py")` and `(tree / 'tests').glob(...)`
-    both count, and the argument's spelling does not matter.
+    A `.glob(...)`/`.rglob(...)` call whose RECEIVER is the tests
+    directory — so `(ROOT / "tests").glob("test_*.py")` and
+    `(tree / 'tests').glob(...)` both count, and a sibling directory
+    that merely CONTAINS the word (`old_tests`) does not. The receiver is
+    the PARSED node, not its source text: the unparsed form matched
+    `old_tests` and every other name with the letters in it, which is
+    the substring match this docstring argues against, one level down.
 
     It is an AST and not a substring because the substring version of
     this question matched a docstring: it put two non-runners in the set
@@ -59,7 +101,7 @@ def _enumerates_the_tests_tree(source):
         if (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr in ('glob', 'rglob')
-                and 'tests' in ast.unparse(node.func.value)):
+                and _is_the_tests_directory(node.func.value)):
             return True
     return False
 
@@ -77,7 +119,8 @@ def _tracked_scripts(root):
 def _suite_runners(scripts):
     """The tracked scripts that launch a suite."""
     return {name for name, source in scripts.items()
-            if _enumerates_the_tests_tree(source)}
+            if _enumerates_the_tests_tree(source)
+            or _launches_a_tests_file(source)}
 
 
 def _invoked_scripts(command, runners):
@@ -152,6 +195,18 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
         tracked filename as a literal substring of the `run:` text, so
         `run: python "$SUITE_RUNNER"` drops the job silently.
 
+      * (f) A `tests/` LITERAL LAUNCH. `subprocess.run([py,
+        "tests/test_x.py"])` was caught by the rule this replaced and is
+        missed by it, and neither disclosure named it.
+      * (g) A WORKFLOW FILE OTHER THAN tests.yml. The guard reads
+        `tests.yml`, so every other workflow file is invisible to it --
+        `release.yml`, which runs `run_tests.py` from a detached tag, and
+        `timed-timings.yml`, whose two suite steps FIX 4's list names.
+      * (h) A TRANSITIVE WRAPPER, in either direction: a job that
+        reaches a runner through a script which itself reaches a runner.
+        This is the route that produced the tag-build incident, and the
+        rule has no transitive arm in either direction.
+
     `timed` IS in the set, matched by the path literal
     `scripts/ci/time_tests.py` in the step's `run:` — the earlier
     disclosure listed the matrix entrypoint as uncovered, which
@@ -182,6 +237,26 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
         'these jobs run a suite and so run the branch-boundary controls, '
         'which cannot be evaluated without the merge base; give every '
         f'checkout step in them fetch-depth: 0 (found {unreadable})')
+
+
+def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
+    """`old_tests` is a different directory that ends in the same five
+    letters, and the unparsed-source predicate this replaces called it a
+    match.
+    """
+    del tmp
+    for source, expected in (
+            ('out = (ROOT / "tests").glob("test_*.py")', True),
+            ("out = (tree / 'tests').glob('test_*.py')", True),
+            ('out = (ROOT / "old_tests").glob("test_*.py")', False),
+            ('out = (ROOT / "dashboard").glob("test_*.py")', False)):
+        assert _enumerates_the_tests_tree(source) is expected, source
+    # The shape a glob-only rule loses.
+    assert _launches_a_tests_file(
+        'import subprocess, sys\n'
+        'subprocess.run([sys.executable, "tests/test_x.py"])\n')
+    assert not _launches_a_tests_file(
+        'import subprocess\nsubprocess.run(["ls", "tests"])\n')
 
 
 def test_the_runnerhood_rule_finds_all_three_runners(tmp):
