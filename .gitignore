@@ -286,6 +286,7 @@
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
 !/tests/_dashnode.py
+!/tests/_dashshell.py
 !/tests/_deliveries.py
 !/tests/_drain.py
 !/tests/_drain_scan.py
@@ -464,6 +465,7 @@
 !/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_tab_events.py
+!/tests/test_dashshell_harness.py
 !/tests/test_delivery_matching.py
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py
