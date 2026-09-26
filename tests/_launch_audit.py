@@ -316,6 +316,12 @@ def launch_refusals(source, here, bound_sink=None):
                 if isinstance(value, ast.Name):
                     module_factories.add(name)
                 else:
+                    # LOAD-BEARING: a factory returning a LAUNCH is bound
+                    # as well as registered, and the bound is what a name
+                    # derived from it reads through. Rows
+                    # `launcher-factory-bare-name-receiver-is-a-placed-
+                    # launch` and its module-factory control are the
+                    # pair that separates the two returns.
                     launcher_factories.add(name)
                     bound.add(name)
                     changed = True
@@ -390,6 +396,11 @@ def launch_refusals(source, here, bound_sink=None):
             launches.append(node)
         elif isinstance(func, ast.Name) and func.id in bound:
             launches.append(node)
+        # LOAD-BEARING and deliberately UNPINNED, so the state is here:
+        # `(x := subprocess)(...)` with `x` bound is the shape that
+        # reaches this arm, and with the arm gone it is reported
+        # `unplaced` instead of placed. No row drives it and this wave
+        # added none, which is a choice and not an oversight.
         elif isinstance(func, ast.NamedExpr) and func.target.id in bound:
             launches.append(node)
         elif isinstance(func, ast.Attribute) \
@@ -483,9 +494,10 @@ def launch_refusals(source, here, bound_sink=None):
         """
         if not isinstance(receiver, ast.Name):
             return False
-        # Three of these four limbs are load-bearing and the fourth is DEAD,
-        # and the code cannot say which. `safe_names`: a name the module
-        # never accounts for is unreadable — row
+        # Three of these four limbs are load-bearing and the fourth is DEAD;
+        # the rest of this comment is which is which, because a disjunction
+        # reads the same either way. `safe_names`: a name the module never
+        # accounts for is unreadable — row
         # `module-factory-name-receiver-stays-unplaced` pins it.
         # `subprocess_names`: a name that spelled a subprocess import and
         # was THEN rebound is in `safe_names` and not in `bound`, so
@@ -494,7 +506,7 @@ def launch_refusals(source, here, bound_sink=None):
         # `== 'subprocess'`: a PLAIN import puts `subprocess` in
         # `safe_names` and in neither of the two sets, so only this limb
         # refuses it — row `bare-subprocess-receiver-is-unplaced`.
-        # `bound` is the dead one: a call whose receiver is a Name in
+        # `bound` is the DEAD one: a call whose receiver is a Name in
         # `bound` is collected as a PLACED launch by EITHER arm of the
         # chain that reads `bound` — the attribute arm and the bare-Name
         # arm — so the unplaced loop skips it and the limb is never
