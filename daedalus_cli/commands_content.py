@@ -126,10 +126,10 @@ def do_net_capture(args):
         fields['maxRequests'] = args.max
     result = ext_cmd('_net_cap', 'net-capture', timeout=15, **fields)
     if result.get('already'):
-        print(f'Already capturing on tab {result.get("tabId")} '
+        print(f'Already capturing on tab {result.get("tabId", "?")} '
               f'({result.get("buffered", 0)} requests buffered)')
     else:
-        print(f'Capturing network on tab {result.get("tabId")}')
+        print(f'Capturing network on tab {result.get("tabId", "?")}')
 
 
 def do_net_capture_stop(args):
@@ -147,7 +147,7 @@ def do_net_capture_stop(args):
     if args.raw:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
-    print(f'Captured {len(requests)} requests from tab {result.get("tabId")}')
+    print(f'Captured {len(requests)} requests from tab {result.get("tabId", "?")}')
     for r in requests:
         status = r.get('status', '???')
         method = r.get('method', '?')
@@ -170,7 +170,7 @@ def do_net_capture_get(args):
     if args.raw:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
-    print(f'{len(requests)} requests on tab {result.get("tabId")}')
+    print(f'{len(requests)} requests on tab {result.get("tabId", "?")}')
     for r in requests:
         status = r.get('status', '???')
         method = r.get('method', '?')
