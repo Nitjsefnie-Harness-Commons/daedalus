@@ -224,26 +224,20 @@ BOUND_SITE_ROWS = (
      "        ['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
     # The rows below are the CONTROLS for the guard clauses this change
-    # classified. The set is NAMED, not general, on purpose: a claim about
-    # every clause in the two analyser modules is open-ended, and each
-    # review round falsified the last round's version of it one arm further
-    # out. The named guards are the four limbs of proved_fixed's
-    # disjunction, the machinery_route loop, the four `seen` guards in
-    # _argv_read.py, and the launcher-factory arm of the bound fixpoint.
-    # Each is CONTROLLED — a row below, or a control in
-    # test_repo_layout.py, that fails when the clause is deleted — or it
-    # is not controlled, for one of exactly two closed reasons written at
-    # the clause: REDUNDANT, where a named bound guarantees it, or DEAD,
-    # where no input reaches it. There is no third answer, and that is
-    # deliberate: a category for "live and unpinned" would admit the
-    # analyser's whole residue and make the rule a licence rather than a
-    # check. The arms that are live and unpinned are named at their own
-    # clauses and tracked at issue #1144, which is where a reader who
-    # trusts this set should look next.
-    # A name that spelled a subprocess import and was then rebound to a
-    # fixed value sits in `safe_names` and NOT in `bound`, so the
-    # `subprocess_names` limb of proved_fixed is the only thing refusing
-    # it. Each of these three loses its row when that limb is dropped.
+    # classified. The set is NAMED, not general: a claim about every
+    # clause in the two analyser modules is open-ended, and each review
+    # round falsified the last round's version of it one arm further out.
+    # The named guards are the four limbs of proved_fixed's disjunction,
+    # the machinery_route loop, the four `seen` guards in _argv_read.py,
+    # and the launcher-factory arm of the bound fixpoint. Each is
+    # CONTROLLED — a row here, or a control in test_repo_layout.py, that
+    # fails when the clause is deleted — or not controlled, for one of
+    # exactly two reasons written at the clause: REDUNDANT, where a named
+    # bound guarantees it, or DEAD, where no input reaches it. There is
+    # no third answer, deliberately: a category for "live and unpinned"
+    # would admit the analyser's whole residue and make the rule a
+    # licence. Those arms are named at their clauses and tracked at
+    # #1144, which is where a reader who trusts this set looks next.
     ('subprocess-alias-spelled-then-rebound-is-unproved',
      "import os\n"
      "import subprocess as sp\n"
@@ -264,31 +258,24 @@ BOUND_SITE_ROWS = (
      "def f():\n"
      "    return sp(timeout=1)\n",
      [(4, 'unreadable', 'unplaced')]),
-    # A plain `import subprocess` puts `subprocess` in `safe_names`, so the
-    # first limb of proved_fixed's disjunction does not fire, and it enters
-    # NEITHER `bound` nor `subprocess_names` — an alias needs an asname and
-    # a from-import needs its own form. Only the `== 'subprocess'` limb
-    # refuses it, which is why that limb cannot be read off the others.
+    # The only row for the `== 'subprocess'` limb, which no other row and
+    # no other limb can stand in for. Why it needs its own is at the
+    # disjunction in proved_fixed.
     ('bare-subprocess-receiver-is-unplaced',
      "import subprocess\nsubprocess(timeout=30)\n",
      [(2, 'unreadable', 'unplaced')]),
     # The bound behind the `bound` limb's redundancy, pinned from the other
-    # side: a call through a bare Name in `bound` is collected as a PLACED
-    # launch, so it reports a `timeout` row here and never an `unplaced`
-    # one. This row is what refuses a refactor of the launch-collection
-    # chain that would turn that placement into an unplaced report.
+    # side: a bare Name in `bound` is a PLACED launch, so it reports a
+    # `timeout` row and never an `unplaced` one. This is what refuses a
+    # refactor of the launch chain that would invert that.
     ('bound-name-called-bare-is-a-placed-launch',
      "import os\n"
      "import subprocess\n"
      "os = subprocess\n"
      "os(timeout=30)\n",
      [(4, 'unreadable', 'timeout')]),
-    # A `*args` / `**kwargs` parameter binds its name in its own scope
-    # exactly as a positional one does, and _parameters has to collect it
-    # or the receiver reads as proved. Each of these four loses its row
-    # when that collection goes; the positional spellings above keep
-    # theirs either way, which is what makes the vararg arm the
-    # discriminator.
+    # Four spellings of the vararg collection in _parameters, which is
+    # what each of them loses.
     ('vararg-receiver-shadowing-a-module-import-is-unproved',
      "import os\n"
      "import subprocess\n"
@@ -317,14 +304,14 @@ BOUND_SITE_ROWS = (
      "f = lambda *os: os(timeout=1)\n"
      "subprocess.run(['git', 'status'], check=True)\n",
      [(3, 'unreadable', 'unplaced')]),
-    # A PAIR, and the pair is the control: these two differ only in what
-    # the factory returns, and that difference is the whole boundary the
-    # launcher-factory arm of the bound fixpoint draws. Both are refused
-    # identically when the arm is deleted; only with it in place does a
-    # factory returning a LAUNCH read as one and a factory returning the
-    # MODULE read as unproved. The for-target spelling of the first shape
-    # reaches the same arm and changes no verdict this row does not
-    # already pin, so it is named here and not added.
+    # A PAIR, and the pair is the control: these differ only in what the
+    # factory returns, which is the boundary the `else` arm draws. Drop
+    # that arm's `bound.add` and only the launcher row changes — the
+    # module row is byte-identical, so it is a control and not a second
+    # copy. Removing the `module_factories` half changes NEITHER; that
+    # arm is among the unpinned ones at #1144. The for-target spelling
+    # of the launcher shape reaches the same arm and pins no verdict this
+    # row does not already pin, so it is not added.
     ('launcher-factory-bare-name-receiver-is-a-placed-launch',
      "import subprocess\n"
      "def make():\n"
