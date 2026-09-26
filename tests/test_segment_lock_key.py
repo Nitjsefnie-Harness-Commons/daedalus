@@ -45,6 +45,21 @@ def _require_a_discriminating_pair(store, name):
         'here could not distinguish the fold from a hash collision')
 
 
+def _require_a_distinct_chain_root(store, name):
+    """Fail unless some name has a chain root different from `name`'s.
+
+    The chain-root twin of `_require_a_discriminating_pair`, for the same
+    reason on the pre-hash key: "these two roots are equal" says nothing
+    unless equal roots are the normal case and unequal ones are not.
+    """
+    for attempt in range(256):
+        other = f'unrelated-{attempt}'
+        if store._job_chain_root(name) != store._job_chain_root(other):
+            return
+    raise AssertionError(
+        f'no unrelated name landed on a different chain root from {name!r}')
+
+
 def test_a_dotted_name_and_its_own_name_take_one_stripe(tmp):
     """`a` and `a.json` own one filesystem entry, so they take one lock.
 
@@ -107,12 +122,32 @@ def test_case_spellings_take_one_stripe(tmp):
     # nothing, once in sixty-four runs — and it did, 19/20 rather than 20/20.
     # The name it compares against is searched for instead, so the assertion
     # is about the fold and never about a collision.
+    # One pair per assertion, because one pair does not cover both. The
+    # second assertion compares `Foo.json` with `foo.JSON`, and a key that
+    # casefolds but strips the affix case-sensitively sends `foo.JSON` down
+    # a different chain root — which lands on a different stripe about one
+    # time in sixty-four, so the assertion passes a broken fold. The pair
+    # that protects the first assertion says nothing about the second.
     _require_a_discriminating_pair(store, 'Foo')
     assert (store.seg_lock_for('Foo')
             is store.seg_lock_for('foo')), 'case spellings took two stripes'
+    _require_a_discriminating_pair(store, 'Foo.json')
     assert (store.seg_lock_for('Foo.json')
             is store.seg_lock_for('foo.JSON')), (
                 'case spellings split the record chain')
+    # Both, and the second is the sound one. Two names agreeing on a STRIPE
+    # can coincide by hash — with the casefold removed they land on different
+    # roots and then share a stripe about once in sixty-four, which is the
+    # escape this control was measured missing. Two names agreeing on a CHAIN
+    # ROOT is exact, and the root is what the stripe is derived from, so
+    # there is nothing left to coincide. The stripe assertions stay because
+    # they are what the callers observe; the root assertions are what cannot
+    # pass by accident.
+    _require_a_distinct_chain_root(store, 'Foo')
+    assert store._job_chain_root('Foo') == store._job_chain_root('foo')
+    _require_a_distinct_chain_root(store, 'Foo.json')
+    assert (store._job_chain_root('Foo.json')
+            == store._job_chain_root('foo.JSON'))
 
 
 def test_normalisation_spellings_take_one_stripe(tmp):
@@ -132,13 +167,51 @@ def test_normalisation_spellings_take_one_stripe(tmp):
     assert unicodedata.is_normalized('NFC', composed), composed
     assert unicodedata.is_normalized('NFD', decomposed), decomposed
     store = _load_store()
+    # The same two assertions with the same two pairs, for the same reason:
+    # the chain assertion is its own coin-flip and needs its own partner.
     _require_a_discriminating_pair(store, composed)
     assert (store.seg_lock_for(composed)
             is store.seg_lock_for(decomposed)), (
                 'the two spellings of one name took two stripes')
+    _require_a_discriminating_pair(store, f'{composed}.json')
     assert (store.seg_lock_for(f'{composed}.json')
             is store.seg_lock_for(f'{decomposed}.JSON')), (
                 'the spellings split the record chain')
+    # The same two assertions a second time, on the chain root rather than
+    # the stripe, for the same reason as the case control: a pair of names on
+    # the same stripe can coincide by hash, and one on the same chain root
+    # cannot.
+    _require_a_distinct_chain_root(store, composed)
+    assert store._job_chain_root(composed) == store._job_chain_root(
+        decomposed)
+    _require_a_distinct_chain_root(store, f'{composed}.json')
+    assert (store._job_chain_root(f'{composed}.json')
+            == store._job_chain_root(f'{decomposed}.JSON'))
+
+
+def test_the_chain_root_is_a_fixpoint(tmp):
+    """Folding the root again changes nothing, over adversarial names.
+
+    `_job_chain_root` normalises, casefolds, strips the record affix and
+    normalises once more. This pins the property that makes the last of
+    those redundant rather than load-bearing: the first normalise leaves a
+    string that is already decomposed and lowercased, and the strip only
+    removes a trailing ASCII affix from it, so no adjacency is created for a
+    second normalise to collapse. If that ever stopped being true — a strip
+    that removed a prefix, or a normalisation that composed — the root
+    would stop being a fixpoint and this fails.
+    """
+    store = _load_store()
+    names = [f'relay{i}' for i in range(2000)]
+    names += ['a.b.c', '', '.', '..json', 'json', '.json', 'A.JSON',
+              'straße', 'ﬁle', 'x' * 200, 'relay' + chr(0x301), 'ＦＯＯ',
+              'ǅungla', 'İstanbul', 'ǰ.json', 'e' + chr(0x301) + '.json']
+    for name in names:
+        root = store._job_chain_root(name)
+        again = unicodedata.normalize('NFKD', root).casefold()
+        assert root == again, (name, root, again)
+        # And the fold does not depend on how the name was spelled.
+        assert store.seg_lock_for(name) is store.seg_lock_for(root), name
 
 
 def main():

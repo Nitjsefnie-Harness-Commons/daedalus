@@ -51,17 +51,6 @@ def note(name, text):
         with (gate / name).open("a", encoding="utf-8") as handle:
             handle.write(text + "\n")
 
-def provably_occupied():
-    """Whether a lock is ACTUALLY held right now, counted not marked.
-
-    The count, not a marker file. A marker says a fixture announced it was
-    holding; the count says a thread is inside an acquire. They differ the
-    moment a holder is neutered — the announcement stays and the hold goes —
-    and a control that read the announcement would call that a held stripe
-    and report an overlap that never happened.
-    """
-    return held[0] > 0
-
 class Signalled:
     """A lock that records being ACQUIRED, not merely being chosen.
 
@@ -98,6 +87,19 @@ class Signalled:
         # moment it is taken.
         already = held[0] > 0
         held[0] += 1
+        # A holder announces `holding` BEFORE it acquires, so an acquire
+        # completing while that announcement is up is proof a hold was
+        # really taken. A holder that announces and does not hold never gets
+        # here, and the control that reads this marker skips instead of
+        # grading a run that held nothing.
+        #
+        # Never cleared: it is written once and read only while the holder
+        # is parked. Clearing it on release would let any OTHER request that
+        # took and dropped its own stripe mid-hold erase the witness — which
+        # is how the premise check was reading a run as unheld.
+        if (gate / "holding").exists():
+            (gate / "holding-acquired").write_text(
+                "acquired", encoding="utf-8")
         if already:
             # Two records, because the two questions differ. The global one
             # says a lock was taken while another was held, and names the
@@ -118,6 +120,14 @@ def record_lock_call(job, lock):
     with call_lock:
         with (gate / "lock-calls").open("a", encoding="utf-8") as handle:
             handle.write(f"{job}\t{id(lock)}\n")
+
+def _blocked():
+    """How many acquires have been recorded as kept out of a lock."""
+    path = gate / "blocked"
+    if not path.is_file():
+        return 0
+    return len(path.read_text(encoding="utf-8").splitlines())
+
 
 def _waits():
     path = gate / "lock-waits"
@@ -159,22 +169,23 @@ def install():
                 # the thing worth waiting for.
                 (gate / "lock-waits").unlink(missing_ok=True)
                 (gate / "parked").write_text("y", encoding="utf-8")
-                # Two ways out, and which one applies is what the control
-                # measures rather than a deadline:
+                # Two ways out, and BOTH are recorded events rather than
+                # arrivals. A request that merely REACHED a lock has not
+                # shown it was kept out of one, and waiting on that is what
+                # let this control go green with the hold removed: the poll
+                # landed in the window between the arrival and the acquire.
                 #
-                #  - this thread still owns the lock and the other request
-                #    has reached one. It cannot get past, so this thread
-                #    may finish and the other will read what it wrote.
-                #  - the other request has reached its OWN mark_dirty,
-                #    which is past its usage read and quota check. That
-                #    only happens when this thread was not holding, so
-                #    waiting here is what forces the torn state to be
-                #    visible instead of leaving both answers to a race.
-                mine = threading.get_ident()
+                #  - the other request was recorded BLOCKED from this job's
+                #    lock, a real failed acquire against a counted hold. It
+                #    cannot get past, so this thread may finish and the
+                #    other will read what this one wrote.
+                #  - the other request reached its OWN mark_dirty, which is
+                #    past its usage read and quota check. That only happens
+                #    when this thread was not holding, so waiting here is
+                #    what forces the torn state to be visible instead of
+                #    leaving both answers to a race.
                 try:
-                    while not (dirty_calls[0] >= 2
-                               or (_waits() >= 1
-                                   and last_acquirer[0] == mine)):
+                    while not (dirty_calls[0] >= 2 or _blocked() >= 1):
                         time.sleep(0.005)
                 finally:
                     # The marker is this thread being inside the hold, so
@@ -200,12 +211,15 @@ def install():
         while not (gate / "arm").exists():
             time.sleep(0.01)
         (gate / "lock-calls").unlink(missing_ok=True)
+        # Announced BEFORE the acquire, so the acquire path can witness that
+        # a hold really happened. A neutered holder announces here and never
+        # acquires, which is exactly what the premise check has to notice.
+        (gate / "holding").write_text("announcing", encoding="utf-8")
         with Signalled(held_lock, held_job):
             # Counted from inside the hold, so the line is the requests'
             # own and the holder's acquisition is not one of them. No
             # request is in flight yet: the test starts them after `held`.
             (gate / "lock-waits").unlink(missing_ok=True)
-            (gate / "holding").write_text("y", encoding="utf-8")
             try:
                 (gate / "held").write_text("held", encoding="utf-8")
                 while not (gate / "release").exists():
@@ -295,10 +309,17 @@ def _require_holder_holding(gate_dir):
         _util.skip(
             'the injected holder failed, so the property was never '
             'exercised: ' + failed)
-    if not (gate_dir / 'holding').exists():
+    # `holding-acquired` is written by the ACQUIRE path when a real acquire
+    # completes while the holder has announced. `holding` is the holder's own
+    # announcement and is on disk whether or not it ever took the lock, so a
+    # premise read from it would pass a run that held nothing — which is how
+    # a neutered fixture used to turn this control green. A premise the
+    # control did not earn must skip the run, not grade it.
+    if not (gate_dir / 'holding-acquired').exists():
         _util.skip(
-            'the injected holder released the job stripe before the request '
-            'reached it, so the property was never exercised')
+            'the injected holder announced a hold but no acquire completed '
+            'under it, so the stripe was never held and the property was not '
+            'exercised')
 
 
 def _shared_lock_witness(gate_dir, held_job, unrelated):
@@ -495,6 +516,13 @@ def test_two_writes_to_one_job_stay_atomic_inside_the_critical_section(tmp):
     what the record claims. The injected overlap marker is only ever read
     after both requests have finished, so it is evidence for a failure and
     never a substitute for one.
+
+    The budget assertion is the one that normally reports this defect. A
+    mutation that does not remove the hold but lets the two writes drift
+    further apart — a park released far too late, say — is caught by the
+    `join` timeout instead, and that assertion moves with host speed. It is
+    named here so a reader who sees a timeout red knows which assertion
+    spoke and why.
     """
     job = 'one-budget'
     gate_dir, env = _recording_setup(tmp, park_job=job)
@@ -562,10 +590,24 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
     while the holder is provably inside this one, and the injected seam
     records that acquire.
 
-    The three requests are released only once each has been seen AT a lock —
-    a positive observation, three `lock-waits` lines, not a deadline. So a
-    site off on its own stripe has necessarily acquired during the hold, and
-    the marker is read after every request has finished.
+    The three requests are released only once each has been recorded BLOCKED
+    from the held lock — a real failed acquire against a counted hold, not an
+    arrival, which proves nothing. So a site off on its own stripe has
+    necessarily acquired during the hold, and the marker is read after every
+    request has finished.
+
+    Which assertion kills which direction, since a reader would otherwise not
+    know what this control is carrying:
+
+    - the overlap assertion kills a site pointed at a stripe of its own,
+      which is the `lookup` and `admit` half;
+    - it ALSO kills the mint's accounting race, and that is the `mint` half.
+      A mint on another stripe reconciles the record — recount, mark_dirty,
+      write_usage — with nothing holding it apart from a concurrent write's
+      usage read, quota check and record write. Both mutations of that shape
+      survive every accounting assertion in the tree; what catches them is
+      this one, because a reconcile that ran during the hold is exactly an
+      acquire during the hold. No accounting assertion elsewhere would fail.
     """
     job = seg_job()
     gate_dir, env = _recording_setup(tmp, held_job=job)
