@@ -352,6 +352,7 @@
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_scratch_index.py
+!/tests/_seg_lock_seam.py
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_speedharness.py
