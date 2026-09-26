@@ -134,6 +134,8 @@ def _virtual_cmdqueue_clock(
     """
     budget = _RUNAWAY_WALL if isinstance(wall_budget, _ModuleDefault) \
         else wall_budget
+    if budget is not None and (not math.isfinite(budget) or budget < 0):
+        raise ValueError('wall budget must be non-negative and finite')
     original = _cmdqueue.time
     wall_started = original.perf_counter()
     # A large power-of-two origin exposes sleeps too small to move the clock.

@@ -335,6 +335,26 @@ def test_the_module_bound_is_read_at_the_call(_tmp):
     assert _has_numeric_token(message, '0.000'), message
 
 
+def test_virtual_clock_rejects_an_unusable_wall_budget(_tmp):
+    """A budget that cannot be compared is not a budget.
+
+    `nan` and `inf` compare false against every elapsed time, so accepting
+    one turns the runaway bound off without saying so; a negative budget is
+    a bound no caller means and it trips at once. `sleep` refuses the same
+    class for its own argument, thirty lines below.
+    """
+    for budget in (math.nan, math.inf, -math.inf, -1.0):
+        failure = None
+        try:
+            with _virtual_cmdqueue_clock(wall_budget=budget):
+                pass
+        except ValueError as caught:
+            failure = caught
+        assert isinstance(failure, ValueError), (budget, failure)
+        message = str(failure).lower()
+        assert 'wall budget' in message, (budget, message)
+
+
 def test_virtual_clock_rejects_non_finite_sleep_requests(_tmp):
     for requested in (math.nan, math.inf, -math.inf):
         failure = None
