@@ -144,6 +144,30 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
+    ('tests/test_cli.py', 'run_cli'):
+        'this spawns the real CLI as a process against a live bridge and '
+        'returns the CompletedProcess, where the owner parses in process, '
+        'fakes ext_cmd and returns the recording with stdout',
+    ('tests/test_cli_duplicate_admission.py', 'run_cli'):
+        'this spawns the real CLI as a process against a live bridge, the '
+        'half the owner deliberately is not, since a retried delivery has '
+        'to survive a real process boundary',
+    ('tests/test_cli_error_reporting.py', 'run_cli'):
+        'this spawns the real CLI to read what it prints on a malformed '
+        'argument, where the owner captures stdout from an in-process '
+        'dispatch and never sees a traceback cross a process',
+    ('tests/test_cli_waits.py', 'run_cli'):
+        'this runs a typed subcommand that enqueues a command and answers '
+        'it afterwards, where the owner dispatches with the answer already '
+        'canned and nothing is ever enqueued',
+    ('tests/test_fetch_timings_count.py', 'run_cli'):
+        'this dispatches commands_browser through build_parser and fakes '
+        'ext_cmd, where the owner dispatches commands_content through '
+        '_cli_parse.accepted, so the module under dispatch differs',
+    ('tests/test_screenshot_quality.py', 'run_cli'):
+        'this patches three module attributes and records through its own '
+        'RecordingApi, where the owner patches one ext_cmd and records '
+        'through RecordingExtCmd',
     ('tests/test_coverage_bindings.py', '_scope_violations'):
         'this renders the expected violation strings for a synthetic source, '
         'where the owner orders real calls within a scope',
