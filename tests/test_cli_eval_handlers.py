@@ -80,18 +80,20 @@ def _result(**over):
 # ── do_tabs ──────────────────────────────────────────────────────────
 
 def test_do_tabs_renders_one_row_per_tab_in_age_order(tmp):
-    """Ages 5 and 120 arrive in that order and print in the other one.
+    """Ages 120 and 5 arrive in that order and print in the other one.
 
     The listing sorts by age, so the row an operator reads first is the
-    freshest tab. Rendering them in the order the bridge returned them
-    would still look right for a list that already happened to be sorted.
+    freshest tab. The older tab therefore has to ARRIVE first for the
+    assertion to mean anything: a list that already happened to be sorted
+    would pass a handler that rendered in the order the bridge returned it,
+    which is the whole defect this test exists to catch.
     """
     del tmp
     tabs = [
-        {'tabId': 'tab9', 'age': 5, 'url': 'https://one.example.com/',
-         'title': 'Nine'},
         {'tabId': 'tab1', 'age': 120, 'url': 'https://two.example.com/',
          'title': 'One'},
+        {'tabId': 'tab9', 'age': 5, 'url': 'https://one.example.com/',
+         'title': 'Nine'},
     ]
     recorded, out = run_cli(
         ['tabs'], [tabs], module=commands_eval, plan=[_get('/tabs')],
@@ -215,17 +217,26 @@ def test_do_put_reads_the_dash_standard_input(tmp):
     del tmp
     body = {'token': TOK, 'id': 'job1', 'code': 'window.x = 1', 'tab': 'tab0'}
     with _stdin('window.x = 1\n'):
-        recorded, _out = run_cli(
+        recorded, out = run_cli(
             ['put', 'job1', '-', '--no-result'], [{'target': 'tab0'}],
             module=commands_eval, plan=[_put(body)], target_tab='tab0',
             token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    # The stdin newline is stripped exactly as a file's is, so the count
+    # printed here is the twelve characters and not thirteen.
+    assert out == f'{OUT} job1 {OUT} tab0  (12 bytes)\n', repr(out)
 
 
 def test_do_put_refuses_a_file_that_is_not_there(tmp):
-    """The refusal is a sentence naming the path, and nothing is sent."""
+    """The refusal is a sentence naming the path, and nothing is sent.
+
+    Nothing is printed either, so the rendered half of this handler's
+    behaviour IS the exit message below — asserted as a whole string,
+    because a refusal that named the wrong path would otherwise read as
+    the same sentence with a different word in it.
+    """
     missing = str(Path(tmp) / 'absent.js')
     try:
         run_cli(['put', 'job1', missing, '--no-result'], [],
@@ -241,17 +252,20 @@ def test_do_put_broadcast_leaves_the_tab_field_off_the_body(tmp):
     """`-b` means the browser's active tab, which is an absent tab field.
 
     Sending `tab: ''` instead would name a tab that does not exist rather
-    than name none, and the two travel differently on the wire.
+    than name none, and the two travel differently on the wire. The row
+    the operator reads is the only place the broadcast is visible, since
+    the request itself carries no tab at all.
     """
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title'}
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['put', 'job1', path, '-b', '--no-result'], [{'target': 'bcast'}],
         module=commands_eval, plan=[_put(body)], target_tab='tab0',
         token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == f'{OUT} job1 {OUT} bcast  (14 bytes)\n', repr(out)
 
 
 def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
@@ -264,12 +278,14 @@ def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
     plan = [_put(body), _wait('job1', 'tab0', 'd1', 15)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['put', 'job1', path, '-t', '0'],
         [{'target': 'tab0', 'did': 'd1'}, _result()],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.timeouts == [15], recorded.timeouts
+    assert out == (f'{OUT} job1 {OUT} tab0  (14 bytes)\n'
+                   f'{IN} job1\nok\n'), repr(out)
 
 
 def test_do_put_carries_an_explicit_timeout_through_unchanged(tmp):
@@ -278,12 +294,14 @@ def test_do_put_carries_an_explicit_timeout_through_unchanged(tmp):
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
     plan = [_put(body), _wait('job1', 'tab0', 'd1', 7)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['put', 'job1', path, '--timeout', '7'],
         [{'target': 'tab0', 'did': 'd1'}, _result()],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.timeouts == [7], recorded.timeouts
+    assert out == (f'{OUT} job1 {OUT} tab0  (14 bytes)\n'
+                   f'{IN} job1\nok\n'), repr(out)
 
 
 # ── do_exec ──────────────────────────────────────────────────────────
@@ -324,16 +342,18 @@ def test_do_exec_without_a_result_never_waits(tmp):
     """`--no-result` sends and returns: the plan has no second request.
 
     A handler that waited anyway would block an operator who asked not to,
-    and a plan that omitted the wait is what makes that visible.
+    and a plan that omitted the wait is what makes that visible. The one
+    rendered line is the whole output for this arm, so there is no sibling
+    row in the same test to compare it against.
     """
     del tmp
     body = {'token': TOK, 'id': 'job5', 'code': '1+1', 'tab': 'tab0'}
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['exec', 'job5', '1+1', '--no-result'], [{'target': 'tab0'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0',
-        token=TOK)
+        module=commands_eval, plan=[_put(body)], target_tab='tab0', token=TOK)
 
     assert recorded.waits == [], recorded.waits
+    assert out == f'{OUT} job5 {OUT} tab0  (3 bytes)\n', repr(out)
 
 
 # ── do_result ────────────────────────────────────────────────────────
@@ -362,12 +382,20 @@ def test_do_result_asks_for_the_broadcast_result_when_no_tab_is_set(tmp):
 
 
 def test_do_result_adds_the_consume_flag_only_when_it_was_asked(tmp):
-    """`consume=1` travels after `tab`, and only with the flag."""
+    """`consume=1` travels after `tab`, and only with the flag.
+
+    The rendered line is byte-identical to the unconsumed arm's, and that
+    is the point: `-c` changes the QUERY and nothing an operator reads
+    back. Pinned here as a whole string, because this arm's rendering was
+    otherwise pinned nowhere in this file.
+    """
     del tmp
-    _recorded, _out = run_cli(
-        ['result', '-c'], [_result()], module=commands_eval,
+    _recorded, out = run_cli(
+        ['result', '-c'], [_result(tabId='tab0')], module=commands_eval,
         plan=[_get('/result?tab=tab0&consume=1')], target_tab='tab0',
         token=TOK)
+
+    assert out == f'{IN} job1  tab=tab0\nok\n', repr(out)
 
 
 def test_do_result_says_so_when_nothing_is_pending(tmp):
@@ -449,7 +477,11 @@ def test_do_ping_leaves_the_tab_field_off_when_none_is_set(tmp):
 
 
 def test_do_ping_exits_when_no_result_arrives(tmp):
-    """The timeout exit names the bound it actually waited."""
+    """The timeout exit names the bound it actually waited.
+
+    This arm prints nothing before exiting, so the exit message below IS
+    the whole rendered output, and it is compared as one string.
+    """
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title',
             'tab': 'tab0'}
@@ -464,7 +496,11 @@ def test_do_ping_exits_when_no_result_arrives(tmp):
 
 
 def test_do_ping_exits_with_the_error_the_page_raised(tmp):
-    """An error result is an exit, not a `Pong` line naming nothing."""
+    """An error result is an exit, not a `Pong` line naming nothing.
+
+    As with the timeout arm, nothing is printed on the way out, so the
+    exit message is the whole rendered output and is compared as one.
+    """
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title',
             'tab': 'tab0'}
@@ -505,17 +541,24 @@ def test_do_navigate_sends_a_location_assignment_and_never_waits(tmp):
 
 def test_do_navigate_json_encodes_a_url_carrying_a_quote(tmp):
     """A quote in the URL is escaped, not pasted: the code must stay a
-    JavaScript string literal rather than terminating one."""
+    JavaScript string literal rather than terminating one.
+
+    The rendered line is pinned whole: its byte count is the ENCODED
+    code's, 50 including the backslash, against 38 for the plain URL the
+    sibling test navigates to. The escaping is therefore visible in what
+    the operator reads and not only in the body.
+    """
     del tmp
     body = {'token': TOK, 'id': '_nav',
             'code': 'location.href = "https://example.com/a\\"b?x=1&y=2"',
             'tab': 'tab0'}
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['navigate', 'https://example.com/a"b?x=1&y=2'], [{'target': 'tab0'}],
         module=commands_eval, plan=[_put(body)], target_tab='tab0', token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == f'{OUT} _nav {OUT} tab0  (50 bytes)\n', repr(out)
 
 
 def test_do_reload_sends_the_reload_expression_to_the_tab(tmp):
@@ -575,11 +618,16 @@ def test_do_title_asks_the_page_for_its_title_in_the_tab(tmp):
 
 
 def test_do_title_leaves_the_tab_field_off_when_none_is_set(tmp):
-    """The absent-tab arm of the read-only pair, pinned separately."""
+    """The absent-tab arm of the read-only pair, pinned separately.
+
+    The result carries no `tabId`, so the result line drops the `tab=`
+    cell as well as the sent row dropping its own. Both are whole strings
+    rather than substrings of the sibling test's.
+    """
     del tmp
     body = {'token': TOK, 'id': '_title', 'code': 'document.title'}
     plan = [_put(body), _wait('_title', '', 'd3', 10)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['title'], [{'target': 'bcast', 'did': 'd3'},
                     {'id': '_title', 'result': 'A page', 'error': None,
                      'ts': 1}],
@@ -587,6 +635,8 @@ def test_do_title_leaves_the_tab_field_off_when_none_is_set(tmp):
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == (f'{OUT} _title {OUT} bcast  (14 bytes)\n'
+                   f'{IN} _title\nA page\n'), repr(out)
 
 
 def test_do_url_asks_the_page_for_its_location_in_the_tab(tmp):
@@ -615,7 +665,7 @@ def test_do_url_leaves_the_tab_field_off_when_none_is_set(tmp):
     del tmp
     body = {'token': TOK, 'id': '_url', 'code': 'location.href'}
     plan = [_put(body), _wait('_url', '', 'd4', 10)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['url'], [{'target': 'bcast', 'did': 'd4'},
                   {'id': '_url', 'result': 'https://example.com/a',
                    'error': None, 'ts': 1}],
@@ -623,6 +673,8 @@ def test_do_url_leaves_the_tab_field_off_when_none_is_set(tmp):
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == (f'{OUT} _url {OUT} bcast  (13 bytes)\n'
+                   f'{IN} _url\nhttps://example.com/a\n'), repr(out)
 
 
 def main():
