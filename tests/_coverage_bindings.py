@@ -14,6 +14,37 @@ _HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
 _DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _SIGNED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
+# The value-bearing fields of every form that hands a sub-value on
+# unchanged, keyed by the form. A comprehension opens the element it
+# repeats and a dict comprehension its key as well: an iterable or a
+# condition feeds the result without joining it.
+_CARRIED_FIELDS = {
+    ast.Await: ('value',),
+    ast.BoolOp: ('values',),
+    ast.DictComp: ('key', 'value'),
+    ast.FormattedValue: ('value', 'format_spec'),
+    ast.GeneratorExp: ('elt',),
+    ast.IfExp: ('test', 'body', 'orelse'),
+    ast.JoinedStr: ('values',),
+    ast.Lambda: ('body',),
+    ast.ListComp: ('elt',),
+    ast.NamedExpr: ('value',),
+    ast.SetComp: ('elt',),
+    ast.Slice: ('lower', 'upper', 'step'),
+    ast.Yield: ('value',),
+    ast.YieldFrom: ('value',),
+}
+
+# The leaves: the atoms `_names_one_of` and `_is_launch_value` judge, and
+# the forms that build a new value out of their operands, where a
+# launcher is transformed rather than carried and opening one would only
+# manufacture refusals.
+_LEAVES = (ast.Name, ast.Attribute, ast.Constant,
+           ast.BinOp, ast.UnaryOp, ast.Compare)
+
+# What a form in neither class yields, so every arm refuses it.
+_UNRECOGNISED = object()
+
 
 def _is_launch_value(value, facts):
     if isinstance(value, ast.Name):
@@ -87,7 +118,27 @@ def _pattern_binds(pattern):
 
 
 def _carried_parts(value):
-    """Carried elements and arguments, including a call-based callee."""
+    """Carried elements and arguments, including a call-based callee.
+
+    The walk is total over `ast.expr`. A form is opened when one of its
+    values reaches the binding unchanged and a leaf when the form builds
+    a new value out of what it is handed; a form in neither class is
+    refused, so one a later Python adds fails closed rather than reading
+    clean.
+
+    Opened, because a sub-value arrives as it was written: a Call and
+    the arguments and call-based callee it carries, a Tuple, List, Set
+    or Dict and its elements, a Subscript and its index, a Starred
+    argument, an IfExp, a BoolOp, a comprehension's element and a
+    DictComp's key (ListComp, SetComp, GeneratorExp), a Lambda body, a
+    JoinedStr and the FormattedValue it interpolates, a Slice, an
+    Await, a Yield, a YieldFrom, and a NamedExpr value.
+
+    Leaves, and that is every form the walk declines to open: the atoms
+    Name, Attribute and Constant, which the predicates judge, and the
+    forms BinOp, UnaryOp and Compare, whose operands are transformed
+    rather than carried.
+    """
     if isinstance(value, ast.Call):
         for part in [*value.args,
                      *(keyword.value for keyword in value.keywords)]:
@@ -109,8 +160,22 @@ def _carried_parts(value):
         yield from _carried_parts(value.slice)
     elif isinstance(value, ast.Starred):
         yield from _carried_parts(value.value)
-    else:
+    elif type(value) in _CARRIED_FIELDS:
+        for field in _CARRIED_FIELDS[type(value)]:
+            for part in _field_parts(getattr(value, field)):
+                yield from _carried_parts(part)
+    elif isinstance(value, _LEAVES):
         yield value
+    else:
+        yield _UNRECOGNISED
+
+
+def _field_parts(field):
+    """The nodes one named field holds, a list of them or a single one."""
+    if isinstance(field, list):
+        yield from field
+    elif field is not None:
+        yield field
 
 
 def _has_cwd_control(value):
@@ -149,14 +214,17 @@ def _call_argument_parts(value):
 
 
 def _carries_launcher(parts, facts):
-    """A launcher, or the module a receiver reads one from."""
-    return any(_names_one_of(part, facts.subprocess_modules)
+    """A launcher, the module a receiver reads one from, or a form the
+    walk does not read."""
+    return any(part is _UNRECOGNISED
+               or _names_one_of(part, facts.subprocess_modules)
                or _is_launch_value(part, facts)
                for part in parts)
 
 
 def _carries_launch_value(parts, facts):
-    """A launcher: an attribute that names one, or a name bound to one.
+    """A launcher: an attribute that names one, or a name bound to one,
+    or a form the walk does not read.
 
     A bare `subprocess` module name is not one, and that is the whole of
     the difference from `_carries_launcher`. The two positions are read
@@ -167,7 +235,9 @@ def _carries_launch_value(parts, facts):
     argument position carries no such read and a module there is a value
     the walk has no launcher to lose.
     """
-    return any(_is_launch_value(part, facts) for part in parts)
+    return any(part is _UNRECOGNISED
+               or _is_launch_value(part, facts)
+               for part in parts)
 
 
 def _unfollowable_launcher_bindings(tree, facts):

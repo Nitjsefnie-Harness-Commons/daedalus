@@ -30,6 +30,9 @@ _SUBSCRIPT_INVOKE = (
     'import test_static_guard_regressions as regression_suite; '
     'regression_suite.test_subscripted_dict_carriers_refuse_hidden_'
     'launchers(None)')
+_FORM_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_value_preserving_form_is_refused(None)')
 
 
 def _mutation_specs():
@@ -81,11 +84,23 @@ def _mutation_specs():
         "            if part is not None:\n"
         "                "
         "yield from _carried_parts(part)\n",
-        "")
+        "    elif isinstance(value, ast.Dict):\n        for part in "
+        "value.keys:\n"
+        "            if part is not None:\n"
+        "                "
+        "yield from _carried_parts(part)\n")
     subscript = (
         "    elif isinstance(value, ast.Subscript):\n"
         "        yield from _carried_parts(value.value)\n"
-        "        yield from _carried_parts(value.slice)\n", "")
+        "        yield from _carried_parts(value.slice)\n",
+        "    elif isinstance(value, ast.Subscript):\n"
+        "        yield from _carried_parts(value.slice)\n")
+    ifexp_field = (
+        "ast.IfExp: ('test', 'body', 'orelse'),",
+        "ast.IfExp: ('test', 'orelse'),")
+    slice_field = (
+        "ast.Slice: ('lower', 'upper', 'step'),",
+        "ast.Slice: ('lower', 'upper'),")
     call_receiver = (
         "    if isinstance(callee, (ast.Tuple, ast.List, ast.Set, ast.Dict)):"
         "\n        yield from _carried_parts(callee)\n",
@@ -196,6 +211,8 @@ def _mutation_specs():
          _INLINE_INVOKE),
         ('subscript values', 'bindings', (subscript,),
          _SUBSCRIPT_INVOKE),
+        ('ifexp field', 'bindings', (ifexp_field,), _FORM_INVOKE),
+        ('slice field', 'bindings', (slice_field,), _FORM_INVOKE),
         ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),

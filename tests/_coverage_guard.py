@@ -33,17 +33,19 @@ module bare rather than a launcher read off it
 (`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
 on an unrecognised callee.
 
-The carrier walk has its own depth, and it is shallower than the syntax
-it reads. It descends through a call's own arguments, through
-containers, subscripts and a callee chain, and it stops at a leaf it
-does not recognise: a conditional expression, a boolean operator, a
-lambda body, an f-string and a subscript's slice each hide a launcher
-from every arm here, in the argument position and in the decorator and
-assignment binding positions alike. That leaf handling is pre-existing,
-shared by all the arms, and unchanged on this branch; it is filed as
-issue #1114, which is where the fix belongs. Every clause above about
-carrying or binding a launcher is true of the leaves the walk does
-reach, and only of those.
+The carrier walk is total over `ast.expr`. It descends through a call's
+own arguments, through containers, subscripts and a callee chain, and
+through every form that hands a sub-value on unchanged — a conditional
+expression, a boolean operator, a comprehension, a lambda body, an
+f-string, a slice, an awaited or yielded value and a walrus — so a
+launcher behind any of them is judged by every arm here, in the
+argument position and in the decorator and assignment binding
+positions alike. What it does not open is a form that builds a new
+value out of its operands, because a launcher inside one is
+transformed rather than carried; a form it does not recognise at all is
+refused rather than read as clean. `tests/_coverage_bindings.py` names
+every form on both sides of that line, and a control fails when its
+prose and its table stop agreeing.
 """
 import ast
 
