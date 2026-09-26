@@ -17,6 +17,7 @@ from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
+from _step_ceiling import within_step_ceiling  # noqa: E402
 
 ROOT = _util.ROOT
 
@@ -638,6 +639,29 @@ def test_the_sink_pins_the_unplaced_and_ambiguous_branches(tmp):
     del tmp
     for label, source, expected in BOUND_SITE_ROWS:
         assert bound_sites(source, label) == expected, label
+
+
+def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
+    """machinery_route's `seen` guard is load-bearing, and its mutant does
+    not answer wrong — it does not stop.
+
+    Every other input the loop takes is decided by an exit that needs no
+    guard: a base the bindings table does not hold, a name bound more
+    than once, and a target that is not a bare name. A cycle is the only
+    thing the guard answers, so a cycle is the only shape that can tell
+    whether it is there, and its absence is a loop rather than a value.
+    The count is what can tell that: the ceiling lives in the control,
+    `_step_ceiling`, and not in the analyser, so the guard leaving the
+    loop in a handful of steps is observed and its absence is an
+    assertion rather than a spin.
+    """
+    del tmp
+    source = ("import importlib\n"
+              "import subprocess\n"
+              "a = a\n"
+              "mod = a.import_module('subprocess')\n"
+              "mod.run(['git', 'status'], check=True, timeout=30)\n")
+    assert within_step_ceiling(source, 'cyclic-base') == []
 
 
 if __name__ == '__main__':

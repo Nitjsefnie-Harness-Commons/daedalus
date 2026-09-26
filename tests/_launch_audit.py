@@ -437,6 +437,13 @@ def launch_refusals(source, here, bound_sink=None):
                 or not isinstance(func.value, ast.Name):
             return False
         base, seen = func.value.id, set()
+        # `base not in seen` is LOAD-BEARING, and it is the third kind of
+        # seen guard: this loop is UNCAPPED, so unlike the flat resolvers
+        # in _argv_read there is no fallback but the guard, and a base
+        # that feeds itself does not stop — it does not answer wrong, it
+        # does not stop. `test_a_cyclic_machinery_base_terminates_within_
+        # a_step_ceiling` is the control, and it bounds STEPS rather than
+        # time, so the mutant is an assertion and not a spin.
         while base in binding_map and base not in seen \
                 and base not in ambiguous:
             seen.add(base)
@@ -476,16 +483,24 @@ def launch_refusals(source, here, bound_sink=None):
         """
         if not isinstance(receiver, ast.Name):
             return False
-        # One limb of this disjunction is DEAD and the next is
-        # load-bearing, and the code cannot say which. A Name in `bound`
-        # is collected as a PLACED launch by the launch chain's
-        # bare-Name arm, so the unplaced loop skips it and the limb is
-        # never consulted; row `bound-name-called-bare-is-a-placed-
-        # launch` pins the placement. A name that spelled a subprocess
-        # import and was THEN rebound is in `safe_names` and not in
-        # `bound`, so nothing else refuses it: the
-        # `*-spelled-then-rebound-is-unproved` and
-        # `annotated-subprocess-alias-is-unproved` rows pin that limb.
+        # Three of these four limbs are load-bearing and the fourth is DEAD,
+        # and the code cannot say which. `safe_names`: a name the module
+        # never accounts for is unreadable — row
+        # `module-factory-name-receiver-stays-unplaced` pins it.
+        # `subprocess_names`: a name that spelled a subprocess import and
+        # was THEN rebound is in `safe_names` and not in `bound`, so
+        # nothing else refuses it — the `*-spelled-then-rebound-
+        # is-unproved` and `annotated-subprocess-alias-is-unproved` rows.
+        # `== 'subprocess'`: a PLAIN import puts `subprocess` in
+        # `safe_names` and in neither of the two sets, so only this limb
+        # refuses it — row `bare-subprocess-receiver-is-unplaced`.
+        # `bound` is the dead one: a call whose receiver is a Name in
+        # `bound` is collected as a PLACED launch by EITHER arm of the
+        # chain that reads `bound` — the attribute arm and the bare-Name
+        # arm — so the unplaced loop skips it and the limb is never
+        # consulted. Rows `bound-name-called-bare-is-a-placed-launch` and
+        # `machinery-call-binding-with-a-readable-argument-is-read` pin
+        # those two placements.
         if (receiver.id not in safe_names or receiver.id in bound
                 or receiver.id in subprocess_names
                 or receiver.id == 'subprocess'):

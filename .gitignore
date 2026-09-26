@@ -357,6 +357,7 @@
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_speedharness.py
+!/tests/_step_ceiling.py
 !/tests/_stream_fake.py
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py

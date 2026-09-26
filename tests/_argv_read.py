@@ -47,6 +47,9 @@ class ArgvReader:
         constant and a self-referential one (`A = A`) stops instead of
         looping. A name bound more than once resolves to None (unreadable),
         for the same last-wins reason as resolve_argv.
+
+        `element.id not in seen` is REDUNDANT: this is a flat capped loop,
+        so the cap bounds it and the guard only spends passes.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
@@ -62,10 +65,16 @@ class ArgvReader:
             element = self.binding_map[element.id]
         return None
 
-    # Whether a `seen` guard can change an answer is a question about
-    # RECURSION, not about the cap. This one is a flat loop, so the cap
-    # bounds it and the guard is deletable; the look-alike in
-    # resolve_string below is the opposite, and says so at its clause.
+    # A `seen` guard has three cases, and the question that separates them
+    # is whether the loop is CAPPED and whether the function RECURSES.
+    # FLAT and CAPPED — resolve_constant above, resolve_argv here, and
+    # head_is_ambiguous below — the cap bounds the passes, so the guard
+    # is redundant and only spends them. RECURSIVE — resolve_string
+    # furthest down — every recursive call starts a fresh budget, so the
+    # guard is the only thing that stops a self-feeding name. The third
+    # case lives in the other file: machinery_route's loop is UNCAPPED, so
+    # there the guard is load-bearing for being uncapped, not for
+    # recursion. Which case a guard is in is stated at the guard.
     def resolve_argv(self, expr):
         """The argv's literal list/tuple, or None when it is dynamic.
 
@@ -82,9 +91,9 @@ class ArgvReader:
                 expr = expr.left
                 continue
             if isinstance(expr, ast.Name):
-                # `expr.id in seen` is provably redundant: this loop is
-                # flat, so the cap already bounds it and the terminal
-                # return is reached either way. It only spends passes.
+                # `expr.id in seen` is REDUNDANT: this is a flat capped
+                # loop, so the cap bounds it and the terminal return is
+                # reached either way. The guard only spends passes.
                 if expr.id in seen or expr.id in self.ambiguous \
                         or expr.id not in self.binding_map:
                     return None
@@ -101,6 +110,9 @@ class ArgvReader:
 
         Such a head is a guess, not a reading, so it is a bound site in its
         own right (in scope) rather than the residual dynamic-argv boundary.
+
+        `expr.id in seen` is REDUNDANT: this is a flat capped loop, so the
+        cap bounds it and the guard only spends passes.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
