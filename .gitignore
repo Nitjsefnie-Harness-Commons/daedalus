@@ -298,6 +298,7 @@
 !/tests/_ghexpr.py
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
+!/tests/_helper_binds.py
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
 !/tests/_jsread.py
@@ -512,6 +513,7 @@
 !/tests/test_gm_segment_job.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_helper_reimplementation.py
 !/tests/test_helper_shadow_boundaries.py
 !/tests/test_hotfix_scope.py
 !/tests/test_hotfix_scope_clear.py
