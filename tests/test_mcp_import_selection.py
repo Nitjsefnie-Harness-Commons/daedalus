@@ -407,6 +407,7 @@ def test_a_keyed_selection_of_a_literal_dict_is_folded(_tmp):
         == 'silent'
     assert _scan(_tmp, "{'b': 0, 'a': importlib.import_module}['a']") \
         == 'resolved'
+    assert _scan(_tmp, '{0: importlib.import_module}[0]') == 'resolved'
     assert _scan(_tmp, "(lambda *a: {'a': importlib.import_module}['a'])") \
         == 'silent'
 
