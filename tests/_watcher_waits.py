@@ -4,10 +4,9 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Every wait here synchronises on what the process under test DID - a line
 drained from its stream, a call appended to the log, a pid gone - and not
-on how long the runner took to do it. The clock appears exactly once: as
+on how long the runner took to do it. The clock appears exactly once, as
 the failure-reporting backstop on the single wait with no live process to
-give up on, which renders the surviving pids, the parent's exit and the
-captured output at expiry instead of a number of seconds.
+give up on.
 """
 import threading
 import time
@@ -52,14 +51,13 @@ class Stream:
 def await_lines(stream, match, count, what):
     """The first `count` lines of `stream` that match.
 
-    The wait is synchronised on the pump: it ends when the process under
-    test published the line, not when the runner next looked for one. The
-    early exit is a state rather than a duration - a stream at its end can
-    never print the line again - and the failure carries everything the
-    process did print, which is what says which line arrived instead. A
-    process that stays up and stays silent leaves this wait nothing to end
-    it, and the hung job naming this wait is the trade the repository takes
-    deliberately (the `_await_alive` in tests/test_stream_lifecycle.py).
+    The early exit is a state rather than a duration - a stream at its end
+    can never print the line again - and the failure carries everything
+    the process did print, which is what says which line arrived instead.
+    A process that stays up and stays silent leaves this wait nothing to
+    end it, and the hung job naming this wait is the trade the repository
+    takes deliberately (the `_await_alive` in
+    tests/test_stream_lifecycle.py).
     """
     while True:
         with stream.changed:
@@ -77,13 +75,11 @@ def await_calls(fake, count, child, what):
     """The call log, once it holds `count` entries.
 
     The log is a file the watcher children append to, so there is no signal
-    to wait on and this polls the record: what it waits for is the record
-    itself, and how long the runner took to write it is not the claim. A
-    child that has exited can make no further call, which is the state that
-    ends the wait early, with the child's own output in the failure. A
-    child that stays up and never calls leaves this wait nothing to end it,
-    and the hung job naming this wait is the same trade `await_lines` takes
-    and the repository takes deliberately.
+    to wait on and this polls the record. A child that has exited can make
+    no further call, which is the state that ends the wait early, with the
+    child's own output in the failure. A child that stays up and never
+    calls leaves this wait nothing to end it, and the hung job naming this
+    wait is the same trade `await_lines` takes.
     """
     while True:
         calls = fake.calls()
@@ -100,8 +96,7 @@ def await_gone(pids, child, what, alive, backstop=BACKSTOP):
     up on: the parent is reaped, the pids are what is being waited for, and
     the only thing that can end the wait is a real survivor - which is the
     defect itself. The bound is therefore a failure report and not a health
-    margin: it never sets the passing wall, and at expiry it names the pids
-    still alive, the parent's exit and everything the parent printed.
+    margin: it never sets the passing wall.
     """
     started = time.monotonic()
     while any(alive(pid) for pid in pids):

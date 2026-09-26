@@ -5,11 +5,11 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 This is the mechanism tests/test_real_browser_eval.py's
 `test_a_worker_that_loads_broken_is_a_failure_not_a_skip` and
 tests/test_real_browser_harness.py's two wrapper controls all ran, moved out
-of the first of them. A test function cannot live in a helper — `run_tests.py`
-only loads `test_*.py`, and being collected is the point — so the mechanism
-came here and each suite kept a test that calls it: the real-browser suite
-against a real browser, the browser-free one against a page fixture that
-raises each of the three verdicts the fixture can produce.
+of the first of them. A test function cannot live in a helper — being
+collected is the point — so the mechanism came here and each suite kept a
+test that calls it: the real-browser suite against a real browser, the
+browser-free one against a page fixture that raises each of the three
+verdicts the fixture can produce.
 """
 import shutil
 import sys
