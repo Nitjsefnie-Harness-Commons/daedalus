@@ -309,10 +309,12 @@ def run_inline_gate(node, program, arguments, *, cwd, plan):
     splices it in as an object literal, this one appends it as JSON text) and
     the harness parses it only when it arrived as text.
 
-    No bound of its own, and that is a choice worth naming: this is the
-    sibling of the file gate above, and the two together are the whole
-    surface the hang detector in `tests/_noderun.py` covers. The child runs
-    with `child_coverage('scrub')` evaluated at launch, so a value set in
+    No bound of its own, and that is a choice worth naming rather than
+    paper over: this is the sibling of the file gate above and it does NOT
+    route through `run_node_program`, so the hang detector in
+    `tests/_noderun.py` does not cover it. A wedged child here is a hung
+    job under the suite's ceiling and nothing more. The child runs with
+    `child_coverage('scrub')` evaluated at launch, so a value set in
     `os.environ` per call reaches the child.
     """
     result = subprocess.run(

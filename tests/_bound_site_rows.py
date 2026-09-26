@@ -328,18 +328,18 @@ BOUND_SITE_ROWS = (
      [(5, 'unreadable', 'unplaced')]),
     # Not part of the NAMED guard set above, and deliberately outside it.
     # Those rows are the controls for arms 1134 classified as CONTROLLED,
-    # REDUNDANT-with-a-bound or DEAD; these are two routes this branch
-    # handed OUT of `tests/_launch_census.py` and INTO the analyser, so
-    # the repo has one answer about a launch call rather than two. Adding
-    # a row here is not adding an arm to that set, and the set's closure
-    # argument is unchanged by these three.
-    # Two routes inside the analyser's unit, handed to it from
-    # `tests/_launch_census.py` so the repo has one answer about a launch
-    # call rather than two. A `**` unpacked on a launch, and a keyword the
-    # stdlib does not take: each is a bound that can reach a child without
-    # the word `timeout` appearing anywhere on the call. A launcher built by
-    # `functools.partial` needs no row here — main's `unplaced` arm already
-    # reports it, at `unreadable`, which is the head the gate keeps.
+    # REDUNDANT-with-a-bound or DEAD. The three rows here are NOT part of
+    # that set and do not change its closure argument: two are the routes
+    # this branch handed OUT of `tests/_launch_census.py` and INTO the
+    # analyser, so the repo has one answer about a launch call rather than
+    # two — a `**` unpacked on a launch, and a keyword the stdlib does not
+    # take, each a bound that can reach a child with the word `timeout`
+    # nowhere on the call. The third, `a-clean-launch-emits-nothing`, is
+    # not a route at all: it is the NEGATIVE control for those two, and it
+    # is the direction that keeps them from becoming false-positive
+    # generators. A launcher built by `functools.partial` needs no row —
+    # main's `unplaced` arm already reports it, at `unreadable`, which is
+    # the head the gate keeps.
     ('unpack-at-a-non-git-launch',
      "import subprocess\n"
      "def probe():\n"
