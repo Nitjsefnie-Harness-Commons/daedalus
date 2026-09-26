@@ -116,7 +116,16 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
 
 @contextlib.contextmanager
-def _virtual_cmdqueue_clock(max_sleeps=None):
+def _virtual_cmdqueue_clock(max_sleeps=None,
+                            wall_budget: float | None = _RUNAWAY_WALL):
+    """Replace the command queue's time with a simulated one.
+
+    `max_sleeps` and `wall_budget` are the caller's own ceilings; neither
+    applies when it is None. A control that decides on a simulated bound
+    passes no wall budget, so its verdict cannot depend on how fast the machine
+    running it happens to be, and a control for the wall guard itself takes the
+    module default.
+    """
     original = _cmdqueue.time
     wall_started = original.perf_counter()
     # A large power-of-two origin exposes sleeps too small to move the clock.
@@ -138,11 +147,13 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
         return advanced, next_correction
 
     def check_wall_bound():
+        if wall_budget is None:
+            return
         wall_elapsed = original.perf_counter() - wall_started
-        if wall_elapsed >= _RUNAWAY_WALL:
+        if wall_elapsed >= wall_budget:
             raise AssertionError(
                 'virtual clock wall-time bound reached after '
-                f'{wall_elapsed:.3f}s (limit {_RUNAWAY_WALL:.3f}s)')
+                f'{wall_elapsed:.3f}s (limit {wall_budget:.3f}s)')
 
     class Clock:
         def monotonic(self):
