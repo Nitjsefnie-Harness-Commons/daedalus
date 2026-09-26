@@ -516,6 +516,7 @@
 !/tests/test_mcp_hotfix_scope.py
 !/tests/test_mcp_import_closure.py
 !/tests/test_mcp_import_code_eval.py
+!/tests/test_mcp_import_selection.py
 !/tests/test_mcp_import_values.py
 !/tests/test_mcp_live_tools.py
 !/tests/test_mcp_poll_matching.py
