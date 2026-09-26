@@ -56,6 +56,21 @@ MIXED = ENTRY + ("const T = [E({ url: 'https://one.example.com/a.js' }),\n"
 NO_STATUS = ENTRY + "const T = [E({ status: undefined })];\n"
 ZERO_STATUS = ENTRY + "const T = [E({ status: 0 })];\n"
 
+# A url longer than the 100 characters both row kinds cut it to, and a
+# 404 on a row that otherwise succeeded: `messaging.js:102` records
+# `status: resp.status` on the success leg, so a 4xx carries no `error`
+# and the red class is the only thing that says so.
+LONG_URL = 'https://one.example.com/' + 'b' * 90 + '.js'
+CUT = LONG_URL[:99] + '…'
+LONG = (ENTRY + "const U = 'https://one.example.com/' + 'b'.repeat(90)"
+        " + '.js';\n")
+OK_AND_404 = LONG + ("const T = [E({ url: U }),\n"
+                     "  E({ url: U, status: 404 })];\n")
+LONG_ERROR = ("const U = 'https://one.example.com/' + 'b'.repeat(90)"
+              " + '.js';\n"
+              "const T = [{ url: U, method: 'GET', error: 'timeout',\n"
+              "  ms_total: 5, ts: 1750000000000 }];\n")
+
 
 def answer(expr, native='true'):
     return ("answer('fetch-timings', { result: { timings: " + expr
@@ -248,6 +263,38 @@ def test_entries_that_all_failed_get_no_stats_block(_tmp):
     assert len(report['rows']) == 1, report
 
 
+def test_a_success_row_with_a_server_error_status_reads_red(_tmp):
+    """`e.status >= 400` is the whole of the red branch, and a 4xx
+    response carries no `error` key, so this row takes the SUCCESS branch
+    and the status cell is the only thing that says the fetch failed. The
+    pairs either side of it are the absent status and the zero status,
+    which both read green above."""
+    report = _run('report({ rows: cells(list()).slice(1) });\n',
+                  setup=OK_AND_404, answers=(ANSWER,))
+    # The buffer is rendered reversed, so the 404 is the row on top.
+    assert [row[1] for row in report['rows']] == [
+        ['mono red', '404'], ['mono green', '200']], report
+    # The red row is a success row: the timing cells are filled in, which
+    # is what tells it apart from the error row's four bare ones.
+    assert report['rows'][0][6] == ['num cyan', '14.25'], report
+    assert len(LONG_URL) == 117, LONG_URL
+
+
+def test_a_url_over_a_hundred_characters_is_cut_in_both_row_kinds(_tmp):
+    """Both rows cut the url at 100 and both rejoin the reason behind TWO
+    spaces, so a long url on an error row is the cut url and then the
+    reason -- and a cap of 140 would show forty more characters of a url
+    the table is already too wide for."""
+    report = _run('report({ rows: cells(list()).slice(1) });\n',
+                  setup=OK_AND_404, answers=(ANSWER,))
+    assert report['rows'][0][7] == ['url', CUT], report
+    assert report['rows'][1][7] == ['url', CUT], report
+    failed = _run('report({ rows: cells(list()).slice(1) });\n',
+                  setup=LONG_ERROR, answers=(ANSWER,))
+    assert failed['rows'][0][7] == [
+        'url red', CUT + '  (timeout)'], failed
+
+
 def test_the_stats_block_counts_the_entries_that_worked(_tmp):
     """`ok` is the entries with no error, so the ratio reads over the whole
     buffer and an error entry moves the denominator only."""
@@ -352,9 +399,11 @@ def test_a_reset_that_worked_toasts_ok_and_leaves_no_pane(_tmp):
 
 
 def test_a_command_the_bridge_refused_answers_nothing_at_all(_tmp):
-    """A non-200 on `PUT /command` throws inside `api.js` before the
-    command ever reached the queue, so the panel's own catch is the only
-    thing that runs and no result leg is opened at all."""
+    """`api.js:56` throws on a non-200, so `runCommand` never reaches the
+    result loop. What this case pins is that: the two `legs(...)`
+    assertions say no poll and no consume leg was opened, and the pane
+    says what the operator is left reading. What the bridge does with a
+    refused command is not something this tree can see."""
     report = _run('report({ pane: panes(list()) });\n',
                   setup=ONE, answers=(), plan=REFUSED_COMMAND)
     assert shared.types(report) == ['fetch-timings'], report
