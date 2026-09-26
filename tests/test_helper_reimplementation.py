@@ -94,7 +94,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _js_functions  # noqa: E402
 import _util  # noqa: E402
 from _branch_boundary import (  # noqa: E402
-    BRANCH_BASES, introduced_rows, js_digests, python_digests)
+    BRANCH_BASES, _parsed, introduced_rows, js_digests, python_digests)
 from _helper_binds import definitions, scan  # noqa: E402
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
@@ -121,14 +121,6 @@ def _in_tests(path):
 
 def _is_shared_helper(path):
     return _in_tests(path) and Path(path).stem.startswith('_')
-
-
-def _parse(path, source):
-    try:
-        return ast.parse(source, filename=path)
-    except SyntaxError as exc:
-        raise AssertionError(
-            f'tests module does not parse: {path}: {exc}') from exc
 
 
 def _entry_points(tree):
@@ -212,7 +204,7 @@ def reimplementations(sources, owner_is_the_definition=_is_the_owner,
     owners = {}
     parsed = {}
     for path in sorted(sources):
-        tree = _parse(path, sources[path])
+        tree = _parsed(path, sources[path])
         imports, _ = scan(tree)
         defined = definitions(tree)
         entry = _entry_points(tree)
