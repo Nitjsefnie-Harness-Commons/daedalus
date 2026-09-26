@@ -28,22 +28,37 @@ LIST = (
     "];\n"
 )
 
+LISTING = "answer('cookies', { result: LIST });\n"
+EMPTY = "answer('cookies', { result: [] });\n"
+SET = "answer('set-cookie', { result: {} });\n"
+CLEARED = "answer('clear-cookies', { result: { removed: 4 } });\n"
+CLEARED_ZERO = "answer('clear-cookies', { result: { removed: 0 } });\n"
+DROPPED = "answer('remove-cookie', { result: {} });\n"
+GONE = "answer('remove-cookie', { error: 'cookie not found' });\n"
+ABSENT = "answer('cookies', { result: null });\n"
+
 SETTLED = ('await bounded(settle(), "after the click",'
            ' _dashnodeStepTimeoutMs);\n')
 
 
-def scenario(body, *, setup=LIST, plan=shared.PLAN):
-    """One child: seed the token, plan every answer, mount, then drive."""
-    return ('(async () => {\n' + shared.SEED + shared.ANSWERS + shared.PRELUDE
-            + shared.open_section(SECTION[0]) + plan + setup
+def scenario(body, *, setup=LIST, answers=(), plan=shared.COMMAND):
+    """One child: seed the token, plan every answer, mount, then drive.
+
+    `setup` lands first because the answer table is written in the scope
+    `setup` defines.
+    """
+    return ('(async () => {\n' + shared.SEED + shared.PRELUDE
+            + shared.open_section(SECTION[0]) + setup + plan
+            + shared.results(*answers)
             + 'const sub = new El("span");\n'
             + 'drive.selector("#s04 [data-sub]", sub);\n'
             + shared.MOUNT + body + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=LIST, plan=shared.PLAN):
-    return run_scenario(scenario(body, setup=setup, plan=plan),
-                        sections=SECTION)
+def _run(body, *, setup=LIST, answers=(), plan=shared.COMMAND):
+    return run_scenario(
+        scenario(body, setup=setup, answers=answers, plan=plan),
+        sections=SECTION)
 
 
 def _list_for(query, how='click'):
@@ -66,7 +81,7 @@ def test_a_query_with_a_scheme_is_sent_as_a_url_and_not_a_domain(_tmp):
                   + 'report({ sub: sub.textContent,\n'
                     '  host: container.find("[data-role=table-host]")'
                     '.textContent });\n',
-                  setup=LIST + "answer('cookies', { result: LIST });\n")
+                  answers=(LISTING,))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'cookies', report
     assert sent.get('url') == 'https://example.com/app', report
@@ -81,7 +96,7 @@ def test_a_bare_domain_is_sent_as_a_domain_and_not_a_url(_tmp):
     command and a listener wired to nothing would pass a click-only case."""
     report = _run(_list_for('example.com', how='enter')
                   + 'report({ rows: rowTexts(container.all()[0]) });\n',
-                  setup=LIST + "answer('cookies', { result: LIST });\n")
+                  answers=(LISTING,))
     sent = shared.commands(report)[0]
     assert sent.get('domain') == 'example.com', report
     assert 'url' not in sent, report
@@ -98,7 +113,7 @@ def test_the_flags_cell_joins_what_is_set_with_a_middle_dot(_tmp):
     rather than a placeholder."""
     report = _run(_list_for('example.com')
                   + 'report({ rows: rowTexts(container.all()[0]) });\n',
-                  setup=LIST + "answer('cookies', { result: LIST });\n")
+                  answers=(LISTING,))
     flags = [row[4] for row in report['rows'][1:]]
     assert flags == ['S·H·l', ''], report
     assert flags[0].index('·') == 1, report
@@ -115,8 +130,9 @@ def test_a_value_longer_than_the_cap_is_truncated_with_an_ellipsis(_tmp):
                         '  domain: "a.test", path: "/" };\n'
                         'const exact = { name: "exact",'
                         ' value: "y".repeat(140),\n'
-                        '  domain: "a.test", path: "/" };\n'
-                        "answer('cookies', { result: [wide, exact] });\n")
+                        '  domain: "a.test", path: "/" };\n',
+                  answers=("answer('cookies',"
+                           " { result: [wide, exact] });\n",))
     cells = report['rows'][1:]
     assert len(cells[0][1]) == 140, report
     assert cells[0][1].endswith('…'), report
@@ -137,8 +153,7 @@ def test_set_sends_no_flag_field_and_an_untrimmed_value(_tmp):
                   'container.find("[data-role=sp]").value = "";\n'
                   'button("SET").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=LIST + "answer('cookies', { result: [] });\n"
-                               "answer('set-cookie', { result: {} });\n")
+                  answers=(EMPTY, SET))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'set-cookie', report
     assert sent['url'] == 'https://shop.example.com/', report
@@ -165,8 +180,7 @@ def test_set_sends_the_domain_when_one_was_typed(_tmp):
                   'container.find("[data-role=sp]").value = "/deep";\n'
                   'button("SET").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=LIST + "answer('cookies', { result: [] });\n"
-                               "answer('set-cookie', { result: {} });\n")
+                  answers=(EMPTY, SET))
     sent = shared.commands(report)[0]
     assert sent['domain'] == '.a.test', report
     assert sent['path'] == '/deep', report
@@ -179,7 +193,7 @@ def test_a_set_without_a_url_or_a_name_sends_nothing(_tmp):
     report = _run('container.find("[data-role=sv]").value = "v";\n'
                   'button("SET").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=LIST + "answer('set-cookie', { result: {} });\n")
+                  answers=(SET,))
     assert shared.commands(report) == [], report
     assert report['requests'] == [], report
     assert report['toasts'] == [{'type': 'warn',
@@ -193,7 +207,7 @@ def test_an_empty_query_asks_the_bridge_for_nothing(_tmp):
                   + 'report({ toasts: toasts(), sub: sub.textContent,\n'
                     '  host: container.find("[data-role=table-host]")'
                     '.textContent });\n',
-                  setup=LIST + "answer('cookies', { result: LIST });\n")
+                  answers=(LISTING,))
     assert report['requests'] == [], report
     assert report['sub'] == '', report
     assert report['host'] == 'enter a domain/url and click LIST.', report
@@ -212,8 +226,7 @@ def test_a_removed_row_reloads_in_silence_and_a_failed_one_toasts(_tmp):
               'const del = button("remove", host);\n'
               'del.click();\n' + SETTLED
               + 'report({ toasts: toasts(), sub: sub.textContent });\n',
-              setup=LIST + "answer('cookies', { result: LIST });\n"
-                           "answer('remove-cookie', { result: {} });\n")
+              answers=(LISTING, DROPPED))
     assert shared.types(ok) == ['cookies', 'remove-cookie', 'cookies'], ok
     assert ok['toasts'] == [], ok
     assert ok['sub'] == '2 cookie(s)', ok
@@ -224,15 +237,12 @@ def test_a_removed_row_reloads_in_silence_and_a_failed_one_toasts(_tmp):
     assert removed['url'] == 'https://example.com/', ok
     assert removed['name'] == 'sid', ok
 
-    plan = (LIST
-            + "answer('cookies', { result: LIST });\n"
-            + "answer('remove-cookie', { error: 'cookie not found' });\n")
     bad = _run(_list_for('a.test')
                + 'const host = container.find("[data-role=table-host]");\n'
                + 'const del = button("remove", host);\n'
                + 'del.click();\n' + SETTLED
                + 'report({ toasts: toasts() });\n',
-               setup=plan)
+               answers=(LISTING, GONE))
     assert shared.types(bad) == ['cookies', 'remove-cookie'], bad
     assert bad['toasts'] == [{'type': 'err',
                               'text': 'cookie not found'}], bad
@@ -251,9 +261,7 @@ def test_clear_all_arms_before_it_sends_and_reports_the_removed_count(
                     '  sent: REQUESTS.length };\n'
                   'clear.click();\n' + SETTLED
                   + 'report({ armed, toasts: toasts() });\n',
-                  setup=LIST + "answer('cookies', { result: [] });\n"
-                               "answer('clear-cookies',"
-                               " { result: { removed: 4 } });\n")
+                  answers=(EMPTY, CLEARED))
     assert report['armed'] == {'text': 'confirm clear all', 'has': True,
                                'sent': 0}, report
     assert shared.types(report) == ['clear-cookies', 'cookies'], report
@@ -271,8 +279,7 @@ def test_clear_all_with_an_empty_query_sends_nothing(_tmp):
                   + 'const armed = clear.textContent;\n'
                   'clear.click();\n' + SETTLED
                   + 'report({ armed, toasts: toasts() });\n',
-                  setup=LIST + "answer('clear-cookies',"
-                               " { result: { removed: 0 } });\n")
+                  answers=(CLEARED_ZERO,))
     assert report['armed'] == 'confirm clear all', report
     assert report['requests'] == [], report
     assert report['toasts'] == [{'type': 'warn',
@@ -288,14 +295,13 @@ def test_an_absent_result_renders_the_empty_state_with_a_zero_count(_tmp):
                  + 'report({ sub: sub.textContent,\n'
                    '  host: container.find("[data-role=table-host]")'
                    '.textContent });\n',
-                 setup="answer('cookies', { result: null });\n")
+                 answers=(ABSENT,))
     assert empty['sub'] == '0 cookie(s)', empty
     assert empty['host'] == 'no cookies.', empty
-    one_cookie = ("answer('cookies',"
-                  " { result: [{ name: 'k', value: 'v' }] });\n")
     one = _run(_list_for('a.test')
                + 'report({ sub: sub.textContent });\n',
-               setup=one_cookie)
+               answers=("answer('cookies',"
+                        " { result: [{ name: 'k', value: 'v' }] });\n",))
     assert one['sub'] == '1 cookie(s)', one
 
 
@@ -309,8 +315,8 @@ def test_a_failed_listing_renders_the_error_pane(_tmp):
                     + '  host: host.textContent,\n'
                     + '  pane: host.all().some((el) => '
                       'hasClass(el, "pane err")) });\n',
-                  setup="answer('cookies',"
-                        " { error: 'cookie store unavailable' });\n")
+                  answers=("answer('cookies',"
+                           " { error: 'cookie store unavailable' });\n",))
     assert report['pane'] is True, report
     assert report['host'] == 'cookie store unavailable', report
     # The counter is written inside `render`, which never ran.
