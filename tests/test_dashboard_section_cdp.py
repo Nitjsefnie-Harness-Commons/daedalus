@@ -328,20 +328,21 @@ def test_an_object_answer_reaches_the_pane_indented(_tmp):
 
 
 def test_a_call_that_never_answers_gives_up_at_twenty_seconds(_tmp):
-    """`extCmd('cdp', fields, { timeout: 20000 })` names the budget
-    explicitly. The pane is the only place that failure is reported, and
-    the message it renders comes from the budget the loop was handed, so
-    the message is the exact pin. The legs behind it are a band rather
-    than a number, because `api.js:143` reads host time as well as the
-    virtual clock. The fifteen-second default would fail both: a different
-    message, and a count twenty legs clear of this band's."""
+    """`cdp.js:70` passes `{ timeout: 20000 }` itself, so the loop's budget
+    is the section's. The pane is the only place that failure is reported,
+    and the message it renders comes from the budget the loop was handed,
+    so it names twenty seconds exactly -- that is the pin. The legs behind
+    it corroborate from the other side and only as an upper bound, because
+    a slow runner reaches the deadline early. Dropping the option to the
+    fifteen-second default fails the message; the count alone would not,
+    which is why the message is asserted first."""
     report = _run(_press() + SETTLED
                   + 'report({ polls: polls(), pane: pane(),'
                     ' toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
     assert report['pane'][1].startswith(
         'Timeout (20000ms) waiting for _cdp_1_'), report
-    assert shared.poll_band(report, 20000), report
+    assert report['polls'] <= 20000 // shared.POLL_CADENCE_MS, report
     assert report['pane'][0] == 'pane err', report
     assert report['toasts'] == [], report
     assert report['unplanned'] == [], report

@@ -122,8 +122,8 @@ def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
     first body is the command's own four keys. A defaulted pair added on
     the way in would be two members the handler reads no part of: it
     answers from `_fetchTimings` and the two globals beside it, and the
-    only field of the command it touches is `cmd.reset` at
-    `extension/worker/tabs.js:31`."""
+    only members of the command it reads are `cmd.reset` at
+    `extension/worker/tabs.js:31` and `cmd._execution` at `:32`."""
     report = _run('report({ sub: sub.textContent,\n'
                   '  head: headers(list()),\n'
                   '  rows: cells(list()) });\n',
