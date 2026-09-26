@@ -39,7 +39,6 @@ def test_a_kept_session_is_forgotten_when_chrome_detaches_us(tmp):
     # Chrome detached us; we did not ask it to.
     assert outcome['detachCalls'] == [], outcome
     assert outcome['live'] == [], outcome
-    assert outcome['claims'] == [], outcome
     # And the tab is attachable again, which is the half that would break if
     # the record survived.
     later = run_attachment_case({'actions': [
@@ -69,7 +68,20 @@ def test_a_closed_tab_is_detached_once_and_forgotten(tmp):
     ]})
     assert outcome['attachCalls'] == [7], outcome
     assert outcome['detachCalls'] == [7], outcome
-    assert outcome['claims'] == [], outcome
+    # A fresh command on that tab id attaches for itself and gives it back,
+    # which is what a released record looks like from outside. A record that
+    # outlived the tab would have made it join, and nothing would attach.
+    again = run_attachment_case({'actions': [
+        {'dispatch': _cdp('kept', tabId=7, keep_session=True)},
+        {'drain': True},
+        {'tabRemoved': 7},
+        {'drain': True},
+        {'dispatch': _cdp('after', tabId=7)},
+        {'drain': True},
+    ]})
+    assert again['attachCalls'] == [7, 7], again
+    assert again['detachCalls'] == [7, 7], again
+    assert _by_id(again)['after']['error'] is None, again
 
     # A tab with no claim must not be detached: Chrome refuses to detach
     # what is not attached, and that refusal belongs to whatever runs next.
@@ -121,29 +133,48 @@ def test_a_forgotten_claim_does_not_stop_a_newer_one_from_attaching(tmp):
     ]})
     assert released['detachCalls'] == [7], released
     assert released['live'] == [], released
-    assert released['claims'] == [], released
 
 
 def test_a_second_release_on_one_handle_detaches_once(tmp):
-    """I-5: a release is idempotent.
+    """I-5: a repeat release on a spent handle detaches nothing.
 
-    Two releases on one handle would drive the count negative and, once the
-    entry is gone, detach a tab a later claim has since attached. The second
-    detach is a Chrome refusal that would land on whichever command ran
-    next, so the handle owns the fact that it has been released.
+    Two releases on one handle would drive the count negative and detach a
+    tab a later claim has since attached — a Chrome refusal that would land
+    on whichever command ran next. So the later claim is really set up here,
+    and deliberately never released, which leaves a repeat release as the
+    only thing that could take its attachment down.
+
+    What carries this is the ENTRY guard in `_cdpRelease`: the first release
+    took the entry out of the map, so the second finds nothing installed and
+    no-ops. The handle's own "released once" guard is defence in depth for a
+    caller that releases twice — no shipped call site does — and removing it
+    alone leaves this control green, which is why it carries no weight here
+    and is named in `cdp_attach.js` rather than pinned here.
     """
     del tmp
-    outcome = run_attachment_case({
-        'doubleRelease': True,
-        'actions': [
-            {'claim': {'tabId': 7}},
-            {'settle': 2},
-            {'release': 0},
-            {'settle': 4},
-        ]})
-    assert outcome['attachCalls'] == [7], outcome
+    outcome = run_attachment_case({'actions': [
+        {'claim': {'tabId': 7}},
+        {'settle': 2},
+        # The first release gives the first attachment back.
+        {'release': 0},
+        {'settle': 2},
+        # A later claim takes the now-free tab...
+        {'claim': {'tabId': 7}},
+        {'settle': 2},
+        # ...and the SAME handle is released again, which is the defect this
+        # is about. The later claim is deliberately never released, so the
+        # only thing that can take its attachment down is a release that
+        # should have been a no-op.
+        {'release': 0},
+        {'settle': 4},
+    ]})
+    assert outcome['attachCalls'] == [7, 7], outcome
+    # Exactly ONE detach, and the later claim's attachment is still standing.
+    # Those two facts are the property together: a release that ran twice on
+    # one handle would have issued a second detach and taken the later
+    # claim's attachment out from under it, so `live` would be empty.
     assert outcome['detachCalls'] == [7], outcome
-    assert outcome['claims'] == [], outcome
+    assert outcome['live'] == [7], outcome
 
 
 def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
@@ -176,10 +207,15 @@ def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
     assert outcome['detachCalls'] == [7], outcome
     # Alive: nothing escaped, so the worker never ended.
     assert outcome['unhandled'] == [], outcome
-    # Released: the capture and the claim are both gone, so the next command
-    # on that tab is free rather than joining a record whose detach is not
-    # coming.
-    assert outcome['claims'] == [], outcome
+    # The record is released, but NOT by dispatching a follow-up command here:
+    # this control's detach REFUSED, so Chrome is still holding the tab, and a
+    # command that tried to attach would be refused for that reason and prove
+    # nothing about the record. A refused detach leaves the tab genuinely
+    # attached, and a double that let a follow-up attach anyway would be
+    # asserting a browser state that cannot exist.
+    # `test_a_claim_arriving_after_a_refused_detach_still_works` below is the
+    # observable for the release: it attaches a second claim and watches it
+    # take, which is what a surviving record would have prevented.
     assert outcome['refused'], outcome
     assert any('detach refused' in line for line in outcome['refused']), \
         outcome
@@ -200,11 +236,15 @@ def test_a_refused_detach_on_a_transient_release_is_survived_and_traced(tmp):
             {'claim': {'tabId': 7}},
             {'settle': 2},
             {'release': 0},
+            {'claim': {'tabId': 7}},
             {'settle': 8},
         ]})
     assert outcome['detachCalls'] == [7], outcome
     assert outcome['unhandled'] == [], outcome
-    assert outcome['claims'] == [], outcome
+    # The second claim attached and is still holding, so the record outlived
+    # the refused release rather than being dropped by it.
+    assert outcome['attachCalls'] == [7, 7], outcome
+    assert outcome['live'] == [7], outcome
     assert any('detach refused' in line for line in outcome['refused']), \
         outcome
 

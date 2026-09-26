@@ -77,8 +77,10 @@ def test_a_cdp_routed_fix_does_not_reach_a_twin_document_in_the_same_tab(tmp):
     # token-1, at the same url. The attribute is PRESENT in the live
     # document and is the WRONG one, which is the state D1 exists to reject
     # and which a guard that only asked "is it there" would wave through.
-    assert outcome['minted'] == {
-        'doc-1': 'doc-token-0', 'doc-2': 'doc-token-1'}, outcome
+    # The RELATION is what this needs, not the double's spelling: asserting
+    # `doc-token-0` back would make the control go red for a reason that has
+    # nothing to do with the subject if the double were respelled.
+    assert None not in outcome['minted'].values(), outcome
     assert outcome['minted']['doc-1'] != outcome['minted']['doc-2'], outcome
     # And the url the CDP channel compared is the same in both, so nothing
     # but the token refused this.
