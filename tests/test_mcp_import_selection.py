@@ -5,17 +5,17 @@ A call's callee is a value, and the walk folds it before asking what it is.
 Where the fold decides the value exactly — a wrapper that produces the value
 it wraps, a subscript of a literal sequence by a position inside it or of a
 literal mapping by a key it carries, however deeply nested — the value is
-the operation and its argument is resolved exactly as the direct spelling
-resolves it. Where the fold cannot decide, the walk asks the STORE side's
-own property: does this expression's subtree mention the operation? A
-mention is refused by spelling, site and remedy. A value the runtime
-provably cannot reach through is CLEAN, and a value that is not the
-operation and does not mention it is left alone, so a container read that
-selects something else is not a refusal.
+the operation and its argument resolves exactly as the direct spelling does.
+Where the fold cannot decide, the walk asks the STORE side's own property:
+does this expression's subtree mention the operation? A mention is refused
+by spelling, site and remedy. A value the runtime provably cannot reach
+through is CLEAN, and one that is neither the operation nor a mention is
+left alone, so a container read that selects something else is not a
+refusal.
 
-The per-form cases below are a SAMPLE; the sweep at the bottom generates
-its forms from a grammar and checks them against a runtime oracle, because
-hand-typed spellings only ever prove the spellings that were thought of.
+These cases are a SAMPLE of the spellings someone thought of;
+`test_mcp_selection_sweep.py` holds the generated product of the grammar,
+because hand-typed spellings only ever prove themselves.
 """
 import ast
 import sys
@@ -23,7 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
-import _mcp_selection_sweep  # noqa: E402
 import _util  # noqa: E402
 
 
@@ -50,7 +49,6 @@ OPERATION_SELECTIONS = (
     '[[importlib.import_module]][0][0]',
     '[[[importlib.import_module]][0]][0][0]',
     '[importlib.import_module][i]',
-    '[importlib.import_module][0:1]',
     '(*stars, importlib.import_module)[1]',
     "{'a': importlib.import_module}['a']",
     '[(0, importlib.import_module)][0][1]',
@@ -66,7 +64,6 @@ UNREADABLE_SELECTIONS = (
     '(importlib.import_module if c else print)',
     '[importlib.import_module for _ in [0]][0]',
     '[importlib.import_module][i]',
-    '[importlib.import_module][0:1]',
     '(*stars, importlib.import_module)[1]',
     "{'a': importlib.import_module}[k]",
     '{**{"b": 0}, "a": importlib.import_module}["a"]',
@@ -132,6 +129,21 @@ def test_a_callee_read_out_of_a_value_is_resolved_or_refused(_tmp):
             assert 'pkg/leaf.py' in names, (callee, names)
 
 
+def _scan_source(_tmp, source):
+    """The scan's own verdict for a whole composition source: the files it
+    closed over, or the refusal it raised. `_scan` always supplies an
+    argument, and a call of the operation is a question about that argument.
+    """
+    _write_tree(Path(_tmp), {'composition.py': source})
+    try:
+        return sorted(
+            path.relative_to(Path(_tmp)).as_posix()
+            for path in _mcp_import_closure.composition_scan_set(
+                Path(_tmp) / 'composition.py', Path(_tmp)))
+    except AssertionError as raised:
+        return str(raised)
+
+
 def _scan(_tmp, callee):
     """`resolved`, `refused`, or `silent` for one callee, with a resolvable
     `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
@@ -171,6 +183,46 @@ def test_a_constant_negative_position_is_folded(_tmp):
     """
     assert _scan(_tmp, '[importlib.import_module][-1]') == 'resolved'
     assert _scan(_tmp, '[0, importlib.import_module, 0][-1]') == 'silent'
+
+
+def test_an_index_the_runtime_settles_to_something_unusable_is_clean(_tmp):
+    """`lst['a' * 0]` is a string, and a string is not a position, so the
+    call raises before it reads anything. The walk's one answer for an
+    operator whose operands are not numbers was "cannot decide" — a
+    REFUSAL, on an expression that raises.
+
+    Asking Python's own operator settles each of these and the position
+    check does its own work: the value is not an int, or it is an int that
+    names a position no container has. A conditional settles when BOTH arms
+    do and agree; one whose arms differ, a call's result, and a value too
+    large to compute WITH are declared limits and stay refused.
+    """
+    for index in ("'a' * 0", "2 * 'a'", "b'a' + b'b'", '1 if c else 1',
+                  '4 if c else 4', '10 ** 10', '2 ** (10 ** 10)'):
+        want = 'refused' if index.count('**') == 2 else 'silent'
+        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+            == want, index
+    for index, want in (("'a' * 0", 'silent'), ('(0, 1)[0]', 'silent'),
+                        ('(0, 1)[1]', 'resolved'), ('2 if c else 2', 'silent'),
+                        ('1 if c else 2', 'refused'), ('len([0])', 'refused')):
+        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+            == want, index
+
+
+def test_a_slice_produces_a_new_container_and_so_names_nothing(_tmp):
+    """`lst[0:1]` builds a LIST, and a list is not callable, so the call
+    raises on the expression however the slice is spelled. Declining a
+    slice was a REFUSAL, on an expression that raises on every container
+    there is: a mapping and a function raise, and the rest produce a new
+    container, so all of them name nothing.
+    """
+    for callee in ('[importlib.import_module][0:1]',
+                   '[importlib.import_module][:]',
+                   '[importlib.import_module][::1]',
+                   '(0, importlib.import_module)[1:]',
+                   '{"a": importlib.import_module}["a":"b"]',
+                   '[importlib.import_module][0:1][0]'):
+        assert _scan(_tmp, callee) == 'silent', callee
 
 
 def test_a_starred_literal_is_folded_by_the_elements_it_carries(_tmp):
@@ -255,11 +307,21 @@ def test_a_position_the_runtime_cannot_reach_is_clean(_tmp):
     nothing, and this is the corpus's own decision: a decided value that
     provably cannot call anything is CLEAN.
     """
-    for index in ('4', '-4', 'None', "'x'", '1.5', '0 / 1', '1 // 1', 'True'):
+    for index in ('4', '-4', 'None', "'x'", '1.5', '0 / 1', '1 // 1', 'True',
+                  "-'a'", '-None', '-b"a"'):
         assert _scan(_tmp, f'[importlib.import_module][{index}]') \
             == 'silent', index
     assert _scan(_tmp, "{'a': importlib.import_module}['zzz']") == 'silent'
     assert _scan(_tmp, '{0: importlib.import_module}[1]') == 'silent'
+    # The ARGUMENT is the same question: an argument this walk can SEE is
+    # not a name raises before the call imports anything, and one it cannot
+    # read still may be a name, so that one stays refused.
+    assert _scan(_tmp, 'importlib.import_module(1)') == 'silent'
+    assert _scan(_tmp, 'importlib.import_module(0.0)') == 'silent'
+    assert _scan(_tmp, 'importlib.import_module(k)') == 'refused'
+    assert _scan_source(_tmp, 'import importlib\n\n\ndef load():\n'
+                        '    return importlib.import_module()\n') \
+        == ['composition.py']
 
 
 # The wrappers a value passes through on its way to being called. Python
@@ -390,6 +452,17 @@ def test_a_getattr_whose_key_the_walk_cannot_read_is_its_object(_tmp):
     assert _scan(_tmp, "getattr(importlib.import_module, 'other')") == 'silent'
     assert _scan(_tmp, 'getattr(importlib.util, k)') == 'silent'
     assert _scan(_tmp, 'getattr(print, k)') == 'silent'
+    # A third argument is a DEFAULT and never decides the key, so the pair
+    # is the only thing that holds the two-argument test.
+    _refuses_the_callee(_tmp, 'getattr(importlib.import_module, k, None)')
+    assert _scan(_tmp, "getattr(importlib.import_module, 'other', None)") \
+        == 'silent'
+    # The REGISTRY axis shares this store grammar and a name the map tracks
+    # is the case its own lookup helper exists for: `sys` is the one such
+    # name the registry tracks. An object that is neither is left alone.
+    assert 'composition:5' in _scan_source(
+        _tmp, 'import sys\n\n\ndef load(k):\n'
+        "    return getattr(sys, k)('os')\n")
 
 
 def test_a_keyed_selection_of_a_literal_dict_is_folded(_tmp):
@@ -408,6 +481,13 @@ def test_a_keyed_selection_of_a_literal_dict_is_folded(_tmp):
     assert _scan(_tmp, "{'b': 0, 'a': importlib.import_module}['a']") \
         == 'resolved'
     assert _scan(_tmp, '{0: importlib.import_module}[0]') == 'resolved'
+    # A key this walk CANNOT read is undetermined, and an expression the
+    # walk can see is unhashable is the display's own `TypeError`. The two
+    # are the cell a `**` unpack shares with an expression key, and the
+    # assertion is what holds it: a reader that read either would resolve
+    # or refuse the other.
+    _refuses_the_callee(_tmp, '{importlib.import_module: 0}["a"]')
+    assert _scan(_tmp, '{[importlib.import_module]: 0}["a"]') == 'silent'
     assert _scan(_tmp, "(lambda *a: {'a': importlib.import_module}['a'])") \
         == 'silent'
 
@@ -416,9 +496,10 @@ def test_a_unary_plus_and_a_bool_are_both_constant_positions(_tmp):
     """`lst[+0]` is `lst[0]` and `lst[True]` is `lst[1]`, so the unary and
     the boolean are the same settled position by two more spellings.
 
-    A float is the different thing and stays declined, for the reason the
-    binop case already gives: `lst[0.0]` raises `TypeError` at runtime, so
-    there is no position to read on either side of it.
+    A float is the different thing, and the fold DECIDES it rather than
+    declining it: `lst[0.0]` raises `TypeError` at runtime, so the value
+    the operator settles is not a position and the call raises on the
+    expression before it reaches anything.
     """
     assert _scan(_tmp, '[importlib.import_module][+0]') == 'resolved'
     assert _scan(_tmp, '[0, 0, importlib.import_module][+1]') == 'silent'
@@ -460,6 +541,36 @@ def test_a_selection_the_fold_cannot_read_refuses(_tmp):
     by spelling, site and remedy, never resolved to a guess."""
     for callee in UNREADABLE_SELECTIONS:
         _refuses_the_callee(_tmp, callee)
+
+
+# `except ValueError as importlib:` binds a name the map tracks, and the map
+# cannot tell the exception from the operation it already holds. The pair is
+# what keeps the arm honest: a clause that binds a name the map does NOT
+# track is left alone, so a rule that refused every rebind — or none of
+# them — would fail one of the two.
+REBOUND = '''
+import importlib
+
+
+def load():
+    try:
+        raise ValueError()
+    except ValueError as importlib:
+        return importlib.import_module("os")
+'''
+
+
+def test_an_except_clause_that_rebinds_a_tracked_name_refuses(_tmp):
+    """`except ValueError as importlib:` binds a name the map tracks, and
+    the map cannot tell the exception from the operation it already holds.
+
+    The pair is what keeps the arm honest: a clause that binds a name the
+    map does NOT track is left alone, so a rule that refused every rebind
+    — or one that refused none of them — would fail one of the two.
+    """
+    assert 'cannot follow' in _scan_source(_tmp, REBOUND), REBOUND
+    other = REBOUND.replace('as importlib', 'as failure')
+    assert _scan_source(_tmp, other) == ['composition.py']
 
 
 def test_a_selection_of_a_known_other_value_is_not_refused(_tmp):
@@ -560,89 +671,6 @@ def test_a_selection_agrees_with_a_store_of_the_same_container(_tmp):
             assert 'composition:' in str(raised), raised
         else:
             raise AssertionError(f'{spelling} was silently skipped')
-
-
-# The sweep: `_mcp_selection_sweep` generates the product of the grammar
-# over its axes and classifies each form by running it. The three cases
-# below are what the product is held to.
-def test_every_generated_form_pays_what_it_owes(_tmp):
-    """The whole generated product, against the oracle, form by form.
-
-    Every class is counted and required to be non-empty: a sweep whose
-    oracle decided nothing has measured nothing and would pass on any guard
-    at all. The pinned does-not-reach class is what a rule that read the
-    whole CONTAINER instead of the value would fail, so its count is
-    reported next to the others.
-    """
-    _write_tree(Path(_tmp), {'pkg/__init__.py': '',
-                             'pkg/leaf.py': 'leaf = True\n'})
-    forms = _mcp_selection_sweep.sweep(
-        Path(_tmp), _mcp_selection_sweep.generated())
-    _mcp_selection_sweep.report(forms)
-    assert all(_mcp_selection_sweep.tally(
-        forms, 'oracle', _mcp_selection_sweep.CLASSES).values())
-    unpaid = _mcp_selection_sweep.unpaid(forms)
-    assert unpaid == f'0 unpaid of {len(forms)}:\n', unpaid
-
-
-def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
-    """A refusal the rule does not owe, counted and pinned rather than
-    tolerated.
-
-    Every one of them is a position the fold DECLINES to read — a free name
-    or a slice, and those are the only two the grammar has — on a container
-    that carries the operation, so the value it selects is unknown to this
-    walk even where the oracle settles it. A negative, a computed, an
-    out-of-range, a float and a key position are not in that set and are not
-    here: the fold reads each of them, and one it reads either selects an
-    element or names nothing at all.
-
-    Both the count and the SET are asserted, so a fold that widened, a step
-    that stopped being settled, or a marker that drifted shows here as a
-    failure instead of as a number scrolling past.
-    """
-    _write_tree(Path(_tmp), {'pkg/__init__.py': '',
-                             'pkg/leaf.py': 'leaf = True\n'})
-    forms = _mcp_selection_sweep.sweep(
-        Path(_tmp), _mcp_selection_sweep.generated())
-    _mcp_selection_sweep.report(forms)
-    bought = [form for form in forms
-              if form['inline'] == 'refused'
-              and form['oracle'] == 'does not reach']
-    for form in bought:
-        assert not form['pinned'] and form['carries'], form
-    assert len(bought) == 196, len(bought)
-    assert sorted({form['step'] for form in bought}) == ['a name', 'a slice']
-
-
-def test_a_stored_container_is_refused_exactly_when_it_mentions(_tmp):
-    """The stored spelling of every generated container, against the store
-    side's own property rather than the call side's.
-
-    The store is the more conservative of the two by construction: it
-    cannot know which element a reader will take, so it refuses a container
-    that mentions the operation even where every index the reader could use
-    selects something else. Pinning the store against ITSELF rather than
-    against the inline verdict is what makes the agreement a real one — and
-    the second assertion is the closure property that matters: no form that
-    reaches the operation escapes BOTH spellings.
-    """
-    _write_tree(Path(_tmp), {'pkg/__init__.py': '',
-                             'pkg/leaf.py': 'leaf = True\n'})
-    forms = _mcp_selection_sweep.sweep(
-        Path(_tmp), _mcp_selection_sweep.generated())
-    _mcp_selection_sweep.report(forms)
-    unclosed = [form['callee'] for form in forms
-                if (form['store'] == 'refused') != form['mentions']]
-    assert not unclosed, f'{len(unclosed)} stored forms: {unclosed[:5]}'
-    escaping = [form['callee'] for form in forms
-                if form['oracle'] == 'reaches'
-                and form['store'] == 'silent'
-                and form['inline'] == 'silent']
-    assert not escaping, f'{len(escaping)} reaching forms escape: {escaping}'
-    pairs = {(form['inline'], form['store']) for form in forms}
-    print('  inline->stored verdict pairs: ' + ', '.join(
-        f'{a}->{b}' for a, b in sorted(pairs)))
 
 
 if __name__ == '__main__':
