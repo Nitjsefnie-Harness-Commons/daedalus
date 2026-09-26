@@ -391,6 +391,20 @@ def assert_every_frame_member_refused(read_module, base):
             member, escapes)
 
 
+def assert_namespace_key_call_accepted(read_module, base):
+    """A real two-argument call naming the namespace key is a path, not a read.
+
+    The negative control on the tree the guard actually runs over. About ninety
+    calls in the CLI pass a constant string as a second argument, and the
+    widened call arm has to leave every one of them alone; this drives the one
+    whose second argument is the namespace key itself, which is the shape a
+    gate on the callee was introduced to spare.
+    """
+    body = "def do_reload(args):\n    api('GET', 'args')\n"
+    escapes = read_module({'commands_eval': plant_in_reload(base, body)})
+    assert escapes == [], escapes
+
+
 def assert_resolved_frame_receiver_refused(read_module, base, frame):
     """A receiver the audit resolves to a live frame is refused on that count.
 

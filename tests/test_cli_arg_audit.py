@@ -567,6 +567,12 @@ def test_cli_audit_refuses_a_resolved_frame_receiver(tmp):
         package_frame_escapes, base, sys._getframe())
 
 
+def test_cli_audit_accepts_a_real_call_naming_the_namespace_key(tmp):
+    base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
+    audit_support.assert_namespace_key_call_accepted(
+        package_frame_escapes, base)
+
+
 def test_cli_audit_respects_comprehension_shadowing(tmp):
     assert _audit_fake_handler('_ = [args.json for args in values]') == []
     assert _audit_fake_handler('[args.json for value in values]') == []
