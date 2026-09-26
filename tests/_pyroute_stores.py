@@ -7,6 +7,7 @@ state it must change, so the store path above it stays a dispatcher.
 import ast
 
 from _pyroute_keys import _UNRESOLVED_KEY, _literal_key
+from _pyroute_positions import position_key
 from _pyroute_storage import (container_copy, fold_dynamic,
                               replace_deferred_storage)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredContainer,
@@ -56,6 +57,22 @@ def store_deferred_target(
             return
         items = dict(owner.items)
         mapping = owner.kind == 'dict'
+        if not mapping and not dynamic:
+            # A negative key counts from the end, so it names a position
+            # rather than the key it is spelled as. Resolving it here is
+            # what keeps the stored value where a read will look for it.
+            placed = position_key(owner, literal)
+            if placed is None:
+                # The runtime raises on a key past the start, so the
+                # store never happens and the container stays as it is.
+                if owner.length is not None:
+                    return
+                # An unknown length names no position at all: the value
+                # joins the unknown-key slot every positional read
+                # consults, rather than a key no read can reach.
+                dynamic, literal = True, _UNRESOLVED_KEY
+            else:
+                literal = placed
         if dynamic and not removing:
             if value is not None or unknown_call:
                 fold_dynamic(
