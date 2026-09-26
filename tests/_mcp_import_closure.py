@@ -8,9 +8,12 @@ the import-by-name operation to a NAME the map does not track is refused
 too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. A CALLEE is
-read by its VALUE: folded to what it statically produces, a folded
-operation is resolved exactly as the direct spelling is, and one the fold
-cannot decide is refused when it mentions the operation. The registry is
+read by its VALUE (`_mcp_selection_fold`): folded to what it statically
+produces, a folded operation is resolved exactly as the direct spelling is,
+and one the fold cannot decide is refused when it mentions the operation. A
+LAMBDA is the call-result limit one step out — read in place it is a
+function, not its body — so it is exempted on the value, wherever the fold
+reaches it. The registry is
 read at every level — base structurally, key by folding it — and a store
 that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one
@@ -35,6 +38,7 @@ from pathlib import Path
 from typing import cast
 
 import _mcp_code_eval
+import _mcp_selection_fold
 
 
 DYNAMIC_ATTRIBUTES = ('import_module', '__import__')
@@ -134,38 +138,6 @@ def _dynamic_callees(tree):
     return bound
 
 
-def _selected_value(node):
-    """The value an expression statically produces, and whether the fold
-    decided it exactly. A subscript of a literal tuple or list by a
-    non-negative constant index inside it selects exactly that element, so
-    the fold takes it; a base that is itself a subscript is folded FIRST,
-    which leaves the depth unbounded and each step terminating. Everything
-    else is UNDETERMINED, which is not silence — the caller reads the
-    mention property over the expression instead. A `Dict` or `Set` is keyed
-    rather than positioned, a slice is not an element, a starred element
-    puts every other position out of reach, and a non-constant, negative or
-    out-of-range index is a position this walk cannot read.
-    """
-    if not isinstance(node, ast.Subscript):
-        return node, True
-    base, decided = _selected_value(node.value)
-    if not decided or not isinstance(base, (ast.Tuple, ast.List)) \
-            or any(isinstance(e, ast.Starred) for e in base.elts):
-        return node, False
-    index = node.slice
-    if not (isinstance(index, ast.Constant)
-            and isinstance(index.value, int)
-            and 0 <= index.value < len(base.elts)):
-        return node, False
-    return _selected_value(base.elts[index.value])
-
-
-def _callee_value(call):
-    """A call's callee value: folded where the fold decides, else whole."""
-    value, decided = _selected_value(call.func)
-    return value if decided else call.func
-
-
 def _is_dynamic_import(func, bound):
     """A call to import_module or __import__, per the module's own bindings.
 
@@ -187,7 +159,7 @@ def _is_dynamic_import(func, bound):
     return False
 
 
-def _yields_the_operation(value, bound):
+def _yields_the_operation(value, bound, delivered=False):
     """True when an expression's own subtree mentions the import-by-name
     operation, so a store of it can hand the operation to a name this map
     cannot follow.
@@ -205,6 +177,14 @@ def _yields_the_operation(value, bound):
     property's single limit, a call: a call evaluates to whatever its
     callee returns, not to the callee, so a name bound to a call's result
     is followed by neither this map nor these refusals.
+
+    A LAMBDA is the call's statement about a value READ IN PLACE, and it
+    turns on who is asking. Read in place it is a function, not its body,
+    so `(lambda: op)()` reaches nothing — the body is returned, not called.
+    DELIVERED to a name it is the opposite: calling the stored name is what
+    delivers, so the body is read after all. Keying this on the node rather
+    than on the call site's spelling is what makes a lambda reached by a
+    fold read the same as one written there.
     """
     if isinstance(value, ast.Name):
         tracked = bound.get(value.id)
@@ -213,7 +193,9 @@ def _yields_the_operation(value, bound):
         return _is_dynamic_import(value, bound)
     if isinstance(value, ast.Call):
         return False
-    return any(_yields_the_operation(child, bound)
+    if isinstance(value, ast.Lambda) and not delivered:
+        return False
+    return any(_yields_the_operation(child, bound, delivered)
                for child in ast.iter_child_nodes(value))
 
 
@@ -276,7 +258,8 @@ class _BindingWalk(ast.NodeVisitor):
         code-evaluating builtin, or nothing. The store path (`_leaf`) and the
         default path (`_defaults`) both route through this, so no axis can
         reach a store form another axis already reaches and be weaker there."""
-        if any(value is not None and _yields_the_operation(value, self.bound)
+        if any(value is not None
+               and _yields_the_operation(value, self.bound, delivered=True)
                for value in values):
             return 'operation'
         if any(value is not None and _yields_the_registry(value, self.bound)
@@ -413,7 +396,8 @@ class _BindingWalk(ast.NodeVisitor):
         if not node.name:
             return
         if node.type is not None \
-                and _yields_the_operation(node.type, self.bound):
+                and _yields_the_operation(node.type, self.bound,
+                                          delivered=True):
             self._alias(node)
         elif node.name in self.bound:
             self._rebind(node, node.name)
@@ -587,11 +571,14 @@ def _import_targets(path, root):
 
     A CALLEE is a value, and is read as one: folded to what it statically
     produces — a subscript of a literal tuple or list by a constant position
-    in it, however deeply nested — a folded operation is resolved exactly as
-    the direct spelling is, and a callee the fold cannot decide is refused
-    when it mentions the operation. Reading the CONTAINER rather than the
-    value is the failure that follows: `(0, importlib.import_module)[0]` is
-    a `0`, and is accepted.
+    in it however that position is spelled, through a starred literal, and
+    through a base or an element that is itself a selection, so the depth is
+    unbounded — a folded operation is resolved exactly as the direct spelling
+    is, and a callee the fold cannot decide is refused when it mentions the
+    operation. A LAMBDA is the call-result limit one step out, and a position
+    the runtime cannot reach is CLEAN rather than suspicious, so neither draws
+    a refusal. Reading the CONTAINER rather than the value is the failure that
+    follows: `(0, importlib.import_module)[0]` is a `0`, and is accepted.
 
     A call's RESULT stays outside the property on purpose: a call evaluates
     to whatever its callee returns, so refusing every store of one would
@@ -637,7 +624,7 @@ def _import_targets(path, root):
                         else alias.name
                     targets |= _resolve_name(name, base, root)
         elif isinstance(node, ast.Call) and _is_dynamic_import(
-                _callee_value(node), bound):
+                _mcp_selection_fold.callee_value(node), bound):
             argument = node.args[0] if node.args else None
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
@@ -646,10 +633,8 @@ def _import_targets(path, root):
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '
                         'this scan cannot read statically')
-        elif isinstance(node, ast.Call) and not isinstance(
-                node.func, ast.Lambda) and _yields_the_operation(
-                _callee_value(node), bound):
-            # A lambda is the property's call limit one step out.
+        elif isinstance(node, ast.Call) and _yields_the_operation(
+                _mcp_selection_fold.callee_value(node), bound):
             _refuse(path, root, node,
                     f'{ast.unparse(node.func)} reaches the import-by-name '
                     'operation through a value this scan cannot resolve')
