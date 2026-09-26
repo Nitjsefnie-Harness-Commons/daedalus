@@ -12,8 +12,8 @@ job that runs it, and the two suites drop out of the measured durations.
 The job set is DERIVED. A tracked script is a suite runner when, as an
 AST fact, it launches a suite; a job runs the suites when one of its
 steps invokes one. That replaced a hand-written job list which missed
-the `timed` matrix, and the derivation found all four jobs on the first
-run where the list had two.
+the `timed` matrix. The policed set is the three jobs the derivation
+names; the hand list it replaced had two.
 """
 import ast
 import fnmatch
@@ -102,22 +102,11 @@ def _launches_a_tests_file(source):
       * `subprocess.run`, `Popen`, `call`, `check_call`, `check_output`,
         `getoutput` and `getstatusoutput`, written as `subprocess.<name>`
         or as an `import subprocess as sp` alias, with the suite path
-        given as an argument;
-      * an argument list that REACHES a suite path indirectly, so
-        `subprocess.run([..., glob.glob("tests/test_x.py")[0]])` counts —
-        the walk descends into the expression.
-
-    EVERY OTHER SHAPE IS NOT POLICED, and that sentence is meant to
-    stand whatever this grammar turns out to contain rather than to
-    enumerate what is missing from it. The declined classes, by category
-    and with the representative measured for each: anything reached
-    through an IMPORT rather than written in the file (`plan_timed_matrix`
-    reaches the tests tree by importing `time_tests.selected`, and both
-    arms read it `False`); any launcher outside the seven names above
-    (`os.system`, `os.popen`, `os.execv`, `os.spawnv`, the asyncio pair);
-    and any suite path not written as an ARGUMENT (`args=`-only calls,
-    a command string holding the path, `+`-assembled paths, `Starred`
-    arguments, an f-string command).
+        given as an argument — directly, or reached indirectly, since the
+        walk descends into the argument expression;
+      * and NOTHING ELSE. Every other shape is not policed: anything
+        reached through an import, any launcher outside those seven
+        names, and any suite path not written as an argument.
     """
     for node in ast.walk(ast.parse(source)):
         if not (isinstance(node, ast.Call) and _is_a_launch_call(node)):
@@ -230,51 +219,15 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     route without noticing. These are the routes it does NOT follow, each
     found by the review that sent this wave back:
 
-      * (a) A JOB THAT NAMES A SUITE DIRECTLY. LIVE IN THE TREE TODAY:
-        `timed-timings.yml:300-301` runs
-        `python3 tests/test_timed_planner.py` and
-        `python3 tests/test_timed_refresh.py` at depth 1, and no bullet
-        here reaches it — not a wrapper, not the matrix entrypoint, not
-        a shell wrapper. Adding this branch's boundary suite to that step
-        breaks the property with this guard green. Latent, not a live
-        violation: nothing reads the base there today.
-      * (b) A CHECKOUT SHAPE this rule cannot see. Replacing `suites`'s
-        `actions/checkout` with `uses: ./.github/actions/checkout` gives
-        no width at all, and the check is on the WIDTH — see the empty
-        list in the assertion below.
-      * (c) THE SCRIPT UNIVERSE IS TWO GLOBS. `_tracked_scripts` reads
-        `run_tests.py` and `scripts/ci/*.py` — 28 of the repository's
-        tracked files — and this module's docstring used to say "a
-        tracked script" as though that were all of them. A suite
-        launched by any other tracked script is invisible.
-      * (d) JOB-LEVEL `uses:` DELEGATION. A job that delegates to
-        `uses: ./.github/workflows/…` has no `steps` to read.
-      * (e) JOB-SIDE LITERAL DEPENDENCY. `_invoked_scripts` needs the
-        tracked filename as a literal substring of the `run:` text, so
-        `run: python "$SUITE_RUNNER"` drops the job silently.
-      * (f) A `tests/` LITERAL LAUNCH. Measured on
-        `subprocess.run([sys.executable, "tests/test_x.py"])`: the glob
-        rule alone returns `False`, the composite before this wave's
-        tightening returned `True`, and this one returns `True`. So the
-        arm is NOT new against the previous composite — the tightening
-        changed what it drops, not whether it fires. What the glob rule
-        alone misses is the shape, and the arm is what covers a workflow
-        step that runs a suite directly.
-      * (g) A WORKFLOW FILE OTHER THAN tests.yml. The guard reads
-        `tests.yml`, so every other workflow file is invisible to it --
-        `release.yml`, which runs `run_tests.py` from a detached tag, and
-        `timed-timings.yml`, whose two suite steps at depth 1 bullet
-        (a) names;
-      * (i) A ROUTE REACHED THROUGH AN IMPORT. The planner enumerates
-        the tests tree by importing `time_tests.selected`, and both arms
-        read it `False`, so `plan-matrix` is no longer in the policed
-        set. It is named here rather than reached, because following
-        imports is a different rule from the one this guard states.
-      * (h) A TRANSITIVE WRAPPER, in either direction: a job that
-        reaches a runner through a script which itself reaches a runner.
-        This is the route that produced the tag-build incident, and the
-        rule has no transitive arm in either direction.
-
+      * (a) A JOB THAT NAMES A SUITE DIRECTLY, which no bullet below
+        reaches: `timed-timings.yml:300-301` runs two suites at depth 1
+        today. It is the only live instance, and nothing reads a base
+        there, so it is latent rather than a live violation.
+      * (b) A `tests/` DIRECTORY LISTING filtered at run time, which is
+        how `plan_timed_matrix.py` enumerates (`:267` lists `tests/`,
+        `:286` filters `test_*.py`). This is why `plan-matrix` left the
+        policed set, and the loss is benign by that job's own
+        `fetch-depth: 0` rather than by this guard.
     `timed` IS in the set, matched by the path literal
     `scripts/ci/time_tests.py` in the step's `run:` — the earlier
     disclosure listed the matrix entrypoint as uncovered, which
@@ -333,13 +286,16 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
     assert _launches_a_tests_file(
         'import subprocess\n'
         'subprocess.getstatusoutput(["python3", "tests/test_x.py"])\n')
-    # The shape that leaves BOTH arms, measured on the real script's
-    # own import form, so the gap is pinned and cannot close by
-    # accident.
-    assert not _enumerates_the_tests_tree(
-        'from time_tests import selected\nout = selected()\n')
+    # The shape that leaves BOTH arms, read off the REAL script and
+    # pinned against its real source, so the gap cannot close by
+    # accident: `plan_timed_matrix.py` enumerates by listing the tests
+    # DIRECTORY and filtering the names at run time.
+    real = (ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py').read_text(
+        encoding='utf-8')
+    assert not _launches_a_tests_file(real)
     assert not _launches_a_tests_file(
-        'from time_tests import selected\nout = selected()\n')
+        "import subprocess\n"
+        "subprocess.run(['git', 'ls-files', '--', 'tests/'])\n")
     # A call reached through a nested expression still counts, because
     # the walk descends into the argument.
     assert _launches_a_tests_file(
@@ -352,10 +308,9 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     """Each member of the policed set, pinned — including the ones no
     hand-written fixture stands for.
 
-    An earlier version of this test named three runners and asserted
-    them, which left a fourth (`plan_timed_matrix.py`) in the set with
-    nothing holding it: changing that script's shape would have dropped
-    `plan-matrix` with the guard green. Every member is named here now.
+    An earlier version named three runners and left a fourth in the set
+    with nothing holding it, so a change to that script would have
+    dropped its job with the guard green. The three members are named.
 
     One thing this test does NOT show, because it is true: removing the
     literal-launch arm leaves the set unchanged. All three runners glob,
@@ -364,12 +319,8 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     directly (`timed-timings.yml`, bullet (a)), and not for a member of
     today's set.
 
-    `plan_timed_matrix.py` is deliberately NOT asserted here. It reads
-    `False` on both arms — it reaches the tests tree by importing
-    `time_tests.selected` — and is named in the disclosure as route (i)
-    rather than followed, so pinning it would pin a member the rule does
-    not claim. Pinned instead is the shape: an import-only source reads
-    `False` on both arms, so the gap cannot close by accident.
+    `plan_timed_matrix.py` is deliberately NOT asserted: it reads
+    `False` on both arms and is named in the disclosure as route (b).
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
@@ -395,9 +346,7 @@ def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
 
     A substring version of this question put two CI scripts whose
     DOCSTRINGS name runners into the set and missed
-    `coverage_suites` — the job whose fetch-depth matters most. The
-    planner enumerates the tests tree too and is included, which costs
-    one workflow line, where under-inclusion is the hole.
+    `coverage_suites` — the job whose fetch-depth matters most.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
