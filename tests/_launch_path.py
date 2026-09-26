@@ -330,6 +330,11 @@ def _binding_analysis(relative, source, keeps):
     the module being asked about enters only as the name set the call is
     matched against, which the caller supplies — so it is memoised per
     (analyser, path, content) like every other per-file read here.
+
+    Per `tests/_coverage_memo.py`, that key cannot see a caller that
+    changes a global this reads without changing content, analyser or
+    path. A warm memo keeps answering from the pre-patch tree after a
+    helper the analyser calls is patched.
     """
     tree = ast.parse(source, filename=relative)
     receivers = _subprocess_receivers(tree)
