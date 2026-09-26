@@ -519,6 +519,85 @@ def load(name):
 ''', 8, 'cannot follow')
 
 
+def test_an_except_clause_that_delivers_the_operation_refuses(_tmp):
+    """`except` NAMES the classes it catches, so a clause carrying the
+    operation is the one store the map cannot follow past.
+
+    A lambda is the call-result limit where it is READ and its body where it
+    is DELIVERED, and an except clause is a delivery: the name it binds takes
+    the exception, so what the clause names is what the handler is handed.
+    A clause naming nothing the map tracks is left alone either way.
+    """
+    _assert_refusal(_tmp, '''
+import importlib
+
+
+def load():
+    try:
+        raise ValueError()
+    except (lambda: importlib.import_module) as loader:
+        return loader
+''', 8, 'cannot follow')
+    _scans_silently(_tmp, '''
+import importlib
+
+
+def load():
+    try:
+        raise ValueError()
+    except (lambda: print) as printer:
+        return printer
+''')
+
+
+# The nesting the walk's own recursion cannot follow. A subscript, a call and
+# a parenthesised expression all have to be DELIMITED and the parser refuses
+# them at 201, so a postfix or infix chain is the only way past that; `or`
+# and `<` chains are n-ary in the AST and stay flat, so they are not a shape
+# at all. Every value here is far past what the parser allows elsewhere.
+_ESCAPES = {
+    'an attribute chain': 'importlib.import_module' + '.a' * 600,
+    'an index chain': '[importlib.import_module][0' + '+0' * 600 + ']',
+    'a unary chain': '-' * 600 + '1',
+    'a concatenation chain': "'a'" + " + 'a'" * 600,
+    'a power chain': '1' + '**1' * 600,
+}
+
+
+def _chain_source(chain):
+    return '\nimport importlib\n\n\ndef load(c):\n    return ' + chain + '\n'
+
+
+def test_a_source_too_deeply_nested_to_follow_refuses(_tmp):
+    """Nesting the walk cannot follow is a VERDICT, not a traceback.
+
+    This scan IS the witness floor's closure, so a walk that dies on a
+    source takes the gate down instead of reporting it, and a reader gets a
+    recursion error rather than the name of the file that caused it. A
+    source too deep to read is refused by name, like every other unreadable
+    thing here.
+
+    The second half is the boundary the first half needs: a chain the walk
+    CAN follow is still followed, so a catch-all that refused everything
+    would fail here rather than pass.
+    """
+    for name, chain in _ESCAPES.items():
+        _write_tree(Path(_tmp), {'composition.py': _chain_source(chain)})
+        try:
+            _mcp_import_closure.composition_scan_set(
+                Path(_tmp) / 'composition.py', _tmp)
+        except AssertionError as raised:
+            message = str(raised)
+            assert 'composition' in message, (name, message)
+            assert 'too deeply nested' in message, (name, message)
+        else:
+            raise AssertionError(f'{name} was silently skipped')
+    _write_tree(Path(_tmp), {'composition.py': _chain_source(
+        'importlib.import_module' + '.a' * 200)})
+    _mcp_import_closure.composition_scan_set(
+        Path(_tmp) / 'composition.py', _tmp)
+
+
 def test_a_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
     """A name the map tracks cannot be overwritten, whatever it is set to.
 
