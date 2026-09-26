@@ -77,19 +77,20 @@ def test_do_net_capture_sends_the_buffer_limit_the_parser_chose(tmp):
 def test_do_net_capture_sends_the_buffer_limit_it_was_given(tmp):
     """`--max 5` travels as `maxRequests: 5`."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['net-capture', '--max', '5'], [{'tabId': 4}],
         plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 5}, 15)],
         token=TOK)
 
     assert recorded.calls == [('_net_cap', 'net-capture',
                                {'maxRequests': 5})], recorded.calls
+    assert out == 'Capturing network on tab 4\n', repr(out)
 
 
 def test_do_net_capture_names_the_tab_chrome_numbered_zero(tmp):
     """`--chrome-tab 0` adds `tabId: 0`; the guard is a presence test."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['net-capture', '--chrome-tab', '0'], [{'tabId': 0}],
         plan=[_ext('_net_cap', 'net-capture',
                    {'maxRequests': 1000, 'tabId': 0}, 15)],
@@ -98,6 +99,7 @@ def test_do_net_capture_names_the_tab_chrome_numbered_zero(tmp):
     assert recorded.calls == [('_net_cap', 'net-capture',
                                {'maxRequests': 1000, 'tabId': 0})], \
         recorded.calls
+    assert out == 'Capturing network on tab 0\n', repr(out)
 
 
 def test_do_net_capture_says_so_when_the_tab_is_already_capturing(tmp):
@@ -218,7 +220,7 @@ def test_do_net_capture_stop_carries_the_tab_and_bodies_when_it_was_given(
         tmp):
     """`--chrome-tab 0 --bodies` adds both, and 0 is the tab that counts."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['net-capture-stop', '--chrome-tab', '0', '--bodies'],
         [{'stopped': True, 'tabId': 0}],
         plan=[_ext('_net_stop', 'net-capture-stop',
@@ -228,6 +230,7 @@ def test_do_net_capture_stop_carries_the_tab_and_bodies_when_it_was_given(
     assert recorded.calls == [('_net_stop', 'net-capture-stop',
                                {'tabId': 0, 'bodies': True})], \
         recorded.calls
+    assert out == 'Captured 0 requests from tab 0\n', repr(out)
 
 
 def test_do_net_capture_stop_cuts_a_long_url_at_a_hundred_and_twenty(tmp):
@@ -337,7 +340,7 @@ def test_do_net_capture_get_prints_only_the_count_when_the_buffer_is_empty(
 def test_do_net_capture_get_carries_every_option_it_was_given(tmp):
     """The three options, all present, with the tab pinned at zero."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['net-capture-get', '--chrome-tab', '0', '--filter', 'seg-',
          '--bodies'],
         [{'tabId': 0, 'requests': []}],
@@ -348,6 +351,7 @@ def test_do_net_capture_get_carries_every_option_it_was_given(tmp):
     assert recorded.calls == [('_net_get', 'net-capture-get',
                                {'tabId': 0, 'filter': 'seg-',
                                 'bodies': True})], recorded.calls
+    assert out == '0 requests on tab 0\n', repr(out)
 
 
 def test_do_net_capture_get_cuts_a_long_url_at_a_hundred_and_twenty(tmp):

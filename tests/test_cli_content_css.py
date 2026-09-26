@@ -91,7 +91,7 @@ def test_do_inject_css_names_the_tab_chrome_numbered_zero(tmp):
     dropped a falsy tab would still satisfy every other tab in this file.
     """
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['inject-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'injected': 3, 'tabId': 0}],
         plan=[_ext('_inject_css', 'inject-css', {'css': 'a{}', 'tabId': 0})],
@@ -99,12 +99,13 @@ def test_do_inject_css_names_the_tab_chrome_numbered_zero(tmp):
 
     assert recorded.calls == [('_inject_css', 'inject-css',
                                {'css': 'a{}', 'tabId': 0})], recorded.calls
+    assert out == 'Injected 3 chars CSS into tab 0\n', repr(out)
 
 
 def test_do_inject_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     """`--all-frames` adds `allFrames` and nothing else."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['inject-css', '--css', 'a{}', '--all-frames'],
         [{'injected': 3, 'tabId': 2}],
         plan=[_ext('_inject_css', 'inject-css',
@@ -114,6 +115,7 @@ def test_do_inject_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     assert recorded.calls == [('_inject_css', 'inject-css',
                                {'css': 'a{}', 'allFrames': True})], \
         recorded.calls
+    assert out == 'Injected 3 chars CSS into tab 2\n', repr(out)
 
 
 def test_do_inject_css_prints_placeholders_for_a_result_counting_nothing(tmp):
@@ -167,7 +169,7 @@ def test_do_remove_css_reads_its_css_out_of_the_file_it_was_given(tmp):
 def test_do_remove_css_names_the_tab_chrome_numbered_zero(tmp):
     """`--chrome-tab 0` sends `tabId: 0`, the value a truthiness test drops."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['remove-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'removed': 3, 'tabId': 0}],
         plan=[_ext('_remove_css', 'remove-css', {'css': 'a{}', 'tabId': 0})],
@@ -175,12 +177,13 @@ def test_do_remove_css_names_the_tab_chrome_numbered_zero(tmp):
 
     assert recorded.calls == [('_remove_css', 'remove-css',
                                {'css': 'a{}', 'tabId': 0})], recorded.calls
+    assert out == 'Removed 3 chars CSS from tab 0\n', repr(out)
 
 
 def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     """`--all-frames` adds `allFrames` and nothing else."""
     del tmp
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['remove-css', '--css', 'a{}', '--all-frames'],
         [{'removed': 3, 'tabId': 2}],
         plan=[_ext('_remove_css', 'remove-css',
@@ -190,6 +193,7 @@ def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     assert recorded.calls == [('_remove_css', 'remove-css',
                                {'css': 'a{}', 'allFrames': True})], \
         recorded.calls
+    assert out == 'Removed 3 chars CSS from tab 2\n', repr(out)
 
 
 def test_do_remove_css_prints_placeholders_for_a_result_counting_nothing(tmp):
