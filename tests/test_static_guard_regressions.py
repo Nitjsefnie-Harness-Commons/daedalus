@@ -486,9 +486,8 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     them — so a saturation figure says more about the neighbours than
     about the bound. The arithmetic above is what the removal rests on;
     the timing only shows the margin is not comfortably large. Re-derive
-    it by timing
-    `suite.test_each_new_binding_and_match_arm_is_mutation_sensitive`
-    under `nproc` burners while reading /proc/loadavg.
+    it by timing the entry test under `nproc` burners while reading
+    /proc/loadavg.
 
     What bounds a wedged child now: `run_tests.py:14`
     `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:95` by
@@ -539,11 +538,11 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     toward finding a launch rather than past one; (5) an argv grown by
     anything but `append` / `extend` — an `insert`, say; (6) a launcher
     the import scan does not type — `__import__`, `getattr`,
-    `sys.modules`, or a
-    `subprocess.Popen` whose `wait` or `communicate` carries the
-    deadline; (7) a deadline spelled without the word, a clock
-    comparison plus a kill or a `signal.alarm`; (8) a `timeout`
-    defaulted inside a helper the launch is routed through; (9) any file
+    `sys.modules`, or a `subprocess.Popen` whose `wait` or
+    `communicate` carries the deadline; (7) a deadline spelled without
+    the word, a clock comparison plus a kill or a `signal.alarm`; (8) a
+    `timeout` defaulted inside a helper the launch is routed through;
+    (9) any file
     outside `tests/test_*.py` — the sweep's own grandchildren are
     bounded at 30s each in `tests/_mutation_sweep.py`, which this
     control leaves alone: a bound on one child is a backstop, only a

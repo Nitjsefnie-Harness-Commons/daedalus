@@ -1,7 +1,4 @@
-"""The launches that run the mutation sweep, and any wall bound on them.
-
-Not a suite itself — run_tests.py only loads `test_*.py`.
-"""
+"""Not a suite itself — run_tests.py only loads `test_*.py`."""
 import ast
 
 SWEEP_ENTRY = (
@@ -16,7 +13,6 @@ _APPENDERS = ('append', 'extend')
 
 
 def _callee(call):
-    """The call's callee spelled `module.member`, or its bare name."""
     function = call.func
     if (isinstance(function, ast.Attribute)
             and isinstance(function.value, ast.Name)):
@@ -49,7 +45,7 @@ def _run_spellings(tree):
 
 
 def _spelled(node, bound, seen=(), before=0):
-    """The text a literal-only expression spells, or None.
+    """The text a literal-only expression spells.
 
     A list is a program too, because `subprocess.run` takes its argv as
     one: its elements are read and joined, so a program assembled outside
@@ -83,7 +79,6 @@ def _spelled(node, bound, seen=(), before=0):
 
 
 def _statement(node):
-    """The expression a statement carries, or the node itself."""
     return node.value if isinstance(node, ast.Expr) else node
 
 
@@ -107,16 +102,12 @@ def _bind(node, bound):
     `argv.extend([...])`, which is the other way an argv is built. A
     match capture is bound to the match SUBJECT rather than to the value
     its own pattern matched, which over-approximates — every capture gets
-    the whole subject — and fails toward finding a launch rather than past
-    one.
+    the whole subject — and fails toward finding a launch, not past one.
 
-    The forms that name a value the scan cannot read — `with`/`as`,
-    `except`/`as` and `except*`/`as` name a context manager and an
-    exception, a comprehension target and a parameter default name a
-    value of another scope — are left unbound and declared in the guard's
-    docstring rather than bound to a node that spells to nothing. A target
-    that is not a bare name — a tuple unpacking, a subscript, a class
-    attribute — is likewise not read.
+    What is left unbound is the list the guard's own docstring owns, so
+    that the two cannot drift: the forms naming a value this cannot read
+    (`with` and `except` name a context manager and an exception, so they
+    spell to nothing) and the targets that are not bare names.
     """
     node = _statement(node)
     line = getattr(node, 'lineno', None)
@@ -163,8 +154,7 @@ def _carries_sweep(call, bound):
 def _own_nodes(scope):
     """Every node of one scope's own body, nested scopes left unopened.
 
-    A nested scope is yielded as a node but not descended into, so its
-    bindings never leak into the scope around it.
+    A nested scope is yielded as a node but not descended into.
     """
     pending = [scope]
     while pending:
@@ -179,10 +169,8 @@ def sweep_launches(tree, relative):
 
     A nested scope is a scope of its own, so a call and the program it
     runs are read together and never borrowed from a sibling. A scope's
-    whole body is bound before any call in it is judged, so a program
-    written inside a branch or a loop is read; and each binding is read
-    only up to the call's own line, so a scope that reuses a name for an
-    unrelated program afterwards reds nothing.
+    whole body is bound in a first pass, before any call in it is
+    judged, so a program written inside a branch or a loop is read too.
     """
     spellings = _run_spellings(tree)
     launches, timed = [], []
