@@ -29,12 +29,14 @@ class _FixedClock:
 
     The control that pins the bounds needs a deadline's arithmetic to be
     reproducible, and `(base + N) - base` reproduces N only when N is
-    exactly representable. A whole number of seconds is, at any scale; a
-    small one is not, at any scale either -- a small base shrinks the size
-    of the residue by about five orders of magnitude, it does not remove
-    it. So the fix is a base small enough to keep that residue far below
-    anything a bound here would have to tell apart, not a base that makes
-    the subtraction exact, which no base can do.
+    exactly representable. A whole number of seconds is, over every
+    monotonic reading this box can produce -- the first base where it
+    stops is near 1e16, where the ulp of the reading is itself 2. A small
+    one is not exact at any scale at all, and a small base shrinks the
+    residue by about five orders of magnitude without removing it. So the
+    fix is a base that keeps that residue far below anything a bound here
+    would have to tell apart, not one that makes the subtraction exact,
+    which no base can do.
     """
 
     def __init__(self, at=100.0):
@@ -44,7 +46,26 @@ class _FixedClock:
         return self.at
 
 
-def _wait_for_path(process, booted, path, clock=time.monotonic):
+class _SteppingClock:
+    """A monotonic reading that jumps past any bound on its first loop pass.
+
+    BOOT_DEADLINE is 120 seconds, so a control that waited it out for real
+    would cost two minutes on every suite leg to prove a bound fires. This
+    hands the wait a clock whose next reading is already past the bound it
+    was given, so the expiry is reached by arithmetic in milliseconds.
+    """
+
+    def __init__(self, step):
+        self.now = 0.0
+        self.step = step
+
+    def __call__(self):
+        self.now += self.step
+        return self.now
+
+
+def _wait_for_path(process, booted, path, clock=time.monotonic,
+                   boot_bound=BOOT_DEADLINE):
     """Wait for the client to boot, then for the path it publishes.
 
     Returns the boot bound and the publish bound this call applied.
@@ -52,12 +73,13 @@ def _wait_for_path(process, booted, path, clock=time.monotonic):
     The bound above governs the boot so the one below covers the publish and
     not a fresh interpreter's startup. The boot marker is a file rather than
     the child's printed line because every caller reads that line through
-    client_states, which reads the stdout pipe itself. The two deadlines are
-    named apart because the second is reassigned below: a pair of returns
-    reading one name would hand back the publish bound twice.
+    client_states, which reads the stdout pipe itself. The two deadlines get
+    separate names because sharing one is a hazard no reader can see: a pair
+    of returns reading a single name would hand back the publish bound twice
+    and still look right.
     """
     boot_opened = clock()
-    boot_deadline = boot_opened + BOOT_DEADLINE
+    boot_deadline = boot_opened + boot_bound
     while not booted.exists():
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before booting')
@@ -137,6 +159,47 @@ def test_the_publish_wait_applies_the_bound_the_suite_declares(tmp):
         assert applied == 5, applied
     finally:
         _drain.kill_and_drain(process)
+
+
+def test_the_boot_wait_names_a_client_that_stays_alive_and_never_boots(tmp):
+    """A wedged client is named by the bound rather than waited on forever.
+
+    Nothing else produces this state: every shipped fixture writes its boot
+    marker within its first statement, and every one of them dies at 60
+    seconds, well inside BOOT_DEADLINE, so the exit escape always wins and
+    the bound's own report is otherwise dead code. A client that starts and
+    then wedges is the case the bound exists for, and a premature one refuses
+    a healthy client with a message about the bound rather than the client.
+
+    The clock jumps past a short bound in one step, so the expiry is reached
+    by arithmetic in milliseconds rather than by two minutes of real waiting.
+    This control's subject IS the expiry, so the wait is the thing under
+    test here; no duration is compared against a threshold anywhere in it.
+    """
+    ready_path = Path(tmp) / 'wedged.ready'
+    booted_path = Path(tmp) / 'wedged.booted'
+    client = (
+        'import sys, time\n'
+        'print("started", flush=True)\n'
+        'time.sleep(60)\n'
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    message = ''
+    try:
+        _wait_for_path(process, booted_path, ready_path,
+                       clock=_SteppingClock(10.0), boot_bound=1)
+    except AssertionError as expiry:
+        message = str(expiry)
+    else:
+        message = 'a wedged client was waited on instead of refused'
+    finally:
+        _drain.kill_and_drain(process)
+    # The BOOT marker, not the ready path: that is also the check that the
+    # two deadlines are distinct, since only the boot wait ran at all.
+    expected = f'the client is alive and never published {booted_path.name}'
+    assert message == expected, message
 
 
 class _KillRecordsOwnStatus:
