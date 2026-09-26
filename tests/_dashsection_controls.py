@@ -432,3 +432,31 @@ await bounded(settle(), 'after the refusal', _dashnodeStepTimeoutMs);
 report({ declared, refusal });
 })().catch(leave);
 """
+
+
+# The same refusal, for a name no scenario wrote that `in` would still
+# find: every `Object.prototype` member is inherited by a plain object
+# literal, so an `in` check would answer a plan nobody declared and the
+# comment above `byType` would be false for eleven spellings.
+BY_TYPE_PROTOTYPE = r"""
+(async () => {
+""" + SEED + IMPORT_API + r"""
+drive.route('/command', { did: 'd1' });
+drive.route('/result?tab=extension',
+  { byType: { 'list-block-rules': { result: ['declared'] } } });
+const inherited = {};
+const seen = [];
+for (const type of ['toString', 'constructor', 'hasOwnProperty',
+                    'valueOf', '__proto__']) {
+  let refusal = null;
+  try {
+    await bounded(api.extCmd(type), 'a prototype name',
+      _dashnodeStepTimeoutMs);
+  } catch (error) { refusal = error.message; }
+  seen.push(refusal);
+  await bounded(settle(), 'after ' + type, _dashnodeStepTimeoutMs);
+}
+report({ refused: seen.filter((m) => m !== null).length,
+  refusals: REFUSALS.length, seen, inherited });
+})().catch(leave);
+"""
