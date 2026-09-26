@@ -96,7 +96,6 @@
     "tests/test_speed_gate.py": 16,
     "tests/test_speed_gate_jobs.py": 1,
     "tests/test_speedharness.py": 2,
-    "tests/test_static_guard_regressions.py": 1,
     "tests/test_stream_lifecycle.py": 2,
     "tests/test_stream_route.py": 3,
     "tests/test_stream_service.py": 1,
