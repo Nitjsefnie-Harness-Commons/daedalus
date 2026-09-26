@@ -1,20 +1,30 @@
 """The refusal conditions the frame rule implements, and the control that dies
-when each is removed. One row per condition;
-``tests/test_cli_arg_audit_conditions.py`` checks this table against the
-rule's own source and reports a condition with no row, a row naming another
-condition's control, and a row no condition backs. The second field is the
-condition's identity - the function it lives in, and the first operand of the
-guard that selects it - and the third names the control, ``test:<name>`` for
-one in ``tests/test_cli_arg_audit.py`` and ``plant:<name>`` for a row of
-``FRAME_NAMESPACE_PLANTS``. Every control named here was watched go red with
-its own condition removed.
+when each is removed. One row per condition; the suite named for this module
+checks the table against the rule's own source and reports a condition with no
+row, a row naming another condition's control, and a row no condition backs.
+The second field is the condition's identity: the function it lives in and the
+operand of the guard selecting it - each operand of a guard several conditions
+are split across has its own, a guard taken whole is named by its first
+operand, an unguarded refusal by ``return``, a walk root by what it yields.
+The third names the control, ``test:<name>`` in ``tests/test_cli_arg_audit.py``
+and ``plant:<name>`` in ``FRAME_NAMESPACE_PLANTS``. Every control named here
+was watched go red with its own condition removed.
 
-Two conditions cannot be told apart by any control in the tree, and the table
-says which: the attribute arm of ``frame_read`` and the member test inside it,
-which exactly two controls separate from the rest. A refusal the rule
-delegates to a function the walk's scope does not name is not carried here at
-all; the scope is declared, and the shapes the control cannot see are named in
-the suite that reads this table."""
+What no row here is worth reading as: ``frame_read``'s attribute arm and the
+member test inside it cannot be told apart by any control in the tree - two
+separate them from the rest; a refusal delegated to a function the walk's scope
+does not name, and a refusal nested in a statement inside an arm, are invisible
+to the control; and a key is the code's own text, so rewriting a guard in an
+equivalent spelling asks for a new key. The scope and the shapes it cannot
+see are named in the suite.
+
+Its reach, stated so it can be checked: over the domain of every row in this
+table against every other control the tree offers - 52 at this tree, 20 rows,
+1020 cells - a misattribution is detected in 249 of them, 24%. That domain is
+a sample of an axis that is not finite: it grows with the rows and with the
+controls, so the figure measures this tree rather than bounding anything. Over
+row pairs, with the rule: exchanging two rows' named controls and nothing else
+goes unnoticed for 91 of 190."""
 CONDITIONS_PINNED = (
     ('frame_read|isinstance(node, ast.Attribute)',
      'an attribute read is a selection the rule reads a member from',

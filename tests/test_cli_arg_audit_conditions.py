@@ -99,6 +99,11 @@ def _own_returns(statement):
     return found
 
 
+def _is_allow(expression):
+    return (isinstance(expression, ast.Constant)
+            and expression.value is None)
+
+
 def _refuses(statement):
     """Whether the arm's own return is the refusal, the allow, or neither.
 
@@ -110,8 +115,7 @@ def _refuses(statement):
     returns = _own_returns(statement)
     if not returns:
         return None
-    verdicts = {not (isinstance(node.value, ast.Constant)
-                     and node.value.value is None)
+    verdicts = {not _is_allow(node.value)
                 for node in returns if node.value is not None}
     if len(verdicts) != 1:
         return None
@@ -152,25 +156,44 @@ def _arm_conditions(starts, function, statement):
         yield from _inline_conditions(starts, function, node)
 
 
+def _allows(expression):
+    """Whether an expression is the allow, the refusal, or neither.
+
+    An inline conditional decides by returning one branch or the other, so the
+    direction is read off the conditional itself: ``return X if P else None``
+    and ``return None if P else X`` make the same decision with the allow in
+    opposite positions, and reading it off the statement's return value calls
+    both of them a refusal. A conditional with two allows or two refusals is
+    not a decision this table can read, and is taken whole.
+    """
+    body_allows = _is_allow(expression.body)
+    if body_allows == _is_allow(expression.orelse):
+        return None
+    return body_allows
+
+
 def _inline_conditions(starts, function, statement):
     """Yield the decision a return makes inline, as a condition of its own.
 
-    ``return <refusal> if <test> else <allow>`` decides the same question an
-    ``if`` arm does, in the return rather than beside it. Removing the
-    decision is leaving the allow, so the return is what the condition takes
-    with it.
+    ``return <one branch> if <test> else <the other>`` decides the same
+    question an ``if`` arm does, in the return rather than beside it. Removing
+    the decision is leaving the allow, so the return is what the condition
+    takes with it - and which branch that is depends on the conditional.
     """
     if not isinstance(statement.value, ast.IfExp):
         return
     guard = statement.value.test
-    if _splits(guard, True):
+    allows = _allows(statement.value)
+    if _splits(guard, not allows if allows is not None else None):
         for operand, span in _operand_spans(starts, guard):
             yield (f'{function.name}|{ast.unparse(operand)}', span, '',
                    operand.lineno)
         return
     first = guard.values[0] if isinstance(guard, ast.BoolOp) else guard
+    allow = (statement.value.body if allows
+             else statement.value.orelse)
     yield (f'{function.name}|{ast.unparse(first)}', _span(starts, statement),
-           f'return {ast.unparse(statement.value.orelse)}', guard.lineno)
+           f'return {ast.unparse(allow)}', guard.lineno)
 
 
 def _chain(statement):
