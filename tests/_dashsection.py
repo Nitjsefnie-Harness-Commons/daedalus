@@ -48,8 +48,9 @@ registry (same element, refusal by name), `nextSibling`, `insertBefore`,
 the class set in both directions, the parked clock and its cancellation,
 the `innerHTML` parse and its refusal, an unplanned request refused and
 recorded, a duplicate plan refused, an envelope that names another
-command, the `localStorage` round trip, the fan-out bus, the pump's
-selectivity, a `Headers` bag, a poll with no command behind it, a
+command, the poll retrying until the result is its own, the
+`localStorage` round trip, the fan-out bus and its live dispatch, the
+pump's selectivity, a `Headers` bag, a poll with no command behind it, a
 duplicate selector, and the `console.error` recorder. What is not held
 and is a refusal by inspection only: `removeChild` of a non-child,
 `remove()` outside the tree, an `insertBefore` reference outside its
@@ -277,6 +278,11 @@ globalThis.clearInterval = (id) => { clearParked(id); };
 // `drive.live()` for the scenario to fire itself. A window that found no
 // spendable slot has nothing to advance, and closes rather than spinning
 // on a turn that can never move.
+//
+// A command timing out in a section suite is the signal to re-measure
+// `api.js:142` against this line, not to suspect the harness: a cadence
+// that no longer matches leaves nothing spendable and every command hangs
+// to its bound, which is loud rather than green.
 const POLL_CADENCE_MS = 250;
 const PUMP = { open: false, at: 0, delay: 0 };
 
@@ -307,13 +313,15 @@ function openPump() {
   hostImmediate(pumpStep);
 }
 
-// The bus the dashboard hands every section as its second argument. Its
-// two halves follow `app.js`: `emit` catches a listener's failure and
-// reports it through `console.error` so one bad listener cannot silence
-// the rest, and `on` hands back the unsubscribe it stored. The dispatch
-// is over a snapshot, which is stricter than the shipped `Set` and is
-// what a scenario can reason about: a listener registered during a
-// dispatch runs at the next one, never inside the one that registered it.
+// The bus the dashboard hands every section as its second argument, and
+// it follows `app.js` on all three points a scenario can observe: `emit`
+// catches a listener's failure and reports it through `console.error` so
+// one bad listener cannot silence the rest, `on` hands back the
+// unsubscribe it stored, and the dispatch iterates LIVE, so a listener
+// registered during a dispatch is reached by the dispatch that registered
+// it. That last one is a property of JavaScript iteration, not a choice:
+// iterating a copy would model a collection the shipped `Set` does not
+// have, and a control pinning the copy would be pinning the fake.
 const bus = {
   on(fn) {
     LISTENERS.push(fn);
@@ -323,7 +331,7 @@ const bus = {
     };
   },
   emit(event) {
-    for (const fn of LISTENERS.slice()) {
+    for (const fn of LISTENERS) {
       try { fn(event); } catch (failure) { console.error(failure); }
     }
   },
@@ -338,7 +346,7 @@ _TRANSPORT = r"""
 const ROUTES = new Map();
 const REQUESTS = [];
 const REFUSALS = [];
-const LEDGER = { command: null, generation: 0 };
+const LEDGER = { command: null, generation: 0, polls: 0 };
 
 function queryValue(target, name) {
   const at = target.indexOf('?');
@@ -451,6 +459,18 @@ function resultAnswer(target, spec) {
   if (spec.envelope) return jsonAnswer(spec.envelope);
   if (!anchored) {
     throw unmodelled('a result poll before any command for', target);
+  }
+  // `wrong` is how many leading polls carry an envelope naming somebody
+  // else's command, which is what a shared result slot that has not been
+  // replaced yet looks like. The count is the plan's, so a scenario that
+  // needs the third poll to be its own says so and asserts three polls --
+  // not however many fitted in a wall clock.
+  if (spec.wrong !== undefined) {
+    LEDGER.polls += 1;
+    if (LEDGER.polls <= spec.wrong) {
+      return jsonAnswer(Object.assign({}, anchored,
+        { id: 'a command this is not' }));
+    }
   }
   if (spec.pending
       || (spec.result === undefined && spec.error === undefined)) {
