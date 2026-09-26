@@ -175,7 +175,12 @@ def test_a_case_variant_suffixed_bookkeeping_name_is_refused(tmp):
     """
     with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
         job = seg_job()
-        for reserved in (f'.{job}.json.DIRTY', f'.{job}.json.TMP'):
+        # The fullwidth stop is the third limb: NFKD folds U+FF0E to `.`, so
+        # on a normalising filesystem this name is the same directory as
+        # `.{job}.json.dirty`. A casefold WITHOUT NFKD would leave it
+        # unmatched and admit it, which is what mutant D1 is.
+        for reserved in (f'.{job}.json.DIRTY', f'.{job}.json.TMP',
+                         f'.{job}\uff0ejson.DIRTY'):
             status, body = mint_job(base, TOK, reserved)
             assert (status, body) == (
                 409, {'error': 'job name unavailable'}), (

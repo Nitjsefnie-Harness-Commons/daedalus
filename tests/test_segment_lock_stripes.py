@@ -27,7 +27,7 @@ from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
                        post_segment, seg_job)
 
 
-def _recording_setup(tmp, held_job='', park_job=''):
+def _recording_setup(tmp, held_job='', park_job='', park_convert=''):
     """The injected seams, and the env that installs them."""
     patch_dir = Path(tmp) / 'segstripe-patch'
     patch_dir.mkdir()
@@ -38,7 +38,8 @@ def _recording_setup(tmp, held_job='', park_job=''):
     return gate_dir, {
         **BRIDGE_ENV, 'PYTHONPATH': str(patch_dir),
         'SEG_GATE_DIR': str(gate_dir), 'SEG_HELD_JOB': held_job,
-        'SEG_PARK_JOB': park_job}
+        'SEG_PARK_JOB': park_job,
+        'SEG_PARK_CONVERT': park_convert}
 
 
 def _lock_calls(gate_dir):
@@ -127,6 +128,84 @@ def _shared_lock_witness(gate_dir, held_job, unrelated):
     held = _job_lock_ids(gate_dir, held_job)
     other = _job_lock_ids(gate_dir, unrelated)
     return sorted(set(held) & set(other)), held, other
+
+
+def _await_blocked(gate_dir, count):
+    """Wait until `count` requests have been recorded kept out of a lock.
+
+    A recorded failed acquire, not a clock and not an arrival. Releasing the
+    conversion on a timeout instead would grade a run in which the write had
+    not reached the lock yet, which is the run where the hold is what
+    matters.
+    """
+    path = gate_dir / 'blocked'
+    deadline = time.time() + 30
+    while True:
+        seen = (len(path.read_text(encoding='utf-8').splitlines())
+                if path.is_file() else 0)
+        if seen >= count:
+            return
+        assert time.time() < deadline, (
+            f'only {seen} of {count} requests were recorded BLOCKED; the '
+            'write reached its own lock, so nothing held it out')
+        time.sleep(0.01)
+
+
+def test_a_legacy_conversion_does_not_refuse_a_concurrent_write(tmp):
+    """A legacy conversion in flight must not turn a valid write into 403.
+
+    A job whose record predates the quotas is converted on its next mint,
+    and the conversion REWRITES the record's `max_*` fields. A `POST
+    /segment` that read the record inside that window sees no quotas,
+    `quota()` returns None, and the request answers `403 bad sig` for a job
+    that exists and whose capability is valid. The admit hold is what
+    excludes the window, and the release below is what makes the control
+    able to see it: the conversion is parked inside its OWN hold and is
+    let go only once the seam has recorded the write BLOCKED — a recorded
+    failed acquire, not a deadline. With the hold removed the write is
+    never kept out, nothing is recorded, and the control fails on that.
+    """
+    job = 'legacy-conversion'
+    gate_dir, env = _recording_setup(tmp, park_convert=job)
+    with _util.bridge(tmp, env=env) as (base, docroot):
+        _await_file(gate_dir, 'ready', 'the injected seams were installed')
+        seg_dir = Path(docroot) / 'segments' / job
+        seg_dir.mkdir(parents=True)
+        (seg_dir / '000000.ts').write_bytes(b'abc')
+        (Path(docroot) / 'segments' / f'{job}.json').write_text(
+            json.dumps({'token': TOK, 'sig': 'legacy-capability'}),
+            encoding='utf-8')
+
+        answers = {}
+
+        def ask(name, call):
+            def run():
+                try:
+                    answers[name] = call()
+                except Exception as exc:  # pylint: disable=broad-except
+                    answers[name] = exc
+            return run
+
+        (gate_dir / 'arm-convert').write_text('arm', encoding='utf-8')
+        mint_thread = threading.Thread(
+            target=ask('convert', lambda: mint_job(base, TOK, job)))
+        mint_thread.start()
+        _await_file(gate_dir, 'conversion-parked',
+                    'the conversion parked inside its own hold')
+        write_thread = threading.Thread(target=ask(
+            'write', lambda: post_segment(
+                base, job, 'legacy-capability', '1', payload=b'abc')))
+        write_thread.start()
+        _await_blocked(gate_dir, 1)
+        (gate_dir / 'release-conversion').write_text('release',
+                                                     encoding='utf-8')
+        for thread in (mint_thread, write_thread):
+            thread.join(timeout=30)
+            assert not thread.is_alive(), answers
+        assert answers['convert'][0] == 200, answers
+        assert answers['write'][0] == 200, (
+            'a segment write was refused while a legacy conversion was in '
+            f'flight: {answers["write"]!r}')
 
 
 def test_a_held_job_stripe_blocks_only_that_job(tmp):
@@ -218,29 +297,29 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
         assert held_box.get('error') is None, held_box
         assert held_box.get('value') == (200, b'{"ok": true}'), held_box
 
-        # Read AFTER the join, where a marker can exist at all. Before it,
-        # the only thread that could record `overlap-<held job>` is the held
-        # write — which is blocked inside acquire() and never reaches the
-        # recording line — so the assertion was reading a file that had not
-        # been written, and a marker the run does produce is
-        # `overlap-<unrelated>`, which this does not read.
-        #
-        # CORROBORATING, not load-bearing. The two assertions that carry
-        # this control are the settlement hand-off — three requests recorded
-        # an outcome, which a site on its own stripe cannot do — and the
-        # `asked == job` check in the site-agreement control, which is exact
-        # where this is a hash. Deleting the hand-off because this marker
-        # looks sufficient is how this control goes green with a site
-        # pointed at its own stripe; `_overlap_report`'s docstring names
-        # the two.
-        assert not _overlap_report(gate_dir, held_job), \
-            _overlap_report(gate_dir, held_job)
-
+        # Premise FIRST. A holder that died mid-hold has to skip here, not
+        # be graded: the marker below is absent in that run for the same
+        # reason it is absent before the join, and a hard fail on a fixture
+        # that fell over reads as a product defect.
         failed = _holder_failure(gate_dir)
         if failed is not None:
             _util.skip(
                 'the injected holder failed while the request was waiting, '
                 'so the property was never exercised end to end: ' + failed)
+        # After the join, where a marker can exist at all. Before it, the
+        # only thread that could record `overlap-<held job>` is the held
+        # write, which is blocked inside acquire() and never reaches the
+        # recording line; the marker the run does produce is
+        # `overlap-<unrelated>`, which this does not read.
+        #
+        # CORROBORATING, and this control's own assertions carry it — NOT
+        # `_await_settlements`, which belongs to the site-agreement control
+        # and has nothing to do with this one. What carries this control is
+        # the unrelated write answering 200 above, which cannot happen under
+        # one lock, and the lock-id witness below. This marker names WHICH
+        # job took a lock during the hold, which those two do not.
+        assert not _overlap_report(gate_dir, held_job), \
+            _overlap_report(gate_dir, held_job)
         held_ids = _job_lock_ids(gate_dir, held_job)
         assert held_ids, (holder, _lock_calls(gate_dir))
         assert all(lock_id == holder[1] for lock_id in held_ids), (
@@ -311,13 +390,16 @@ def _overlap_report(gate_dir, job=None):
     defect); the held-stripe control wants the first, because an unrelated
     job is *supposed* to take its own stripe while another is held.
 
-    What it is NOT: the assertion that carries these controls. The hand-off
-    in `_await_settlements` is — three distinct requests each recording an
-    outcome, which a site pointed at its own stripe cannot produce — and so
-    is the `asked == job` check in the site-agreement control, which is
-    exact where this is a hash. This marker is CORROBORATING: it names which
-    job took a lock during a hold, which the other two do not, and it is
-    worth reading when one of them fires.
+    CORROBORATING in both controls that read it, and each carries itself
+    with its OWN assertions. The site-agreement control is carried by
+    `_await_settlements` (three distinct requests each recording an outcome,
+    which a site pointed at its own stripe cannot produce) and by its
+    `asked == job` check, which is exact where this is a hash. The
+    held-stripe control is carried by the unrelated write completing and by
+    its lock-id witness; it has no settlement assertion at all, and reading
+    this marker as though it shared the other control's coverage is the
+    mistake I-1 named. The marker's own value is that it says WHICH job took
+    a lock during a hold, which none of those assertions says.
 
     Read it only once every request has finished. A selection trace cannot
     answer this — a request can be seen choosing a stripe and still be
