@@ -197,6 +197,36 @@ def _bound():
     return int(found[0])
 
 
+# The bound from both sides, read out of the module rather than restated:
+# at the bound nothing is forgotten, and one frame past it the oldest is.
+_BOUNDARY = _OPEN_STREAM + r"""
+const frames = () => seen.filter((e) => e[0] === false);
+const quiet = async (label) => {
+  for (let guard = 0; guard < 3; guard += 1) {
+    await bounded(settle(), label, _dashnodeStepTimeoutMs);
+  }
+};
+const bound = %d;
+const ids = [];
+for (let i = 0; i < bound; i += 1) ids.push('e' + i);
+for (const id of ids) push({ kind: 'event', id, type: 'result' });
+for (let guard = 0; guard < 8 && frames().length < bound; guard += 1) {
+  await bounded(settle(), 'the bound frames arriving', _dashnodeStepTimeoutMs);
+}
+const fed = frames().length;
+push({ kind: 'event', id: ids[0], type: 'result' });
+await quiet('replay at the bound');
+const atBound = frames().length;
+push({ kind: 'event', id: 'e' + bound, type: 'result' });
+await quiet('the frame past the bound');
+const past = frames().length;
+push({ kind: 'event', id: ids[0], type: 'result' });
+await quiet('replay past the bound');
+report({ bound, fed, atBound, past, after: frames().length,
+  last: frames()[frames().length - 1][3] });
+""" % _bound()
+
+
 def _assert_one_restart(report):
     """The log holds the start and one restart. A direction that
     restarted when it should not reaches three; one that failed to
@@ -331,6 +361,29 @@ def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
     assert report['afterOldest'] == fed + [[False, 'result', 'event',
                                            'e0']], report
     assert report['seen'] == report['afterOldest'], report
+
+
+def test_the_dispatched_id_set_forgets_nothing_until_it_is_one_past_the_bound(_tmp):
+    """`sse.js:64`'s `>` rather than `>=`. The eviction property and the
+    eviction order both hold either way, so a suite that asserts only
+    those cannot tell them apart -- but at rest the set is documented to
+    hold the whole bound, and `>=` leaves it one short of that.
+
+    Two directions, and the first is what gives the second its meaning:
+    at the bound the oldest is still remembered, so its replay is
+    dropped, and one frame later the same replay is dispatched. `fed` is
+    the liveness of both -- if the frames had not all arrived, a replay
+    that added nothing would prove nothing."""
+    bound = _bound()
+    report = _run(_BOUNDARY)
+    # The report carries every settlement, and this scenario reads the
+    # whole bound, so the assertion is over the counts alone: a failure
+    # here prints six numbers rather than five hundred chunks.
+    counts = {key: report[key] for key in
+              ('bound', 'fed', 'atBound', 'past', 'after', 'last')}
+    assert counts == {'bound': bound, 'fed': bound, 'atBound': bound,
+                      'past': bound + 1, 'after': bound + 2,
+                      'last': 'e0'}, counts
 
 
 def test_a_storage_event_with_a_changed_token_restarts_the_client(_tmp):
