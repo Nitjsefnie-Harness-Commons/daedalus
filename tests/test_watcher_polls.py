@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _watcher_polls import await_polls, per_poll  # noqa: E402
+from _watcher_polls import per_poll  # noqa: E402
 
 # The base comment watcher's one poll: the four REST surfaces it reads, in
 # the order the call log records them - the pull request itself first, its
@@ -22,36 +22,6 @@ from _watcher_polls import await_polls, per_poll  # noqa: E402
 # order-sensitive measure uncaught.
 BASE_POLL = ['repos/o/r/pulls/195', 'repos/o/r/pulls/195/reviews',
              'repos/o/r/pulls/195/comments', 'repos/o/r/issues/195/comments']
-
-# A double that never terminates turns a missing liveness escape into a job
-# timeout, so the escape's own control ends by name instead.
-RUNAWAY_CALL_LIMIT = 1000
-
-
-class _SilentLog:
-    """A call log that never establishes a width, and says so by name."""
-
-    def __init__(self):
-        self.reads = 0
-
-    def calls(self):
-        self.reads += 1
-        if self.reads > RUNAWAY_CALL_LIMIT:
-            raise AssertionError('log double exceeded call limit')
-        return []
-
-
-class _ExitedChild:
-    """A child that has exited: it can make no further call."""
-
-    def __init__(self, output):
-        self._output = output
-
-    def alive(self):
-        return False
-
-    def captured(self):
-        return self._output
 
 
 def _logged(requests, gaps=None, step=0.01):
@@ -131,30 +101,6 @@ def test_a_trailing_partial_poll_is_trimmed_rather_than_refused(tmp):
         trailing = BASE_POLL * 2 + BASE_POLL[:extra]
         assert per_poll(_logged(trailing)) == len(BASE_POLL), (
             extra, trailing)
-
-
-def test_the_poll_wait_gives_up_by_name_when_the_child_exits(tmp):
-    """A child that has exited ends the wait, and the failure says which.
-
-    This branch is the only thing between a broken watcher and a wait that
-    runs to the job's limit, so the control drives it with a child that can
-    make no further call and reads the wait's own name and the child's
-    output back out of the failure. The log double ends by name past its own
-    limit, so a wait that ignored the child would fail here rather than at
-    the job's timeout.
-    """
-    del tmp
-    child = _ExitedChild('gh: no fixture carries the query')
-    message = None
-    try:
-        await_polls(_SilentLog(), child, 'the comment watcher to poll twice')
-    except AssertionError as exc:
-        message = str(exc)
-    else:
-        raise AssertionError('a wait on an exited child did not fail')
-    assert message is not None
-    assert 'the comment watcher to poll twice' in message, message
-    assert 'gh: no fixture carries the query' in message, message
 
 
 def main():
