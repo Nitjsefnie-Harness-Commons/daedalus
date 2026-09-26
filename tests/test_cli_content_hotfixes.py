@@ -20,10 +20,13 @@ value that tells the two apart.
 `clear-hotfixes`, `False` included, so both spellings are pinned here.
 `--chrome-tab 0` is the usual third: the value a truthiness test drops.
 
-`do_list_hotfixes` is deliberately absent. Its row is rendered through
-`time.strftime` on a local timestamp, so a whole-string comparison
-would bake this machine's timezone into the suite, and it is already
-covered by tests/test_cli_hotfixes.py.
+`do_list_hotfixes` is here for one arm only. Its rows are rendered
+through `time.strftime` on a local timestamp, so a whole-string
+comparison of a row would bake this machine's timezone into the suite;
+`tests/test_cli_hotfixes.py` owns the two columns an operator can act
+on, and this file pins the empty listing, whose `No hotfixes stored`
+line no suite in the tree asserted before -- the branch was driven
+through `tests/test_cli.py` with its output unchecked.
 """
 import sys
 from pathlib import Path
@@ -85,11 +88,22 @@ def test_store_hotfix_sends_an_empty_pattern_rather_than_dropping_it(tmp):
     the operator believes it was scoped. The field set is the whole
     assertion -- `''` present and nothing beside it -- so a handler that
     sent the empty pattern but also a flag it was not given fails too.
+
+    The answer is the default record, because that is what the worker
+    sends for any fix it holds without a scope: `hotfixes.js` answers
+    `match: match || null`, and `''` is falsy, so an empty pattern can
+    never come back as an empty pattern. Against the real extension
+    this command does not render at all -- it exits on the worker's
+    refusal -- and that surfacing is `ext_cmd`'s, not this handler's:
+    `invoke.py` raises it, and the harness here rebinds `ext_cmd` itself,
+    so this suite cannot reach it. `tests/test_cli_error_reporting.py`
+    is where a refused command's exit is pinned, and driving the real
+    `ext_cmd` against a live worker is the end-to-end check.
     """
     del tmp
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE, '--match', ''],
-        [_stored(match='')],
+        [_stored()],
         plan=[_ext('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE, 'match': ''})],
         token=TOK)
@@ -97,10 +111,11 @@ def test_store_hotfix_sends_an_empty_pattern_rather_than_dropping_it(tmp):
     assert recorded.calls == [('_store_hf', 'store-hotfix',
                                {'fixId': 'fix', 'code': CODE,
                                 'match': ''})], recorded.calls
-    # The extension is the only thing that can decide whether a pattern
-    # is a pattern, and its refusal is the point of sending the empty
-    # string: the CLI now surfaces an error the user did not get before.
-    assert out == 'Stored hotfix "fix" [] (1 total)\n', repr(out)
+    # `[unscoped]` and not `[SCOPE]`: the record that comes back carries
+    # no scope, which is the state a refused store leaves nothing of.
+    # The arm that renders a scope is the one above, and the arm that
+    # renders `[PERM]` beside one is `..._renders_both_markers_...`.
+    assert out == 'Stored hotfix "fix" [unscoped] (1 total)\n', repr(out)
 
 
 def test_store_hotfix_reads_its_source_out_of_the_file_it_was_given(tmp):
@@ -282,6 +297,26 @@ def test_do_clear_hotfixes_reports_the_wider_clear_without_the_counts(tmp):
                                {'includePermanent': True})], \
         recorded.calls
     assert out == 'All hotfixes cleared (incl. permanent)\n', repr(out)
+
+
+# ── do_list_hotfixes ─────────────────────────────────────────────────
+
+def test_do_list_hotfixes_says_so_when_none_is_stored(tmp):
+    """The empty listing is a sentence and an early return.
+
+    One line, no timestamp: the twelve-wide cell and the strftime below
+    it are what make a row unpinnable here, and neither of them runs
+    on this arm. Nothing asserted this string before, so a handler that
+    printed nothing at all for an empty buffer passed every suite.
+    """
+    del tmp
+    recorded, out = run_cli(
+        ['list-hotfixes'], [{'version': '1.0', 'fixes': []}],
+        plan=[_ext('_list_hf', 'list-hotfixes', {})], token=TOK)
+
+    assert recorded.calls == [('_list_hf', 'list-hotfixes', {})], \
+        recorded.calls
+    assert out == 'No hotfixes stored\n', repr(out)
 
 
 # ── do_set_permanent ─────────────────────────────────────────────────
