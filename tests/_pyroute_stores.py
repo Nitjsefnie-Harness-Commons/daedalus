@@ -13,6 +13,11 @@ from _pyroute_storage import (container_copy, fold_dynamic,
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredContainer,
                              DeferredInstance, is_deferred_value, sync_cells)
 
+# The kinds whose instances take `x[k] = v`. A kind outside this set has
+# no item assignment at all, so a subscript store into one is a store the
+# runtime refuses rather than one that lands anywhere.
+_ASSIGNS_BY_INDEX = ('list', 'dict')
+
 
 def replace_container(state, owner_name, owner,
                       items, unknown_length=False):
@@ -54,6 +59,12 @@ def store_deferred_target(
             owner = DeferredContainer({}, None, 'dict', target)
             state.callables[owner_name] = owner
         elif not isinstance(owner, DeferredContainer):
+            return
+        elif owner.kind not in _ASSIGNS_BY_INDEX:
+            # A tuple and a set have no item assignment, so a subscript
+            # store into one never happens - in either sign, and not only
+            # where the key is out of range. Leaving the container as it
+            # is is the same answer a list store past the end gets.
             return
         items = dict(owner.items)
         mapping = owner.kind == 'dict'
