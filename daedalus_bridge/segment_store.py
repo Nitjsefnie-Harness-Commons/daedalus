@@ -1,5 +1,5 @@
 """Segment job records and HLS segment usage accounting."""
-import os, json, hmac, secrets, threading, time
+import os, json, hmac, secrets, threading, time, unicodedata
 
 from daedalus_bridge import atomic_file
 from daedalus_bridge import delivery_stripes
@@ -27,10 +27,52 @@ DEBUG_TIMING = debug_timing()
 # mapping leaves whoever chooses job names nothing to compute offline, and a
 # per-job table would be unbounded over names an authenticated caller
 # controls.
+#
+# What the key must cover is every pair of names that could be ONE filesystem
+# entry, because two names that are one entry and take two stripes lose mutual
+# exclusion. Two things make names one entry here, and both are folded before
+# hashing: the record affix, so `a` and `a.json` meet, and case plus
+# normalisation, so `Foo`/`foo` and a composed/decomposed pair meet the way a
+# case-insensitive or normalising filesystem would put them together. The
+# bookkeeping names a job spends are refused at mint, so no fourth kind of
+# name can reach a path — see `reserved_bookkeeping_name`.
 SEGMENT_LOCK_STRIPES = 64
 seg_locks = tuple(threading.Lock() for _ in range(SEGMENT_LOCK_STRIPES))
 
 _RECORD_AFFIX = '.json'
+
+# The two names a job spends beside its record, as suffixes on the job name:
+# the marker `mark_dirty` writes and the temp `write_usage` replaces from.
+# Both are the record affix plus the one that call adds, and both are read
+# here rather than spelled out so the refusal cannot drift from the layout.
+_BOOKKEEPING_SUFFIXES = (f'{_RECORD_AFFIX}.dirty', f'{_RECORD_AFFIX}.tmp')
+
+
+def reserved_bookkeeping_name(job):
+    """Whether `job` is a name the segment layout already spends on a job.
+
+    A job named K owns four names under the segments root: its directory
+    `K`, its record `K.json`, the marker `.{K}.json.dirty` and the temp
+    `.{K}.json.tmp`. Only the last two can be another job's own name, and
+    minting one parks a directory exactly where its owner has to write a
+    file: `mark_dirty` cannot, so every segment write for the owner
+    answers 500 from then on.
+
+    The test is the shape, not what is on disk, because a lookup answers
+    differently on the two sides of the minting order. With the reserved
+    name minted first there is no owner to collide with yet, so a
+    conditional refusal admits it — and the owner's own mint then succeeds
+    into a namespace the squatter already holds, which is the same 500 one
+    step later. The shape asks the same question whichever job is minted
+    first, needs no stat, and cannot be raced by a concurrent mint.
+
+    `.json.dirty` and `.json.tmp` are not that shape: they carry no job
+    name between the leading dot and the affix, so no job reserves them.
+    """
+    if not job.startswith('.'):
+        return False
+    return any(job.endswith(suffix) and len(job) > len(suffix) + 1
+               for suffix in _BOOKKEEPING_SUFFIXES)
 
 
 def _job_chain_root(job):
@@ -38,18 +80,34 @@ def _job_chain_root(job):
 
     The namespace is flat, so the job named `a` keeps its record at
     `a.json` — the very directory the job named `a.json` keeps its segments
-    in. Two names that differ only by trailing record affixes therefore own
-    one filesystem entry between them, and the write path joins the pair as
-    well as the mint does, because it writes that record too. Folding the
-    affix off names the chain, and every member of a chain then takes one
-    stripe: the two calls that touch one path cannot interleave. `normcase`
-    is the identity on POSIX and folds case on Windows, which is a
-    filesystem that answers two spellings with one entry.
+    in, and the write path joins that pair as well as the mint does,
+    because it writes that record too. Folding the affix off names the
+    chain, and every member of a chain then takes one stripe: the two calls
+    that touch one path cannot interleave.
+
+    The case and normalisation folds are what make the chain the whole
+    story rather than nearly all of it. `os.path.normcase` cannot see what
+    a case-insensitive filesystem does to `Foo` and `foo`, and those two
+    names are one directory and one record there; a key that split them
+    would let two writes to one directory interleave the usage read, the
+    quota check and the record write that `store_segment` holds as one.
+    Normalising and casefolding before the strip also puts `Foo.JSON` and
+    `foo.json` on one chain, which is where a case-insensitive parent would
+    have put them, and normalising again afterwards covers a sequence the
+    strip exposed.
+
+    Every fold here is a superset of what a filesystem might treat as one
+    entry, and a superset is the safe direction: two names that are
+    genuinely distinct and land on one stripe cost the wait that sharing a
+    stripe already costs, while two names that are one entry and land on
+    different stripes lose mutual exclusion entirely. So the key folds more
+    whenever in doubt. With the bookkeeping names refused at mint, this
+    chain is then exactly the set of job names that can own one path.
     """
-    root = job
+    root = unicodedata.normalize('NFKD', job).casefold()
     while root.endswith(_RECORD_AFFIX):
         root = root[:-len(_RECORD_AFFIX)]
-    return os.path.normcase(root)
+    return unicodedata.normalize('NFKD', root).casefold()
 
 
 def seg_lock_for(job):

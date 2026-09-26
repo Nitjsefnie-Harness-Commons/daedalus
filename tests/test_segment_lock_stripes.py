@@ -13,14 +13,17 @@ lock object each caller was given, so a claim about who blocked whom is
 settled by the record and not by how fast the machine was.
 """
 import concurrent.futures
+import json
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _segments import BRIDGE_ENV, TOK, mint_job, post_segment  # noqa: E402
+from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
+                       post_segment, seg_job)
 
 
 # The stripe is selected inside the bridge process, whose per-process seed
@@ -200,7 +203,9 @@ def test_a_dotted_name_and_its_own_name_take_one_stripe(tmp):
         assert first is store.seg_lock_for(base + '.json.json'), base
         assert first is store.seg_lock_for(base + '.json.json.json'), base
     # The strip is on the record affix and not on any dot: `a.b` keeps its
-    # own name, so the chain is exactly the names that share a path.
+    # own name. The bookkeeping names a job also spends are refused at mint
+    # (see `test_the_dirty_bookkeeping_name_is_refused_beside_its_job`), so
+    # no other name can reach a path this chain does not already name.
     assert (store.seg_lock_for('a.b')
             is store.seg_lock_for('a.b.json')), 'a.b'
     unrelated = 'relay-2'
@@ -348,6 +353,158 @@ def test_two_writes_to_one_job_take_one_stripe_and_one_budget(tmp):
         assert len(lock_ids) == 1, (
             'one job reached more than one lock object: '
             f'{_lock_calls(gate_dir)!r}')
+
+
+def _store_one_segment(base, job, sig):
+    """POST one admitted segment, answering (status, body)."""
+    return post_segment(base, job, sig, '0', payload=b'abc')
+
+
+def _job_record(docroot, job):
+    return json.loads(
+        (Path(docroot) / 'segments' / f'{job}.json').read_text(
+            encoding='utf-8'))
+
+
+def test_the_dirty_bookkeeping_name_is_refused_beside_its_job(tmp):
+    """`.{job}.json.dirty` is the marker `mark_dirty` writes, not a job name.
+
+    A job named K spends four names under the segments root, and this is
+    the marker among them. Minted as a job of its own it parks a directory
+    exactly where the victim's first segment write has to put a file, and
+    mark_dirty cannot, so every write for the victim answers 500 from then
+    on. The refusal is the collision refusal's own answer, so a caller
+    cannot read the reservation as an oracle for which names are in use.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        job = seg_job()
+        status, body = mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        reserved = f'.{job}.json.dirty'
+        status, body = mint_job(base, TOK, reserved)
+        assert (status, body) == (409, {'error': 'job name unavailable'}), (
+            status, body)
+        # A refused mint writes nothing, so it cannot leave the directory
+        # that would have broken the victim either.
+        assert not (Path(docroot) / 'segments' / reserved).exists()
+        # And the victim still stores: on the unfixed tree this is the
+        # 500 the squatter causes, from this write onwards.
+        status, body = _store_one_segment(base, job, sig)
+        assert status == 200, (status, body)
+
+
+def test_the_temp_bookkeeping_name_is_refused_beside_its_job(tmp):
+    """`.{job}.json.tmp` is the temp `write_usage` replaces from.
+
+    The same reservation as the dirty marker, with the quieter harm: the
+    record write cannot land, so the job's stored totals stay at zero and
+    every later write rescans the whole directory instead of trusting them.
+    The control therefore checks the record after a successful write, not
+    only the mint's answer.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        job = seg_job()
+        status, body = mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        sig = body['sig']
+        reserved = f'.{job}.json.tmp'
+        status, body = mint_job(base, TOK, reserved)
+        assert (status, body) == (409, {'error': 'job name unavailable'}), (
+            status, body)
+        assert not (Path(docroot) / 'segments' / reserved).exists()
+        status, body = _store_one_segment(base, job, sig)
+        assert status == 200, (status, body)
+        record = _job_record(docroot, job)
+        assert (record['stored_count'], record['stored_bytes']) == (1, 3), (
+            record)
+        mark = Path(docroot) / 'segments' / f'.{job}.json.dirty'
+        assert not mark.exists(), 'the dirty mark was not cleared'
+
+
+def test_a_bookkeeping_name_is_refused_with_no_owner_on_disk(tmp):
+    """The reservation is structural: it holds with no victim minted.
+
+    This is the order a conditional refusal gets wrong. With no `relay` on
+    disk there is nothing to collide with, so a lookup admits the name —
+    and the victim's own mint then succeeds into a namespace the squatter
+    already holds, leaving every write for it answering 500. The shape is
+    the same question whichever job is minted first, and it is the only
+    form of the answer that cannot be raced by a concurrent mint.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        job = seg_job()
+        reserved = f'.{job}.json.dirty'
+        assert not (Path(docroot) / 'segments' / job).exists()
+        status, body = mint_job(base, TOK, reserved)
+        assert (status, body) == (409, {'error': 'job name unavailable'}), (
+            status, body)
+        assert not (Path(docroot) / 'segments' / reserved).exists()
+        # And the victim that order was aimed at is unaffected.
+        status, body = mint_job(base, TOK, job)
+        assert status == 200, (status, body)
+        status, body = _store_one_segment(base, job, body['sig'])
+        assert status == 200, (status, body)
+
+
+def test_the_reservation_refuses_only_the_two_bookkeeping_shapes(tmp):
+    """A name that merely contains a dot, or has no job in it, still mints.
+
+    The rule is the two bookkeeping shapes and nothing wider: a dotted job
+    name, the two names with no job between the dot and the affix, a
+    leading dot with a different affix, and a trailing temp affix without
+    a leading one. Each of those is a name the layout never spends, so
+    refusing any of them would be the bridge inventing a restriction.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        for job in (f'{seg_job()}.1', '.json.dirty', '.json.tmp',
+                    f'.{seg_job()}.dirty', f'{seg_job()}.json.tmp'):
+            status, body = mint_job(base, TOK, job)
+            assert status == 200, (job, status, body)
+            status, body = _store_one_segment(base, job, body['sig'])
+            assert status == 200, (job, status, body)
+
+
+def test_case_spellings_take_one_stripe(tmp):
+    """`Foo` and `foo` are one directory on a case-insensitive parent.
+
+    The single lock this branch replaced held them together whatever the
+    filesystem did with case. A key that folded only the record affix
+    would split them, and two writes to one directory would interleave the
+    usage read, the quota check and the record write that `store_segment`
+    holds as one.
+    """
+    store = _load_store()
+    assert (store.seg_lock_for('Foo')
+            is store.seg_lock_for('foo')), 'case spellings took two stripes'
+    assert (store.seg_lock_for('Foo.json')
+            is store.seg_lock_for('foo.JSON')), (
+                'case spellings split the record chain')
+
+
+def test_normalisation_spellings_take_one_stripe(tmp):
+    """A composed and a decomposed spelling of one name take one stripe.
+
+    Both spellings are written out rather than derived from one another: a
+    control that built the second from the first would be testing the
+    construction, and would pass against a key that folds nothing. They are
+    spelled as escapes so the two stay two spellings in the file — an editor
+    or a checkout that normalises source to NFC merges two raw literals into
+    one, which is how this control silently stops testing anything. The first
+    two assertions are the backstop for that.
+    """
+    composed = 'caf\u00e9'     # LATIN SMALL LETTER E WITH
+    decomposed = 'cafe\u0301'  # e, then COMBINING ACUTE
+    assert composed != decomposed, 'the two literals are one spelling'
+    assert unicodedata.is_normalized('NFC', composed), composed
+    assert unicodedata.is_normalized('NFD', decomposed), decomposed
+    store = _load_store()
+    assert (store.seg_lock_for(composed)
+            is store.seg_lock_for(decomposed)), (
+                'the two spellings of one name took two stripes')
+    assert (store.seg_lock_for(f'{composed}.json')
+            is store.seg_lock_for(f'{decomposed}.JSON')), (
+                'the spellings split the record chain')
 
 
 def main():
