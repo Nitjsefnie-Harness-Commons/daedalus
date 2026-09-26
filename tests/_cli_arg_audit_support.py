@@ -304,6 +304,13 @@ FRAME_NAMESPACE_PLANTS = (
      'def do_reload(args):\n',
      "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
      ".get('undeclared_probe')\n", 'sys._getframe()'),
+    ('method of a class in the same module', '', 'def do_reload(args):\n',
+     'class _Reach:\n'
+     '    def namespace(self):\n'
+     "        return sys._getframe(2).f_locals['args']\n\n\n"
+     'def do_reload(args):\n'
+     '    _ = _Reach().namespace().undeclared_probe\n',
+     'sys._getframe(2).f_locals'),
 )
 
 
