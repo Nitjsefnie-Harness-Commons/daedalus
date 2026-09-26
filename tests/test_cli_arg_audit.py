@@ -528,6 +528,12 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
     # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
+    # A name a LOCAL scope binds is not an origin the audit can see, so a
+    # dict literal built in the handler and read by key is refused. Stated in
+    # the resolver's docstring because it is the one over-refusal here.
+    local = "data = {'f_locals': 1}\nreturn data['f_locals']"
+    assert _audit_fake_handler(local) == [
+        "namespace escape: data['f_locals']"], local
 
 
 def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
