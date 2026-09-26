@@ -22,6 +22,7 @@ from _coverage_comment_workflow import (  # noqa: E402
     run_artifact_check,
     run_block,
     step_condition,
+    workflow,
     write_executable,
 )
 from _repo import ROOT  # noqa: E402
@@ -613,8 +614,6 @@ def test_the_shared_comment_harness_refuses_a_step_it_cannot_read(tmp):
     step would feed a later step's shell to an earlier step's fixture.
     """
     del tmp
-    from _coverage_comment_workflow import (  # noqa: PLC0415
-        run_block, step_condition, workflow)
     from _wffixtures import _refuses  # noqa: PLC0415
 
     text = workflow()
