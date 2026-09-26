@@ -4,11 +4,12 @@
 Every row is a synthetic module scanned by `sweep_launches`, so each
 branch of the analyser is pinned by a fixture rather than by the two
 real sites happening to spell things one way. Two groups, opposite on
-purpose: the first must be CAUGHT, the second must NOT be, and the
-second group is the arms
+purpose: the first must be CAUGHT, the second must NOT be. The second
+group is the arms of
 `tests/test_static_guard_regressions.py`'s
-`test_a_sweep_launch_carries_no_wall_clock_bound` declares it does not
-enforce.
+`test_a_sweep_launch_carries_no_wall_clock_bound` that the ANALYSER can
+be shown not to enforce — the ones about a deadline it cannot see at
+all, rather than about how the caller chooses which files to hand it.
 
 Closing one of the second group's arms is an improvement, and it is also
 a red test here on purpose: the row must move to the first group in the
@@ -72,6 +73,8 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         f'p = ["-c", "{PROGRAM}"]\nsubprocess.run(p, timeout=120)\n',
         f'p = ("-c", "{PROGRAM}")\nsubprocess.run(p, timeout=120)\n',
         f'p = ["-c", f"{PROGRAM}"]\nsubprocess.run(p, timeout=120)\n',
+        f'p = "a" + f"suite.{SWEEP_ENTRY}()"\n'
+        'subprocess.run([p], timeout=120)\n',
         f'p = ["-c"]\np.append("{PROGRAM}")\n'
         'subprocess.run(p, timeout=120)\n',
         f'p = ["-c"]\np.extend(["{PROGRAM}"])\n'
@@ -79,25 +82,49 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         f'a = b = ["-c", "{PROGRAM}"]\nsubprocess.run(a, timeout=120)\n',
         f'p = "print(1)"\np = ["-c", "{PROGRAM}"]\n'
         'subprocess.run(p, timeout=120)\n',
-        f'subprocess.run(p, timeout=120)\np = ["-c", "{PROGRAM}"]\n',
         f'subprocess.run(args=["-c", "{PROGRAM}"], timeout=120)\n',
         f'subprocess.run("{PROGRAM}", timeout=120)\n',
+        f'p = ["-c"]\np += ["{PROGRAM}"]\n'
+        'subprocess.run(p, timeout=120)\n',
+        f'p: list = ["-c", "{PROGRAM}"]\n'
+        'subprocess.run(p, timeout=120)\n',
+        f'if p := ["-c", "{PROGRAM}"]:\n    pass\n'
+        'subprocess.run(p, timeout=120)\n',
+        f'for p in [["-c", "{PROGRAM}"]]:\n'
+        '    subprocess.run(p, timeout=120)\n',
         f'name = "{SWEEP_ENTRY}"\n'
         f'subprocess.run(["-c", f"{{name}}(tmp)"], timeout=120)\n',
         f'name = "{SWEEP_ENTRY}"\n'
         f'subprocess.run(f"{{name}}(tmp)", timeout=120)\n',
+        f'p = ["-c", "{PROGRAM}"]; subprocess.run(p, timeout=120)\n',
     )
     for index, body in enumerate(rows):
         _bounded(f'row {index}', body)
 
 
 def test_each_scope_kind_binds_its_own_program(tmp):
-    """Function, async function, class body and branch each read their own."""
+    """Function, async function and class body each read their own."""
     del tmp
-    for header in ('def go():', 'async def go():', 'class C:', 'if True:'):
-        body = (f'{header}\n    p = ["-c", "{PROGRAM}"]\n'
-                '    subprocess.run(p, timeout=120)\n')
-        _bounded(header, body)
+    for header in ('def go():', 'async def go():', 'class C:'):
+        _bounded(header, f'{header}\n    p = ["-c", "{PROGRAM}"]\n'
+                         '    subprocess.run(p, timeout=120)\n')
+
+
+def test_a_branch_shares_its_enclosing_scope(tmp):
+    """`ast.If` is not a scope, so a binding inside one is still read.
+
+    This row discriminates. The first half stays green while
+    `_SCOPE_NODES` omits `ast.If`; the second goes red the moment it is
+    added, because a `def` nested in a branch is a scope of its own and
+    its bindings must not reach the launch beside it.
+    """
+    del tmp
+    _bounded('a binding inside a branch',
+             f'if True:\n    p = ["-c", "{PROGRAM}"]\n'
+             'subprocess.run(p, timeout=120)\n')
+    body = (f'if True:\n    def inner():\n        p = ["-c", "{PROGRAM}"]\n'
+            'subprocess.run(p, timeout=120)\n')
+    assert _scan(body) == ([], []), _scan(body)
 
 
 def test_a_clean_module_reports_nothing(tmp):
@@ -113,6 +140,20 @@ def test_a_clean_module_reports_nothing(tmp):
         assert _scan(body) == ([], []), (f'row {index}', _scan(body))
 
 
+def test_a_name_rebound_later_does_not_red_a_correct_launch(tmp):
+    """A launch is judged on the bindings that exist at its own line.
+
+    The scan reads each name up to the line of the launch, so a scope
+    that reuses a name for an unrelated program afterwards reds nothing.
+    """
+    del tmp
+    body = (f'program = "print(1)"\n'
+            'subprocess.run([program], timeout=5)\n'
+            f'program = ["-c", "{PROGRAM}"]\n'
+            'subprocess.run([program])\n')
+    assert _scan(body) == ([(HERE, 5)], []), _scan(body)
+
+
 def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
     """The launch is found either way; only a `timeout` is a refusal."""
     del tmp
@@ -121,7 +162,7 @@ def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
 
 
 def test_each_declared_blind_spot_is_really_missed(tmp):
-    """The arms the guard's docstring does not claim, pinned as missed.
+    """The analyser arms the guard's docstring does not claim.
 
     Each row states what the scan does with it, which for a launch the
     scan still finds is a launch reported and a deadline not read.
@@ -132,11 +173,46 @@ def test_each_declared_blind_spot_is_really_missed(tmp):
     del tmp
     rows = (
         ('a timeout unpacked from a mapping',
-         f'kw = dict(timeout=120)\n'
+         'kw = dict(timeout=120)\n'
          f'subprocess.run(["-c", "{PROGRAM}"], **kw)\n',
          [(HERE, 3)], []),
-        ('a tuple target binding',
-         f'a, b = ["-c"], "{PROGRAM}"\nsubprocess.run(a, timeout=120)\n',
+        ('a program the scope only defines afterwards',
+         f'subprocess.run(p, timeout=120)\np = ["-c", "{PROGRAM}"]\n',
+         [], []),
+        ('an argv grown afterwards',
+         f'p = ["-c"]\nsubprocess.run(p, timeout=120)\n'
+         f'p.append("{PROGRAM}")\n',
+         [], []),
+        ('a program named by a with/as target',
+         'with open("x") as p:\n    subprocess.run(p, timeout=120)\n',
+         [], []),
+        ('a program named by an except/as target',
+         'try:\n    pass\nexcept ValueError as p:\n'
+         '    subprocess.run(p, timeout=120)\n',
+         [], []),
+        ('a comprehension target, which is its own scope',
+         f'rows = [q for q in [["-c", "{PROGRAM}"]]]\n'
+         'subprocess.run(q, timeout=120)\n',
+         [], []),
+        ('a lambda default parameter',
+         f'go = lambda p=["-c", "{PROGRAM}"]: '
+         'subprocess.run(p, timeout=120)\n',
+         [], []),
+        ('a global name',
+         f'program = ["-c", "{PROGRAM}"]\n'
+         'def go():\n    global program\n'
+         '    subprocess.run(program, timeout=120)\n',
+         [], []),
+        ('a nonlocal name',
+         'def outer():\n'
+         f'    program = ["-c", "{PROGRAM}"]\n'
+         '    def inner():\n        nonlocal program\n'
+         '        subprocess.run(program, timeout=120)\n    inner()\n',
+         [], []),
+        ('a subscript target',
+         'argv = []\n'
+         f'argv[0] = ["-c", "{PROGRAM}"]\n'
+         'subprocess.run(argv, timeout=120)\n',
          [], []),
         ('an argv grown by insert',
          f'p = ["-c"]\np.insert(0, "{PROGRAM}")\n'
@@ -157,6 +233,15 @@ def test_each_declared_blind_spot_is_really_missed(tmp):
          f'subprocess.run(["-c", "assert \'{SWEEP_ENTRY}\' in text"],\n'
          '                timeout=120)\n',
          [(HERE, 2)], [(HERE, 2)]),
+        ('a deadline spelled without the word timeout',
+         'import signal\nsignal.alarm(120)\n'
+         f'subprocess.run(["-c", "{PROGRAM}"])\n',
+         [(HERE, 4)], []),
+        ('a timeout defaulted inside a helper',
+         'def go(argv, timeout=120):\n'
+         '    return subprocess.run(argv)\n'
+         f'go(["-c", "{PROGRAM}"])\n',
+         [], []),
         ('a program no readable binding reaches',
          f'parts = ["suite.", "{SWEEP_ENTRY}"]\n'
          'program = "".join(parts)\n'

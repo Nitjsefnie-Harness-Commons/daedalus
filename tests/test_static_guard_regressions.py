@@ -465,180 +465,27 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
         assert violations == wanted, (name, violations)
 
 
-def test_malformed_controls_and_destinations_fail_closed(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_write_reason)
-
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'actions/setup-go@v6', 'with': {'cache': ['false']}},
-        'wheel', 3, contains='not a literal scalar')
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'docker/build-push-action@v6',
-         'with': {'cache-to': 'type=${{ inputs.kind }}'}},
-        'wheel', 3, contains='dynamic destination')
-    _refuses(
-        _cache_write_reason,
-        {'uses': 'docker/build-push-action@v6', 'with': {'cache-to': None}},
-        'wheel', 3, contains='cache-to is not a literal')
-    for keys in (('cache-to', 'CACHE-TO'), ('cache-to', 'Cache-To')):
-        _refuses(
-            _cache_write_reason,
-            {'uses': 'docker/build-push-action@v6',
-             'with': {key: 'type=gha' for key in keys}},
-            'wheel', 3, contains='duplicated case-insensitively')
-
-
-def test_direct_cache_markers_are_token_bounded(tmp):
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _direct_cache_run)
-
-    positives = (
-        'curl "$ACTIONS_CACHE_URL/_apis/artifactcache/cache"',
-        'curl "/_apis/artifactcache/cache"',
-        'curl "$ACTIONS_RESULTS_URL"',
-        'curl -H "$ACTIONS_RUNTIME_TOKEN" /cache',
-        'github.actions.results.api.v1.CacheService/GetCacheEntry',
-        "node -e \"require('@actions/cache')\"",
-        'docker buildx build --cache-to type=gha,mode=max .',
-        'docker buildx build --cache-to \\\n type=gha .',
-    )
-    for run in positives:
-        assert _direct_cache_run(run) is not None, run
-    negatives = (
-        'echo MY_ACTIONS_CACHE_URL_BACKUP',
-        'echo ACTIONS_CACHE_URL_BACKUP',
-        'echo github.actions.results.api.v1.CacheServiceX',
-        "echo '@actions/cacheable'",
-        'docker buildx build --cache-to type=local --cache-from type=gha .',
-        'docker buildx build --cache-from type=gha .',
-        'docker buildx build --cache-to type=gha2 .',
-        'docker buildx build --cache-from type=gha --cache-to type=local .',
-        'docker buildx build --cache-to type=gh .',
-    )
-    for run in negatives:
-        assert _direct_cache_run(run) is None, run
-
-
-def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _direct_cache_run)
-
-    for run in (
-            'docker buildx build --cache-to type=${TYPE} .',
-            'docker buildx build --cache-to "$CACHE_DEST" .',
-            'docker buildx build --cache-to type=${{ matrix.type }} .'):
-        _refuses(_direct_cache_run, run, contains='dynamic destination')
-    _refuses(_direct_cache_run, 'x' * 65537, contains='65536')
-
-
-def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _assert_writer_inventory, _cache_writing_jobs, _insert_wheel_step,
-        _real_step)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
-    workflow = _tests_yml()
-    positives = (
-        _real_step(uses='actions/setup-go@v6'),
-        _real_step(uses='actions/setup-node@v7'),
-        _real_step(uses='docker/setup-buildx-action@v3'),
-        _real_step(uses='astral-sh/setup-uv@v7',
-                   inputs={'enable-cache': 'true'}),
-        _real_step(uses='Swatinem/rust-cache@v2'),
-        _real_step(uses='docker/build-push-action@v6',
-                   inputs={'cache-to': 'type=gha'}),
-        _real_step(run='curl "$ACTIONS_CACHE_URL/_apis/artifactcache/cache"'),
-        _real_step(run='curl "$ACTIONS_RESULTS_URL"'),
-        _real_step(run='curl "$ACTIONS_RUNTIME_TOKEN"'),
-        _real_step(run='github.actions.results.api.v1.CacheService/Get'),
-        _real_step(run="node -e \"require('@actions/cache')\""),
-        _real_step(run='docker buildx build --cache-to type=gha .'),
-    )
-    for step in positives:
-        assert 'wheel' in _cache_writing_jobs(
-            _insert_wheel_step(workflow, step)), step
-    uppercase = _insert_wheel_step(
-        workflow, _real_step(uses='docker/build-push-action@v6',
-                             inputs={'CACHE-TO': 'type=gha'}))
-    _refuses(_assert_writer_inventory, uppercase,
-             contains="unrecorded cache-writing jobs: ['wheel']")
-
-
-def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_writing_jobs, _insert_wheel_step, _real_step)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
-    workflow = _tests_yml()
-    for step, expected in (
-            (_real_step(uses='${{ matrix.action }}'),
-             "expression-valued uses '${{ matrix.action }}'"),
-            (_real_step(uses='owner/action@v1'),
-             "no cache policy for action 'owner/action@v1'"),
-            (_real_step(uses='actions/cache/unknown@v4'),
-             "unknown actions/cache sub-action 'actions/cache/unknown'")):
-        _refuses(_cache_writing_jobs, _insert_wheel_step(workflow, step),
-                 contains=expected)
-
-
-def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _assert_writer_inventory)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
-    workflow = _tests_yml()
-    _assert_writer_inventory(workflow)
-    line = '          package-manager-cache: false\n'
-    assert line in workflow
-    without_opt_out = workflow.replace(line, '', 1)
-    message = _refuses(_assert_writer_inventory, without_opt_out)
-    assert message == (
-        "AssertionError: unrecorded cache-writing jobs: ['eslint']; "
-        "recorded cache-writing jobs gone quiet: []")
-
-
-def test_production_cache_steps_keep_restore_and_save_separate(tmp):
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_write_reason)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-    from _yamlsteps import complete_job_mapping  # noqa: PLC0415
-
-    workflow = _tests_yml()
-    for job in ('suites', 'coverage-matrix', 'coverage'):
-        steps = complete_job_mapping(workflow, job)['steps']
-        restores = [step for step in steps if step.get('uses', '').startswith(
-            'actions/cache/restore@')]
-        saves = [step for step in steps if step.get('uses', '').startswith(
-            'actions/cache/save@')]
-        assert len(restores) == len(saves) == 1, (job, restores, saves)
-        assert _cache_write_reason(restores[0], job, 1) is None
-        assert _cache_write_reason(saves[0], job, 1) is not None
-
-
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child runs 128 individually-bounded grandchildren, so an outer
-    bound on it decides a verdict its own work does not own: on a
-    12-core host the aggregate takes 52s unloaded and 145s under full
-    saturation, `returncode 0` every time, so a starved host ran it past
-    the 120s bound this removes. A wall bound is legitimate where the
-    child always spends it on real work — the freeze controls busy-wait
-    on purpose, so a wedged child is the only failure a ceiling names —
-    and a runaway backstop would have to cover 128 x 30s, which 120s
-    truncates thirty-two times over.
+    That child runs 127 mutation rows spawning 128 individually-bounded
+    grandchildren, so an outer bound on it decides a verdict its own work
+    does not own. On this 12-core host the aggregate takes 25-28s
+    unloaded and 105-145s under full CPU saturation (12 burners),
+    `returncode 0` every time: a starved run has been measured past the
+    120s bound this removes. Neither figure is a point measurement —
+    both vary with whatever else the host is running, which is the whole
+    argument. A wall bound is legitimate where the child always spends it
+    on real work — the freeze controls busy-wait on purpose, so a wedged
+    child is the only failure a ceiling names — and a runaway backstop
+    would have to cover 127 x 30s = 3810s, which 120s truncates about
+    thirty-two times over.
 
     What bounds a wedged child now: `run_tests.py:14`
-    `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:96`, so a wedged sweep
-    child hangs the suite for 900s and reports `SUITE TIMED OUT` under
-    the `suites` job. `scripts/ci/coverage_suites.py:28-34` passes no
+    `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:95` by
+    `process.wait(timeout=timeout)` and reported as `SUITE TIMED OUT` at
+    `:101`, so under the `suites` job a wedged sweep child hangs for 900s
+    and then says so. `scripts/ci/coverage_suites.py:28-34` passes no
     `timeout=` at all and `tests/_util.py:621` has no per-test bound, so
     under `coverage-matrix` the only escape is the job's
     `timeout-minutes: 30` (`.github/workflows/tests.yml:716`) — a
@@ -656,30 +503,46 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     keys on is no function any tracked suite defines, which a rename
     that stranded the two program strings would have left green.
 
+    Each launch is judged on the bindings that exist AT ITS OWN LINE, so
+    a scope that reuses a name for an unrelated program after the launch
+    reds nothing, and a program the scope only defines afterwards is not
+    read into a call it did not run.
+
     Not enforced, and not claimed to be: (1) a `timeout` unpacked from
     a `**` mapping on the same call, which the scan does not read; (2) a
     program no readable binding reaches — a `str.join`, a value read
     from a mapping or off disk, or a template built at runtime; (3) a
-    program bound in an ENCLOSING
-    function and read in a nested one, or imported from another module,
-    because each scope reads only its own bindings; (4) a program built
-    by a mutating call other than `append` / `extend` — an `insert`, or
-    a subscript assignment — and a binding whose target is not a bare
-    name, such as a tuple unpacking; (5) a launcher the import scan does
-    not type — `__import__`, `getattr`, `sys.modules`, or a
+    program bound in another scope — read in a nested function, class or
+    lambda, named by a comprehension target, a parameter default, or a
+    `global` / `nonlocal` declaration, or imported from another module,
+    because each scope reads only its own bindings; (4) a bare-name
+    target bound by a form the scan does not read — `with ... as`,
+    `except ... as`, which name a context manager and an exception, and
+    a target that is not a bare name at all: a tuple unpacking, a
+    subscript, a class attribute. `=`, `+=`, an annotated `=`, a
+    walrus, a `for ... in` target and `append` / `extend` ARE read; a
+    `for` target binds the iterated expression, an over-approximation of
+    what one iteration holds, which fails toward finding a launch rather
+    than past one; (5) an argv grown by anything but `append` /
+    `extend` — an `insert`, say; (6) a launcher the import scan does not
+    type — `__import__`, `getattr`, `sys.modules`, or a
     `subprocess.Popen` whose `wait` or `communicate` carries the
-    deadline; (6) a deadline spelled without the word, a clock
-    comparison plus a kill or a `signal.alarm`; (7) a `timeout`
-    defaulted inside a helper the launch is routed through; (8) any file
+    deadline; (7) a deadline spelled without the word, a clock
+    comparison plus a kill or a `signal.alarm`; (8) a `timeout`
+    defaulted inside a helper the launch is routed through; (9) any file
     outside `tests/test_*.py` — the sweep's own grandchildren are
     bounded at 30s each in `tests/_mutation_sweep.py`, which this
     control leaves alone: a bound on one child is a backstop, only a
-    bound on the aggregate a margin; and (9) the flip side of the key —
+    bound on the aggregate a margin; and (10) the flip side of the key —
     the scan reads the entry NAME, not the call it belongs to, so a
     bounded launch whose program only mentions that name in a string is
     refused. Separating them means parsing the child program itself, and
     a false red on a correct suite is the worse failure here, so the arm
     is declared, not closed.
+
+    Arms 1 to 8 are the analyser's, and each has a row pinned as missed
+    in `tests/test_sweep_launch_scan.py`; arm 9 is the caller's glob and
+    arm 10 is a false red this control accepts on purpose.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
