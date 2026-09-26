@@ -88,8 +88,8 @@ def _refused_shape(k, spelling, list_shape, value, read):
     the read after it is one the runtime would never run uncaught. Either
     way the position is unreachable and the verdict is clean."""
     return _QUIET + _bind(k, spelling) + list_shape \
-        + f'try:\n    {_key(k, spelling)} = {value}\nexcept IndexError:\n    pass\n' \
-        + _SL + read
+        + f'try:\n    {_key(k, spelling)} = {value}\n' \
+        + 'except IndexError:\n    pass\n' + _SL + read
 
 
 def _negative_store_verdicts(tmp, row):
