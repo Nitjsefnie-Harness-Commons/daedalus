@@ -242,12 +242,12 @@ BOUNDED_GIT_LAUNCHES = {
         'the final reap, on the same process',
     ('tests/_watcher_once.py', 68, 'stop'):
         'a fixture stopping a watcher process it started',
-    ('tests/test_watcher_budget.py', 176, 'stop'):
+    ('tests/test_watcher_budget.py', 98, 'stop'):
         'a fixture stopping a child it started',
-    ('tests/test_watcher_budget.py', 728,
+    ('tests/test_watcher_budget.py', 523,
      'test_a_graceful_exit_leaves_no_children_behind'):
         'the same, in the graceful-exit control',
-    ('tests/test_watcher_budget.py', 544,
+    ('tests/test_watcher_budget.py', 338,
      'test_the_children_die_with_their_parent'):
         'a parent handle stopping a child the test started',
 }

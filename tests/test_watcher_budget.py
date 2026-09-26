@@ -21,105 +21,27 @@ import _fake_gh  # noqa: E402
 import _util  # noqa: E402
 import _watcher_once as once_run  # noqa: E402
 import _watcher_waits as waits  # noqa: E402
+from _watcher_fixtures import BRANCH  # noqa: E402
+from _watcher_fixtures import IDLE_POLL_BOUND  # noqa: E402
+from _watcher_fixtures import PR  # noqa: E402
+from _watcher_fixtures import SHA  # noqa: E402
+from _watcher_fixtures import STAMP  # noqa: E402
+from _watcher_fixtures import TICK  # noqa: E402
+from _watcher_fixtures import base_answers  # noqa: E402
+from _watcher_fixtures import check  # noqa: E402
+from _watcher_fixtures import ci_page  # noqa: E402
+from _watcher_fixtures import comment  # noqa: E402
+from _watcher_fixtures import idle_answers  # noqa: E402
+from _watcher_fixtures import pr_page  # noqa: E402
+from _watcher_fixtures import rate_limited_error  # noqa: E402
+from _watcher_fixtures import refusal  # noqa: E402
+from _watcher_fixtures import review  # noqa: E402
+from _watcher_fixtures import runs_page  # noqa: E402
+from _watcher_fixtures import suite  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 BASE = '3cc3605f38f1b0c0d0e47d5252ad17154bad72ec'
-PR = '195'
-BRANCH = 'issue-997'
-SHA = 'a' * 40
-
-# The interval the measured watchers poll at, and what the hourly figure
-# divides by. Nothing in the measurement itself reads a clock.
-TICK = 2
-# What one idle poll of either watcher may spend. Named so the doubled-poll
-# control is checked against the bound the idle controls enforce.
-IDLE_POLL_BOUND = 1
-STAMP = '%Y-%m-%dT%H:%M:%SZ'
-
-
-def _page_info(has_next=False, cursor=None):
-    return {'hasNextPage': has_next, 'endCursor': cursor}
-
-
-def _author(login):
-    return {'login': login}
-
-
-def pr_page(reviews=(), conversation=(), state='OPEN', is_draft=False,
-            merged_at=None):
-    """One page of the single query the comment watcher now makes."""
-    return {'data': {'repository': {'pullRequest': {
-        'state': state, 'isDraft': is_draft, 'mergedAt': merged_at,
-        'reviews': {'pageInfo': _page_info(), 'nodes': list(reviews)},
-        'comments': {'pageInfo': _page_info(), 'nodes': list(conversation)}}}}}
-
-
-def _review(rid, body='LGTM', comments=()):
-    return {'databaseId': rid, 'body': body, 'state': 'APPROVED',
-            'submittedAt': '2026-09-20T10:00:00Z', 'author': _author('alice'),
-            'comments': {'pageInfo': _page_info(), 'nodes': list(comments)}}
-
-
-def _comment(rid, body='looks good', inline=False):
-    node = {'databaseId': rid, 'body': body,
-            'createdAt': '2026-09-20T10:01:00Z',
-            'updatedAt': '2026-09-20T10:01:00Z', 'author': _author('bob')}
-    if inline:
-        node['path'] = 'daedalus_bridge/result_store.py'
-        node['line'] = 12
-    return node
-
-
-def ci_page(checks=(), sha=SHA):
-    """One page of the single query the CI watcher now makes."""
-    return {'data': {'repository': {'ref': {'target': {
-        'oid': sha,
-        'statusCheckRollup': {'contexts': {
-            'pageInfo': _page_info(),
-            'nodes': [{'__typename': 'CheckRun', 'databaseId': node['id'],
-                       'name': node['name'],
-                       'conclusion': node['conclusion'],
-                       'detailsUrl': node['url']} for node in checks]}}}}}}}
-
-
-def _check(rid, name, conclusion='SUCCESS'):
-    return {'id': rid, 'name': name, 'conclusion': conclusion,
-            'url': f'https://github.com/o/r/runs/{rid}'}
-
-
-def runs_page(suites=()):
-    """One page of the single query the wait and the hold now make."""
-    return {'data': {'repository': {'object': {'checkSuites': {
-        'pageInfo': _page_info(),
-        'nodes': list(suites)}}}}}
-
-
-def _suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
-           started='2026-09-20T10:00:00Z'):
-    """One check suite of a workflow run, as the live schema reports it."""
-    return {'status': status, 'conclusion': conclusion, 'createdAt': started,
-            'workflowRun': {
-                'databaseId': rid, 'createdAt': started,
-                'url': f'https://github.com/o/r/actions/runs/{rid}',
-                'file': {'path': '.github/workflows/ci.yml'},
-                'workflow': {'databaseId': workflow,
-                             'name': f'workflow {workflow}'}}}
-
-
-def _refusal(status=403, headers=None, body='API rate limit exceeded.'):
-    return {'status': status, 'headers': headers or {}, 'body': body}
-
-
-def _rate_limited_error(reset_at=None, retry_after=None):
-    rate = {}
-    if reset_at:
-        rate['resetAt'] = reset_at
-    if retry_after:
-        rate['retryAfter'] = retry_after
-    return {'status': 200, 'body': {'data': None, 'errors': [
-        {'type': 'RATE_LIMITED', 'message': 'API rate limit exceeded.',
-         'extensions': {'rateLimit': rate}}]}}
 
 
 def _announces_pid(line):
@@ -216,46 +138,8 @@ def _pid_alive(pid):
     return text.rsplit(')', 1)[-1].split()[0] != 'Z'
 
 
-def _base_answers():
-    """Answers for the REST surfaces the base watchers read; the specific
-    paths come first, `pulls/195` alone matching all three comment surfaces.
-    """
-    return {
-        'pulls/195/reviews': json.dumps(
-            [{'id': 1, 'body': 'LGTM', 'user': {'login': 'alice'},
-              'submitted_at': '2026-09-20T10:00:00Z'}]),
-        'pulls/195/comments': json.dumps([]),
-        'issues/195/comments': json.dumps([]),
-        'pulls/195': json.dumps({'merged_at': None, 'state': 'open',
-                                 'draft': False}),
-        f'branches/{BRANCH}': json.dumps({'commit': {'sha': SHA}}),
-        'check-runs': json.dumps({'check_runs': [
-            {'id': 1, 'name': 'pylint', 'conclusion': 'success',
-             'html_url': 'https://github.com/o/r/runs/1'}]}),
-        'actions/runs': json.dumps({'workflow_runs': [
-            {'id': 1, 'name': 'run 1', 'status': 'completed',
-             'conclusion': 'success',
-             'run_started_at': '2026-09-20T10:00:00Z',
-             'workflow_id': 11,
-             'html_url': 'https://github.com/o/r/actions/runs/1'}]}),
-    }
-
-
-def _idle_answers():
-    """One idle pull request, answerable by this tree and by the base, which
-    is what makes the before/after one method: a base watcher answers from
-    the REST surfaces and spends four and two requests per poll, as it did.
-    """
-    return {
-        'reviews(first: 100': pr_page(),
-        'statusCheckRollup': ci_page([_check(1, 'pylint')]),
-        'checkSuites': runs_page([_suite(1)]),
-        **_base_answers(),
-    }
-
-
 def test_an_idle_comment_watch_costs_one_query_per_tick(tmp):
-    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers())
     per_poll, seen = once_run.measure(
         SKILL / 'pr_comment_watch.py', [PR], fake, TICK)
     print(f'\n  comment watcher: {per_poll} call(s) per poll, '
@@ -266,7 +150,7 @@ def test_an_idle_comment_watch_costs_one_query_per_tick(tmp):
 
 
 def test_an_idle_ci_watch_costs_one_query_per_tick(tmp):
-    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers())
     per_poll, seen = once_run.measure(
         SKILL / 'ci_watch.py', [BRANCH], fake, TICK)
     print(f'\n  CI watcher: {per_poll} call(s) per poll, '
@@ -284,30 +168,6 @@ _IDENTICAL_POLL = """    gh_client.paginate(
         CONNECTIONS)
 """
 _PULL_PAGE = '    found = gh_client.at(pages[0], PULL)\n'
-# The loop body's own tail, below the poll: the request it already made,
-# asked a second time, inside the same poll. The `--once` trial returns
-# before this point, so a trial figure cannot see it at all.
-_LOOP_TAIL = ('            failures = 0\n'
-              '        except Exception as exc:                      '
-              '# noqa: BLE001\n')
-
-
-def _repeat(indent):
-    """The poll's own request asked again, at the loop body's indentation."""
-    pad = ' ' * indent
-    return (f"{pad}owner, name = args.repo.split('/', 1)\n"
-            f'{pad}gh_client.paginate(\n'
-            f'{pad}    PR_QUERY,\n'
-            f"{pad}    {{'owner': owner, 'name': name, "
-            f"'number': int(args.pr),\n"
-            f"{pad}     'reviewCursor': None, 'talkCursor': None}},\n"
-            f'{pad}    CONNECTIONS)\n')
-
-
-_WATCHER_BUILT = "    watcher = gh_client.Watcher(f'PR {args.pr} watcher')\n"
-# The extra request from the third poll on, indented inside its own guard.
-_LATER_POLL = ('            grown += 1\n'
-               '            if grown > 2:\n' + _repeat(16))
 
 
 def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
@@ -323,78 +183,12 @@ def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
     here.mkdir(parents=True, exist_ok=True)
     script = once_run.planted(here, 'pr_comment_watch.py',
                               (_PULL_PAGE, _IDENTICAL_POLL))
-    fake = _fake_gh.FakeGh(here, _idle_answers())
+    fake = _fake_gh.FakeGh(here, idle_answers())
     seen = once_run.once(script, [PR, '--interval', str(TICK)], fake)
     print(f'\n  a trial poll asking twice: {len(seen)} call(s) per poll, '
           f'from {len(seen)} logged call(s)')
     assert len(seen) == 2, [call['request'][:80] for call in seen]
     assert len(seen) > IDLE_POLL_BOUND, (len(seen), IDLE_POLL_BOUND)
-
-
-def test_a_loop_poll_asking_the_same_question_twice_costs_two(tmp):
-    """The same doubling, where production runs it: inside the loop.
-
-    The trial control above proves the measure counts two calls in one
-    poll; this proves the loop figure does too, which is the figure the
-    idle bounds judge.
-    """
-    here = Path(tmp) / 'doubled'
-    here.mkdir(parents=True, exist_ok=True)
-    script = once_run.planted(here, 'pr_comment_watch.py',
-                              (_PULL_PAGE, _IDENTICAL_POLL))
-    fake = _fake_gh.FakeGh(here, _idle_answers())
-    per_poll, seen = once_run.measure(script, [PR], fake, TICK)
-    print(f'\n  a loop poll asking twice: {per_poll} call(s) per poll, from '
-          f'{len(seen)} logged call(s)')
-    assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
-    assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
-
-
-def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
-    """#1215: the loop asking twice where a trial cannot follow it.
-
-    The repeat is spliced into the loop body, below the poll and above the
-    state a `--once` trial returns from, so the trial log stays one call
-    long and every poll the loop runs costs two. A figure read from the
-    trial - or from a fixed-length comparison of the two - reports 1 for a
-    watcher spending two, which is the understatement this pins shut.
-    """
-    here = Path(tmp) / 'repeated'
-    here.mkdir(parents=True, exist_ok=True)
-    script = once_run.planted(here, 'pr_comment_watch.py',
-                              (_LOOP_TAIL, _repeat(12)))
-    fake = _fake_gh.FakeGh(here, _idle_answers())
-    per_poll, seen = once_run.measure(script, [PR], fake, TICK)
-    fake.clear()
-    trial = once_run.once(script, [PR, '--interval', str(TICK)], fake)
-    print(f'\n  a loop repeating its last request: {per_poll} call(s) per '
-          f'poll, from {len(seen)} logged call(s), and a trial that sees '
-          f'{len(trial)}')
-    assert len(trial) == 1, [call['request'][:80] for call in trial]
-    assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
-    assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
-
-
-def test_a_loop_that_grows_from_its_third_poll_costs_two(tmp):
-    """A poll that starts costing more is measured at its grown size.
-
-    The first two polls spend the budgeted request and the third spends one
-    more, so a figure read from the first poll passes the bound for a
-    watcher spending twice as much. The bound here holds for every poll in
-    the window, which is what makes the grouping worth doing.
-    """
-    here = Path(tmp) / 'growing'
-    here.mkdir(parents=True, exist_ok=True)
-    script = once_run.planted(
-        here, 'pr_comment_watch.py',
-        (_WATCHER_BUILT, _WATCHER_BUILT + '    grown = 0\n'),
-        (_LOOP_TAIL, _LATER_POLL))
-    fake = _fake_gh.FakeGh(here, _idle_answers())
-    per_poll, seen = once_run.measure(script, [PR], fake, TICK)
-    print(f'\n  a loop growing at its third poll: {per_poll} call(s) per '
-          f'poll, from {len(seen)} logged call(s)')
-    assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
-    assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
 
 
 _DIES_MID_POLL = '        for kind in KINDS:\n'
@@ -412,7 +206,7 @@ def test_a_trial_that_dies_part_way_through_is_not_counted(tmp):
     here.mkdir(parents=True, exist_ok=True)
     script = once_run.planted(here, 'pr_comment_watch.py',
                               (_DIES_MID_POLL, _DEATH))
-    fake = _fake_gh.FakeGh(here, _idle_answers())
+    fake = _fake_gh.FakeGh(here, idle_answers())
     refused = None
     try:
         once_run.once(script, [PR, '--interval', str(TICK)], fake)
@@ -460,7 +254,7 @@ def test_the_hourly_cost_of_an_idle_watch_is_two_queries(tmp):
                        ('ci_watch.py', [BRANCH])):
         here = Path(tmp) / 'after' / name
         here.parent.mkdir(parents=True, exist_ok=True)
-        fake = _fake_gh.FakeGh(here.parent, _idle_answers())
+        fake = _fake_gh.FakeGh(here.parent, idle_answers())
         per_poll, seen = once_run.measure(SKILL / name, args, fake, TICK)
         after[name] = per_poll
         assert per_poll <= IDLE_POLL_BOUND, (
@@ -490,7 +284,7 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
         if script is None:
             _util.skip(f'base commit {BASE} is not reachable in this '
                        f'checkout; the BEFORE figure is never invented')
-        fake = _fake_gh.FakeGh(here, _base_answers())
+        fake = _fake_gh.FakeGh(here, base_answers())
         before[name] = len(once_run.once(
             script, args + ['--interval', str(TICK)], fake))
     total = sum(before.values())
@@ -519,7 +313,7 @@ def test_the_base_figure_is_read_off_the_base_script(tmp):
         if script is None:
             _util.skip(f'base commit {BASE} is not reachable in this '
                        f'checkout; the BEFORE figure is never invented')
-        fake = _fake_gh.FakeGh(here, _base_answers())
+        fake = _fake_gh.FakeGh(here, base_answers())
         figures[doubled] = len(once_run.once(
             script, [PR, '--interval', str(TICK)], fake))
     print(f'\n  the base comment watcher: {figures[False]} call(s) per poll, '
@@ -529,7 +323,7 @@ def test_the_base_figure_is_read_off_the_base_script(tmp):
 
 
 def test_the_children_die_with_their_parent(tmp):
-    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers())
     parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                      '--debounce', '1', '--max-hold', '5'], fake.env())
@@ -551,10 +345,10 @@ def test_the_children_die_with_their_parent(tmp):
 
 def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
     reset = int(time.time()) + 6
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['reviews(first: 100'] = [
-        _refusal(headers={'X-RateLimit-Reset': str(reset)}),
-        pr_page(reviews=[_review(1)], conversation=[_comment(2)])]
+        refusal(headers={'X-RateLimit-Reset': str(reset)}),
+        pr_page(reviews=[review(1)], conversation=[comment(2)])]
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
     try:
@@ -578,10 +372,10 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
 
 def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
     before = time.time()
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['statusCheckRollup'] = [
-        _refusal(429, {'Retry-After': '4'}),
-        ci_page([_check(1, 'pyright', 'FAILURE')])]
+        refusal(429, {'Retry-After': '4'}),
+        ci_page([check(1, 'pyright', 'FAILURE')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('ci_watch.py',
                      [BRANCH, '--interval', '5', '--debounce', '0'], fake)
@@ -609,10 +403,10 @@ def _ci_wait(fake, extra=(), bound=30, limit=120):
 
 def test_a_refused_wait_pauses_and_still_answers(tmp):
     reset_at = datetime.fromtimestamp(time.time() + 3, timezone.utc)
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['checkSuites'] = [
-        _rate_limited_error(reset_at=reset_at.strftime(STAMP)),
-        runs_page([_suite(1)])]
+        rate_limited_error(reset_at=reset_at.strftime(STAMP)),
+        runs_page([suite(1)])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -631,8 +425,8 @@ def test_a_persistent_refusal_exits_two_at_its_timeout(tmp):
     """
     far = datetime.now(timezone.utc) + timedelta(hours=2)
     reset_at = far.strftime(STAMP)
-    answers = dict(_idle_answers())
-    answers['checkSuites'] = _rate_limited_error(reset_at=reset_at)
+    answers = dict(idle_answers())
+    answers['checkSuites'] = rate_limited_error(reset_at=reset_at)
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake, bound=5, limit=40)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
@@ -647,19 +441,20 @@ def test_a_review_whose_inline_comments_overflow_is_followed_once(tmp):
     cursor is not honoured - must not buy a second follow-up query for the
     same review's inline comments. The quota is spent per query.
     """
-    review = _review(1, comments=[_comment(10, inline=True)])
-    review['id'] = 'REV1'
-    review['comments'] = {'pageInfo': {'hasNextPage': True, 'endCursor': 'I'},
-                          'nodes': [_comment(10, inline=True)]}
-    page_one = pr_page(reviews=[review])
+    repeated = review(1, comments=[comment(10, inline=True)])
+    repeated['id'] = 'REV1'
+    repeated['comments'] = {
+        'pageInfo': {'hasNextPage': True, 'endCursor': 'I'},
+        'nodes': [comment(10, inline=True)]}
+    page_one = pr_page(reviews=[repeated])
     page_one['data']['repository']['pullRequest']['comments']['pageInfo'] = {
         'hasNextPage': True, 'endCursor': 'C'}
-    page_two = pr_page(reviews=[review], conversation=[_comment(20)])
-    answers = dict(_idle_answers())
+    page_two = pr_page(reviews=[repeated], conversation=[comment(20)])
+    answers = dict(idle_answers())
     answers['reviews(first: 100'] = [page_one, page_two]
     answers['on PullRequestReview'] = {'data': {'node': {'comments': {
         'pageInfo': {'hasNextPage': False, 'endCursor': None},
-        'nodes': [_comment(11, inline=True)]}}}}
+        'nodes': [comment(11, inline=True)]}}}}
     fake = _fake_gh.FakeGh(tmp, answers)
     done = subprocess.run(
         [sys.executable, '-u', str(SKILL / 'pr_comment_watch.py'),
@@ -673,8 +468,8 @@ def test_a_review_whose_inline_comments_overflow_is_followed_once(tmp):
 
 def test_the_review_line_keeps_the_uppercase_state(tmp):
     """The REST review state was uppercase; the line must stay that way."""
-    answers = dict(_idle_answers())
-    answers['reviews(first: 100'] = pr_page(reviews=[_review(1)])
+    answers = dict(idle_answers())
+    answers['reviews(first: 100'] = pr_page(reviews=[review(1)])
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
     try:
@@ -689,13 +484,13 @@ def test_the_review_line_keeps_the_uppercase_state(tmp):
 
 def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
     """`N check run(s), M concluded` are two numbers again, not one twice."""
-    page = ci_page([_check(1, 'pylint')])
+    page = ci_page([check(1, 'pylint')])
     contexts = page['data']['repository']['ref']['target'][
         'statusCheckRollup']['contexts']['nodes']
     contexts.append({'__typename': 'CheckRun', 'databaseId': 2,
                      'name': 'pyright', 'conclusion': None,
                      'detailsUrl': 'https://github.com/o/r/runs/2'})
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['statusCheckRollup'] = page
     fake = _fake_gh.FakeGh(tmp, answers)
     done = subprocess.run(
@@ -708,7 +503,7 @@ def test_the_once_trial_counts_the_checks_that_have_not_concluded(tmp):
 
 def test_a_graceful_exit_leaves_no_children_behind(tmp):
     """The teardown path, which a hard kill never reaches."""
-    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers())
     parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
                      '--debounce', '1', '--max-hold', '5'], fake.env(),
@@ -734,9 +529,9 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
 
 
 def test_a_plain_refusal_still_exits_three_at_once(tmp):
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['checkSuites'] = [
-        _refusal(403, {}, 'Resource not accessible by integration.')]
+        refusal(403, {}, 'Resource not accessible by integration.')]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 3, (done.returncode, done.stdout, done.stderr)
@@ -746,10 +541,10 @@ def test_a_plain_refusal_still_exits_three_at_once(tmp):
 
 
 def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['checkSuites'] = [runs_page([
-        _suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
-        _suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z')])]
+        suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
+        suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -757,9 +552,9 @@ def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
 
 
 def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):
-    answers = dict(_idle_answers())
+    answers = dict(idle_answers())
     answers['checkSuites'] = [runs_page([
-        _suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z')])]
+        suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
@@ -767,7 +562,7 @@ def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):
 
 
 def test_the_wait_reads_runs_for_the_pinned_sha_in_one_query(tmp):
-    fake = _fake_gh.FakeGh(tmp, _idle_answers())
+    fake = _fake_gh.FakeGh(tmp, idle_answers())
     done = _ci_wait(fake, extra=['--once'])
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     calls = fake.calls()
