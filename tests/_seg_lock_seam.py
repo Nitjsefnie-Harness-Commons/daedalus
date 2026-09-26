@@ -28,6 +28,8 @@ held_job = os.environ.get("SEG_HELD_JOB", "")
 park_job = os.environ.get("SEG_PARK_JOB", "")
 call_lock = threading.Lock()
 _ACQUIRE_GRACE = 0.25
+_PARK_CONVERT = os.environ.get("SEG_PARK_CONVERT", "")
+_parked_convert = []
 held = [0]
 dirty_calls = [0]
 
@@ -116,6 +118,26 @@ def install():
             return Signalled(lock, job)
         segment_store.seg_lock_for = wrapped_lock_for
 
+        if _PARK_CONVERT:
+            # Parks the CONVERSION, inside its own hold, at the record read
+            # it opens with. The write fires after this and must be refused
+            # past the hold; the suite then releases the conversion only once
+            # the seam has recorded that write BLOCKED, which is an event
+            # rather than a deadline and is what makes the control sound.
+            real_load_record = segment_store.load_record
+
+            def parking_load_record(root, name):
+                if (name != _PARK_CONVERT or _parked_convert
+                        or not (gate / "arm-convert").exists()):
+                    return real_load_record(root, name)
+                _parked_convert.append(name)
+                (gate / "conversion-parked").write_text("y", encoding="utf-8")
+                while not (gate / "release-conversion").exists():
+                    time.sleep(0.005)
+                return real_load_record(root, name)
+
+            segment_store.load_record = parking_load_record
+
         if park_job:
             real_mark_dirty = segment_store.mark_dirty
             parked = []
@@ -177,6 +199,8 @@ def install():
         # Announced BEFORE the acquire, so the acquire path can witness that
         # a hold really happened.
         (gate / "holding").write_text("announcing", encoding="utf-8")
+        # The hand-off the suite waits on: the settle records written below,
+        # counted by distinct thread in `_await_settlements`.
         with Signalled(held_lock, held_job):
             (gate / "holder-thread").write_text(
                 str(threading.get_ident()), encoding="utf-8")

@@ -78,15 +78,11 @@ def admit_segment(seg_dir_root, params, sig):
     # request. Only the server-minted record controls storage.
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
-        # What this hold is FOR, which the surrounding comments never said:
-        # a legacy record carries no `max_*` fields, and the next mint for
-        # that job converts it by rewriting them. A write that read the
-        # record inside that window sees a record with no quotas in it,
-        # `quota()` returns None, and the request answers `403 bad sig` for a
-        # job that exists and whose capability is valid. The conversion holds
-        # this job's stripe for the rewrite, so this hold is what excludes
-        # the window. Transient and caller-retryable, and still a refusal the
-        # caller cannot tell from a wrong capability.
+        # What this hold is FOR: a legacy record carries no `max_*`
+        # fields and the next mint for the job writes them, so a write
+        # that read the record inside that window would see no quota,
+        # `quota()` would return None, and a valid capability would be
+        # answered `403 bad sig`.
         lock = segment_store.seg_lock_for(job)
         with lock:
             record = segment_store.record_for_sig(seg_dir_root, job, sig)
