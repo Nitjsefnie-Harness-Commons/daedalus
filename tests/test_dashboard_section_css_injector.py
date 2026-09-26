@@ -37,6 +37,16 @@ SEEDED = TABS + (
 
 TABS_ONLY = TABS + "drive.route('/tabs', { json: TABS });\n"
 
+# `bindTabSelector` is called with a placeholder and no `errorLabel`, so
+# both of its failure paths return without touching the select. These two
+# setups are how a scenario reaches them: no token at all, and a `/tabs`
+# the bridge answers with a status, which `api.js:58` turns into a throw.
+NO_TOKEN = "localStorage.removeItem('daedalus-token');\n"
+TABS_FAILING = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
+                "  url: 'https://one.example.com/one' }];\n"
+                "drive.route('/tabs',"
+                " { status: 500, json: { error: 'tabs unavailable' } });\n")
+
 INJECTED = "answer('inject-css', { result: { injected: 13, tabId: 5 } });\n"
 INJECTED_11 = ("answer('inject-css',"
                " { result: { injected: 13, tabId: 11 } });\n")
@@ -73,6 +83,40 @@ def _run(body, *, setup=SEEDED, answers=(), plan=shared.COMMAND):
 def _store(report):
     raw = report['storage'].get('daedalus-dash-css-sessions')
     return json.loads(raw) if raw else []
+
+
+def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
+    """`bindTabSelector` returns before `api.get('/tabs')` when the token
+    is empty, so the panel asks the bridge for nothing at all, and this
+    section passes no `errorLabel`, so the select keeps the `(active tab)`
+    option the markup shipped with. `runCommand` still refuses a command
+    at `api.js:128`; this case does not press anything to say so."""
+    report = _run(SETTLED + 'report({ options:'
+                  ' container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  toasts: toasts(), requests: REQUESTS.length });\n',
+                  setup=TABS_ONLY + NO_TOKEN)
+    assert report['options'] == ['(active tab)'], report
+    assert report['toasts'] == [], report
+    # Not one request: a guard that fell through would have asked for the
+    # list and been answered with the two tabs the plan declares.
+    assert report['requests'] == 0, report
+    assert report['unplanned'] == [], report
+
+
+def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
+    """`_util.js:63` renders the error only when an `errorLabel` was
+    passed, and this section passes none -- so a 500 leaves the select on
+    its placeholder. What the bridge said is nowhere on the panel, which
+    is the contract the missing `errorLabel` buys. The panel is still
+    runnable: an omitted tab is the active tab."""
+    report = _run(SETTLED + 'report({ options:'
+                  ' container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  toasts: toasts() });\n', setup=TABS_FAILING)
+    assert report['options'] == ['(active tab)'], report
+    assert report['toasts'] == [], report
+    assert report['unplanned'] == [], report
 
 
 def test_the_tab_list_labels_a_tab_with_its_id_and_two_spaces(_tmp):
