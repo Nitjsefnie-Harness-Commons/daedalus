@@ -171,8 +171,26 @@ def _setdefault_value(node, state):
 
 
 def _mapping_lookup(owner, key, default):
-    if DYNAMIC_KEY not in owner.items: return owner.items.get(key, default)
-    return merge_yielded((*_selected_values(owner, key), default))
+    """A mapping read carrying a default.
+
+    The default answers an absent key and nothing else, so a key the
+    container holds keeps the value RECORDED there: the value the model
+    recorded, which is the value the runtime holds only while no
+    unreadable source has since overwritten that key. An unknown-key slot
+    joins the read as it always has. An absent key on a mapping the
+    model cannot enumerate is not an absent key: an unknown length with no
+    unknown-key slot says the key set holds entries the model never
+    learned, so that read joins rather than answering the default for a
+    key the runtime may well hold. The subscript of the same mapping
+    reaches the model's own unprovable marking for the name; this read
+    answers from the container and has to join for itself."""
+    if DYNAMIC_KEY in owner.items:
+        return merge_yielded((*_selected_values(owner, key), default))
+    if key in owner.items:
+        return owner.items[key]
+    if owner.length is None:
+        return merge_yielded((UNPROVABLE_SENDER, default))
+    return default
 
 
 def _mapping_item_value(node, owner, state):

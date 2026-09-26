@@ -132,7 +132,12 @@ def _mark_unprovable(state, owner_name):
 
 
 def _apply_mapping_store(state, owner_name, sources, keywords, node):
-    """Merge provable items into the owner; unknown sources fail closed."""
+    """Merge provable items into the owner; unknown sources fail closed.
+
+    A `**mapping` argument is a source like any other, and claiming the
+    call without folding it would leave the owner holding a key set the
+    model never computed, which is the shape a later constant-key read
+    cannot account for."""
     items = {}
     counted = True
     for source in sources:
@@ -248,7 +253,9 @@ def _apply_modelled_store(statement, state, claimed):
             claimed.add(id(call))
         elif call.func.attr == 'update' and mapping:
             _apply_mapping_store(
-                state, owner_name, call.args, {
+                state, owner_name,
+                [*call.args, *(keyword.value for keyword in call.keywords
+                               if keyword.arg is None)], {
                     keyword.arg: keyword.value for keyword in call.keywords
                     if keyword.arg is not None}, call)
             claimed.add(id(call))
