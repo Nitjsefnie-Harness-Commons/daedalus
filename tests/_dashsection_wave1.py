@@ -4,15 +4,14 @@
 what the three suites repeat. A section suite's own file is its cases, and
 these are the strings they are assembled from.
 
-The transport answers one `/result` plan for a whole scenario, so a
-scenario that needs a different result for a different command TYPE
-carries the table itself: `answer(type, patch)` declares what each type
-answers, the wrapper reads the type off the `/command` body the transport
-recorded, and a type the scenario never declared is refused by name. The
-patch is applied to the envelope the transport anchored on the command, so
-the delivery id and the generation the loop matched on are still the real
-ones -- what a scenario declares is the RESULT, not the envelope.
+A scenario that needs a different result for a different command names
+them with `results()` and the transport's `byType` plan member, which is
+where that strictness lives. A command type the scenario did not name is
+refused and recorded there, by the same door an unplanned target is.
 """
+import json
+import re
+
 TOKEN = 'tok-abcdefghijklmnop'
 
 SEED = "localStorage.setItem('daedalus-token', '" + TOKEN + "');\n"
@@ -44,46 +43,44 @@ const pressEnter = (el) => {
 };
 """
 
-# `answer` is declared per scenario, so an undeclared type is a scenario
-# bug rather than a bridge the suite never built. The refusal is thrown
-# after the transport has recorded the request, so the record and the
-# failure agree.
-ANSWERS = r"""
-const ANSWERS = {};
-const answer = (type, patch) => { ANSWERS[type] = patch; };
-const realFetch = globalThis.fetch;
-let answering = null;
-globalThis.fetch = async (target, init) => {
-  const key = String(target);
-  if (key.endsWith('/command')) {
-    answering = JSON.parse((init || {}).body).type;
-    const sent = await realFetch(target, init);
-    if (!(answering in ANSWERS)) {
-      throw new Error('no answer planned for ' + answering);
-    }
-    return sent;
-  }
-  const got = await realFetch(target, init);
-  if (key.indexOf('/result') < 0 || key.indexOf('consume') >= 0) return got;
-  if (!(answering in ANSWERS)) {
-    throw new Error('no answer planned for ' + answering);
-  }
-  return jsonResponse(Object.assign({}, await got.json(),
-                                  ANSWERS[answering]));
-};
-"""
-
 MOUNT = "mount(container, bus);\n"
 SETTLE = ("await bounded(settle(), 'the mount settled',\n"
           "  _dashnodeStepTimeoutMs);\n")
 
 # The one plan a command needs. The delivery id is a constant because the
-# assertions are about the fields the section sent, and the result it
-# answers with is the scenario's own table (`answer`) applied to this
-# envelope -- the default here is only what a poll carries before the
-# wrapper replaces it.
-PLAN = ("drive.route('/command', { did: 'delivery-1' });\n"
-        "drive.route('/result?tab=extension', { result: null });\n")
+# assertions are about the fields the section sent.
+COMMAND = "drive.route('/command', { did: 'delivery-1' });\n"
+
+
+_ANSWER = re.compile(r"answer\('([^']*)', (.*)\);$")
+
+
+def results(*statements):
+    """Plan the `/result` leg from a scenario's `answer(...)` lines.
+
+    A scenario writes what each command TYPE answers with in the same
+    shape it writes its routes, and this is the one place that reads
+    those lines into the transport's `byType` plan. A line that is not an
+    `answer('type', {...});` is a scenario bug, and it is refused here --
+    at plan time, in Python, where it is a test failure rather than a
+    throw a section catches.
+
+    The refusal for a command type nobody NAMED is the transport's, not
+    this file's: it records the request and throws, exactly as it does for
+    a target no scenario planned.
+    """
+    pairs = []
+    for line in ''.join(statements).splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        found = _ANSWER.fullmatch(text)
+        if not found:
+            raise ValueError('not an answer line: ' + text)
+        pairs.append(found.groups())
+    table = ', '.join(json.dumps(name) + ': ' + patch for name, patch in pairs)
+    return ("drive.route('/result?tab=extension',\n"
+            "  { byType: { " + table + ' } });\n')
 
 
 def open_section(name):

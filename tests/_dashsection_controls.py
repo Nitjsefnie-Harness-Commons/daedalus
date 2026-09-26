@@ -408,3 +408,27 @@ await bounded(settle(), 'settled', _dashnodeStepTimeoutMs);
 report();
 })().catch(leave);
 """
+
+
+# A `/result` plan naming one command TYPE is how a scenario answers a
+# different result for each; naming no plan at all is a scenario that sent
+# no command. Both halves are here because a transport that refused every
+# poll would pass the refusal half on its own, and a transport that
+# answered every poll would pass the declared half.
+BY_TYPE = r"""
+(async () => {
+""" + SEED + IMPORT_API + r"""
+drive.route('/command', { did: 'd1' });
+drive.route('/result?tab=extension',
+  { byType: { 'list-block-rules': { result: ['declared'] } } });
+const declared = await bounded(api.extCmd('list-block-rules'),
+  'a command type the plan names', _dashnodeStepTimeoutMs);
+let refusal = null;
+try {
+  await bounded(api.extCmd('unblock-requests'),
+    'a command type the plan does not name', _dashnodeStepTimeoutMs);
+} catch (error) { refusal = error.message; }
+await bounded(settle(), 'after the refusal', _dashnodeStepTimeoutMs);
+report({ declared, refusal });
+})().catch(leave);
+"""

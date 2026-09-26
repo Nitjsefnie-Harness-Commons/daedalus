@@ -37,20 +37,37 @@ SEEDED = TABS + (
 
 TABS_ONLY = TABS + "drive.route('/tabs', { json: TABS });\n"
 
+INJECTED = "answer('inject-css', { result: { injected: 13, tabId: 5 } });\n"
+INJECTED_11 = ("answer('inject-css',"
+               " { result: { injected: 13, tabId: 11 } });\n")
+INJECTED_PLAIN = "answer('inject-css', { result: {} });\n"
+INJECTED_9 = "answer('inject-css', { result: { injected: 9, tabId: 0 } });\n"
+INJECT_REFUSED = "answer('inject-css', { error: 'cannot access the tab' });\n"
+REMOVED = "answer('remove-css', { result: {} });\n"
+REMOVED_13 = "answer('remove-css', { result: { removed: 13 } });\n"
+REMOVE_REFUSED = "answer('remove-css', { error: 'removeCSS rejected it' });\n"
+REMOVE_NO_CSS = "answer('remove-css', { error: 'no such css' });\n"
+
 SETTLED = ('await bounded(settle(), "after the click",'
            ' _dashnodeStepTimeoutMs);\n')
 
 
-def scenario(body, *, setup=SEEDED, plan=shared.PLAN):
-    """One child: seed the token, plan every answer, mount, then drive."""
-    return ('(async () => {\n' + shared.SEED + shared.ANSWERS + shared.PRELUDE
-            + shared.open_section(SECTION[0]) + plan + setup
+def scenario(body, *, setup=SEEDED, answers=(), plan=shared.COMMAND):
+    """One child: seed the token, plan every answer, mount, then drive.
+
+    `setup` lands first because the answer table is written in the scope
+    `setup` defines.
+    """
+    return ('(async () => {\n' + shared.SEED + shared.PRELUDE
+            + shared.open_section(SECTION[0]) + setup + plan
+            + shared.results(*answers)
             + shared.MOUNT + body + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=SEEDED, plan=shared.PLAN):
-    return run_scenario(scenario(body, setup=setup, plan=plan),
-                        sections=SECTION)
+def _run(body, *, setup=SEEDED, answers=(), plan=shared.COMMAND):
+    return run_scenario(
+        scenario(body, setup=setup, answers=answers, plan=plan),
+        sections=SECTION)
 
 
 def _store(report):
@@ -81,13 +98,10 @@ def test_injecting_sends_the_css_and_neither_tab_nor_frames_by_default(_tmp):
     """`buildFields` adds `tabId` and `allFrames` only when the control
     holds something, so the way to say "the active tab, top frame only" is
     the absence of both keys rather than a defaulted pair."""
-    plan = (TABS_ONLY
-            + "answer('inject-css',"
-            " { result: { injected: 13, tabId: 5 } });\n")
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=plan)
+                  setup=TABS_ONLY, answers=(INJECTED,))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'inject-css', report
     assert sent['css'] == 'a{color:red}', report
@@ -101,15 +115,12 @@ def test_a_selected_tab_and_a_checked_box_reach_the_command(_tmp):
     """The counterpart of the pair above: a chosen tab arrives as a
     NUMBER and a checked box as `true`, and the session record keeps both
     so the row's own remove can aim at the same target later."""
-    plan = (TABS_ONLY
-            + "answer('inject-css',"
-            " { result: { injected: 13, tabId: 11 } });\n")
     report = _run('container.find("[data-role=tab]").value = "11";\n'
                   'container.find("[data-role=all]").checked = true;\n'
                   'container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=plan)
+                  setup=TABS_ONLY, answers=(INJECTED_11,))
     sent = shared.commands(report)[0]
     assert sent['tabId'] == 11, report
     assert sent.get('allFrames') is True, report
@@ -123,13 +134,11 @@ def test_a_textarea_holding_only_whitespace_is_refused(_tmp):
     """The emptiness guard is on the TRIMMED value while the field itself
     is sent untrimmed, so a textarea of spaces is empty and a value with
     meaningful leading whitespace is not."""
-    plan = (SEEDED + "answer('inject-css', { result: {} });\n"
-            "answer('remove-css', { result: {} });\n")
     report = _run('container.find("[data-role=css]").value = "  \\n\\t ";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'button("REMOVE").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=plan)
+                  setup=SEEDED, answers=(INJECTED_PLAIN, REMOVED))
     assert shared.commands(report) == [], report
     assert report['toasts'] == [
         {'type': 'warn', 'text': 'css is empty'},
@@ -140,13 +149,11 @@ def test_a_textarea_holding_only_whitespace_is_refused(_tmp):
 def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
     """`f.css = cssEl.value || ''` does not trim, so a rule the operator
     indented reaches the bridge exactly as they typed it."""
-    plan = (TABS_ONLY
-            + "answer('inject-css', { result: {} });\n")
     report = _run('container.find("[data-role=css]").value ='
                   ' "  a{\\n  color: red; }  ";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=plan)
+                  setup=TABS_ONLY, answers=(INJECTED_PLAIN,))
     assert shared.commands(report)[0]['css'] == '  a{\n  color: red; }  ', \
         report
     assert _store(report)[-1]['css'] == '  a{\n  color: red; }  ', report
@@ -155,15 +162,12 @@ def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
 def test_a_failed_inject_appends_no_session_and_re_renders_nothing(_tmp):
     """The `catch` on INJECT covers the push as well as the command, so a
     refused injection leaves the table with the rows it already had."""
-    plan = (SEEDED
-            + "answer('inject-css',"
-            " { error: 'cannot access the tab' });\n")
     report = _run('const before = rowTexts(container.all()[0]).length;\n'
                   'container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'report({ toasts: toasts(), before,\n'
                     '  after: rowTexts(container.all()[0]).length });\n',
-                  setup=plan)
+                  setup=SEEDED, answers=(INJECT_REFUSED,))
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'cannot access the tab'}], report
     assert report['after'] == report['before'], report
@@ -174,13 +178,10 @@ def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
     """The toolbar REMOVE is the plain command: its failure toasts and the
     store is not touched, which is the asymmetry the session row's own
     remove breaks below."""
-    plan = (SEEDED
-            + "answer('remove-css',"
-            " { error: 'no such css' });\n")
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("REMOVE").click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=plan)
+                  setup=SEEDED, answers=(REMOVE_NO_CSS,))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'remove-css', report
     assert sent['css'] == 'a{color:red}', report
@@ -200,7 +201,7 @@ def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
                   'dels[0].click();\n' + SETTLED
                   + 'dels[1].click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
-                  setup=SEEDED + "answer('remove-css', { result: {} });\n")
+                  setup=SEEDED, answers=(REMOVED,))
     first, second = shared.commands(report)
     assert first['type'] == 'remove-css', report
     assert first['css'] == 'a{--seed:1}', report
@@ -220,15 +221,12 @@ def test_a_row_remove_that_failed_keeps_the_local_session(_tmp):
     The success case beside it is the other half: a handler that never
     deletes fails there, and one that always deletes fails here.
     """
-    plan = (SEEDED
-            + "answer('remove-css',"
-            " { error: 'removeCSS rejected it' });\n")
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
                   + 'report({ toasts: toasts(), rows,\n'
                     '  live: drive.live().length });\n',
-                  setup=plan)
+                  setup=SEEDED, answers=(REMOVE_REFUSED,))
     assert shared.types(report) == ['remove-css'], report
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'removeCSS rejected it'}], report
@@ -245,13 +243,11 @@ def test_a_row_remove_that_failed_keeps_the_local_session(_tmp):
 def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     """The half the failure case needs: the same row, the same splice, and
     a toast naming the removal rather than an error."""
-    plan = (SEEDED + "answer('remove-css',"
-            " { result: { removed: 13 } });\n")
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
                   'report({ toasts: toasts(), rows });\n',
-                  setup=plan)
+                  setup=SEEDED, answers=(REMOVED_13,))
     assert report['toasts'] == [{'type': 'ok', 'text': 'removed'}], report
     assert [row[3] for row in report['rows'][1:]] == ['b{--seed:2}'], report
     assert len(_store(report)) == 1, report
@@ -281,10 +277,7 @@ def test_a_full_session_list_refuses_the_next_injection(_tmp):
             ' _dashnodeStepTimeoutMs);\n'
             'report({ rows: rowTexts(container.all()[0]),'
             ' toasts: toasts() });\n')
-    plan = (TABS_ONLY
-            + "answer('inject-css',"
-            + " { result: { injected: 9, tabId: 0 } });\n")
-    report = _run(body, setup=plan)
+    report = _run(body, setup=TABS_ONLY, answers=(INJECTED_9,))
     # Twenty commands, and the twenty-first injection never reached the
     # wire, so the rule it named is not sitting on a page unrecorded.
     assert shared.types(report).count('inject-css') == 20, report
