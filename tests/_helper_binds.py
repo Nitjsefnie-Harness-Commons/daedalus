@@ -49,22 +49,25 @@ def _target_names(target):
     return []
 
 
-def _module_execution(tree):
+def _module_execution(tree, nodes=None):
     """(imports, binds, definitions) for what module execution establishes.
 
     imports maps a name to {import line: set of source module stems};
     binds maps a name to the set of lines that bind it; definitions maps
     a name to the subset of those lines carrying a def, async def or
-    class.
+    class. `nodes`, when given, collects the definition NODES themselves
+    under the same names, for a caller that needs a definition's content.
     """
     imports = {}
     binds = {}
     definitions = {}
 
-    def bind(name, lineno, defining=False):
+    def bind(name, lineno, defining=False, node=None):
         binds.setdefault(name, set()).add(lineno)
         if defining:
             definitions.setdefault(name, set()).add(lineno)
+            if nodes is not None:
+                nodes.setdefault(name, []).append(node)
 
     def imported(name, lineno, source):
         imports.setdefault(name, {}).setdefault(lineno, set()).add(source)
@@ -169,7 +172,7 @@ def _module_execution(tree):
             # where it is written; its body is its own scope, so the
             # walk is handed the first group and not the node.
             collect_walrus(evaluated_here(node))
-            bind(node.name, node.lineno, defining=True)
+            bind(node.name, node.lineno, defining=True, node=node)
             return
         collect_walrus([node])
         record(node)
@@ -211,9 +214,13 @@ def definition_nodes(tree):
     definitions by CONTENT: the branch boundary keys an allowance row on
     a declaration, and a declaration is identified by what it contains
     rather than by the line it sits on.
+
+    The SCOPE is the one `_module_execution` decides, and it runs the
+    walk that decides it rather than a second: `ast.walk` reaches a def
+    nested in a function, a lambda or a class body, and those bind
+    nothing at module scope, so counting one made the boundary refuse a
+    legitimate row for a tabled file.
     """
     found = {}
-    for node in ast.walk(tree):
-        if isinstance(node, DEFN):
-            found.setdefault(node.name, []).append(node)
+    _module_execution(tree, found)
     return found

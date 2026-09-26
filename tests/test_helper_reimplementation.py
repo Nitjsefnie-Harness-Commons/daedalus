@@ -88,15 +88,7 @@ count in a docstring is a claim somebody has to reproduce, and this one
 has been measured three ways with three answers, because a population
 described in prose is resolved by each reader slightly differently.
 Lowering `.pylintrc`'s `min-similarity-lines` instead would fire on
-ordinary Python, which is why the floor lives here. The class's
-shortest copy is a three-line body, the `function eventTarget() { return
-{ addListener() {} }; }` spelling, so three is the floor: it excludes the
-one-liner band and catches every spelling of the class, where one would
-catch trivial wrappers and fifteen, the Python value, would catch none
-of them. Two measures identically, so nothing rides on that choice;
-three is the value the class's own shortest copy sets. Lowering
-`.pylintrc`'s `min-similarity-lines` instead would fire on ordinary
-Python, which is why the floor lives here.
+ordinary Python, which is why the floor lives here.
 """
 import ast
 import subprocess
