@@ -48,8 +48,14 @@ def run_block(text, step_name):
 
 
 def write_executable(path, content):
-    """Write an executable test double."""
-    path.write_text(content, encoding='utf-8')
+    """Write an executable test double, byte for byte.
+
+    Bytes, not text: `write_text` translates every `\\n` to `os.linesep`, so
+    on Windows a reader would get a `\\r\\n` shell double it was never
+    given. The 0o755 mark is a POSIX convention Windows cannot record, and
+    `chmod` is kept for the platforms that can.
+    """
+    path.write_bytes(content.encode('utf-8'))
     path.chmod(0o755)
 
 
