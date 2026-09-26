@@ -160,10 +160,6 @@ UNCONSOLIDATED_NAMES = {
         'this runs a typed subcommand that enqueues a command and answers '
         'it afterwards, where the owner dispatches with the answer already '
         'canned and nothing is ever enqueued',
-    ('tests/test_fetch_timings_count.py', 'run_cli'):
-        'this dispatches commands_browser through build_parser and fakes '
-        'ext_cmd, where the owner dispatches commands_content through '
-        '_cli_parse.accepted, so the module under dispatch differs',
     ('tests/test_screenshot_quality.py', 'run_cli'):
         'this patches three module attributes and records through its own '
         'RecordingApi, where the owner patches one ext_cmd and records '
