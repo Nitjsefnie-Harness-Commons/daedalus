@@ -326,18 +326,20 @@ def test_an_object_answer_reaches_the_pane_indented(_tmp):
 
 def test_a_call_that_never_answers_gives_up_at_twenty_seconds(_tmp):
     """`extCmd('cdp', fields, { timeout: 20000 })` names the budget
-    explicitly, and it is observable only as the number of result polls
-    the loop spends -- eighty at 250 ms each. The pane is the only place
-    that failure is reported, so the eighty is what says the budget was
-    the one the module asked for and not the fifteen-second default."""
+    explicitly. The pane is the only place that failure is reported, and
+    the message it renders comes from the budget the loop was handed, so
+    the message is the exact pin. The legs behind it are a band rather
+    than a number, because `api.js:143` reads host time as well as the
+    virtual clock. The fifteen-second default would fail both: a different
+    message, and a count twenty legs clear of this band's."""
     report = _run(_press() + SETTLED
                   + 'report({ polls: polls(), pane: pane(),'
                     ' toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
-    assert report['polls'] == 80, report
-    assert report['pane'][0] == 'pane err', report
     assert report['pane'][1].startswith(
         'Timeout (20000ms) waiting for _cdp_1_'), report
+    assert shared.poll_band(report, 20000), report
+    assert report['pane'][0] == 'pane err', report
     assert report['toasts'] == [], report
     assert report['unplanned'] == [], report
 

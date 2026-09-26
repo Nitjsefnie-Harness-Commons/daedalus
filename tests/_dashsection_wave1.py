@@ -107,6 +107,50 @@ def legs(report):
     }
 
 
+# `api.js` sleeps `POLL_CADENCE_MS` between result attempts and its loop
+# tests `hostNow() + SPENT < deadline` at `api.js:143`, so the number of
+# legs a give-up spends is the budget divided by the cadence MINUS whatever
+# real time the child itself burned getting there. A run fast enough to
+# stay under one cadence of host time gets the whole number; a slow or
+# loaded one gives up a poll or two early, and an exact count then reddens
+# a suite for the runner rather than for the code.
+#
+# The budget itself is pinned exactly and host-independently, by the
+# give-up message: `api.js:164` formats it from the `timeout` the loop was
+# handed, and nothing a loaded machine does reaches that string. So the leg
+# count is the CORROBORATION and the band is its honest shape.
+POLL_CADENCE_MS = 250
+
+# How far a count may fall short of the whole number. The four budgets a
+# dashboard section can send are 5000, 15000, 20000 and 30000 -- twenty,
+# sixty, eighty and a hundred and twenty legs -- and the nearest pair is
+# twenty legs apart, so nine is the widest band that keeps every pair
+# disjoint. It is not a comfort margin: it is the most the numbers allow.
+#
+# Its ceiling is measured, not assumed. A runner that burns `h` ms of host
+# time per result leg costs `legs * h` over a give-up, so the binding case
+# is the largest budget and the arithmetic bound is `9 * 250 / 120` =
+# 18.75 ms per leg. Planting a busy-wait of that size in the transport's
+# fetch puts the real edge a little above the arithmetic: three samples
+# each at 16, 18 and 20 ms per leg are green in both suites, and the first
+# red is one sample in three at 22. Past the ceiling the CORROBORATING
+# count reds and the case's actual claim -- the message, which `api.js:164`
+# formats from the budget the loop was handed -- is untouched. Assert the
+# message first.
+POLL_SLACK = 9
+
+
+def poll_band(report, budget, key='polls'):
+    """The band `api.js` spends `budget` worth of result legs in.
+
+    `budget` is the number the case's own timeout message already asserts
+    exactly, so this band is derived from the same fact rather than from
+    whatever count a fast run happened to produce.
+    """
+    whole = budget // POLL_CADENCE_MS
+    return whole - POLL_SLACK <= report[key] <= whole
+
+
 def commands(report):
     """The recorded command bodies, in the order the section sent them."""
     return [r['body'] for r in legs(report)['command']]
