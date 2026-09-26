@@ -27,57 +27,40 @@ from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
 
-# Which jobs run the suites is DERIVED, not written here. A job is in the
-# set when one of its steps invokes a tracked script that reaches a suite:
-# either it spawns one, or it invokes a script that does. Deriving it is
-# the whole point — the hand list this replaces missed the `timed`
-# matrix, which runs slices of tests/ and therefore ran both boundary
-# controls in a checkout where neither `origin/main` nor a local `main`
-# resolved, so both took their refusal arm and the property every
-# allowance row rests on was never evaluated there.
+# Which jobs run the suites is DERIVED, not written here: a job is in
+# the set when one of its steps invokes a tracked script that enumerates
+# the tests tree. Deriving it is the whole point — the hand list this
+# replaces missed the `timed` matrix, which runs slices of tests/ and so
+# ran both boundary controls where neither `origin/main` nor a local
+# `main` resolved.
 #
-_SUITE_LAUNCH_CALLS = frozenset({
-    'subprocess.run', 'subprocess.Popen', 'subprocess.check_output',
-    'subprocess.check_call'})
+def _enumerates_the_tests_tree(source):
+    """Whether this script ENUMERATES the tests tree itself.
 
+    A `.glob(...)`/`.rglob(...)` call whose RECEIVER names `tests` — so
+    `(ROOT / "tests").glob("test_*.py")` and `(tree / 'tests').glob(...)`
+    both count, and the argument's spelling does not matter.
 
-def _launches_a_suite(source):
-    """Whether this script, as an AST, launches a suite.
+    It is an AST and not a substring because the substring version of
+    this question matched a docstring: it put two non-runners in the set
+    and MISSED `coverage_suites`, which is the job whose fetch-depth
+    matters most. Same mention-versus-call mistake the
+    re-implementation control's `__main__` rule had, in a second
+    control, and it is why the rule reads the tree.
 
-    A `subprocess` call whose first argument names a path under `tests/`
-    or is the suite it was handed. It is an AST fact and not a substring
-    because the substring version of this question matched a docstring
-    and put two non-runners in the set while missing the one that
-    mattered — the same mention-versus-call mistake the re-implementation
-    control's `__main__` rule had, in a different control.
-
-    The set is over-inclusive by design in the SAFE direction: the
-    planner launches nothing but is included, which costs one workflow
-    line, where under-inclusion is the hole this guard exists to close.
-
-    This rule is still partly a SPELLING — the three runners that
-    delegate their suite enumeration are recognised by a variable NAME,
-    and no shape in this tree separates them from the CI scripts that
-    read the tests tree directly, because those ENUMERATE while the
-    runners are handed a computed path. What that costs, the rename that
-    reaches it, and why it survives are written once, in
-    `test_the_runnerhood_rule_still_recognises_the_instrument`.
+    Three of the twenty-eight tracked scripts enumerate the tests tree,
+    and they are the three that run suites: `run_tests.py`,
+    `scripts/ci/coverage_suites.py` and `scripts/ci/time_tests.py`. The
+    first two write the identical expression; the third spells its
+    receiver differently, which is exactly what a SHAPE rule tolerates
+    and a name rule does not.
     """
     for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        if ast.unparse(node.func) not in _SUITE_LAUNCH_CALLS:
-            continue
-        for argument in node.args[:1]:
-            for inner in ast.walk(argument):
-                if isinstance(inner, ast.Constant) \
-                        and isinstance(inner.value, str) \
-                        and inner.value.replace('\\', '/').startswith(
-                            'tests/'):
-                    return True
-                if isinstance(inner, ast.Name) and inner.id in (
-                        'suite', 'suites'):
-                    return True
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ('glob', 'rglob')
+                and 'tests' in ast.unparse(node.func.value)):
+            return True
     return False
 
 
@@ -94,7 +77,7 @@ def _tracked_scripts(root):
 def _suite_runners(scripts):
     """The tracked scripts that launch a suite."""
     return {name for name, source in scripts.items()
-            if _launches_a_suite(source)}
+            if _enumerates_the_tests_tree(source)}
 
 
 def _invoked_scripts(command, runners):
@@ -146,21 +129,38 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     route without noticing. These are the routes it does NOT follow, each
     found by the review that sent this wave back:
 
-      * a job that runs a suite through a TRANSITIVE WRAPPER — a script
-        that neither spawns a suite nor invokes a runner this walk sees;
-      * the timed MATRIX ENTRYPOINT, where the suites come from the
-        planner's cells rather than from a command line;
-      * a SHELL WRAPPER, where a `.sh` step runs a suite and no tracked
-        Python script is named at all;
-      * `os.system`, `subprocess.call` and any launch this shape does
-        not read, in this or any other workflow file;
-      * `release.yml`, which runs `run_tests.py` from a detached tag and
-        is a different file: it is fixed in the workflow, not by this
-        guard, and a workflow added beside it inherits nothing.
+      * (a) A JOB THAT NAMES A SUITE DIRECTLY. LIVE IN THE TREE TODAY:
+        `timed-timings.yml:300-301` runs
+        `python3 tests/test_timed_planner.py` and
+        `python3 tests/test_timed_refresh.py` at depth 1, and no bullet
+        here reaches it — not a wrapper, not the matrix entrypoint, not
+        a shell wrapper. Adding this branch's boundary suite to that step
+        breaks the property with this guard green. Latent, not a live
+        violation: nothing reads the base there today.
+      * (b) A CHECKOUT SHAPE this rule cannot see. Replacing `suites`'s
+        `actions/checkout` with `uses: ./.github/actions/checkout` gives
+        no width at all, and the check is on the WIDTH — see the empty
+        list in the assertion below.
+      * (c) THE SCRIPT UNIVERSE IS TWO GLOBS. `_tracked_scripts` reads
+        `run_tests.py` and `scripts/ci/*.py` — 28 of the repository's
+        tracked files — and this module's docstring used to say "a
+        tracked script" as though that were all of them. A suite
+        launched by any other tracked script is invisible.
+      * (d) JOB-LEVEL `uses:` DELEGATION. A job that delegates to
+        `uses: ./.github/workflows/…` has no `steps` to read.
+      * (e) JOB-SIDE LITERAL DEPENDENCY. `_invoked_scripts` needs the
+        tracked filename as a literal substring of the `run:` text, so
+        `run: python "$SUITE_RUNNER"` drops the job silently.
 
-    Every one of those needs the WORKFLOW edited. The failing check is
-    the mitigation for the routes this guard can see; it is not a claim
-    about the rest.
+    `timed` IS in the set, matched by the path literal
+    `scripts/ci/time_tests.py` in the step's `run:` — the earlier
+    disclosure listed the matrix entrypoint as uncovered, which
+    under-claimed, and being told less than is true is the safe
+    direction but still wrong.
+
+    Every one of those needs the WORKFLOW edited, and (c) and (e) need
+    this reader widened. The failing check is the mitigation for the
+    routes it can see; it is not a claim about the rest.
     """
     del tmp
     scripts = _tracked_scripts(ROOT)
@@ -170,61 +170,60 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
     assert jobs, (
         'no job in the workflow invokes a suite runner, so the suite set '
         'this guard reads is empty')
-    unreadable = {job: widths for job, widths in jobs.items()
-                  if any(width != '0' for width in _checkout_widths(job))}
+    unreadable = {
+        job: _checkout_widths(job) for job in jobs
+        # `not widths` matters: a job with no `actions/checkout` step at
+        # all has nothing this rule can read, and `any(...)` over the
+        # empty list is False, which would read that as "every checkout
+        # asked for 0" and pass.
+        if not _checkout_widths(job) or any(
+            width != '0' for width in _checkout_widths(job))}
     assert not unreadable, (
         'these jobs run a suite and so run the branch-boundary controls, '
         'which cannot be evaluated without the merge base; give every '
         f'checkout step in them fetch-depth: 0 (found {unreadable})')
 
 
-def test_the_runnerhood_rule_still_recognises_the_instrument(tmp):
-    """The spelling the rule depends on, reported when it moves.
+def test_the_runnerhood_rule_finds_all_three_runners(tmp):
+    """The shape the rule keys on, pinned on the three that matter.
 
-    The rule is still a SPELLING, and this is the statement of what that
-    costs. The three runners that delegate their suite enumeration are
-    recognised because the path they launch is built from a variable the
-    predicate looks for BY NAME — no shape in this tree separates them
-    from the CI scripts that read the tests tree directly, because those
-    ENUMERATE while the runners are handed a computed path, and a rule
-    keyed on the enumeration catches only the former.
-
-    So `sed -i 's/\bsuite\b/suitepath/g' scripts/ci/time_tests.py` drops
-    `timed` from the set this guard polices with everything else green —
-    the original failure reached by a spelling. This test is what makes
-    that a red rather than a silence, and its message names both halves
-    of the choice: widen the rule, or say which route is no longer
-    policed.
+    A name-keyed rule recognised two of these three only because a loop
+    variable happened to be called `suite`, and the reviewer's
+    `sed -i 's/\bsuite\b/suitepath/g' scripts/ci/time_tests.py` reached
+    that. The rule keys on ENUMERATING THE TESTS TREE instead, and this
+    is the statement of why: `run_tests.py` and `coverage_suites.py`
+    write the identical expression, and `time_tests.py` spells its
+    receiver differently — which a shape tolerates and a name does not.
     """
-    scripts = _tracked_scripts(ROOT)
-    runners = _suite_runners(scripts)
+    del tmp
+    runners = _suite_runners(_tracked_scripts(ROOT))
     for runner in ('run_tests.py', 'scripts/ci/coverage_suites.py',
                    'scripts/ci/time_tests.py'):
         assert runner in runners, (
-            f'{runner} no longer launches a suite this rule recognises; the '
-            'rule keys on a variable name, so a rename of it drops the '
-            'job from the guard. Widen the rule, or say in the guard which '
-            'route is no longer policed')
-    assert 'scripts/ci/time_tests.py' in runners
+            f'{runner} no longer enumerates the tests tree, so the guard '
+            'drops the job that runs it from the policed set. The rule is '
+            'a shape now, so this is a change to what the tree does, not '
+            'a rename.')
 
 
 def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
     """The rule reads the AST, and over-includes in the safe direction.
 
-    The planner launches nothing and is in the set; two CI scripts whose
-    DOCSTRINGS name runners are not. A substring version of this question
-    put the two in the set and missed `coverage_suites`, so the shape and
-    the direction are both pinned.
+    A substring version of this question put two CI scripts whose
+    DOCSTRINGS name runners into the set and missed
+    `coverage_suites` — the job whose fetch-depth matters most. The
+    planner enumerates the tests tree too and is included, which costs
+    one workflow line, where under-inclusion is the hole.
     """
     del tmp
-    scripts = _tracked_scripts(ROOT)
-    runners = _suite_runners(scripts)
+    runners = _suite_runners(_tracked_scripts(ROOT))
     for planner_only in ('scripts/ci/compare_durations.py',
                          'scripts/ci/gate_freshness.py'):
         assert planner_only not in runners, (
-            f'{planner_only} is in the runner set and launches no suite')
+            f'{planner_only} is in the runner set and enumerates no tests '
+            'tree; the rule has grown past what it claims')
     assert 'scripts/ci/coverage_suites.py' in runners, (
-        'coverage_suites reaches the suites by invoking run_tests; a rule '
+        'coverage_suites reaches the suites through run_tests; a rule '
         'that misses it misses the job whose fetch-depth matters most')
 
 

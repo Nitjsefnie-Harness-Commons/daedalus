@@ -100,7 +100,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _js_functions  # noqa: E402
 import _util  # noqa: E402
 from _branch_boundary import (  # noqa: E402
-    BRANCH_BASES, _parsed, introduced_rows, js_digests, python_digests)
+    BRANCH_BASES, IS_THE_BASE, UNREADABLE, _parsed, introduced_rows,
+    js_digests, python_digests)
 from _helper_binds import definitions, scan  # noqa: E402
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
@@ -316,9 +317,7 @@ def _live_js():
 
 
 def _live_sources():
-    """The tracked tests modules, memoised: four tests read the whole tree
-    and the two readers are the expensive part, so recomputing them per
-    test cost this suite 45 seconds where the shared scans cost 13."""
+    """The tracked tests modules, memoised: four tests read the tree."""
     global _LIVE_SOURCES
     if _LIVE_SOURCES is None:
         listed = subprocess.run(
@@ -358,22 +357,25 @@ def test_an_allowance_row_naming_no_live_site_fails(tmp):
 
 def test_a_row_may_not_name_a_declaration_this_branch_added(tmp):
     del tmp
-    introduced = introduced_rows(UNCONSOLIDATED_NAMES, python_digests, ROOT)
-    assert introduced is not None, (
-        'the branch boundary could not be evaluated: this checkout '
-        'resolves neither ' + ' nor '.join(BRANCH_BASES) + ', so nothing '
-        'here says a row is not excusing a definition the branch wrote. '
-        'That is a refusal, not a pass — fetch the base and re-run.')
-    assert not introduced, (
+    boundary = introduced_rows(UNCONSOLIDATED_NAMES, python_digests, ROOT)
+    # An UNREADABLE base REFUSES and a tree that IS the base SKIPS; a
+    # maintainer chasing either red needs the cause that produced it.
+    assert boundary.reason != UNREADABLE, (
+        'UNCONSOLIDATED_NAMES: the base tree could not be read. This '
+        'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + ', so '
+        'nothing here says a row is not excusing a definition the branch '
+        'wrote. That is a refusal, not a pass — fetch the base and re-run.')
+    if boundary.reason:
+        return
+    assert not boundary.introduced, (
         'UNCONSOLIDATED_NAMES rows excuse a definition the base tree does '
-        f'not carry, so the branch wrote it: {introduced}')
+        f'not carry, so the branch wrote it: {boundary.introduced}')
 
 
 def test_no_tests_module_reimplements_a_shared_javascript_name(tmp):
     del tmp
     sources, findings = _live_js()
     assert sources, 'the tests tree enumerated no module'
-    # This reader's one hole, sized: see the count above.
     dropped = []
     js_declarations(sources, dropped)
     cut = [(path, count) for path, count in dropped if count]
@@ -458,17 +460,23 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
              ('tests/test_base.py', 'twin'): 'this one is a second copy',
              ('tests/test_base.py', 'pair'): 'this one is untouched',
              ('tests/test_base.py', 'added'): 'this one is a new name'}
-    assert introduced_rows(table, python_digests, repo, bases=('main',)) == [
+    base = introduced_rows(table, python_digests, repo, bases=('main',))
+    assert base.introduced == [
         ('tests/test_base.py', 'added'),
         ('tests/test_base.py', 'twin')], 'the second copy is not free'
-    assert introduced_rows(table, js_digests, repo, bases=('main',)) == [
+    base_js = introduced_rows(table, js_digests, repo, bases=('main',))
+    assert base_js.introduced == [
         ('tests/test_base.py', 'carried')], 'and neither is a second copy'
-    # A checkout carrying neither base, and one whose base IS the head,
-    # cannot answer the question, and both are refusals.
-    assert introduced_rows(table, python_digests, repo,
-                           bases=('origin/main',)) is None
-    assert introduced_rows(table, python_digests, repo,
-                           bases=('HEAD',)) is None
+    # A checkout carrying neither base cannot answer, and REFUSES.
+    unreadable = introduced_rows(
+        table, python_digests, repo, bases=('origin/main',))
+    assert unreadable.reason == UNREADABLE
+    # A base that IS the head is a different question: a release tag is
+    # a commit on main, so a tag checkout lands here, and a control that
+    # refused it would redden every tag build.
+    assert introduced_rows(
+        table, python_digests, repo, bases=('HEAD',)).reason == IS_THE_BASE
+    assert UNREADABLE != IS_THE_BASE
 
 
 def test_the_detector_names_the_module_and_the_name(tmp):
