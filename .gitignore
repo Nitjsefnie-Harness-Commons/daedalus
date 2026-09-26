@@ -544,6 +544,7 @@
 !/tests/test_helper_reimplementation.py
 !/tests/test_helper_reimplementation_js.py
 !/tests/test_helper_shadow_boundaries.py
+!/tests/test_hotfix_commands.py
 !/tests/test_hotfix_document_binding.py
 !/tests/test_hotfix_scope.py
 !/tests/test_hotfix_scope_clear.py
