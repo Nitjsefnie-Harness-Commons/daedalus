@@ -16,6 +16,7 @@ the `timed` matrix, and the derivation found all four jobs on the first
 run where the list had two.
 """
 import ast
+import fnmatch
 import subprocess
 import sys
 from pathlib import Path
@@ -47,28 +48,73 @@ def _is_the_tests_directory(node):
     return (isinstance(node, ast.Constant) and node.value == 'tests')
 
 
-def _launches_a_tests_file(source):
-    """Whether this script LAUNCHES a file under tests/ directly.
+def _is_a_runnable_suite_file(node):
+    """Whether this string names a file under tests/ THAT CAN BE RUN.
 
-    `subprocess.run([sys.executable, "tests/test_x.py"])` runs a suite
-    without ever globbing for one, so a rule that only reads globs
-    misses it. Measured: the rule below would have caught this shape and
-    the glob-only rule does not, which is why both are asked.
+    A directory (`tests/`), a listing flag (`-- tests/`) and an
+    unrelated path are not a launch. Reading them as one put
+    `plan-matrix` in the policed set for a `git ls-files` LISTING, in a
+    set whose stated reason was that the rule recognises a launch.
+    """
+    if not (isinstance(node, ast.Constant)
+            and isinstance(node.value, str)):
+        return False
+    path = node.value.replace(chr(92) * 2, '/')
+    return (path.startswith('tests/')
+            and (fnmatch.fnmatch(path, 'tests/run_tests.py')
+                 or fnmatch.fnmatch(path, 'tests/test_*.py')))
+
+
+def _is_a_launch_call(node):
+    """A parsed callee naming a process launcher, not a source match.
+
+    "run" inside a callee name is not a launch: a method called `run` on
+    some other object, and a path that merely contains the letters, must
+    not match — which is why the callee is read as a node here.
+    """
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr not in ('run', 'Popen', 'call', 'check_call',
+                         'check_output'):
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id in (
+        'subprocess', 'sp')
+
+
+def _launches_a_tests_file(source):
+    """Whether this script LAUNCHES a runnable file under tests/.
+
+    ADMITTED, each measured against this predicate:
+      * `subprocess.run([sys.executable, "tests/test_x.py"])`, and the
+        same under `Popen`, `call`, `check_call` and `check_output`,
+        written as `subprocess.<name>` or as an `import subprocess as
+        sp` alias;
+      * an argument list that REACHES a suite path indirectly, so
+        `subprocess.run([..., glob.glob("tests/test_x.py")[0]])` counts
+        — the walk descends into the expression.
+
+    DELIBERATELY NOT ADMITTED, each measured as a miss rather than
+    assumed:
+      * `os.system`, `os.popen` and `os.execv`: a `system` call carries
+        a shell string, and reading it as an argv would be a guess;
+      * `subprocess.run(args=[...])` with no positional argument — the
+        walk reads `node.args[0]`, and the `args=` keyword is not read
+        at all;
+      * `from subprocess import run`, and a callee on any other
+        owner, because the owner is a Name equal to `subprocess` or
+        `sp` and nothing else;
+      * a command assembled in an f-string, which is a string only at
+        run time.
     """
     for node in ast.walk(ast.parse(source)):
-        if not (isinstance(node, ast.Call)
-                and ast.unparse(node.func).endswith(
-                    ('subprocess.run', 'subprocess.Popen',
-                     'subprocess.check_call', 'subprocess.check_output',
-                     'os.system'))):
+        if not (isinstance(node, ast.Call) and _is_a_launch_call(node)):
             continue
-        for argument in node.args[:1]:
-            for inner in ast.walk(argument):
-                if (isinstance(inner, ast.Constant)
-                        and isinstance(inner.value, str)
-                        and inner.value.replace('\\', '/').startswith(
-                            'tests/')):
-                    return True
+        if not node.args:
+            continue
+        for inner in ast.walk(node.args[0]):
+            if _is_a_runnable_suite_file(inner):
+                return True
     return False
 
 
@@ -194,14 +240,17 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
       * (e) JOB-SIDE LITERAL DEPENDENCY. `_invoked_scripts` needs the
         tracked filename as a literal substring of the `run:` text, so
         `run: python "$SUITE_RUNNER"` drops the job silently.
-
-      * (f) A `tests/` LITERAL LAUNCH. `subprocess.run([py,
-        "tests/test_x.py"])` was caught by the rule this replaced and is
-        missed by it, and neither disclosure named it.
+      * (f) A `tests/` LITERAL LAUNCH *the rule this replaced never
+        caught either*: measured against the pre-wave predicate, a
+        literal `subprocess.run([py, "tests/test_x.py"])` is `False`
+        under both the old and the new rule, because the old one looked
+        only at `.glob(...)` calls. The arm exists for that gap, not
+        because the old rule lost the shape.
       * (g) A WORKFLOW FILE OTHER THAN tests.yml. The guard reads
         `tests.yml`, so every other workflow file is invisible to it --
         `release.yml`, which runs `run_tests.py` from a detached tag, and
-        `timed-timings.yml`, whose two suite steps FIX 4's list names.
+        `timed-timings.yml`, whose two suite steps at depth 1 bullet
+        (a) names.
       * (h) A TRANSITIVE WRAPPER, in either direction: a job that
         reaches a runner through a script which itself reaches a runner.
         This is the route that produced the tag-build incident, and the
@@ -251,34 +300,52 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
             ('out = (ROOT / "old_tests").glob("test_*.py")', False),
             ('out = (ROOT / "dashboard").glob("test_*.py")', False)):
         assert _enumerates_the_tests_tree(source) is expected, source
-    # The shape a glob-only rule loses.
-    assert _launches_a_tests_file(
-        'import subprocess, sys\n'
-        'subprocess.run([sys.executable, "tests/test_x.py"])\n')
+    # A callee whose NAME merely contains a launch word, with an
+    # argument that does not name a suite: the source-text callee test
+    # this replaced counted it.
     assert not _launches_a_tests_file(
-        'import subprocess\nsubprocess.run(["ls", "tests"])\n')
+        'import subprocess\nsubprocess.runner(["python3", "docs/x.py"])\n')
+    # A call reached through a nested expression still counts, because
+    # the walk descends into the argument.
+    assert _launches_a_tests_file(
+        'import glob, subprocess, sys\n'
+        'subprocess.run([sys.executable,'
+        ' glob.glob("tests/test_x.py")[0]])\n')
 
 
-def test_the_runnerhood_rule_finds_all_three_runners(tmp):
-    """The shape the rule keys on, pinned on the three that matter.
+def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
+    """Each member of the policed set, pinned — including the ones no
+    hand-written fixture stands for.
 
-    A name-keyed rule recognised two of these three only because a loop
-    variable happened to be called `suite`, and the reviewer's
-    `sed -i 's/\bsuite\b/suitepath/g' scripts/ci/time_tests.py` reached
-    that. The rule keys on ENUMERATING THE TESTS TREE instead, and this
-    is the statement of why: `run_tests.py` and `coverage_suites.py`
-    write the identical expression, and `time_tests.py` spells its
-    receiver differently — which a shape tolerates and a name does not.
+    An earlier version of this test named three runners and asserted
+    them, which left a fourth (`plan_timed_matrix.py`) in the set with
+    nothing holding it: changing that script's shape would have dropped
+    `plan-matrix` with the guard green. Every member is named here now.
+
+    One thing this test does NOT show, because it is true: removing the
+    literal-launch arm leaves the set unchanged. All three runners glob,
+    so the arm currently contributes NO member — it is kept for the
+    route it is meant to cover, a workflow step that runs a suite
+    directly (`timed-timings.yml`, bullet (a)), and not for a member of
+    today's set.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))
     for runner in ('run_tests.py', 'scripts/ci/coverage_suites.py',
                    'scripts/ci/time_tests.py'):
         assert runner in runners, (
-            f'{runner} no longer enumerates the tests tree, so the guard '
-            'drops the job that runs it from the policed set. The rule is '
-            'a shape now, so this is a change to what the tree does, not '
-            'a rename.')
+            f'{runner} no longer enumerates the tests tree or launches a '
+            'suite file, so the guard drops the job that runs it. The rule '
+            'is a shape now, so this is a change to what the tree does, '
+            'not a rename.')
+    # The listing that is NOT a launch, and the launch that is.
+    assert not _launches_a_tests_file(
+        "import subprocess\n"
+        "subprocess.run(['git', '-C', str(t), 'ls-files', '-z', '--',"
+        " 'tests/'])\n")
+    assert _launches_a_tests_file(
+        'import subprocess, sys\n'
+        'subprocess.run([sys.executable, "tests/test_x.py"])\n')
 
 
 def test_the_runnerhood_rule_is_not_a_substring_match(tmp):
