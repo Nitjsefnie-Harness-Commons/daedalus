@@ -361,8 +361,6 @@ def test_an_allowance_row_naming_no_live_site_fails(tmp):
 def test_a_row_may_not_name_a_declaration_this_branch_added(tmp):
     del tmp
     boundary = introduced_rows(UNCONSOLIDATED_NAMES, python_digests, ROOT)
-    # An UNREADABLE base REFUSES and a tree that IS the base SKIPS; a
-    # maintainer chasing either red needs the cause that produced it.
     assert boundary.reason != UNREADABLE, (
         'UNCONSOLIDATED_NAMES: the base tree could not be read. This '
         'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + ', so '
@@ -471,6 +469,8 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     assert js.introduced == [
         ('tests/test_base.py', 'carried')], 'and neither is a second copy'
     # A checkout carrying neither base cannot answer, and REFUSES.
+    # A base that IS the head SKIPS: a release tag is a commit on main,
+    # so a tag checkout has no branch to compare against.
     unreadable = introduced_rows(table, python_digests, repo,
                                  bases=('origin/main',))
     assert unreadable.reason == UNREADABLE

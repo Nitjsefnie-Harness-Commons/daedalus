@@ -338,10 +338,9 @@ UNCONSOLIDATED_JS_NAMES = {
         'this is the JSON answer the dashboard node own reader expects, '
         'where the owner is the shell harness one',
     ('tests/_dashnode.py', 'textNode'):
-        'this is the text-node factory the dashboard node document uses. '
-        'Its twin is the row for tests/_dashdom.py, five body lines each, '
-        'and that twin is the owner: tests/_dashshell.py, which an '
-        'earlier draft of this row named, defines no textNode at all',
+        'this is the text-node factory the dashboard node document uses, '
+        'five body lines, and its twin in tests/_dashdom.py is the owner. '
+        'A separate file, tests/_dashshell.py, defines no textNode at all',
     ('tests/_dashshell.py', 'jsonResponse'):
         'this is the JSON answer the shell harness own reader expects, '
         'where the owner belongs to the dashboard node harness',
@@ -371,11 +370,11 @@ UNCONSOLIDATED_JS_NAMES = {
         'duplication is real and deferred, and the wider response-factory '
         'cluster is the second wave of this consolidation',
     ('tests/_netcapture_harness.py', 'run'):
-        'this is the capture harness own driver, 45 body lines and the '
-        'sixth largest of the 21 `run` declarations in the tree, where '
-        'the owner is the relay harness driver (236 body lines, the '
-        'largest) over a different plan; no shared copy of either would '
-        'serve both',
+        'this is the capture harness own driver, 45 body lines. Ranked '
+        'from 1 over the 21 `run` declarations in the tree by body lines, '
+        'it is the seventh, where the owner is the largest at 236; the '
+        'order runs 236, 198, 137, 120, 98, 50, 45. No shared copy of '
+        'either driver would serve both harnesses',
     ('tests/_tabs_harness.py', 'maybeReject'):
         'this refuses a chrome surface by API name, where the netcapture '
         'harness refuses a declarativeNetRequest entry by RULESET key',
