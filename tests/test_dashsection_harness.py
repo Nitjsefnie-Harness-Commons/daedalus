@@ -236,6 +236,106 @@ report({ refusal, planned: drive.planned() });
 """
 
 
+# A fan-out double's contract is its breadth, so this registers several
+# listeners and varies what each one does. One listener proves none of it.
+_BUS = r"""
+(async () => {
+const seen = [];
+let lateAdded = false;
+const stopSecond = bus.on((event) => {
+  seen.push('second:' + event.type);
+  if (lateAdded) return;
+  lateAdded = true;
+  bus.on((late) => { seen.push('late:' + late.type); });
+});
+bus.on(() => { seen.push('third'); throw new Error('listener failed'); });
+bus.on((event) => { seen.push('fourth:' + event.type); });
+let escaped = null;
+try { bus.emit({ type: 'tabs-synced' }); }
+catch (error) { escaped = error.message; }
+// `seen` is one array the whole run appends to, so each snapshot copies it
+// at the moment it was taken rather than aliasing what came later.
+const first = { seen: seen.slice(), escaped, errors: ERRORS.length };
+bus.emit({ type: 'tab-updated' });
+const second = { seen: seen.slice() };
+stopSecond();
+bus.emit({ type: 'tab-unregistered' });
+report({ first, second, third: { seen: seen.slice() },
+  errors: ERRORS.slice() });
+})().catch(leave);
+"""
+
+
+# A 4242 ms timer parked inside a command window is the timer the pump must
+# not spend. It is parked from inside the `/command` response, so it sits in
+# the window ahead of the poll sleep, and a pump that spends by index
+# fires it -- which is a callback no scenario fired and no browser would
+# run at that moment.
+_PUMP_SELECTIVITY = r"""
+(async () => {
+""" + _SEED + _IMPORT_API + r"""
+let planted = 0;
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (target, init) => {
+  const answered = await realFetch(target, init);
+  if (String(target) === '/command') {
+    setTimeout(() => { planted += 1; }, 4242);
+  }
+  return answered;
+};
+drive.route('/command', { did: 'd1', result: 'the right result' });
+drive.route('/result?tab=extension', { result: 'the right result' });
+const result = await bounded(api.extCmd('list-block-rules', {},
+  { timeout: 700 }), 'a command with a timer parked beside it',
+  _dashnodeStepTimeoutMs);
+await bounded(settle(), 'after the command', _dashnodeStepTimeoutMs);
+report({ result, planted, live: drive.live() });
+})().catch(leave);
+"""
+
+
+# The three refusals that are cheap to reach and were unreached: a
+# `Headers` bag the transport cannot read a credential from, a result poll
+# with no command behind it, and a selector registered twice.
+_REFUSALS = r"""
+(async () => {
+let bag = null;
+let polled = null;
+let twice = null;
+try {
+  await bounded(fetch('/tabs', { headers: new Headers({ token: 'x' }) }),
+    'a headers bag the transport cannot read', _dashnodeStepTimeoutMs);
+} catch (error) { bag = error.message; }
+drive.route('/result?tab=extension', { result: [] });
+try {
+  await bounded(fetch('/result?tab=extension'), 'a poll with no command',
+    _dashnodeStepTimeoutMs);
+} catch (error) { polled = error.message; }
+const sub = new El('span');
+drive.selector('#s08 [data-sub]', sub);
+try { drive.selector('#s08 [data-sub]', sub); }
+catch (error) { twice = error.message; }
+report({ bag, polled, twice, requests: REQUESTS.length,
+  errors: ERRORS.slice() });
+})().catch(leave);
+"""
+
+
+# `console.error` is where a section's failed mount and `app.js`'s bus
+# report reach a scenario, so the recorder has to hold a line it was given
+# and a value whose own `toString` throws.
+_CONSOLE_ERROR = r"""
+(async () => {
+console.error('[mount] net-capture failed', new Error('boom'));
+let escaped = null;
+const unprintable = { toString() { throw new Error('no'); } };
+try { console.error('[bus] listener failed', unprintable); }
+catch (error) { escaped = error.message; }
+report({ escaped });
+})().catch(leave);
+"""
+
+
 _PHASE_TRACE = r"""
 (async () => {
 """ + _SEED + _IMPORT_API + r"""
@@ -362,12 +462,29 @@ def test_an_unplanned_request_is_refused_and_recorded(_tmp):
     """Both halves, per the #1083 wording: the target the scenario never
     declared is on the record AND the request is refused. A double that
     answers 200 for everything unrecognised leaves `unplanned` empty and
-    `refusal` null while the section reads the refusal as a result."""
+    `refusal` null while the section reads the refusal as a result.
+
+    The recorded body is compared as an object, not searched as a string:
+    a section suite asserts `'tabId' not in command`, and on a raw string
+    that is a substring match a field named `xTabId` would satisfy. A
+    double that records the string and parses it separately for the
+    ledger leaves every other case in this suite green, so the comparison
+    here is what holds the shape."""
     report = run_scenario(_UNPLANNED, sections=('api.js',))
     assert report['unplanned'] == [{'n': 1, 'target': '/command'}], report
-    assert report['requests'][0]['target'] == '/command', report
-    assert report['requests'][0]['method'] == 'PUT', report
-    assert report['requests'][0]['authorization'] == 'Bearer ' + _TOKEN, report
+    request = report['requests'][0]
+    assert request['target'] == '/command', report
+    assert request['method'] == 'PUT', report
+    assert request['authorization'] == 'Bearer ' + _TOKEN, report
+    body = request['body']
+    assert isinstance(body, dict), (
+        'the recorded body is not the parsed object', report)
+    assert body['type'] == 'list-block-rules', report
+    assert body['token'] == _TOKEN, report
+    assert body['tab'] == 'extension', report
+    # The command id is minted per run, so the key SET is what pins it:
+    # a body with a key the section never sent, or missing one it did.
+    assert sorted(body) == ['id', 'tab', 'token', 'type'], report
     assert report['refusal'] == 'unexpected request /command', report
 
 
@@ -383,13 +500,19 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
     """The fake has to be able to tell a wrong result from a right one, and
     the shipped loop is what decides: it skips an envelope whose `id` is
     not the command's and keeps polling to its own budget. Repairing the
-    envelope in the double hands the section a result it never sent."""
+    envelope in the double hands the section a result it never sent.
+
+    The discriminator is the consume leg, not the poll count. A poll count
+    turns on `api.js`'s `Date.now() - t0 < 700` against a clock that is
+    host time plus virtual time, so it passes only while the host stays
+    under 200 ms across three pump turns. The consume leg was reached or
+    it was not, and it is reached only for a result the loop accepted."""
     report = run_scenario(_ENVELOPE, sections=('api.js',))
     assert report['outcome'] is not None, (
         'the mismatched envelope was delivered as a match', report)
     assert report['outcome'].startswith('Timeout (700ms) waiting for '), report
-    polls = [r for r in report['requests'] if 'consume' not in r['target']]
-    assert len(polls) == 4, report
+    consumed = [r for r in report['requests'] if 'consume' in r['target']]
+    assert consumed == [], report
     assert report['unplanned'] == [], report
 
 
@@ -426,6 +549,83 @@ def test_loading_an_undeclared_module_is_refused(_tmp):
     report = run_scenario(_UNDECLARED_MODULE)
     assert report['refusal'] == 'no module argument for api.js', report
     assert report['planned'] == [], report
+
+
+def test_the_bus_reaches_every_listener_and_only_those_still_registered(_tmp):
+    """A fan-out double's contract is its breadth: one listener is never
+    enough, and here each one does something different. The snapshot
+    dispatch is stricter than the shipped `Set` — a listener registered
+    during a dispatch runs at the next one, not inside the one that
+    registered it — and the unsubscribe has to actually remove its own
+    listener, which is the only way a scenario can stop a re-populating
+    `bindTabSelector` from following a later event."""
+    report = run_scenario(_BUS)
+    assert report['first'] == {
+        'seen': ['second:tabs-synced', 'third', 'fourth:tabs-synced'],
+        'escaped': None,
+        'errors': 1,
+    }, report
+    assert report['second']['seen'] == [
+        'second:tabs-synced', 'third', 'fourth:tabs-synced',
+        'second:tab-updated', 'third', 'fourth:tab-updated',
+        'late:tab-updated',
+    ], report
+    # The unsubscribed listener is gone; the other three are not.
+    assert report['third']['seen'] == [
+        'second:tabs-synced', 'third', 'fourth:tabs-synced',
+        'second:tab-updated', 'third', 'fourth:tab-updated',
+        'late:tab-updated',
+        'third', 'fourth:tab-unregistered', 'late:tab-unregistered',
+    ], report
+    assert report['errors'] == ['listener failed'] * 3, report
+
+
+def test_the_pump_spends_the_poll_sleep_and_not_a_timer_beside_it(_tmp):
+    """A scenario that parks its own long timer inside a command window
+    must still see it parked: a pump that spends by index fires a callback
+    the scenario never fired, skips the sleep the command was waiting for,
+    and blows the virtual budget on a delay the window did not open for."""
+    report = run_scenario(_PUMP_SELECTIVITY, sections=('api.js',))
+    assert report['result'] == 'the right result', report
+    assert report['planted'] == 0, report
+    assert len(report['live']) == 1, report
+    assert report['unplanned'] == [], report
+
+
+def test_a_headers_bag_a_poll_with_no_command_and_a_twice_registered_selector(
+        _tmp):
+    """Three refusals that were reachable and unexercised. A `Headers`
+    instance carries the credential just as truly as the plain object
+    `api.js` builds, so reading it as absent would assert the opposite of
+    the truth. A poll with no command behind it is a scenario that never
+    sent one, not a bridge with a stale slot. A selector registered twice
+    is a scenario that meant to register two documents."""
+    report = run_scenario(_REFUSALS)
+    assert report['bag'] is not None, report
+    assert 'Headers' in report['bag'], report
+    assert 'plain header object' in report['bag'], report
+    assert report['polled'] is not None, report
+    assert 'a result poll before any command for' in report['polled'], report
+    assert '/result?tab=extension' in report['polled'], report
+    assert report['twice'] == 'selector already registered: #s08 [data-sub]', \
+        report
+    # The bag is refused before the request is recorded, so the record
+    # carries the poll and nothing before it.
+    assert report['requests'] == 1, report
+    assert report['errors'] == [], report
+
+
+def test_console_error_is_recorded_and_an_unprintable_one_does_not_throw(_tmp):
+    """A failed mount and a failed bus listener reach a scenario only
+    through this recorder, so a value whose own `toString` throws must not
+    take the call site with it — `app.js`'s bus catches and logs, and a
+    throw here would replace a recorded line with a crash."""
+    report = run_scenario(_CONSOLE_ERROR)
+    assert report['escaped'] is None, report
+    assert report['errors'] == [
+        '[mount] net-capture failed boom',
+        '[bus] listener failed [unprintable value]',
+    ], report
 
 
 def test_a_scenario_records_the_six_phase_checkpoints(_tmp):
