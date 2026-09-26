@@ -294,4 +294,15 @@ LAUNCH_REFUSAL_ROWS = (
      "for word, flag in launcher(['git', 'status'], check=True):\n"
      "    pass\n",
      'unpacks subprocess-derived values the audit cannot follow'),
+    # The human-readable half of the one route `BOUND_SITE_ROWS` pins that
+    # this branch added, so a message that stops naming the problem is
+    # caught here rather than by a reader of a CI log. The other two
+    # routes need no row: a `**` unpacked on a launch is main's
+    # `keyword-mapping-unpack` row, and a `functools.partial` is reported by
+    # the `unplaced` arm, which pins a head rather than a message.
+    ('foreign-keyword-on-a-launch',
+     "import subprocess\n"
+     "def probe():\n"
+     "    subprocess.run(['git', 'status'], check=True, timout=30)\n",
+     'which this subprocess does not take'),
 )
