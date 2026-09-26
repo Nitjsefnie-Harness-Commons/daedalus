@@ -497,6 +497,7 @@
 !/tests/test_coverage_environment.py
 !/tests/test_coverage_memo.py
 !/tests/test_coverage_name_bindings.py
+!/tests/test_coverage_prose.py
 !/tests/test_coverage_root_provenance.py
 !/tests/test_coverage_scope_bindings.py
 !/tests/test_coverage_suites.py
