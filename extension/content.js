@@ -267,9 +267,13 @@ function connectKeepAlive() {
 // indistinguishable to it. So this document plants a token in its OWN DOM
 // and sends it with the request, and the CDP channel reads that token back
 // inside the evaluation that runs the fix. A page can read and rewrite the
-// token, and that is accepted: a document can only plant a token in its own
-// DOM, so a hostile one can suppress its own fix and can never make a fix
-// run in a document it does not hold. The direction is what the property is.
+// token, and that is accepted. It is NOT that a page cannot reach another
+// document — a same-origin frame or opened window it holds, it can, and it
+// could plant a token in either. It is that the evaluation reads the tab's
+// top frame, and the asker holds no handle to a second top-frame document in
+// its own tab, so a hostile document can suppress its own fix and can never
+// make one run in a document it does not hold. worker/hotfixes.js states the
+// mechanism beside the check itself.
 (function replayHotfixes() {
   // `crypto.randomUUID` is [SecureContext] and this script is declared on
   // `<all_urls>`, so it is absent on a plain-http page. A token minted

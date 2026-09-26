@@ -192,10 +192,16 @@ const chrome = {
             .replace('__SEND_COMMAND__', send_command))
 
 
-# The two page globals a harness must supply before it can run the shipped
-# content script, because that script uses them at load: `crypto`, to mint the
-# document token its replay request carries, and `document.documentElement`,
-# to plant that token in the asking document's own DOM.
+# The page globals a harness must supply before it can run the shipped
+# content script or the shipped page script, because both use them at load:
+# `crypto`, which the content script mints its replay token with, and the
+# document, which both relay through.
+#
+# Every member below is one `content.js` or `page.js` actually reads, and
+# nothing more: a step nothing reads is inert data that reads as coverage.
+# `getAttribute` is deliberately NOT here — no shipped script reads it. The
+# only thing that does is the hotfix harness's own document double, which
+# models the guard reading the token back, and that harness keeps its own.
 #
 # The attribute store is real rather than a set of no-ops. A documentElement
 # that swallowed the write would let a control pass against a page that never
@@ -210,7 +216,6 @@ function contentScriptPage() {
     document: {
       documentElement: {
         setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute: (name) => (attributes.get(name) ?? null),
         removeAttribute(name) { attributes.delete(name); },
       },
       addEventListener() {},
