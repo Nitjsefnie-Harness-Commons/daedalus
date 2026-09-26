@@ -19,7 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 
 # Chrome's own words, so a control that reads the failure reads what the
@@ -27,7 +28,8 @@ from _worker_sources import import_scripts_stub  # noqa: E402
 REFUSAL = 'Another debugger is already attached'
 
 _ATTACHMENT_HARNESS = (
-    r"""
+    event_target_stub()
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -71,10 +73,6 @@ function response(status, data) {
     json: async () => data,
     text: async () => JSON.stringify(data),
   };
-}
-
-function eventTarget(listeners) {
-  return { addListener(listener) { listeners.push(listener); } };
 }
 
 const tabRemoved = [];
