@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfield  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
-import test_dashboard_accessibility as accessibility  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
@@ -39,7 +39,7 @@ def test_shipped_harnesses_pin_their_process_metadata(tmp):
         'consume': (behaviour._DASHBOARD_CONSUME_HARNESS, 2, False),
         'world': (behaviour._DASHBOARD_WORLD_HARNESS, 1, False),
         'selector': (behaviour._TAB_SELECTOR_HARNESS, 5, True),
-        'field': (accessibility._FIELD_HARNESS, 1, True),
+        'field': (_dashfield.FIELD_HARNESS, 1, True),
     }
     for name, (harness, bounded_steps, module) in expected.items():
         assert isinstance(harness, _dashnode.DashboardNodeHarness), name
@@ -117,7 +117,7 @@ def test_all_shipped_harnesses_pass_bound_shape_validation(tmp):
         behaviour._DASHBOARD_CONSUME_HARNESS,
         behaviour._DASHBOARD_WORLD_HARNESS,
         behaviour._TAB_SELECTOR_HARNESS,
-        accessibility._FIELD_HARNESS,
+        _dashfield.FIELD_HARNESS,
     )
     assert all(isinstance(harness, _dashnode.DashboardNodeHarness)
                for harness in shipped), shipped
