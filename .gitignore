@@ -628,6 +628,7 @@
 !/tests/test_tab_routing_yielded_sender.py
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
+!/tests/test_timed_basis_feed.py
 !/tests/test_timed_matrix_shape.py
 !/tests/test_timed_planner.py
 !/tests/test_timed_refresh.py
