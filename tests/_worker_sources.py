@@ -223,3 +223,43 @@ function eventTarget(retained = [], dispatches = false) {
   return target;
 }
 """
+
+
+def resolve_target_stub():
+    """The injection-target resolver the MAIN-world and hotfix doubles share.
+
+    Chrome resolves an injection target to a document: a bare `tabId` lands
+    on whatever holds the tab at injection time, a `documentIds` target
+    lands on the document it names, and a document that is gone is refused
+    rather than answered from a stale binding. A target shape the double
+    does not model is refused by name, because a stub that quietly accepted
+    what it does not model is how a false green is manufactured.
+
+    The two doubles keep their document stores in different shapes — one an
+    array, one an object keyed by id — so the shared half is the CONTROL and
+    the store access is the caller's: `find(id)` answers the document with
+    that id and `current()` answers the live one. Both are functions, not
+    values, because the live document changes under a navigation and the
+    answer is read at call time.
+    """
+    return r"""
+function resolveTarget(target, find, current) {
+  if (!target || target.tabId === undefined) {
+    throw new Error('unmodelled injection target ' + JSON.stringify(target));
+  }
+  const shape = Object.keys(target).sort().join(',');
+  if (shape === 'tabId') return current();
+  if (shape === 'documentIds,tabId') {
+    const named = target.documentIds;
+    if (!Array.isArray(named) || named.length !== 1) {
+      throw new Error('unmodelled documentIds ' + JSON.stringify(named));
+    }
+    const doc = find(named[0]);
+    if (!doc || !doc.live) {
+      throw new Error('Cannot access contents of the page');
+    }
+    return doc;
+  }
+  throw new Error('unmodelled injection target ' + shape);
+}
+"""

@@ -30,10 +30,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub, resolve_target_stub)
 
 _HOTFIX_HARNESS = (
-    r"""
+    event_target_stub() + resolve_target_stub()
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 const repl = require('repl');
@@ -57,11 +59,6 @@ const storageStore = {
 };
 let sequence = 0;
 
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) { if (listeners) listeners.push(listener); },
-  };
-}
 function response(status, data) {
   return {
     ok: status >= 200 && status < 300,
@@ -173,35 +170,21 @@ function relocateAt(point) {
 
 // ─── the fake browser ───
 
-// Chrome resolves an injection target to a document: a bare tabId resolves
-// to whatever holds the tab at injection time, a documentIds target
-// resolves to the document it names and is refused once it is gone.
-function resolveTarget(target) {
-  if (!target || target.tabId === undefined) {
-    throw new Error('unmodelled injection target ' + JSON.stringify(target));
-  }
-  const shape = Object.keys(target).sort().join(',');
-  if (shape === 'tabId') return currentDocument;
-  if (shape === 'documentIds,tabId') {
-    const named = target.documentIds;
-    if (!Array.isArray(named) || named.length !== 1) {
-      throw new Error('unmodelled documentIds ' + JSON.stringify(named));
-    }
-    const doc = documents.find((candidate) => candidate.id === named[0]);
-    if (!doc || !doc.live) {
-      throw new Error('Cannot access contents of the page');
-    }
-    return doc;
-  }
-  throw new Error('unmodelled injection target ' + shape);
-}
+// Chrome's resolution of an injection target is the shared stub. This
+// harness's own store is the array it pushes documents into, so the two
+// accessors it takes are all that is left of it, inlined at the one call
+// site rather than named.
+
 
 async function executeScript(injection) {
   navigateAt('first-script-call');
   if (injection.world !== 'MAIN') {
     throw new Error('unmodelled injection world ' + injection.world);
   }
-  const doc = resolveTarget(injection.target);
+  const doc = resolveTarget(
+    injection.target,
+    (id) => documents.find((candidate) => candidate.id === id),
+    () => currentDocument);
   const isProbe = injection.func.name === '_canUseMainWorldEval';
   injections.push({
     documentId: doc.id, world: injection.world, probe: isProbe,
