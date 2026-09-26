@@ -14,13 +14,16 @@ token in its OWN DOM and sends it with the request, and the CDP channel reads
 that token back inside the same evaluation that runs the fix — the property
 the existing `location` guard already had, one step finer.
 
-The token is page-readable and page-writable, and that is accepted: a
-document can only plant a token in its own DOM, so a hostile one can
-suppress its own fix and can never make a fix run in a document it does not
-hold. The direction is the property, not the secrecy. `D1` below rests on
-exactly one layer for that reason — the two documents share a url, so the
-`location` guard passes for both and only the token guard can fire — which
-is why removing the token guard alone turns it red.
+The token is page-readable and page-writable, and that is accepted. A page
+can reach a second document's DOM — a same-origin frame or opened window it
+holds — and could plant a token there; what it cannot do is make a fix run in
+a document the evaluation does not read. The evaluation resolves to the tab's
+top frame, and the asker holds no handle to a second top-frame document in its
+own tab, so a hostile document can suppress its own fix and can never make one
+run somewhere it does not hold. The binding is directional, not secret.
+`D1` below rests on exactly one layer for that reason — the two documents
+share a url, so the `location` guard passes for both and only the token
+guard can fire — which is why removing the token guard alone turns it red.
 """
 import sys
 from pathlib import Path
