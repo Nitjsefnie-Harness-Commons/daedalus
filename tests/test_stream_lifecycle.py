@@ -392,10 +392,14 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
 
 
 def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
-    """The search is bounded, and says what the child printed instead."""
+    """The search is bounded, and says what the child printed instead.
+
+    The window opens only once the child has demonstrably printed.
+    """
     del tmp
     # Built before the list rather than inside it: two adjacent literals
     # between commas read as a missing comma, which is a different program.
+    marker = 'nothing to do with the port\n'
     program = ('import sys, time; '
                'print("nothing to do with the port", flush=True); '
                'time.sleep(600)')
@@ -403,15 +407,22 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         [sys.executable, '-c', program],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
+        drained = _util.drain_lines(proc)
+        # A handshake, not a bigger number: the ordering is waited for
+        # unbounded, so the bound below cannot be spent on interpreter
+        # startup while proving nothing about the search.
+        _await_alive(proc, drained, lambda: marker in drained,
+                     'the child never printed its one line')
         started = time.time()
         failure = ''
         try:
-            _util.await_listening_line(
-                proc, _util.drain_lines(proc), timeout=1)
+            _util.await_listening_line(proc, drained, timeout=1)
         except RuntimeError as e:
             failure = str(e)
         elapsed = time.time() - started
         assert failure, 'a silent child was read as an announcement'
+        # The 10x headroom is now over the search loop, so it still catches
+        # a bound that was silently widened.
         assert elapsed < 10, elapsed
         assert 'did not announce its port in 1s' in failure, failure
         assert 'nothing to do with the port' in failure, failure
