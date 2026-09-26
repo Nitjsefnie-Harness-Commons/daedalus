@@ -11,6 +11,7 @@ every `segment_store` call here is given the same root, so one root names
 one tree.
 """
 import pathlib
+import threading
 import time
 from typing import NamedTuple
 
@@ -30,6 +31,12 @@ class Admission(NamedTuple):
     quota: tuple
     seg_dir: pathlib.Path
     seg_dir_root: pathlib.Path
+    # The lock this job's storage is serialized on, chosen once by the
+    # admission that read the record. The write path takes this rather than
+    # asking again: the two sites must hold one lock across the usage read,
+    # the quota check and the record write, and a second lookup is a second
+    # chance to name a different job's stripe.
+    lock: threading.Lock
 
 
 def admit_segment(seg_dir_root, params, sig):
@@ -71,7 +78,8 @@ def admit_segment(seg_dir_root, params, sig):
     # request. Only the server-minted record controls storage.
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
-        with segment_store.seg_lock_for(job):
+        lock = segment_store.seg_lock_for(job)
+        with lock:
             record = segment_store.record_for_sig(seg_dir_root, job, sig)
             quota = (segment_store.quota(record)
                      if record is not None else None)
@@ -81,10 +89,11 @@ def admit_segment(seg_dir_root, params, sig):
         return 403, {'error': 'bad sig'}
     if segment_index > quota[0]:
         return 400, {'error': 'seg out of range'}
-    # The directory travels with the admission so the namespace is decided
-    # once, here, where the refusal is a 400 about the request rather than
-    # a storage error raised under the write lock.
-    return Admission(job, segment_index, quota, seg_dir, seg_dir_root)
+    # The directory and the lock travel with the admission so the namespace
+    # and the stripe are decided once, here, where the refusal is a 400
+    # about the request rather than a storage error raised under the write
+    # lock.
+    return Admission(job, segment_index, quota, seg_dir, seg_dir_root, lock)
 
 
 def store_segment(raw, admission):
@@ -92,14 +101,14 @@ def store_segment(raw, admission):
 
     The capability, the parameter shapes and the quota were settled by
     admit_segment. What is left has to be atomic: the file listing, the
-    byte sum and the write happen under one hold of this job's own stripe
-    (segment_store.seg_lock_for), so two segments arriving together cannot
+    byte sum and the write happen under one hold of this job's own stripe,
+    the one the admission carries, so two segments arriving together cannot
     both spend the same remaining bytes. Two jobs do not share that hold.
     """
-    job, segment_index, quota, seg_dir, seg_dir_root = admission
+    job, segment_index, quota, seg_dir, seg_dir_root, lock = admission
     _, max_count, max_bytes = quota
     marks = segment_store.timing_marks()
-    with segment_store.seg_lock_for(job):
+    with lock:
         if marks is not None:
             marks.append(('acquire', time.perf_counter()))
         filename = f'{segment_index:06d}.ts'
