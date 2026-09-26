@@ -2,8 +2,8 @@
 executed for real and then read by the guard.
 
 A suite that reports a routing violation has to show it against code
-that runs, not against a fixture that describes what the guard thinks
-runs. This harness mutates the body of the real `do_focus_tab` in
+that runs, not a fixture describing what the guard thinks runs. This
+mutates the body of the real `do_focus_tab` in
 `daedalus_cli/commands_browser.py`, executes the result against
 recording stubs, and answers `(runtime_calls, guard_violations)` — the
 two halves a guard has to agree with.

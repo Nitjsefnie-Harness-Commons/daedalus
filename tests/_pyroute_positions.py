@@ -38,10 +38,14 @@ def position_key(container, index):
     A negative key counts from the end, so a sequence of length L names
     L + index. A key past the start names a position the runtime refuses
     and an unknown length names none; both answer None, and the caller
-    tells them apart by the length it already holds.
+    tells them apart by the length it already holds. The container is a
+    sequence by precondition, which the one caller enforces.
 
-    The container is a sequence by precondition - a mapping key is a key
-    and no length resolves it - and the one caller is what enforces it.
+    This is `at_position`'s arithmetic, and the two must not be merged:
+    that one consults BOTH spellings of a negative key, because a read
+    that under-reports is the worse failure, while a store picks exactly
+    one - a value written to a key no read consults is a value the model
+    has lost.
     """
     if not isinstance(index, int) or index >= 0:
         return index
