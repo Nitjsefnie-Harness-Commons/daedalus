@@ -5,8 +5,7 @@ Every row is a synthetic module scanned by `sweep_launches`, so each
 branch of the analyser is pinned by a fixture rather than by the two
 real sites happening to spell things one way. Two groups, opposite on
 purpose: the first must be CAUGHT, the second must NOT be. The second
-group is the arms of
-`tests/test_static_guard_regressions.py`'s
+group is the arms of `tests/test_static_guard_regressions.py`'s
 `test_a_sweep_launch_carries_no_wall_clock_bound` that the ANALYSER can
 be shown not to enforce — the ones about a deadline it cannot see at
 all, rather than about how the caller chooses which files to hand it.
@@ -31,7 +30,6 @@ PROGRAM = f'suite.{SWEEP_ENTRY}(tmp)'
 
 
 def _scan(body, head='import subprocess\n'):
-    """The (launches, timed) of one synthetic module."""
     return sweep_launches(ast.parse(head + body), HERE)
 
 
@@ -41,14 +39,12 @@ def _line_of(body):
 
 
 def _bounded(label, body):
-    """Assert `body` is one bounded sweep launch, and name its line."""
     line = _line_of(body)
     assert _scan(body) == ([(HERE, line)], [(HERE, line)]), (
         label, _scan(body), line)
 
 
 def test_every_launcher_spelling_names_a_deadline_keyword(tmp):
-    """The four launchers, in the import spellings that give them."""
     del tmp
     rows = (
         ('import subprocess\n', 'subprocess.{launcher}'),
@@ -66,7 +62,6 @@ def test_every_launcher_spelling_names_a_deadline_keyword(tmp):
 
 
 def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
-    """A list is a program, and so is every way a scope spells one."""
     del tmp
     rows = (
         f'subprocess.run(["-c", "{PROGRAM}"], timeout=120)\n',
@@ -153,7 +148,6 @@ def test_a_branch_shares_its_enclosing_scope(tmp):
 
 
 def test_a_clean_module_reports_nothing(tmp):
-    """The scan must not report a launch that runs something else."""
     del tmp
     for index, body in enumerate((
             'x = 1\n',
@@ -171,7 +165,6 @@ def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
     Three directions, and the first two are the ones that used to red a
     correct launch: a name the scope reused for an unrelated program
     afterwards, and one it reused for an unrelated program in between.
-    A launch is judged on the binding in force at its own line.
     """
     del tmp
     reused_after = (f'program = ["-c", "{PROGRAM}"]\n'
@@ -192,7 +185,6 @@ def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
 
 
 def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
-    """The launch is found either way; only a `timeout` is a refusal."""
     del tmp
     body = f'subprocess.run(["-c", "{PROGRAM}"])\n'
     assert _scan(body) == ([(HERE, 2)], []), _scan(body)
