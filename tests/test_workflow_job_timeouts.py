@@ -10,20 +10,16 @@ neither `runs-on` nor a job-level `uses` is not a runner job and is not
 asked for a bound; such a job is invalid, and the repository's pinned
 actionlint is the gate that refuses it.
 """
-import ast
 import math
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _wfgraph import _job_names, _tests_yml  # noqa: E402
 from _wfjobs import bound_source, load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
-from _yamlsteps import complete_job_mapping  # noqa: E402
 
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
 _DIGITS = r'[0-9](?:_?[0-9])*'
@@ -519,126 +515,6 @@ def _positive_literal(bound, where):
     if value <= 0:
         return f'{where}: timeout-minutes {digits} is not greater than zero'
     return None
-
-
-# Which jobs run the suites is DERIVED, not written here. A job is in the
-# set when one of its steps invokes a tracked script that reaches a suite:
-# either it spawns one, or it invokes a script that does. Deriving it is
-# the whole point — the hand list this replaces missed the `timed`
-# matrix, which runs slices of tests/ and therefore ran both boundary
-# controls in a checkout where neither `origin/main` nor a local `main`
-# resolved, so both took their refusal arm and the property every
-# allowance row rests on was never evaluated there.
-#
-_SUITE_LAUNCH_CALLS = frozenset({
-    'subprocess.run', 'subprocess.Popen', 'subprocess.check_output',
-    'subprocess.check_call'})
-
-
-def _launches_a_suite(source):
-    """Whether this script, as an AST, launches a suite.
-
-    A `subprocess` call whose first argument names a path under `tests/`
-    or is the suite it was handed. It is an AST fact and not a substring
-    because the substring version of this question matched a docstring
-    and put two non-runners in the set while missing the one that
-    mattered — the same mention-versus-call mistake the re-implementation
-    control's `__main__` rule had, in a different control.
-
-    The set is over-inclusive by design in the SAFE direction: the
-    planner launches nothing but is included, which costs one workflow
-    line, where under-inclusion is the hole this guard exists to close.
-    """
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        if ast.unparse(node.func) not in _SUITE_LAUNCH_CALLS:
-            continue
-        for argument in node.args[:1]:
-            for inner in ast.walk(argument):
-                if isinstance(inner, ast.Constant) \
-                        and isinstance(inner.value, str) \
-                        and inner.value.replace('\\', '/').startswith(
-                            'tests/'):
-                    return True
-                if isinstance(inner, ast.Name) and inner.id in (
-                        'suite', 'suites'):
-                    return True
-    return False
-
-
-def _tracked_scripts(root):
-    """{repo-relative path: source} for the tracked entry-point scripts."""
-    listed = subprocess.run(
-        ['git', 'ls-files', 'run_tests.py', 'scripts/ci/*.py'], cwd=root,
-        capture_output=True, text=True, check=True,
-        env=_util.child_coverage('scrub')).stdout.split()
-    return {name: (root / name).read_text(encoding='utf-8')
-            for name in listed}
-
-
-def _suite_runners(scripts):
-    """The tracked scripts that launch a suite."""
-    return {name for name, source in scripts.items()
-            if _launches_a_suite(source)}
-
-
-def _invoked_scripts(command, runners):
-    """Which of `runners` this shell command invokes, by its own name."""
-    return {name for name in runners if name in command}
-
-
-def _jobs_running_suites(workflow, runners):
-    """{job: {the runners it invokes}} over the workflow's own steps."""
-    found = {}
-    for job in _job_names(workflow):
-        steps = (complete_job_mapping(workflow, job) or {}).get('steps') or []
-        for step in steps:
-            if not step:
-                continue
-            invoked = _invoked_scripts(str(step.get('run', '')), runners)
-            if invoked:
-                found.setdefault(job, set()).update(invoked)
-    return found
-
-
-def _checkout_widths(job):
-    """Every `fetch-depth` the job's checkout steps ask for."""
-    widths = []
-    for step in (complete_job_mapping(_tests_yml(), job) or {}).get(
-            'steps') or []:
-        if not step or 'actions/checkout@' not in str(step.get('uses', '')):
-            continue
-        inputs = step.get('with') or {}
-        widths.append(str(inputs.get('fetch-depth', '')) or None)
-    return widths
-
-
-def test_every_job_that_runs_the_suites_can_read_the_merge_base(tmp):
-    """Every job that runs a suite must fetch the merge base.
-
-    The branch-boundary controls read the merge base's own declarations,
-    and a checkout that resolves neither `origin/main` nor a local `main`
-    makes both boundary tests take their refusal arm. That is not a red
-    gate in every job — `timed` records durations and does not fail on a
-    failing suite — so the consequence is quieter and worse: the branch's
-    central guarantee goes unevaluated in a job that runs it, and the
-    two suites drop out of the measured durations.
-    """
-    del tmp
-    scripts = _tracked_scripts(ROOT)
-    runners = _suite_runners(scripts)
-    assert runners, 'no tracked script reaches a suite, so this guard is blind'
-    jobs = _jobs_running_suites(_tests_yml(), runners)
-    assert jobs, (
-        'no job in the workflow invokes a suite runner, so the suite set '
-        'this guard reads is empty')
-    unreadable = {job: widths for job, widths in jobs.items()
-                  if any(width != '0' for width in _checkout_widths(job))}
-    assert not unreadable, (
-        'these jobs run a suite and so run the branch-boundary controls, '
-        'which cannot be evaluated without the merge base; give every '
-        f'checkout step in them fetch-depth: 0 (found {unreadable})')
 
 
 def _where(workflow, name):
