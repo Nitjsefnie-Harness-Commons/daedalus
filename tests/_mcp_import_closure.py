@@ -11,9 +11,12 @@ same hole the tracked-name map left open, and both are refused. A CALLEE is
 read by its VALUE (`_mcp_selection_fold`): folded to what it statically
 produces, a folded operation is resolved exactly as the direct spelling is,
 and one the fold cannot decide is refused when it mentions the operation. A
+value the runtime cannot CALL is CLEAN, whichever way it is spelled: a
 LAMBDA is the call-result limit one step out — read in place it is a
-function, not its body — so it is exempted on the value, wherever the fold
-reaches it. The registry is
+function, not its body — and a CONTAINER the fold decides is a list, a tuple,
+a set, a dict or a comprehension, none of which a call can invoke. A lambda
+DELIVERED to a name is the other half and is not exempt, for the reason
+`_yields_the_operation` gives. The registry is
 read at every level — base structurally, key by folding it — and a store
 that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one
@@ -41,12 +44,11 @@ import _mcp_code_eval
 import _mcp_selection_fold
 
 
-DYNAMIC_ATTRIBUTES = ('import_module', '__import__')
-
-# The map's values that name the module registry rather than the operation.
-# A registry name is tracked so a read of it can be refused, not because it
-# mentions the import-by-name operation.
-REGISTRY_NAMES = ('sys', 'registry')
+# The two name sets the moved recognisers read. They live in the fold
+# module beside the property that uses them, and are named here for the
+# four readers this module keeps.
+DYNAMIC_ATTRIBUTES = _mcp_selection_fold.DYNAMIC_ATTRIBUTES
+REGISTRY_NAMES = _mcp_selection_fold.REGISTRY_NAMES
 
 # The one name the module registry answers to, whether it is read as a dotted
 # attribute or as the key of a module namespace.
@@ -87,14 +89,27 @@ def composition_scan_set(composition, root):
     files under the repository root or is provably elsewhere (stdlib, site
     packages), and the walk iterates to a fixed point. A target the walk
     cannot determine statically is unprovable and fails loudly, naming the
-    module and the import site.
+    module and the import site. A module nested deeper than the walk's own
+    recursion can follow is unprovable the same way, and is refused by name
+    rather than raising out of the walk.
     """
     root = Path(root).resolve()
     composition = Path(composition).resolve()
     seen = {composition}
     pending = [composition]
     while pending:
-        for target in _import_targets(pending.pop(), root):
+        path = pending.pop()
+        try:
+            targets = _import_targets(path, root)
+        except RecursionError:
+            # The one site every deep recursion passes through, and the
+            # handler runs with the frame popped, so it has the headroom the
+            # walk did not. There is no line to name: the tree never parsed
+            # far enough to have one.
+            raise AssertionError(
+                f'{dotted_module(path, root)} is too deeply nested to '
+                f'follow{CLOSURE_TAIL}') from None
+        for target in targets:
             if target not in seen:
                 seen.add(target)
                 pending.append(target)
@@ -127,9 +142,10 @@ def _dynamic_callees(tree):
                     bound[alias.asname or head] = head
         elif isinstance(node, ast.ImportFrom):
             if not node.level:
-                names = {'importlib': DYNAMIC_ATTRIBUTES,
-                         'builtins': ('__import__',)}.get(
-                             cast(str, node.module), ())
+                names = {
+                    'importlib': DYNAMIC_ATTRIBUTES,
+                    'builtins': ('__import__',)}.get(
+                        cast(str, node.module), ())
                 for alias in node.names:
                     if alias.name in names:
                         bound[alias.asname or alias.name] = 'by name'
@@ -138,65 +154,18 @@ def _dynamic_callees(tree):
     return bound
 
 
-def _is_dynamic_import(func, bound):
-    """A call to import_module or __import__, per the module's own bindings.
+def _unresolved_callee_mentions(call, bound):
+    """Whether a call's callee mentions the operation AND is one the walk may
+    still refuse.
 
-    An attribute names the operation by its own name, so one whose attribute
-    is not one of the operation's (`importlib.util`) is readable to a
-    specific other object and is not the operation; one whose attribute IS
-    the operation's is the operation exactly when its base mentions the
-    operation, and that base is read through the same property the store
-    side uses. Loading a module by PATH —
-    `spec_from_file_location`, `SourceFileLoader` — is a different
-    operation and stays outside this recognition.
+    The fold is asked first, because it has already decided a value this
+    call cannot make: a container is not callable, so the call raises before
+    it reaches anything, and the mention the container carries is then a
+    fact about the wrong value.
     """
-    if isinstance(func, ast.Name):
-        return bound.get(func.id) == 'by name'
-    if isinstance(func, ast.Attribute):
-        if func.attr not in DYNAMIC_ATTRIBUTES:
-            return False
-        return _yields_the_operation(func.value, bound)
-    return False
-
-
-def _yields_the_operation(value, bound, delivered=False):
-    """True when an expression's own subtree mentions the import-by-name
-    operation, so a store of it can hand the operation to a name this map
-    cannot follow.
-
-    The property, not a list of the shapes that have been met: a tracked
-    name anywhere inside an expression is a mention, and every type nobody
-    has thought of is read the same way, by its own children. A registry
-    name is the one tracked name that is not a mention: the map tracks it
-    so a read of it can be refused. Two early
-    returns do NOT answer by their own children, and each is accounted for.
-    An attribute is one: it is the operation exactly when its own name is
-    the operation's AND its base mentions the operation — a test that reads
-    the whole base however it is spelled, so `importlib.util` is not the
-    operation and `[importlib][0].import_module` is. The OTHER is the
-    property's single limit, a call: a call evaluates to whatever its
-    callee returns, not to the callee, so a name bound to a call's result
-    is followed by neither this map nor these refusals.
-
-    A LAMBDA is the call's statement about a value READ IN PLACE, and it
-    turns on who is asking. Read in place it is a function, not its body,
-    so `(lambda: op)()` reaches nothing — the body is returned, not called.
-    DELIVERED to a name it is the opposite: calling the stored name is what
-    delivers, so the body is read after all. Keying this on the node rather
-    than on the call site's spelling is what makes a lambda reached by a
-    fold read the same as one written there.
-    """
-    if isinstance(value, ast.Name):
-        tracked = bound.get(value.id)
-        return tracked is not None and tracked not in REGISTRY_NAMES
-    if isinstance(value, ast.Attribute):
-        return _is_dynamic_import(value, bound)
-    if isinstance(value, ast.Call):
-        return False
-    if isinstance(value, ast.Lambda) and not delivered:
-        return False
-    return any(_yields_the_operation(child, bound, delivered)
-               for child in ast.iter_child_nodes(value))
+    value = _mcp_selection_fold.unresolvable_callee(call)
+    return value is not None and _mcp_selection_fold.yields_the_operation(
+        value, bound)
 
 
 def _store_leaves(target):
@@ -259,7 +228,8 @@ class _BindingWalk(ast.NodeVisitor):
         default path (`_defaults`) both route through this, so no axis can
         reach a store form another axis already reaches and be weaker there."""
         if any(value is not None
-               and _yields_the_operation(value, self.bound, delivered=True)
+               and _mcp_selection_fold.yields_the_operation(
+                   value, self.bound, delivered=True)
                for value in values):
             return 'operation'
         if any(value is not None and _yields_the_registry(value, self.bound)
@@ -396,8 +366,8 @@ class _BindingWalk(ast.NodeVisitor):
         if not node.name:
             return
         if node.type is not None \
-                and _yields_the_operation(node.type, self.bound,
-                                          delivered=True):
+                and _mcp_selection_fold.yields_the_operation(
+                    node.type, self.bound, delivered=True):
             self._alias(node)
         elif node.name in self.bound:
             self._rebind(node, node.name)
@@ -575,10 +545,12 @@ def _import_targets(path, root):
     through a base or an element that is itself a selection, so the depth is
     unbounded — a folded operation is resolved exactly as the direct spelling
     is, and a callee the fold cannot decide is refused when it mentions the
-    operation. A LAMBDA is the call-result limit one step out, and a position
-    the runtime cannot reach is CLEAN rather than suspicious, so neither draws
-    a refusal. Reading the CONTAINER rather than the value is the failure that
-    follows: `(0, importlib.import_module)[0]` is a `0`, and is accepted.
+    operation. A LAMBDA is the call-result limit one step out, and a CONTAINER
+    the fold decides is a value the runtime cannot CALL, so both are CLEAN
+    rather than suspicious and neither draws a refusal. A position the fold
+    cannot READ is the other thing, and is still refused. Reading the
+    CONTAINER rather than the value is the failure that follows:
+    `(0, importlib.import_module)[0]` is a `0`, and is accepted.
 
     A call's RESULT stays outside the property on purpose: a call evaluates
     to whatever its callee returns, so refusing every store of one would
@@ -623,8 +595,9 @@ def _import_targets(path, root):
                     name = f'{node.module}.{alias.name}' if node.module \
                         else alias.name
                     targets |= _resolve_name(name, base, root)
-        elif isinstance(node, ast.Call) and _is_dynamic_import(
-                _mcp_selection_fold.callee_value(node), bound):
+        elif isinstance(node, ast.Call) \
+                and _mcp_selection_fold.is_dynamic_import(
+                    _mcp_selection_fold.callee_value(node), bound):
             argument = node.args[0] if node.args else None
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
@@ -633,8 +606,8 @@ def _import_targets(path, root):
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '
                         'this scan cannot read statically')
-        elif isinstance(node, ast.Call) and _yields_the_operation(
-                _mcp_selection_fold.callee_value(node), bound):
+        elif isinstance(node, ast.Call) and _unresolved_callee_mentions(
+                node, bound):
             _refuse(path, root, node,
                     f'{ast.unparse(node.func)} reaches the import-by-name '
                     'operation through a value this scan cannot resolve')
