@@ -7,14 +7,28 @@ condition leaves the suite green in both cases, so counting rows tells them
 apart no better. This derives the conditions from the guards the rule's own
 functions select a refusal with, and for every row removes that condition,
 re-imports the rule, and requires a control the row names to go red - which a
-row naming another half's control does not."""
+row naming another half's control does not.
+
+Every control a row names also runs once with the condition in place, which
+is what makes its death under the removal attributable rather than some other
+failure. That costs a second run of every control - 3.1s to 8.9s - and it is
+the thing to claw back if the suite ever has to be faster: without it a flake,
+an environment failure, or an unrelated raise at the top of a control
+satisfies its row.
+
+Running this module with ``--reach`` re-derives the figures quoted in
+``tests/_cli_arg_audit_conditions.py`` and exits nonzero if any of them has
+moved. It is a reporting mode, not a test: the suite does not run it, and the
+run above is why."""
 import ast
 import contextlib
 import hashlib
 import importlib
 import importlib.util
+import re
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -332,6 +346,132 @@ def _subject_loaded(copied):
              if module is not None})
 
 
+# What the ledger's docstring claims about this control's reach, in the form
+# the code can check. `--reach` re-measures every one of them and exits
+# nonzero on a mismatch; the test checks the identities and that the
+# docstring still says each of these numbers.
+RECORDED_REACH = {
+    'rows': 20, 'controls': 52, 'cells': 1020, 'detected': 249,
+    'undetected': 771, 'pairs': 190, 'unnoticed': 91, 'one_direction': 85,
+    'both_directions': 14,
+}
+REACH_RULE = (
+    'Domain one: every row against every OTHER control the tree offers - the '
+    f"{RECORDED_REACH['controls']} the tree has - a cell is detected when "
+    "that control does not survive the row's own condition removal. Domain "
+    'two: every unordered pair of rows, exchanging the two named controls; '
+    "the exchange is unnoticed when each row's control survives under the "
+    "OTHER row's condition.")
+
+
+def _live_counts(mutated):
+    """The row and control counts this tree actually offers."""
+    rows = len(ledger.CONDITIONS_PINNED)
+    controls = len(_util.collect(vars(mutated))) + len(
+        mutated.audit_support.FRAME_NAMESPACE_PLANTS)
+    return rows, controls
+
+
+def _assert_recorded_reach(mutated):
+    """The recorded figures still describe this tree, and are still said.
+
+    Cheap by construction: no condition is removed here, because the measured
+    half of the claim is re-derived by `--reach`, which is where a figure that
+    has moved stops being a warning and becomes a nonzero exit. What the suite
+    can afford is checked here, and it is checked first so a stale figure reds
+    before the 8.9s of mutation runs.
+    """
+    reach = RECORDED_REACH
+    rows, controls = _live_counts(mutated)
+    assert rows == reach['rows'] and controls == reach['controls'], (
+        f'the docstring says {reach["rows"]} rows and {reach["controls"]} '
+        f'controls; this tree offers {rows} and {controls}')
+    assert reach['cells'] == rows * (controls - 1), reach
+    assert reach['detected'] + reach['undetected'] == reach['cells'], reach
+    assert reach['pairs'] == rows * (rows - 1) // 2, reach
+    assert (reach['unnoticed'] + reach['one_direction']
+            + reach['both_directions']) == reach['pairs'], reach
+    assert reach['both_directions'] + reach['one_direction'] == (
+        reach['pairs'] - reach['unnoticed']), reach
+    document = ledger.__doc__ or ''
+    for name, value in reach.items():
+        if name == 'cells':
+            continue
+        assert re.search(rf'\b{value}\b', document), (
+            f'the ledger docstring no longer says {name} = {value}')
+
+
+def _measure_reach(copied, mutated, tmp):
+    """The controls that survive each condition, measured on a fresh copy."""
+    conditions = rule_conditions(copied)
+    domain = [f'test:{test.__name__}'
+              for test in _util.collect(vars(mutated))]
+    domain += [f'plant:{plant[0]}'
+               for plant in mutated.audit_support.FRAME_NAMESPACE_PLANTS]
+    runners = {control: _control(mutated, control, tmp) for control in domain}
+    for control, run in runners.items():
+        assert not _failed(run), f'{control} fails with nothing removed'
+    survived = {}
+    for key in sorted(conditions):
+        with _condition_removed(key, conditions[key], conditions):
+            survived[key] = frozenset(
+                control for control, run in runners.items()
+                if not _failed(run))
+        print(f'  {key[:56]:58} {len(survived[key]):2d} survive', flush=True)
+    return domain, survived
+
+
+def _partition(domain, survived):
+    """The measured partition of the row pairs, by REACH_RULE's rule."""
+    rows = {key: controls[0]
+            for key, _what, controls in ledger.CONDITIONS_PINNED}
+    cells = [(r, c) for r in rows for c in domain if c != rows[r]]
+    detected = sum(1 for r, c in cells if c not in survived[r])
+    unnoticed = one = both = 0
+    keys = list(rows)
+    for index, a in enumerate(keys):
+        for b in keys[index + 1:]:
+            survives_a, survives_b = (rows[b] in survived[a],
+                                      rows[a] in survived[b])
+            unnoticed += survives_a and survives_b
+            one += survives_a != survives_b
+            both += not (survives_a or survives_b)
+    return {'rows': len(rows), 'controls': len(domain), 'cells': len(cells),
+            'detected': detected, 'undetected': len(cells) - detected,
+            'pairs': len(keys) * (len(keys) - 1) // 2,
+            'unnoticed': unnoticed, 'one_direction': one,
+            'both_directions': both}
+
+
+def _report_reach():
+    """Print the re-derived figures and fail if any has moved. See --reach."""
+    print('The rule, as the ledger docstring states it:\n')
+    print(f'  {REACH_RULE}\n')
+    with tempfile.TemporaryDirectory() as td:
+        copied = _copied_subject(Path(td))
+        with _subject_loaded(copied) as mutated:
+            domain, survived = _measure_reach(copied, mutated, td)
+            measured = _partition(domain, survived)
+    print('The partition, measured on a fresh copy of the rule:\n')
+    width = max(len(name) for name in measured)
+    for name, value in measured.items():
+        recorded = RECORDED_REACH[name]
+        verdict = 'ok' if recorded == value else f'MOVED (recorded {recorded})'
+        print(f'  {name:<{width}}  {value:>5}   {verdict}')
+    print()
+    moved = sorted(name for name in measured
+                   if measured[name] != RECORDED_REACH[name])
+    if moved:
+        print(f'THE RECORDED FIGURES NO LONGER DESCRIBE THIS TREE: {moved}',
+              file=sys.stderr)
+        print("The docstring quotes them; fix the docstring and this "
+              "module's RECORDED_REACH together, or re-measure "
+              "deliberately.", file=sys.stderr)
+        return 1
+    print('Every recorded figure matches this tree.')
+    return 0
+
+
 def _failed(run):
     """Whether running a control raises, whatever it raises.
 
@@ -431,6 +571,7 @@ def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
         'the ledger names one condition twice')
     copied = _copied_subject(Path(tmp))
     with _subject_loaded(copied) as mutated:
+        _assert_recorded_reach(mutated)
         conditions = rule_conditions(copied)
         unpinned_conditions = sorted(set(conditions) - set(rows))
         stale = sorted(set(rows) - set(conditions))
@@ -463,4 +604,6 @@ def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
 
 
 if __name__ == '__main__':
+    if '--reach' in sys.argv[1:]:
+        sys.exit(_report_reach())
     sys.exit(_util.runner(_util.collect(dict(locals()))))

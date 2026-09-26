@@ -25,17 +25,17 @@ decision has not. The cost is accepted rather than argued; what a normaliser
 would buy and lose is in the pull request.
 
 Its reach, stated so the numbers follow from the rules. Domain one: every row
-in this table against every OTHER control the tree offers - the 31 the audit
-suite's runner collects and the 21 plant rows, 52 in all - which is 20 x 51 =
-1020 cells; a cell is detected when that control does not survive the row's own
-condition removal, and 249 of the 1020 are, 24%. Domain two: the 190 unordered
-pairs of rows, exchanging the two rows' named controls and nothing else; the
-exchange is unnoticed when each row's control survives under the OTHER row's
-condition, which is 91 of the 190; the other 99 are caught, in both directions
-for 14 of them and in exactly one for 85. Both domains grow with the tree, so
-the figures measure it rather than bounding anything. Re-derived by running the
-control over every condition against every control; the script is named in the
-pull request."""
+in this table - 20 of them - against every OTHER control the tree offers, the
+31 the audit suite's runner collects plus the 21 plant rows, 52 in all: 20 x 51
+= 1020 cells, a cell detected when that control does not survive the row's own
+condition removal. 249 are detected and 771 are not, 24%. Domain two: the 190
+unordered pairs of rows, exchanging the two rows' named controls and nothing
+else; the exchange is unnoticed when each row's control survives under the
+OTHER row's condition, which is 91 pairs, with 85 caught in exactly one
+direction and 14 caught in both. Both domains grow with the tree, so the
+figures measure it rather than bounding anything. Every figure here is
+re-measured by ``python3 tests/test_cli_arg_audit_conditions.py --reach``,
+which exits nonzero if one has moved."""
 CONDITIONS_PINNED = (
     ('frame_read|isinstance(node, ast.Attribute)',
      'an attribute read is a selection the rule reads a member from',
