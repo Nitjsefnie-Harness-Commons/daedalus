@@ -212,12 +212,20 @@ def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
 def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
     """`save()` runs BEFORE `extCmd('inject-css')`, so the record is already
     in the store when the command is refused. That is a record with no live
-    rule, and it is the safe direction: a stale record is a row the session
-    table offers and the row's own remove button takes away.
+    rule, and it is the safe direction: the reverse order's failure is a
+    rule applied to a page that nothing recorded, which the operator cannot
+    take off at all.
 
-    The residue is deliberate, so this case states it rather than treating it
-    as a defect. The direction that cannot be reached from here is the one
-    beside it -- a store that refuses the write never reaches the command.
+    The residue is not free, and this case says so rather than claiming the
+    row is removable. It is not: the row's remove asks the worker to take
+    off a rule that was never applied, the worker refuses, and the record
+    stays. Enough of those reach the cap, where the next injection is
+    refused too, and clearing the store key by hand is the only way out.
+    That bounded annoyance is the price of the direction, and the direction
+    is the one worth paying it for.
+
+    The residue that cannot be reached from here is the other one -- a store
+    that refuses the write never reaches the command.
     """
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
@@ -316,9 +324,14 @@ def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     assert len(_store(report)) == 1, report
 
 
-# A `setItem` that refuses the one key `save()` writes, and nothing else, so
-# the token the harness seeds and the store the mount reads both still work.
-# Installed AFTER `SEEDED`, which writes that key to seed the table.
+# A `setItem` that refuses the sessions key, installed AFTER `SEEDED`, which
+# writes that key to seed the table.
+#
+# The guard on the key is pinned by nothing and cannot be: `save()` is the
+# only `setItem` here and STORE_KEY the only key it writes, so a fake that
+# threw on EVERY key would behave identically in every case below. Dropping
+# the guard leaves the suite green, and the honest reading is that the
+# specificity is unobservable here, not merely unasserted.
 QUOTA = ("const realSet = localStorage.setItem;\n"
          "localStorage.setItem = (key, value) => {\n"
          "  if (String(key) === 'daedalus-dash-css-sessions') {\n"
@@ -560,6 +573,123 @@ def test_an_internal_bus_event_repopulates_nothing(_tmp):
                   + 'report({ before, after: REQUESTS.length });\n',
                   setup=SEEDED)
     assert report['after'] - report['before'] == 0, report
+
+
+# Nineteen records: one more fits under `STORE_MAX`, a second would not.
+NINETEEN = ("const NINETEEN = [];\n"
+            "for (let i = 0; i < 19; i += 1) {\n"
+            "  NINETEEN.push({ css: 'a{--n:' + i + '}', tabId: '',\n"
+            "    allFrames: false, ts: 1750000000000 + i });\n"
+            "}\n"
+            "localStorage.setItem('daedalus-dash-css-sessions',\n"
+            "  JSON.stringify(NINETEEN));\n")
+
+
+def _store_after(js, *, setup, answers=()):
+    return _run(js + 'report({ toasts: toasts(),\n'
+                '  rows: rowTexts(container.all()[0]),\n'
+                '  left: JSON.parse(localStorage.getItem(\n'
+                '    "daedalus-dash-css-sessions")) });\n',
+                setup=setup, answers=answers)
+
+
+def test_two_overlapping_injections_cannot_both_pass_the_cap_check(_tmp):
+    """The overlap IS the claim: a sequential pair needs no interleaving,
+    so it would pass under either order and pin nothing. `click()` does not
+    await the handler, so firing INJECT twice without settling leaves the
+    first suspended at its `await` while the second runs the cap check. The
+    write is before that `await`, so the second sees nineteen plus one and
+    is refused. Move the write back after it and the second sees nineteen
+    again, passes, and its `save` slices the oldest away saying nothing.
+    """
+    report = _store_after(
+        'const css = container.find("[data-role=css]");\n'
+        'css.value = "a{--first}";\n'
+        'button("INJECT").click();\n'
+        'css.value = "a{--second}";\n'
+        'button("INJECT").click();\n'
+        'await bounded((async () => {\n'
+        '  for (let i = 0; i < 8; i += 1) await settle();\n'
+        '})(), "both injections settled", _dashnodeStepTimeoutMs);\n',
+        setup=TABS_ONLY + NINETEEN, answers=(INJECTED_9,))
+    assert shared.types(report) == ['inject-css'], report
+    assert len(report['left']) == 20, report
+    assert {'type': 'warn',
+            'text': 'session list full (20) — remove one first'} \
+        in report['toasts'], report
+
+
+def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
+    """Spliced out by the contents of the record the row was built from,
+    not by the position it was rendered at: the store is re-read when the
+    button is pressed, so a record added between the render and the click
+    moved every index after it. The scenario makes that move itself, which a
+    sequential test never does. The planted index mutation is caught by
+    naming the store, the only place the two differ visibly -- a re-render
+    follows either way, so the table alone would agree.
+    """
+    report = _store_after(
+        'const stored = JSON.parse(localStorage.getItem(\n'
+        '  "daedalus-dash-css-sessions"));\n'
+        'stored.push({ css: "c{--other}", tabId: "",\n'
+        '  allFrames: false, ts: 1750000000999 });\n'
+        'localStorage.setItem("daedalus-dash-css-sessions",\n'
+        '  JSON.stringify(stored));\n'
+        'button("remove", container).click();\n' + SETTLED,
+        setup=SEEDED, answers=(REMOVED,))
+    left = [e['css'] for e in report['left']]
+    assert left == ['b{--seed:2}', 'c{--other}'], report
+    assert [row[3] for row in report['rows'][1:]] == [
+        'c{--other}', 'b{--seed:2}'], report
+
+
+def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
+    """`{}` is valid JSON, so it passes the `catch` the corrupt-store guard
+    is built on, and the sharp part is what follows: the cap check compares
+    `load().length >= STORE_MAX` against `undefined`, which is `false`, so
+    THE GUARD PASSES and the failure surfaces later at the first
+    `arr.slice` -- blaming the table rather than the store. The case is not
+    that it renders empty but that the guard refuses to pass on a value it
+    cannot measure. The planted mutation fails with exactly that TypeError.
+    """
+    report = _store_after(
+        'container.find("[data-role=css]").value = "a{color:red}";\n'
+        'button("INJECT").click();\n' + SETTLED,
+        setup=TABS_ONLY
+        + "localStorage.setItem('daedalus-dash-css-sessions', '{}');\n",
+        answers=(INJECTED,))
+    assert shared.types(report) == ['inject-css'], report
+    # One record, and it is the one this click made: the `{}` read as no
+    # records rather than as a value with no `length`.
+    one = ['a{color:red}']
+    assert [e['css'] for e in report['left']] == one, report
+    assert [row[3] for row in report['rows'][1:]] == one, report
+
+
+def test_a_refused_injection_leaves_a_record_the_panel_cannot_clear(_tmp):
+    """The residue of the safe direction, driven to its end: the record a
+    refused injection reserves is NOT removable from this panel. Its remove
+    asks the worker for a rule that is not there, the worker answers `no
+    such css`, and the handler returns before the splice -- the refusal
+    `test_a_row_remove_that_failed_keeps_the_local_session` pins, from the
+    other end. Each refused injection adds one more until the cap refuses
+    the next. This is what the module's corrected comment rests on, so it
+    is pinned here rather than asserted there.
+    """
+    report = _store_after(
+        'container.find("[data-role=css]").value = "a{color:red}";\n'
+        'button("INJECT").click();\n' + SETTLED
+        + 'button("remove", container).click();\n' + SETTLED,
+        setup=SEEDED, answers=(INJECT_REFUSED, REMOVE_NO_CSS))
+    assert shared.types(report) == ['inject-css', 'remove-css'], report
+    assert [t['text'] for t in report['toasts']] == [
+        'cannot access the tab', 'no such css'], report
+    # Still on offer, and still in the store, after the operator tried
+    # exactly what the panel offers for removing it.
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
+    assert [e['css'] for e in report['left']] == [
+        'b{--seed:2}', 'a{--seed:1}', 'a{color:red}'], report
 
 
 def main():
