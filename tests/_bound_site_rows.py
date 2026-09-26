@@ -223,4 +223,77 @@ BOUND_SITE_ROWS = (
      "    return json.run(\n"
      "        ['git', 'status'], check=True, timeout=30)\n",
      [(4, 'unreadable', 'unplaced')]),
+    # The rows below are the CONTROLS for launch-audit clauses that mutate
+    # away to a green suite, so each names the clause it answers. A clause
+    # with no row here is proved redundant by a mechanism named in a
+    # comment at the clause itself, not by a mutant that stays invisible.
+    # A name that spelled a subprocess import and was then rebound to a
+    # fixed value sits in `safe_names` and NOT in `bound`, so the
+    # `subprocess_names` limb of proved_fixed is the only thing refusing
+    # it. Each of these three loses its row when that limb is dropped.
+    ('subprocess-alias-spelled-then-rebound-is-unproved',
+     "import os\n"
+     "import subprocess as sp\n"
+     "sp = os\n"
+     "def f():\n"
+     "    return sp(timeout=1)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('subprocess-from-import-spelled-then-rebound-is-unproved',
+     "import os\n"
+     "from subprocess import run as r\n"
+     "r = os\n"
+     "def f():\n"
+     "    return r(timeout=1)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('annotated-subprocess-alias-is-unproved',
+     "import subprocess as sp\n"
+     "sp: object = None\n"
+     "def f():\n"
+     "    return sp(timeout=1)\n",
+     [(4, 'unreadable', 'unplaced')]),
+    # The bound behind the `bound` limb's redundancy, pinned from the other
+    # side: a call through a bare Name in `bound` is collected as a PLACED
+    # launch, so it reports a `timeout` row here and never an `unplaced`
+    # one. This row is what refuses a refactor of the launch-collection
+    # chain that would turn that placement into an unplaced report.
+    ('bound-name-called-bare-is-a-placed-launch',
+     "import os\n"
+     "import subprocess\n"
+     "os = subprocess\n"
+     "os(timeout=30)\n",
+     [(4, 'unreadable', 'timeout')]),
+    # A `*args` / `**kwargs` parameter binds its name in its own scope
+    # exactly as a positional one does, and _parameters has to collect it
+    # or the receiver reads as proved. Each of these four loses its row
+    # when that collection goes; the positional spellings above keep
+    # theirs either way, which is what makes the vararg arm the
+    # discriminator.
+    ('vararg-receiver-shadowing-a-module-import-is-unproved',
+     "import os\n"
+     "import subprocess\n"
+     "def f(*os):\n"
+     "    subprocess.run(['git', 'status'], check=True)\n"
+     "    return os(timeout=1)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('kwarg-receiver-shadowing-a-module-import-is-unproved',
+     "import os\n"
+     "import subprocess\n"
+     "def f(**os):\n"
+     "    subprocess.run(['git', 'status'], check=True)\n"
+     "    return os(timeout=1)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('vararg-receiver-shadowing-a-from-import-is-unproved',
+     "from os import path\n"
+     "import subprocess\n"
+     "def f(*path):\n"
+     "    subprocess.run(['git', 'status'], check=True)\n"
+     "    return path(timeout=1)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('lambda-vararg-receiver-shadowing-a-module-import-'
+     'is-unproved',
+     "import os\n"
+     "import subprocess\n"
+     "f = lambda *os: os(timeout=1)\n"
+     "subprocess.run(['git', 'status'], check=True)\n",
+     [(3, 'unreadable', 'unplaced')]),
 )

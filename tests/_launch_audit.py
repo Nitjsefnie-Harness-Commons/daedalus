@@ -41,6 +41,12 @@ def _parameters(node):
                 for target in ast.walk(generator.target)} - {None}
     names = {arg.arg for arg in
              list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)}
+    # Load-bearing, and the vararg arm is the discriminator: a `*os` or
+    # `**os` parameter binds its name in this scope like any other, and
+    # a bare-name receiver is exactly what proved_fixed accepts. Drop it
+    # and `def f(*os): ... os(timeout=1)` reads as proved. The four
+    # `*receiver-shadowing-a-*` rows in tests/_bound_site_rows.py pin
+    # it; the positional spellings keep their row either way.
     for extra in (args.vararg, args.kwarg):
         if extra is not None:
             names.add(extra.arg)
@@ -470,6 +476,16 @@ def launch_refusals(source, here, bound_sink=None):
         """
         if not isinstance(receiver, ast.Name):
             return False
+        # One limb of this disjunction is DEAD and the next is
+        # load-bearing, and the code cannot say which. A Name in `bound`
+        # is collected as a PLACED launch by the launch chain's
+        # bare-Name arm, so the unplaced loop skips it and the limb is
+        # never consulted; row `bound-name-called-bare-is-a-placed-
+        # launch` pins the placement. A name that spelled a subprocess
+        # import and was THEN rebound is in `safe_names` and not in
+        # `bound`, so nothing else refuses it: the
+        # `*-spelled-then-rebound-is-unproved` and
+        # `annotated-subprocess-alias-is-unproved` rows pin that limb.
         if (receiver.id not in safe_names or receiver.id in bound
                 or receiver.id in subprocess_names
                 or receiver.id == 'subprocess'):

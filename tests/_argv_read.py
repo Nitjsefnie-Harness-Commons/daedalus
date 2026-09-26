@@ -62,9 +62,10 @@ class ArgvReader:
             element = self.binding_map[element.id]
         return None
 
-    # The seen-guards below cannot change an answer — these resolvers do
-    # not recurse, so the cap already bounds them. Belt and braces, and
-    # deletable rather than defensible.
+    # Whether a `seen` guard can change an answer is a question about
+    # RECURSION, not about the cap. This one is a flat loop, so the cap
+    # bounds it and the guard is deletable; the look-alike in
+    # resolve_string below is the opposite, and says so at its clause.
     def resolve_argv(self, expr):
         """The argv's literal list/tuple, or None when it is dynamic.
 
@@ -81,6 +82,9 @@ class ArgvReader:
                 expr = expr.left
                 continue
             if isinstance(expr, ast.Name):
+                # `expr.id in seen` is provably redundant: this loop is
+                # flat, so the cap already bounds it and the terminal
+                # return is reached either way. It only spends passes.
                 if expr.id in seen or expr.id in self.ambiguous \
                         or expr.id not in self.binding_map:
                     return None
@@ -178,7 +182,10 @@ class ArgvReader:
 
         This and resolve_constant are ONE algorithm with one extra arm,
         and they are here together so the guard that stops a guess and
-        the guard that stops a cycle are written once.
+        the guard that stops a cycle are written once. It is reached only
+        from `derives` — a Subscript slice and an `import_module` name
+        argument — and never from the argv-head path, which reads
+        resolve_constant, whose `+` arm does not exist.
         """
         seen = set() if seen is None else seen
         for _ in range(ARGV_UNWRAP_CAP):
@@ -193,6 +200,12 @@ class ArgvReader:
             if not (isinstance(element, ast.Name)
                     and element.id in self.binding_map
                     and element.id not in self.ambiguous
+                    # LOAD-BEARING, unlike the look-alike in
+                    # resolve_argv: this resolver RECURSES, so the cap
+                    # bounds passes within one call and every recursive
+                    # call starts a fresh budget. `a = a + a` is a
+                    # RecursionError without this, and the
+                    # `self-referential-concat-name` row pins it.
                     and element.id not in seen):
                 return None
             seen.add(element.id)
