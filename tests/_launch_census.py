@@ -66,6 +66,18 @@ assignment rather than a gap: one control, one owner, and a control in
     this one: this census refuses bounds, and `tests/_drain_scan.py` owns a
     drain with no bound after a stop, with `tests/_processtree.py` in its
     site table. The cleanup's fallback reap is that shape and is correct;
+  - a child's `wait` or `communicate` on a receiver the walk CANNOT resolve
+    to a launched child — an attribute or a subscript nothing here binds, or
+    a name bound in a scope this walk does not read. `self.child.wait(30)`
+    with no `self.child = Popen(...)` in the same file is therefore not
+    refused. The narrowing is deliberate and is the one that keeps a socket
+    or a thread's `wait` from reading as a child's, and the attribute case
+    IS refused when the attribute is bound from a launch; what is left is
+    the unresolved receiver, and it is named here rather than left to be
+    found. A fail-closed reading of it — an unresolvable receiver is a
+    fault — is the one change that would close this, and it would have to
+    land with a measure of how often a non-child receiver appears on the
+    path;
   - the three launch-call routes above are REFUSED by the analyser and
     pinned in both its row tables, but nothing tree-wide acts on them: the
     repo-layout gate keeps a git-headed launch, and a tree-wide Node form
