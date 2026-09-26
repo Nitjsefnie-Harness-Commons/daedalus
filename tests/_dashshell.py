@@ -294,10 +294,11 @@ const drive = {
 };
 
 // The recorder is read by every control that asserts a logged line, so
-// describing a value must not be able to throw. `String(symbol)` does
-// not -- it is the one implicit conversion special-cased not to -- but a
-// value with a `toString` of its own that throws is ordinary, and the
-// throw would escape the `console.error` that called it.
+// describing a value must not be able to throw. `String(symbol)` is the
+// one coercion that does not throw -- `ToString` on a symbol does, so a
+// template literal or `+` on the same symbol does too -- while a value
+// with a `toString` of its own that throws is ordinary, and the throw
+// would escape the `console.error` that called it.
 function describe(value) {
   try {
     if (typeof value === 'string') return value;

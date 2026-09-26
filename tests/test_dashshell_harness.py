@@ -586,11 +586,12 @@ def test_the_response_double_refuses_what_it_does_not_model(_tmp):
 
 
 def test_an_unprintable_console_error_is_recorded_not_thrown(_tmp):
-    """`describe()`'s guard, which had none. A value whose `String()`
-    throws would leave the `console.error` that called it -- from inside
-    `sse.js`'s own `catch`, where it would end the stream instead of
-    logging a listener. Both halves are asserted: the throw did not
-    escape the call, and the line is on the recorder."""
+    """`describe()`'s guard, which had none. A caller that passes a value
+    whose `String()` throws gets an exception out of its own
+    `console.error` instead of a recorded line, and `sse.js`'s `catch` is
+    one such caller. This scenario calls it directly, so the two halves
+    below are the ones that hold wherever the call comes from: the throw
+    did not escape, and the line is on the recorder."""
     report = run_scenario(_UNPRINTABLE)
     assert report['escaped'] is None, report
     assert report['errors'] == [

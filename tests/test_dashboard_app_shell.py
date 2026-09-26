@@ -308,10 +308,11 @@ report({ before, after: read() });
 def test_a_saved_token_reads_the_same_in_the_bar_as_it_did_at_boot(_tmp):
     """`settings.js`'s own mask, which had no length guard: a token of
     twelve or fewer reads verbatim when the bar is wired and masked
-    behind an ellipsis after a save. The panel delegates to `app.js`'s
-    mask, so a mutation in that mask turns this red; a copy kept in
-    `settings.js` would not. The short cell and the server label are
-    read beside it because the same three writes are one delegation."""
+    behind an ellipsis after a save. The panel delegates to `wireMetaBar`,
+    so a mutation in the `maskToken` beside it in `sections/_util.js`
+    turns this red; a copy kept in `settings.js` would not. The short cell
+    and the server label are read beside it because the same three writes
+    are one delegation."""
     for token in (_SHORT, _OVER):
         report = _run(_SAVE_PANEL, storage=_storage(token))
         assert report['before'] == {'token': _masked(token),

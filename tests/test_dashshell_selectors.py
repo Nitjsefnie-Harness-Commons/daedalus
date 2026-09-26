@@ -4,9 +4,11 @@
 The parser is the shell's one fail-closed surface: a selector it cannot
 read must be refused by name, because a selector that silently matches
 nothing is a scaffold that answers a question it did not understand.
-Each refusal below is reached by one selector and pinned by the phrase
-the parser refuses with, so a branch with no selector here is a branch
-no control can delete.
+Each entry in `_SELECTOR_REFUSALS` is reached by its own selector and
+pinned by the phrase the parser refuses with, so a branch with no entry
+there is a branch no control can delete. The fifth refusal,
+`unknown syntax`, is reached by the combinator the base scenario already
+drives, and is pinned there rather than in the table.
 
 The controls live in their own file because the suite they came from
 passed the 700-line ceiling with them in it, and this repository's
