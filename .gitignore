@@ -489,6 +489,7 @@
 !/tests/test_dashboard_section_block_rules.py
 !/tests/test_dashboard_section_cookies.py
 !/tests/test_dashboard_section_css_injector.py
+!/tests/test_dashboard_section_fetch_timings.py
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
