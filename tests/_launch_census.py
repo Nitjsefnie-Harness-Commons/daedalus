@@ -78,11 +78,19 @@ assignment rather than a gap: one control, one owner, and a control in
     fault — is the one change that would close this, and it would have to
     land with a measure of how often a non-child receiver appears on the
     path;
-  - the three launch-call routes above are REFUSED by the analyser and
-    pinned in both its row tables, but nothing tree-wide acts on them: the
-    repo-layout gate keeps a git-headed launch, and a tree-wide Node form
-    is the deferred shape issue #1121 describes. So a harness launch that
-    unpacks a mapping is refused and reported, and not yet a gate;
+  - FOUR classes of site the analyser REFUSES and the repo-layout gate does
+    not act on, so they are reported and not policed. The gate's keep rule
+    (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
+    head reads `git` or `ambiguous`, or when the kind is `unplaced`; every
+    other classified site is dropped. Measured on the tracked tree, the four
+    are a `timeout` at a `non-git` head, a `timeout` at an `unreadable` head,
+    a `keyword` (an argument the `subprocess` does not take) at an
+    `unreadable` head, and a `unpack` (a `**` mapping) at an `unreadable`
+    head. The launch-call routes above are the last two of those four. The
+    first two are the tree-wide Node form issue #1121 describes. Where the
+    gate arrives for all four is issue #1170, filed by mechanism, because the
+    keep rule is being redesigned under #1140 and #1155 and a widening here
+    would be redone by that redesign;
   - a helper the launcher modules import from outside themselves —
     `tests/_processtree.py`, named because it is the one that ends the
     child — whose body is read only where it is on the path.
