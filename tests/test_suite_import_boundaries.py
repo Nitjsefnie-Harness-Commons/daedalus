@@ -74,8 +74,6 @@ ALLOWED = (
     Allowance('tests/test_dashboard_gate.py',
               'test_dashboard_behaviour', 'PR 1082, #1094 eventTarget'),
     Allowance('tests/test_dashboard_harness.py',
-              'test_dashboard_accessibility', 'PR 1082'),
-    Allowance('tests/test_dashboard_harness.py',
               'test_dashboard_behaviour', 'PR 1082'),
     Allowance('tests/test_dashboard_node_retry.py',
               'test_dashboard_behaviour', 'PR 1082'),
