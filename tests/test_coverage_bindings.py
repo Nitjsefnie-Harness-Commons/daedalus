@@ -130,9 +130,12 @@ def _mutation_specs():
         "        if isinstance(callee, ast.Subscript):\n"
         "            yield from _carried_parts(callee.slice)\n", "")
     # The whole elif chain, so the arm is deleted rather than narrowed.
-    # One arm at a time no longer shows: the refusal branch answers for
-    # whatever the chain stops opening, so a single deleted arm reads as
-    # a stricter walk rather than a gap.
+    # Measured: deleting one arm at a time IS caught, by the
+    # classification control and the over-refusal rows, so the comment
+    # this replaces was wrong about that. What the whole chain defeats
+    # is both at once — every opened form falls to the leaves — and the
+    # classification control does not see it, because the table it reads
+    # is untouched. This row exists for exactly that case.
     walk_arms = (
         "    elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):\n"
         "        for part in value.elts:\n"

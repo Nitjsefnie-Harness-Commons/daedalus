@@ -14,25 +14,34 @@ _HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
 _DECORATED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _SIGNED_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
-# The value-bearing fields of every form that hands a sub-value on
-# unchanged, keyed by the form. A comprehension opens the element it
-# repeats and a dict comprehension its key as well: an iterable or a
-# condition feeds the result without joining it.
+# The value-bearing fields of every form the walk opens, keyed by the
+# form; `_carried_parts`' docstring is the boundary this table states.
+# Three entries carry a reason the rule does not give them on its own: a
+# comprehension reaches its conditions through the statement-level node
+# its generators hold, and not through its own iterable, which
+# `_bound_values` judges as the comprehension arm's own business; a dict
+# comprehension opens its key as well as its value; and an interpolation
+# is opened on requirement rather than on the value-preserving argument,
+# because `f"{launcher}"` binds a string and the issue still asks for it
+# to be judged.
 _CARRIED_FIELDS = {
     ast.Await: ('value',),
     ast.BoolOp: ('values',),
-    ast.DictComp: ('key', 'value'),
+    ast.DictComp: ('key', 'value', 'generators'),
     ast.FormattedValue: ('value', 'format_spec'),
-    ast.GeneratorExp: ('elt',),
+    ast.GeneratorExp: ('elt', 'generators'),
     ast.IfExp: ('test', 'body', 'orelse'),
     ast.JoinedStr: ('values',),
     ast.Lambda: ('body',),
-    ast.ListComp: ('elt',),
+    ast.ListComp: ('elt', 'generators'),
     ast.NamedExpr: ('value',),
-    ast.SetComp: ('elt',),
+    ast.SetComp: ('elt', 'generators'),
     ast.Slice: ('lower', 'upper', 'step'),
     ast.Yield: ('value',),
     ast.YieldFrom: ('value',),
+    # Statement-level, so a comprehension's conditions are the one place
+    # the walk leaves the expression forms and enters a sibling of them.
+    ast.comprehension: ('ifs',),
 }
 
 # The atoms `_names_one_of` and `_is_launch_value` judge, and the forms
@@ -124,23 +133,30 @@ def _carried_parts(value):
     """Carried elements and arguments, including a call-based callee.
 
     The walk is total over `ast.expr`. A form is opened when one of its
-    values reaches the binding unchanged and a leaf when the form builds
-    a new value out of what it is handed; a form in neither class is
-    refused, so one a later Python adds fails closed rather than reading
-    clean.
+    values reaches the binding unchanged, a leaf when the form builds a
+    new value out of what it is handed, and a form in neither class is
+    refused rather than read as clean: the branch exists so a Python that
+    adds one fails closed instead.
 
-    Opened, because a sub-value arrives as it was written: a Call and
-    the arguments and call-based callee it carries, a Tuple, List, Set
-    or Dict and its elements, a Subscript and its index, a Starred
-    argument, an IfExp, a BoolOp, a comprehension's element and a
-    DictComp's key (ListComp, SetComp, GeneratorExp), a Lambda body, a
-    JoinedStr and the FormattedValue it interpolates, a Slice, an
-    Await, a Yield, a YieldFrom, and a NamedExpr value.
+    Opened, because a sub-value arrives as it was written: Await, BoolOp,
+    Call, Dict, DictComp, FormattedValue, GeneratorExp, IfExp, JoinedStr,
+    Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice, Starred,
+    Subscript, Tuple, Yield, YieldFrom, comprehension.
 
-    Leaves, and that is every form the walk declines to open: the atoms
-    Name, Attribute and Constant, which the predicates judge, and the
-    forms BinOp, UnaryOp and Compare, whose operands are transformed
-    rather than carried.
+    Leaves, and that is every form the walk declines to open: Attribute,
+    BinOp, Compare, Constant, Name, UnaryOp. The first three are atoms
+    the predicates judge and the last three build a new value out of
+    their operands, so a launcher inside one is transformed rather than
+    carried.
+
+    Two entries carry a reason the rule does not give them. A dict
+    comprehension opens its key as well as its value, and the four
+    comprehension forms reach their conditions through the statement-
+    level node their `generators` hold, never through their own iterable,
+    which `_bound_values` judges as the comprehension arm's business. And
+    FormattedValue is opened on requirement rather than on the argument
+    above, because `f"{launcher}"` binds a string and not the launcher,
+    and the issue asks for the interpolation to be judged all the same.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,
