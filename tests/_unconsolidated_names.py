@@ -7,6 +7,10 @@ the branch adds or edits is itself a finding, so the table can absorb
 what `main` lands underneath it while excusing nothing the branch wrote.
 """
 UNCONSOLIDATED_NAMES = {
+    ('tests/_binding_assertions.py', '_scope_violations'):
+        'this renders the expected violation strings for a synthetic source '
+        'from (relative, source, expected), where the drain owner orders real '
+        'calls within a scope and appends to a violations list it was handed',
     ('tests/_bash_resolver_scan.py', '_ModuleFacts'):
         'each guard analyses a different launcher surface, and the facts '
         'class each builds carries that surface own names, so neither is a '
@@ -35,6 +39,16 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_clientstate.py', '_output_text'):
         'the client-state reader strips the decoded value and the dashboard '
         'reader keeps it verbatim, so one would lose a behaviour',
+    ('tests/_cli_dispatch.py', 'run_cli'):
+        'this dispatches argv in process through _dispatch, raises '
+        'SystemExit on a refusal code and returns the recording with stdout, '
+        'where the other spawns the real CLI as a subprocess under a supplied '
+        'env and timeout; only the process form can lose a traceback at the '
+        'boundary, which is the whole point of the pair',
+    ('tests/_cli_helpers.py', 'run_cli'):
+        'this spawns the real CLI as a subprocess under a supplied env and '
+        'timeout, where the other dispatches argv in process and asserts the '
+        'plan was consumed',
     ('tests/_command_type_readers.py', '_literal_value'):
         'one reads a text literal and the other an evaluated expression node, '
         'so the argument types are not interchangeable',
@@ -87,6 +101,11 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_drain_scan.py', '_tree_violations'):
         'one enumerates test modules and the other every python source, so a '
         'shared reader would have to carry both sets',
+    ('tests/_drain_scan.py', '_scope_violations'):
+        'this orders real calls within a scope and appends every violation to '
+        'the list it was handed, where the binding-assertions owner renders '
+        'expected strings for a synthetic source off a fixed marker list, so '
+        'neither body would answer for the other',
     ('tests/_jsroute_sweep.py', '_indent'):
         'the sweep helper indents a block of generated JavaScript while the '
         'two yaml readers measure one line, so three unrelated meanings',
@@ -105,6 +124,15 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_pyroute_values.py', '_argument_value'):
         'one reads a call-site entry and the other an expression with a '
         'caller and a sender resolver',
+    ('tests/_realbrowser_fixture_controls.py', '_browser_version'):
+        'this asserts the exact subprocess call the control makes - the argv, '
+        'capture_output, text and a 15s timeout - and answers a canned '
+        'Chromium version, where the owner really runs --version and formats '
+        'whatever came back',
+    ('tests/_realbrowser_workers.py', '_browser_version'):
+        'this runs --version and formats what the browser called itself, so a '
+        'skip says which browser refused, where the fixture control asserts a '
+        'canned answer for a call it has already fixed',
     ('tests/_util.py', 'load'):
         'this one imports a module by path and the workflow one decodes a '
         'workflow file jobs, so neither name can serve the other',
@@ -147,10 +175,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
-    ('tests/test_cli.py', 'run_cli'):
-        'this spawns the real CLI as a process against a live bridge and '
-        'returns the CompletedProcess, where the owner parses in process, '
-        'fakes ext_cmd and returns the recording with stdout',
     ('tests/test_cli_duplicate_admission.py', 'run_cli'):
         'byte-identical to the row for tests/test_cli_error_reporting.py, '
         'and neither is a copy of the owner: both spawn the real CLI as a '
@@ -181,9 +205,21 @@ UNCONSOLIDATED_NAMES = {
         'this patches three module attributes and records through its own '
         'RecordingApi, where the owner patches one ext_cmd and records '
         'through RecordingExtCmd',
-    ('tests/test_coverage_bindings.py', '_scope_violations'):
-        'this renders the expected violation strings for a synthetic source, '
-        'where the owner orders real calls within a scope',
+    ('tests/test_cli_dispatch.py', '_refused'):
+        'this drives a call the CLI harness must refuse and returns the '
+        'AssertionError text it read, where the owner takes a zero-argument '
+        'scan and returns the SystemExit text; a different exception over a '
+        'different argument',
+    ('tests/test_coverage_environment.py', '_module_text'):
+        'byte-identical to the test_unresolved_routes site (both '
+        'c79201d1572322de) and the owner bar this suite own one-line '
+        'docstring, which the owner does not carry. The pair is a real '
+        'duplicate and consolidating it means editing one of the two suites, '
+        'which is deferred, not dismissed',
+    ('tests/test_coverage_unfollowable_forms.py', '_refused'):
+        'this compiles each named synthetic case and asserts exactly one '
+        'binding verdict at its marker, where the owner takes a zero-argument '
+        'scan and returns the SystemExit text',
     ('tests/test_coverage_decorated_launch.py', '_planted'):
         'this writes one probe into the tree the control owns and reads the '
         'verdict, where the owner reverts one converted site in a scratch '
@@ -227,15 +263,17 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_mcp_live_tools.py', '_row'):
         'this builds one tool row from a command type, its fields and a '
         'builder, where the owner builds a getter-argument case',
+    ('tests/test_mcp_hotfix_scope.py', '_load_composition'):
+        'this patches MCPServer and BridgeSession the way the owner does but '
+        'names its own _ToolRegistry and _BridgeProbe classes and its own '
+        'mcp_server_hotfix_ module suffix, where the owner uses the '
+        'unprefixed names and the mcp_server_tools_ suffix',
     ('tests/test_mcp_refusal_drain.py', '_load_mcp'):
         'this drives the already-booted bridge with an empty token, which the '
         'shared loader base_url-first signature does not express',
     ('tests/test_overlap_bound.py', '_bound_source'):
         'this slices the shipped prelude bound machinery at the entry IIFE, '
         'where the owner reads a job field after timeout-minutes',
-    ('tests/test_real_browser_harness.py', '_browser_version'):
-        'this asserts a stubbed --version call, where the owner asks a '
-        'browser object what it calls itself',
     ('tests/test_real_browser_harness_recovery.py', '_control_target'):
         'this names a different extension origin under test, which is the '
         'whole point of the case',
@@ -257,12 +295,31 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_static_routes.py', '_load'):
         'this loads static_routes by path under a name of its own, where the '
         'owner is a JSON file reader',
+    ('tests/test_segment_mint.py', '_refused'):
+        'this asserts a refused mint answer is exactly {error: message} and '
+        'that the plan sent nothing else to the bridge, where the owner '
+        'returns the SystemExit text a scan raised',
+    ('tests/test_segment_routes.py', '_refused'):
+        'this is a context manager that makes one pathlib.Path method raise '
+        'for one final path component and yields the calls that fired, where '
+        'the owner takes a zero-argument scan and returns the SystemExit text',
     ('tests/test_stream_backoff.py', '_run'):
         'this runs one backoff plan against the shipped worker, where the '
         'shared _run boots a recorded scenario',
     ('tests/test_tab_registry.py', '_load'):
         'this loads tab_registry by path under a name of its own, where the '
         'owner is a JSON file reader',
+    ('tests/test_suite_import_boundaries.py', '_scan'):
+        'this walks one module AST for sibling-suite imports and returns '
+        '(lineno, leaf, spelling) hits, where the drain owner scans a module '
+        'text for unbounded drains and the code-eval owner walks an '
+        'expression value; three different arguments',
+    ('tests/test_unresolved_routes.py', '_module_text'):
+        'byte-identical to the test_coverage_environment site (both '
+        'c79201d1572322de) and the owner bar this suite own one-line '
+        'docstring, which the owner does not carry. The pair is a real '
+        'duplicate and consolidating it means editing one of the two suites, '
+        'which is deferred, not dismissed',
     ('tests/test_tab_routing_js_heads.py', '_literal'):
         'this builds a method entry plus a plain sibling, where the owner '
         'builds a getter-returning object',
@@ -299,12 +356,20 @@ UNCONSOLIDATED_NAMES = {
         'under a name of its own where the owner is a JSON file reader. The '
         'pair is a real duplicate and consolidating it is deferred, not '
         'dismissed',
+    ('tests/test_version_empty_values.py', '_assert_duplicate_refused'):
+        'this asserts the empty string reached stderr and that no ok: line '
+        'reached stdout, where the owner takes both competing values and '
+        'asserts each repr in stderr',
     ('tests/test_watch_all.py', '_run'):
         'this builds one shared-client workflow run against a SHA, where the '
         'shared _run boots a node scenario',
     ('tests/test_watcher_budget.py', '_comment'):
         'this builds one review-comment node, where the owner asks whether a '
         'line is a YAML comment',
+    ('tests/test_yamlread_anchor_edges.py', '_refused'):
+        'this calls workflow_step_items and asserts the YAMLReadError carries '
+        'a detail and is not the unknown-alias refusal, where the owner takes '
+        'a zero-argument scan and returns the SystemExit text',
     ('tests/test_worker_register_throttle.py', '_observe'):
         'this drives the register-throttle harness under a plan with '
         'expected streams, where the owner reads one relay mode answer',

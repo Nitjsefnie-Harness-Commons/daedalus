@@ -61,8 +61,6 @@ def test_workflow_harness_scrubs_coverage_environment(tmp):
     assert 'present=true' not in output, output
 
 
-
-
 def _job_condition(workflow, job):
     """Read one job condition through the complete-scalar reader."""
     condition = job_scalar(workflow, job, 'if')
