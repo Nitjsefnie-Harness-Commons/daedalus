@@ -35,17 +35,33 @@ DEBUG_TIMING = debug_timing()
 # normalisation, so `Foo`/`foo` and a composed/decomposed pair meet the way a
 # case-insensitive or normalising filesystem would put them together. The
 # bookkeeping names a job spends are refused at mint, so no fourth kind of
-# name can reach a path — see `reserved_bookkeeping_name`.
+# name can reach a path — see `reserved_bookkeeping_name`. The one
+# filesystem equivalence the fold does not cover is named as an exclusion in
+# `_job_chain_root` rather than left as an implied promise.
 SEGMENT_LOCK_STRIPES = 64
 seg_locks = tuple(threading.Lock() for _ in range(SEGMENT_LOCK_STRIPES))
 
 _RECORD_AFFIX = '.json'
+_MARK_AFFIX = '.dirty'
+_TEMP_AFFIX = '.tmp'
 
-# The two names a job spends beside its record, as suffixes on the job name:
-# the marker `mark_dirty` writes and the temp `write_usage` replaces from.
-# Both are the record affix plus the one that call adds, and both are read
-# here rather than spelled out so the refusal cannot drift from the layout.
-_BOOKKEEPING_SUFFIXES = (f'{_RECORD_AFFIX}.dirty', f'{_RECORD_AFFIX}.tmp')
+# The two names a job spends beside its record, as suffixes on the job name.
+# Every derivation of those names goes through here — `record_temp_path` and
+# `_dirty_path` for the paths themselves, and this tuple for the refusal — so
+# a change to the record affix moves the layout and the reservation together
+# instead of leaving the mint writing a temp the refusal no longer reserves.
+_BOOKKEEPING_SUFFIXES = (f'{_RECORD_AFFIX}{_MARK_AFFIX}',
+                         f'{_RECORD_AFFIX}{_TEMP_AFFIX}')
+
+
+def record_temp_path(seg_dir_root, job):
+    """The temp a record is written from, beside the record it replaces.
+
+    The mint publishes through this one, so the name it writes and the name
+    `write_usage` replaces from and the name the mint refuses are one name.
+    """
+    return path_safety.under(
+        seg_dir_root, f'.{job}{_RECORD_AFFIX}{_TEMP_AFFIX}')
 
 
 def reserved_bookkeeping_name(job):
@@ -96,13 +112,23 @@ def _job_chain_root(job):
     have put them, and normalising again afterwards covers a sequence the
     strip exposed.
 
-    Every fold here is a superset of what a filesystem might treat as one
-    entry, and a superset is the safe direction: two names that are
+    Every fold here is a superset of the equivalence a case-folding or
+    normalising filesystem applies, and of NTFS's upcased comparison. It
+    is a superset in the direction that is safe: two names that are
     genuinely distinct and land on one stripe cost the wait that sharing a
     stripe already costs, while two names that are one entry and land on
     different stripes lose mutual exclusion entirely. So the key folds more
-    whenever in doubt. With the bookkeeping names refused at mint, this
-    chain is then exactly the set of job names that can own one path.
+    whenever in doubt.
+
+    One exclusion, stated rather than papered over: NTFS short-name (8.3)
+    aliases. A generated alias is always `XXXXXX~N`, so a job deliberately
+    named `Abcdef~1` and the job whose long name generates that alias are
+    one directory, and the two keys differ. That needs an authenticated
+    caller to craft the name on purpose, and this says so instead of
+    claiming a universal the fold does not deliver.
+
+    With that exclusion named, and with the bookkeeping names refused at
+    mint, the chain is then the set of job names that can own one path.
     """
     root = unicodedata.normalize('NFKD', job).casefold()
     while root.endswith(_RECORD_AFFIX):
@@ -112,6 +138,15 @@ def _job_chain_root(job):
 
 def seg_lock_for(job):
     """Return the lock that serializes one segment job's storage.
+
+    ONE authority: this is the only function that turns a job name into a
+    lock, and every caller passes the job name it was given, unchanged.
+    Four sites used to share one module-level lock and so agreed by
+    construction; keyed, they agree only as long as each one calls this
+    with the same name, and an edit that passes a decorated name is a
+    concurrency change wearing a rename's clothes. `admit_segment` and
+    `store_segment` no longer even compute it independently — the admission
+    carries the lock, so the load-bearing pair cannot drift apart.
 
     Keyed on the job's chain root, so the `a` / `a.json` pair takes one
     lock and two unrelated jobs generally do not. Every caller takes this
@@ -303,8 +338,8 @@ def new_record(token, quotas, stored_count=0, stored_bytes=0):
 
 def _dirty_path(seg_dir_root, job):
     """Where write_usage marks that job's totals may not have landed."""
-    path = record_path(seg_dir_root, job)
-    return path.with_name(f'.{path.name}.dirty')
+    return record_path(seg_dir_root, job).with_name(
+        f'.{job}{_RECORD_AFFIX}{_MARK_AFFIX}')
 
 
 def needs_recount(seg_dir_root, job):
@@ -359,7 +394,7 @@ def write_usage(seg_dir_root, job, count, stored):
     dirty = _dirty_path(seg_dir_root, job)
     record['stored_count'] = count
     record['stored_bytes'] = stored
-    tmp = path.with_name(f'.{path.name}.tmp')
+    tmp = record_temp_path(seg_dir_root, job)
     try:
         atomic_file.write_text_retrying(tmp, json.dumps(record))
         atomic_file.replace_atomically(tmp, path)

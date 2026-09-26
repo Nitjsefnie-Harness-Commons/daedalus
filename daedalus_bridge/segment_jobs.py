@@ -43,7 +43,7 @@ def mint_job(seg_dir_root, token, body, quotas):
         try:
             record = segment_store.load_record(seg_dir_root, job)
             job_dir = path_safety.under(seg_dir_root, job)
-            tmp = path_safety.under(seg_dir_root, f'.{job}.json.tmp')
+            tmp = segment_store.record_temp_path(seg_dir_root, job)
             record_path = segment_store.record_path(seg_dir_root, job)
         except ValueError:
             return 400, {'error': 'bad job'}
