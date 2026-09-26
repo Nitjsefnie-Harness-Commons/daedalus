@@ -166,6 +166,12 @@ jobs:
           # Nothing here pushes, and a token left in .git/config
           # is reusable by every later step in the job.
           persist-credentials: false
+          # This job runs the suites from a DETACHED TAG, and a tag build
+          # legitimately has no local main — so the branch-boundary
+          # controls, whose refusal is fatal, need origin/main to resolve
+          # here or every tag build goes red. The refusal itself is
+          # correct and stays.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
