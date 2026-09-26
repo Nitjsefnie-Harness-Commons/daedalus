@@ -29,6 +29,8 @@ const sent = () => REQUESTS.filter((r) => r.target === '/command')
   .map((r) => r.body);
 const methods = () => container.all()
   .filter((el) => el.tag === 'datalist')[0].children.map((o) => o.value);
+const polls = () => REQUESTS.filter((r) => r.target.slice(0, 7) === '/result'
+  && r.target.indexOf('consume') < 0).length;
 """
 
 TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
@@ -85,23 +87,32 @@ def _press(method=None, params=None, tab=None):
             + 'button("RUN").click();\n')
 
 
-def scenario(body, *, setup=None, answers=(), plan=shared.COMMAND):
+# A result leg that never matches: the loop spends its whole budget and
+# gives up, and the number of polls it spent is the budget.
+NEVER_ANSWERED = ("drive.route('/result?tab=extension',"
+                  " { pending: true });\n")
+
+
+def scenario(body, *, setup=None, answers=(), plan=shared.COMMAND,
+             by_type=True):
     """One child: seed the token, plan every answer, mount, then drive.
 
     `setup` lands first because the answer table is written in the scope
     `setup` defines.
     """
+    table = shared.results(*answers) if by_type else ''
     return ('(async () => {\n' + shared.SEED + shared.PRELUDE + EXTRA
             + shared.open_section(SECTION[0])
-            + (TABS if setup is None else setup) + plan
-            + shared.results(*answers)
+            + (TABS if setup is None else setup) + plan + table
             + shared.MOUNT + shared.SETTLE + body
             + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=None, answers=(), plan=shared.COMMAND):
+def _run(body, *, setup=None, answers=(), plan=shared.COMMAND,
+         by_type=True):
     return run_scenario(
-        scenario(body, setup=setup, answers=answers, plan=plan),
+        scenario(body, setup=setup, answers=answers, plan=plan,
+                 by_type=by_type),
         sections=SECTION)
 
 
@@ -262,6 +273,24 @@ def test_an_object_answer_reaches_the_pane_indented(_tmp):
                               '  "frameId": "A1",\n'
                               '  "loaderId": "L1"\n'
                               '}'], report
+
+
+def test_a_call_that_never_answers_gives_up_at_twenty_seconds(_tmp):
+    """`extCmd('cdp', fields, { timeout: 20000 })` names the budget
+    explicitly, and it is observable only as the number of result polls
+    the loop spends -- eighty at 250 ms each. The pane is the only place
+    that failure is reported, so the eighty is what says the budget was
+    the one the module asked for and not the fifteen-second default."""
+    report = _run(_press() + SETTLED
+                  + 'report({ polls: polls(), pane: pane(),'
+                    ' toasts: toasts() });\n',
+                  plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
+    assert report['polls'] == 80, report
+    assert report['pane'][0] == 'pane err', report
+    assert report['pane'][1].startswith(
+        'Timeout (20000ms) waiting for _cdp_1_'), report
+    assert report['toasts'] == [], report
+    assert report['unplanned'] == [], report
 
 
 def test_a_bus_tab_event_repopulates_the_select_and_keeps_the_choice(_tmp):
