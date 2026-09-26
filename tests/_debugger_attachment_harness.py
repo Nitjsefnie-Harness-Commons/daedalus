@@ -215,18 +215,6 @@ function claimHandle(command) {
     'cdpClaimAttachment(claimTabId, { keep: claimKeep })', context);
 }
 
-function claims() {
-  // `null` rather than a throw when the map is absent: a control must fail
-  // on the behaviour it is about, and an exception raised here would report
-  // the missing readout as the defect instead.
-  const observed = vm.runInContext(
-    'typeof _cdpClaims === "undefined" ? null'
-    + ' : JSON.stringify(Array.from(_cdpClaims.entries())'
-    + '.map(([tabId, entry]) => [tabId, entry.refs, entry.keep]))',
-    context);
-  return observed === null ? null : JSON.parse(observed);
-}
-
 async function settle(times) {
   for (let turn_ = 0; turn_ < (times || 6); turn_++) await new Promise(
     (resolve) => setImmediate(resolve));
@@ -289,7 +277,6 @@ async function settle(times) {
     refused: bgConsole,
     order,
     live: Array.from(live).sort(),
-    claims: claims(),
     posted: posted.map((item) => ({
       id: item.id,
       result: item.result === undefined ? null : item.result,
