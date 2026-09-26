@@ -272,6 +272,43 @@ report({ token: cell('[data-meta="token"]'),
     assert absent['server'] == '(same origin)', absent
 
 
+def test_a_saved_token_reads_the_same_in_the_bar_as_it_did_at_boot(_tmp):
+    """`settings.js:78`'s own mask, which has no length guard: a token of
+    twelve or fewer reads verbatim when the bar is wired and masked
+    behind an ellipsis after a save. The panel delegates to `app.js`'s
+    mask, so a mutation in that mask turns this red; a copy kept in
+    `settings.js` would not. The short cell and the server label are
+    read beside it because the same three writes are one delegation."""
+    report = _run(_BAR + r"""
+const panel = h('div', { class: 'panel-b', 'data-section': 'settings' });
+document.body.appendChild(panel);
+drive.route('https://example.com/tabs', { json: [] });
+""" + _READ_CELL + _IMPORT + _FIRE + r"""
+const read = () => ({
+  token: cell('[data-meta="token"]'),
+  short: cell('[data-meta="token-short"]'),
+  server: cell('[data-meta="server"]'),
+});
+const before = read();
+panel.querySelector('[data-role=save]').click();
+await bounded(settle(), 'the save and its server probe',
+  _dashnodeStepTimeoutMs);
+report({ before, after: read() });
+""", storage=_storage(_SHORT))
+    assert report['before'] == {'token': _SHORT,
+                                'short': _SHORT[:8] + _ELLIPSIS,
+                                'server': _SERVER}, report
+    # The restart is the liveness of the assertion: two stream requests
+    # and the server probe is what a save actually did, so a handler that
+    # never ran cannot leave the two readings equal.
+    assert [r['target'] for r in report['requests']] == [
+        _SERVER + '/stream?tab=dashboard',
+        _SERVER + '/stream?tab=dashboard',
+        _SERVER + '/tabs'], report['requests']
+    assert report['after'] == report['before'], report
+    assert report['unplanned'] == [], report
+
+
 def test_an_internal_sse_status_reaches_the_dot_and_both_status_texts(_tmp):
     """`app.js:105-108` dropping the guard, the dot or `txt2`."""
     report = _bar(_READ_CELL + _IMPORT_BUS + r"""
