@@ -2,14 +2,15 @@
 """What the dashboard shell harness guarantees, proven by breaking it.
 
 The shell is a guard, so a green run on the tree it was written against
-proves nothing. Each control drives the shipped `sse.js` or the shell
+proves nothing. Each control drives the shipped modules or the shell
 itself through a real Node child and reads the report it printed; the
 defect each one plants and the red output it produced are recorded in
 the task report for issue 493.
 
 None of this asserts how the dashboard behaves. It asserts that a
 scenario can see what it drove -- a refusal recorded rather than thrown,
-a settlement recorded rather than implied, a timer that stays parked.
+a settlement recorded rather than implied, a timer that stays parked,
+and a surface the shipped entry point actually reaches.
 """
 import sys
 from pathlib import Path
@@ -27,6 +28,8 @@ _SERVER = 'https://example.com'
 _TOKEN = 'tok-abcdefghijklmnop'
 _STREAM = _SERVER + '/stream?tab=dashboard'
 _LOCAL_STREAM = '/stream?tab=dashboard'
+_TABS = _SERVER + '/tabs'
+_APP_MODULES = ('app.js', 'sections/_util.js')
 
 _PRELUDE = """
 localStorage.setItem('daedalus-token', 'tok-abcdefghijklmnop');
@@ -72,6 +75,47 @@ report();
 """
 
 
+# One request of each shape the double records an argument for. A double
+# that answered a constant rather than a read would be indistinguishable
+# from a correct one if every request carried the same values, so this
+# varies all six at once: no signal, a signal, no tab, two different tab
+# values, GET and POST, and two different server prefixes.
+_REQUEST_LOG_VARIED = r"""
+(async () => {
+const plain = 'https://example.com/tabs';
+const tabbed = 'https://example.com/tabs?tab=alpha';
+const elsewhere = 'https://example.com:8443/tabs?tab=beta';
+for (const target of [plain, tabbed, elsewhere]) {
+  drive.route(target, { json: [] });
+}
+await bounded(fetch(plain, { headers: { Authorization: 'Bearer one' } }),
+  'request with no signal and no tab', _dashnodeStepTimeoutMs);
+await bounded(fetch(tabbed, { method: 'POST',
+  headers: { Authorization: 'Bearer two' } }),
+  'request with a tab and a method', _dashnodeStepTimeoutMs);
+await bounded(fetch(elsewhere,
+  { headers: { Authorization: 'Bearer three' },
+    signal: new AbortController().signal }),
+  'request on another origin with a signal', _dashnodeStepTimeoutMs);
+report();
+})().catch(leave);
+"""
+
+
+_HEADERS_BAG = r"""
+(async () => {
+drive.route('https://example.com/tabs', { json: [] });
+let refusal = null;
+try {
+  await bounded(fetch('https://example.com/tabs',
+    { headers: new Headers({ Authorization: 'Bearer hidden' }) }),
+    'headers bag the shell cannot read', _dashnodeStepTimeoutMs);
+} catch (error) { refusal = error.message; }
+report({ bagRefusal: refusal });
+})().catch(leave);
+"""
+
+
 _READER = r"""
 (async () => {
 """ + _PRELUDE + r"""
@@ -104,12 +148,30 @@ report({ afterClose });
 """
 
 
+_WINDOW_STORAGE = r"""
+(async () => {
+localStorage.setItem('daedalus-token', 'first-token-abcdefgh');
+drive.route('/stream?tab=dashboard', { stream: true });
+""" + _IMPORT_SSE + r"""
+sse.start();
+await bounded(settle(), 'first connection', _dashnodeStepTimeoutMs);
+localStorage.setItem('daedalus-token', 'second-token-abcdefgh');
+window.fire('storage', { key: 'daedalus-token',
+  newValue: 'second-token-abcdefgh' });
+await bounded(settle(), 'restart after the storage event',
+  _dashnodeStepTimeoutMs);
+report();
+})().catch(leave);
+"""
+
+
 _PARKED_TIMERS = r"""
 (async () => {
 let ticks = 0;
-setTimeout(() => { ticks += 1; }, 3000);
+let carried = null;
+setTimeout((arg) => { carried = arg; }, 3000, 'carried');
 setInterval(() => { ticks += 1; }, 1000);
-const ids = drive.ids();
+setTimeout(() => { carried = 'wrong'; }, 2500);
 const before = ticks;
 await bounded(pause(20), 'parked timers must not run',
   _dashnodeStepTimeoutMs);
@@ -118,8 +180,11 @@ drive.fire(drive.ids((slot) => slot.kind === 'interval')[0]);
 const once = ticks;
 drive.fire(drive.ids((slot) => slot.kind === 'interval')[0]);
 const twice = ticks;
-clearTimeout(ids[0]);
-report({ before, parked, once, twice, live: drive.live() });
+const timeouts = drive.ids((slot) => slot.kind === 'timeout');
+drive.fire(timeouts[0]);
+clearTimeout(timeouts[1]);
+report({ before, parked, once, twice, carried: String(carried),
+  live: drive.live() });
 })().catch(leave);
 """
 
@@ -144,30 +209,48 @@ report({ forcedOn, forcedOff, bare: el.className,
 _SELECTORS = r"""
 (async () => {
 const empty = document.querySelectorAll('[data-meta="nothing-here"]');
+const token = document.createElement('span');
+token.setAttribute('data-meta', 'token');
+document.body.appendChild(token);
+const doubleQuoted = document.querySelectorAll('[data-meta="token"]').length;
+const singleQuoted = document.querySelectorAll("[data-meta='token']").length;
 let combinator = null;
 try {
   document.querySelectorAll('.rail-list > li');
 } catch (error) { combinator = error.message; }
+let unquoted = null;
+try {
+  document.querySelectorAll('[data-meta="token]');
+} catch (error) { unquoted = error.message; }
 let notAString = null;
 try {
   document.querySelectorAll(null);
 } catch (error) { notAString = error.message; }
 report({ empty: empty.length, isArray: Array.isArray(empty),
-  combinator, notAString });
+  doubleQuoted, singleQuoted, combinator, unquoted, notAString });
 })().catch(leave);
 """
 
 
+# Two entries, in an order the caller's sort has to undo: a non-
+# intersecting one first, then an intersecting one that is NOT the
+# nearest to the top. A double that hands over one entry, or hands over
+# an entry of its own, cannot pass this.
 _OBSERVER = r"""
 (async () => {
 const target = new El('section');
 const seen = [];
 const io = new IntersectionObserver((entries) => {
-  seen.push(entries.map((e) => e.target.id + ':' + e.isIntersecting));
+  seen.push(entries.map((e) => e.target.id + ':' + e.isIntersecting
+    + ':' + e.boundingClientRect.top));
 }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
 io.observe(target);
-io.fire([{ isIntersecting: true, boundingClientRect: { top: 12 },
-  target: { id: 'from-the-caller' } }]);
+io.fire([
+  { isIntersecting: false, boundingClientRect: { top: 5 },
+    target: { id: 'skipped' } },
+  { isIntersecting: true, boundingClientRect: { top: 90 },
+    target: { id: 'from-the-caller' } },
+]);
 let unmodelled = null;
 try {
   io.unobserveAll();
@@ -208,10 +291,101 @@ report({ before, isArray, matched, anchors,
 """
 
 
+_RESPONSE_DOUBLE = r"""
+(async () => {
+drive.route('https://example.com/tabs', { json: [] });
+const response = await bounded(fetch('https://example.com/tabs'),
+  'planned json response', _dashnodeStepTimeoutMs);
+let header = null;
+try {
+  response.headers.get('x-not-a-header');
+} catch (error) { header = error.message; }
+let blob = null;
+try {
+  await response.blob();
+} catch (error) { blob = error.message; }
+let absent = null;
+try {
+  response.formData();
+} catch (error) { absent = error.message; }
+report({ contentType: response.headers.get('content-type'),
+  header, blob, absent });
+})().catch(leave);
+"""
+
+
 _CONSOLE_ERROR = r"""
 (async () => {
 console.error('[mount] overview failed', new Error('boom'));
 report();
+})().catch(leave);
+"""
+
+
+# The shell against the real entry point. `boot()` runs wireMetaBar,
+# wireStatusLine, wireRailHighlight, then mountSections, so the first
+# interval and the first observer parked belong to app.js itself.
+_APP_BOOT = r"""
+(async () => {
+const util = await bounded(load('sections/_util.js'), 'util import',
+  _dashnodeStepTimeoutMs);
+const h = util.h;
+const bar = h('div', { class: 'meta-bar' }, [
+  h('span', { class: 'meta-v', 'data-meta': 'server' }, '-'),
+  h('span', { class: 'meta-v', 'data-meta': 'token' }, '-'),
+  h('span', { class: 'sse-dot', 'data-meta': 'sse-dot',
+    'data-status': 'idle' }),
+  h('span', { class: 'meta-v', 'data-meta': 'sse-text' }, 'idle'),
+]);
+const status = h('div', { class: 'sl' }, [
+  h('span', { class: 'sl-meta', 'data-meta': 'token-short' }, '-'),
+  h('span', { class: 'sl-meta', 'data-meta': 'sse-text2' }, 'idle'),
+  h('span', { class: 'sl-meta', 'data-meta': 'last-event' }, '-'),
+]);
+const rail = h('ol', { class: 'rail-list' }, [
+  h('li', {}, h('a', { href: '#s00' }, 'OVERVIEW')),
+  h('li', {}, h('a', { href: '#s01' }, 'TABS')),
+]);
+const panel = h('div', { class: 'panel-b', 'data-section': 'overview' });
+for (const el of [bar, status, rail, h('section', { id: 's00' }),
+  h('section', { id: 's01' }), panel]) {
+  document.body.appendChild(el);
+}
+localStorage.setItem('daedalus-token', 'tok-abcdefghijklmnop');
+localStorage.setItem('daedalus-server', 'https://example.com');
+drive.route('https://example.com/stream?tab=dashboard', { stream: true });
+drive.route('https://example.com/tabs', { json: [] });
+document.readyState = 'loading';
+await bounded(load('app.js'), 'app import', _dashnodeStepTimeoutMs);
+await bounded(settle(), 'import with boot deferred', _dashnodeStepTimeoutMs);
+const deferred = document.querySelector('[data-meta="token"]').textContent;
+document.fire('DOMContentLoaded');
+await bounded(settle(), 'boot', _dashnodeStepTimeoutMs);
+const links = Array.from(document.querySelectorAll('.rail-list a'));
+drive.fire(drive.ids((slot) => slot.kind === 'interval')[0]);
+const io = drive.observers()[0];
+io.fire([{ isIntersecting: true, boundingClientRect: { top: 40 },
+  target: document.querySelector('#s01') }]);
+const afterObserver = links.map((a) => a.classList.contains('active'));
+links[0].click();
+const counts = {};
+for (const selector of ['[data-meta="token"]',
+  '[data-meta="token-short"]', '[data-meta="server"]',
+  '[data-meta="sse-dot"]', '[data-meta="sse-text"]',
+  '[data-meta="sse-text2"]', '[data-meta="last-event"]',
+  '[data-section]', '.rail-list a']) {
+  counts[selector] = document.querySelectorAll(selector).length;
+}
+report({ deferred, counts,
+  token: document.querySelector('[data-meta="token"]').textContent,
+  dot: document.querySelector('[data-meta="sse-dot"]').dataset.status,
+  sseText: document.querySelector('[data-meta="sse-text"]').textContent,
+  lastEvent: document.querySelector('[data-meta="last-event"]').textContent,
+  mounted: panel.textContent.length > 0
+    && !panel.textContent.includes('no module for'),
+  afterObserver,
+  afterClick: links.map((a) => a.classList.contains('active')),
+  observed: io.observed.length, observers: drive.observers().length });
 })().catch(leave);
 """
 
@@ -264,6 +438,43 @@ def test_the_request_log_carries_the_bearer_value_and_the_target(_tmp):
     assert request['planned'] is True, request
 
 
+def test_the_request_log_records_what_the_caller_varied(_tmp):
+    """The same six arguments, read rather than answered. Every other
+    request in this suite is a GET carrying `tab=dashboard` and a
+    signal, so a constant would be indistinguishable from a read; here
+    each is pinned in both directions. Hardcoding `hasSignal: true`,
+    `tab: 'dashboard'`, `method: 'GET'` or one server prefix turns this
+    red on the request that varies it."""
+    report = run_scenario(_REQUEST_LOG_VARIED)
+    plain, tabbed, elsewhere = report['requests']
+    assert plain == {'n': 1, 'target': _TABS, 'method': 'GET',
+                     'authorization': 'Bearer one', 'tab': None,
+                     'server': _SERVER, 'hasSignal': False,
+                     'planned': True}, plain
+    assert tabbed == {'n': 2, 'target': _TABS + '?tab=alpha',
+                      'method': 'POST', 'authorization': 'Bearer two',
+                      'tab': 'alpha', 'server': _SERVER,
+                      'hasSignal': False, 'planned': True}, tabbed
+    assert elsewhere == {'n': 3, 'target': 'https://example.com:8443/tabs'
+                         + '?tab=beta', 'method': 'GET',
+                         'authorization': 'Bearer three', 'tab': 'beta',
+                         'server': 'https://example.com:8443',
+                         'hasSignal': True, 'planned': True}, elsewhere
+    assert report['unplanned'] == [], report
+
+
+def test_a_headers_bag_the_shell_cannot_read_is_refused(_tmp):
+    """A real `Headers` carries the credential just as truly, so reading
+    it as absent would assert the opposite of the truth. The bag is
+    refused by name, and nothing is recorded for the request, because a
+    recorded request would carry `authorization: null`."""
+    report = run_scenario(_HEADERS_BAG)
+    assert report['requests'] == [], report
+    assert report['bagRefusal'] is not None, report
+    assert 'plain header object' in report['bagRefusal'], report
+    assert 'Headers' in report['bagRefusal'], report
+
+
 def test_the_reader_exposes_every_settlement(_tmp):
     """Two frames, a stream driven to its end, a failed stream and a
     teardown's abort are each recorded as they happen. Recording
@@ -281,15 +492,31 @@ def test_the_reader_exposes_every_settlement(_tmp):
     assert 'reader already settled' in report['afterClose'], report
 
 
+def test_a_window_storage_event_reaches_the_sse_client(_tmp):
+    """`sse.js:158` registers its storage listener at module-evaluation
+    time, so the shell has to hold a window listener a scenario can
+    fire. Dropping the registration leaves the first connection as the
+    only one."""
+    report = run_scenario(_WINDOW_STORAGE, modules=('sse.js',))
+    assert len(report['requests']) == 2, report
+    assert report['requests'][0]['authorization'] == (
+        'Bearer first-token-abcdefgh'), report
+    assert report['requests'][1]['authorization'] == (
+        'Bearer second-token-abcdefgh'), report
+    assert report['unplanned'] == [], report
+
+
 def test_a_parked_timer_runs_only_when_driven(_tmp):
     """sse.js's 3s retry and app.js's 1s clock park, and driving one
-    runs its callback exactly once. Running short timers for real --
-    what `_dashnode`'s shared scaffold does -- leaves `parked` at 1."""
+    runs its callback exactly once, with the arguments real setTimeout
+    would have passed it. Running short timers for real leaves `parked`
+    at 1; not spending a fired timeout leaves it in `live`."""
     report = run_scenario(_PARKED_TIMERS)
     assert report['before'] == 0, report
     assert report['parked'] == 0, report
     assert report['once'] == 1, report
     assert report['twice'] == 2, report
+    assert report['carried'] == 'carried', report
     assert report['live'] == [{'id': 2, 'kind': 'interval',
                                'delay': 1000}], report
 
@@ -309,24 +536,34 @@ def test_class_list_toggle_reflects_force_in_both_directions(_tmp):
 
 def test_an_unimplemented_selector_fails_by_name(_tmp):
     """A selector the shell does not implement raises, naming it; one
-    that matches nothing returns an empty list. Answering an
-    unimplemented selector with an empty list makes "the scaffold did
-    not understand" look like "nothing matched". Permissive parsing
-    leaves `combinator` null."""
+    that matches nothing returns an empty list. A value it cannot read
+    is refused too: a single-quoted value read as part of the value
+    matches nothing, which is the failure this is about. Permissive
+    parsing leaves `combinator` and `unquoted` null."""
     report = run_scenario(_SELECTORS)
     assert report['empty'] == 0, report
     assert report['isArray'] is False, report
+    assert report['doubleQuoted'] == 1, report
+    assert report['singleQuoted'] == 1, report
+    assert report['combinator'] is not None, report
     assert 'does not implement selector' in report['combinator'], report
     assert '.rail-list > li' in report['combinator'], report
+    assert report['unquoted'] is not None, report
+    assert 'unreadable attribute value' in report['unquoted'], report
     assert 'is not a selector' in report['notAString'], report
 
 
 def test_the_observer_refuses_an_unmodelled_member(_tmp):
     """An unmodelled observer member fails by name; `undefined` would
-    make the use a silent no-op. The entry list is the caller's, so
-    `seen` proves the callback ran on what the scenario supplied."""
+    make the use a silent no-op. The callback must receive the caller's
+    entries -- both of them, in order, with the caller's own values --
+    because app.js filters on `isIntersecting`, sorts on
+    `boundingClientRect.top` and picks on `target.id` over a list it
+    did not make. Truncating the list to one entry, or substituting an
+    entry of the double's own, both turn this red."""
     report = run_scenario(_OBSERVER)
-    assert report['seen'] == [['from-the-caller:true']], report
+    assert report['seen'] == [['skipped:false:5',
+                               'from-the-caller:true:90']], report
     assert report['observed'] == 1, report
     assert 'not modelled: unobserveAll' in report['unmodelled'], report
     assert report['margin'] == '-80px 0px -60% 0px', report
@@ -347,12 +584,62 @@ def test_queries_walk_the_live_tree(_tmp):
     assert report['emptied'] == '', report
 
 
+def test_the_response_double_refuses_what_it_does_not_model(_tmp):
+    """`api.js:53` branches on `content-type` and can only reach
+    `api.js:55`'s text branch if some scenario models a non-JSON
+    response, so the header answers for the one name it has and refuses
+    the rest. A response member the double does not have is refused by
+    name, as the observer's is, not left to fail as
+    `blob is not a function`."""
+    report = run_scenario(_RESPONSE_DOUBLE)
+    assert report['contentType'] == 'application/json', report
+    assert report['header'] is not None, report
+    assert 'header not modelled: x-not-a-header' in report['header'], report
+    assert report['blob'] is not None, report
+    assert 'blob not modelled' in report['blob'], report
+    assert report['absent'] is not None, report
+    assert 'member not modelled: formData' in report['absent'], report
+
+
 def test_console_error_is_recorded_as_well_as_printed(_tmp):
     """`app.js` reports a failed mount and a throwing bus listener
     through `console.error` and nothing else, so a scenario can only
     read them off the recorder. Not recording leaves `errors` empty."""
     report = run_scenario(_CONSOLE_ERROR)
     assert report['errors'] == ['[mount] overview failed boom'], report
+
+
+def test_app_js_boots_against_the_shell(_tmp):
+    """The whole point of the scaffold: the shipped entry point reaches
+    every surface the brief enumerates, and the shell answered or
+    refused nothing it could not do. Nine selectors resolve, the token
+    and server labels render, the section mounts through
+    `dataset.section`, the observer and the rail click move the
+    highlight, and no request went unplanned. A scaffold that cannot do
+    one of those fails this control instead of passing it quietly."""
+    report = run_scenario(_APP_BOOT, modules=_APP_MODULES)
+    assert report['unplanned'] == [], report
+    assert report['errors'] == [], report
+    assert report['deferred'] == '-', report
+    assert report['counts'] == {
+        '[data-meta="token"]': 1,
+        '[data-meta="token-short"]': 1,
+        '[data-meta="server"]': 1,
+        '[data-meta="sse-dot"]': 1,
+        '[data-meta="sse-text"]': 1,
+        '[data-meta="sse-text2"]': 1,
+        '[data-meta="last-event"]': 1,
+        '[data-section]': 1,
+        '.rail-list a': 2,
+    }, report['counts']
+    assert report['token'] == 'tok-abcd…mnop', report
+    assert report['dot'] == 'connected', report
+    assert report['sseText'] == 'connected', report
+    assert report['lastEvent'] == 'now', report
+    assert report['mounted'] is True, report
+    assert report['observed'] == 2, report
+    assert report['afterObserver'] == [False, True], report
+    assert report['afterClick'] == [True, False], report
 
 
 def main():
