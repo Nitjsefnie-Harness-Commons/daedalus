@@ -7,9 +7,13 @@ Namespace stores are refused as namespace store escapes.
 FRAME_NAMESPACE_PLANTS are ways the CLI can be made to read a frame's
 namespace, planted into a real module and read one per row here. They are
 plants, not the rule's inputs: the rule answers the operation once, from
-the member set the resolver reads off types.FrameType. Each row is the
-discriminating entry for one arm of the carrier, so a mutation that drops
-an arm is silent without the row that arm's own mutation is caught by."""
+the member set the resolver reads off types.FrameType. Three rows are the
+sole catcher of one arm each — the callee that is itself a call, the
+starred expansion, and the getattr whose name is an expression — so
+dropping one of those three arms reds the row that names it. The
+unreadable-subscript arm has no such row: what it refuses is a computed key
+on an unproven receiver, and the control that pins it is the real tree,
+where removing it refuses eleven correct slices."""
 import argparse
 import builtins
 import contextlib
@@ -339,6 +343,22 @@ FRAME_NAMESPACE_PLANTS = (
      '    getattr = object.__getattribute__\n'
      "    _ = getattr(sys._getframe(), 'f_locals').get('undeclared_probe')\n",
      "getattr(sys._getframe(), 'f_locals')"),
+    ('callee the audit cannot see is a call', 'import operator\n',
+     'def do_reload(args):\n',
+     "def do_reload(args):\n"
+     "    _ = operator.attrgetter('f_locals')(sys._getframe())"
+     ".get('args').undeclared_probe\n",
+     "operator.attrgetter('f_locals')(sys._getframe())"),
+    ('starred expansion hides the argument list', '', 'def do_reload(args):\n',
+     'def do_reload(args):\n'
+     "    _ = getattr(*(sys._getframe(), 'f_locals')).get('args')"
+     '.undeclared_probe\n',
+     "getattr(*(sys._getframe(), 'f_locals'))"),
+    ('getattr whose name is an expression', '', 'def do_reload(args):\n',
+     "def do_reload(args):\n"
+     "    _ = getattr(sys._getframe(), 'f_' + 'locals').get('args')"
+     '.undeclared_probe\n',
+     "getattr(sys._getframe(), 'f_' + 'locals')"),
     ('class body', "class _Reach:\n    NS = sys._getframe()['f_locals']\n",
      'def do_reload(args):\n',
      'def do_reload(args):\n    _ = _Reach.NS.undeclared_probe\n',
@@ -432,9 +452,15 @@ def assert_namespace_key_call_accepted(read_module, base):
     control that stopped testing what it names.
     """
     shapes = {
-        'literal receiver': "def do_reload(args):\n    api('GET', 'args')\n",
-        'unproven receiver': ("def do_reload(args):\n    cmd_id = 'x'\n"
-                              "    send(cmd_id, 'args')\n")}
+        'literal receiver, namespace key':
+            "def do_reload(args):\n    api('GET', 'args')\n",
+        'unproven receiver, namespace key':
+            "def do_reload(args):\n    cmd_id = 'x'\n"
+            "    send(cmd_id, 'args')\n",
+        'literal receiver, a frame member':
+            "def do_reload(args):\n    api('GET', 'f_locals')\n",
+        'unproven receiver, a frame member':
+            "def do_reload(args):\n    send('t', 'f_code')\n"}
     for name, body in shapes.items():
         escapes = read_module({'commands_eval': plant_in_reload(base, body)})
         assert escapes == [], (name, escapes)
