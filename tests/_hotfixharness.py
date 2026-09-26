@@ -21,6 +21,11 @@ REPL mode is: a top-level `await` settles and a top-level `var` or function
 declaration lands in the document's global. An evaluation that could not
 tell a statement-list guard from an IIFE wrapper cannot hold the control
 that exists for exactly that difference.
+
+A case asks for a fault by naming it — `attach`, `cdpRefused`,
+`injectedError`, `storageReadFails`, `recordVersion` — and each is refused
+shaped rather than ignored. `commands` and `store` are the two spellings of
+the typed command list, and a case naming both is refused, not resolved.
 """
 import json
 import shutil
@@ -45,6 +50,11 @@ const contentPath = process.argv[2];
 const spec = JSON.parse(process.argv[process.argv.length - 1]);
 
 const HOTFIX_KEY = 'daedalus-hotfixes';
+// The version a seeded record carries. No shipped `VERSION` can equal it, so
+// "the key is gone" and "a record is still there" are told apart by the
+// version `list-hotfixes` answers — stated, not left to two constants that
+// happen to differ.
+const RECORD_VERSION = '0.00.0-fixture';
 const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
 const TAB_ID = 7;
 const posted = [];
@@ -53,6 +63,7 @@ const messageListeners = [];
 const injections = [];
 const submitted = [];
 const attachCalls = [];
+const detachCalls = [];
 const timers = [];
 const storageStore = {
   'daedalus-token': 'hotfix-token',
@@ -302,6 +313,13 @@ async function executeScript(injection) {
     navigateAt('after-probe');
     return [{ documentId: doc.id, result: spec.probe !== false }];
   }
+  // The other answer shape a MAIN-world injection can come back in: a frame
+  // carrying `error` where every other frame carries `result`. Nothing ran
+  // in the document it names, so the code that would have run there was
+  // never compiled into it.
+  if (spec.injectedError !== undefined) {
+    return [{ documentId: doc.id, error: spec.injectedError }];
+  }
   doc.page.__args = injection.args || [];
   const source = '(' + injection.func.toString() + ')(...__args)';
   // vm-load-exempt: runs the function the extension injected
@@ -348,6 +366,10 @@ async function sendCommand(_target, method, params) {
     replMode: params.replMode === true,
     awaitPromise: params.awaitPromise === true,
   });
+  // The call reached the debugger and the debugger refused it. The
+  // submission is recorded first, because it WAS made — that is what tells a
+  // refused command apart from one the worker never issued.
+  if (spec.cdpRefused) throw new Error(spec.cdpRefused);
   navigateAt('before-cdp-evaluate');
   relocateAt('before-cdp-evaluate');
   const answer = await evaluateIn(currentDocument, params.expression);
@@ -370,6 +392,13 @@ const chrome = {
   storage: {
     local: {
       get: async (keys) => {
+        // A read Chrome refuses for one NAMED key. The name is matched so a
+        // fault planted on the hotfix key leaves the boot read of the token
+        // alone, and an unnamed key is not a fault this double models.
+        if (spec.storageReadFails
+            && [].concat(keys).includes(spec.storageReadFails)) {
+          throw new Error('storage read refused for ' + spec.storageReadFails);
+        }
         const out = {};
         for (const key of [].concat(keys)) {
           if (key in storageStore) {
@@ -411,7 +440,7 @@ const chrome = {
       attachCalls.push(target.tabId);
       if (spec.attach === 'fail') throw new Error('debugger refused');
     },
-    detach: async () => {},
+    detach: async (target) => { detachCalls.push(target.tabId); },
     sendCommand,
   },
   cookies: { getAll: async () => [], remove: async () => null },
@@ -500,7 +529,9 @@ async function waitFor(predicate) {
     }
   }
   storageStore[HOTFIX_KEY] = {
-    version: '0.18.0', fixes: (spec.fixes || []).map((fix) =>
+    version: spec.recordVersion === undefined ? RECORD_VERSION
+                                              : spec.recordVersion,
+    fixes: (spec.fixes || []).map((fix) =>
       Object.assign({ permanent: true }, fix)),
   };
 
@@ -509,7 +540,23 @@ async function waitFor(predicate) {
     { filename: backgroundPath });
   await vm.runInContext('loadConfig()', context);
 
-  for (const command of spec.store || []) {
+  // `commands` is the general spelling; `store` is the older key, the same
+  // loop with `store-hotfix` defaulted. Naming both is a case this double
+  // cannot resolve, and dropping one without a word is the failure mode the
+  // module's own record default would paper over.
+  //
+  // The error carries a NAME, reported on stdout by the handler at the end
+  // of this program. A control telling this refusal from any other way a
+  // case can fail cannot anchor on prose: a reword is a false red.
+  if (spec.commands !== undefined && spec.store !== undefined) {
+    const refused = new Error('the case names both `commands` and `store`; '
+                              + 'one spelling of the list is required');
+    refused.name = 'CaseShapeRefused';
+    throw refused;
+  }
+  const commands = spec.commands === undefined ? (spec.store || [])
+                                                 : spec.commands;
+  for (const command of commands) {
     context.storeCommand = Object.assign(
       { type: 'store-hotfix', _did: 'did-' + command.fixId }, command);
     await vm.runInContext('dispatchCommand(storeCommand)', context);
@@ -588,6 +635,7 @@ async function waitFor(predicate) {
   }
   process.stdout.write(JSON.stringify({
     attachCalls,
+    detachCalls,
     // False means the worker held the channel open and never answered, so
     // Chrome delivered the content script's callback with `lastError` set.
     answered: spec.ask === false ? null : asker.answered,
@@ -623,6 +671,9 @@ async function waitFor(predicate) {
     armings: timers.filter((timer) => !timer.cleared).map((t) => t.delay),
   }), () => process.exit(0));
 })().catch((error) => {
+  // The failing error's own NAME, on its own channel, for a control that has
+  // to tell one refusal from another: stdout is empty on every other path.
+  process.stdout.write(((error && error.name) || 'Error') + '\n');
   process.stderr.write((error.stack || String(error)) + '\n',
                        () => process.exit(1));
 });
