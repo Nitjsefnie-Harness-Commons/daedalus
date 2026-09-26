@@ -11,9 +11,7 @@ in tests/test_watcher_polls.py.
 """
 import time
 
-# A wake-up interval, never a deadline: the wait below ends on what the
-# process under test did, and names no duration.
-POLL = 0.05
+from _watcher_waits import POLL
 
 
 def repeated_width(requests):
