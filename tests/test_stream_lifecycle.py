@@ -410,13 +410,13 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         # startup while proving nothing about the search.
         _await_alive(proc, drained, lambda: marker in drained,
                      'the child never printed its one line')
-        # Both pins below are "opens after the child printed", and both
-        # compare monotonic readings, which is why they are an ordering and
-        # not a margin: no duration is held against a threshold, so neither
-        # can be spent on a slow machine however the box is loaded.
+        # The pin is "the window opens after the child printed": the drain
+        # is non-empty only because the handshake returned, so with the
+        # handshake gone the window is provably open too early. It is a
+        # statement about what the drain holds and not a duration held
+        # against a threshold, so no machine speed can spend it.
         assert drained, 'the window opened before the child printed'
-        handshaken, started = time.monotonic(), time.monotonic()
-        assert started >= handshaken, 'the window opened before the print'
+        started = time.monotonic()
         failure = ''
         try:
             _util.await_listening_line(proc, drained, timeout=1)
