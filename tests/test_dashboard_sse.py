@@ -154,6 +154,18 @@ await bounded(settle(), 'second frame', _dashnodeStepTimeoutMs);
 report({ heard, seen, read: drive.lastScript().settlements });
 """
 
+# A listener added from inside a listener, on the SSE side this time.
+_JOINING_LISTENER = _OPEN_STREAM + r"""
+const order = [];
+sse.subscribe(() => {
+  order.push('first');
+  sse.subscribe((e) => order.push('joined:' + e.id));
+});
+push({ kind: 'event', id: 'e1', type: 'result' });
+await bounded(settle(), 'the joining frame', _dashnodeStepTimeoutMs);
+report({ order, seen });
+"""
+
 # The three directions of the conjunction: the negative first, then a
 # changed-token event whose restart is the oracle that the log sees one.
 _CHANGED = r"""
@@ -254,6 +266,20 @@ def test_a_frame_the_module_never_dispatched_does_not_move_the_clock(_tmp):
     assert report['lastEventAt'] == report['afterEvent'], report
     assert report['seen'] == statuses + [[False, 'result', 'event', 'e1']], \
         report
+
+
+def test_a_listener_added_during_a_dispatch_joins_it_in_sse_js(_tmp):
+    """A listener added during a dispatch joins that dispatch.
+
+    `dispatch` iterates the `Set` itself, and a `Set`'s iterator is
+    live: it visits what the set holds at each step rather than what it
+    held when iteration began, so an entry added mid-iteration is still
+    reached. The subscriber here does nothing to arrange that -- no
+    re-application, no second frame -- so this is a pin on the shape the
+    module already has, beside the identical one on `app.js:64`."""
+    report = _run(_JOINING_LISTENER)
+    assert report['order'] == ['first', 'joined:e1'], report
+    assert report['seen'][-1] == [False, 'result', 'event', 'e1'], report
 
 
 def test_a_throwing_listener_neither_silences_the_rest_nor_escapes(_tmp):
