@@ -39,6 +39,7 @@ importScripts(
   'worker/tabs.js',
   'worker/cdp.js',
   'worker/netcapture.js',
+  'worker/hotfix_scope.js',
   'worker/hotfixes.js',
   'worker/segment_mint.js',
   'worker/evaluate.js',
