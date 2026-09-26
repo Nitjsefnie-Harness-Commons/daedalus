@@ -421,10 +421,13 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
             failure = str(e)
         elapsed = time.time() - started
         assert failure, 'a silent child was read as an announcement'
-        # The bound the search actually applied, in the message beside the
-        # one the caller asked for: a search given less than it claims
-        # reports a timeout it never had. A literal, because compared
-        # against a constant it would move both sides and pass.
+        # The bound the search applied, beside the one the caller asked
+        # for; a literal, since a constant would move both sides of the
+        # comparison and pass. It pins less than it looks: this helper
+        # builds its deadline as `started + timeout`, so the applied and
+        # the requested bound are one number, and a control reading this
+        # slot cannot tell them apart -- it does not certify WHICH bound
+        # it printed, only that the two agreed.
         assert '(bound applied 1s)' in failure, failure
         # The 10x headroom is now over the search loop, so it still catches
         # a bound that was silently widened.
