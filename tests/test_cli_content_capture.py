@@ -134,12 +134,32 @@ def test_do_net_capture_reports_zero_buffered_when_the_extension_says_nothing(
         repr(out)
 
 
+def test_do_net_capture_reads_a_tab_the_already_arm_left_out(tmp):
+    """The `already` line has its own read, and it needed its own test.
+
+    It is a separate f-string from the default arm's, so pinning one
+    default says nothing about the other, and both of the tests beside
+    this one carry a `tabId`.
+    """
+    del tmp
+    _recorded, out = run_cli(
+        ['net-capture'], [{'already': True, 'buffered': 12}],
+        plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 1000}, 15)],
+        token=TOK)
+
+    assert out == 'Already capturing on tab ? (12 requests buffered)\n', \
+        repr(out)
+
+
 def test_do_net_capture_names_a_tab_the_extension_left_out(tmp):
-    """The default arm reads `None` for a result with no tab at all.
+    """The default arm reads `?` for a result with no tab at all.
 
     The two arms differ only in the `already` key, so the shared
-    `get('tabId')` default is what this pins: the already-arm test above
-    always carries a tab.
+    `get('tabId', '?')` default is what this pins: the already-arm test
+    above always carries a tab. `?` rather than the word Python prints for
+    an absent lookup, because that is the placeholder every other handler
+    in the CLI already reads an absent id as, and an operator reading the
+    word `None` where a tab id belongs learns nothing.
     """
     del tmp
     _recorded, out = run_cli(
@@ -147,7 +167,7 @@ def test_do_net_capture_names_a_tab_the_extension_left_out(tmp):
         plan=[_ext('_net_cap', 'net-capture', {'maxRequests': 1000}, 15)],
         token=TOK)
 
-    assert out == 'Capturing network on tab None\n', repr(out)
+    assert out == 'Capturing network on tab ?\n', repr(out)
 
 
 # ── do_net_capture_stop ──────────────────────────────────────────────
@@ -186,6 +206,22 @@ def test_do_net_capture_stop_prints_only_the_count_when_none_were_captured(
         plan=[_ext('_net_stop', 'net-capture-stop', {}, 30)], token=TOK)
 
     assert out == 'Captured 0 requests from tab 4\n', repr(out)
+
+
+def test_do_net_capture_stop_reads_a_tab_the_extension_left_out(tmp):
+    """An answer with no `tabId` reads `?`, the placeholder, not `None`.
+
+    Every sibling of this arm supplies a `tabId`, which is why the read
+    stayed dark: a handler that had dropped the field entirely would
+    have passed all of them. The two defaults are separate lines of the
+    handler, so pinning the count here pins nothing about the tab.
+    """
+    del tmp
+    _recorded, out = run_cli(
+        ['net-capture-stop'], [{'stopped': True}],
+        plan=[_ext('_net_stop', 'net-capture-stop', {}, 30)], token=TOK)
+
+    assert out == 'Captured 0 requests from tab ?\n', repr(out)
 
 
 def test_do_net_capture_stop_says_so_when_the_tab_was_not_capturing(tmp):
@@ -335,6 +371,20 @@ def test_do_net_capture_get_prints_only_the_count_when_the_buffer_is_empty(
         plan=[_ext('_net_get', 'net-capture-get', {}, 30)], token=TOK)
 
     assert out == '0 requests on tab 4\n', repr(out)
+
+
+def test_do_net_capture_get_reads_a_tab_the_extension_left_out(tmp):
+    """The `?` arm of the listing, for an answer that names no tab.
+
+    Both siblings of this arm supply a `tabId`, so an undefaulted read
+    reached the wire in every test of this handler and nothing noticed.
+    """
+    del tmp
+    _recorded, out = run_cli(
+        ['net-capture-get'], [{}],
+        plan=[_ext('_net_get', 'net-capture-get', {}, 30)], token=TOK)
+
+    assert out == '0 requests on tab ?\n', repr(out)
 
 
 def test_do_net_capture_get_carries_every_option_it_was_given(tmp):
