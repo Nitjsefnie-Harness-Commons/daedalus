@@ -260,11 +260,14 @@ phase('dashboard harness finished');
 
 
 def test_a_tab_list_the_bridge_refused_says_why_in_the_option(_tmp):
-    """`eval.js:71` is the one section that passes an `errorLabel` to
-    `bindTabSelector`, so a `/tabs` the bridge refuses reaches the
-    operator as the select's own option rather than as the silence the
-    other five sections settle for. `api.js:58` builds the message and
-    `errMsg` hands it back unchanged, so the option is asserted whole.
+    """Five sections call `bindTabSelector` -- `css-injector.js:41`,
+    `cdp.js:52`, `eval.js:69`, `net-capture.js:44` and `screenshot.js:47`
+    -- and `eval.js:71` is the only one of the five that passes an
+    `errorLabel`. So a `/tabs` the bridge refuses reaches the operator
+    here as the select's own option, where the other four leave the
+    markup's `(active tab)` option and say nothing.
+    `api.js:58` builds the message and `errMsg` hands it back unchanged,
+    so the option is asserted whole.
 
     Nothing else mounts eval.js with `/tabs` answered a status, so
     without this case the `errorLabel` render is unpinned tree-wide:

@@ -120,9 +120,10 @@ def _run(body, *, setup='', answers=(), plan=shared.COMMAND):
 def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
     """`load()` is called with no argument at the end of `mount`, so the
     first body is the command's own four keys. A defaulted pair added on
-    the way in would be two members `extension/worker/tabs.js:32` does
-    not read: it answers from `_fetchTimings` and the two globals beside
-    it, and nothing else off the command."""
+    the way in would be two members the handler reads no part of: it
+    answers from `_fetchTimings` and the two globals beside it, and the
+    only field of the command it touches is `cmd.reset` at
+    `extension/worker/tabs.js:31`."""
     report = _run('report({ sub: sub.textContent,\n'
                   '  head: headers(list()),\n'
                   '  rows: cells(list()) });\n',
