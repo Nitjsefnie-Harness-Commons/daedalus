@@ -550,11 +550,13 @@ def load():
 ''')
 
 
-# The nesting the walk's own recursion cannot follow. A subscript, a call and
-# a parenthesised expression all have to be DELIMITED and the parser refuses
-# them at 201, so a postfix or infix chain is the only way past that; `or`
-# and `<` chains are n-ary in the AST and stay flat, so they are not a shape
-# at all. Every value here is far past what the parser allows elsewhere.
+# The nesting the walk's own recursion cannot follow. The parser's own 201
+# limit is on a NESTED BRACKET and on nothing else here: a postfix chain of
+# subscripts, calls or attributes, and an infix chain, each parse at any
+# depth (measured: `x` + `[0]`*N, `x` + `()`*N, `x` + `.a`*N and
+# `'a' + ' + 'a'`*N all parse at N=1000) and reach the walk instead — which
+# is why every value below is a chain rather than a bracket. `or` and `<`
+# chains are n-ary in the AST and stay flat, so they are not a shape at all.
 _ESCAPES = {
     'an attribute chain': 'importlib.import_module' + '.a' * 600,
     'an index chain': '[importlib.import_module][0' + '+0' * 600 + ']',
@@ -659,14 +661,20 @@ REAL_COMPOSITION_SCAN_SET = [
 
 
 def test_a_getattr_of_an_unknown_attribute_on_a_bound_name_refuses(_tmp):
-    """A non-constant attribute read off a known operation is still one."""
+    """A non-constant attribute read off a known operation is still one.
+
+    The key is unreadable, so the lookup may be reading `__call__` and the
+    walk reads it as the value it reads off — which is the refusal this
+    names, and the same one the sibling code-eval axis draws for a `getattr`
+    whose key it cannot read either.
+    """
     _assert_refusal(_tmp, '''
 import importlib
 
 
 def load(name, attribute):
     return getattr(importlib, attribute)(name)
-''', 6, 'cannot follow')
+''', 6, 'reaches the import-by-name operation')
 
 
 def test_the_real_composition_scan_set_is_pinned(_tmp):
