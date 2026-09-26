@@ -27,8 +27,8 @@ from _cmdqueue_faults import (  # noqa: E402
 )
 import _overlap  # noqa: E402
 import _overlap_clients  # noqa: E402
-import test_cli  # noqa: E402
-import test_mcp_server  # noqa: E402
+import _cli_helpers as test_cli  # noqa: E402
+import _mcp_load as test_mcp_server  # noqa: E402
 
 
 def test_a_transient_read_refusal_returns_the_queued_command(tmp):
