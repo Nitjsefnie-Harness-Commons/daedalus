@@ -50,7 +50,6 @@ export function lastEventAt() {
 }
 
 function emit(raw) {
-  lastEventTs = Date.now();
   let payload;
   try { payload = JSON.parse(raw); }
   catch (err) { console.error('[sse] parse error', err, raw); return; }
@@ -65,6 +64,11 @@ function emit(raw) {
         dispatchedIds.delete(dispatchedIds.values().next().value);
       }
     }
+    // Stamped here, on the last step before the frame reaches a
+    // subscriber, because the clock is the dashboard's "last event"
+    // readout: a frame dropped above was never an event, and a spurious
+    // stamp renders as "now".
+    lastEventTs = Date.now();
     dispatch(payload);
   }
 }
