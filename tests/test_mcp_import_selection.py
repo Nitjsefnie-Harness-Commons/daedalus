@@ -2,14 +2,16 @@
 """The import-by-name operation reached through a CALL's callee VALUE.
 
 A call's callee is a value, and the walk folds it before asking what it is.
-Where the fold decides the value exactly — a subscript of a literal tuple
-or list by a constant index inside it, however deeply nested — the value is
+Where the fold decides the value exactly — a wrapper that produces the value
+it wraps, a subscript of a literal sequence by a position inside it or of a
+literal mapping by a key it carries, however deeply nested — the value is
 the operation and its argument is resolved exactly as the direct spelling
-resolves it. Where the fold cannot, the walk asks the STORE side's own
-property: does this expression's subtree mention the operation? A mention
-is refused by spelling, site and remedy. A value that is not the operation
-and does not mention it is left alone, so a container read that selects
-something else is not a refusal.
+resolves it. Where the fold cannot decide, the walk asks the STORE side's
+own property: does this expression's subtree mention the operation? A
+mention is refused by spelling, site and remedy. A value the runtime
+provably cannot reach through is CLEAN, and a value that is not the
+operation and does not mention it is left alone, so a container read that
+selects something else is not a refusal.
 
 The per-form cases below are a SAMPLE; the sweep at the bottom generates
 its forms from a grammar and checks them against a runtime oracle, because
@@ -33,7 +35,7 @@ def _write_tree(directory, files):
 
 
 # Callee spellings that read the operation OUT of a value rather than
-# naming it. None is a shape `_is_dynamic_import` answers, and that is the
+# naming it. None is a shape `is_dynamic_import` answers, and that is the
 # whole hole: the store side of the same operation asks a PROPERTY ("does
 # this subtree mention the operation") and is right on every one of them,
 # so two halves of one design disagreed about the same value.
@@ -66,7 +68,10 @@ UNREADABLE_SELECTIONS = (
     '[importlib.import_module][i]',
     '[importlib.import_module][0:1]',
     '(*stars, importlib.import_module)[1]',
-    "{'a': importlib.import_module}['a']",
+    "{'a': importlib.import_module}[k]",
+    '{**{"b": 0}, "a": importlib.import_module}["a"]',
+    '(importlib.import_module or print).__call__',
+    'getattr([0, importlib.import_module][i], \'__call__\')',
 )
 
 
@@ -213,12 +218,207 @@ def test_a_constant_index_folded_from_a_binop_is_read(_tmp):
     reads a constant string concatenation, so the index axis does not decline
     a spelling whose value the runtime has already settled.
 
-    A float index is a different thing and stays declined: `lst[0.0]` raises
-    `TypeError` at runtime, so there is no value to read either way.
+    A float index is a different thing and is CLEAN rather than refused:
+    `lst[0.0]` raises `TypeError` at runtime, so the position names nothing
+    and the call raises before it reaches anything the container carries.
     """
     assert _scan(_tmp, '[importlib.import_module][0 + 0]') == 'resolved'
     assert _scan(_tmp, '[0, importlib.import_module][0 + 0]') == 'silent'
-    assert _scan(_tmp, '[importlib.import_module][0.0]') == 'refused'
+    assert _scan(_tmp, '[importlib.import_module][0.0]') == 'silent'
+
+
+def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
+    """`*`, `//`, `%` and `**` over two numeric constants are the same settled
+    position `+` and `-` are, so the index axis folds them too — by asking
+    Python's own operator for the value rather than by reading the spelling,
+    which is what leaves no one operator to forget.
+
+    A walrus binds a name and produces the same value, `bool(0)` is `0`, and
+    `/` and a division by zero are the two that cannot: a float is not a
+    position and a `ZeroDivisionError` raises before the container is read.
+    """
+    for index in ('0 * 1', '1 - 1', '1 % 1', '0 ** 1', '(j := 0)',
+                  'bool(0)', '+0', '-(-0)'):
+        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+            == 'resolved', index
+        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+            == 'silent', index
+    for index in ('2 - 1', '1 + 0', '1 * 1', '1 ** 1', '1 // 1'):
+        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+            == 'silent', index
+        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+            == 'resolved', index
+    assert _scan(_tmp, '[importlib.import_module][0 / 1]') == 'silent'
+    assert _scan(_tmp, '[importlib.import_module][1 // 0]') == 'silent'
+
+
+def test_a_position_the_runtime_cannot_reach_is_clean(_tmp):
+    """A position that provably raises names nothing, so the call raises
+    before it reaches anything and the container's mention is beside the
+    question.
+
+    An out-of-range index, a `None`, a string and a float all raise on every
+    container the fold reads, and a dict key the literal does not carry
+    raises `KeyError`. Refusing them is a false refusal on code that imports
+    nothing, and this is the corpus's own decision: a decided value that
+    provably cannot call anything is CLEAN.
+    """
+    for index in ('4', '-4', 'None', "'x'", '1.5', '0 / 1', '1 // 1', 'True'):
+        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+            == 'silent', index
+    assert _scan(_tmp, "{'a': importlib.import_module}['zzz']") == 'silent'
+    assert _scan(_tmp, '{0: importlib.import_module}[1]') == 'silent'
+
+
+# The wrappers a value passes through on its way to being called. Python
+# spells "this object is callable" as `X.__call__`, and a lambda called
+# with no arguments produces its own body; both produce the value they
+# wrap, so a value read through one is the value it wraps.
+PROJECTIONS = (
+    'importlib.import_module.__call__',
+    'importlib.import_module.__call__.__call__',
+    "getattr(importlib.import_module, '__call__')",
+    '[importlib.import_module][0].__call__',
+    '[[importlib.import_module]][0][0].__call__',
+    "{'a': importlib.import_module}['a'].__call__",
+    'getattr([importlib.import_module][0], \'__call__\')',
+)
+
+# The near-miss the projection must not break: each projects a value the
+# fold DECIDED, and none of those is the operation. `X.__call__` raises
+# `AttributeError` for each, so a refusal here is a false one.
+PROJECTION_CLEAN = (
+    '(0, importlib.import_module)[0].__call__',
+    "[0, importlib.import_module][0].__call__",
+    "{'a': 0, 'b': importlib.import_module}['a'].__call__",
+    '[print, importlib.import_module][0].__call__',
+    'importlib.util.find_spec.__call__',
+)
+
+
+def test_a_callable_projection_of_the_operation_resolves_it(_tmp):
+    """`op.__call__` IS the operation: `__call__` is how Python spells "this
+    object is callable", so calling the projection calls the operation.
+
+    Every form here is RESOLVED rather than refused, because the value the
+    projection denotes is the operation and the argument is a constant name
+    the direct spelling resolves. A guard that closed the route by REFUSING
+    would be right about the reach and wrong about a module it can name —
+    and the route is named in the issue's own second comment.
+    """
+    for callee in PROJECTIONS:
+        assert _scan(_tmp, callee) == 'resolved', callee
+
+
+def test_a_callable_projection_of_a_decided_value_is_clean(_tmp):
+    """The projection is read as the VALUE it projects, so the near-miss
+    pair survives it.
+
+    Each of these projects a value the fold already decided and none is the
+    operation, which is the same honesty property the un-projected pair
+    stands on: a rule that read the projected CONTAINER instead of the
+    projected value would refuse all of them, and each raises before it
+    reaches anything.
+    """
+    for callee in PROJECTION_CLEAN:
+        assert _scan(_tmp, callee) == 'silent', callee
+
+
+def test_a_projection_delivered_to_a_name_refuses(_tmp):
+    """A projection stored under a name is a DELIVERY: `d = op.__call__` and
+    then `d('pkg.leaf')` really imports.
+
+    The store side asks the same property the call side does, and the value
+    it projects is the operation, so the store is refused. A store the
+    property answered about the SPELLING would see an attribute named
+    `__call__` and pass this.
+    """
+    _write_tree(Path(_tmp), {'composition.py': '''
+import importlib
+
+
+def load():
+    d = importlib.import_module.__call__
+    return d("pkg.leaf")
+'''})
+    try:
+        _mcp_import_closure.composition_scan_set(
+            Path(_tmp) / 'composition.py', _tmp)
+    except AssertionError as raised:
+        assert 'composition:6' in str(raised), raised
+    else:
+        raise AssertionError('the projected delivery was silently skipped')
+
+
+# A lambda this walk can call with no arguments produces its own body, so
+# `(lambda: op)()` is a value the fold reads. A lambda with a REQUIRED
+# parameter cannot be called that way and raises, which is the near-miss.
+NULLARY_LAMBDAS = (
+    '(lambda: importlib.import_module)()',
+    '(lambda *a: importlib.import_module)()',
+    '(lambda a=0: importlib.import_module)()',
+    '(lambda **k: importlib.import_module)()',
+)
+
+
+def test_a_nullary_lambda_call_of_the_operation_resolves_it(_tmp):
+    """`(lambda: op)()` produces the operation, and it is the CALLEE here, so
+    it reaches the module rather than being carried as a value.
+
+    The sibling code-eval axis reads the same shape through the same rule
+    and calls it a projection, which is what this is: another way a value is
+    produced rather than named.
+    """
+    for callee in NULLARY_LAMBDAS:
+        assert _scan(_tmp, callee) == 'resolved', callee
+
+
+def test_a_lambda_that_cannot_be_called_with_no_arguments_is_clean(_tmp):
+    """`(lambda a: op)()` raises `TypeError` before it produces anything, so
+    there is no value to read and nothing to refuse.
+
+    Its call-site lambda counterpart — the lambda itself, uncalled — is the
+    call-result limit and stays silent too, so the two halves of the lambda
+    rule are pinned from both directions.
+    """
+    assert _scan(_tmp, '(lambda a: importlib.import_module)()') == 'silent'
+    assert _scan(_tmp, '(lambda a=0: print)()') == 'silent'
+
+
+def test_a_getattr_whose_key_the_walk_cannot_read_is_its_object(_tmp):
+    """`getattr(V, k)` with a key this walk cannot read MAY be reading
+    `__call__`, so the walk reads the lookup as the value it reads off.
+
+    It REFUSES rather than resolving, because the fold does not know the
+    value: the key may be `__call__` and it may be anything else, so there
+    is no one module to resolve to and the honest answer is the refusal the
+    issue asks for. A readable key is an ordinary lookup instead — a
+    different constant names an ordinary attribute, and an object that is
+    not the operation is left alone however its key is spelled.
+    """
+    _refuses_the_callee(_tmp, 'getattr(importlib.import_module, k)')
+    assert _scan(_tmp, "getattr(importlib.import_module, 'other')") == 'silent'
+    assert _scan(_tmp, 'getattr(importlib.util, k)') == 'silent'
+    assert _scan(_tmp, 'getattr(print, k)') == 'silent'
+
+
+def test_a_keyed_selection_of_a_literal_dict_is_folded(_tmp):
+    """`{'a': op}['a']` selects the operation by its KEY, and a dict is a
+    literal container the fold reads like any other.
+
+    This is the near-miss pair in its dict spelling and the half that keeps
+    the rule honest: `{'a': 0, 'b': op}['a']` calls `0`, and a fold that
+    read the whole dict would refuse it. Both halves are here because one
+    without the other proves nothing — a fold that declined every dict
+    fails the first and passes the second.
+    """
+    assert _scan(_tmp, "{'a': importlib.import_module}['a']") == 'resolved'
+    assert _scan(_tmp, "{'a': 0, 'b': importlib.import_module}['a']") \
+        == 'silent'
+    assert _scan(_tmp, "{'b': 0, 'a': importlib.import_module}['a']") \
+        == 'resolved'
+    assert _scan(_tmp, "(lambda *a: {'a': importlib.import_module}['a'])") \
+        == 'silent'
 
 
 def test_a_unary_plus_and_a_bool_are_both_constant_positions(_tmp):
@@ -255,7 +455,11 @@ def test_a_callee_the_fold_decides_to_be_a_container_is_not_refused(_tmp):
                    '{importlib.import_module}',
                    "{'a': importlib.import_module}",
                    '[importlib.import_module for _ in [0]]',
-                   '(importlib.import_module for _ in [0])'):
+                   '(importlib.import_module for _ in [0])',
+                   '{importlib.import_module for _ in [0]}',
+                   '{k: importlib.import_module for k in [0]}',
+                   '{importlib.import_module for _ in [0]}.__call__',
+                   '{k: importlib.import_module for k in [0]}.__call__'):
         assert _scan(_tmp, f'{callee}("pkg.leaf")') == 'silent', callee
     _refuses_the_callee(_tmp, '[[importlib.import_module]][i]')
 
@@ -394,16 +598,17 @@ def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
     """A refusal the rule does not owe, counted and pinned rather than
     tolerated.
 
-    Every one of them is a position the fold DECLINES to read — a free name,
-    a slice — on a container that mentions the operation, so the value it
-    selects is unknown to this walk even where the oracle settles it. A
-    negative, a computed and an out-of-range position are not in that set
-    and are not here: the fold reads them, and what it reads settles the
-    value rather than leaving it in doubt.
+    Every one of them is a position the fold DECLINES to read — a free name
+    or a slice, and those are the only two the grammar has — on a container
+    that carries the operation, so the value it selects is unknown to this
+    walk even where the oracle settles it. A negative, a computed, an
+    out-of-range, a float and a key position are not in that set and are not
+    here: the fold reads each of them, and one it reads either selects an
+    element or names nothing at all.
 
-    Both the count and the SET are asserted, so a fold that widened or a
-    marker that drifted shows here as a failure instead of as a number
-    scrolling past.
+    Both the count and the SET are asserted, so a fold that widened, a step
+    that stopped being settled, or a marker that drifted shows here as a
+    failure instead of as a number scrolling past.
     """
     _write_tree(Path(_tmp), {'pkg/__init__.py': '',
                              'pkg/leaf.py': 'leaf = True\n'})
@@ -414,8 +619,8 @@ def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
               if form['inline'] == 'refused'
               and form['oracle'] == 'does not reach']
     for form in bought:
-        assert not form['pinned'] and form['mentions'], form
-    assert len(bought) == 180, len(bought)
+        assert not form['pinned'] and form['carries'], form
+    assert len(bought) == 196, len(bought)
     assert sorted({form['step'] for form in bought}) == ['a name', 'a slice']
 
 
