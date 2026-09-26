@@ -17,6 +17,13 @@ _RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
 
 
+class _ModuleDefault:
+    """An omitted wall budget, read from `_RUNAWAY_WALL` as it then stands.
+
+    A default bound in the signature would freeze the constant at import.
+    """
+
+
 def _queued_file(tmp, name='1700000000000_000001.json'):
     queue = Path(tmp) / 'queue'
     queue.mkdir(exist_ok=True)
@@ -116,7 +123,17 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 
 
 @contextlib.contextmanager
-def _virtual_cmdqueue_clock(max_sleeps=None):
+def _virtual_cmdqueue_clock(
+        max_sleeps=None,
+        wall_budget: float | None | _ModuleDefault = _ModuleDefault()):
+    """Replace the command queue's time with a simulated one.
+
+    Both ceilings have three states: omitted takes the module's value as it
+    stands when the control runs, a number is that caller's own, and None
+    means no such ceiling applies.
+    """
+    budget = _RUNAWAY_WALL if isinstance(wall_budget, _ModuleDefault) \
+        else wall_budget
     original = _cmdqueue.time
     wall_started = original.perf_counter()
     # A large power-of-two origin exposes sleeps too small to move the clock.
@@ -138,11 +155,13 @@ def _virtual_cmdqueue_clock(max_sleeps=None):
         return advanced, next_correction
 
     def check_wall_bound():
+        if budget is None:
+            return
         wall_elapsed = original.perf_counter() - wall_started
-        if wall_elapsed >= _RUNAWAY_WALL:
+        if wall_elapsed >= budget:
             raise AssertionError(
                 'virtual clock wall-time bound reached after '
-                f'{wall_elapsed:.3f}s (limit {_RUNAWAY_WALL:.3f}s)')
+                f'{wall_elapsed:.3f}s (limit {budget:.3f}s)')
 
     class Clock:
         def monotonic(self):
