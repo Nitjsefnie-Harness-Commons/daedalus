@@ -11,9 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers  # noqa: E402
-from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
-from test_real_browser_harness import (  # noqa: E402
+from _realbrowser_fixture_controls import (  # noqa: E402
     _ProcessDouble, _browser_requirements, _enter_fixture)
+from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
 def _process_launches(recovery_failure=None):

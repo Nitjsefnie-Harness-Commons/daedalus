@@ -11,7 +11,7 @@
     }
   },
   "module_size_baseline": {
-    "tests/test_bridge_results.py": 981,
+    "tests/test_bridge_results.py": 976,
     "tests/test_cli.py": 1166,
     "tests/test_mcp_server.py": 1575,
     "tests/test_tab_routing.py": 768
@@ -93,7 +93,7 @@
     "tests/test_real_browser_harness.py": 6,
     "tests/test_real_browser_harness_recovery.py": 15,
     "tests/test_speed_acceptance.py": 2,
-    "tests/test_speed_gate.py": 17,
+    "tests/test_speed_gate.py": 16,
     "tests/test_speed_gate_jobs.py": 1,
     "tests/test_speedharness.py": 2,
     "tests/test_static_guard_regressions.py": 1,
@@ -112,7 +112,6 @@
     "tests/test_watch_all.py": 2,
     "tests/test_wfjobs.py": 3,
     "tests/test_worker_runtime.py": 8,
-    "tests/test_workflow_cache_boundary.py": 3,
     "tests/test_workflow_eslint.py": 4,
     "tests/test_workflow_spellings.py": 6,
     "tests/test_workflow_yaml_uses.py": 1

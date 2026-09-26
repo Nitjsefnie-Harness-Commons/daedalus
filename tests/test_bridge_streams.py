@@ -17,20 +17,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
+                     _wait_for_delivery_health,
                      assert_oversize_stream_matches_enqueue,
                      framer, next_stream_data, put_command, queue_files,
                      read_stream_data, stream_response)
-
-
-def _wait_for_delivery_health(base):
-    deadline = time.monotonic() + 5
-    while True:
-        status, health = _util.get_json(base + '/health')
-        assert status == 200, (status, health)
-        if health['last_delivery_s_ago'] is not None:
-            return health
-        assert time.monotonic() < deadline, health
-        time.sleep(0.01)
 
 
 def test_put_command_broadcast_writes_queue_file(tmp):

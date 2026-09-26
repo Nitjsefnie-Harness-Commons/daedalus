@@ -9,8 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import BRIDGE_ENV, TOK  # noqa: E402
-from test_bridge_results import _patch_env  # noqa: E402
+from _bridge import BRIDGE_ENV, TOK, _patch_env  # noqa: E402
 
 
 _STRIPE_SITE_CUSTOMIZE = r'''

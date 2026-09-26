@@ -18,7 +18,7 @@ from _deliveries import (  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 from _realbrowser_classification_support import (  # noqa: E402
     answered_diagnosis, control_diagnosis)
-from test_real_browser_harness import (  # noqa: E402
+from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_version, _enter_fixture, _fixture_runtime)
 
 

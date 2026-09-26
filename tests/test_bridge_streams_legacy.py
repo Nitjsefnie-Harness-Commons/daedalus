@@ -8,8 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _bridge import (  # noqa: E402
-    BRIDGE_ENV, TOK, framer, next_stream_data, put_command, stream_response)
-from test_bridge_streams import _wait_for_delivery_health  # noqa: E402
+    BRIDGE_ENV, TOK, _wait_for_delivery_health, framer, next_stream_data,
+    put_command, stream_response)
 
 
 def test_stream_survives_a_surrogate_id_in_a_legacy_command_file(tmp):

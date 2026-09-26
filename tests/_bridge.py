@@ -7,6 +7,12 @@ per spawn because `_util.bridge()` strips every inherited `DAEDALUS_*`
 variable before applying the caller's `env=`. Nothing here writes to the
 suite process's own environment: a suite reads the credential from `TOK` and
 hands `BRIDGE_ENV` to the child it spawns.
+
+`_patch_env` and `_wait_for_delivery_health` moved here out of
+tests/test_bridge_results.py and tests/test_bridge_streams.py, which the
+stripes and legacy suites imported for them; both are the fixtures every
+bridge suite in this family needs, next to the env and the stream readers
+they are built on.
 """
 import http.client
 import json
@@ -25,6 +31,11 @@ PNG = b'\x89PNG\r\n\x1a\n' + b'not-really-a-png-but-the-bridge-does-not-care'
 # the suites' requests present, with `TOKEN` cleared so an ambient one-off
 # override cannot shadow it.
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
+
+
+def _patch_env(patch_dir, **extra):
+    """BRIDGE_ENV plus the sitecustomize PYTHONPATH a fault fixture injects."""
+    return {**BRIDGE_ENV, 'PYTHONPATH': str(patch_dir), **extra}
 
 
 def put_command(base, payload):
@@ -227,6 +238,22 @@ def next_stream_data(response, timeout=10):
             # there is no timeout left to restore; this cleanup failure must
             # not displace the diagnosis raised above it.
             pass
+
+
+def _wait_for_delivery_health(base):
+    """The health body once the bridge has recorded a delivery.
+
+    A delivery that has not landed yet is the state the reader polls out,
+    not a failure, so the loop ends on the first body carrying the clock.
+    """
+    deadline = time.monotonic() + 5
+    while True:
+        status, health = _util.get_json(base + '/health')
+        assert status == 200, (status, health)
+        if health['last_delivery_s_ago'] is not None:
+            return health
+        assert time.monotonic() < deadline, health
+        time.sleep(0.01)
 
 
 def assert_oversize_stream_matches_enqueue(base):
