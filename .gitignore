@@ -681,6 +681,7 @@
 !/tests/test_workflow_job_timeouts.py
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_spellings.py
+!/tests/test_workflow_suite_base.py
 !/tests/test_workflow_triggers.py
 !/tests/test_workflow_yaml_uses.py
 !/tests/test_yamlblock.py
