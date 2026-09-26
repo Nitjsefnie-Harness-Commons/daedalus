@@ -83,11 +83,12 @@ def _wait_for_path(process, booted, path, clock=time.monotonic,
     opened = clock()
     deadline = opened + PUBLISH_BOUND
     while not path.exists() and clock() < deadline:
-        # The boot loop above is not the only wait here that can hang. This
-        # one has a deadline, but a client that dies does not reach it: the
-        # condition is re-read and re-true for as long as the clock is, so
-        # the check the boot loop has is what turns a dead client into a
-        # named exit rather than a wait out the rest of the bound.
+        # The boot loop above is not the only wait here that can hang, and
+        # this condition cannot tell a dead client from a live one: a
+        # client that dies leaves the file unpublished and the clock still
+        # running, so the wait runs out the rest of the bound and then
+        # reports only that nothing was published. This check is what turns
+        # that into a prompt named exit.
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before publishing: '
             + (process.stderr.read() if process.stderr else ''))
