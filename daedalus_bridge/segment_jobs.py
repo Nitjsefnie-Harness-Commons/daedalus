@@ -35,6 +35,10 @@ def mint_job(seg_dir_root, token, body, quotas):
     job = body.get('job', '')
     if not job or path_safety.unsafe_component(job):
         return 400, {'error': 'bad job'}
+    if segment_store.reserved_bookkeeping_name(job):
+        # The collision refusal's own answer, so a caller cannot read the
+        # reservation as an oracle for which bookkeeping names are in use.
+        return 409, {'error': 'job name unavailable'}
     with segment_store.seg_lock_for(job):
         try:
             record = segment_store.load_record(seg_dir_root, job)
