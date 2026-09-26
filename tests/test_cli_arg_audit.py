@@ -124,23 +124,31 @@ def _is_getattr(node, function, handler_globals):
         _comprehension_shadows)
 
 
-def _frame_escapes(node, function, handler_globals, label, found):
-    """Refuse a frame read whose receiver the audit cannot account for.
+def _frame_receiver(node, function, handler_globals):
+    """The receiver of a frame read the audit cannot account for, or None.
 
-    The walk is over the whole callable and does not stop at a nested
-    function's own header, so a read in a helper the callable calls is
-    reported against the callable that reaches it. One read reports once:
-    the walk stops descending as soon as a node is refused, so a line that
-    both selects a member and subscripts it is not counted twice.
+    The one place the rule is applied, so the package walk and the per-handler
+    walk cannot drift into two different rules.
     """
     read = resolver.frame_read(
         node, lambda callee: _is_getattr(callee, function, handler_globals))
-    if read is not None:
-        receiver = resolver.reads_frame_namespace(
-            read, _origin(read[1], function, handler_globals))
-        if receiver is not None:
-            found.append(f'{label}: {ast.unparse(receiver)}')
-            return
+    if read is None:
+        return None
+    return resolver.reads_frame_namespace(
+        read, _origin(read[1], function, handler_globals))
+
+
+def _frame_escapes(node, function, handler_globals, label, found):
+    """Report every frame read in a callable, helpers and methods included.
+
+    One read reports once: the walk stops descending as soon as a node is
+    refused, so a line that both selects a member and subscripts it is not
+    counted twice.
+    """
+    receiver = _frame_receiver(node, function, handler_globals)
+    if receiver is not None:
+        found.append(f'{label}: {ast.unparse(receiver)}')
+        return
     for child in ast.iter_child_nodes(node):
         _frame_escapes(child, function, handler_globals, label, found)
 
@@ -187,13 +195,9 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 _comprehension_shadows):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
-        read = resolver.frame_read(
-            node, lambda callee: _is_getattr(
-                callee, function, handler_globals))
-        if read is not None and resolver.reads_frame_namespace(
-                read, _origin(read[1], function, handler_globals)) is not None:
-            violations.append(
-                f'namespace escape: {ast.unparse(read[1])}')
+        receiver = _frame_receiver(node, function, handler_globals)
+        if receiver is not None:
+            violations.append(f'namespace escape: {ast.unparse(receiver)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
             permitted = resolver.permitted_namespace_read(
