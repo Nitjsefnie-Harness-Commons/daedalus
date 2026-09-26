@@ -330,6 +330,8 @@
 !/tests/_mcp_guard_floor.py
 !/tests/_mcp_import_closure.py
 !/tests/_mcp_load.py
+!/tests/_mcp_selection_fold.py
+!/tests/_mcp_selection_sweep.py
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_transport_probes.py
 !/tests/_netcapture_harness.py
@@ -534,6 +536,7 @@
 !/tests/test_mcp_hotfix_scope.py
 !/tests/test_mcp_import_closure.py
 !/tests/test_mcp_import_code_eval.py
+!/tests/test_mcp_import_selection.py
 !/tests/test_mcp_import_values.py
 !/tests/test_mcp_live_tools.py
 !/tests/test_mcp_poll_matching.py

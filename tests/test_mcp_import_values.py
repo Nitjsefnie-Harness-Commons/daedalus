@@ -269,23 +269,23 @@ def load(name, table):
 ''', 6, 'cannot follow')
 
 
-def test_an_attribute_over_a_call_base_holds_at_the_call_limit(_tmp):
-    """`(lambda: importlib)().import_module` is the declared call limit.
+def test_an_attribute_over_a_followable_call_base_is_a_delivery(_tmp):
+    """`(lambda: importlib)().import_module` binds the operation.
 
-    The base is a call, and a call's result is followed by neither the map
-    nor these refusals; a name bound to it is the accepted residual, not a
-    new hole. Pinned here so the boundary is read off a real shape rather
-    than assumed, and so closing it later is a deliberate change.
+    The call-result limit covers a call this walk CANNOT follow, whose
+    result is a runtime value — `__import__('importlib')` above. This one it
+    can: a lambda called with no arguments produces its own body, so the
+    store receives the module and the attribute read off it is the
+    operation. The sibling code-eval axis draws the same line here.
     """
-    scanned = _scans_silently(_tmp, '''
+    _assert_refusal(_tmp, '''
 import importlib
 
 
 def load(name):
     loader = (lambda: importlib)().import_module
     return loader(name)
-''')
-    assert scanned == [(Path(_tmp) / 'composition.py').resolve()], scanned
+''', 6, 'cannot follow')
 
 
 def test_an_attribute_over_a_builtin_import_call_holds_at_the_call_limit(
