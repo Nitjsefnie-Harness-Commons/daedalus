@@ -201,16 +201,21 @@ def _has_cwd_control(value):
 
 
 def _call_receiver_parts(value):
-    """What a call's receiver carries, a container callee aside.
+    """Every sub-value a call's callee carries, bar the callable itself.
 
-    An atom callee is a name or an attribute the other arms already read:
-    handing one to the walk would find a bare module name and call it a
-    launcher here, where the receiver position is the one that reads a
-    launch method off what it carries. Every other form is a form the
-    walk opens, and a launcher behind it is this arm's subject.
+    The descent consumes an attribute chain and every subscript on the
+    way down, and each subscript it consumes is itself a sub-value: its
+    index and bounds are handed to the walk as it goes, not left behind
+    at the base. What the descent lands on is handed over only when it
+    is not an atom, because an atom is the name or attribute the other
+    arms already read and the receiver position reads a launch method
+    off what it carries — handing one over would find a bare module name
+    and refuse a direct launch.
     """
     callee = value.func
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
+        if isinstance(callee, ast.Subscript):
+            yield from _carried_parts(callee.slice)
         callee = callee.value
     if not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
