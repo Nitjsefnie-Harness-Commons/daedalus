@@ -273,12 +273,10 @@ def test_an_attribute_over_a_followable_call_base_is_a_delivery(_tmp):
     """`(lambda: importlib)().import_module` binds the operation.
 
     The call-result limit covers a call this walk CANNOT follow, whose
-    result is a runtime value — `__import__('importlib')` above. This one
-    it can: a lambda called with no arguments produces its own body, so the
+    result is a runtime value — `__import__('importlib')` above. This one it
+    can: a lambda called with no arguments produces its own body, so the
     store receives the module and the attribute read off it is the
-    operation. Pinned here so the boundary is read off a real shape rather
-    than assumed, and so widening it again is a deliberate change; the
-    sibling code-eval axis draws the same line at the same spelling.
+    operation. The sibling code-eval axis draws the same line here.
     """
     _assert_refusal(_tmp, '''
 import importlib

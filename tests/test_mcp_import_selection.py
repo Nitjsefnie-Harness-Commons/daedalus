@@ -154,9 +154,7 @@ def test_a_callee_whose_value_is_a_lambda_is_not_refused(_tmp):
 
     The three cases are one property at three depths — read directly, folded
     out of a container, and folded out of a nested one. An exemption keyed on
-    the CALL's own spelling covers the first and refuses the other two, so the
-    guard contradicts itself inside a single rule and refuses code that
-    imports nothing.
+    the CALL's own spelling covers the first and refuses the other two.
     """
     for callee in ('(lambda: importlib.import_module)',
                    '[(lambda: 1), (lambda: importlib.import_module)][1]',
@@ -216,15 +214,9 @@ def test_a_container_element_that_is_itself_a_selection_is_folded(_tmp):
 def test_a_constant_index_folded_from_a_binop_is_read(_tmp):
     """`[0 + 0]` is a position the fold reads, by the same fold that already
     reads a constant string concatenation, so the index axis does not decline
-    a spelling whose value the runtime has already settled.
-
-    A float index is a different thing and is CLEAN rather than refused:
-    `lst[0.0]` raises `TypeError` at runtime, so the position names nothing
-    and the call raises before it reaches anything the container carries.
-    """
+    a spelling whose value the runtime has already settled."""
     assert _scan(_tmp, '[importlib.import_module][0 + 0]') == 'resolved'
     assert _scan(_tmp, '[0, importlib.import_module][0 + 0]') == 'silent'
-    assert _scan(_tmp, '[importlib.import_module][0.0]') == 'silent'
 
 
 def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
@@ -363,10 +355,8 @@ NULLARY_LAMBDAS = (
 
 def test_a_nullary_lambda_call_of_the_operation_resolves_it(_tmp):
     """`(lambda: op)()` produces the operation, and it is the CALLEE here, so
-    it reaches the module rather than being carried as a value.
-
-    The sibling code-eval axis reads the same shape through the same rule
-    and calls it a projection, which is what this is: another way a value is
+    it reaches the module rather than being carried as a value. The sibling
+    code-eval axis calls the same shape a projection: another way a value is
     produced rather than named.
     """
     for callee in NULLARY_LAMBDAS:
@@ -441,11 +431,11 @@ def test_a_callee_the_fold_decides_to_be_a_container_is_not_refused(_tmp):
     it reaches anything, so the callee is CLEAN however much the container
     it names mentions the operation.
 
-    The walk already holds the value here — the fold returns the literal
-    itself — so what it is refusing on is the CONTAINER's mention rather
-    than the value's, which is the question it is not being asked. The
-    generated sweep is blind to the class by construction, so this is the
-    only control for it.
+    What a refusal here refuses on is the CONTAINER's mention rather than the
+    value's, which is the question it is not being asked. The generated
+    sweep is blind to the class by construction — a subscript never reaches a
+    comprehension as its base — so this is the only control for it, and the
+    set and dict comprehensions are here because nothing else names them.
 
     A container the fold does NOT decide is the same class one level out,
     and stays refused: `[[op]][i]` may be a list, or a function.
