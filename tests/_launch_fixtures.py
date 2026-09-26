@@ -27,7 +27,8 @@ SAMPLES = (1.0, 1.5, 2.0)
 SLOWEST_S = max(SAMPLES)
 MULTIPLE = 10
 DEADLINE_S = round(SLOWEST_S * MULTIPLE)
-CLEANUP_S = 5
+CLEANUP_SHARE = 0.05
+CLEANUP_S = round(DEADLINE_S * CLEANUP_SHARE)
 
 
 class ChildDeadlineExceeded(Exception):

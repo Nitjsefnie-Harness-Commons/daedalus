@@ -349,6 +349,33 @@ def tree(relative):
     return _TREES[relative]
 
 
+def bodies():
+    """`relative module -> {function name: body}` for every parsed module.
+
+    The census reads it to resolve a CALLED function's signature, which is
+    the only place a deadline handed positionally says what its slot means.
+    """
+    return _BODIES
+
+
+def body_named(name):
+    """A parsed function body by bare name, or None.
+
+    Names are not unique across the tree, so a name several modules define
+    resolves to the one on the launch path when exactly one module there has
+    it; a name no launcher module has is not a path function and the
+    deadline it might carry is not this audit's subject.
+    """
+    holders = [bodies for module, bodies in _BODIES.items()
+               if name in bodies
+               and (module in _KNOWN
+                    or module.rsplit('/', 1)[-1] in LAZY_MODULES
+                    or module.rsplit('/', 1)[-1] in CHILD_ENDING_MODULES)]
+    if len(holders) != 1:
+        return None
+    return holders[0][name]
+
+
 def parameters_for(relative):
     """The parameters this module's functions receive a CHILD through."""
     return {name for name, entries in _CHILD_PARAMETERS.get(
@@ -515,9 +542,13 @@ def path_functions(tests_dir, launcher_modules=LAZY_MODULES):
                 names |= found
                 growing = True
     _KNOWN = known
-    ending = set(CHILD_ENDING_MODULES)
+    # The CALLEE closure is general: ANY module a path function hands a
+    # launched child to joins, because that is where the child's lifetime is
+    # decided. Naming the known ones was the gap — a second receiving module
+    # was invisible, and a live `process.wait(5)` in it read clean. The
+    # named pair stays as a pinned assertion, not as the gate.
     for relative, functions in own.items():
-        if relative in known or relative.rsplit('/', 1)[-1] not in ending:
+        if relative in known:
             continue
         if _handed_a_child(relative):
             known[relative] = set(functions)
