@@ -41,7 +41,9 @@ const legs = () => REQUESTS.filter((r) => r.target.slice(0, 7) === '/result'
   && r.target.indexOf('consume') < 0).length;
 """
 
-# One captured request per status cell, and the first carries every member
+# One captured request per status cell -- and the third is 400 exactly,
+# because `>= 400` is the boundary the comparison states and a fixture of
+# 404 alone would not tell `>=` from `>`. The first carries every member
 # the detail pane reads -- so `pretty` has all eleven of its keys to print,
 # and a three-row table is what makes the detail's POSITION observable: a
 # one-row table inserts and appends to the same place.
@@ -56,7 +58,7 @@ REQS = ("const LONG = 'https://one.example.com/' + 'a'.repeat(120)"
         "  body: 'var a = 1;' },\n"
         "  { status: 301, method: 'GET', type: 'Other',\n"
         "    url: 'https://one.example.com/b' },\n"
-        "  { status: 404, method: 'POST', type: 'XHR',\n"
+        "  { status: 400, method: 'POST', type: 'XHR',\n"
         "    url: 'https://one.example.com/c', encodedLength: 512 }];\n")
 
 # The two boundary cases count this marker in the rendered pane, so it is
@@ -96,7 +98,7 @@ TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
 # `bindTabSelector` is called with a placeholder and no `errorLabel`, so
 # both of its failure paths return without touching the select. These two
 # setups are how a scenario reaches them: no token at all, and a `/tabs`
-# the bridge answers with a status `api.js` turns into a throw.
+# answered with a status, which `api.js:58` turns into a throw.
 NO_TOKEN = "localStorage.removeItem('daedalus-token');\n"
 TABS_FAILING = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
                 "  url: 'https://one.example.com/one' }];\n"
@@ -217,8 +219,9 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     """`bindTabSelector` returns before `api.get('/tabs')` when the token
     is empty, and this section passes no `errorLabel`, so the select keeps
     the `(active tab)` option the markup shipped with and says nothing
-    about why. The panel is otherwise live: the START button still works
-    and its own refusal is the operator's only clue the session is gone."""
+    about why. The panel is otherwise live -- `runCommand` still refuses
+    a command at `api.js:128` -- and this case does not press anything to
+    say so."""
     report = _run('report({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  status: said() });\n', setup=TABS + NO_TOKEN)
@@ -229,7 +232,7 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
 
 
 def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
-    """The `/tabs` catch renders the error only when an `errorLabel` was
+    """`_util.js:63` renders the error only when an `errorLabel` was
     passed, and this section passes none -- so a 500 leaves the select on
     its placeholder. What the bridge said is nowhere on the panel, which
     is the contract the missing `errorLabel` buys."""
@@ -288,11 +291,13 @@ def test_a_chosen_tab_arrives_as_a_number_and_the_filter_is_trimmed(_tmp):
 
 
 def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
-    """`bodies` is read by `fields()` on every path rather than only on the
-    stop. `extension/worker/netcapture.js:174` fetches the bodies in the
-    get handler and never detaches, so a poll that dropped the key would
-    ask for a buffer the worker filled without them -- and a start that
-    dropped it would capture without them from the first request."""
+    """`bodies` is read by `fields()` on all three paths rather than only on
+    the stop, which `extension/worker/netcapture.js:130` and `:175` are
+    the only two handlers that read at all. The start body is the odd one:
+    `handleNetCapture` never reads the key, so this case pins that
+    `fields()` sends it rather than that the worker wants it -- and a poll
+    that dropped it would ask for a buffer the get handler filled without
+    them, having attached nothing on the way in."""
     report = _run(_set('bodies', BODIES_ON)
                   + _click('START') + _click('poll') + _click('STOP')
                   + 'report({ sent: sent() });\n',
@@ -336,8 +341,9 @@ def test_poll_says_the_count_and_renders_the_rows(_tmp):
     `undefined` -- which is the other half of the pair below.
 
     The url cell is the 140-character cap: this row's url is longer than
-    that, so the cell is the first 139 characters and an ellipsis, and a
-    cap of 100 would show 39 fewer."""
+    that, so the cell is the first 139 characters and an ellipsis
+    (`truncate` is `slice(0, n - 1) + '…'`), and a cap of 100 would show
+    40 fewer."""
     report = _run(_click('poll') + 'report({ status: said(),'
                   ' sub: sub.textContent, rows: rows() });\n',
                   answers=(ANSWER_POLL,))
@@ -496,11 +502,13 @@ def test_the_status_cell_is_three_way_with_a_hyphen_for_nothing(_tmp):
     """`status >= 400` then `status >= 300` then neither, and the text is
     `String(r.status || '-')` -- a HYPHEN, where `fetch-timings` renders
     the same field as an empty string. The two modules genuinely differ
-    and both are the contract."""
+    and both are the contract. The 400 is the boundary itself: a `> 400`
+    comparison would read the third row amber, and the 301 is what makes
+    the middle branch reachable at all."""
     report = _run(_click('poll') + 'report({ rows: rows() });\n',
                   answers=(ANSWER_POLL,))
     assert [row[0] for row in report['rows']] == [
-        ['mono green', '200'], ['mono amber', '301'], ['mono red', '404']], \
+        ['mono green', '200'], ['mono amber', '301'], ['mono red', '400']], \
         report
     bare = _run(_click('poll') + 'report({ rows: rows() });\n',
                 setup=TABS + "const BARE = [{}];\n",
@@ -548,7 +556,7 @@ def test_clicking_a_row_inserts_the_detail_just_below_it(_tmp):
                   answers=(ANSWER_POLL,))
     assert report['open'] == 1, report
     assert report['at'] == 1, report
-    assert report['order'] == ['200', 'detail', '301', '404'], report
+    assert report['order'] == ['200', 'detail', '301', '400'], report
     assert report['colspan'] == '5', report
     assert report['cursor'] == 'pointer', report
     assert report['text'] == EXPECTED_DETAIL, report
@@ -558,7 +566,10 @@ def test_clicking_the_same_row_again_closes_the_detail(_tmp):
     """The toggle reads `tr.nextSibling` rather than a stored reference,
     and the pane it opens is what that walk finds, so a second click on
     the same row collapses it and the three rows the poll rendered are
-    what is left. An append put the pane where this walk never looks."""
+    what is left. This case clicks the FIRST row, where an append would
+    put the pane past the last one and the walk would never see it; on
+    the last row the two positions coincide, which is why the case is
+    not the one that states the index."""
     report = _run(_click('poll')
                   + 'const row = body().children[0];\n'
                     'row.click();\n'
