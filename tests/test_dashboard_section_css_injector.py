@@ -626,9 +626,12 @@ def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
     LAST element, so an unguarded splice takes the record it did not come
     for. Two mutations die here: dropping the `at < 0` guard, and restoring
     the index. They CONVERGE on this store, because for the row clicked `i`
-    is 0 and `length - 1 - 0` IS `-1`, so the two splices are the same call;
-    distinguishability is at suite level, and the position path is pinned
-    apart by the two remove cases beside it.
+    is 0 and `length - 1 - 0` IS `-1`, so the two splices are the same call.
+    The position path is pinned by NO case, and the two remove cases beside
+    this one do not close that: each clicks its row at `i` 0 against a store
+    the index and the search agree on, so the position mutation survives
+    them. Distinguishing the two needs a click on a row with `i` above 0 and
+    a three-record store, which is not built here.
     """
     report = _store_after(
         'const KEY = "daedalus-dash-css-sessions";\n'
@@ -647,8 +650,7 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     is built on. What reaches it first is not the cap check but the MOUNT:
     `renderSessions` runs before any click and its row map calls `.slice`, so
     the panel dies at the table. The cap check would have waved the same
-    `undefined` through -- against 20 is false -- so the check belongs in
-    `load()`.
+    `undefined` through -- against 20 is false -- so it belongs in `load()`.
     """
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'
