@@ -240,12 +240,16 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
 
     The wrong envelopes are read back off the responses and pinned
     member by member, because "the loop retried past somebody else's
-    envelope" is a property of what the fake handed over. All three of
-    the shapes below are rejected by the same `if` in `api.js:150` --
-    the id and the delivery id are read in one condition -- and a carried
-    `result` is not read at all until after a match, so none of them
-    changes the poll count. The count says how many times the loop
-    looked; only the envelope says what it found."""
+    envelope" is a property of what the fake handed over. Both shapes
+    below are rejected by the same `if` in `api.js:150` -- the id and
+    the delivery id are read in one condition -- and neither changes the
+    poll count. The count says how many times the loop looked; only the
+    envelope says what it found. The anchoring of the third envelope is
+    not asserted here: `api.js:150` matches only when `res.id === cmdId`
+    and `cmdId` is the id `api.js` put in the request body itself, so the
+    loop can only match an envelope anchored on that id. It is pinned by
+    name in `test_the_envelope_the_transport_anchors_is_the_commands_own`
+    instead, which reds when the anchor moves."""
     report = run_scenario(scenarios.LATE_ENVELOPE, sections=('api.js',))
     _command, polls, consumed = _legs(report)
     # A result that is `undefined` vanishes from the report rather than
@@ -262,14 +266,19 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
         {'id': 'a command this is not', 'deliveryId': 'd1',
          'resultGeneration': 1},
     ], report
-    # The third envelope's id is the command the transport received, read
-    # off the recorded request rather than off the envelope itself: a
-    # member that expected itself is a member that cannot fail.
-    assert report['seen'][2] == {
-        'id': _legs(report)[0][0]['body']['id'], 'deliveryId': 'd1',
-        'resultGeneration': 1, 'result': 'the right result',
-        'error': None,
-    }, report
+    # The third is the envelope that matched, so its members are the ones
+    # a result is read from rather than the ones a skip is read from. The
+    # key SET is pinned so no member is added or dropped, and each value
+    # that can fail is asserted on its own. `id` is in the set and not
+    # among the values: the loop matched on it, so its value here is a
+    # theorem rather than a pin -- see the docstring.
+    matched = report['seen'][2]
+    assert sorted(matched) == ['deliveryId', 'error', 'id', 'result',
+                               'resultGeneration'], report
+    assert matched['deliveryId'] == 'd1', report
+    assert matched['resultGeneration'] == 1, report
+    assert matched['result'] == 'the right result', report
+    assert matched['error'] is None, report
     assert report['unplanned'] == [], report
 
 
