@@ -65,8 +65,8 @@ CUT = LONG_URL[:99] + '…'
 LONG = (ENTRY + "const U = 'https://one.example.com/' + 'b'.repeat(90)"
         " + '.js';\n")
 # The 400 is the boundary `e.status >= 400` states, so a `> 400` comparison
-# would read its row green; the 404 beside it is the status an operator
-# meets most and the one the ring buffer records for any failed response.
+# would read its row green; the 404 beside it is a second 4xx, so the
+# branch is read on more than one status and not on the boundary alone.
 OK_AND_404 = LONG + ("const T = [E({ url: U }),\n"
                      "  E({ url: U, status: 400 }),\n"
                      "  E({ url: U, status: 404 })];\n")

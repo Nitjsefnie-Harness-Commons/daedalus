@@ -2,8 +2,12 @@
 
 `_dashsection.SHELL` is `_dashnode.DOM` and the elements half followed
 by this string, and the two share one module scope in the child, so
-this half reads `PARKED`, `SELECTORS`, `LISTENERS` and `hostImmediate`
-from `_dashsection._ELEMENTS` and writes into them. The split is the
+this half reads names the other halves declare rather than importing
+them. From `_dashsection._ELEMENTS` those are `PARKED`, `SELECTORS`,
+`PUMP`, `spendOne`, `openPump`, `hostImmediate` and `realSetTimeout`,
+of which it writes `PARKED`, `SELECTORS` and `PUMP`; from
+`_dashnode.DOM` they are `CLICKS`, `ERRORS`, `STORAGE`, `MODULES`,
+`phase`, `jsonResponse` and `unmodelled`, all read. The split is the
 size ceiling's own remedy -- a file over the 700-line test ceiling is
 relocated, never given an entry -- and it puts each half's code with
 the half that owns it.
@@ -12,9 +16,7 @@ Every response member and every plan a scenario reads is answered by
 name; a request the scenario never planned is recorded and then
 refused.
 """
-# The strict transport, the driver and the report. Every response member
-# and every plan a scenario reads is answered by name; a request the
-# scenario never planned is recorded and then refused.
+# The strict transport, the driver and the report.
 TRANSPORT = r"""
 const ROUTES = new Map();
 const REQUESTS = [];
@@ -84,28 +86,24 @@ function parseBody(init, target) {
 
 function jsonAnswer(data, status) {
   if (status === undefined) return jsonResponse(data);
+  // `api.js:53` reads `content-type` and it is the only header a shipped
+  // fetch path reads, so a `get` that answered for every name would hide
+  // a section reaching for a header this transport does not model. The
+  // base's own header bag refuses one by name; so does this. No case
+  // drives it: it is a refusal by inspection.
   return { ok: status >= 200 && status < 300, status,
-           headers: { get: () => 'application/json' },
+           headers: { get: (name) => {
+             if (String(name).toLowerCase() !== 'content-type') {
+               throw unmodelled('a response header', name);
+             }
+             return 'application/json';
+           } },
            json: async () => data, text: async () => JSON.stringify(data) };
 }
 
 // The delivery id is the one number the poll legs have to agree on, so a
 // command answer that carries none is answered without one and lets the
 // shipped `runCommand` throw its own "no delivery id".
-// A request the scenario never planned is recorded and then refused, and
-// the throw is the refusal: no section wraps its fetch in a catch that
-// turns one into a stream error, so a thrown refusal is readable and a
-// swallowed one is not. `byType` refuses through this same door rather
-// than a second one, which is the whole of the answer-table strictness
-// this file claims one control for. It is not the only throw here:
-// `unmodelled()` is a second door, it is not recorded, and
-// `test_a_headers_bag_a_poll_with_no_command_and_a_twice_registered_selector`
-// reaches it and pins the message it throws.
-function refuse(target) {
-  REFUSALS.push({ n: REQUESTS.length, target: String(target) });
-  throw new Error('unexpected request ' + String(target));
-}
-
 function commandAnswer(spec, body) {
   if (spec.status !== undefined && spec.status !== 200) {
     const failure = spec.json === undefined
@@ -121,10 +119,31 @@ function commandAnswer(spec, body) {
     : { did: String(spec.did) });
 }
 
+// A request the scenario never planned is recorded and then refused, and
+// the throw is the refusal: no section wraps its fetch in a catch that
+// turns one into a stream error, so a thrown refusal is readable and a
+// swallowed one is not. `byType` refuses through this same door rather
+// than a second one, which is the whole of the answer-table strictness,
+// held by `test_a_result_plan_naming_one_command_type_refuses_the_rest`
+// and by
+// `test_a_result_plan_refuses_a_name_no_scenario_wrote_that_in_would_find`.
+// It is not the only throw here: `unmodelled()` is a second door, it is
+// not recorded, and `test_a_headers_bag_a_poll_with_no_command_and_a_
+// twice_registered_selector` reaches it and pins the message it throws.
+function refuse(target) {
+  REFUSALS.push({ n: REQUESTS.length, target: String(target) });
+  throw new Error('unexpected request ' + String(target));
+}
+
 // The anchored envelope for the first N polls a plan says to skip, or
-// null once they are spent. One counter per member, because a plan uses
-// one at a time and a shared counter would let the second one's count
-// answer for the first.
+// null once they are spent.
+//
+// The transport validates no plan member: `drive.route` stores the spec
+// a scenario wrote, so a `byType`, a `wrong` or a `stale` of the wrong
+// shape coerces rather than refuses. Each member is counted separately
+// so a plan naming two of them cannot spend one's count against the
+// other's; no plan in the tree names both today, so nothing holds the
+// two counters together.
 function leading(spec, key, shape, anchored) {
   if (spec[key] === undefined) return null;
   LEDGER[key] += 1;
@@ -164,8 +183,9 @@ function resultAnswer(target, spec) {
   // anchored, so the delivery id and generation the loop matched on stay
   // the real ones. Any name that is not an OWN key of the table is
   // refused like an unplanned target, which is what the check below is
-  // for; the control beside it samples five `Object.prototype` names,
-  // so the guarantee here is the `hasOwnProperty`, not the sample.
+  // for; `test_a_result_plan_refuses_a_name_no_scenario_wrote_that_in_
+  // would_find` drives five `Object.prototype` names, so the guarantee
+  // here is the `hasOwnProperty`, not the sample.
   if (spec.byType !== undefined) {
     // `hasOwnProperty`, not `in`: `in` walks the prototype, so a type
     // named `toString` would pass the check and be answered with the

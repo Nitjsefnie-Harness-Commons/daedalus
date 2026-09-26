@@ -14,9 +14,9 @@ fake cannot pass off as somebody else's, a poll loop that retries rather
 than settles for the first answer, and a bus that dispatches the way the
 shipped one does.
 
-The scenario sources live in `tests/_dashsection_controls.py`. They grew
-under the assertions while the assertions are what this file is for, and
-a suite a reviewer mutates does not belong twelve lines under a ceiling.
+The scenario sources live in `tests/_dashsection_controls.py`: they are
+the fixtures this suite drives, and the two do not fit inside the
+700-line `tests/` ceiling together.
 """
 import re
 import sys
@@ -54,10 +54,10 @@ def _phases(scenario, sections=()):
 
 
 def test_a_registered_selector_answers_the_same_element_twice(_tmp):
-    """`block-rules`, `cookies`, `fetch-timings` and `net-capture` all
-    write `document.querySelector('#sNN [data-sub]').textContent` with no
-    null guard, and a double that mints a fresh element per call throws
-    that write away. Returning a throwaway leaves `observed` empty."""
+    """Seven sections write `document.querySelector('#sNN [data-sub]')
+    .textContent` with no null guard, and a double that mints a fresh
+    element per call throws that write away. Returning a throwaway leaves
+    `observed` empty."""
     report = run_scenario(scenarios.SELECTORS)
     assert report['same'] is True, report
     assert report['isSub'] is True, report
@@ -141,8 +141,8 @@ def test_a_parked_timer_runs_only_when_fired(_tmp):
 
 
 def test_inner_html_yields_a_child_and_refuses_what_it_cannot_parse(_tmp):
-    """The three list hosts reset to one bare `<div class="...">` and read
-    it back, so the parse has to produce an observable child. A shape it
+    """The list hosts reset to one bare `<div class="...">` and read it
+    back, so the parse has to produce an observable child. A shape it
     does not model is refused by name and leaves the element alone, rather
     than emptying a host the section is about to render into."""
     report = run_scenario(scenarios.INNER_HTML)
@@ -210,10 +210,9 @@ def test_a_result_plan_refuses_a_name_no_scenario_wrote_that_in_would_find(
         _tmp):
     """`in` walks `Object.prototype`, so a command type named after one of
     its members would be answered from a plan nobody declared -- the
-    refusal would not happen and, worse, would not be recorded. Eleven
-    spellings reach it, and the comment above the branch says a type the
-    scenario did not name is refused, so the claim is held here rather
-    than only corrected.
+    refusal would not happen and, worse, would not be recorded. The
+    comment above the branch says a type the scenario did not name is
+    refused, so the claim is held here rather than only corrected.
 
     Every one of the five names is driven, so a fix that special-cased one
     of them fails on the other four.
@@ -310,8 +309,7 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
     # a result is read from rather than the ones a skip is read from. The
     # key SET is pinned so no member is added or dropped, and each value
     # that can fail is asserted on its own. `id` is in the set and not
-    # among the values: the loop matched on it, so its value here is a
-    # theorem rather than a pin -- see the docstring.
+    # among the values; the docstring says why.
     matched = report['seen'][2]
     assert sorted(matched) == ['deliveryId', 'error', 'id', 'result',
                                'resultGeneration'], report
@@ -432,12 +430,13 @@ def test_the_pump_spends_the_poll_sleep_and_not_a_timer_beside_it(_tmp):
 
 def test_a_headers_bag_a_poll_with_no_command_and_a_twice_registered_selector(
         _tmp):
-    """Three refusals that were reachable and unexercised. A `Headers`
-    instance carries the credential just as truly as the plain object
-    `api.js` builds, so reading it as absent would assert the opposite of
-    the truth. A poll with no command behind it is a scenario that never
-    sent one, not a bridge with a stale slot. A selector registered twice
-    is a scenario that meant to register two documents."""
+    """Three refusals this case drives, and the message each one throws. A
+    `Headers` instance carries the credential just as truly as the plain
+    object `api.js` builds, so reading it as absent would assert the
+    opposite of the truth. A poll with no command behind it is a scenario
+    that never sent one, not a bridge with a stale slot. A selector
+    registered twice is a scenario that meant to register two documents.
+    """
     report = run_scenario(scenarios.REFUSALS)
     assert report['bag'] is not None, report
     assert 'Headers' in report['bag'], report
@@ -467,8 +466,9 @@ def test_console_error_is_recorded_and_an_unprintable_one_does_not_throw(_tmp):
 
 
 def test_a_scenario_records_the_six_phase_checkpoints(_tmp):
-    """`test_dashboard_harness.py` pins this trace for every shipped
-    harness. `load` emits the two import checkpoints and `report` the two
+    """`test_dashboard_harness.py` pins this trace for the five harnesses it
+    enumerates, and this one is not among them -- which is why the case
+    exists. `load` emits the two import checkpoints and `report` the two
     that close the run, so a scenario cannot emit them out of order or
     leave one out."""
     assert _phases(scenarios.PHASE_TRACE, ('api.js',)) == [
