@@ -166,7 +166,6 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
 
 
 def test_do_open_tabs_prints_only_a_count_when_nothing_opened(tmp):
-    """Neither loop ran: the count line is the whole output."""
     del tmp
     plan = [_ext('_open_tabs', 'open-tabs',
                  {'urls': ['https://a.example.com/']}, timeout=30)]
@@ -232,7 +231,6 @@ def test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error(tmp):
 # ── do_focus_tab ─────────────────────────────────────────────────────
 
 def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
-    """The tab id the operator asked for, and the window it landed in."""
     del tmp
     plan = [_ext('_focus', 'focus-tab', {'tabId': 0})]
     recorded, out = run_cli(
@@ -245,7 +243,6 @@ def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
 
 
 def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
-    """A result carrying neither value reads `?` twice, in one line."""
     del tmp
     plan = [_ext('_focus', 'focus-tab', {'tabId': 0})]
     _recorded, out = run_cli(
@@ -258,7 +255,7 @@ def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
 # ── do_ext_navigate ──────────────────────────────────────────────────
 
 def test_do_ext_navigate_sends_the_url_and_no_tab_id(tmp):
-    """The bare arm: the URL alone, and the browser's active tab runs it."""
+    """No `tabId`: the browser's active tab runs it."""
     del tmp
     plan = [_ext('_nav', 'navigate', {'url': 'https://example.com/'})]
     recorded, out = run_cli(
@@ -344,7 +341,6 @@ def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
 
 
 def test_do_ext_reload_carries_both_fields_when_both_were_given(tmp):
-    """Both options together, in the order the handler builds them."""
     del tmp
     fields = {'tabId': 7, 'bypassCache': True}
     recorded, out = run_cli(

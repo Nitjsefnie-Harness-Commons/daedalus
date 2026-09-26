@@ -16,10 +16,6 @@ for a pattern the operator had typed. The control below fails against
 that guard and passes against a presence test, and `''` is the only
 value that tells the two apart.
 
-`includePermanent` is the mirror image: it is sent on every
-`clear-hotfixes`, `False` included, so both spellings are pinned here.
-`--chrome-tab 0` is the usual third: the value a truthiness test drops.
-
 `do_list_hotfixes` is here for one arm only. Its rows are rendered
 through `time.strftime` on a local timestamp, so a whole-string
 comparison of a row would bake this machine's timezone into the suite;

@@ -125,7 +125,6 @@ def test_do_block_requests_sends_the_pattern_it_was_given(tmp):
 
 
 def test_do_block_requests_names_the_tab_chrome_numbered_zero(tmp):
-    """`--chrome-tab 0` adds `tabId: 0`; the guard is a presence test."""
     del tmp
     body = {'id': '_block', 'type': 'block-requests', 'token': TOK,
             'tab': 'extension', 'pattern': PATTERN, 'tabId': 0}
