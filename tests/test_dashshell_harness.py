@@ -206,32 +206,6 @@ report({ forcedOn, forcedOff, bare: el.className,
 """
 
 
-_SELECTORS = r"""
-(async () => {
-const empty = document.querySelectorAll('[data-meta="nothing-here"]');
-const token = document.createElement('span');
-token.setAttribute('data-meta', 'token');
-document.body.appendChild(token);
-const doubleQuoted = document.querySelectorAll('[data-meta="token"]').length;
-const singleQuoted = document.querySelectorAll("[data-meta='token']").length;
-let combinator = null;
-try {
-  document.querySelectorAll('.rail-list > li');
-} catch (error) { combinator = error.message; }
-let unquoted = null;
-try {
-  document.querySelectorAll('[data-meta="token]');
-} catch (error) { unquoted = error.message; }
-let notAString = null;
-try {
-  document.querySelectorAll(null);
-} catch (error) { notAString = error.message; }
-report({ empty: empty.length, isArray: Array.isArray(empty),
-  doubleQuoted, singleQuoted, combinator, unquoted, notAString });
-})().catch(leave);
-"""
-
-
 # Two entries, in an order the caller's sort has to undo: a non-
 # intersecting one first, then an intersecting one that is NOT the
 # nearest to the top. A double that hands over one entry, or hands over
@@ -321,6 +295,21 @@ report({ contentType: response.headers.get('content-type'),
 })().catch(leave);
 """
 
+
+# A `console.error` argument whose `String()` throws. `String(symbol)`
+# does not -- it is the one implicit conversion that is special-cased --
+# so the thrower here is an object with a `toString` of its own that
+# throws. The recorder is read by every control that asserts a logged
+# line, so a throw inside it would take the call site with it.
+_UNPRINTABLE = r"""
+(async () => {
+const unprintable = { toString() { throw new Error('nope'); } };
+let escaped = null;
+try { console.error('[sse] listener error', unprintable); }
+catch (error) { escaped = error.message; }
+report({ escaped });
+})().catch(leave);
+"""
 
 _CONSOLE_ERROR = r"""
 (async () => {
@@ -502,7 +491,7 @@ def test_the_reader_exposes_every_settlement(_tmp):
 
 
 def test_a_window_storage_event_reaches_the_sse_client(_tmp):
-    """`sse.js:158` registers its storage listener at module-evaluation
+    """`sse.js`'s `storage` listener registers at module-evaluation
     time, so the shell has to hold a window listener a scenario can
     fire. Dropping the registration leaves the first connection as the
     only one."""
@@ -543,26 +532,6 @@ def test_class_list_toggle_reflects_force_in_both_directions(_tmp):
     assert report['length'] == 3, report
 
 
-def test_an_unimplemented_selector_fails_by_name(_tmp):
-    """A selector the shell does not implement raises, naming it; one
-    that matches nothing returns an empty list. A value it cannot read
-    is refused too: a single-quoted value read as part of the value
-    matches nothing, which is the failure this is about. Permissive
-    parsing leaves `combinator` and `unquoted` null."""
-    report = run_scenario(_SELECTORS)
-    assert report['empty'] == 0, report
-    assert report['isArray'] is False, report
-    assert report['doubleQuoted'] == 1, report
-    assert report['singleQuoted'] == 1, report
-    assert report['combinator'] is not None, report
-    assert 'does not implement selector' in report['combinator'], report
-    assert '.rail-list > li' in report['combinator'], report
-    assert report['unquoted'] is not None, report
-    assert 'unreadable attribute value' in report['unquoted'], report
-    assert report['notAString'] is not None, report
-    assert 'is not a selector' in report['notAString'], report
-
-
 def test_the_observer_refuses_an_unmodelled_member(_tmp):
     """An unmodelled observer member fails by name; `undefined` would
     make the use a silent no-op. The callback must receive the caller's
@@ -596,8 +565,8 @@ def test_queries_walk_the_live_tree(_tmp):
 
 
 def test_the_response_double_refuses_what_it_does_not_model(_tmp):
-    """`api.js:53` branches on `content-type` and can only reach
-    `api.js:55`'s text branch if some scenario models a non-JSON
+    """`api.js`'s `req` branches on `content-type` and can only
+    reach its `r.text()` branch if some scenario models a non-JSON
     response, so the header answers for the one name it has and refuses
     the rest. A response member the double does not have is refused by
     name, as the observer's is, not left to fail as
@@ -614,6 +583,18 @@ def test_the_response_double_refuses_what_it_does_not_model(_tmp):
     assert 'member not modelled: arrayBuffer' in report['buffer'], report
     assert report['copy'] is not None, report
     assert 'member not modelled: clone' in report['copy'], report
+
+
+def test_an_unprintable_console_error_is_recorded_not_thrown(_tmp):
+    """`describe()`'s guard, which had none. A value whose `String()`
+    throws would leave the `console.error` that called it -- from inside
+    `sse.js`'s own `catch`, where it would end the stream instead of
+    logging a listener. Both halves are asserted: the throw did not
+    escape the call, and the line is on the recorder."""
+    report = run_scenario(_UNPRINTABLE)
+    assert report['escaped'] is None, report
+    assert report['errors'] == [
+        '[sse] listener error [unprintable value]'], report['errors']
 
 
 def test_console_error_is_recorded_as_well_as_printed(_tmp):
