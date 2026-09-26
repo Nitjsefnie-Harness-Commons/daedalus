@@ -61,6 +61,8 @@ def store_deferred_target(
             # A negative key counts from the end, so it names a position
             # rather than the key it is spelled as. Resolving it here is
             # what keeps the stored value where a read will look for it.
+            # The `not mapping` gate is the whole dict exemption: a key
+            # on a mapping is a key, and `position_key` takes a sequence.
             placed = position_key(owner, literal)
             if placed is None:
                 # The runtime raises on a key past the start, so the

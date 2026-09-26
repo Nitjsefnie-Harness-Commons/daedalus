@@ -39,9 +39,11 @@ def position_key(container, index):
     L + index. A key past the start names a position the runtime refuses
     and an unknown length names none; both answer None, and the caller
     tells them apart by the length it already holds.
+
+    The container is a sequence by precondition - a mapping key is a key
+    and no length resolves it - and the one caller is what enforces it.
     """
-    if container.kind == 'dict' or not isinstance(index, int) \
-            or index >= 0:
+    if not isinstance(index, int) or index >= 0:
         return index
     if container.length is None:
         return None
