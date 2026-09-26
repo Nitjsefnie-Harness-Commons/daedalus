@@ -9,12 +9,14 @@ plants into a copied test module, so the refusal is proved against real
 code and not only against a source string. That table now lives in
 tests/_coverage_mutation_specs.py, and the planted snippets with it.
 """
-import ast
 import sys
-import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _carrier_cases import (  # noqa: E402
+    _BESPOKE, _bare_form, _callee_chain_cases, _comprehension_cases,
+    _grammar_forms, _receiver_atom_cases, _receiver_carrier_cases,
+    _transforming_cases, _value_preserving_cases)
 from _coverage_guard import (  # noqa: E402
     _BINDING_MESSAGE, _synthetic_violations)
 
@@ -267,181 +269,6 @@ operator.call((subprocess.run, ['python3', 'child.py']))
     )
 
 
-def _value_preserving_cases():
-    """Forms whose sub-value reaches the binding unchanged.
-
-    Every row is a shape the carrier walk read as one opaque leaf, so a
-    launcher inside it was judged by no arm. The rows that only parse
-    inside a coroutine or a generator carry their own enclosing block.
-    """
-    return (
-        ('conditional expression', """import operator
-import subprocess
-operator.call(subprocess.run if flag else None, 1)
-""", 'operator.call('),
-        ('boolean and', """import operator
-import subprocess
-operator.call(flag and subprocess.run, 1)
-""", 'operator.call('),
-        ('boolean or', """import operator
-import subprocess
-operator.call(flag or subprocess.run, 1)
-""", 'operator.call('),
-        ('list comprehension', """import operator
-import subprocess
-operator.call([subprocess.run for _ in xs], 1)
-""", 'operator.call('),
-        ('set comprehension', """import operator
-import subprocess
-operator.call({subprocess.run for _ in xs}, 1)
-""", 'operator.call('),
-        ('dict comprehension value', """import operator
-import subprocess
-operator.call({k: subprocess.run for k in xs}, 1)
-""", 'operator.call('),
-        ('dict comprehension key', """import operator
-import subprocess
-operator.call({subprocess.run: k for k in xs}, 1)
-""", 'operator.call('),
-        ('generator expression', """import operator
-import subprocess
-operator.call((subprocess.run for _ in xs), 1)
-""", 'operator.call('),
-        ('lambda body', """import operator
-import subprocess
-operator.call(lambda: subprocess.run, 1)
-""", 'operator.call('),
-        ('f-string', """import operator
-import subprocess
-operator.call(f"{subprocess.run}", 1)
-""", 'operator.call('),
-        ('f-string with a format spec', """import operator
-import subprocess
-operator.call(f"{subprocess.run!r:>{width}}", 1)
-""", 'operator.call('),
-        ('f-string format spec', """import operator
-import subprocess
-operator.call(f"{value:{subprocess.run}}", 1)
-""", 'operator.call('),
-        ('slice lower bound', """import operator
-import subprocess
-operator.call(d[subprocess.run:1], 1)
-""", 'operator.call('),
-        ('slice step', """import operator
-import subprocess
-operator.call(d[::subprocess.run], 1)
-""", 'operator.call('),
-        ('slice upper bound', """import operator
-import subprocess
-operator.call(d[1:subprocess.run], 1)
-""", 'operator.call('),
-        ('awaited value', """import operator
-import subprocess
-async def go():
-    operator.call(await subprocess.run, 1)
-""", 'operator.call('),
-        ('walrus value', """import operator
-import subprocess
-operator.call((held := subprocess.run), 1)
-""", 'operator.call('),
-        ('yielded value', """import operator
-import subprocess
-def go():
-    operator.call((yield subprocess.run), 1)
-""", 'operator.call('),
-        ('value yielded from', """import operator
-import subprocess
-def go():
-    operator.call((yield from subprocess.run), 1)
-""", 'operator.call('),
-        ('assigned conditional', """import subprocess
-go = subprocess.run if flag else None
-""", 'go = '),
-        ('assigned comprehension', """import subprocess
-go = [subprocess.run for _ in xs]
-""", 'go = '),
-        ('decorated conditional', """import subprocess
-@(subprocess.run if flag else None)
-def go():
-    pass
-""", '@('),
-        ('default lambda', """import subprocess
-def go(cb=lambda: subprocess.run):
-    pass
-""", 'def go(cb='),
-    )
-
-
-def _transforming_cases():
-    """Forms that build a new value, so a launcher in one is not carried."""
-    return (
-        ('sum of a launcher', """import operator
-import subprocess
-operator.call(subprocess.run + 1, 1)
-"""),
-        ('negated launcher', """import operator
-import subprocess
-operator.call(-subprocess.run, 1)
-"""),
-        ('compared launcher', """import operator
-import subprocess
-operator.call(subprocess.run < 1, 1)
-"""),
-        ('assigned sum', """import subprocess
-go = subprocess.run + 1
-"""),
-        ('sum in a comprehension element', """import operator
-import subprocess
-operator.call([subprocess.run + 1 for _ in xs], 1)
-"""),
-    )
-
-
-def _grammar_forms():
-    """Every concrete expression form this interpreter's grammar names.
-
-    A deprecated spelling such as `ast.Ellipsis` builds a node of the
-    form that replaced it, so the instance decides the identity rather
-    than the attribute name.
-    """
-    forms = set()
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
-        for name in dir(ast):
-            candidate = getattr(ast, name)
-            if (isinstance(candidate, type)
-                    and issubclass(candidate, ast.expr)
-                    and candidate is not ast.expr):
-                forms.add(type(_bare_form(candidate)))
-    return forms
-
-
-_LIST_FIELDS = frozenset({'args', 'elts', 'keywords', 'keys', 'values'})
-_EMPTY = ast.Constant.__new__(ast.Constant)
-_EMPTY.value = None
-_EMPTY.kind = None
-
-
-def _bare_form(form):
-    """An instance of a form with every field present and empty.
-
-    The constructor is skipped because it warns about the fields it
-    leaves unset, and every one of them is unset here on purpose. The
-    fields the walk iterates are emptied and the rest carry a constant
-    leaf, so a form reaches its own arm and every arm it enters has
-    something to walk.
-    """
-    instance = form.__new__(form)
-    for field in form._fields:
-        setattr(instance, field, [] if field in _LIST_FIELDS else _EMPTY)
-    return instance
-
-
-# The forms `_carried_parts` opens with its own arms, ahead of the table.
-_BESPOKE = (ast.Call, ast.Tuple, ast.List, ast.Set, ast.Dict,
-            ast.Subscript, ast.Starred)
-
-
 def _launcher_free_cases():
     """The headers and arguments that carry no launcher stay clean."""
     return (
@@ -550,6 +377,26 @@ def test_a_value_preserving_form_is_refused(tmp):
 def test_a_transforming_form_stays_an_atom(tmp):
     del tmp
     _accepted(_transforming_cases())
+
+
+def test_a_receiver_that_carries_a_launcher_is_refused(tmp):
+    del tmp
+    _refused(_receiver_carrier_cases())
+
+
+def test_a_receiver_that_only_names_a_launcher_stays_clean(tmp):
+    del tmp
+    _accepted(_receiver_atom_cases())
+
+
+def test_a_launcher_used_as_a_callee_is_reached_through_the_chain(tmp):
+    del tmp
+    _refused(_callee_chain_cases())
+
+
+def test_both_halves_of_a_comprehension_are_judged(tmp):
+    del tmp
+    _refused(_comprehension_cases())
 
 
 def test_every_grammar_expression_form_is_classified(tmp):
