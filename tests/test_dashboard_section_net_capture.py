@@ -41,23 +41,23 @@ const legs = () => REQUESTS.filter((r) => r.target.slice(0, 7) === '/result'
   && r.target.indexOf('consume') < 0).length;
 """
 
-# One captured request. The three statuses are the three branches of the
-# status cell, and the second carries no `encodedLength` at all.
-REQS = ("const REQS = [{ status: 200, method: 'GET', type: 'Script',\n"
-        "  url: 'https://one.example.com/a.js', encodedLength: 2048 },\n"
+# One captured request per status cell, and the first carries every member
+# the detail pane reads -- so `pretty` has all eleven of its keys to print,
+# and a three-row table is what makes the detail's POSITION observable: a
+# one-row table inserts and appends to the same place.
+LONG_URL = 'https://one.example.com/' + 'a' * 120 + '.js'
+REQS = ("const LONG = 'https://one.example.com/' + 'a'.repeat(120)"
+        " + '.js';\n"
+        "const REQS = [{ status: 200, method: 'GET', type: 'Script',\n"
+        "  url: LONG, encodedLength: 2048, statusText: 'OK',\n"
+        "  mimeType: 'text/javascript', headers: { accept: 'text/html' },\n"
+        "  responseHeaders: { 'content-type': 'text/javascript' },\n"
+        "  initiator: 'parser', ts: 1750000000000,\n"
+        "  body: 'var a = 1;' },\n"
         "  { status: 301, method: 'GET', type: 'Other',\n"
-        "  url: 'https://one.example.com/b' },\n"
+        "    url: 'https://one.example.com/b' },\n"
         "  { status: 404, method: 'POST', type: 'XHR',\n"
-        "  url: 'https://one.example.com/c', encodedLength: 512 }];\n")
-
-# Every member the detail pane reads, so `pretty` has all eleven of its
-# keys to print and their order is the thing under test.
-DETAIL = ("const D = { status: 200, method: 'GET',\n"
-          "  url: 'https://one.example.com/a.js', statusText: 'OK',\n"
-          "  mimeType: 'text/javascript', headers: { accept: 'text/html' },\n"
-          "  responseHeaders: { 'content-type': 'text/javascript' },\n"
-          "  initiator: 'parser', ts: 1750000000000,\n"
-          "  body: 'var a = 1;' };\n")
+        "    url: 'https://one.example.com/c', encodedLength: 512 }];\n")
 
 # The two boundary cases count this marker in the rendered pane, so it is
 # a letter no other part of the pane carries -- `example` has an `x`.
@@ -70,7 +70,7 @@ NO_BODY = ("const D = { status: 200, method: 'GET',\n"
 
 EXPECTED_DETAIL = (
     '{\n'
-    '  "url": "https://one.example.com/a.js",\n'
+    '  "url": "' + LONG_URL + '",\n'
     '  "method": "GET",\n'
     '  "status": 200,\n'
     '  "statusText": "OK",\n'
@@ -92,6 +92,16 @@ TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
         "  url: 'https://one.example.com/one' },\n"
         "  { tabId: 22, title: '', url: 'https://two.example.com/two' }];\n"
         "drive.route('/tabs', { json: TABS });\n")
+
+# `bindTabSelector` is called with a placeholder and no `errorLabel`, so
+# both of its failure paths return without touching the select. These two
+# setups are how a scenario reaches them: no token at all, and a `/tabs`
+# the bridge answers with a status `api.js` turns into a throw.
+NO_TOKEN = "localStorage.removeItem('daedalus-token');\n"
+TABS_FAILING = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
+                "  url: 'https://one.example.com/one' }];\n"
+                "drive.route('/tabs',"
+                " { status: 500, json: { error: 'tabs unavailable' } });\n")
 
 # The mount's tab list and the three captured requests most cases poll for.
 DEFAULT = TABS + REQS
@@ -203,6 +213,34 @@ def test_the_mount_lists_the_tabs_and_says_it_is_not_capturing(_tmp):
     assert report['unplanned'] == [], report
 
 
+def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
+    """`bindTabSelector` returns before `api.get('/tabs')` when the token
+    is empty, and this section passes no `errorLabel`, so the select keeps
+    the `(active tab)` option the markup shipped with and says nothing
+    about why. The panel is otherwise live: the START button still works
+    and its own refusal is the operator's only clue the session is gone."""
+    report = _run('report({ options: container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  status: said() });\n', setup=TABS + NO_TOKEN)
+    assert report['options'] == ['(active tab)'], report
+    assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
+        report
+    assert report['unplanned'] == [], report
+
+
+def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
+    """The `/tabs` catch renders the error only when an `errorLabel` was
+    passed, and this section passes none -- so a 500 leaves the select on
+    its placeholder. What the bridge said is nowhere on the panel, which
+    is the contract the missing `errorLabel` buys."""
+    report = _run('report({ options: container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  toasts: toasts() });\n', setup=TABS_FAILING)
+    assert report['options'] == ['(active tab)'], report
+    assert report['toasts'] == [], report
+    assert report['unplanned'] == [], report
+
+
 def test_start_sends_the_max_and_neither_tab_nor_filter(_tmp):
     """`fields(true)` adds the max from the control and adds a tab only
     when the select holds one, so the way to say "the active tab, default
@@ -250,10 +288,11 @@ def test_a_chosen_tab_arrives_as_a_number_and_the_filter_is_trimmed(_tmp):
 
 
 def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
-    """`bodies` is read by `fields()` on every path rather than only on
-    the stop, because it changes what the worker fetches while the
-    capture is still open. A start that dropped it would buffer a
-    capture the poll then asks for in full."""
+    """`bodies` is read by `fields()` on every path rather than only on the
+    stop. `extension/worker/netcapture.js:174` fetches the bodies in the
+    get handler and never detaches, so a poll that dropped the key would
+    ask for a buffer the worker filled without them -- and a start that
+    dropped it would capture without them from the first request."""
     report = _run(_set('bodies', BODIES_ON)
                   + _click('START') + _click('poll') + _click('STOP')
                   + 'report({ sent: sent() });\n',
@@ -265,10 +304,11 @@ def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
 
 
 def test_the_max_is_on_the_start_command_and_on_nothing_else(_tmp):
-    """`fields(false)` is what poll and stop pass, and it is the difference
-    between a bound on the capture and a bound on the read. A max sent
-    with a poll would re-aim the capture at a depth the operator had
-    already set."""
+    """`fields(true)` is what the start passes and `fields(false)` is what
+    the other two pass, and `extension/worker/netcapture.js:80` reads
+    `cmd.maxRequests` only in the start handler -- so the key on a poll is
+    a member no handler would read, and a poll that could set the capture
+    depth would be the operator's first sign of it."""
     report = _run(_click('START') + _click('poll') + _click('STOP')
                   + 'report({ sent: sent() });\n',
                   answers=(ANSWER_START, ANSWER_POLL, ANSWER_STOPPED))
@@ -293,16 +333,21 @@ def test_start_says_already_capturing_with_the_buffered_depth(_tmp):
 def test_poll_says_the_count_and_renders_the_rows(_tmp):
     """The count is stringified straight off the answer, so a worker that
     sent a number renders that number and one that sent nothing renders
-    `undefined` -- which is the other half of the pair below."""
+    `undefined` -- which is the other half of the pair below.
+
+    The url cell is the 140-character cap: this row's url is longer than
+    that, so the cell is the first 139 characters and an ellipsis, and a
+    cap of 100 would show 39 fewer."""
     report = _run(_click('poll') + 'report({ status: said(),'
                   ' sub: sub.textContent, rows: rows() });\n',
                   answers=(ANSWER_POLL,))
     assert report['status'] == {'text': '3 request(s) on tab 11',
                                 'classes': ['cyan']}, report
     assert report['sub'] == '3 req', report
+    assert len(LONG_URL) == 147, LONG_URL
     assert report['rows'][0] == [
         ['mono green', '200'], ['mono', 'GET'], ['dim small', 'Script'],
-        ['url', 'https://one.example.com/a.js'], ['num', '2.0 KB']], report
+        ['url', LONG_URL[:139] + '…'], ['num', '2.0 KB']], report
     assert report['unplanned'] == [], report
 
 
@@ -479,25 +524,41 @@ def test_a_poll_with_no_rows_says_so_and_still_counts(_tmp):
     assert report['rows'] == 0, report
 
 
-def test_clicking_a_row_opens_the_detail_in_this_key_order(_tmp):
-    """`pretty` receives an object literal, so the key order is the order
-    the pane prints, and `requestHeaders` is the request's `headers` --
-    a different name from the response's, which the same object carries
-    as `responseHeaders`."""
+def test_clicking_a_row_inserts_the_detail_just_below_it(_tmp):
+    """`tr.parentNode.insertBefore(detail, tr.nextSibling)` puts the pane
+    between the row that was clicked and the row after it, so the detail
+    is at index 1 of a three-row table -- not at the end, which is where
+    an append would leave it. A one-row table cannot tell the two apart,
+    which is why the poll here is the three-row one.
+
+    The pane itself is `td[colspan=5] > pre.pane` over `pretty` of an
+    object literal, so the key order is the order it prints and
+    `requestHeaders` is the request's `headers` under a different name
+    from the response's."""
     report = _run(_click('poll') + 'body().children[0].click();\n'
                   + 'report({ open: detail().length,\n'
-                    '  text: detailText(), cursor:'
-                    ' body().children[0].style.cursor });\n',
-                  setup=TABS + DETAIL, answers=(ANSWER_ONE,))
+                    '  at: body().children.indexOf(detail()[0]),\n'
+                    '  order: body().children.map((tr) =>\n'
+                    '    tr.dataset.detail ? \'detail\' : tr.children[0]'
+                    '.textContent),\n'
+                    '  colspan: detail()[0].children[0]'
+                    '.getAttribute(\'colspan\'),\n'
+                    '  cursor: body().children[0].style.cursor,\n'
+                    '  text: detailText() });\n',
+                  answers=(ANSWER_POLL,))
     assert report['open'] == 1, report
+    assert report['at'] == 1, report
+    assert report['order'] == ['200', 'detail', '301', '404'], report
+    assert report['colspan'] == '5', report
     assert report['cursor'] == 'pointer', report
     assert report['text'] == EXPECTED_DETAIL, report
 
 
 def test_clicking_the_same_row_again_closes_the_detail(_tmp):
-    """The toggle reads `tr.nextSibling` rather than a stored reference, so
-    a second click collapses the pane it opened and the table is back to
-    the rows the poll rendered."""
+    """The toggle reads `tr.nextSibling` rather than a stored reference,
+    and the pane it opens is what that walk finds, so a second click on
+    the same row collapses it and the three rows the poll rendered are
+    what is left. An append put the pane where this walk never looks."""
     report = _run(_click('poll')
                   + 'const row = body().children[0];\n'
                     'row.click();\n'
@@ -505,10 +566,10 @@ def test_clicking_the_same_row_again_closes_the_detail(_tmp):
                     'row.click();\n'
                     'report({ open, closed: detail().length,\n'
                     '  rows: rows().length, requests: sent().length });\n',
-                  setup=TABS + DETAIL, answers=(ANSWER_ONE,))
+                  answers=(ANSWER_POLL,))
     assert report['open'] == 1, report
     assert report['closed'] == 0, report
-    assert report['rows'] == 1, report
+    assert report['rows'] == 3, report
     assert report['requests'] == 1, report
 
 

@@ -38,6 +38,16 @@ TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
         "  { tabId: 22, title: '', url: 'https://two.example.com/two' }];\n"
         "drive.route('/tabs', { json: TABS });\n")
 
+# `bindTabSelector` is called with a placeholder and no `errorLabel`, so
+# both of its failure paths return without touching the select. These two
+# setups are how a scenario reaches them: no token at all, and a `/tabs`
+# the bridge answers with a status `api.js` turns into a throw.
+NO_TOKEN = "localStorage.removeItem('daedalus-token');\n"
+TABS_FAILING = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
+                "  url: 'https://one.example.com/one' }];\n"
+                "drive.route('/tabs',"
+                " { status: 500, json: { error: 'tabs unavailable' } });\n")
+
 # The control values the cases set, as the JavaScript literals they are
 # assigned from.
 METHOD = '"Page.reload"'
@@ -131,10 +141,40 @@ def test_the_mount_offers_the_tabs_and_leaves_the_pane_empty(_tmp):
     assert report['unplanned'] == [], report
 
 
+def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
+    """`bindTabSelector` returns before `api.get('/tabs')` when the token
+    is empty, and this section passes no `errorLabel`, so the select keeps
+    the `(active tab)` option the markup shipped with. A RUN now reaches
+    `runCommand`, which throws its own no-token error into the result
+    pane -- the two panels' silence and loudness are separate."""
+    report = _run('report({ options: container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  pane: pane() });\n', setup=TABS + NO_TOKEN)
+    assert report['options'] == ['(active tab)'], report
+    assert report['pane'] == ['pane empty', 'no result yet.'], report
+    assert report['unplanned'] == [], report
+
+
+def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
+    """The `/tabs` catch renders the error only when an `errorLabel` was
+    passed, and this section passes none -- so a 500 leaves the select on
+    its placeholder with nothing on the pane to say why. The panel is
+    still runnable: an omitted tab is the active tab."""
+    report = _run(_press() + SETTLED + 'report({ options:'
+                  ' container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent),\n'
+                  '  pane: pane() });\n',
+                  setup=TABS_FAILING, answers=(ANSWER_TEXT,))
+    assert report['options'] == ['(active tab)'], report
+    assert report['pane'][0] == 'pane flash', report
+    assert report['unplanned'] == [], report
+
+
 def test_the_datalist_carries_the_sixteen_common_methods_in_order(_tmp):
-    """`COMMON` is a fixed list the datalist is built from, and its order
-    is the order the browser offers: the methods an operator reaches for
-    most are the ones an earlier version put first."""
+    """`COMMON` is a fixed list the datalist is built from, and the case
+    pins the list AND its order: the browser offers the options in DOM
+    order, so a member moved or a name respelled changes what the panel
+    offers first."""
     report = _run('report({ methods: methods() });\n')
     assert report['methods'] == COMMON_METHODS, report
 
@@ -203,9 +243,11 @@ def test_a_params_box_that_holds_json_reaches_the_command_parsed(_tmp):
 
 def test_a_chosen_tab_arrives_as_the_string_the_select_holds(_tmp):
     """`fields.tabId = tabSel.value` with no `Number()` around it, which is
-    the difference from `net-capture.js` and `css-injector.js` -- both send
-    the same control as a number. The bridge reads it either way; a test
-    that asserted equality alone would pass against both modules."""
+    the difference from `net-capture.js` and `css-injector.js` -- both wrap
+    the same control in `Number()`. A test that asserted equality alone
+    would pass against both, so the type is what this case states;
+    `extension/worker/cdp.js:13` then guards it with a truthiness test,
+    which is the whole of what this module's own shape commits to."""
     report = _run(_press(tab=TAB_CHOSEN) + SETTLED
                   + 'report({ sent: sent() });\n',
                   answers=(ANSWER_TEXT,))
@@ -231,7 +273,9 @@ def test_params_that_will_not_parse_render_the_invalid_state_and_send_nothing(
         _tmp):
     """`JSON.parse` throws before `extCmd` is called, so no command is
     written and nothing is toasted -- the pane carries the whole report.
-    The assertion is the PREFIX, because `e.message` is the engine's."""
+    The assertion is the PREFIX and never the rest, because the rest is
+    the `e.message` of the engine's `JSON.parse` and this suite does not
+    state it."""
     report = _run(_press(params=PARAMS_BROKEN) + SETTLED
                   + 'report({ pane: pane(), sent: sent(),'
                     ' toasts: toasts() });\n', answers=(ANSWER_TEXT,))
