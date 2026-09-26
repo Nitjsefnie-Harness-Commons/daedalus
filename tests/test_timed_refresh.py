@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT, git_index  # noqa: E402
 from _timed_basis import (  # noqa: E402
-    assert_the_generator_wrote_the_basis, verify_recorded_count)
+    assert_the_generator_wrote_the_basis, verify_recorded_count,
+    write_run as _write_run)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -49,42 +50,6 @@ def _tree(tmp, suites):
     git_index(tree, 'init', '-q')
     git_index(tree, 'add', '--', 'tests/')
     return tree
-
-
-def _suite_file(path, seconds):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({'tests': {'test_a': seconds},
-                                'outcomes': {}}), encoding='utf-8')
-
-
-def _write_run(root, run_id, cells,
-               reference: float | None = 2.0, decoys=()):
-    """One run's artifact tree; `cells` maps a cell name to suite seconds.
-
-    Each suite gets the given seconds in `head-1` and `head-2`, the two
-    measured rounds. `reference=None` writes no reference reading at
-    all. `decoys` names extra round directories (`base-1`, `warmup`)
-    that carry the same suites at ten times the seconds, so a parser
-    that counted them would not agree with one that did not.
-    """
-    run = Path(root) / str(run_id)
-    for cell, suites in cells.items():
-        for suite, seconds in suites.items():
-            # time_tests.py names each file after the suite's STEM, so
-            # the file is `test_a.json` for `test_a.py`.
-            name = f'{Path(suite).stem}.json'
-            for round_name in ('head-1', 'head-2'):
-                _suite_file(run / cell / round_name / name, seconds)
-        for decoy in decoys:
-            for suite, seconds in suites.items():
-                name = f'{Path(suite).stem}.json'
-                _suite_file(run / cell / decoy / name, seconds * 10)
-        if reference is not None:
-            (run / cell).mkdir(parents=True, exist_ok=True)
-            (run / cell / 'reference.json').write_text(
-                json.dumps({'seconds': reference, 'iterations': 16}),
-                encoding='utf-8')
-    return run
 
 
 def _data(weights, units='reference-multiples', target=10.0, max_cells=15,
@@ -479,15 +444,17 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     truth of the count.
 
     WHAT CHECKS THE COUNT. `verify_recorded_count` re-derives it through
-    the refresher's own `discover_runs` and `select`, the two calls
-    `refresh()` makes before it attaches a basis, and asserts the
-    committed prose records what the selected run measured. It reads
-    `<repo>/runs`, where the refresher is pointed, so it is live in
-    exactly one place: `timed-timings.yml` downloads the runs there and
-    its "Verify the change" step runs this suite in the same job with
-    them on disk, so the number is pinned at the step that writes it.
-    The pull-request `suites` job has no artifacts, so there the check
-    cannot run; it says so on stderr rather than passing silently.
+    the refresher's own `discover_runs` and `read_run`, from the run
+    `measured_from` NAMES FIRST -- the same `selected[0]` the refresher
+    counted the cells from -- and not from whatever the runs root
+    selects today, which on a newer run with an extra cell is a run this
+    file was never written from. It reads `<repo>/runs`, where the
+    refresher is pointed, so it is live in exactly one place:
+    `timed-timings.yml` downloads the runs there and its "Verify the
+    change" step runs this suite in the same job with them on disk, so
+    the number is pinned at the step that writes it. The pull-request
+    `suites` job has no artifacts, so there the check cannot run; it
+    says so on stderr rather than passing silently.
 
     The boundary is not where it first looks. The target clause's cell
     count, heaviest cell and median come from `plan_matrix`, and the plan
