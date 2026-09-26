@@ -12,28 +12,30 @@ was watched go red with its own condition removed.
 
 What no row here is worth reading as: ``frame_read``'s attribute arm and the
 member test inside it cannot be told apart by any control in the tree - two
-separate them from the rest; a refusal delegated to a function the walk's scope
-does not name, and a refusal nested in a statement inside an arm, are invisible
-to the control. The scope and the shapes it cannot see are named in the suite.
+separate them from the rest. Six shapes of refusal reach neither this table nor
+the control, and each is named in the suite beside the code that misses it: a
+refusal delegated to a function the walk's scope does not name, a refusal
+written inside one, a refusal raised rather than returned, one raised through a
+helper, one inside a loop, one under ``try``/``except`` and one under ``with``.
 
-The row key is the code's own text. A behaviour-preserving rewrite that
-changes a guard's boolean algebra - pushing a negation through, reordering
-operands - is a red that asks for a renamed row, because the text the key names
-has changed while the decision has not. This is deliberate. The key being the
-text is what stops a row drifting away from the structure it describes, and a
-normaliser that canonicalised the algebra would replace the code's text with a
-second derivation, whose disagreement with the first would be invisible. The
-cost is a rename on an equivalent rewrite; the alternative is a normaliser that
-can be wrong quietly. A false red costs a rename and a false green costs a hole
-in the guard, and only one of those is cheap to notice.
+The row key is the code's own text, so a behaviour-preserving rewrite of a
+guard's boolean algebra - pushing a negation through, reordering operands - is
+a red asking for a renamed row: the text the key names has changed and the
+decision has not. The cost is accepted rather than argued; what a normaliser
+would buy and lose is in the pull request.
 
-Its reach, stated so it can be checked: over the domain of every row in this
-table against every other control the tree offers - 52 at this tree, 20 rows,
-1020 cells - a misattribution is detected in 249 of them, 24%. That domain is
-a sample of an axis that is not finite: it grows with the rows and with the
-controls, so the figure measures this tree rather than bounding anything. Over
-row pairs, with the rule: exchanging two rows' named controls and nothing else
-goes unnoticed for 91 of 190."""
+Its reach, stated so the numbers follow from the rules. Domain one: every row
+in this table against every OTHER control the tree offers - the 31 the audit
+suite's runner collects and the 21 plant rows, 52 in all - which is 20 x 51 =
+1020 cells; a cell is detected when that control does not survive the row's own
+condition removal, and 249 of the 1020 are, 24%. Domain two: the 190 unordered
+pairs of rows, exchanging the two rows' named controls and nothing else; the
+exchange is unnoticed when each row's control survives under the OTHER row's
+condition, which is 91 of the 190; the other 99 are caught, in both directions
+for 14 of them and in exactly one for 85. Both domains grow with the tree, so
+the figures measure it rather than bounding anything. Re-derived by running the
+control over every condition against every control; the script is named in the
+pull request."""
 CONDITIONS_PINNED = (
     ('frame_read|isinstance(node, ast.Attribute)',
      'an attribute read is a selection the rule reads a member from',
@@ -71,7 +73,8 @@ CONDITIONS_PINNED = (
      'a callee that is itself a call',
      ('plant:callee the audit cannot see is a call',)),
     ('_call_read|len(node.args) in (2, 3)',
-     'a proven getattr whose name is an expression',
+     'a proven getattr whose name is an expression; the first conjunct, so '
+     'removing it takes the other three with it',
      ('plant:getattr whose name is an expression',)),
     ('reads_frame_namespace|origin is not UNPROVEN',
      'a name a local scope binds is unproven, and unproven is refused',
