@@ -225,8 +225,9 @@ BOUND_SITE_ROWS = (
      [(4, 'unreadable', 'unplaced')]),
     # The rows below are the CONTROLS for launch-audit clauses that mutate
     # away to a green suite, so each names the clause it answers. A clause
-    # with no row here is proved redundant by a mechanism named in a
-    # comment at the clause itself, not by a mutant that stays invisible.
+    # that is REDUNDANT needs no row: the comment at the clause says so and
+    # names the bound that guarantees it. A live clause with no row here is
+    # a hole in this table.
     # A name that spelled a subprocess import and was then rebound to a
     # fixed value sits in `safe_names` and NOT in `bound`, so the
     # `subprocess_names` limb of proved_fixed is the only thing refusing
@@ -251,6 +252,14 @@ BOUND_SITE_ROWS = (
      "def f():\n"
      "    return sp(timeout=1)\n",
      [(4, 'unreadable', 'unplaced')]),
+    # A plain `import subprocess` puts `subprocess` in `safe_names`, so the
+    # first limb of proved_fixed's disjunction does not fire, and it enters
+    # NEITHER `bound` nor `subprocess_names` — an alias needs an asname and
+    # a from-import needs its own form. Only the `== 'subprocess'` limb
+    # refuses it, which is why that limb cannot be read off the others.
+    ('bare-subprocess-receiver-is-unplaced',
+     "import subprocess\nsubprocess(timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
     # The bound behind the `bound` limb's redundancy, pinned from the other
     # side: a call through a bare Name in `bound` is collected as a PLACED
     # launch, so it reports a `timeout` row here and never an `unplaced`
