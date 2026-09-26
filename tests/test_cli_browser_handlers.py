@@ -35,7 +35,8 @@ TOK = 'clitok'
 
 
 def _put(body):
-    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body}
+    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
+            'timeout': 30}
 
 
 def _wait(cmd_id, delivery, timeout, interval=0.5):
