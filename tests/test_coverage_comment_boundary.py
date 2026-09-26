@@ -12,10 +12,17 @@ import _util  # noqa: E402
 import _workflowrun  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
+    GH_COMMENT_STUB as _GH_COMMENT_STUB,
     complete_workflow_expectations,
 )
 from _coverage_comment_publication import (  # noqa: E402
     EXPECTED_PUBLICATION_STEP as _EXPECTED_PUBLICATION_STEP,
+)
+from _coverage_comment_workflow import (  # noqa: E402
+    run_artifact_check,
+    run_block,
+    step_condition,
+    write_executable,
 )
 from _repo import ROOT  # noqa: E402
 from _wfpins import WorkflowPinError, pinned_action  # noqa: E402
@@ -25,7 +32,6 @@ from _yamlsteps import (  # noqa: E402
     step_mappings,
     workflow_mapping,
 )
-import test_coverage_comment_workflow as commenter  # noqa: E402
 
 
 _DOWNLOAD_ACTION = 'actions/download-artifact'
@@ -256,9 +262,7 @@ def _run_hostile_post(tmp, label, body, workflow=None):
     workflow = _workflow() if workflow is None else workflow
     workdir = Path(tmp) / label
     (workdir / 'bin').mkdir(parents=True)
-    commenter._write_executable(  # pylint: disable=protected-access
-        workdir / 'bin' / 'gh',
-        commenter._GH_COMMENT_STUB)  # pylint: disable=protected-access
+    write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)
     state_path = workdir / 'state.json'
     calls_path = workdir / 'calls.jsonl'
     state_path.write_text('[]', encoding='utf-8')
@@ -354,9 +358,7 @@ def test_commits_query_is_refused_loudly(tmp):
     """A commits query fails loudly instead of naming a pull request."""
     workdir = Path(tmp) / 'commits-query'
     (workdir / 'bin').mkdir(parents=True)
-    commenter._write_executable(  # pylint: disable=protected-access
-        workdir / 'bin' / 'gh',
-        commenter._GH_COMMENT_STUB)  # pylint: disable=protected-access
+    write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)
     state_path = workdir / 'state.json'
     calls_path = workdir / 'calls.jsonl'
     output_path = workdir / 'github-output'
@@ -374,7 +376,7 @@ def test_commits_query_is_refused_loudly(tmp):
         'STUB_STATE': str(state_path),
         'STUB_CALLS': str(calls_path),
     }
-    resolve = commenter._run_block(  # pylint: disable=protected-access
+    resolve = run_block(
         _workflow(), 'Resolve the target pull request from the event')
     result = _workflowrun.run_step(workdir, {'run': resolve}, env)
     published = output_path.read_text(encoding='utf-8')
@@ -506,8 +508,7 @@ def test_privileged_permissions_are_exactly_allowlisted(tmp):
 
 def test_absent_artifact_output_enables_the_missing_marker(tmp):
     """An unset output is absent, and the real guard handles that value."""
-    # pylint: disable-next=protected-access
-    result, output = commenter._run_artifact_check(
+    result, output = run_artifact_check(
         tmp, {'total_count': 0, 'artifacts': []})
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert output == '', output
@@ -523,7 +524,7 @@ def test_absent_artifact_output_enables_the_missing_marker(tmp):
         },
     }
     assert 'present' not in context['steps']['artifact']['outputs']
-    condition = commenter._step_condition(  # pylint: disable=protected-access
+    condition = step_condition(
         _workflow(), 'Mark missing patch coverage')
     assert evaluate_if(condition, context) is True, (condition, context)
 
@@ -601,6 +602,32 @@ def test_pinned_action_refuses_a_malformed_sha(tmp):
     _pin_refused(
         f'  uses: {_DOWNLOAD_ACTION}@' + 'A' * 40 + '\n',
         _DOWNLOAD_ACTION, 'no pin')
+
+
+def test_the_shared_comment_harness_refuses_a_step_it_cannot_read(tmp):
+    """The relocated reader keeps what its suite relied on.
+
+    No caller ever reached the refusals — the suites that shared the helper
+    only ever named a step the workflow has — and the helpers now live in
+    one module every suite reads, where a reader that ran off the end of a
+    step would feed a later step's shell to an earlier step's fixture.
+    """
+    del tmp
+    from _coverage_comment_workflow import (  # noqa: PLC0415
+        run_block, step_condition, workflow)
+    from _wffixtures import _refuses  # noqa: PLC0415
+
+    text = workflow()
+    _refuses(run_block, text, 'No such step', contains='missing workflow')
+    _refuses(
+        step_condition, text, 'No such step',
+        contains='missing condition for step')
+    for name in ('Check for the comment artifact',
+                 'Post or update the pull request comment',
+                 'Publish coverage check'):
+        block = run_block(text, name)
+        assert block.endswith('\n') and block.strip(), name
+        assert '      - name:' not in block, (name, block)
 
 
 if __name__ == '__main__':
