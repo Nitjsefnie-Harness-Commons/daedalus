@@ -38,6 +38,18 @@ shared-helper one; a `from X import *`, whose names the rule cannot
 enumerate; a helper reached through a name computed at run time; and a
 same-named local that genuinely re-implements nothing, which is what
 every row of UNCONSOLIDATED_NAMES is.
+
+The residue ships as that table, and the boundary on it is the BRANCH'S
+OWN DIFF, not "the table may only shrink". A shrink-only rule is
+unlandable on a base that moves: every new tests module `main` lands can
+surface a collision nobody introduced, and the control would go red for
+code the branch never touched. The enforceable boundary is instead that
+a row may name any pre-existing site, and may NOT name a file this
+branch adds or edits — so the table can absorb what `main` lands
+underneath it while still being unable to excuse one line of what the
+branch itself wrote. That is a rule over a derived set of paths rather
+than a promise about the author's intent, which is why it can be a
+control at all.
 """
 import ast
 import subprocess
@@ -48,282 +60,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _helper_binds import definitions, scan  # noqa: E402
+from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
 
 ROOT = _util.ROOT
 
 Reimplementation = namedtuple('Reimplementation', 'path name lines owners')
 
-# The same-named locals that are not re-implementations, keyed by
-# (repo-relative path, name) so a row cannot be widened by a prefix or a
-# substring match. The table may only shrink.
-UNCONSOLIDATED_NAMES = {
-    ('tests/_bash_resolver_scan.py', '_ModuleFacts'):
-        'each guard analyses a different launcher surface, and the facts '
-        'class each builds carries that surface own names, so neither is a '
-        'copy of the other',
-    ('tests/_bash_resolver_scan.py', '_analyze'):
-        'the three analysers return their own violation records and take '
-        'different memo arguments, so none composes the others',
-    ('tests/_bash_resolver_scan.py', '_binding_of'):
-        'the drain reader also accepts the = -less forms, so the two would '
-        'answer differently for one node',
-    ('tests/_bash_resolver_scan.py', '_check_launch'):
-        'one reads the argv a resolver passes, the other refuses a cwd it '
-        'cannot resolve, and the signatures do not meet',
-    ('tests/_bash_resolver_scan.py', '_launch_method'):
-        'the coverage guard also accepts any callee that spells cwd readably, '
-        'which the bash resolver launcher set does not',
-    ('tests/_bash_resolver_scan.py', '_synthetic_violations'):
-        'each runs its own analyser over the synthetic source, and the '
-        'coverage guard threads the memo keeps it needs',
-    ('tests/_bash_resolver_scan.py', '_tree_violations'):
-        'one enumerates test modules and the other every python source, so a '
-        'shared reader would have to carry both sets',
-    ('tests/_bash_resolver_scan.py', '_visit'):
-        'each walks its own facts object under its own signature and its own '
-        'per-call state',
-    ('tests/_clientstate.py', '_output_text'):
-        'the client-state reader strips the decoded value and the dashboard '
-        'reader keeps it verbatim, so one would lose a behaviour',
-    ('tests/_command_type_readers.py', '_literal_value'):
-        'one reads a text literal and the other an evaluated expression node, '
-        'so the argument types are not interchangeable',
-    ('tests/_command_type_readers.py', '_parents'):
-        'the scope map is built over memoised nodes only, so it is not the '
-        'plain walk the command readers want',
-    ('tests/_command_type_readers.py', '_refuse'):
-        'each refuses with its own message shape: a where and what pair '
-        'against a path, root, node and detail',
-    ('tests/_control_writes.py', '_bound_names'):
-        'one yields the names an assignment target binds and the other '
-        'returns every name a node stores, so they answer differently',
-    ('tests/_coverage_guard.py', '_ModuleFacts'):
-        'each guard analyses a different launcher surface, and the facts '
-        'class each builds carries that surface own names, so neither is a '
-        'copy of the other',
-    ('tests/_coverage_guard.py', '_analyze'):
-        'the three analysers return their own violation records and take '
-        'different memo arguments, so none composes the others',
-    ('tests/_coverage_guard.py', '_check_launch'):
-        'one reads the argv a resolver passes, the other refuses a cwd it '
-        'cannot resolve, and the signatures do not meet',
-    ('tests/_coverage_guard.py', '_launch_method'):
-        'the coverage guard also accepts any callee that spells cwd readably, '
-        'which the bash resolver launcher set does not',
-    ('tests/_coverage_guard.py', '_synthetic_violations'):
-        'each runs its own analyser over the synthetic source, and the '
-        'coverage guard threads the memo keeps it needs',
-    ('tests/_coverage_guard.py', '_visit'):
-        'each walks its own facts object under its own signature and its own '
-        'per-call state',
-    ('tests/_coverage_scopes.py', '_bound_names'):
-        'one yields the names an assignment target binds and the other '
-        'returns every name a node stores, so they answer differently',
-    ('tests/_coverage_scopes.py', '_parents'):
-        'the scope map is built over memoised nodes only, so it is not the '
-        'plain walk the command readers want',
-    ('tests/_dashnode.py', '_output_text'):
-        'the client-state reader strips the decoded value and the dashboard '
-        'reader keeps it verbatim, so one would lose a behaviour',
-    ('tests/_drain_scan.py', '_analyze'):
-        'the three analysers return their own violation records and take '
-        'different memo arguments, so none composes the others',
-    ('tests/_drain_scan.py', '_binding_of'):
-        'the drain reader also accepts the = -less forms, so the two would '
-        'answer differently for one node',
-    ('tests/_drain_scan.py', '_scan'):
-        'one scans a module text and the other evaluates an expression '
-        'against a binding set, so they share no argument',
-    ('tests/_drain_scan.py', '_tree_violations'):
-        'one enumerates test modules and the other every python source, so a '
-        'shared reader would have to carry both sets',
-    ('tests/_jsroute_sweep.py', '_indent'):
-        'the sweep helper indents a block of generated JavaScript while the '
-        'two yaml readers measure one line, so three unrelated meanings',
-    ('tests/_mcp_code_eval.py', '_scan'):
-        'one scans a module text and the other evaluates an expression '
-        'against a binding set, so they share no argument',
-    ('tests/_mcp_import_closure.py', '_refuse'):
-        'each refuses with its own message shape: a where and what pair '
-        'against a path, root, node and detail',
-    ('tests/_pyroute_keys.py', '_literal_value'):
-        'one reads a text literal and the other an evaluated expression node, '
-        'so the argument types are not interchangeable',
-    ('tests/_pyroute_live.py', '_argument_value'):
-        'one reads a call-site entry and the other an expression with a '
-        'caller and a sender resolver',
-    ('tests/_pyroute_values.py', '_argument_value'):
-        'one reads a call-site entry and the other an expression with a '
-        'caller and a sender resolver',
-    ('tests/_util.py', 'load'):
-        'this one imports a module by path and the workflow one decodes a '
-        'workflow file jobs, so neither name can serve the other',
-    ('tests/_wfjobs.py', 'load'):
-        'this one imports a module by path and the workflow one decodes a '
-        'workflow file jobs, so neither name can serve the other',
-    ('tests/_workflows.py', '_entry'):
-        'the workflow reader decodes a mapping key through the bounded scalar '
-        'reader, where the yaml one only splits at the first colon',
-    ('tests/_workflows.py', '_indent'):
-        'the sweep helper indents a block of generated JavaScript while the '
-        'two yaml readers measure one line, so three unrelated meanings',
-    ('tests/_yamllines.py', '_entry'):
-        'the workflow reader decodes a mapping key through the bounded scalar '
-        'reader, where the yaml one only splits at the first colon',
-    ('tests/_yamllines.py', '_indent'):
-        'the sweep helper indents a block of generated JavaScript while the '
-        'two yaml readers measure one line, so three unrelated meanings',
-    ('tests/test_aggregate_gate.py', '_run'):
-        'this builds one workflow run as the actions API reports it, where '
-        'the shared _run boots a node scenario',
-    ('tests/test_aggregate_needs.py', '_fixture'):
-        'this writes one fixture workflow into a fresh tmp directory, where '
-        'the owner reads a fake-GitHub answer fragment',
-    ('tests/test_bash_resolver_scan.py', '_synthetic'):
-        'a one-line delegate to the bash resolver own synthetic entry, and '
-        'the name it collides with is the drain analyser',
-    ('tests/test_case_fold_parent.py', '_load'):
-        'this loads a bridge module by path under a name of its own, where '
-        'the owner is a JSON file reader',
-    ('tests/test_ci_ratchets.py', '_git'):
-        'this runs git with text output and a scrubbed child environment, '
-        'which the shared runner does not set',
-    ('tests/test_ci_wait.py', '_run'):
-        'this builds one workflow run against a SHA, optionally without a '
-        'workflow id, where the shared _run boots a node scenario',
-    ('tests/test_cli_waits.py', '_run'):
-        'this runs one argv under a supplied environment with a 60s bound, '
-        'where the shared _run boots a node scenario',
-    ('tests/test_config_boot_generation.py', '_run'):
-        'this drives the worker under node for one plan and reads back its '
-        'streams, where the shared _run boots a recorded scenario',
-    ('tests/test_coverage_bindings.py', '_scope_violations'):
-        'this renders the expected violation strings for a synthetic source, '
-        'where the owner orders real calls within a scope',
-    ('tests/test_dashboard_fanout.py', '_order'):
-        'this returns the real daedalus_bridge.queue_order the loaded '
-        'command_queue mints with, where the owner builds a JS case tuple',
-    ('tests/test_dashboard_harness.py', '_harness_failure'):
-        'this drives the shipped retry entry with bounded steps, where the '
-        'owner reads a relay harness failure under a plan',
-    ('tests/test_dashboard_tab_events.py', '_run'):
-        'this runs the dashboard node and parses its JSON, where the shared '
-        '_run boots a recorded boundary scenario',
-    ('tests/test_delivery_stripe_acceptance.py', '_lines'):
-        'this splits a file own text into lines, where the owner retains '
-        'whether each physical line ended',
-    ('tests/test_diff_coverage.py', '_git'):
-        'this runs one git command in a fixture repository with text output, '
-        'where the shared runner captures bytes only',
-    ('tests/test_diff_coverage_javascript.py', '_run'):
-        'this runs the reporter script inside the fixture directory, where '
-        'the shared _run boots a node scenario',
-    ('tests/test_env_publication.py', '_bound_names'):
-        'this one yields each name with the value bound beside it, in source '
-        'order, which neither owner takes an argument for',
-    ('tests/test_extension_manifest.py', '_entry'):
-        'this builds a manifest mutant from an index, key, subkey and value, '
-        'so it is not a mapping-line reader at all',
-    ('tests/test_js_coverage.py', '_git'):
-        'this runs git with text output in a scratch index, where the shared '
-        'runner captures bytes',
-    ('tests/test_line_lengths.py', '_git'):
-        'this runs git under a scrubbed child environment, which the shared '
-        'runner does not set',
-    ('tests/test_line_lengths.py', '_lines'):
-        'this joins texts and encodes them as the byte-length source, where '
-        'the owner splits a workflow keeping line endings',
-    ('tests/test_mcp_live_tools.py', '_row'):
-        'this builds one tool row from a command type, its fields and a '
-        'builder, where the owner builds a getter-argument case',
-    ('tests/test_mcp_refusal_drain.py', '_load_mcp'):
-        'this drives the already-booted bridge with an empty token, which the '
-        'shared loader base_url-first signature does not express',
-    ('tests/test_overlap_bound.py', '_bound_source'):
-        'this slices the shipped prelude bound machinery at the entry IIFE, '
-        'where the owner reads a job field after timeout-minutes',
-    ('tests/test_real_browser_harness.py', '_browser_version'):
-        'this asserts a stubbed --version call, where the owner asks a '
-        'browser object what it calls itself',
-    ('tests/test_real_browser_harness_recovery.py', '_control_target'):
-        'this names a different extension origin under test, which is the '
-        'whole point of the case',
-    ('tests/test_relay_example_placeholders.py', '_run'):
-        'this runs the relay harness under one source and a plan, where the '
-        'shared _run boots a recorded scenario',
-    ('tests/test_repo_layout.py', '_enclosing_function'):
-        'this finds the innermost function whose body spans a line, where the '
-        'owner walks up from a node through a parent map',
-    ('tests/test_result_routes.py', '_load'):
-        'this loads result_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_result_stripe.py', '_load'):
-        'this loads result_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_runner_refuses_unawaited.py', '_run'):
-        'this runs the suite collector with warnings recorded, where the '
-        'shared _run boots a node scenario',
-    ('tests/test_static_routes.py', '_load'):
-        'this loads static_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_stream_backoff.py', '_run'):
-        'this runs one backoff plan against the shipped worker, where the '
-        'shared _run boots a recorded scenario',
-    ('tests/test_tab_registry.py', '_load'):
-        'this loads tab_registry by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_tab_routing_js_heads.py', '_literal'):
-        'this builds a method entry plus a plain sibling, where the owner '
-        'builds a getter-returning object',
-    ('tests/test_tab_routing_positions.py', '_literal'):
-        'this builds one member-access position case from a named shape, '
-        'where the owner builds a getter-returning object',
-    ('tests/test_tab_routing_positions.py', '_run'):
-        'this runs one masked source through the position verdict, where the '
-        'shared _run boots a node scenario',
-    ('tests/test_tab_routing_unprovable.py', '_scan'):
-        'this writes one synthetic module and asks the route scanner, where '
-        'the owner scans a module text with a memo',
-    ('tests/test_timed_planner.py', '_run'):
-        'this runs the planner main with stdout captured, where the shared '
-        '_run boots a node scenario',
-    ('tests/test_timed_refresh.py', '_run'):
-        'this runs the refresh main with both streams captured, where the '
-        'shared _run boots a node scenario',
-    ('tests/test_type_errors.py', '_git'):
-        'this runs git under a scrubbed child environment, which the shared '
-        'runner does not set',
-    ('tests/test_upload_races.py', '_load'):
-        'this loads upload_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_upload_routes.py', '_load'):
-        'this loads upload_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
-    ('tests/test_watch_all.py', '_run'):
-        'this builds one shared-client workflow run against a SHA, where the '
-        'shared _run boots a node scenario',
-    ('tests/test_watcher_budget.py', '_comment'):
-        'this builds one review-comment node, where the owner asks whether a '
-        'line is a YAML comment',
-    ('tests/test_worker_register_throttle.py', '_observe'):
-        'this drives the register-throttle harness under a plan with expected '
-        'streams, where the owner reads one relay mode answer',
-    ('tests/test_worker_result_post.py', '_post'):
-        'this drives one postResult call through the shipped worker source, '
-        'where the owner builds one MCP answer tuple',
-    ('tests/test_workflow_eslint.py', '_run'):
-        'this returns one named step run block through the bounded reader, '
-        'where the shared _run boots a node scenario',
-    ('tests/test_workflow_job_timeouts.py', '_fixture'):
-        'this writes one fixture workflow into a fresh tmp directory, where '
-        'the owner reads a fake-GitHub answer fragment',
-    ('tests/test_workflow_job_timeouts.py', '_planted'):
-        'this copies the real workflow minus the aggregate job bound, where '
-        'the owner reverts one converted site in a scratch tree',
-    ('tests/test_workflow_job_timeouts.py', '_scan'):
-        'this checks one workflow and through a local caller its target, '
-        'where the owner scans a module text with a memo',
-}
+BRANCH_BASES = ('origin/main', 'main')
 
 
 def _mod(*lines):
@@ -440,11 +183,51 @@ def reimplementations(sources, owner_is_the_definition=_is_the_owner,
 def _live():
     listed = subprocess.run(
         ['git', 'ls-files', 'tests/*.py'], cwd=ROOT, capture_output=True,
-        text=True, check=True).stdout.splitlines()
+        text=True, check=True, env=_util.child_coverage('scrub')
+    ).stdout.splitlines()
     assert listed, 'git ls-files named no tests module'
     sources = {name: (ROOT / name).read_text(encoding='utf-8')
                for name in listed}
     return sources, reimplementations(sources)
+
+
+def branch_paths(run, bases=BRANCH_BASES):
+    """The repo-relative paths this branch adds or edits, or None.
+
+    The base is the merge base with the first of `bases` that resolves, so
+    a developer checkout and a CI checkout that has fetched the base read
+    the same set. A depth-1 pull-request checkout fetches neither and its
+    one commit has no parent to diff against, so the answer there is None
+    rather than an empty set: an empty set reads as the claim that the
+    branch changed nothing, which is a claim about the branch and not
+    about what this checkout can see.
+    """
+    for base in bases:
+        merge_base = run(['git', 'merge-base', 'HEAD', base])
+        if not merge_base:
+            continue
+        names = run(['git', 'diff', '--name-only', f'{merge_base[0]}..HEAD'])
+        if names is None:
+            return None
+        return set(names)
+    return None
+
+
+def excused_by_the_branch(touched, table):
+    """The rows naming a file this branch adds or edits."""
+    return sorted(key for key in table if key[0] in touched)
+
+
+def _git_in(root):
+    """A `run` for `branch_paths` over one checkout, in that root."""
+    def run(argv):
+        done = subprocess.run(
+            argv, cwd=root, capture_output=True, text=True,
+            env=_util.child_coverage('scrub'))
+        if done.returncode:
+            return None
+        return done.stdout.split()
+    return run
 
 
 def test_no_tests_module_reimplements_a_shared_helper_name(tmp):
@@ -470,6 +253,62 @@ def test_an_allowance_row_naming_no_live_site_fails(tmp):
             're-implementation; a stale allowance is a refusal')
         assert UNCONSOLIDATED_NAMES[key].strip(), (
             f'UNCONSOLIDATED_NAMES row {key} carries no justification')
+
+
+def test_a_row_may_not_name_a_file_this_branch_touches(tmp):
+    del tmp
+    touched = branch_paths(_git_in(ROOT))
+    if touched is None:
+        # A checkout that cannot name the branch's diff evaluates nothing,
+        # which is why the rule is proved on a repository built for it
+        # below rather than trusted to stay vacuous here.
+        return
+    excused = excused_by_the_branch(touched, UNCONSOLIDATED_NAMES)
+    assert not excused, (
+        'UNCONSOLIDATED_NAMES rows excuse a site in a file this branch '
+        f'adds or edits: {excused}')
+
+
+def test_the_branch_diff_names_a_file_the_branch_edited(tmp):
+    """The boundary bites on a real repository, not only on this one: a
+    row naming a file the branch edited is refused, and the same table
+    naming a file the branch left alone is not.
+    """
+    repo = Path(tmp) / 'branch'
+    repo.mkdir()
+    run = _git_in(repo)
+    subprocess.run(['git', 'init', '-q'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'config', 'user.email', 't@example.invalid'],
+                   cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'config', 'user.name', 'T'], cwd=repo,
+                   check=True, env=_util.child_coverage('scrub'))
+    (repo / 'base.py').write_text('BASE = 1\n', encoding='utf-8')
+    (repo / 'edited.py').write_text('BEFORE = 1\n', encoding='utf-8')
+    (repo / 'kept.py').write_text('KEPT = 1\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'commit', '-qm', 'base'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    (repo / 'edited.py').write_text('AFTER = 1\n', encoding='utf-8')
+    (repo / 'added.py').write_text('ADDED = 1\n', encoding='utf-8')
+    subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'commit', '-qm', 'branch'], cwd=repo, check=True,
+                   env=_util.child_coverage('scrub'))
+
+    touched = branch_paths(run, bases=('main',))
+    assert touched == {'edited.py', 'added.py'}, touched
+    table = {('edited.py', 'name'): 'this one is the branch own',
+             ('kept.py', 'name'): 'this one predates the branch'}
+    assert excused_by_the_branch(touched, table) == [('edited.py', 'name')]
+    # The base that resolves is the merge base, so a base the branch has
+    # not merged leaves the branch's own commits in the set, and a
+    # checkout carrying neither base says it cannot read the diff.
+    assert branch_paths(run, bases=('origin/main',)) is None
 
 
 def test_the_detector_names_the_module_and_the_name(tmp):
@@ -623,24 +462,30 @@ def test_each_limb_decides_a_site_of_its_own(tmp):
                                     'def _twice():', '    return 1'),
     }
 
-    def found(**limbs):
-        return {(item.path, item.name)
-                for item in reimplementations(sources, **limbs)}
+    # Each call names the limb it drops rather than unpacking a mapping:
+    # a `**`-unpacked call reads as a bounded launch whose head the launch
+    # audit cannot prove, and this file is itself audited.
+    def report(items):
+        return {(item.path, item.name) for item in items}
 
-    assert found() == {('tests/test_owner.py', '_trim'),
-                       ('tests/_second.py', '_twice'),
-                       ('tests/_third.py', '_twice')}, sorted(found())
+    intact = report(reimplementations(sources))
+    assert intact == {('tests/test_owner.py', '_trim'),
+                      ('tests/_second.py', '_twice'),
+                      ('tests/_third.py', '_twice')}, sorted(intact)
     # Limb two dropped: the sole owner stops being the definition.
-    without_owner = found(owner_is_the_definition=lambda path, name, o: False)
+    without_owner = report(reimplementations(
+        sources, owner_is_the_definition=lambda path, name, o: False))
     assert ('tests/_owner.py', '_trim') in without_owner, without_owner
     # Limb three dropped: a module that imports the name and defines it
     # too is this control's finding, and the shadow control's.
-    without_import = found(an_import_settles_it=lambda i, n, s: False)
+    without_import = report(reimplementations(
+        sources, an_import_settles_it=lambda i, n, s: False))
     assert ('tests/test_twice.py', '_twice') in without_import, without_import
     # The owner set read per owner rather than as a set: both `_twice`
     # owners become clean and the pair goes unreported.
-    per_owner = found(owner_is_the_definition=lambda path, name, o:
-                      path in o.get(name, ()))
+    per_owner = report(reimplementations(
+        sources, owner_is_the_definition=lambda path, name, o:
+        path in o.get(name, ())))
     assert not [item for item in per_owner if item[1] == '_twice'], per_owner
 
 

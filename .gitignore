@@ -377,6 +377,7 @@
 !/tests/_token_mask.py
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
+!/tests/_unconsolidated_names.py
 !/tests/_util.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
