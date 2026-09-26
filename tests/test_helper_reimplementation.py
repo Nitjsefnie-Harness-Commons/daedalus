@@ -72,12 +72,23 @@ is the conservative direction, but a module that ONLY splices one in is
 invisible here and must be right by construction.
 
 `JS_FLOOR` is this rule's own size floor, and it is scoped to it. The
-measurement it comes from, on this tree, over RESIDUE — a declaration
-whose name a shared-helper module owns, counted once per
-`(path, name)` because that is the table's key: 117 with no floor, 93
-with any floor at two, 93 at three, so twenty-four are below the floor
-and none at all is two lines. (The declaration count, which the table
-does not key on, is 159 / 101 / 101 on the same run.) The class's
+claim it rests on is a PROPERTY, not a count, and
+`test_the_size_floor_excludes_no_copy_of_the_class` asserts it: nothing
+in the residue sits at exactly two body lines, so a floor of two and a
+floor of three select the same declarations, and every copy of the
+shared class in the tree is at or above the floor, so the floor excludes
+no copy of the thing it exists for. Three is also the shortest copy of
+that class — `function eventTarget() { return { addListener() {} }; }`
+is three lines from brace to brace — and the band below it is one-line
+wrappers no harness copies.
+
+The population and the counts are `js_residue_histogram`, which the
+control prints on every run. They are deliberately not written here: a
+count in a docstring is a claim somebody has to reproduce, and this one
+has been measured three ways with three answers, because a population
+described in prose is resolved by each reader slightly differently.
+Lowering `.pylintrc`'s `min-similarity-lines` instead would fire on
+ordinary Python, which is why the floor lives here. The class's
 shortest copy is a three-line body, the `function eventTarget() { return
 { addListener() {} }; }` spelling, so three is the floor: it excludes the
 one-liner band and catches every spelling of the class, where one would
@@ -106,7 +117,8 @@ from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
 ROOT = _util.ROOT
 
 Reimplementation = namedtuple('Reimplementation', 'path name lines owners')
-JsReimplementation = namedtuple('JsReimplementation', 'path name line owners')
+JsReimplementation = namedtuple(
+    'JsReimplementation', 'path name line body_lines owners')
 JsDeclaration = namedtuple('JsDeclaration', 'name line body_lines')
 
 JS_FLOOR = 3
@@ -301,7 +313,8 @@ def js_reimplementations(sources, owner_is_the_definition=_is_the_owner,
                     or owner_is_the_definition(path, item.name, owners)):
                 continue
             findings.append(JsReimplementation(
-                path, item.name, item.line, sorted(owners[item.name])))
+                path, item.name, item.line, item.body_lines,
+                sorted(owners[item.name])))
     return findings
 
 
@@ -311,12 +324,9 @@ def _live_js():
 
 
 def _live_sources():
-    """The tracked tests modules, memoised for the suite's own duration.
-
-    Four tests read the whole tree and the two readers are the expensive
-    part; recomputing them per test cost this suite 45 seconds where the
-    shared scans cost 13.
-    """
+    """The tracked tests modules, memoised: four tests read the whole tree
+    and the two readers are the expensive part, so recomputing them per
+    test cost this suite 45 seconds where the shared scans cost 13."""
     global _LIVE_SOURCES
     if _LIVE_SOURCES is None:
         listed = subprocess.run(
@@ -371,9 +381,7 @@ def test_no_tests_module_reimplements_a_shared_javascript_name(tmp):
     del tmp
     sources, findings = _live_js()
     assert sources, 'the tests tree enumerated no module'
-    # The size of the one hole in this reader, printed rather than
-    # asserted: a fragment on purpose and a program left truncated are
-    # the same shape to it, and only a number tells them apart.
+    # This reader's one hole, sized: see the count above.
     dropped = []
     js_declarations(sources, dropped)
     cut = [(path, count) for path, count in dropped if count]

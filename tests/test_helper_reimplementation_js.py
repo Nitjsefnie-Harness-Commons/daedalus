@@ -26,14 +26,15 @@ strings, so a fixture has to be one too.
 """
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _branch_boundary import introduced_rows, js_digests  # noqa: E402
 from test_helper_reimplementation import (  # noqa: E402
-    BRANCH_BASES, JS_FLOOR, ROOT, js_declarations, js_reimplementations,
-    reimplementations)
+    BRANCH_BASES, JS_FLOOR, ROOT, _live_sources, js_declarations,
+    js_reimplementations, reimplementations)
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
 
@@ -338,6 +339,66 @@ def test_the_two_recognisers_do_not_read_each_other(tmp):
                 for item in reimplementations(sources)}
     assert py_found == {('tests/test_py.py', 'eventTarget')}, sorted(py_found)
     assert ('tests/test_js.py', 'eventTarget') not in py_found, py_found
+
+
+def js_residue_histogram(sources=None):
+    """{body_lines: how many} over the population the size floor is for.
+
+    A declaration whose name a shared-helper module owns, with NO floor
+    applied, counted per DECLARATION — the table keys on `(path, name)`
+    and deduping by it is a different population, which is how three
+    people came to three different sets of numbers for the same claim.
+
+    This function is that population. A reader who wants the floor's
+    arithmetic runs it rather than trusting a number in a docstring.
+    """
+    sources = _live_sources() if sources is None else sources
+    histogram = Counter()
+    for item in js_reimplementations(sources, minimum=1):
+        histogram[item.body_lines] += 1
+    return dict(sorted(histogram.items()))
+
+
+def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
+    """The floor's two load-bearing properties, asserted as properties.
+
+    Neither is a count, and that is the point: three people measured the
+    same nominal population and got three sets of numbers, because the
+    population was described in prose and each resolved it slightly
+    differently. The population is `js_residue_histogram` now — a
+    declaration whose name a shared-helper module owns, counted per
+    declaration — and the two things the floor is FOR do not depend on
+    how many there are:
+
+      * nothing sits at exactly two body lines, so `>= 2` and `>= 3`
+        select the same declarations and the floor drops nothing that a
+        floor of two would have caught;
+      * every copy of the shared class in the tree is at or above the
+        floor, so the floor excludes no copy of the thing it exists for.
+
+    The second has one stated exception, and it is this file: the
+    size-floor test below plants a one-line `eventTarget` on purpose,
+    to pin what the floor drops. A blanket form of the claim is
+    therefore false of the controls that measure it, which is the
+    reason the exception is named here rather than folded in.
+    """
+    del tmp
+    histogram = js_residue_histogram()
+    print(f'[js] residue body_lines histogram: {histogram}')
+    assert 2 not in histogram, (
+        'a residue declaration sits at exactly two body lines, so the '
+        f'floor and a floor of two select different sets: {histogram}')
+    sources = _live_sources()
+    here = Path(__file__).name
+    below = sorted(
+        f'{path}:{item.line} ({item.body_lines} body lines)'
+        for path, items in js_declarations(sources).items()
+        for item in items
+        if item.name == 'eventTarget' and item.body_lines < JS_FLOOR
+        and path.split('/')[-1] != here)
+    assert not below, (
+        'the floor excludes a copy of the shared class it is for: '
+        f'{below}')
 
 
 def test_the_size_floor_holds_the_class_and_lets_the_one_liners_through(tmp):
