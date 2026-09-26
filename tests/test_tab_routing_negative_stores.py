@@ -65,6 +65,8 @@ _NO_ITEM_ASSIGNMENT = {
                      'x[0]()'),
     'set_positive': ('s = {quiet(), quiet()}\n', 's', 0, 'x = [*s]\n',
                      'x[0]()'),
+    'frozenset': ('v = frozenset([quiet(), quiet()])\n', 'v', 0,
+                  'w = [*v]\n', 'w[0]()'),
 }
 
 
