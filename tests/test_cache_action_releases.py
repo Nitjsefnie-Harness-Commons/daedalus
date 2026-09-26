@@ -17,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(
     1, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
 import _util  # noqa: E402
+from _pip_cache import _CACHE_JOBS  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from test_ci_pip_cache import _CACHE_JOBS  # noqa: E402
-from test_workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
+from _workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
 V610 = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9'
 V430 = '0057852bfaa89a56745cba8c7296529d2fc39830'

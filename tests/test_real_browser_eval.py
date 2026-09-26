@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
 from _deliveries import real_eval, real_ext_command  # noqa: E402
+from _realbrowser_broken_worker import (  # noqa: E402
+    BROKEN_WORKER_TOKEN, assert_broken_worker_is_a_failure)
 from _realbrowser import (BrowserEnvironmentSkipped,  # noqa: E402
                           browser_requirements, cdp_call, cdp_eval,
                           eval_page_server, hostile_eval_matrix,
@@ -140,43 +142,11 @@ def test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp):
     cannot be reached at all is decided by the control extension: the
     machine skips only when the control fails to load too.
     """
-    browser_requirements()  # skips honestly where no browser exists
-    broken = Path(tmp) / 'broken-extension'
-    shutil.copytree(EXTENSION_ROOT, broken)
-    worker = broken / 'background.js'
-    # Appended, and conditioned on being a real MV3 worker: the script still
-    # installs and answers, and what breaks is the extension's own state.
-    # A top-level throw instead makes Chrome retire the registration, which
-    # is what the control extension now tells apart from a machine that
-    # cannot reach a worker at all.
-    worker.write_text(
-        worker.read_text(encoding='utf-8')
-        + "\nif (chrome.runtime.id) { startStream = undefined; }\n",
-        encoding='utf-8')
-
-    token = 'workerboottok'
     with _util.bridge(
-            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': token,
+            tmp, env={'TOKEN': '', 'DAEDALUS_TOKEN': BROKEN_WORKER_TOKEN,
                       'DAEDALUS_MCP_PORT': '0'}) as (bridge_url, _docroot):
         with eval_page_server() as pages:
-            reported = None
-            try:
-                # The verdict is certain - the ready probe can never go true -
-                # so the short patience only skips waiting for it.
-                with real_extension_page(
-                        tmp, bridge_url, token, pages + '/plain.html',
-                        extension_root=broken, worker_ready_patience=2.0):
-                    raise AssertionError(
-                        'the fixture yielded with a worker that cannot boot')
-            except BrowserEnvironmentSkipped:
-                raise
-            except _util.Skipped as skipped:
-                raise AssertionError(
-                    'a broken extension was reported as an environment skip: '
-                    + str(skipped)) from skipped
-            except AssertionError as failure:
-                reported = str(failure)
-            assert reported and 'service worker' in reported, reported
+            assert_broken_worker_is_a_failure(tmp, bridge_url, pages)
 
 
 def test_a_page_that_never_reports_ready_is_a_failure_not_a_skip(tmp):

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
-from test_real_browser_harness import _enter_fixture  # noqa: E402
+from _realbrowser_fixture_controls import _enter_fixture  # noqa: E402
 
 
 def _which_with(node):

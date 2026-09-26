@@ -17,12 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _bridge import BRIDGE_ENV, TOK  # noqa: E402
-
-
-def _patch_env(patch_dir, **extra):
-    """BRIDGE_ENV plus the sitecustomize PYTHONPATH a fault fixture injects."""
-    return {**BRIDGE_ENV, 'PYTHONPATH': str(patch_dir), **extra}
+from _bridge import BRIDGE_ENV, TOK, _patch_env  # noqa: E402
 
 
 def test_result_roundtrip_and_consume(tmp):

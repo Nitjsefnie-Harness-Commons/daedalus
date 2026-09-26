@@ -7,26 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pip_cache import _CACHE_JOBS  # noqa: E402
 from _wfgraph import _job_section, _tests_yml  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
-from test_workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
+from _workflow_cache_boundary import REVIEWED_CACHE_RELEASES  # noqa: E402
 
-
-_CACHE_JOBS = (
-    # (job, the key's python component, the step a save must follow, the
-    # step the restore must precede).
-    ('suites', '${{ matrix.python }}', 'Run every suite',
-     'Install the test dependencies and project'),
-    ('coverage-matrix', '${{ matrix.python }}', 'Measure',
-     'Install the coverage toolchain and the project'),
-    ('coverage', '3.13', 'Install the coverage toolchain and the project',
-     'Install the coverage toolchain and the project'),
-    ('pycodestyle', '3.13', 'pycodestyle', 'Install linters'),
-    ('pylint', '3.13', 'pylint', 'Install linters and import dependencies'),
-    ('pyright', '3.13', 'pyright',
-     'Install the type checker and the dependencies it resolves'),
-)
 
 # Every platform pip cache directory, so one spelling warms all three OSes;
 # actions/cache ignores the two that do not exist on the running platform.
