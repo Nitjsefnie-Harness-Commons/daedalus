@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """What `dashboard/sse.js` reports, forgets, filters and restarts.
 
-Four behaviours. The repeated-id drop and the status sequence are already
-held by `test_dashboard_fanout` and `test_dashboard_eval`, which drive
-this module as a harness argument.
+The repeated-id drop and the status sequence are held by
+`test_dashboard_fanout` and `test_dashboard_eval`, which drive this module
+as a harness argument.
 """
 import re
 import sys
@@ -25,9 +25,8 @@ _BEARER_NEW = 'Bearer ' + _OTHER_TOKEN
 # clock moved" is about the code and not about the millisecond.
 _STEP_MS = 4000
 
-# Every scenario opens the same way: the storage and the one planned
-# route installed before the import, a clock the scenario drives, and the
-# module namespace kept for the calls under test.
+# Every scenario opens the same way: storage, one planned route, a clock
+# the scenario drives, and the namespace the calls are made on.
 _OPEN = r"""
 (async () => {
 localStorage.setItem('daedalus-token', '%s');
@@ -46,9 +45,9 @@ _CLOSE = """
 })().catch(leave);
 """
 
-# What actually reached a subscriber, and nothing more. The frame filter
-# is NOT re-applied here: a subscriber that re-applies it sees the same
-# thing whether or not the module applies it.
+# What reached a subscriber, and nothing more. The frame filter is NOT
+# re-applied here: a subscriber that re-applies it sees the same thing
+# whether or not the module applies it.
 _SUBSCRIBE = r"""
 const seen = [];
 sse.subscribe((e) => seen.push([e.__internal === true, e.type,
@@ -88,8 +87,6 @@ await bounded(settle(), 'second frame', _dashnodeStepTimeoutMs);
 report({ lastEventAt: sse.lastEventAt(), onConnect, onFirst, seen });
 """ % (_STEP_MS, _STEP_MS)
 
-# The whole bound plus one, down a single in-process stream, then the
-# oldest id and the newest one replayed.
 _EVICT = _OPEN_STREAM + r"""
 const frames = () => seen.filter((e) => e[0] === false);
 const ids = [];
@@ -107,10 +104,7 @@ await bounded(settle(), 'newest replayed', _dashnodeStepTimeoutMs);
 report({ fed, afterOldest, seen: frames() });
 """
 
-# Every frame the module does not dispatch, in the order it meets them: one
-# that will not parse, one the kind filter drops, and one replayed after it
-# has already been dispatched. Each is stamped under, and a real frame
-# between them is not.
+# Each of `emit`'s three discards, with one real frame between them.
 _DISCARDED = _OPEN_STREAM + r"""
 const onConnect = sse.lastEventAt();
 offset += %d;
@@ -142,7 +136,7 @@ await bounded(settle(), 'event frame', _dashnodeStepTimeoutMs);
 report({ seen, afterBroadcast, read: drive.lastScript().settlements });
 """
 
-# A subscriber that throws, and what the module owes the ones behind it.
+# A subscriber that throws, and the one behind it.
 _THROWING_LISTENER = _UP + _SUBSCRIBE + r"""
 sse.subscribe(() => { throw new Error('listener blew up'); });
 const heard = [];
@@ -197,8 +191,7 @@ def _bound():
     return int(found[0])
 
 
-# The bound from both sides, read out of the module rather than restated:
-# at the bound nothing is forgotten, and one frame past it the oldest is.
+# The bound from both sides, read out of the module rather than restated.
 _BOUNDARY = _OPEN_STREAM + r"""
 const frames = () => seen.filter((e) => e[0] === false);
 const quiet = async (label) => {
@@ -279,11 +272,10 @@ def test_a_frame_the_module_never_dispatched_does_not_move_the_clock(_tmp):
     `relTime` renders anything under two seconds as "now", so a frame the
     module threw away reads as a live one.
 
-    Three discards, because `emit` has three: a frame that will not
-    parse, one the `kind` filter drops, and one whose id is already
-    dispatched. `errors` is the liveness of the first -- a frame that
-    never arrived would leave the clock unmoved too -- and the real frame
-    in the middle is what shows the clock still moves at all."""
+    All three of `emit`'s discards, and the real frame between them is
+    what shows the clock still moves. `errors` is the liveness of the
+    first: a frame that never arrived would leave the clock unmoved
+    too."""
     report = _run(_DISCARDED)
     statuses = [[True, 'sse-status', None, None]] * 2
     assert report['onConnect'] > 0, report
@@ -303,10 +295,9 @@ def test_a_listener_added_during_a_dispatch_joins_it_in_sse_js(_tmp):
 
     `dispatch` iterates the `Set` itself, and a `Set`'s iterator is
     live: it visits what the set holds at each step rather than what it
-    held when iteration began, so an entry added mid-iteration is still
-    reached. The subscriber here does nothing to arrange that -- no
-    re-application, no second frame -- so this is a pin on the shape the
-    module already has, beside the identical one on `app.js:64`."""
+    held when iteration began. The subscriber arranges nothing here, so
+    this pins the shape the module already has, beside the identical
+    one on `app.js:64`."""
     report = _run(_JOINING_LISTENER)
     assert report['order'] == ['first', 'joined:e1'], report
     assert report['seen'][-1] == [False, 'result', 'event', 'e1'], report
@@ -364,21 +355,19 @@ def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
 
 
 def test_the_dispatched_id_set_forgets_nothing_until_it_is_one_past_the_bound(_tmp):
-    """`sse.js:64`'s `>` rather than `>=`. The eviction property and the
-    eviction order both hold either way, so a suite that asserts only
-    those cannot tell them apart -- but at rest the set is documented to
-    hold the whole bound, and `>=` leaves it one short of that.
+    """`sse.js:64`'s `>` rather than `>=`. The eviction property and
+    order both hold either way, so a suite asserting only those cannot
+    tell them apart -- but at rest the set is documented to hold the
+    whole bound, and `>=` leaves it one short.
 
-    Two directions, and the first is what gives the second its meaning:
-    at the bound the oldest is still remembered, so its replay is
-    dropped, and one frame later the same replay is dispatched. `fed` is
-    the liveness of both -- if the frames had not all arrived, a replay
-    that added nothing would prove nothing."""
+    The first direction gives the second its meaning: at the bound the
+    oldest is still remembered, so its replay is dropped, and one frame
+    later the same replay is dispatched. `fed` is the liveness of
+    both."""
     bound = _bound()
     report = _run(_BOUNDARY)
-    # The report carries every settlement, and this scenario reads the
-    # whole bound, so the assertion is over the counts alone: a failure
-    # here prints six numbers rather than five hundred chunks.
+    # The report carries every settlement and this scenario reads the
+    # whole bound, so a failure prints six numbers, not 500 chunks.
     counts = {key: report[key] for key in
               ('bound', 'fed', 'atBound', 'past', 'after', 'last')}
     assert counts == {'bound': bound, 'fed': bound, 'atBound': bound,

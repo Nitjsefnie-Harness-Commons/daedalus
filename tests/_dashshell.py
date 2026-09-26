@@ -300,10 +300,17 @@ const drive = {
   observers() { return OBSERVERS.slice(); },
 };
 
+// The recorder is read by every control that asserts a logged line, so
+// describing a value must not be able to throw: `String(symbol)` does,
+// and a throw here would escape the `console.error` that called it.
 function describe(value) {
-  if (typeof value === 'string') return value;
-  if (value && typeof value.message === 'string') return value.message;
-  return String(value);
+  try {
+    if (typeof value === 'string') return value;
+    if (value && typeof value.message === 'string') return value.message;
+    return String(value);
+  } catch (e) {
+    return '[unprintable value]';
+  }
 }
 
 const realError = console.error.bind(console);
