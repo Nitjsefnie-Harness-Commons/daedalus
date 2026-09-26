@@ -29,15 +29,6 @@ one binds a name a later call can reach:
   * `const|let|var name = (...) => {...}` and `= (...) => <expression>`,
     and the same arrows over one bare parameter, `= name => ...`.
 
-NESTING, stated as the code behaves rather than as it was designed. This
-reader is not a statement parser: it walks a token stream and jumps
-PAST the body of every declaration it recognises, so a declaration
-inside a recognised function's or arrow's body is skipped, while one
-inside an `if`, a `try` or an object literal is found, because nothing
-was open when it was reached. A shared helper re-implemented as a named
-function inside a harness's own wrapper function is therefore invisible,
-and that shape is in the bypass list below.
-
 Deliberately NOT recognised, each for a stated reason. An unrecognised
 form is a bypass, so each of these is named here rather than left as a
 reader that silently stops:
@@ -54,24 +45,33 @@ reader that silently stops:
   * a class declaration, and any other name-binding form: `var` inside
     a `for` head, a function reached through a computed property or a
     spread, a destructuring default, and a declaration nested inside
-    another declaration's body.
+    another declaration's body. The last is a property of the walk
+    rather than a choice: this reader is not a statement parser, it
+    jumps PAST the body of every declaration it recognises, so one
+    inside a recognised function's or arrow's body is skipped while one
+    inside an `if`, a `try` or an object literal is found, because
+    nothing was open when it was reached. A shared helper
+    re-implemented as a named function inside a harness's own wrapper
+    is therefore invisible.
   * a program assembled by something other than `+`: `''.join(lines)`,
     `%`-formatting, `.format()`, or a body whose closing brace is
     written in a different Python expression from the one that opened
     it. A harness that builds its program that way is a bypass of this
     rule, and there is one shipped module on this tree that does
     (`tests/test_dashboard_harness.py`).
+  * a TRUNCATED body — a document that runs out with a bracket still
+    open, which is a list of lines a later step joins and a fixture
+    built to attack a wrapper's delimiters as much as it is a program
+    left half-written. This reader cannot tell those apart, so it drops
+    both, and a truncated declaration is silently absent from the scan
+    that exists to find it. `declarations()` counts every one it drops
+    and the control prints the total, so the hole is sized rather than
+    open-ended.
 
-WHAT RAISES AND WHAT IS DROPPED. A bracket that closes the WRONG thing
-raises, naming the constant: that is the one thing the tolerant reader
-refuses to guess at, because every later declaration in that document
-would then be read at the wrong nesting. A document that merely RUNS
-OUT with a bracket still open is a FRAGMENT and is dropped — a list of
-lines a later step joins, a fixture built to attack a wrapper's
-delimiters — and the reader cannot tell that from a program whose author
-left it truncated. The cost of that tolerance is a named bypass: a
-truncated declaration is silently absent from the scan that exists to
-find it, and a harness that loses its closing brace gets no refusal.
+A bracket that closes the WRONG thing is the opposite case and RAISES,
+naming the constant: that is the one thing the tolerant reader refuses
+to guess at, because every later declaration in that document would
+then be read at the wrong nesting.
 
 The regexp/comment decision after `/` uses the usual previous-token
 heuristic extended with the control-statement head rule, so
@@ -155,6 +155,11 @@ def _strings_in(node, out, consumed):
         _strings_in(node.left, out, consumed)
         _strings_in(node.right, out, consumed)
     elif isinstance(node, ast.JoinedStr):
+        # The f-string ITSELF is consumed as well as its parts: an
+        # f-string inside a `+` is read once, through the concatenation,
+        # and marking only its constants left `documents()` free to emit
+        # it a second time on its own.
+        consumed.add(id(node))
         for part in node.values:
             _strings_in(part, out, consumed)
     elif isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -493,11 +498,14 @@ def _arrow(tokens, index, where):
 
 
 def _assigned(tokens, index, where):
-    """The declaration in a `const|let|var NAME = <function>` head."""
+    """(declaration, index after it, truncated) for an assigned function.
+
+    See `_function_at` for what `truncated` means.
+    """
     if (index + 2 >= len(tokens) or tokens[index + 1].kind != 'name'
             or tokens[index + 2].kind != 'punct'
             or tokens[index + 2].text != '='):
-        return None
+        return None, index + 1, False
     name = tokens[index + 1].text
     cursor = index + 3
     if (cursor < len(tokens) and tokens[cursor].kind == 'name'
@@ -525,21 +533,27 @@ def _assigned(tokens, index, where):
     else:
         if (cursor >= len(tokens) or tokens[cursor].kind != 'punct'
                 or tokens[cursor].text != '('):
-            return None
+            return None, index + 1, False
         body = _arrow(tokens, cursor, where)
     if body is None:
-        return None
+        return None, index + 1, False
     if tokens[body].kind == 'punct' and tokens[body].text == '{':
         end = _closing(tokens, body, where)
         if end is None:
-            return None
+            return None, index + 1, True
         return (Declaration(name, tokens[index].line,
-                            tokens[end].line - tokens[body].line + 1), end)
-    return Declaration(name, tokens[index].line, 1), body
+                            tokens[end].line - tokens[body].line + 1),
+                end, False)
+    return Declaration(name, tokens[index].line, 1), body, False
 
 
 def _function_at(tokens, index, where):
-    """(declaration, index after it) for a `function` keyword token."""
+    """(declaration, index after it, truncated) for a `function` token.
+
+    `truncated` is True when a NAMED body opened and the document ran
+    out before closing it, which is the one shape this reader drops and
+    counts.
+    """
     cursor = index + 1
     if (cursor < len(tokens) and tokens[cursor].kind == 'punct'
             and tokens[cursor].text == '*'):
@@ -553,21 +567,22 @@ def _function_at(tokens, index, where):
             and tokens[cursor].text == '(':
         closed = _closing(tokens, cursor, where)
         if closed is None:
-            return None, index + 1
+            return None, index + 1, False
         cursor = closed + 1
     if cursor >= len(tokens) or tokens[cursor].kind != 'punct' \
             or tokens[cursor].text != '{':
-        return None, index + 1
+        return None, index + 1, False
     end = _closing(tokens, cursor, where)
     if end is None:
-        return None, index + 1
+        return None, index + 1, name is not None
     if name is None:
-        return None, end + 1
+        return None, end + 1, False
     return (Declaration(name, tokens[index].line,
-                        tokens[end].line - tokens[cursor].line + 1), end + 1)
+                        tokens[end].line - tokens[cursor].line + 1),
+            end + 1, False)
 
 
-def declarations(text, where='?'):
+def declarations(text, where='?', truncated=None):
     """Every recognised declaration in one JavaScript document.
 
     Each is a `Declaration`: the bound name, the offset the `function`
@@ -580,23 +595,30 @@ def declarations(text, where='?'):
     at the wrong nesting. A document that merely runs out with a bracket
     open is a fragment and is dropped instead — see the module
     docstring.
+
+    `truncated`, when given, is a one-element list this appends the
+    number of bodies that ran out to. Dropping a body is a hole in the
+    scan, and a hole nobody counts is a hole nobody sees; the caller
+    totals it and the control prints the total.
     """
     tokens = _lex(text)
+    cut = 0
     found = []
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token.kind == 'name' and token.text == 'function':
-            declaration, index = _function_at(tokens, index, where)
+            declaration, index, truncated_here = _function_at(
+                tokens, index, where)
         elif token.kind == 'name' and token.text in ('const', 'let', 'var'):
-            assigned = _assigned(tokens, index, where)
-            if assigned is None:
-                index += 1
-                continue
-            declaration, index = assigned
+            declaration, index, truncated_here = _assigned(
+                tokens, index, where)
         else:
             index += 1
             continue
+        cut += truncated_here
         if declaration is not None:
             found.append(declaration)
+    if truncated is not None:
+        truncated.append(cut)
     return found
