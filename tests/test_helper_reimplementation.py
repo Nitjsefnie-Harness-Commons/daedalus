@@ -50,6 +50,39 @@ underneath it while still being unable to excuse one line of what the
 branch itself wrote. That is a rule over a derived set of paths rather
 than a promise about the author's intent, which is why it can be a
 control at all.
+
+THE SAME RULE IN JAVASCRIPT. A `function` inside a Python string
+literal is not a Python binding, and this repository's duplicate-code
+checker is the only thing that looks at one: it compares parsed Python
+ASTs, so it sees JavaScript only as the characters between two string
+quotes, and its `min-similarity-lines=15` is a Python function-body
+threshold that no five-line JavaScript block reaches. So the rule is
+read a second time, in the other language, by `js_reimplementations`
+below over the reader in `_js_functions`. A shared helper module owns a
+JavaScript name when it defines `function <name>` inside a string
+constant; a tests module re-implements it when it does the same, is not
+the owner, and the block is at least `JS_FLOOR` body lines.
+
+What the JavaScript rule does NOT carry over, stated rather than
+assumed: the import limb. There is no `from X import eventTarget` in
+JavaScript, so nothing records that a module took the name from a
+shared helper rather than writing its own; a module that both splices a
+shared stub in and still writes the name is a finding either way, which
+is the conservative direction, but a module that ONLY splices one in is
+invisible here and must be right by construction.
+
+`JS_FLOOR` is this rule's own size floor, and it is scoped to it. The
+measurement it comes from: the rule reports 123 sites with no floor, 106
+with any floor at two, and 106 at three — so seventeen of them are
+one-line blocks and none at all is two lines. The class's shortest copy
+is three body lines, the `function eventTarget() { return { addListener()
+{} }; }` spelling, so three is the floor: it excludes the one-liner band
+and catches every spelling of the class, where one would catch trivial
+wrappers and fifteen, the Python value, would catch none of them. Two
+measures identically today, so nothing rides on that choice; three is the
+value the class's own shortest copy sets. Lowering `.pylintrc`'s
+`min-similarity-lines` instead would fire on ordinary Python, which is
+why the floor lives here.
 """
 import ast
 import subprocess
@@ -58,15 +91,21 @@ from collections import namedtuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _js_functions  # noqa: E402
 import _util  # noqa: E402
 from _helper_binds import definitions, scan  # noqa: E402
+from _unconsolidated_js_names import (  # noqa: E402
+    UNCONSOLIDATED_JS_NAMES)
 from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
 
 ROOT = _util.ROOT
 
 Reimplementation = namedtuple('Reimplementation', 'path name lines owners')
+JsReimplementation = namedtuple('JsReimplementation', 'path name line owners')
+JsDeclaration = namedtuple('JsDeclaration', 'name line body_lines')
 
 BRANCH_BASES = ('origin/main', 'main')
+JS_FLOOR = 3
 
 
 def _mod(*lines):
@@ -191,6 +230,64 @@ def _live():
     return sources, reimplementations(sources)
 
 
+def js_declarations(sources):
+    """{path: [JsDeclaration]} for every JavaScript a module declares.
+
+    The reader raises on a function body it cannot close with program
+    still following it, naming the constant — the same fail-closed
+    posture the Python side takes on a module that does not parse.
+    """
+    declared = {}
+    for path in sorted(sources):
+        found = []
+        for text, starts in _js_functions.documents(sources[path], path):
+            for item in _js_functions.declarations(text, path):
+                found.append(JsDeclaration(
+                    item.name, _js_functions.lineno_at(starts, item.offset),
+                    item.body_lines))
+        if found:
+            declared[path] = found
+    return declared
+
+
+def js_reimplementations(sources, owner_is_the_definition=_is_the_owner,
+                         minimum=JS_FLOOR):
+    """Every re-implementation of a shared helper's JavaScript name.
+
+    The same rule `reimplementations` applies, read in the other
+    language: a shared-helper module owns a name when it defines
+    `function <name>` inside a string constant, and a tests module
+    re-implements it when it does the same, is not the owner, and the
+    block is at least `minimum` body lines. The owner set is read as a
+    set, so two helpers defining one name leave each of them a
+    re-implementation of the other.
+    """
+    declared = js_declarations(sources)
+    owners = {}
+    for path, items in declared.items():
+        if not _is_shared_helper(path):
+            continue
+        for item in items:
+            if item.body_lines >= minimum:
+                owners.setdefault(item.name, set()).add(path)
+    findings = []
+    for path in sorted(declared):
+        if not _in_tests(path):
+            continue
+        for item in declared[path]:
+            if (item.body_lines < minimum or item.name not in owners
+                    or owner_is_the_definition(path, item.name, owners)):
+                continue
+            findings.append(JsReimplementation(
+                path, item.name, item.line, sorted(owners[item.name])))
+    return findings
+
+
+def _live_js():
+    sources, _ = _live()
+    return sources, js_reimplementations(sources)
+
+
 def branch_paths(run, bases=BRANCH_BASES):
     """The repo-relative paths this branch adds or edits, or None.
 
@@ -221,13 +318,23 @@ def excused_by_the_branch(touched, table):
 def _git_in(root):
     """A `run` for `branch_paths` over one checkout, in that root."""
     def run(argv):
-        done = subprocess.run(
-            argv, cwd=root, capture_output=True, text=True,
-            env=_util.child_coverage('scrub'))
-        if done.returncode:
-            return None
-        return done.stdout.split()
+        text = _git_text(root, argv)
+        return None if text is None else text.split()
     return run
+
+
+def _text_in(root):
+    """A `run` for the same git calls that must yield a file's text."""
+    def run(argv):
+        return _git_text(root, argv)
+    return run
+
+
+def _git_text(root, argv):
+    done = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True,
+        env=_util.child_coverage('scrub'))
+    return None if done.returncode else done.stdout
 
 
 def test_no_tests_module_reimplements_a_shared_helper_name(tmp):
@@ -267,6 +374,84 @@ def test_a_row_may_not_name_a_file_this_branch_touches(tmp):
     assert not excused, (
         'UNCONSOLIDATED_NAMES rows excuse a site in a file this branch '
         f'adds or edits: {excused}')
+
+
+def test_no_tests_module_reimplements_a_shared_javascript_name(tmp):
+    del tmp
+    sources, findings = _live_js()
+    assert sources, 'the tests tree enumerated no module'
+    unallowed = sorted(
+        f'{item.path}::{item.name} at line {item.line} owned by '
+        f'{item.owners}'
+        for item in findings
+        if (item.path, item.name) not in UNCONSOLIDATED_JS_NAMES)
+    assert not unallowed, (
+        'tests modules re-implement a shared helper\'s JavaScript name '
+        'with no row in UNCONSOLIDATED_JS_NAMES:\n' + '\n'.join(unallowed))
+
+
+def test_an_allowance_row_naming_no_live_javascript_site_fails(tmp):
+    del tmp
+    _, findings = _live_js()
+    live = {(item.path, item.name) for item in findings}
+    for key in sorted(UNCONSOLIDATED_JS_NAMES):
+        assert key in live, (
+            f'UNCONSOLIDATED_JS_NAMES row {key} has no live JavaScript '
+            're-implementation; a stale allowance is a refusal')
+        assert UNCONSOLIDATED_JS_NAMES[key].strip(), (
+            f'UNCONSOLIDATED_JS_NAMES row {key} carries no justification')
+
+
+def test_a_javascript_row_may_not_name_a_site_this_branch_introduced(tmp):
+    del tmp
+    introduced = _js_sites_this_branch_added()
+    if introduced is None:
+        return
+    excused = sorted(key for key in UNCONSOLIDATED_JS_NAMES
+                     if key in introduced)
+    assert not excused, (
+        'UNCONSOLIDATED_JS_NAMES rows excuse a declaration this branch '
+        f'added: {excused}')
+
+
+def _js_sites_this_branch_added():
+    """(path, name) keys the merge base does not already declare, or None.
+
+    Site-scoped, where the Python table's boundary is file-scoped, and
+    for a stated reason: this branch edits twelve of the eighteen files
+    the JavaScript residue lives in, for the unrelated `eventTarget`
+    migration, so forbidding every row in a file the branch touches would
+    forbid recording sites that predate the branch. What the two forms
+    share is the property that makes either a control at all — the table
+    cannot excuse a declaration the branch itself wrote — and this one
+    reaches it by reading the base's own declarations rather than the
+    branch's file list.
+
+    None rather than an empty set when the base cannot be read, for the
+    reason `branch_paths` gives: an empty set would read as the claim
+    that the branch added nothing, which is a claim about the branch and
+    not about what this checkout can see.
+    """
+    run = _text_in(ROOT)
+    for base in BRANCH_BASES:
+        merge_base = run(['git', 'merge-base', 'HEAD', base])
+        if not merge_base or not merge_base.strip():
+            continue
+        paths = sorted({key[0] for key in UNCONSOLIDATED_JS_NAMES})
+        sources = {}
+        for path in paths:
+            at_base = run(['git', 'show', f'{merge_base.strip()}:{path}'])
+            if at_base is not None:
+                sources[path] = at_base
+        try:
+            declared = js_declarations(sources)
+        except (AssertionError, SyntaxError) as exc:
+            raise AssertionError(
+                f'the merge base JavaScript does not parse: {exc}') from exc
+        before = {(path, item.name)
+                  for path, items in declared.items() for item in items}
+        return {key for key in UNCONSOLIDATED_JS_NAMES if key not in before}
+    return None
 
 
 def test_the_branch_diff_names_a_file_the_branch_edited(tmp):

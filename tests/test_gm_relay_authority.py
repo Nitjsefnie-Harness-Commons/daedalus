@@ -17,13 +17,14 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 RELAY_HOST = 'https://example.com'
 RELAYED = 'POST ' + RELAY_HOST + '/account'
 
 
-_RELAY_AUTHORITY_HARNESS = r"""
+_RELAY_AUTHORITY_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -33,14 +34,6 @@ const created = [];
 let createCalls = 0;
 const downloaded = [];
 let downloadCalls = 0;
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
-  };
-}
 
 const chrome = {
   storage: {

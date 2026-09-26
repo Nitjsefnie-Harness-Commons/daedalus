@@ -9,7 +9,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 REGISTER = 'POST /register'
 SYNC = 'POST /sync-tabs'
@@ -19,7 +20,7 @@ BOOT_STREAM = (503,)
 ONE = [SYNC, REGISTER]
 TWO = [SYNC, REGISTER, REGISTER]
 
-_REGISTER_HARNESS = r"""
+_REGISTER_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 const [backgroundPath, plan] = process.argv.slice(1);
@@ -31,10 +32,6 @@ const tabs = new Map([
   [7, { id: 7, title: 'Initial', url: 'https://page.example.com/7' }],
   [8, { id: 8, title: 'Other', url: 'https://page.example.com/8' }],
 ]);
-
-function eventTarget(listeners = []) {
-  return { addListener: listener => listeners.push(listener) };
-}
 
 function schedule(callback, delay) {
   const timer = { id: timers.length + 1, callback, delay, pending: true };
@@ -144,7 +141,7 @@ run().then(result => process.stdout.write(JSON.stringify(result)))
 """
 
 
-def _observe(*steps, planned, planned_stream=BOOT_STREAM):
+def _drive(*steps, planned, planned_stream=BOOT_STREAM):
     outcome = run_gate(
         require_node(), _REGISTER_HARNESS,
         [str(EXTENSION_ROOT / 'background.js')], cwd=ROOT,
@@ -170,7 +167,7 @@ def _posts(observation):
 def test_title_burst_arms_once_without_resetting(tmp):
     """Catches direct registration or a resetting timer."""
     del tmp
-    *events, fired = _observe(
+    *events, fired = _drive(
         _update(title='A'), _update(title='B'), _update(title='C'),
         {'fire': True}, planned=ONE)
     for event in events:
@@ -184,7 +181,7 @@ def test_title_burst_arms_once_without_resetting(tmp):
 def test_register_reads_live_tab_state_when_timer_fires(tmp):
     """Catches direct calls or payloads built from changeInfo."""
     del tmp
-    *_, fired = _observe(
+    *_, fired = _drive(
         _update(title='A'), _update(title='B'),
         {'id': 7, 'state': {
             'title': 'B', 'url': 'https://page.example.com/current'}},
@@ -198,7 +195,7 @@ def test_register_reads_live_tab_state_when_timer_fires(tmp):
 def test_different_tabs_keep_independent_timers(tmp):
     """Catches direct registration or a shared timer."""
     del tmp
-    *_, pending, fired = _observe(
+    *_, pending, fired = _drive(
         _update(7, title='A'), _update(8, title='X'),
         _update(7, title='B'), _update(8, title='Y'), {'fire': True},
         planned=TWO)
@@ -211,7 +208,7 @@ def test_different_tabs_keep_independent_timers(tmp):
 def test_fired_tab_can_arm_a_new_registration(tmp):
     """Catches direct calls or a map entry that is never deleted."""
     del tmp
-    first, fired, again, twice = _observe(
+    first, fired, again, twice = _drive(
         _update(title='A'), {'fire': True}, _update(title='B'),
         {'fire': True}, planned=TWO)
     assert first['delays'] == [250], first
@@ -225,7 +222,7 @@ def test_fired_tab_can_arm_a_new_registration(tmp):
 def test_url_burst_uses_the_same_coalescing_path(tmp):
     """Catches direct registerTab calls for URL changes."""
     del tmp
-    _, pending, fired = _observe(
+    _, pending, fired = _drive(
         _update(url='https://page.example.com/a'),
         _update(url='https://page.example.com/b'), {'fire': True},
         planned=ONE)
@@ -239,8 +236,8 @@ def test_url_burst_uses_the_same_coalescing_path(tmp):
 def test_registration_window_is_250_milliseconds(tmp):
     """Catches direct registration or a changed scheduler delay."""
     del tmp
-    pending, fired = _observe(_update(title='A'), {'fire': True},
-                              planned=ONE)
+    pending, fired = _drive(_update(title='A'), {'fire': True},
+                            planned=ONE)
     assert pending['delays'] == [250], pending
     assert len(_posts(fired)) == 1, fired
 

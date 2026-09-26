@@ -24,11 +24,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 
 _MAINWORLD_HARNESS = (
-    r"""
+    event_target_stub()
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -82,10 +84,6 @@ function nextDeadline() {
     if (at === null || entry.at < at) at = entry.at;
   }
   return at;
-}
-
-function eventTarget() {
-  return { addListener() {} };
 }
 
 function response(status, data) {
