@@ -52,24 +52,19 @@ class Signalled:
         self._job = job
     def __enter__(self):
         note("lock-waits", "wait")
-        # A bounded attempt, so "this request could not get the lock while
-        # the hold was in place" is an EVENT the test can wait for rather
-        # than a sample it has to take. The grace is fixture-internal: the
-        # marker it produces is a fact about the acquire, and a site on
-        # another stripe simply succeeds inside the window and is recorded
-        # as an overlap instead.
+        # Bounded, so "this request could not get the lock while the hold
+        # was in place" is an event a control waits for rather than a sample
+        # it takes. A site on another stripe succeeds inside the window and
+        # is recorded as an overlap instead.
         mine = threading.get_ident()
         if not self._real.acquire(timeout=_ACQUIRE_GRACE):
-            # One line each, in a shared file: three requests for ONE job
-            # would otherwise write one filename and count as one.
             note("blocked", self._job)
             note(f"blocked-{self._job}", "waited")
             note("settled", f"{mine} {self._job} blocked")
             self._real.acquire()
         else:
-            # The other half of the hand-off. A request that took a lock
-            # during the hold has also recorded what it was asked for, which
-            # is what makes the name check exact rather than hashed.
+            # The acquiring half of the hand-off, and the reason the name
+            # check is exact: the record carries what was ASKED FOR.
             note("settled", f"{mine} {self._job} acquired")
         last_acquirer[0] = mine
         # Read BEFORE this acquire joins the count: the question is whether
@@ -77,27 +72,18 @@ class Signalled:
         # moment it is taken.
         already = held[0] > 0
         held[0] += 1
-        # A holder announces `holding` BEFORE it acquires, so an acquire
-        # completing while that announcement is up is proof a hold was
-        # really taken. A holder that announces and does not hold never gets
-        # here, and the control that reads this marker skips instead of
-        # grading a run that held nothing.
-        #
-        # Never cleared: it is written once and read only while the holder
-        # is parked. Clearing it on release would let any OTHER request that
-        # took and dropped its own stripe mid-hold erase the witness — which
-        # is how the premise check was reading a run as unheld.
+        # The holder announces `holding` BEFORE it acquires, so an acquire
+        # completing under that announcement is proof a hold was really
+        # taken. Never cleared: any other request taking and dropping its own
+        # stripe mid-hold would erase it, and the premise check would read
+        # a held run as unheld.
         if (gate / "holding").exists():
             (gate / "holding-acquired").write_text(
                 "acquired", encoding="utf-8")
         if already:
-            # Two records, because the two questions differ. The global one
-            # says a lock was taken while another was held, and names the
-            # job that asked for it. The per-job one is that same fact keyed
-            # by the name asked for — which a mutation decorates, so a
-            # control that means "THIS job's hold did not cover it" reads
-            # the per-job file and one that means "nothing at all may take
-            # a lock during this hold" reads the global one.
+            # Two records for two questions: the global one is "any lock was
+            # taken during a hold", the per-job one is "THIS job's own hold
+            # did not cover it".
             note("overlap", self._job)
             note(f"overlap-{self._job}", "acquired-while-occupied")
         return self._real
@@ -146,34 +132,28 @@ def install():
                 # request is about to invalidate, which is the race.
                 if job != park_job or not (gate / "arm-park").exists():
                     return real_mark_dirty(root, job)
-                # Every armed call counts, not only the one that parks: the
-                # second request's mark_dirty is the signal that it has
-                # read its usage and passed its quota check.
+                # Every armed call counts, not only the parking one: the
+                # second request's mark_dirty is the signal that it has read
+                # its usage and passed its quota check.
                 dirty_calls[0] += 1
                 if parked:
                     return real_mark_dirty(root, job)
                 parked.append(job)
                 # Counted from here, not from process start: this thread
-                # has already been through its own lock, and the mint
-                # before it, and only the SECOND request's acquisition is
-                # the thing worth waiting for.
+                # and the mint before it have both been through a lock.
                 (gate / "lock-waits").unlink(missing_ok=True)
                 (gate / "parked").write_text("y", encoding="utf-8")
-                # Two ways out, and BOTH are recorded events rather than
-                # arrivals. A request that merely REACHED a lock has not
-                # shown it was kept out of one, and waiting on that is what
-                # let this control go green with the hold removed: the poll
-                # landed in the window between the arrival and the acquire.
+                # Two ways out, both recorded events and never arrivals: a
+                # request that merely REACHED a lock has not shown it was
+                # kept out of one, and the window between the two is what
+                # let this control go green with the hold removed.
                 #
                 #  - the other request was recorded BLOCKED from this job's
-                #    lock, a real failed acquire against a counted hold. It
-                #    cannot get past, so this thread may finish and the
-                #    other will read what this one wrote.
-                #  - the other request reached its OWN mark_dirty, which is
-                #    past its usage read and quota check. That only happens
-                #    when this thread was not holding, so waiting here is
-                #    what forces the torn state to be visible instead of
-                #    leaving both answers to a race.
+                #    lock, so it cannot get past and this thread may finish.
+                #  - it reached its OWN mark_dirty, which is past its usage
+                #    read and quota check. That only happens when this
+                #    thread was not holding, so waiting for it is what
+                #    forces the torn state to be visible.
                 try:
                     while not (dirty_calls[0] >= 2 or _blocked() >= 1):
                         time.sleep(0.005)
@@ -202,8 +182,7 @@ def install():
             time.sleep(0.01)
         (gate / "lock-calls").unlink(missing_ok=True)
         # Announced BEFORE the acquire, so the acquire path can witness that
-        # a hold really happened. A neutered holder announces here and never
-        # acquires, which is exactly what the premise check has to notice.
+        # a hold really happened.
         (gate / "holding").write_text("announcing", encoding="utf-8")
         with Signalled(held_lock, held_job):
             (gate / "holder-thread").write_text(
