@@ -32,9 +32,8 @@ SHA = 'a' * 40
 # The interval the measured watchers poll at, and what the hourly figure
 # divides by. Nothing in the measurement itself reads a clock.
 TICK = 2
-# What one idle poll of either watcher may spend, as an upper bound. Named
-# once so the doubled-poll control is checked against the bound the idle
-# controls actually enforce rather than a copy of it.
+# What one idle poll of either watcher may spend. Named so the doubled-poll
+# control is checked against the bound the idle controls enforce.
 IDLE_POLL_BOUND = 1
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
 
@@ -292,14 +291,13 @@ def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
 
     One poll of two identical calls and two polls of one call each record
     the same sequence, so a figure read off the sequence answers 1 for both.
-    The copy here is the tracked comment watcher with one more of the same
-    paginate spliced in, run through the same measure the idle controls
-    use, so what the figure refuses is the figure every bound rests on.
+    The copy is the tracked comment watcher with one more of the same
+    paginate spliced in, run through the measure the idle controls use.
     """
     here = Path(tmp) / 'doubled'
     here.mkdir(parents=True, exist_ok=True)
     script = once_run.planted(here, 'pr_comment_watch.py', _PULL_PAGE,
-                                _IDENTICAL_POLL)
+                              _IDENTICAL_POLL)
     fake = _fake_gh.FakeGh(here, _idle_answers())
     per_poll, seen = once_run.measure(script, [PR], fake, TICK)
     print(f'\n  a poll asking twice: {per_poll} call(s) per poll, from '
@@ -309,13 +307,12 @@ def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
 
 
 def test_a_once_poll_costs_what_a_loop_poll_costs(tmp):
-    """The load-bearing assumption, checked against the loop it stands in for.
+    """The load-bearing assumption, checked against the loop it stands for.
 
     The budget is counted from one `--once` invocation, so the loop has to
     ask the same things in the same order or the figure measures a path
     nobody runs. Nothing here is timed and no boundary is inferred: both
-    halves are read from the call log, and a chunk that does not line up is
-    a different poll whatever the loop was doing.
+    halves are read from the call log.
     """
     for name, args in (('pr_comment_watch.py', [PR]),
                        ('ci_watch.py', [BRANCH])):
@@ -329,16 +326,31 @@ def test_a_once_poll_costs_what_a_loop_poll_costs(tmp):
         assert polled[chunk:] == trial, (name, polled[chunk:], trial)
 
 
-def _base_script(directory, name):
-    """The base commit's copy of one watcher, or None when unreachable."""
+_BASE_POLL_READS = '    for kind, path in surfaces(repo, pr):\n'
+_BASE_POLL_TWICE = '    for kind, path in surfaces(repo, pr) * 2:\n'
+# The base watcher's three comment surfaces; its own state read is outside
+# that loop, which is why a doubled pass is three calls and not four.
+BASE_SURFACES = 3
+
+
+def _base_script(directory, name, doubled=False):
+    """The base commit's copy of one watcher, or None when unreachable.
+
+    `doubled` reads every comment surface twice per poll: a defect only a
+    copy can carry, and the one the base's own cost measure would refuse.
+    """
     found = subprocess.run(
         ['git', '-C', str(ROOT), 'show', f'{BASE}:.claude/skills/'
          f'changing-daedalus/{name}'], capture_output=True)
     if found.returncode != 0:
         return None
+    text = found.stdout.decode('utf-8')
+    if doubled:
+        assert text.count(_BASE_POLL_READS) == 1, name
+        text = text.replace(_BASE_POLL_READS, _BASE_POLL_TWICE)
     Path(directory).mkdir(parents=True, exist_ok=True)
     path = Path(directory) / name
-    path.write_bytes(found.stdout)
+    path.write_text(text, encoding='utf-8')
     return path
 
 
@@ -374,15 +386,12 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
     before = {}
     for name, args in (('pr_comment_watch.py', [PR]),
                        ('ci_watch.py', [BRANCH])):
-        source = _base_script(Path(tmp) / 'before', name)
-        if source is None:
+        here = Path(tmp) / 'before' / name
+        script = _base_script(here, name)
+        if script is None:
             _util.skip(f'base commit {BASE} is not reachable in this '
                        f'checkout; the BEFORE figure is never invented')
-        before_dir = Path(tmp) / 'before' / f'src-{name}'
-        before_dir.mkdir(parents=True, exist_ok=True)
-        script = before_dir / name
-        script.write_bytes(source.read_bytes())
-        fake = _fake_gh.FakeGh(before_dir, _base_answers())
+        fake = _fake_gh.FakeGh(here, _base_answers())
         before[name] = len(once_run.once(
             script, args + ['--interval', str(TICK)], fake))
     total = sum(before.values())
@@ -390,6 +399,34 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
     print(f'\n  BEFORE an idle watched pull request cost {total:.0f} gh '
           f'call(s) per poll ({before}), '
           f'{total * 60:.0f}/hour at the 60s default tick')
+
+
+def test_the_base_figure_is_read_off_the_base_script(tmp):
+    """`total >= 6` discriminates only if the 6 was measured, not remembered.
+
+    A floor a constant satisfies proves nothing, so the base comment watcher
+    is measured again with every comment surface read twice per poll. The
+    figure has to move with the script, which is what says the BEFORE number
+    is a measurement and the AFTER number beside it is one too.
+    """
+    if _fake_gh.WINDOWS:
+        _util.skip('the base scripts call gh by bare name, which no PATH '
+                   'seam can answer on Windows; the BEFORE figure and the '
+                   'measurement method are platform-independent')
+    figures = {}
+    for doubled in (False, True):
+        here = Path(tmp) / ('twice' if doubled else 'once')
+        script = _base_script(here, 'pr_comment_watch.py', doubled=doubled)
+        if script is None:
+            _util.skip(f'base commit {BASE} is not reachable in this '
+                       f'checkout; the BEFORE figure is never invented')
+        fake = _fake_gh.FakeGh(here, _base_answers())
+        figures[doubled] = len(once_run.once(
+            script, [PR, '--interval', str(TICK)], fake))
+    print(f'\n  the base comment watcher: {figures[False]} call(s) per poll, '
+          f'{figures[True]} with every surface read twice')
+    assert figures[False], figures
+    assert figures[True] == figures[False] + BASE_SURFACES, figures
 
 
 def test_the_children_die_with_their_parent(tmp):
