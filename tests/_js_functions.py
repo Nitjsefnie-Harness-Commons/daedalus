@@ -14,18 +14,29 @@ first literal closes in the last. So the unit is a `+` concatenation of
 string constants — its constant operands in the order written, with a
 non-constant operand becoming a space, which is bracket-neutral and so
 leaves a body balanced across it. A constant not in such an expression
-is a document of its own. A bare `ast.Expr` string statement is prose
-about the module rather than a value in it, and is the one shape left
-out; an f-string's literal parts are read with their doubled braces
-undoubled, because the JavaScript they become has single ones.
+is a document of its own, which is what an f-string's parts are read as
+and what a `''.join` of lines is not (see the bypass list). A bare
+`ast.Expr` string statement is prose about the module rather than a
+value in it; an f-string's literal parts are read with their doubled
+braces undoubled, because the JavaScript they become has single ones.
 
 THE ADMITTED SUBSET. Three declaration forms are recognised, and each
 one binds a name a later call can reach:
 
-  * `function name(...) {...}`, with or without `async`;
-  * `const|let|var name = function (...) {...}`;
+  * `function name(...) {...}`, with or without `async` and with or
+    without the generator `*`;
+  * `const|let|var name = function (...) {...}`, the same with `*`;
   * `const|let|var name = (...) => {...}` and `= (...) => <expression>`,
     and the same arrows over one bare parameter, `= name => ...`.
+
+NESTING, stated as the code behaves rather than as it was designed. This
+reader is not a statement parser: it walks a token stream and jumps
+PAST the body of every declaration it recognises, so a declaration
+inside a recognised function's or arrow's body is skipped, while one
+inside an `if`, a `try` or an object literal is found, because nothing
+was open when it was reached. A shared helper re-implemented as a named
+function inside a harness's own wrapper function is therefore invisible,
+and that shape is in the bypass list below.
 
 Deliberately NOT recognised, each for a stated reason. An unrecognised
 form is a bypass, so each of these is named here rather than left as a
@@ -40,25 +51,32 @@ reader that silently stops:
     for exactly that reason.
   * an ANONYMOUS function expression, and an IIFE. Neither binds a
     name, so neither can be the shared helper's name.
-  * a class declaration, and any other name-binding form (`var` inside
+  * a class declaration, and any other name-binding form: `var` inside
     a `for` head, a function reached through a computed property or a
-    spread, a destructuring default). This reader has no object-literal
-    and no statement-context model, so it finds declarations at the top
-    level of a document and nothing nested inside one.
-  * a function whose body opens and never closes while PROGRAM FOLLOWS
-    it in the same document. That raises, naming the constant: the
-    reader has lost the plot, and every later declaration would be
-    read at the wrong nesting.
+    spread, a destructuring default, and a declaration nested inside
+    another declaration's body.
+  * a program assembled by something other than `+`: `''.join(lines)`,
+    `%`-formatting, `.format()`, or a body whose closing brace is
+    written in a different Python expression from the one that opened
+    it. A harness that builds its program that way is a bypass of this
+    rule, and there is one shipped module on this tree that does
+    (`tests/test_dashboard_harness.py`).
 
-Two boundaries this reader draws rather than hides. A document that
-simply STOPS inside a body is a fragment — a list of lines a later step
-joins, a fixture built to attack a wrapper's delimiters — and is
-dropped, because there is no program after it to mis-attribute; a
-function split across two separate Python expressions is dropped for
-the same reason, and is a named bypass. And the regexp/comment
-decision after `/` uses the usual previous-token heuristic extended
-with the control-statement head rule, so `if (x) /re/.test(y)` reads as
-a regexp where `total / count` reads as division.
+WHAT RAISES AND WHAT IS DROPPED. A bracket that closes the WRONG thing
+raises, naming the constant: that is the one thing the tolerant reader
+refuses to guess at, because every later declaration in that document
+would then be read at the wrong nesting. A document that merely RUNS
+OUT with a bracket still open is a FRAGMENT and is dropped — a list of
+lines a later step joins, a fixture built to attack a wrapper's
+delimiters — and the reader cannot tell that from a program whose author
+left it truncated. The cost of that tolerance is a named bypass: a
+truncated declaration is silently absent from the scan that exists to
+find it, and a harness that loses its closing brace gets no refusal.
+
+The regexp/comment decision after `/` uses the usual previous-token
+heuristic extended with the control-statement head rule, so
+`if (x) /re/.test(y)` reads as a regexp where `total / count` reads as
+division.
 
 SIZE. `body_lines` counts the lines from a body's first line to its
 last, which is the measure `min-similarity-lines` uses on a Python
@@ -84,7 +102,6 @@ KEYWORDS_BEFORE_REGEXP = frozenset({
 CONTROL_HEADS = frozenset({'if', 'while', 'for', 'with', 'switch', 'catch'})
 
 Declaration = namedtuple('Declaration', 'name offset body_lines')
-_Unreadable = namedtuple('_Unreadable', 'name offset')
 
 
 class _JsToken:
@@ -173,6 +190,12 @@ def documents(source, path='?'):
     offset in the joined text maps back to the constant it came from.
     A bare `ast.Expr` string statement is prose about the module rather
     than a value in it, and is the one shape left out.
+
+    An f-string is ONE document whether or not it is concatenated: its
+    literal parts are separate `ast.Constant` nodes, so reading them one
+    at a time splits any body an interpolated value lands in, and each
+    half is then a fragment. A `FormattedValue` becomes a space, which
+    is bracket-neutral, so the body stays balanced across it.
     """
     tree = ast.parse(source, filename=path)
     prose = {id(statement.value) for statement in ast.walk(tree)
@@ -183,6 +206,15 @@ def documents(source, path='?'):
     for node in _concatenations(tree, parents):
         pieces = []
         _strings_in(node, pieces, consumed)
+        joined.append(_join(pieces))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        if id(node) in prose or id(node) in consumed:
+            continue
+        pieces = []
+        for part in node.values:
+            _strings_in(part, pieces, consumed)
         joined.append(_join(pieces))
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Constant)
@@ -413,9 +445,16 @@ def _regexp(text, start):
     return index, False
 
 
-def _closing(tokens, index):
-    """The index of the token closing the bracket `tokens[index]` opens,
-    or None when this reader cannot find one."""
+def _closing(tokens, index, where):
+    """The index of the token closing the bracket `tokens[index]` opens.
+
+    None when the document simply RUNS OUT with the bracket still open —
+    the fragment case, which is a program this reader cannot measure
+    rather than one it cannot read. A bracket that closes the WRONG thing
+    is a different failure and raises, because that is a document whose
+    nesting this reader has lost and every later declaration in it would
+    be read at the wrong depth.
+    """
     stack = [OPENERS[tokens[index].text]]
     cursor = index + 1
     while cursor < len(tokens):
@@ -424,7 +463,9 @@ def _closing(tokens, index):
             stack.append(OPENERS[token.text])
         elif token.kind == 'punct' and token.text in CLOSERS:
             if token.text != stack[-1]:
-                return None
+                raise AssertionError(
+                    f'{where}: expected {stack[-1]!r}, found {token.text!r} '
+                    f'at line {token.line}')
             stack.pop()
             if not stack:
                 return cursor
@@ -432,7 +473,7 @@ def _closing(tokens, index):
     return None
 
 
-def _arrow(tokens, index):
+def _arrow(tokens, index, where):
     """The `{` a function's parameter list is followed by, the token just
     past an expression-bodied arrow's, or None for neither.
 
@@ -440,7 +481,7 @@ def _arrow(tokens, index):
     one after the `)` that closes it: `=>` for an arrow, `{` for a
     `function` body.
     """
-    after = _closing(tokens, index)
+    after = _closing(tokens, index, where)
     if after is None or after + 1 >= len(tokens):
         return None
     following = tokens[after + 1]
@@ -451,7 +492,7 @@ def _arrow(tokens, index):
     return None
 
 
-def _assigned(tokens, index):
+def _assigned(tokens, index, where):
     """The declaration in a `const|let|var NAME = <function>` head."""
     if (index + 2 >= len(tokens) or tokens[index + 1].kind != 'name'
             or tokens[index + 2].kind != 'punct'
@@ -465,6 +506,12 @@ def _assigned(tokens, index):
     if (cursor < len(tokens) and tokens[cursor].kind == 'name'
             and tokens[cursor].text == 'function'):
         cursor += 1
+        if (cursor < len(tokens) and tokens[cursor].kind == 'punct'
+                and tokens[cursor].text == '*'):
+            # A generator, exactly as the `function * name()` DECLARATION
+            # form is read; accepting one and not the other would be an
+            # accident of spelling rather than a decision.
+            cursor += 1
         if (cursor < len(tokens) and tokens[cursor].kind == 'name'
                 and tokens[cursor].text != '('):
             cursor += 1
@@ -479,36 +526,19 @@ def _assigned(tokens, index):
         if (cursor >= len(tokens) or tokens[cursor].kind != 'punct'
                 or tokens[cursor].text != '('):
             return None
-        body = _arrow(tokens, cursor)
+        body = _arrow(tokens, cursor, where)
     if body is None:
         return None
     if tokens[body].kind == 'punct' and tokens[body].text == '{':
-        end = _closing(tokens, body)
+        end = _closing(tokens, body, where)
         if end is None:
-            if _ends_here(tokens, body):
-                return None
-            return _Unreadable(name, tokens[index].line), index + 1
+            return None
         return (Declaration(name, tokens[index].line,
                             tokens[end].line - tokens[body].line + 1), end)
     return Declaration(name, tokens[index].line, 1), body
 
 
-def _ends_here(tokens, index):
-    """Whether the document stops at the bracket `tokens[index]` opens.
-
-    A tests module also holds JavaScript that is a FRAGMENT on purpose: a
-    list of lines a later step joins, a fixture built to attack a
-    wrapper's delimiters. Such a document runs out mid-body, and there is
-    no program after it for the reader to mis-attribute, so the function
-    is not a declaration this reader can measure and is not reported. A
-    body that opens with program still following it is a different thing
-    — the reader has lost the plot and every later declaration would be
-    read at the wrong nesting — and that is what raises.
-    """
-    return all(token.kind == 'junk' for token in tokens[index + 1:])
-
-
-def _function_at(tokens, index):
+def _function_at(tokens, index, where):
     """(declaration, index after it) for a `function` keyword token."""
     cursor = index + 1
     if (cursor < len(tokens) and tokens[cursor].kind == 'punct'
@@ -521,18 +551,16 @@ def _function_at(tokens, index):
         cursor += 1
     if cursor < len(tokens) and tokens[cursor].kind == 'punct' \
             and tokens[cursor].text == '(':
-        closed = _closing(tokens, cursor)
+        closed = _closing(tokens, cursor, where)
         if closed is None:
             return None, index + 1
         cursor = closed + 1
     if cursor >= len(tokens) or tokens[cursor].kind != 'punct' \
             or tokens[cursor].text != '{':
         return None, index + 1
-    end = _closing(tokens, cursor)
+    end = _closing(tokens, cursor, where)
     if end is None:
-        if name is None or _ends_here(tokens, cursor):
-            return None, index + 1
-        return _Unreadable(name, tokens[index].line), index + 1
+        return None, index + 1
     if name is None:
         return None, end + 1
     return (Declaration(name, tokens[index].line,
@@ -546,10 +574,12 @@ def declarations(text, where='?'):
     keyword or the `const` sits at, and the body's line span — so a
     caller can report the Python line it came from and floor the size.
 
-    A `function name(...) {` whose body this reader cannot find the end
-    of raises, naming the constant: that is the one thing the tolerant
-    reader refuses to guess at, because a function silently absent from
-    the scan that exists to find it is a bypass with no trace.
+    A bracket that closes the WRONG thing raises, naming the constant:
+    that is the one thing the tolerant reader refuses to guess at,
+    because every later declaration in that document would then be read
+    at the wrong nesting. A document that merely runs out with a bracket
+    open is a fragment and is dropped instead — see the module
+    docstring.
     """
     tokens = _lex(text)
     found = []
@@ -557,9 +587,9 @@ def declarations(text, where='?'):
     while index < len(tokens):
         token = tokens[index]
         if token.kind == 'name' and token.text == 'function':
-            declaration, index = _function_at(tokens, index)
+            declaration, index = _function_at(tokens, index, where)
         elif token.kind == 'name' and token.text in ('const', 'let', 'var'):
-            assigned = _assigned(tokens, index)
+            assigned = _assigned(tokens, index, where)
             if assigned is None:
                 index += 1
                 continue
@@ -567,10 +597,6 @@ def declarations(text, where='?'):
         else:
             index += 1
             continue
-        if isinstance(declaration, _Unreadable):
-            raise AssertionError(
-                f'{where}: function {declaration.name} opens a body at line '
-                f'{declaration.offset} that never closes')
         if declaration is not None:
             found.append(declaration)
     return found
