@@ -29,9 +29,11 @@ The two outcomes differ in what the read costs once nothing is routed. A
 refused read resolves to a tracked callable, so the guard reads that
 callable's body and the shape stays clean. A declared read joins to an
 unprovable sender, and a `tab` through a name holding one is reported
-whatever that callable would have done -- the cost the subscript of the same
-dict has always carried, here extended to the read forms that share its
-lookup.
+whatever that callable would have done. Which read forms pay that is the
+MEMBER's own split, not the domain's: the freshness stores pay it on the
+subscript and read clean on the container reads, the starred and
+name-source stores the other way round, and `_SILENT` carries that split per
+member beside the issue each is parked against.
 
 **Not this suite's bucket.** A store path that folds an unreadable source
 into a `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`, `update(...)`,
@@ -39,7 +41,9 @@ into a `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`, `update(...)`,
 joined to an unprovable sender. A bare routed-lambda call through it still
 reads clean, because a `tab` living in the callee's body is not a reporting
 shape for an unprovable sender. That is a different mechanism, tracked as
-1010, and none of those members is a row here.
+1010, and none of those members is a row here -- except through a source the
+model already holds unaccountable, which no store folds at all and which
+`_SILENT` carries by read form.
 """
 import sys
 from pathlib import Path
@@ -70,6 +74,11 @@ _CALL = '(1, tab=args.flag)'
 # A source the model cannot read as pairs.
 _UNREADABLE = 'def mk():\n    return dict(zip(["k"], [relay()]))\n'
 
+# A source the model cannot read as pairs, reached through a NAME -- the same
+# unaccountable dict a store consumes without resolving it, so a store that
+# folds the name inherits the emptiness rather than the unreadable mark.
+_UNACCOUNTABLE = 'o = {}\no.update(zip(["k"], [relay()]))'
+
 _AXES = {
     # `update`, a positional source the model reads as pairs.
     'update-pairs': 'd = {}\nd.update([("k", relay())])',
@@ -89,11 +98,14 @@ _AXES = {
     # `update`, a positional source it reads and a `**` source it does
     # not. The readable pair is folded, then the unreadable mark keeps
     # the OWNER's items and discards the local fold, so a read of the
-    # readable pair's own key joins. This is the order that over-reports,
-    # and it is the only one spellable: `d.update(mk(), [("a", 1)])` is a
-    # runtime TypeError and `d.update(**o, [("a", 1)])` a SyntaxError, so
-    # folding the readable source second -- which would keep the pair --
-    # is unreachable rather than unmeasured.
+    # readable pair's own key joins. This is the order that over-reports.
+    # Both orders are spellable and neither is reachable as a KEEP: a
+    # readable source second is dropped either way, because
+    # `_apply_mapping_store` returns on the first `None` source, so the
+    # over-report is identical in every order of the two. The orderings
+    # that are not spellable at all are the mixed positional forms --
+    # `d.update(mk(), [("a", 1)])` is a runtime TypeError and
+    # `d.update(**o, [("a", 1)])` a SyntaxError.
     'update-star-mixed-unreadable': (
         'def mk():\n    return dict(zip(["j"], [1]))\nd = {}\n'
         'd.update([("k", relay())], **mk())'),
@@ -178,6 +190,7 @@ _ACCOUNTED = {
 # stores report on the subscript and read clean on the container reads, the
 # starred source the other way round.
 _CONTAINER_READS = ('get', 'setdefault')
+_SUBSCRIPT = ('subscript',)
 
 # The rest of the domain, at the polarity that still reads silent. A key the
 # model recorded while it could still see the value, and an unreadable source
@@ -185,21 +198,43 @@ _CONTAINER_READS = ('get', 'setdefault')
 # loses: the read answers the recorded value or its own default, so a
 # `relay()` the runtime really does call is reported nothing. Each names the
 # issue it is parked against, because the census's value is that its
-# unconsidered bucket is empty BY NAME.
+# unconsidered bucket is empty BY NAME. The fourth field is the clean cost of
+# the read forms the member does NOT name: the member's own shape already
+# marks a name unprovable, so those reads report whatever the callable in
+# that name would have done, and the clean counterpart pays for it.
 _SILENT = {
     'stale-recorded-zip': (
         'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154,
-        _CONTAINER_READS),
+        _CONTAINER_READS, (0, 1)),
     'stale-recorded-frozenset': (
         'd = {"k": ordinary}\nd.update(frozenset([("k", relay())]))', 1154,
-        _CONTAINER_READS),
+        _CONTAINER_READS, (0, 1)),
     'stale-recorded-later-store': (
         'd = {"k": ordinary}\nd.update(zip(["j"], [1]))'
-        '\nd.update(zip(["k"], [relay()]))', 1154, _CONTAINER_READS),
+        '\nd.update(zip(["k"], [relay()]))', 1154, _CONTAINER_READS, (0, 1)),
     # A positional source reached through a star, so the container answers
     # the subscript from the fold and joins the two container reads instead.
     'update-starred-source': (
-        'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, ('subscript',)),
+        'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, _SUBSCRIPT,
+        (0, 1)),
+    # A source reached through a NAME the model already holds as
+    # unaccountable. It takes `_source_items`' `(items, False)` branch, so
+    # the store never reaches `_mark_unprovable` on the OWNER: the container
+    # lands at `items=[]`, `length=None`, no unknown-key slot, and every read
+    # of it answers a clean absence. The two container reads join anyway --
+    # the name is marked, and that costs the clean row its `(0, 1)` -- while
+    # the subscript binds the callable itself, which is #1010's invoke arm
+    # on a bare source and #1162's on a starred one. `dict(<name>)` is the
+    # same defect silent on all three forms, and is filed as 1163.
+    'update-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(o)', 1010, _SUBSCRIPT, (0, 1)),
+    'update-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**o)', 1162, _SUBSCRIPT, (0, 1)),
+    'update-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**o})', 1162, _SUBSCRIPT,
+        (0, 1)),
+    'ior-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {}\nd |= o', 1010, _SUBSCRIPT, (0, 1)),
 }
 
 
@@ -299,19 +334,25 @@ def test_every_silent_member_is_listed_and_not_refused(tmp):
     for, so each one left is listed against the issue it is parked on and
     PINNED: the pin is the defect, so a repair turns this red on the very
     commit that has to move the member into `_AXES`. The clean counterpart
-    is pinned beside it, because a fix that made every read of that key
-    join would be a new false positive rather than a repair."""
-    assert not {name for name, _ in _AXES.items()} & set(_SILENT)
+    is pinned beside it, on EVERY read form rather than only the silent one,
+    because a fix that made every read of that key join would be a new false
+    positive rather than a repair -- and which form that would be is the
+    member's own split, so neither form's cost can be assumed."""
+    assert not {store for store, _, _, _ in _SILENT.values()} \
+        & set(_AXES.values())
     assert all(isinstance(issue, int) and issue > 0
-               for _, issue, _ in _SILENT.values())
-    for label, (store, _, names) in sorted(_SILENT.items()):
-        for name in names:
-            read = _READS[name]
+               for _, issue, _, _ in _SILENT.values())
+    for label, (store, _, names, reported) in sorted(_SILENT.items()):
+        for name, read in sorted(_READS.items()):
+            clean = _verdict(tmp, store, read, _CLEAN)
+            assert clean == ((0, 0) if name in names else reported), (
+                label, name, clean)
+            if name not in names:
+                continue
             calls, found = _verdict(tmp, store, read)
             assert (calls, found) == (1, 0), (
                 label, name, calls, found,
                 'a repair moves the member into _AXES, not into the suite')
-            assert _verdict(tmp, store, read, _CLEAN) == (0, 0), (label, name)
 
 
 def main():
