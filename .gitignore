@@ -261,6 +261,7 @@
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
+!/tests/_branch_boundary.py
 !/tests/_bridge.py
 !/tests/_bridge_fake_oracle_harness.py
 !/tests/_case_fold.py

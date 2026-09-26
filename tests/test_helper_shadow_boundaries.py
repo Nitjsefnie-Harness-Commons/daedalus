@@ -322,7 +322,10 @@ def test_the_binder_agrees_with_cpython(tmp):
         _, binds = _scan(ast.parse(source))
         walked = name in binds
         namespace = {}
-        exec(compile(source, label, 'exec'), namespace)  # noqa: S102
+        # The interpreter IS the oracle here, so executing the case is
+        # the point rather than a shortcut; it is a literal the file
+        # itself constructed.
+        exec(compile(source, label, 'exec'), namespace)  # pylint: disable=exec-used
         interpreted = name in namespace
         if walked != interpreted:
             disagreed.append((label, walked, interpreted))

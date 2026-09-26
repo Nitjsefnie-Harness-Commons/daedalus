@@ -526,10 +526,19 @@ SUITE_RUNNING_JOBS = ('suites', 'coverage-matrix')
 
 
 def _checkout_width(job):
-    """The `fetch-depth` one job's checkout step asks for, or None."""
-    for step in complete_job_mapping(_tests_yml(), job).get('steps', []):
-        if 'actions/checkout@' in str(step.get('uses', '')):
-            return str(step.get('with', {}).get('fetch-depth', '')) or None
+    """The `fetch-depth` one job's checkout step asks for, or None.
+
+    A step with no `with:` block at all asks for nothing, which is the
+    default and not a value, so it reads as None here.
+    """
+    mapping = complete_job_mapping(_tests_yml(), job) or {}
+    for step in mapping.get('steps') or []:
+        # A step the reader could not classify decodes to None; it has no
+        # checkout and therefore no fetch-depth to be missing.
+        if not step or 'actions/checkout@' not in str(step.get('uses', '')):
+            continue
+        inputs = step.get('with') or {}
+        return str(inputs.get('fetch-depth', '')) or None
     return None
 
 
