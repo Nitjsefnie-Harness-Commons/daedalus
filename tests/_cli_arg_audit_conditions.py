@@ -13,15 +13,16 @@ was watched go red with its own condition removed.
 What no row here is worth reading as: ``frame_read``'s attribute arm and the
 member test inside it cannot be told apart by any control in the tree - two
 separate them from the rest. Sixteen shapes of refusal reach neither this table
-nor the control, each planted behaviour-neutrally in the real resolver with
-both suites green, and each named in the suite beside the code that misses it:
-one that is not a return at all (raised, raised through a helper, asserted);
-one that is not a top-level statement of a scoped function (inside a ``for``,
-a ``while``, a ``try``/``except``, a ``try``/``finally``, a ``with``, a
-``match``, a ``try``'s ``else``, a lambda, a comprehension, a closure); one
-nested inside
-an arm's body rather than beside it, and one nested twice; and one written
-inside a function the walk's scope does not name, which is how
+nor the control: a count over a declared, behaviour-neutral plant set, so a
+shape nobody has planted is still an unnamed hole and the count is falsifiable
+by re-deriving it from the plants. Each was planted in the real resolver with
+both suites green, and each is named in the suite beside the code that misses
+it - one that is not a return at all (raised, raised through a helper,
+asserted); one that is not a top-level statement of a scoped function (inside a
+``for``, a ``while``, a ``try``/``except``, a ``try``/``finally``, a ``with``,
+a ``match``, a ``try``'s ``else``, a lambda, a comprehension, a closure); one
+nested inside an arm's body rather than beside it, and one nested twice; and
+one written inside a function the walk's scope does not name, which is how
 ``reflective_builtin_call`` refuses today.
 
 The row key is the code's own text, so a behaviour-preserving rewrite that
