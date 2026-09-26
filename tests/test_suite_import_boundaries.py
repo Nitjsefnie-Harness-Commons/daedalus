@@ -31,13 +31,12 @@ provides, which is a broken import rather than this defect. A module the
 detector cannot parse fails the control, naming the file, rather than
 being dropped.
 
-`ALLOWED` is a shrink-only table over the sites whose importing file an
-open pull request or another seat owns, which this branch may not edit. A
-row is added only by a merge that put the file in someone's territory, and
-removing a row is a move rather than a deletion: the table is pinned on
-both sides, so an offender absent from it is a finding AND a row that no
-longer names a live site is a stale finding. It cannot grow to hide this
-branch's own work.
+`ALLOWED` is a shrink-only table over the sites whose fix would edit a
+file another change owns, which this branch may not edit; #1160 is the
+record of what it carries. Removing a row is a move rather than a
+deletion: the table is pinned on both sides, so an offender absent from
+it is a finding AND a row that no longer names a live site is a stale
+finding. It cannot grow to hide this branch's own work.
 
 `tests/test_helper_shadow_boundaries.py` is the sibling control, and it
 names this one: it reports a name a suite binds locally that a
@@ -69,67 +68,119 @@ Import = namedtuple('Import', 'path lineno module spelling')
 Allowance = namedtuple('Allowance', 'path module reason')
 
 ALLOWED = (
-    # A whole-module import, so there is no helper to relocate: the module
-    # it names is held under the #1094 eventTarget rule.
-    Allowance('tests/test_dashboard_gate.py',
-              'test_dashboard_behaviour', 'PR 1082, #1094 eventTarget'),
-    Allowance('tests/test_dashboard_harness.py',
-              'test_dashboard_behaviour', 'PR 1082'),
-    Allowance('tests/test_dashboard_node_retry.py',
-              'test_dashboard_behaviour', 'PR 1082'),
+    # Two causes, both #1160: a fix edits a file another change owns, so
+    # every row's reason is one clause of that. A whole-module import has
+    # no helper to move — the module it names is itself the held file.
+    Allowance('tests/test_dashboard_gate.py', 'test_dashboard_behaviour',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_dashboard_harness.py', 'test_dashboard_behaviour',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_dashboard_harness_metadata.py',
+              'test_dashboard_behaviour',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_dashboard_node_retry.py', 'test_dashboard_behaviour',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_generator_second_consumption.py',
+              'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_hotfix_scope_clear.py', 'test_hotfix_scope',
-              'Issue 1080 / 1111 / 678'),
-    Allowance('tests/test_starvation_bounds.py', 'test_cli', 'PR 1122'),
-    Allowance('tests/test_tab_routing_collapse.py',
-              'test_tab_routing', 'PR 1063'),
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_starvation_bounds.py', 'test_cli',
+              '#1160: the importing suite is being changed alongside its '
+              'helper'),
+    Allowance('tests/test_stream_fake_oracle.py', 'test_stream_backoff',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_collapse.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_comprehension_probe.py',
-              'test_tab_routing_collapse', 'PR 1063'),
+              'test_tab_routing_collapse',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_dict_construction.py',
-              'test_tab_routing_dict_stores', 'PR 1063'),
+              'test_tab_routing_dict_stores',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_dict_lengths.py',
-              'test_tab_routing_dict_stores', 'PR 1063'),
+              'test_tab_routing_dict_stores',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_dict_stores.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_dict_stores.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_dict_stores.py',
-              'test_tab_routing_store_sweep', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_bodies.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_closure.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_heads.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_keys.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_net.py',
-              'test_tab_routing_js', 'PR 1063'),
+              'test_tab_routing_store_sweep',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_bodies.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_closure.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_heads.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_keys.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_net.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_js_operations.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_js_reach.py',
-              'test_tab_routing_js', 'PR 1063'),
+              'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_js_reach.py', 'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_js_templates.py',
-              'test_tab_routing_js', 'PR 1063'),
-    Allowance('tests/test_tab_routing_match.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_match.py',
-              'test_tab_routing_collapse', 'PR 1063'),
+              'test_tab_routing_js',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_match.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_match.py', 'test_tab_routing_collapse',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_positions.py',
-              'test_tab_routing_dict_stores', 'PR 1063'),
+              'test_tab_routing_dict_stores',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_sequence_reads.py',
-              'test_tab_routing_dict_stores', 'PR 1063'),
-    Allowance('tests/test_tab_routing_set_operations.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_setdefault.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_starred_arity.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_store_sweep.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_unprovable.py',
-              'test_tab_routing', 'PR 1063'),
+              'test_tab_routing_dict_stores',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_set_operations.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_setdefault.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_starred_arity.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_store_sweep.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
     Allowance('tests/test_tab_routing_unmodelled_mutation.py',
-              'test_tab_routing', 'PR 1063'),
-    Allowance('tests/test_tab_routing_yielded_sender.py',
-              'test_tab_routing', 'PR 1063'),
+              'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_unprovable.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
+    Allowance('tests/test_tab_routing_yielded_sender.py', 'test_tab_routing',
+              '#1160: moving the helper would edit a module another change '
+              'is rewriting'),
 )
 
 
