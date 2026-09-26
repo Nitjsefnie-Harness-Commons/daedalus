@@ -3,11 +3,10 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Split out of tests/test_coverage_comment_workflow.py, which three suites
-imported whole to reach these seven names. That suite is the #1094 seat's:
-it keeps its own import lines and its `__all__` re-export block, and
-nothing reads the re-export any more. A wrong reader here would fail
-every caller at once, so tests/test_coverage_comment_boundary.py pins
-the two refusals.
+imported whole to reach these seven names. All three now import from
+here, and so does that suite. A wrong reader here would fail every
+caller at once, so tests/test_coverage_comment_boundary.py pins the two
+refusals.
 
 `write_executable` is the one copy of that helper: tests/_speedharness.py
 imports it here rather than carrying a second body, and
