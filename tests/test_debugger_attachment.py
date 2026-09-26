@@ -47,7 +47,22 @@ def test_two_commands_dispatched_together_share_one_attachment(tmp):
         'Runtime.enable', 'Page.enable'], outcome
     # The transient attachment was given back once both commands were done.
     assert outcome['detachCalls'] == [7], outcome
-    assert outcome['claims'] == [], outcome
+
+    # Which is the record's own doing and not a leftover: a THIRD command,
+    # dispatched after both finished, had to attach for itself and gave that
+    # back in turn. A record that outlived the attachment would have made it
+    # join instead, and no second attach would have happened.
+    later = run_attachment_case({'actions': [
+        {'dispatch': _cdp('first', tabId=7)},
+        {'dispatch': _cdp('second', tabId=7)},
+        {'drain': True},
+        {'dispatch': _cdp('third', tabId=7)},
+        {'drain': True},
+    ]})
+    assert later['attachCalls'] == [7, 7], later
+    assert later['detachCalls'] == [7, 7], later
+    assert later['live'] == [], later
+    assert _by_id(later)['third']['error'] is None, later
 
 
 def test_a_failing_attach_fails_every_joiner_and_leaves_no_claim(tmp):
@@ -74,13 +89,14 @@ def test_a_failing_attach_fails_every_joiner_and_leaves_no_claim(tmp):
                for row in posted.values()), outcome
     # The same error, not two: neither command re-attempted.
     assert len({row['error'] for row in posted.values()}) == 1, outcome
-    # No claim left behind, and nothing was detached that was never
-    # attached.
-    assert outcome['claims'] == [], outcome
+    # Nothing was detached that was never attached: a release on a refused
+    # claim has no attachment to give back, and detaching a tab nothing is on
+    # is a refusal from Chrome that would land on whichever command ran next.
     assert outcome['detachCalls'] == [], outcome
 
     # The anti-vacuity half: a later command is not poisoned by the failure,
-    # because a claim map that kept the dead `ready` would refuse it too.
+    # because a record that kept the dead `ready` would refuse it too — and
+    # not inheriting the dead attachment is why it had to attach for itself.
     later = run_attachment_case({
         'attachFailures': 1,
         'actions': [
@@ -91,6 +107,10 @@ def test_a_failing_attach_fails_every_joiner_and_leaves_no_claim(tmp):
             {'drain': True},
         ]})
     assert later['attachCalls'] == [7, 7], later
+    # And it gave that one back, so nothing is left attached to a tab whose
+    # only successful attach was the third command's.
+    assert later['detachCalls'] == [7], later
+    assert later['live'] == [], later
     third = [row for key, row in _by_id(later).items()
              if key.startswith('third')]
     assert len(third) == 1 and third[0]['error'] is None, later
@@ -110,14 +130,24 @@ def test_a_kept_session_survives_a_transient_command_on_the_same_tab(tmp):
         {'drain': True},
         {'dispatch': _cdp('transient', tabId=7)},
         {'drain': True},
+        {'dispatch': _cdp('next', tabId=7)},
+        {'drain': True},
     ]})
     assert outcome['attachCalls'] == [7], outcome
-    # The transient release must not have taken the session's attachment.
+    # The transient release must not have taken the session's attachment: it
+    # joined and gave back only its own share, and nothing detached.
     assert outcome['detachCalls'] == [], outcome
     assert outcome['live'] == [7], outcome
-    assert outcome['claims'] == [[7, 1, True]], outcome
     posted = _by_id(outcome)
     assert all(row['error'] is None for row in posted.values()), outcome
+    # The command the docstring promised, and the half that makes the
+    # property worth pinning: the NEXT command on that tab still found the
+    # kept session's attachment standing, so it joined it and attached
+    # nothing. Without this, "no detach" and "nothing was ever attached"
+    # would read the same.
+    assert sorted(posted) == ['kept', 'next', 'transient'], outcome
+    assert _ran(outcome, 'next') == 'Runtime.enable', outcome
+    assert outcome['attachCalls'] == [7], outcome
 
 
 def test_a_running_capture_holds_the_attachment_against_a_cdp_command(tmp):
@@ -211,20 +241,29 @@ def test_a_claim_arriving_mid_detach_waits_for_that_detach(tmp):
         'actions': [
             {'dispatch': _cdp('leaving', tabId=7)},
             {'drain': True},
+            {'dispatch': _cdp('after', tabId=7)},
+            {'drain': True},
         ]})
-    # attach, detach, attach, detach: the second claim waited for the first
-    # detach to settle, and the racing command is transient, so it gives its
-    # own attachment back in turn.
+    # attach, detach, attach, detach, attach, detach: the second claim waited
+    # for the first detach to settle, the racing command is transient so it
+    # gives its own attachment back in turn, and the third command then
+    # attaches for itself.
     assert outcome['order'] == [
-        'attach:7', 'detach:7', 'attach:7', 'detach:7'], outcome
-    assert outcome['attachCalls'] == [7, 7], outcome
-    assert outcome['detachCalls'] == [7, 7], outcome
+        'attach:7', 'detach:7', 'attach:7', 'detach:7', 'attach:7', 'detach:7',
+    ], outcome
+    assert outcome['attachCalls'] == [7, 7, 7], outcome
+    assert outcome['detachCalls'] == [7, 7, 7], outcome
     posted = _by_id(outcome)
-    assert len(posted) == 2, outcome
+    assert len(posted) == 3, outcome
     assert all(row['error'] is None for row in posted.values()), outcome
     assert all(REFUSAL not in (row['error'] or '')
                for row in posted.values()), outcome
-    assert outcome['claims'] == [], outcome
+    # And nothing is left attached: the third command had to attach for
+    # itself and gave that back, which is what a chained attach followed by
+    # its own release looks like from outside.
+    assert outcome['attachCalls'] == [7, 7, 7], outcome
+    assert outcome['detachCalls'] == [7, 7, 7], outcome
+    assert outcome['live'] == [], outcome
 
 
 def main():
