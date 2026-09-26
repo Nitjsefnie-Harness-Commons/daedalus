@@ -64,25 +64,37 @@ def _file(tmp, data, name='suite-timings.json'):
     return path
 
 
-def _timings(tmp, name, run_id, suites, measured, max_cells=5):
-    """A data file whose basis says run `run_id` ran `measured` cells.
+def _timings(tmp, name, measured_from, suites, measured, max_cells=5):
+    """A data file whose basis says the run named first ran `measured`.
 
     Written through `basis_sentence` and read back through
     `read_timings`, so the guard is handed the same kind of file the
     refresher leaves rather than a dict assembled to suit it.
+    `measured_from` is a whole provenance string: the refresher writes
+    every run of the sample, in selection order, so the run the count
+    came from is the FIRST of them.
     """
     bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
                         'timings_bounds')
     data = _data({suite: 1.0 for suite in suites}, max_cells=max_cells,
-                 measured_from=str(run_id))
+                 measured_from=measured_from)
     tree = fixture_tree(Path(tmp) / f'tree-{name}', suites)
     data['basis'] = bounds.basis_sentence(
         tree, data, measured, bounds.estimated_count(tree, data))
     return _planner().read_timings(_file(tmp, data, name=f'{name}.json'))
 
 
-_TWO_CELLS = {'cell-01': {'test_a.py': 4.0}, 'cell-02': {'test_b.py': 4.0}}
-_THREE_CELLS = dict(_TWO_CELLS, **{'cell-03': {'test_c.py': 4.0}})
+# Two cells carrying THREE suites, and never one suite per cell. A cell
+# artifact is a directory of one JSON per suite stem
+# (`_suite_seconds` globs `round_dir.glob('*.json')`), and the planner
+# packs several suites into a cell -- the shipped file records 273
+# suites over 13 cells. A fixture of one suite per cell would make the
+# suite count and the cell count coincide, and a guard counting the
+# wrong one would be indistinguishable from a right one.
+_SUITES = ['test_a.py', 'test_b.py', 'test_c.py']
+_TWO_CELLS = {'cell-01': {'test_a.py': 4.0, 'test_b.py': 4.0},
+              'cell-02': {'test_c.py': 4.0}}
+_THREE_CELLS = dict(_TWO_CELLS, **{'cell-03': {'test_d.py': 4.0}})
 
 
 def test_the_measured_count_is_not_the_bound(tmp):
@@ -148,23 +160,32 @@ def test_the_guard_reports_a_named_run_that_agrees(tmp):
     return that declines to check. The report is the evidence, so this
     asserts on it: a guard that compared nothing would have nothing to
     name.
+
+    The provenance names two runs, the second of which the root does not
+    carry, so the guard has to ask about the FIRST: the refresher writes
+    its sample in selection order, and asking about the last would be
+    N2 again one level down -- a run that never wrote this file.
     """
     root = Path(tmp) / 'runs'
     write_run(root, 100, _TWO_CELLS)
     report = verify_recorded_count(
-        _timings(tmp, 'match', 100, ['test_a.py', 'test_b.py'], 2), root)
+        _timings(tmp, 'match', '100, 999', _SUITES, 2), root)
     assert 'run 100' in report, report
     assert '2 cells' in report, report
     assert 'UNCHECKED' not in report, report
 
 
 def test_the_guard_reds_a_named_run_that_disagrees(tmp):
-    """The true direction, and the message names both numbers."""
+    """The true direction, and the message names both numbers.
+
+    Three suites over two cells, so `measured 2` here is a CELL count and
+    not the suite count the same artifacts would give.
+    """
     root = Path(tmp) / 'runs'
     write_run(root, 100, _TWO_CELLS)
     try:
         verify_recorded_count(
-            _timings(tmp, 'wrong', 100, ['test_a.py', 'test_b.py'], 1), root)
+            _timings(tmp, 'wrong', '100, 999', _SUITES, 1), root)
     except AssertionError as error:
         said = str(error)
         assert 'run 100' in said, said
@@ -192,7 +213,7 @@ def test_a_newer_run_the_file_does_not_name_is_not_its_run(tmp):
     write_run(root, 100, _TWO_CELLS)
     write_run(root, 300, _THREE_CELLS)
     report = verify_recorded_count(
-        _timings(tmp, 'named', 100, ['test_a.py', 'test_b.py'], 2), root)
+        _timings(tmp, 'named', '100, 999', _SUITES, 2), root)
     assert 'run 100' in report, report
     assert 'UNCHECKED' not in report, report
 
@@ -212,16 +233,15 @@ def test_the_count_goes_unchecked_where_there_is_nothing_to_check(tmp):
     root = Path(tmp) / 'runs'
     write_run(root, 100, _TWO_CELLS)
     no_root = verify_recorded_count(
-        _timings(tmp, 'a', 100, ['test_a.py', 'test_b.py'], 2),
-        Path(tmp) / 'nowhere')
+        _timings(tmp, 'a', '100', _SUITES, 2), Path(tmp) / 'nowhere')
     assert 'no runs root' in no_root and 'UNCHECKED' in no_root, no_root
     not_there = verify_recorded_count(
-        _timings(tmp, 'b', 999, ['test_a.py', 'test_b.py'], 2), root)
+        _timings(tmp, 'b', '999', _SUITES, 2), root)
     assert '999' in not_there and 'UNCHECKED' in not_there, not_there
     unreadable = Path(tmp) / 'unreadable'
     write_run(unreadable, 100, _TWO_CELLS, reference=None)
     cannot = verify_recorded_count(
-        _timings(tmp, 'c', 100, ['test_a.py', 'test_b.py'], 2), unreadable)
+        _timings(tmp, 'c', '100', _SUITES, 2), unreadable)
     assert 'run 100' in cannot and 'UNCHECKED' in cannot, cannot
 
 
