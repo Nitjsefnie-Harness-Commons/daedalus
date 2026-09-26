@@ -76,7 +76,7 @@ export function mount(container, bus) {
     statusEl.textContent = 'saved — verifying…';
     // The top bar's three cells are written where the token is masked, so
     // a save cannot render a different one than the boot did.
-    wireMetaBar();
+    wireMetaBar(tok, srv);
     try {
       await api.get('/tabs');
       setStatus(h('span', { class: 'green' }, 'connected'));

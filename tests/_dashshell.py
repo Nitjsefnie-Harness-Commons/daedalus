@@ -29,13 +29,13 @@ import json
 from pathlib import Path, PurePosixPath
 
 from _dashdom import DOM as _DOM
-from _dashnode import (DashboardNodeHarness, _BOUNDED_AWAIT,  # noqa: F401
-                       dashboard_child_timeout, run_dashboard_node)
+from _dashnode import (DashboardNodeHarness, _BOUNDED_AWAIT,
+                       run_dashboard_node)
 from _jsread import blank_js_comments
 from _repo import ROOT
 
 __all__ = ['SHELL', 'UNPLANNED_STATUS', 'build_harness',
-           'dashboard_child_timeout', 'dashboard_module', 'run_scenario']
+           'dashboard_module', 'run_scenario']
 
 
 # The status a request the scenario never planned is answered with. The
@@ -286,13 +286,6 @@ const drive = {
     return PARKED.filter((slot) => slot && (!predicate || predicate(slot)))
       .map((slot) => slot.id);
   },
-  fireMatching(predicate) {
-    const ids = drive.ids(predicate);
-    if (ids.length !== 1) {
-      throw new Error('parked timer selection matched ' + ids.length);
-    }
-    return drive.fire(ids[0]);
-  },
   lastScript() {
     if (!SCRIPTS.length) throw new Error('no stream has been requested');
     return SCRIPTS[SCRIPTS.length - 1];
@@ -301,8 +294,10 @@ const drive = {
 };
 
 // The recorder is read by every control that asserts a logged line, so
-// describing a value must not be able to throw: `String(symbol)` does,
-// and a throw here would escape the `console.error` that called it.
+// describing a value must not be able to throw. `String(symbol)` does
+// not -- it is the one implicit conversion special-cased not to -- but a
+// value with a `toString` of its own that throws is ordinary, and the
+// throw would escape the `console.error` that called it.
 function describe(value) {
   try {
     if (typeof value === 'string') return value;

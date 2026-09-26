@@ -1,7 +1,5 @@
 // Dashboard section — shared DOM + formatting helpers.
 
-import { getToken, getServer } from '../api.js';
-
 export function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
   if (attrs) {
@@ -304,10 +302,10 @@ function setAll(selector, text) {
 
 // Both the entry point and the settings panel write these three cells, and
 // a second copy of the mask is how a twelve-character token came to read
-// verbatim at boot and masked a moment later.
-export function wireMetaBar() {
-  const token = getToken();
-  const server = getServer();
+// verbatim at boot and masked a moment later. The values are passed in
+// rather than read here: this module imports nothing, and both callers
+// already hold the two they wrote.
+export function wireMetaBar(token, server) {
   setAll('[data-meta="token"]', maskToken(token));
   setAll('[data-meta="token-short"]', shortToken(token));
   setAll('[data-meta="server"]', server || '(same origin)');
