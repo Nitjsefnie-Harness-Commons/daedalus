@@ -160,9 +160,21 @@ BOUNDED_GIT_LAUNCHES = {
      'test_dashboard_responses_refuse_cross_origin_framing'):
         'an HTTP read: a socket, not a git process, and the'
         ' timeout is the bound itself',
-    ('tests/test_dashboard_behaviour.py', 529, 'popen'):
+    ('tests/test_dashboard_behaviour.py', 530, 'popen'):
         'a test double constructed with a keyword mapping; it'
         'records, it does not launch',
+    ('tests/test_dashboard_gate.py', 102,
+     'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
+        'a wait on a holder this test killed on the line above;'
+        ' the suite runner is the bound',
+    ('tests/test_dashboard_gate.py', 104,
+     'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
+        'the gate child this test started; the suite runner is'
+        ' the bound',
+    ('tests/test_dashboard_node_retry.py', 681,
+     'test_two_dashboard_children_cannot_be_inside_the_gate_together'):
+        'a wait on the two gate children this test started;'
+        ' the suite runner is the bound',
     ('tests/test_mcp_entry_point.py', 37, '_cleanup_mcp'):
         'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
