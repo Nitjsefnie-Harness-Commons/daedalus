@@ -36,19 +36,34 @@ The clock parks every timer for the scenario to fire, and a parked
 poll sleep would strand every command inside its first attempt:
 `api.js` waits 250 ms between result polls and no scenario can drive
 that from outside its own `await`. So a command window opens when a
-`/command` is answered, and a pump spends one timeout parked inside it
-per turn against a virtual clock. One `settle()` is then all a scenario
+`/command` is answered, and a pump spends the poll sleep inside it per
+turn against a virtual clock. One `settle()` is then all a scenario
 needs, and a two-click `armedAction` and a toast that has not faded stay
 assertable because nothing outside a window runs.
+
+Not every refusal in here is controlled, and the docstring should not
+read as though it were. What
+`tests/test_dashsection_harness.py` holds by mutation: the selector
+registry (same element, refusal by name), `nextSibling`, `insertBefore`,
+the class set in both directions, the parked clock and its cancellation,
+the `innerHTML` parse and its refusal, an unplanned request refused and
+recorded, a duplicate plan refused, an envelope that names another
+command, the `localStorage` round trip, the fan-out bus, the pump's
+selectivity, a `Headers` bag, a poll with no command behind it, a
+duplicate selector, and the `console.error` recorder. What is not held
+and is a refusal by inspection only: `removeChild` of a non-child,
+`remove()` outside the tree, an `insertBefore` reference outside its
+parent, an `innerHTML` read, a non-string body and a body that will not
+parse. A refusal nothing exercises is still better than an answer, but
+it is not a control and should not be counted as one.
 """
 import json
-from pathlib import Path, PurePosixPath
 
 from _dashnode import DOM as _DOM
 from _dashnode import (DashboardNodeHarness, _BOUNDED_AWAIT,
                        run_dashboard_node)
+from _dashshell import dashboard_module as section_path
 from _jsread import blank_js_comments
-from _repo import ROOT
 
 __all__ = ['SHELL', 'build_harness', 'run_scenario', 'section_path']
 
@@ -255,14 +270,24 @@ globalThis.clearInterval = (id) => { clearParked(id); };
 // attempts -- instead of fifteen thousand attempts that take as long as
 // the budget itself. Outside a window nothing runs, which is what makes
 // a two-click `armedAction` and a toast that has not faded assertable.
-const PUMP = { open: false, from: 0 };
+//
+// The window spends the poll sleep and nothing else. `api.js` parks no
+// other timer, so the delay it polls at identifies it: a slot the window
+// did not open for is stepped over, never fired, and stays in
+// `drive.live()` for the scenario to fire itself. A window that found no
+// spendable slot has nothing to advance, and closes rather than spinning
+// on a turn that can never move.
+const POLL_CADENCE_MS = 250;
+const PUMP = { open: false, at: 0, delay: 0 };
 
 function spendOne() {
   if (!PUMP.open) return false;
-  for (let at = PUMP.from; at < PARKED.length; at += 1) {
-    const slot = PARKED[at];
+  while (PUMP.at < PARKED.length) {
+    const slot = PARKED[PUMP.at];
+    PUMP.at += 1;
     if (!slot || slot.kind !== 'timeout') continue;
-    PARKED[at] = null;
+    if (slot.delay !== PUMP.delay) continue;
+    PARKED[PUMP.at - 1] = null;
     SPENT += slot.delay;
     slot.callback(...slot.extra);
     return true;
@@ -270,21 +295,25 @@ function spendOne() {
   return false;
 }
 
-// Nothing left to spend is how a loop that gave up announces itself: the
-// window closes rather than spinning on a turn that can never advance.
 function pumpStep() {
   if (spendOne()) { hostImmediate(pumpStep); return; }
   PUMP.open = false;
 }
 
 function openPump() {
-  PUMP.from = PARKED.length;
+  PUMP.at = PARKED.length;
+  PUMP.delay = POLL_CADENCE_MS;
   PUMP.open = true;
   hostImmediate(pumpStep);
 }
 
-// The bus the dashboard hands every section as its second argument. It
-// records its listeners so a scenario can drive a tab event.
+// The bus the dashboard hands every section as its second argument. Its
+// two halves follow `app.js`: `emit` catches a listener's failure and
+// reports it through `console.error` so one bad listener cannot silence
+// the rest, and `on` hands back the unsubscribe it stored. The dispatch
+// is over a snapshot, which is stricter than the shipped `Set` and is
+// what a scenario can reason about: a listener registered during a
+// dispatch runs at the next one, never inside the one that registered it.
 const bus = {
   on(fn) {
     LISTENERS.push(fn);
@@ -294,7 +323,9 @@ const bus = {
     };
   },
   emit(event) {
-    for (const fn of LISTENERS.slice()) fn(event);
+    for (const fn of LISTENERS.slice()) {
+      try { fn(event); } catch (failure) { console.error(failure); }
+    }
   },
 };
 """
@@ -525,14 +556,6 @@ function report(extra) {
 
 
 SHELL = _DOM + _ELEMENTS + _TRANSPORT
-
-
-def section_path(name: str) -> Path:
-    """The path `build_harness` passes to the child for a dashboard module."""
-    parts = PurePosixPath(name)
-    if parts.is_absolute() or '..' in parts.parts or not parts.parts:
-        raise ValueError(f'dashboard module name escapes dashboard: {name}')
-    return ROOT / 'dashboard' / Path(*parts.parts)
 
 
 def build_harness(scenario: str, *,
