@@ -20,7 +20,8 @@ from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import STRICT_FETCH  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
@@ -37,7 +38,7 @@ TWO = [SYNC, SYNC]
 BOTH = [BRIDGE, NEW_BRIDGE]
 
 
-_STREAM_HARNESS = r"""
+_STREAM_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -84,14 +85,6 @@ function response(status, data) {
     body: null,
     json: async () => data,
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
   };
 }
 
@@ -466,7 +459,7 @@ def _drive(plan):
     return json.loads(result.stdout)
 
 
-def _run(plan):
+def _gate(plan):
     """Two checks carry coverage; a third names the route in the message.
 
     `badOrigins` is the only thing that catches a request to an origin the
@@ -493,14 +486,14 @@ def _run(plan):
 
 def test_consecutive_refusals_back_off_exponentially(tmp):
     del tmp
-    outcome = _run({'scenario': 'backoff', 'planned': [SYNC]})
+    outcome = _gate({'scenario': 'backoff', 'planned': [SYNC]})
     assert outcome['delays'] == [
         1000, 2000, 4000, 8000, 16000, 32000, 60000], outcome
 
 
 def test_a_connected_stream_resets_the_backoff(tmp):
     del tmp
-    outcome = _run({'scenario': 'reset', 'statuses': [503, 'ok', 503],
+    outcome = _gate({'scenario': 'reset', 'statuses': [503, 'ok', 503],
                     'planned': TWO})
     assert outcome['delays'] == [1000, 1000, 1000], outcome
 
@@ -509,7 +502,7 @@ def test_an_auth_refusal_stops_the_reconnect(tmp):
     """A wrong credential is not transient: stop until it is replaced."""
     del tmp
     for status in (401, 400):
-        outcome = _run({'scenario': 'stop', 'statuses': [status],
+        outcome = _gate({'scenario': 'stop', 'statuses': [status],
                         'planned': TWO})
         assert outcome['answered'] == [status], (status, outcome)
         assert outcome['fetches'] == 1, (status, outcome)
@@ -521,7 +514,7 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
     """The refused attempt's watchdog does not tick into the stop."""
     del tmp
     for status in (401, 400):
-        outcome = _run({'scenario': 'stop', 'statuses': [status],
+        outcome = _gate({'scenario': 'stop', 'statuses': [status],
                         'planned': TWO})
         assert outcome['intervals'] == [
             {'delay': 20000, 'cleared': False},
@@ -531,7 +524,7 @@ def test_the_auth_stop_tears_down_the_watchdog_interval(tmp):
 def test_a_silent_stream_reconnects_through_the_backoff(tmp):
     """The watchdog counts as a failed attempt, not a free reconnect."""
     del tmp
-    outcome = _run({'scenario': 'watchdog', 'statuses': ['silent'],
+    outcome = _gate({'scenario': 'watchdog', 'statuses': ['silent'],
                     'planned': TWO})
     assert outcome['fetchesAfterWatchdog'] == 0, outcome
     assert outcome['scheduled'] == [1000], outcome
@@ -540,7 +533,7 @@ def test_a_silent_stream_reconnects_through_the_backoff(tmp):
 def test_a_killed_connection_counts_toward_the_backoff(tmp):
     """A non-abort reader failure counts once from its connect reset."""
     del tmp
-    outcome = _run(
+    outcome = _gate(
         {'scenario': 'killed', 'statuses': ['ok', 'kill', 'kill'],
          'planned': [SYNC] * 4})
     assert outcome['delays'] == [1000, 2000, 2000], outcome
@@ -549,7 +542,7 @@ def test_a_killed_connection_counts_toward_the_backoff(tmp):
 def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
     """A good connection keeps its EOF retry at the flat 1 s scale."""
     del tmp
-    outcome = _run({'scenario': 'eof-data', 'statuses': ['ok-data', 503],
+    outcome = _gate({'scenario': 'eof-data', 'statuses': ['ok-data', 503],
                     'planned': TWO})
     assert outcome['delays'] == [1000, 1000], outcome
 
@@ -557,7 +550,7 @@ def test_a_clean_data_carrying_eof_still_retries_at_1000(tmp):
 def test_rejected_connects_grow_to_the_cap(tmp):
     """An unreachable bridge never connects, so the counter only grows."""
     del tmp
-    outcome = _run({'scenario': 'unreachable',
+    outcome = _gate({'scenario': 'unreachable',
                     'statuses': ['down'] * 6, 'planned': [SYNC]})
     assert outcome['delays'] == [
         2000, 4000, 8000, 16000, 32000, 60000], outcome
@@ -565,9 +558,9 @@ def test_rejected_connects_grow_to_the_cap(tmp):
 
 def test_a_new_token_resumes_connecting(tmp):
     del tmp
-    outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
+    outcome = _gate({'scenario': 'resume', 'statuses': [401, 'ok'],
                     'field': 'daedalus-token', 'value': NEW_TOKEN,
-                    'planned': TWO})
+                     'planned': TWO})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome
@@ -576,9 +569,9 @@ def test_a_new_token_resumes_connecting(tmp):
 
 def test_a_new_bridge_url_resumes_connecting(tmp):
     del tmp
-    outcome = _run({'scenario': 'resume', 'statuses': [401, 'ok'],
+    outcome = _gate({'scenario': 'resume', 'statuses': [401, 'ok'],
                     'field': 'daedalus-server', 'value': NEW_BRIDGE,
-                    'planned': TWO, 'hosts': BOTH})
+                     'planned': TWO, 'hosts': BOTH})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok'], outcome
     assert outcome['resumedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -588,10 +581,10 @@ def test_a_new_bridge_url_resumes_connecting(tmp):
 def test_a_connected_stream_reopens_the_stopped_pair(tmp):
     """The success that cleared the stop lets the old pair be retried."""
     del tmp
-    outcome = _run({'scenario': 'reopen',
+    outcome = _gate({'scenario': 'reopen',
                     'statuses': [401, 'ok', 503],
-                    'changes': [NEW_TOKEN, TOKEN],
-                    'planned': TWO})
+                     'changes': [NEW_TOKEN, TOKEN],
+                     'planned': TWO})
     assert outcome['bootFetches'] == 1, outcome
     assert outcome['answered'] == [401, 'ok', 503], outcome
     assert outcome['returnedAuth'] == 'Bearer ' + TOKEN, outcome
@@ -602,9 +595,9 @@ def test_a_keepalive_connect_during_the_ledger_read_starts_no_stream(tmp):
     idle: the stream it would open dispatches against an empty dedup
     ledger, and boot then opens a second stream over it."""
     del tmp
-    outcome = _run({'scenario': 'ledger-window', 'trigger': 'connect',
+    outcome = _gate({'scenario': 'ledger-window', 'trigger': 'connect',
                     'holdLedger': True, 'statuses': ['silent'],
-                    'planned': TWO})
+                     'planned': TWO})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
 
@@ -612,9 +605,9 @@ def test_a_keepalive_connect_during_the_ledger_read_starts_no_stream(tmp):
 def test_a_heartbeat_alarm_during_the_ledger_read_starts_no_stream(tmp):
     """The heartbeat alarm races boot the same way a port connect does."""
     del tmp
-    outcome = _run({'scenario': 'ledger-window', 'trigger': 'alarm',
+    outcome = _gate({'scenario': 'ledger-window', 'trigger': 'alarm',
                     'holdLedger': True, 'statuses': ['silent'],
-                    'planned': [SYNC, SYNC, SYNC]})
+                     'planned': [SYNC, SYNC, SYNC]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
 
@@ -624,10 +617,10 @@ def test_boot_opens_the_stream_once_with_the_ledger_loaded(tmp):
     ledger it read decides dedup — a persisted delivery id is skipped,
     a fresh one dispatches."""
     del tmp
-    outcome = _run({'scenario': 'ledger-window', 'holdLedger': True,
+    outcome = _gate({'scenario': 'ledger-window', 'holdLedger': True,
                     'deliver': 'commands',
-                    'statuses': ['ledger-commands'],
-                    'planned': [SYNC, SYNC, RESULT]})
+                     'statuses': ['ledger-commands'],
+                     'planned': [SYNC, SYNC, RESULT]})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['dispatchedDids'] == ['did-new'], outcome
@@ -638,7 +631,7 @@ def test_a_failed_ledger_read_still_opens_the_stream(tmp):
     read is tolerated (the in-memory ledger still dedups), and the
     boot start must go through."""
     del tmp
-    outcome = _run({'scenario': 'boot-ledger', 'failLedger': True,
+    outcome = _gate({'scenario': 'boot-ledger', 'failLedger': True,
                     'statuses': ['silent'], 'planned': TWO})
     assert outcome['fetches'] == 1, outcome
 
@@ -647,7 +640,7 @@ def test_a_worker_without_a_stored_ledger_still_opens_the_stream(tmp):
     """A fresh install has no ledger row at all: the gate must still open
     once the read has answered empty, and never lock the stream out."""
     del tmp
-    outcome = _run({'scenario': 'boot-ledger', 'noLedger': True,
+    outcome = _gate({'scenario': 'boot-ledger', 'noLedger': True,
                     'statuses': ['silent'], 'planned': TWO})
     assert outcome['fetches'] == 1, outcome
 
@@ -656,10 +649,10 @@ def test_a_post_boot_token_change_still_reconnects_after_the_gate(tmp):
     """Once the ledger read has completed, the healthy reconnect paths
     are untouched: a token change still tears down and reopens."""
     del tmp
-    outcome = _run({'scenario': 'ledger-window', 'trigger': 'token-change',
+    outcome = _gate({'scenario': 'ledger-window', 'trigger': 'token-change',
                     'holdLedger': True, 'statuses': ['silent'],
-                    'field': 'daedalus-token', 'value': NEW_TOKEN,
-                    'planned': TWO})
+                     'field': 'daedalus-token', 'value': NEW_TOKEN,
+                     'planned': TWO})
     assert outcome['windowFetches'] == 0, outcome
     assert outcome['totalFetches'] == 1, outcome
     assert outcome['resumedAuth'] == 'Bearer ' + NEW_TOKEN, outcome

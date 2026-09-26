@@ -3,7 +3,8 @@
 Not a suite itself — run_tests.py only loads `test_*.py`. The text assumes
 a `messageListeners` array and an `eventTarget` factory in scope, so
 `runtime.onMessage` records the worker's listener for the harness's own
-`send()`.
+`send()`. The factory is the shared `event_target_stub`, which every
+caller of this text splices in from `_worker_sources`.
 """
 
 INERT_WORKER_APIS = r"""

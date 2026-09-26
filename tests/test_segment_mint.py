@@ -15,7 +15,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import RELAY_CONTEXT  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    RELAY_CONTEXT, event_target_stub)
 
 ORIGINS_KEY = 'daedalus-segment-origins'
 ALLOWED = 'https://allowed.example.com'
@@ -34,7 +35,7 @@ BOOT_STREAM = (503,)
 MINT_PLAN = [SYNC, SEGMENT]
 REFUSED_PLAN = [SYNC]
 
-_MINT_HARNESS = (r"""
+_MINT_HARNESS = (event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -62,14 +63,6 @@ function response(status, data) {
       return data;
     },
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
   };
 }
 

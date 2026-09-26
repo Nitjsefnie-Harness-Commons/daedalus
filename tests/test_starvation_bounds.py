@@ -20,7 +20,7 @@ from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import (  # noqa: E402
-    chrome_stub, import_scripts_stub)
+    chrome_stub, event_target_stub, import_scripts_stub)
 
 # The starvation scenarios run with the freeze/thaw budget of their own (see
 # _FREEZE_RUN_TIMEOUT_S); the harness children the wall-timeout guard names do
@@ -44,7 +44,8 @@ BOOT_STREAM = [503]
 _FREEZE_MS = _SETTLE_BUDGET_MS + 500
 
 _CDP_STARVE_HARNESS = (
-    r"""
+    event_target_stub()
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -69,10 +70,6 @@ async function sendCommand(_target, method, params) {
     return new Promise((resolve) => { pendingResolve = resolve; });
   }
   return {};
-}
-
-function eventTarget() {
-  return { addListener() {} };
 }
 
 function response(status, data) {
