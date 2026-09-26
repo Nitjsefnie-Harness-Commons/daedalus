@@ -59,11 +59,13 @@ def _rendered(out):
 
 
 def _put(body):
-    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body}
+    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
+            'timeout': 30}
 
 
 def _get(path):
-    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None}
+    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None,
+            'timeout': 30}
 
 
 def _wait(cmd_id, target_tab, delivery, timeout, interval=0.5):

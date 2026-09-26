@@ -184,9 +184,10 @@ class RecordingExtCmd:
         self.calls = []
         self.api_calls = []
         self.waits = []
-        # Every timeout a CALLER chose: the two a handler picks a wait for.
-        # `api` is absent because its timeout is the transport's own default,
-        # which no handler in this tree sets.
+        # Every timeout a CALLER chose for a WAIT: the two a handler picks
+        # one for. An `api` deadline is not here — it rides in that
+        # request's own plan entry, so the plan pins it in the same
+        # comparison that pins the method, path and body.
         self.timeouts = []
         self.issued = []
 
@@ -198,12 +199,16 @@ class RecordingExtCmd:
         return self._answer()
 
     def api(self, method, path, body=None, timeout=30, headers=None):
-        del timeout
         # `headers` is recorded only when a caller sent one, so a plan entry
         # that declares no headers means "none were sent" and nothing else
         # has to say so. `{}` and `None` are the same request on the wire —
         # `transport._request` merges either into its own header dict.
-        entry = {'via': 'api', 'method': method, 'path': path, 'body': body}
+        # `timeout` is recorded unconditionally, so a plan states the
+        # deadline it expects. A handler that started passing one here
+        # would otherwise change how long the CLI blocks an operator and
+        # not one plan in the tree would notice.
+        entry = {'via': 'api', 'method': method, 'path': path, 'body': body,
+                 'timeout': timeout}
         if headers:
             entry['headers'] = headers
         self._record(entry)

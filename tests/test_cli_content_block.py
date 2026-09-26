@@ -36,7 +36,8 @@ PATTERN = '*.cdn.example.com/vod/*/seg-*'
 
 
 def _put(body):
-    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body}
+    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
+            'timeout': 30}
 
 
 def _wait(cmd_id, delivery):
