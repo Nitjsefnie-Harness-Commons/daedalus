@@ -3,7 +3,6 @@
 import ast
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -11,6 +10,7 @@ from _jsroute import js_tab_routing_violations  # noqa: E402
 from _pyroute import (dict_assignments, payload_keys,  # noqa: E402
                       py_tab_routing_violations)
 from _pyroute_state import literal_iterable_cardinality  # noqa: E402
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 from _tabroute_selections import SELECTION_PRE, SELECTIONS  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -26,55 +26,6 @@ def _focus_flow(initial, effect, *steps, iterable='[1]'):
              f'gen = ((send := {effect}) for _ in {iterable})', *steps,
              "send('_focus', 'focus-tab', tab=int(args.chrome_tab))"]
     return '\n'.join(lines)
-
-
-def _tracked_focus_verdict(tmp, body, before='', after='', counts=False):
-    source = ROOT / 'daedalus_cli' / 'commands_browser.py'
-    tree = ast.parse(source.read_text(encoding='utf-8'))
-    function = next(node for node in tree.body if isinstance(
-        node, ast.FunctionDef) and node.name == 'do_focus_tab')
-    function.body = ast.parse(body).body
-    before_nodes, after_nodes = (ast.parse(value).body
-                                 for value in (before, after))
-    future_nodes = [node for node in before_nodes if isinstance(
-        node, ast.ImportFrom) and node.module == '__future__']
-    before_nodes = [node for node in before_nodes if node not in future_nodes]
-    tree.body[1:1] = future_nodes
-    index = tree.body.index(function)
-    tree.body[index:index] = before_nodes
-    tree.body.extend(after_nodes)
-    ast.fix_missing_locations(tree)
-    mutated = Path(tmp) / 'commands_browser.py'
-    mutated.write_text(ast.unparse(tree) + '\n', encoding='utf-8')
-    calls = []
-
-    def ext_cmd(*args, **kwargs):
-        calls.append((args, kwargs))
-        return 0
-
-    def tab_sink(*args, **kwargs):
-        if any('tab' in payload for payload in (*args, *kwargs.values())):
-            calls.append((args, kwargs))
-        return 0
-
-    namespace = {'ext_cmd': ext_cmd,
-                 'ordinary': lambda *args, **kwargs: 0, 'tab_sink': tab_sink,
-                 '_args': SimpleNamespace(
-                     chrome_tab=323, flag=True, values=(1, 2))}
-    sender_module = ModuleType('_pyroute_test_sender')
-    sender_module.__dict__.update(namespace)
-    sys.modules['_pyroute_test_sender'] = sender_module
-    isolated = ast.fix_missing_locations(ast.Module(
-        body=[*future_nodes, *before_nodes, function, *after_nodes],
-        type_ignores=[]))
-    try:
-        # pylint: disable-next=exec-used
-        exec(compile(isolated, str(mutated), 'exec'), namespace)
-        if not after_nodes: namespace['do_focus_tab'](namespace['_args'])
-    finally: sys.modules.pop('_pyroute_test_sender', None)
-    verdict = (len(calls), len(py_tab_routing_violations(
-        mutated, mutated.name)))
-    return verdict if counts else tuple(bool(value) for value in verdict)
 
 
 _DIRECTIONS = [('setting', 'ordinary', 'ext_cmd', True),

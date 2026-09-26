@@ -394,6 +394,7 @@
 !/tests/_speedharness.py
 !/tests/_step_ceiling.py
 !/tests/_stream_fake.py
+!/tests/_tabroute_focus.py
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
