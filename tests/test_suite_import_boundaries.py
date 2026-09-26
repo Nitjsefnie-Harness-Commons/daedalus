@@ -23,23 +23,24 @@ rule reports all three as offenders when none of them executes.
 What the control does not see, by design: a `from X import *` names
 nothing the rule can enumerate, so only its `X` is examined; a module
 name built at runtime rather than written as a literal; a suite spelled
-`tests.test_x` inside a dynamic literal, which `_DYNAMIC` admits no dot
-for though the static clause's `_leaf` drops that prefix; a suite whose
-stem falls outside `^test_[a-z0-9_]+$`, such as one carrying an
-upper-case letter; a sibling's private reached by copy rather than by
-import; and a name shaped like a suite that no tracked tests module
-provides, which is a broken import rather than this defect. A module the
-detector cannot parse fails the control, naming the file, rather than
-being dropped.
+`tests.test_x` inside a dynamic literal, which `_DYNAMIC` refuses
+because it does not start with `test_` though the static clause's
+`_leaf` drops that prefix; a suite whose stem falls outside
+`^test_[a-z0-9_]+$`, such as one carrying an upper-case letter; a
+sibling's private reached by copy rather than by import; and a name
+shaped like a suite that no tracked tests module provides, which is a
+broken import rather than this defect. It reads TRACKED modules, where
+`run_tests.py` globs the disk, so a new suite runs and is outside the
+control until it is added. A module the detector cannot parse fails the
+control, naming the file, rather than being dropped.
 
 A string constant is a string and `exec` is not one of the four dynamic
 callees, so `exec('import test_sibling')` executes the sibling and the
-rule does not see it. The tree carries constants of that shape — a
-mutation child runs one to invoke a named test, which is a suite used
-as a library rather than a private-helper grab — and none is reported.
-The count is deliberately not given: it is a property of the tree
-rather than of this rule, so a list of files and totals here would read
-as complete and stop being true at the next mutation spec.
+rule does not see it. The constants this tree carries of that shape
+name a suite for a mutation child, and reach one as `python -c` source
+rather than through `exec`. A number is deliberately not given: it is a
+property of the tree rather than of this rule, so a list here would
+read as complete and stop being true at the next mutation spec.
 
 `ALLOWED` records the sites this branch deferred to #1160, and it is
 pinned on both sides: a row cannot be dropped without the site it names
@@ -53,10 +54,14 @@ honest.
 
 `tests/test_helper_shadow_boundaries.py` is the sibling control: it
 reports a name a suite binds locally that a shared-helper import also
-binds. One class is open to both — a helper a module re-implements
-under a shared helper's name while importing nothing, which is no
-shadow (there is no import to shadow) and no sibling-suite import (no
-suite is imported).
+binds. Three of the five classes its own docstring lists as unseen are
+unseen here as well: a helper re-implemented while importing nothing,
+which is no shadow (there is no import to shadow) and no sibling-suite
+import (no suite is imported); a duplicate body whose import went with
+it, for the same two reasons; and a rebind through `globals()[...]` or
+`exec`. A byte-identical pair standing in two modules is therefore
+reported by neither, and nothing in the tree complains while both are
+there.
 """
 import ast
 import re
@@ -85,8 +90,9 @@ Allowance = namedtuple('Allowance', 'path module reason')
 ALLOWED = (
     # Deferred sites, recorded in #1160. One row's reason says the file is
     # held by another change; the rest say the move was cut to keep this one
-    # reviewable. A whole-module import has no helper to move — the module
-    # it names is itself the held file.
+    # reviewable. Four rows are whole-module imports, which have no helper
+    # to move: three name a held file, and the fourth names a file a merge
+    # released while the importing suite is the held one.
     Allowance('tests/test_dashboard_gate.py', 'test_dashboard_behaviour',
               '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_dashboard_harness.py', 'test_dashboard_behaviour',
@@ -389,6 +395,14 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
                            "importlib.util.spec_from_file_location("
                            "'sibling', 'test_sibling.py')"),
          ['test_sibling']),
+        # The same call naming the path by keyword, so the sibling is not
+        # in a positional argument at all. The case above passes the path
+        # second and positionally, so dropping the keyword limb moves no
+        # verdict it can see.
+        ('test_l_kw.py', _mod('import importlib.util',
+                              "importlib.util.spec_from_file_location("
+                              "'mod', location='test_sibling.py')"),
+         ['test_sibling']),
         # A triple-quoted synthetic-violation fixture naming a sibling is
         # a string that executes nothing: the shape of the three real
         # sites a text rule would report.
@@ -418,6 +432,13 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
                            'importlib.import_module(NAME)'), []),
         ('test_u.py', _mod('import runpy',
                            "runpy.run_path('tests/test_sibling.py')"), []),
+        # The same suite spelled by package rather than by directory: the
+        # static clause's `_leaf` drops that leading component, and
+        # `_DYNAMIC` refuses the literal because it does not start with
+        # `test_`, so the two clauses disagree on the spelling.
+        ('test_u_pkg.py', _mod('import runpy',
+                               "runpy.run_path('tests.test_sibling.py')"),
+         []),
         ('test_v.py', _mod('import importlib',
                            "importlib.import_module("
                            "'daedalus_mcp.transport')"), []),

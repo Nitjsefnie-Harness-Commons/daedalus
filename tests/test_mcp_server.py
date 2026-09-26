@@ -37,9 +37,9 @@ if DEPS:
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
     logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
 
-# The shared load-and-drive helpers. They are re-exported rather than imported
-# under their own names so every importer of this suite's namespace — including
-# held ones this branch may not edit — keeps reading the same object.
+# The shared load-and-drive helpers, bound from `_mcp_load` and read by
+# this suite's own cases. No tracked module imports this suite's
+# namespace — the two that did now import `_mcp_load` under that name.
 TOK, BRIDGE_ENV = _mcp_load.TOK, _mcp_load.BRIDGE_ENV
 _need_deps = _mcp_load._need_deps
 _load_mcp = _mcp_load._load_mcp
