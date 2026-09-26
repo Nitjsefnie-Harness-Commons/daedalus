@@ -15,9 +15,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _carrier_cases import (  # noqa: E402
-    _BESPOKE, _bare_form, _callee_chain_cases, _comprehension_cases,
+    _BESPOKE, _bare_form, _binding_arm_cases,
+    _binding_arm_free_cases, _callee_chain_cases, _comprehension_cases,
     _comprehension_free_cases, _grammar_forms, _opened_form_free_cases,
     _receiver_atom_cases, _receiver_carrier_cases,
+    _target_carrier_cases, _target_free_cases,
     _transforming_cases, _value_preserving_cases)
 import _coverage_guard  # noqa: E402
 from _coverage_guard import (  # noqa: E402
@@ -377,6 +379,16 @@ def test_a_value_preserving_form_is_refused(tmp):
     _refused(_value_preserving_cases())
 
 
+def test_a_binding_arm_of_issue_1114_is_refused(tmp):
+    del tmp
+    _refused(_binding_arm_cases())
+
+
+def test_a_binding_arm_carrying_nothing_stays_clean(tmp):
+    del tmp
+    _accepted(_binding_arm_free_cases())
+
+
 def test_a_transforming_form_stays_an_atom(tmp):
     del tmp
     _accepted(_transforming_cases())
@@ -385,6 +397,16 @@ def test_a_transforming_form_stays_an_atom(tmp):
 def test_a_launcher_free_spelling_of_an_opened_form_stays_clean(tmp):
     del tmp
     _accepted(_opened_form_free_cases())
+
+
+def test_a_target_that_carries_a_launcher_is_refused(tmp):
+    del tmp
+    _refused(_target_carrier_cases())
+
+
+def test_a_target_and_value_that_carry_nothing_stay_clean(tmp):
+    del tmp
+    _accepted(_target_free_cases())
 
 
 def test_a_receiver_that_carries_a_launcher_is_refused(tmp):
@@ -431,10 +453,13 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
     """A guard's prose is a claim about the code beside it, in both files.
 
     The lists come from the table rather than from the prose, so a form
-    swapped across the line or left out of a docstring fails here, and
-    the two claims a reader cannot check by eye — the comprehension's
-    conditions and the receiver's subscript carry — are held to the code
-    that has to back them.
+    swapped across the line or left out of a docstring fails here. The
+    two claims a reader cannot check by eye — the comprehension's
+    conditions and the receiver's subscript carry — are each held twice:
+    the sentence is pinned whole, and the behaviour behind it is driven
+    and required. The prose leg catches a claim that drifts while the
+    code stands still; the behaviour leg catches the code that stops
+    backing a claim the prose still makes.
     """
     from _coverage_bindings import _carried_parts
 
@@ -447,14 +472,34 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
         # have to say and fails here rather than passing on vocabulary.
         assert _squash(opened) in flat, opened
         assert _squash(leaves) in flat, leaves
-        # The claim, whole and not merely its opening words: a paragraph
-        # that keeps "refused" while inverting the sentence is the false
-        # green this replaces, and only the full claim catches it.
+        # The claims, whole and not merely their opening words: a
+        # paragraph that keeps the word while inverting the sentence is
+        # the false green this replaces, and only the full claim
+        # catches it.
         assert _squash(FAIL_CLOSED) in flat, prose
-        assert ('conditions' in flat) == _opens_conditions(), prose
+        assert _squash(CONDITIONS_CLAIM) in flat, prose
     assert _squash(RECEIVER_CARRY) in _squash(_GUARD_PROSE), _GUARD_PROSE
     assert _receiver_carries_a_subscript(), _BINDING_MESSAGE
+    assert _the_walk_reaches_a_conditions_launcher(), (
+        'a condition carries no launcher back: ' + CONDITIONS_CLAIM)
     assert _an_unrecognised_form_is_refused(), 'the fail-closed branch'
+
+
+def _the_walk_reaches_a_conditions_launcher():
+    """Whether a launcher carried by a comprehension's condition comes back.
+
+    The element and the iterable of this comprehension carry nothing, so
+    a launcher part can only have come through the condition, and no
+    prose is consulted to say so.
+    """
+    from _coverage_bindings import _carried_parts, _is_launch_value
+    from _coverage_guard import _ModuleFacts
+
+    statement = ast.parse('[x for x in xs if subprocess.run]').body[0]
+    assert isinstance(statement, ast.Expr)
+    facts = _ModuleFacts(ast.parse('import subprocess'))
+    return any(_is_launch_value(part, facts)
+               for part in _carried_parts(statement.value))
 
 
 def _an_unrecognised_form_is_refused():
@@ -487,13 +532,6 @@ def _squash(text):
     return ''.join(text.split())
 
 
-def _opens_conditions():
-    """Whether the table reaches a comprehension's conditions at all."""
-    from _coverage_bindings import _CARRIED_FIELDS
-
-    return ast.comprehension in _CARRIED_FIELDS
-
-
 def _classification():
     """The opened and leaf form names, read from the walk's own table.
 
@@ -521,6 +559,7 @@ def _receiver_carries_a_subscript():
 _GUARD_PROSE = _coverage_guard.__doc__ or ''
 FAIL_CLOSED = 'a form in neither class is refused rather than read as clean'
 RECEIVER_CARRY = 'every subscript the descent consumes'
+CONDITIONS_CLAIM = 'reach their conditions through the statement-level node'
 
 
 if __name__ == '__main__':

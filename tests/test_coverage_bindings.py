@@ -39,6 +39,12 @@ _RECEIVER_CARRIER_INVOKE = (
 _RECEIVER_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_receiver_that_only_names_a_launcher_stays_clean(None)')
+_ARM_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_binding_arm_of_issue_1114_is_refused(None)')
+_TARGET_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_target_that_carries_a_launcher_is_refused(None)')
 _CHAIN_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_launcher_used_as_a_callee_is_reached_through_'
@@ -69,9 +75,35 @@ def _mutation_specs():
     )
     comprehension = (
         "    if isinstance(node, ast.comprehension):\n"
-        "        return [(node.target.lineno, node.iter)]\n",
+        "        return [(node.target.lineno, node.iter),\n"
+        "                (node.target.lineno, node.target)]\n",
         "",
     )
+    # The three arms that bind a name read one value and assign another,
+    # and a target carrying a launcher is a bypass the read side cannot
+    # see. Each row drops the assignment and leaves the read in place, so
+    # the row that dies is the target's own and not the iterable's.
+    # #1114 names both arms and neither had a row: removing either
+    # removed no control, so the census read them as uncovered.
+    walrus_binding = (
+        "    if isinstance(node, ast.NamedExpr):\n"
+        "        return [(node.lineno, node.value)]\n",
+        "")
+    augassign = (
+        "    if isinstance(node, ast.AugAssign):\n"
+        "        return [(node.lineno, node.value)]\n",
+        "")
+    for_target = (
+        "        return [(node.lineno, node.iter), "
+        "(node.lineno, node.target)]",
+        "        return [(node.lineno, node.iter)]")
+    with_target = (
+        "                for part in (item.context_expr, item.optional_vars)]",
+        "                for part in (item.context_expr,)]")
+    comprehension_target = (
+        "        return [(node.target.lineno, node.iter),\n"
+        "                (node.target.lineno, node.target)]",
+        "        return [(node.target.lineno, node.iter)]")
     defaults = (
         "    if isinstance(node, _SIGNED_FORMS):\n", "    if False:\n")
     match = (
@@ -264,6 +296,12 @@ def _mutation_specs():
          _SUBSCRIPT_INVOKE),
         ('ifexp field', 'bindings', (ifexp_field,), _FORM_INVOKE),
         ('slice field', 'bindings', (slice_field,), _FORM_INVOKE),
+        ('walrus binding', 'bindings', (walrus_binding,), _ARM_INVOKE),
+        ('augmented assignment', 'bindings', (augassign,), _ARM_INVOKE),
+        ('for target', 'bindings', (for_target,), _TARGET_INVOKE),
+        ('with target', 'bindings', (with_target,), _TARGET_INVOKE),
+        ('comprehension target', 'bindings', (comprehension_target,),
+         _TARGET_INVOKE),
         ('walk arms', 'bindings', (walk_arms,), _FORM_INVOKE),
         ('receiver opens atoms', 'bindings', (receiver_atoms,),
          _RECEIVER_INVOKE),
