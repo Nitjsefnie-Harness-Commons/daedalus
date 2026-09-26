@@ -48,8 +48,7 @@ class ArgvReader:
         looping. A name bound more than once resolves to None (unreadable),
         for the same last-wins reason as resolve_argv.
 
-        `element.id not in seen` is REDUNDANT: this is a flat capped loop,
-        so the cap bounds it and the guard only spends passes.
+        REDUNDANT: a flat capped loop, so the cap bounds this guard.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
@@ -65,16 +64,12 @@ class ArgvReader:
             element = self.binding_map[element.id]
         return None
 
-    # A `seen` guard has three cases, and the question that separates them
-    # is whether the loop is CAPPED and whether the function RECURSES.
-    # FLAT and CAPPED — resolve_constant above, resolve_argv here, and
-    # head_is_ambiguous below — the cap bounds the passes, so the guard
-    # is redundant and only spends them. RECURSIVE — resolve_string
-    # furthest down — every recursive call starts a fresh budget, so the
-    # guard is the only thing that stops a self-feeding name. The third
-    # case lives in the other file: machinery_route's loop is UNCAPPED, so
-    # there the guard is load-bearing for being uncapped, not for
-    # recursion. Which case a guard is in is stated at the guard.
+    # A `seen` guard has three cases, separated by two questions: is the
+    # loop CAPPED, and does the function RECURS. resolve_constant above,
+    # resolve_argv here and head_is_ambiguous below are FLAT and CAPPED;
+    # resolve_string furthest down RECURSES, so each of its calls starts
+    # a fresh budget. The third case is in the other file, where
+    # machinery_route's loop is UNCAPPED. Each guard says which it is.
     def resolve_argv(self, expr):
         """The argv's literal list/tuple, or None when it is dynamic.
 
@@ -91,9 +86,7 @@ class ArgvReader:
                 expr = expr.left
                 continue
             if isinstance(expr, ast.Name):
-                # `expr.id in seen` is REDUNDANT: this is a flat capped
-                # loop, so the cap bounds it and the terminal return is
-                # reached either way. The guard only spends passes.
+                # REDUNDANT: a flat capped loop, so the cap bounds this.
                 if expr.id in seen or expr.id in self.ambiguous \
                         or expr.id not in self.binding_map:
                     return None
@@ -111,8 +104,7 @@ class ArgvReader:
         Such a head is a guess, not a reading, so it is a bound site in its
         own right (in scope) rather than the residual dynamic-argv boundary.
 
-        `expr.id in seen` is REDUNDANT: this is a flat capped loop, so the
-        cap bounds it and the guard only spends passes.
+        REDUNDANT: a flat capped loop, so the cap bounds this guard.
         """
         seen = set()
         for _ in range(ARGV_UNWRAP_CAP):
@@ -194,10 +186,9 @@ class ArgvReader:
 
         This and resolve_constant are ONE algorithm with one extra arm,
         and they are here together so the guard that stops a guess and
-        the guard that stops a cycle are written once. It is reached only
-        from `derives` — a Subscript slice and an `import_module` name
-        argument — and never from the argv-head path, which reads
-        resolve_constant, whose `+` arm does not exist.
+        the guard that stops a cycle are written once. Reached only from
+        `derives` — a Subscript slice and an `import_module` name — never
+        from the argv-head path, which reads resolve_constant.
         """
         seen = set() if seen is None else seen
         for _ in range(ARGV_UNWRAP_CAP):
@@ -213,11 +204,11 @@ class ArgvReader:
                     and element.id in self.binding_map
                     and element.id not in self.ambiguous
                     # LOAD-BEARING, unlike the look-alike in
-                    # resolve_argv: this resolver RECURSES, so the cap
-                    # bounds passes within one call and every recursive
-                    # call starts a fresh budget. `a = a + a` is a
-                    # RecursionError without this, and the
-                    # `self-referential-concat-name` row pins it.
+                    # resolve_argv: this RECURSES, so the cap bounds
+                    # passes within one call and every recursive call
+                    # starts a fresh budget. `a = a + a` is a
+                    # RecursionError without it; the
+                    # `self-referential-concat-name` row pins that.
                     and element.id not in seen):
                 return None
             seen.add(element.id)

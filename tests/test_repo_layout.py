@@ -645,21 +645,18 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     """machinery_route's `seen` guard is load-bearing, and its mutant does
     not answer wrong — it does not stop.
 
-    Every other input the loop takes is decided by an exit that needs no
-    guard: a base the bindings table does not hold, a name bound more
-    than once, and a target that is not a bare name. A cycle is the only
-    thing the guard answers, so a cycle is the only shape that can tell
-    whether it is there, and its absence is a loop rather than a value.
-    The count is what can tell that, and it is taken in a child process
-    so the tracer it needs cannot reach whatever tracer this suite is
-    already running under.
+    A cycle is the only input the guard answers: every other one is
+    decided by an exit that needs no guard, a base the bindings table
+    does not hold, a name bound twice, or a target that is not a bare
+    name. So a cycle is the only shape that can tell whether the guard
+    is there, and its absence is a loop rather than a value. The step
+    count is what can tell that; `_step_ceiling` has why it is taken in
+    a child process.
 
-    The second assertion is the control on that: an in-process tracer is
-    exactly the bug this shape of the bound was written to avoid, and
-    under `coverage run --parallel-mode` an in-process version left
-    `sys.gettrace()` as NoneType where it had been CTracer. The ceiling
-    lives in `_step_ceiling`, not in the analyser, so no guard's
-    behaviour depends on it.
+    The second assertion is the control on that choice. An in-process
+    tracer is the bug that shape exists to avoid, and under
+    `coverage run --parallel-mode` it left `sys.gettrace()` as NoneType
+    where it had been CTracer.
     """
     del tmp
     source = ("import importlib\n"
