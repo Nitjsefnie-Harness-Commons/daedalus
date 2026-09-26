@@ -211,4 +211,25 @@ def _unfollowable_snippets():
             """def _binding_probe(tmp):
     result = subprocess.run(['python3', 'child.py'], cwd=tmp)
 """),
+        (
+            'hidden conditional',
+            """def _binding_probe(tmp):
+    result = subprocess.run if flag else None
+    return result
+""",
+            'result = subprocess.run if flag else None',
+            """def _binding_probe(tmp):
+    result = subprocess.run(['python3', 'child.py'], cwd=tmp)
+    return result
+"""),
+        (
+            'hidden comprehension',
+            """def _binding_probe(tmp):
+    return [launcher for launcher in
+            [subprocess.run if flag else None]]
+""",
+            'return [launcher for launcher in',
+            """def _binding_probe(tmp):
+    return [subprocess.run(['python3', 'child.py'], cwd=tmp)]
+"""),
     )
