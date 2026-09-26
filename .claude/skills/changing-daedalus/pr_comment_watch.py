@@ -32,6 +32,7 @@ SKILL.md beside this script.
 
 import argparse
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -44,6 +45,10 @@ FAIL_ESCALATE = 5
 STATE_KEY = ('state', 'pull-request')
 KINDS = ('review', 'inline', 'conversation')
 PULL = ('repository', 'pullRequest')
+# The poll index this watcher names for its own boundary, published where
+# the `gh` children inherit it. Nothing reads it back; real `gh` ignores an
+# environment variable it does not know.
+POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 PR_QUERY = f'''query WatchPull($owner: String!, $name: String!, $number: Int!,
     $reviewCursor: String, $talkCursor: String) {{
@@ -263,7 +268,10 @@ def main():
     seen = {}
     failures = 0
     watcher = gh_client.Watcher(f'PR {args.pr} watcher')
+    poll_index = 0
     while True:
+        poll_index += 1
+        os.environ[POLL_MARK] = str(poll_index)
         try:
             watcher.poll(
                 lambda: poll(args.repo, args.pr, seen, announce=True))
