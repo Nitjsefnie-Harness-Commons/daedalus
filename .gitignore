@@ -584,6 +584,7 @@
 !/tests/test_mcp_poll_pause.py
 !/tests/test_mcp_probe.py
 !/tests/test_mcp_refusal_drain.py
+!/tests/test_mcp_selection_sweep.py
 !/tests/test_mcp_server.py
 !/tests/test_mcp_tools.py
 !/tests/test_mcp_transport.py
