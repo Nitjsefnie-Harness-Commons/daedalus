@@ -9,7 +9,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 REGISTER = 'POST /register'
 SYNC = 'POST /sync-tabs'
@@ -19,7 +20,7 @@ BOOT_STREAM = (503,)
 ONE = [SYNC, REGISTER]
 TWO = [SYNC, REGISTER, REGISTER]
 
-_REGISTER_HARNESS = r"""
+_REGISTER_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 const [backgroundPath, plan] = process.argv.slice(1);
@@ -31,10 +32,6 @@ const tabs = new Map([
   [7, { id: 7, title: 'Initial', url: 'https://page.example.com/7' }],
   [8, { id: 8, title: 'Other', url: 'https://page.example.com/8' }],
 ]);
-
-function eventTarget(listeners = []) {
-  return { addListener: listener => listeners.push(listener) };
-}
 
 function schedule(callback, delay) {
   const timer = { id: timers.length + 1, callback, delay, pending: true };

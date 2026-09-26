@@ -13,7 +13,7 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
 from _worker_sources import (  # noqa: E402
-    STREAM_RESPONSE, chrome_stub, import_scripts_stub)
+    STREAM_RESPONSE, chrome_stub, event_target_stub, import_scripts_stub)
 
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
@@ -29,8 +29,11 @@ _PLAN = {
 }
 
 
+_CHROME = chrome_stub("'lifecycle-token'", 'BRIDGE_URL', 'sendCommand')
+
 _CDP_HANDLE_LIFECYCLE_HARNESS = (
-    r"""
+    event_target_stub()
+    + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -132,10 +135,6 @@ function response(status, data) {
   };
 }
 
-function eventTarget() {
-  return { addListener() {} };
-}
-
 const BRIDGE_URL = 'https://bridge.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -146,7 +145,7 @@ const badOrigins = [];
 """ + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
 
-""" + chrome_stub("'lifecycle-token'", 'BRIDGE_URL', 'sendCommand') + r"""
+""" + _CHROME + r"""
 const context = vm.createContext({
   chrome,
   // A thin wrapper that DELEGATES to the gate and then does this harness's

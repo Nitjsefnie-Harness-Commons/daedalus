@@ -10,11 +10,12 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 RESULT = 'POST /result'
 
-_POST_RESULT_HARNESS = r"""
+_POST_RESULT_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 // The bridge the worker is configured against; the gate permits this origin.
 const SERVER = 'https://bridge.example.com';
@@ -33,10 +34,6 @@ const plan = typeof gatePlanArg === 'string'
 const messageListeners = [];
 const errors = [];
 const timerDelays = [];
-
-function eventTarget(listeners = []) {
-  return { addListener: listener => listeners.push(listener) };
-}
 
 const chrome = {
   storage: {

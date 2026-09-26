@@ -28,13 +28,14 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 BRIDGE = 'https://bridge.example.com'
 SYNC = 'POST /sync-tabs'
 
 
-_HARNESS = (r"""
+_HARNESS = (event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -79,12 +80,6 @@ function response(status, data) {
     body: null,
     json: async () => data,
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(l) { if (listeners) listeners.push(l); },
   };
 }
 

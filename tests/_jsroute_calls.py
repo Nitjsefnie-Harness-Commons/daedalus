@@ -9,6 +9,7 @@ from _jsroute_source import (BUILTIN_CHAINS,  # noqa: E402
                              previous_nonspace as _js_previous_nonspace,
                              word_before as _js_word_before)
 from _jsroute_tab import computed_writes
+from _jsroute_target import _target
 
 
 _NON_CALL_WORDS = {
@@ -283,12 +284,6 @@ def sender_candidate_bindings(scopes, bindings, mask, visible_binding,
             break
         pending = retained
     return candidates
-
-
-def _target(status, binding=None, body=None, member=None, name=None,
-            source=None, form=None):
-    return {'status': status, 'binding': binding, 'body': body,
-            'member': member, 'name': name, 'source': source, 'form': form}
 
 
 def _target_fields(target):

@@ -263,6 +263,7 @@
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
+!/tests/_branch_boundary.py
 !/tests/_bridge.py
 !/tests/_bridge_fake_oracle_harness.py
 !/tests/_case_fold.py
@@ -301,8 +302,10 @@
 !/tests/_ghexpr.py
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
+!/tests/_helper_binds.py
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
+!/tests/_js_functions.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
@@ -322,6 +325,7 @@
 !/tests/_jsroute_sweep.py
 !/tests/_jsroute_sweep_grammar.py
 !/tests/_jsroute_tab.py
+!/tests/_jsroute_target.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
 !/tests/_launch_refusal_rows.py
@@ -378,6 +382,8 @@
 !/tests/_token_mask.py
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
+!/tests/_unconsolidated_js_names.py
+!/tests/_unconsolidated_names.py
 !/tests/_util.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
@@ -516,6 +522,8 @@
 !/tests/test_gm_segment_job.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_helper_reimplementation.py
+!/tests/test_helper_reimplementation_js.py
 !/tests/test_helper_shadow_boundaries.py
 !/tests/test_hotfix_document_binding.py
 !/tests/test_hotfix_scope.py
@@ -679,6 +687,7 @@
 !/tests/test_workflow_job_timeouts.py
 !/tests/test_workflow_parsing.py
 !/tests/test_workflow_spellings.py
+!/tests/test_workflow_suite_base.py
 !/tests/test_workflow_triggers.py
 !/tests/test_workflow_yaml_uses.py
 !/tests/test_yamlblock.py

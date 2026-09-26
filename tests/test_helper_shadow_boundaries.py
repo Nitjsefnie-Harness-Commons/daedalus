@@ -18,11 +18,17 @@ also imports it from a module in the same tests tree, whether by
 `import X as Z`, whose target is that module.
 
 The rule is deliberately narrow and complete only over the static forms.
-A def, class, comprehension or lambda body is its own namespace, so a
-rebinding there is not a module-scope shadow and a walrus inside a
-comprehension or lambda is not collected. A walrus in a comprehension's
-outermost iterable would bind in the enclosing scope, but CPython rejects
-that source at compile time, so it is not collected. An import binds the
+A def, class or lambda BODY is its own namespace, so a rebinding there is
+not a module-scope shadow. A comprehension and a generator expression are
+NOT namespaces for an assignment expression: a walrus anywhere inside
+one binds the containing scope, and a `def` and a lambda evaluate their
+DEFAULTS, ANNOTATIONS and a `def`'s decorators where they are written,
+so a walrus in those binds it too. `test_the_binder_agrees_with_cpython`
+holds this walker to that list against the interpreter itself, so the
+narrowness is a measured boundary rather than an assumption. A walrus in
+a comprehension's OUTERMOST iterable would bind the containing scope, but
+CPython rejects that source outright, so there is no case to compare.
+An import binds the
 name it brings INTO the module, so an aliased import `X as _Y` is
 shadowed only by a rebind of `_Y`. A name the file binds with no import
 from a sibling tests module, or an import from outside the tests tree, is
@@ -30,11 +36,12 @@ not a shadow. A module the detector cannot parse fails the control, naming
 the file, rather than being silently dropped.
 
 What this control does not see, by design: a re-paste whose import was
-deleted along with it is a duplicate body, not a shadow; a `from X
-import *`, whose names the rule cannot enumerate; a `def` that
-re-implements a shared helper's name without importing it at all; a suite
-that imports another suite whole and reads its privates; and a dynamic
-rebind through `globals()[...] = ...`, `exec` or `importlib`.
+deleted along with it is a duplicate body, not a shadow; a `def` that
+re-implements a shared helper's name without importing it at all, which
+`test_helper_reimplementation.py` reports; a `from X import *`, whose
+names the rule cannot enumerate; a suite that imports another suite whole
+and reads its privates; and a dynamic rebind through `globals()[...] =
+...`, `exec` or `importlib`.
 """
 import ast
 import subprocess
@@ -44,125 +51,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _helper_binds import scan as _scan  # noqa: E402
 
 ROOT = _util.ROOT
 
-_DEFN = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-_COMPREHENSION = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-
 Shadow = namedtuple(
     'Shadow', 'path name import_lines bind_lines sources')
-
-
-def _target_names(target):
-    """An attribute or subscript target binds no module name, so
-    `x.name = 1` and `d['k'] = 1` contribute nothing.
-    """
-    if isinstance(target, ast.Name):
-        return [target.id]
-    if isinstance(target, ast.Starred):
-        return _target_names(target.value)
-    if isinstance(target, (ast.Tuple, ast.List)):
-        names = []
-        for element in target.elts:
-            names.extend(_target_names(element))
-        return names
-    return []
-
-
-def _scan(tree):
-    """Return (imports, binds) for what module execution establishes.
-
-    imports maps a name to {import line: set of source module stems};
-    binds maps a name to the set of lines that bind it. A def, class,
-    comprehension or lambda body is its own namespace, so a rebinding
-    there is not collected.
-    """
-    imports = {}
-    binds = {}
-
-    def bind(name, lineno):
-        binds.setdefault(name, set()).add(lineno)
-
-    def imported(name, lineno, source):
-        imports.setdefault(name, {}).setdefault(lineno, set()).add(source)
-
-    def collect_walrus(node):
-        stack = list(ast.iter_child_nodes(node))
-        while stack:
-            current = stack.pop()
-            if isinstance(current, ast.NamedExpr):
-                if isinstance(current.target, ast.Name):
-                    bind(current.target.id, current.lineno)
-                stack.extend(ast.iter_child_nodes(current))
-            elif isinstance(current, _DEFN):
-                continue
-            elif isinstance(current, ast.Lambda):
-                continue
-            elif isinstance(current, _COMPREHENSION):
-                continue
-            else:
-                stack.extend(ast.iter_child_nodes(current))
-
-    def record(node):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imported(alias.asname or alias.name.split('.')[0],
-                         node.lineno, alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                if alias.name != '*':
-                    imported(alias.asname or alias.name, node.lineno,
-                             node.module or '')
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                for name in _target_names(target):
-                    bind(name, node.lineno)
-        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            for name in _target_names(node.target):
-                bind(name, node.lineno)
-        elif isinstance(node, (ast.For, ast.AsyncFor)):
-            for name in _target_names(node.target):
-                bind(name, node.lineno)
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                if item.optional_vars is not None:
-                    for name in _target_names(item.optional_vars):
-                        bind(name, node.lineno)
-        elif isinstance(node, ast.ExceptHandler) and node.name:
-            bind(node.name, node.lineno)
-        elif isinstance(node, ast.Match):
-            for case in node.cases:
-                for sub in ast.walk(case.pattern):
-                    if isinstance(sub, (ast.MatchAs, ast.MatchStar)):
-                        if sub.name:
-                            bind(sub.name, sub.lineno)
-                    elif isinstance(sub, ast.MatchMapping) and sub.rest:
-                        bind(sub.rest, sub.lineno)
-
-    def statement(node):
-        if isinstance(node, _DEFN):
-            bind(node.name, node.lineno)
-            return
-        collect_walrus(node)
-        record(node)
-        for field in ('body', 'orelse', 'finalbody'):
-            children = getattr(node, field, None)
-            if (isinstance(children, list) and children and all(
-                    isinstance(child, ast.stmt) for child in children)):
-                block(children)
-        for handler in getattr(node, 'handlers', None) or []:
-            statement(handler)
-        if isinstance(node, ast.Match):
-            for case in node.cases:
-                block(case.body)
-
-    def block(body):
-        for child in body:
-            statement(child)
-
-    block(tree.body)
-    return imports, binds
 
 
 def _shadow_findings(sources):
@@ -297,10 +191,47 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
          '_command_candidates'),
         ('test_no_import.py', _mod(
             'def _load_queue():', '    pass'), None),
+        # A comprehension and a generator expression are NOT scopes for
+        # an assignment expression: a walrus anywhere inside one binds
+        # the CONTAINING scope, which is what CPython does and what
+        # this control used to deny.
         ('test_comp_inner.py', suite(
-            '[(_load_queue := i) for i in range(3)]'), None),
+            '[(_load_queue := i) for i in range(3)]'), '_load_queue'),
+        ('test_comp_condition.py', suite(
+            '[i for i in range(3) if (_load_queue := i)]'), '_load_queue'),
+        ('test_genexp.py', suite(
+            'list(i for i in range(3) if (_load_queue := i))'),
+         '_load_queue'),
+        ('test_comp_nested.py', suite(
+            '[[j for i in range(3)] for _ in range(3) '
+            'if (_load_queue := 1)]'), '_load_queue'),
+        # A lambda's BODY is its own scope, so nothing in it binds the
+        # module — not even a comprehension inside it.
         ('test_lambda.py', suite(
             'f = lambda: (_load_queue := 1)'), None),
+        ('test_lambda_comp_body.py', suite(
+            'f = lambda: [i for i in range(3) if (_load_queue := i)]'), None),
+        # A lambda's and a def's DEFAULTS are evaluated where they are
+        # written, so a walrus in one binds the containing scope, and so
+        # does one in a decorator.
+        ('test_lambda_default.py', suite(
+            'f = lambda q=(_load_queue := 1): q'), '_load_queue'),
+        ('test_def_default.py', suite(
+            'def g(q=(_load_queue := 1)):', '    return q'),
+         '_load_queue'),
+        ('test_def_annotation.py', suite(
+            'def g(q: int = (_load_queue := 1)):', '    return q'),
+         '_load_queue'),
+        ('test_decorator.py', suite(
+            'def _deco():', '    return 1',
+            '@(_load_queue := _deco)',
+            'def g():', '    pass'), '_load_queue'),
+        # A PEP 695 `type X = ...` binds X, so over an import it is a
+        # shadow like any other rebind. It is a bind and not a
+        # definition, which is why the re-implementation control's three
+        # defining forms do not list it.
+        ('test_type_alias.py', suite('type _load_queue = int'),
+         '_load_queue'),
         ('test_assign_attr.py', suite('x._load_queue = 1'), None),
         ('test_annassign_attr.py', suite('x._load_queue: int = 1'), None),
     ]
@@ -334,6 +265,82 @@ def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
         assert 'tests/test_broken.py' in str(exc), exc
     else:
         raise AssertionError('the detector accepted an unparseable module')
+
+
+# One case per shape where a walrus binds the module scope, and one per
+# shape where it does not. The expected half of each pair is not written
+# down: the interpreter is asked, and the walker has to agree with it.
+# Every case here is one this control got wrong at some point, or one
+# adjacent to one it did.
+_WALRUS_CASES = (
+    ('comprehension element', 'out = [(y := x) for x in range(3)]', 'y'),
+    ('comprehension condition',
+     'out = [x for x in range(3) if (y := x * 2)]', 'y'),
+    ('generator expression',
+     'out = list(x for x in range(3) if (y := x))', 'y'),
+    ('nested comprehension',
+     'out = [[z for x in range(3)] for _ in range(3) if (z := 1)]', 'z'),
+    ('dict display', 'out = {(_y := 1): 2}', '_y'),
+    ('set display', 'out = {(_y := 1)}', '_y'),
+    ('lambda default', 'out = lambda q=(_y := 1): q', '_y'),
+    ('def default', 'def g(q=(_y := 1)):\n    return q', '_y'),
+    ('def annotation',
+     'def g(q: int = (_y := 1)):\n    return q', '_y'),
+    # A class BODY is a scope of its own; a class HEADER is not. Its
+    # decorators, its bases and its keywords all evaluate where the
+    # class is written, so a walrus in any of them binds the module.
+    ('class decorator', 'def _d(f):\n    return f\n@(_y := _d)\n'
+     'class K:\n    pass', '_y'),
+    ('class base expression', 'class K((_y := object)):\n    pass', '_y'),
+    ('class keyword',
+     'class K(metaclass=(_y := type)):\n    pass', '_y'),
+    ('class body statement', 'class K:\n    (_y := 1)', None),
+    ('class body method default',
+     'class K:\n    def m(self, q=(_y := 1)):\n        return q', None),
+    ('decorator',
+     'def _d(q=None):\n    return 1\n@(_y := _d)\ndef g():\n    pass',
+     '_y'),
+    ('f-string', 'out = f"{(_y := 1)}"', '_y'),
+    ('lambda body', 'out = lambda: (_y := 1)', None),
+    ('def body', 'def g():\n    (_y := 1)\n    return _y', None),
+    ('class body', 'class K:\n    (_y := 1)', None),
+    ('comprehension inside a lambda body',
+     'out = lambda: [x for x in range(3) if (_y := x)]', None),
+    ('comprehension inside a method body',
+     'class K:\n    def m(self):\n        return [x for x in range(3) '
+     'if (_y := x)]', None),
+    ('method default', 'class K:\n    def m(self, q=(_y := 1)):\n'
+     '        return q', None),
+)
+
+
+def test_the_binder_agrees_with_cpython(tmp):
+    """The walker's module-scope binds, against the interpreter's.
+
+    A fabricated case says only what this control believes about a
+    shape; the interpreter says which of those shapes actually bind the
+    module namespace, so asking it turns a disputed boundary into a
+    measured one. This is the control that would have caught the four
+    walrus spellings the walker skipped — a comprehension's element and
+    condition, a generator expression and a lambda default — and the
+    three it would still have skipped: a def's default, a def's
+    decorator, and a PEP 695 type alias.
+    """
+    del tmp
+    disagreed = []
+    for label, source, name in _WALRUS_CASES:
+        compile(source, label, 'exec')
+        _, binds = _scan(ast.parse(source))
+        walked = name in binds
+        namespace = {}
+        # The interpreter IS the oracle here, so executing the case is
+        # the point rather than a shortcut.
+        code = compile(source, label, 'exec')
+        exec(code, namespace)  # pylint: disable=exec-used
+        interpreted = name in namespace
+        if walked != interpreted:
+            disagreed.append((label, walked, interpreted))
+    assert not disagreed, disagreed
 
 
 if __name__ == '__main__':

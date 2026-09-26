@@ -20,7 +20,8 @@ from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import STRICT_FETCH  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import import_scripts_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    event_target_stub, import_scripts_stub)
 
 TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
@@ -37,7 +38,7 @@ TWO = [SYNC, SYNC]
 BOTH = [BRIDGE, NEW_BRIDGE]
 
 
-_STREAM_HARNESS = r"""
+_STREAM_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -84,14 +85,6 @@ function response(status, data) {
     body: null,
     json: async () => data,
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
   };
 }
 

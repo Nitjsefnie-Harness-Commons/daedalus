@@ -2,18 +2,13 @@
 from bisect import bisect_right
 import re
 
-from _jsroute_calls import parameter_sources
+from _jsroute_calls import _segments, parameter_sources, _trim
 from _jsroute_keys import (class_accessor, decode_string_literal,
                            entry_head, head_left, source_key)
 from _jsroute_returns import (callable_body, callable_return,
                               constructed_value, member_value)
 from _jsroute_source import BUILTIN_CHAINS, record_work
-
-
-def target(status, binding=None, body=None, member=None, name=None,
-           source=None, form=None):
-    return {'status': status, 'binding': binding, 'body': body,
-            'member': member, 'name': name, 'source': source, 'form': form}
+from _jsroute_target import _target as target
 
 
 def next_offset(mask, position):
@@ -21,31 +16,6 @@ def next_offset(mask, position):
     while position < len(mask) and mask[position].isspace():
         position += 1
     return position
-
-
-def _trim(mask, left, right):
-    while left < right and mask[left].isspace():
-        left += 1
-    while right > left and mask[right - 1].isspace():
-        right -= 1
-    return left, right
-
-
-def _segments(mask, start, end):
-    found = []
-    depth = 0
-    left = start
-    for position in range(start, end):
-        char = mask[position]
-        if char in '([{':
-            depth += 1
-        elif char in ')]}':
-            depth -= 1
-        elif char == ',' and depth == 0:
-            found.append((left, position))
-            left = position + 1
-    found.append((left, end))
-    return found
 
 
 class _History:

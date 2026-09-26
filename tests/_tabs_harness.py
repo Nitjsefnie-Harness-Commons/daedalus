@@ -304,9 +304,3 @@ def command(**fields):
     cmd = {'id': 'cmd-1', '_did': 'did-1'}
     cmd.update(fields)
     return cmd
-
-
-def apis(outcome, *names):
-    """Ordered [api, args] pairs for the named chrome surfaces."""
-    return [[c['api'], c['args']] for c in outcome['calls']
-            if c['api'] in names]
