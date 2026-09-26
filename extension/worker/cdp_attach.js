@@ -89,9 +89,12 @@ function _cdpRelease(entry) {
   // the stale release owns nothing that is still installed.
   if (_cdpClaims.get(entry.tabId) !== entry) return null;
   _cdpClaims.delete(entry.tabId);
-  // A refused attach never took, so there is nothing to give back — and
-  // detaching an unattached tab is a refusal that lands on whatever runs
-  // next.
+  // Defence in depth, BEHIND the identity check above, and this guard is
+  // not what answers a refused attach: the rejection handler on `ready`
+  // drops the record, so a release for that entry is already gone by the
+  // line above. What remains here is an attach whose promise has not
+  // settled yet — nothing is installed to give back, and detaching an
+  // unattached tab is a refusal that lands on whatever runs next.
   if (!entry.live) return null;
   let settle;
   // Recorded BEFORE the call, not after: a claim that arrives while `detach`
