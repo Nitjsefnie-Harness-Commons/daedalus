@@ -55,9 +55,7 @@ def per_poll(calls):
             raise _refuse(requests,
                           f'the poll at call {start} is another shape')
     polls, _ = divmod(len(requests), width)
-    # The numerator counts the whole polls alone: a trailing partial one is
-    # trimmed, because the log is read some time after the wait returns.
-    whole = polls * width
+    whole = polls * width             # the trailing partial poll, dropped
     return whole // polls
 
 
