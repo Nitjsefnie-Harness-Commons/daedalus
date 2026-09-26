@@ -20,9 +20,7 @@ _NO_PROGRESS_LIMIT = 200_000
 class _ModuleDefault:
     """An omitted wall budget, read from `_RUNAWAY_WALL` as it then stands.
 
-    A default bound in the signature would freeze the constant at import, and
-    a session that lowers `_RUNAWAY_WALL` to check what a control escapes
-    would be lowering a name nothing reads any more.
+    A default bound in the signature would freeze the constant at import.
     """
 
 
@@ -130,12 +128,9 @@ def _virtual_cmdqueue_clock(
         wall_budget: float | None | _ModuleDefault = _ModuleDefault()):
     """Replace the command queue's time with a simulated one.
 
-    `max_sleeps` and `wall_budget` are the caller's own ceilings. Each has
-    three states: omitted takes the module's value as it stands when the
-    control runs, a number is that caller's own, and None means no such
-    ceiling applies. A control that decides on a simulated bound passes no
-    wall budget, so its verdict cannot depend on how fast the machine running
-    it happens to be, and a control for the wall guard itself omits it.
+    Both ceilings have three states: omitted takes the module's value as it
+    stands when the control runs, a number is that caller's own, and None
+    means no such ceiling applies.
     """
     budget = _RUNAWAY_WALL if isinstance(wall_budget, _ModuleDefault) \
         else wall_budget
