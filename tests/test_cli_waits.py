@@ -255,7 +255,7 @@ _WAIT_HARNESS = (
 
 
 def _wait_harness_output(stdout):
-    """(sleeps, polls, result, interval); a zero-sleep waiter prints []."""
+    """Decoded harness fields; a zero-sleep waiter prints SLEEPS []."""
     out = dict(  # ''.split(' ', 1) is ['']: a spaceless line must not parse
         line.split(' ', 1) for line in stdout.splitlines() if ' ' in line)
     return (json.loads(out['SLEEPS']), int(out['POLLS']), out['RESULT'],
@@ -285,6 +285,8 @@ def test_the_result_wait_records_the_ramp_opening_below_the_interval(tmp):
     assert result == '7', r.stdout
     assert polls == 2, r.stdout
     assert sleeps == [0.02], r.stdout
+    # Order matters: the assertion above is what makes this index safe.
+    # Swapped, a zero-sleep waiter raises IndexError: ERROR, stdout lost.
     assert sleeps[0] < interval, r.stdout
 
 
