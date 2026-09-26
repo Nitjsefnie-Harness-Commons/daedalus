@@ -129,8 +129,9 @@ def _run(body, *, setup=None, answers=(), plan=shared.COMMAND,
 def test_the_mount_offers_the_tabs_and_leaves_the_pane_empty(_tmp):
     """The pane starts in the `empty` state and the mount sends nothing
     at all: the one request it makes is the tab list `bindTabSelector`
-    issues, and a mount that sent a CDP command would be attaching a
-    debugger before the operator asked for anything."""
+    issues, and a mount that sent a CDP command would reach
+    `extension/worker/cdp.js:30`, which attaches a debugger, before the
+    operator asked for anything."""
     report = _run('report({ pane: pane(), sent: sent(),'
                   ' options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent) });\n')
@@ -144,9 +145,9 @@ def test_the_mount_offers_the_tabs_and_leaves_the_pane_empty(_tmp):
 def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     """`bindTabSelector` returns before `api.get('/tabs')` when the token
     is empty, and this section passes no `errorLabel`, so the select keeps
-    the `(active tab)` option the markup shipped with. A RUN now reaches
-    `runCommand`, which throws its own no-token error into the result
-    pane -- the two panels' silence and loudness are separate."""
+    the `(active tab)` option the markup shipped with. A RUN would reach
+    `runCommand` and be refused at `api.js:128`; this case does not
+    press it, and states instead that the mount left the pane empty."""
     report = _run('report({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  pane: pane() });\n', setup=TABS + NO_TOKEN)
@@ -245,9 +246,11 @@ def test_a_chosen_tab_arrives_as_the_string_the_select_holds(_tmp):
     """`fields.tabId = tabSel.value` with no `Number()` around it, which is
     the difference from `net-capture.js` and `css-injector.js` -- both wrap
     the same control in `Number()`. A test that asserted equality alone
-    would pass against both, so the type is what this case states;
-    `extension/worker/cdp.js:13` then guards it with a truthiness test,
-    which is the whole of what this module's own shape commits to."""
+    would pass against both, so the type is what this case states. The
+    worker's own guard is about emptiness, not type --
+    `extension/worker/cdp.js:13` is `!chromeTabId` -- and it is
+    `extension/worker/cdp.js:20-21` that takes a string, so a tab id
+    this panel sends as one is a tab id the worker parses."""
     report = _run(_press(tab=TAB_CHOSEN) + SETTLED
                   + 'report({ sent: sent() });\n',
                   answers=(ANSWER_TEXT,))
@@ -298,9 +301,9 @@ def test_a_bridge_failure_renders_the_pane_and_toasts_nothing(_tmp):
 
 
 def test_a_string_answer_reaches_the_pane_unquoted(_tmp):
-    """`pretty` returns a string as it is, so an answer the bridge framed
-    as text arrives as the operator typed it rather than as a quoted
-    string they would have to read past."""
+    """`pretty` returns a string as it is and `JSON.stringify`s anything
+    else, so a string answer reaches the pane as the text itself rather
+    than as a quoted string the operator would have to read past."""
     report = _run(_press() + SETTLED + 'report({ pane: pane() });\n',
                   answers=(ANSWER_TEXT,))
     assert report['pane'] == ['pane flash', 'frameNavigated'], report
