@@ -8,12 +8,25 @@ the tree — the first of one file, the second of every tracked shipped
 JavaScript file — so both are derived here, in one command, with no suite
 run and no coverage data.
 
-The covered count and the percentage are NOT functions of the tree; they are
-measurements of one run, and this suite therefore asserts that the prose does
-not restate them. That split is the point of the case. The figures that can
-be checked are checked here and go red the moment a shipped file grows; the
-ones that cannot are pointed at the run's own summary rather than copied into
-a file where nothing would notice them going stale.
+The covered count is NOT a function of the tree; it is a measurement of one
+run, so no gate here can hold it and the prose is not permitted to state it.
+The percentage IS a function of the tree — it is the module's share of the
+denominator — so it is recomputed from the two figures above and compared by
+value, to the precision the prose states. Every remaining figure in the
+paragraph must be one the tree proves, and anything else is refused as a
+value rather than as a phrase, so rewording around it does not slip past.
+
+That split is the point. The figures that can be checked are checked here and
+go red the moment a shipped file grows; the ones that cannot are pointed at
+the run's own summary rather than copied into a file where nothing would
+notice them going stale.
+
+The scan reads DIGIT FORM. A figure written in words, or one attached to a
+name or a version — `V8`, `base64`, `Python 3.13`, `SHA-256` — is outside
+what it sees, and the case docstring says so rather than claiming
+completeness it does not have. This is deliberate: the alternative is a
+natural-language parser, and a prose gate is worth more when its own limits
+are written down than when it pretends to have none.
 
 The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the number it is checking: if the
@@ -94,26 +107,58 @@ def test_the_paragraph_still_claims_the_unreached_module(tmp):
         'the paragraph no longer claims the module is unreached')
 
 
+def _digit_runs(text):
+    """Every maximal digit run, with where it sits, for the figure scan."""
+    return [(m.group(0), m.start(), m.end())
+            for m in re.finditer(r'\d+(?:\.\d+)?', text)]
+
+
+def _part_of_a_token(text, start, end, run):
+    """True when a digit run belongs to a name or a version, not a figure.
+
+    A run is a token's own when it touches a letter, a digit or an
+    underscore (`V8`, `base64`, `NODE_V8_COVERAGE`), when it carries its own
+    dot (`Python 3.13`), or when a hyphen runs into it (`SHA-256`). Those are
+    spellings of something else, and the paragraph is allowed to name things.
+
+    This is an EXEMPTION list, not a description of what the scan can read.
+    The scan reads digit form: a figure spelled in words is invisible to it,
+    and so is one written with a thousands separator in a way that splits it
+    into runs it will judge separately. The case docstring says so, because a
+    gate that reads as complete and is not will be trusted past its reach.
+    """
+    before = text[start - 1] if start else ''
+    after = text[end] if end < len(text) else ''
+    if before.isalnum() or before == '_':
+        return True
+    if after.isalnum() or after == '_':
+        return True
+    return '.' in run or before in '.-'
+
+
 def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """The property, not a token: a figure may appear only if the tree
     proves it, so the test is the VALUE and never the wording around it.
 
     Two figures are provable here and are pinned by the cases above: the
     unreached module's own code-line count, and the denominator. The
-    paragraph's one percentage must be computed FROM those two, which is why
-    it is recomputed below and compared rather than matched against a
-    phrasing -- `about 1%` is a rounding of 51/4943, and a rotated `about
-    99%` is the same sentence with a different number in it.
+    paragraph's percentage is the third, because it is computed FROM those
+    two -- it is the module's share of the denominator -- so it is
+    recomputed here and compared at the precision the prose states. That
+    admits `about 1%` and refuses `about 2%`, which a flat one-point
+    tolerance would have let through.
 
-    Every other figure in the paragraph is a measurement of a coverage run,
-    which nothing in this repository can check without making that run. The
-    covered count and the total are therefore banned as VALUES, so rewording
-    around them does not slip past, and inserting one is caught however it is
-    phrased. The bare `0` is permitted because it is not a measurement: it is
-    the claim that the module is unreached, which is what the paragraph is
-    for. The scan is bounded by identifier characters, so the `8` in `V8` and
-    the one in `NODE_V8_COVERAGE` are read as part of a name rather than as
-    figures the paragraph states.
+    Every other figure is a measurement of a coverage run, which nothing here
+    can check, so it is refused as a VALUE: rewording around one does not
+    slip past, and neither does inserting one into the sentence that
+    disclaims it. The bare `0` is permitted because it is not a measurement
+    but the claim that the module is unreached.
+
+    What this does NOT read is in the module docstring and repeated here: the
+    scan is digit form, so a figure spelled in words -- "four thousand three
+    hundred and forty" -- passes. That is a known limit rather than a bug to
+    be fixed by writing a prose parser, and the honest remedy is this
+    sentence, not a bigger regular expression.
     """
     del tmp
     text = _paragraph()
@@ -125,16 +170,31 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     total = int(said_total.group(1))
     share = 100.0 * count / total
 
-    for said in re.findall(r'(\d+(?:\.\d+)?)\s*%', text):
-        assert abs(float(said) - share) < 1, (
+    percents = re.findall(r'(\d+(?:\.\d+)?)\s*%', text)
+    assert percents, (
+        'the paragraph states no percentage in digits, so the share it '
+        'expresses is not checked against anything -- and a percentage '
+        'written in words is exactly as unchecked as none at all, so both '
+        'are refused rather than passed')
+    for said in percents:
+        decimals = len(said.split('.')[1]) if '.' in said else 0
+        half = 0.5 * 10 ** -decimals
+        assert abs(float(said) - round(share, decimals)) < half, (
             f'the paragraph states {said}%, which is not the '
             f'{share:.2f}% the two figures above give')
-    prose = re.sub(r'\d+(?:\.\d+)?\s*%', '', text)
-    for said in re.findall(r'(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])', prose):
-        assert int(said) in (0, count, total), (
-            f'the paragraph states {said}, which is a measurement of a '
-            'coverage run rather than a figure the tree proves; it belongs '
-            'in the coverage step summary')
+
+    # Percentages are judged above; blank them so their digits are not also
+    # scanned as bare figures, keeping every other offset where it was.
+    blanked = re.sub(r'\d+(?:\.\d+)?\s*%',
+                     lambda m: ' ' * len(m.group(0)), text)
+    for run, start, end in _digit_runs(blanked):
+        if _part_of_a_token(blanked, start, end, run):
+            continue
+        assert float(run) in (0, count, total), (
+            f'the paragraph states {run!r} in '
+            f'...{blanked[max(0, start - 14):end + 14].strip()}... , which is '
+            'a measurement of a coverage run rather than a figure the tree '
+            'proves; it belongs in the coverage step summary')
     assert 'coverage step summary' in text, (
         'the run-only figures must point at the coverage step summary')
 
