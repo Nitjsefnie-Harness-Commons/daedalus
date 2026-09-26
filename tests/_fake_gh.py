@@ -43,7 +43,7 @@ GRAPHQL_MARK = 'graphql'
 # inherit. Recorded beside every request so a poll is a group in the log
 # rather than a width inferred from the requests. A watcher that publishes
 # none - a base commit's, or a `--once` trial - logs `None`, and its whole
-# log is one poll because the process ran one.
+# log is one poll because the process ran exactly one and exited.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 
