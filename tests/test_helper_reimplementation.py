@@ -85,6 +85,8 @@ three is the value the class's own shortest copy sets. Lowering
 Python, which is why the floor lives here.
 """
 import ast
+import hashlib
+import re
 import subprocess
 import sys
 from collections import namedtuple
@@ -93,7 +95,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _js_functions  # noqa: E402
 import _util  # noqa: E402
-from _helper_binds import definitions, scan  # noqa: E402
+from _helper_binds import (  # noqa: E402
+    definition_nodes, definitions, scan)
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
 from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
@@ -106,6 +109,8 @@ JsDeclaration = namedtuple('JsDeclaration', 'name line body_lines')
 
 BRANCH_BASES = ('origin/main', 'main')
 JS_FLOOR = 3
+
+_LIVE_SOURCES = None
 
 
 def _mod(*lines):
@@ -288,35 +293,118 @@ def _live_js():
     return sources, js_reimplementations(sources)
 
 
-def branch_paths(run, bases=BRANCH_BASES):
-    """The repo-relative paths this branch adds or edits, or None.
+def _merge_base(root, bases=BRANCH_BASES):
+    """The merge base with the first of `bases` that resolves, or None.
 
-    The base is the merge base with the first of `bases` that resolves, so
-    a developer checkout and a CI checkout that has fetched the base read
-    the same set. A depth-1 pull-request checkout fetches neither and its
-    one commit has no parent to diff against, so the answer there is None
-    rather than an empty set: an empty set reads as the claim that the
-    branch changed nothing, which is a claim about the branch and not
-    about what this checkout can see.
+    A developer checkout resolves one of them and a CI checkout that has
+    fetched the base resolves the same one, so both read the same tree.
+    None means THIS CHECKOUT CANNOT SEE A BASE, which is a different
+    fact from "the base resolves and names nothing"; the caller has to
+    treat the first as a refusal and may treat the second as an answer.
     """
+    run = _text_in(root)
     for base in bases:
         merge_base = run(['git', 'merge-base', 'HEAD', base])
-        if not merge_base:
-            continue
-        names = run(['git', 'diff', '--name-only', f'{merge_base[0]}..HEAD'])
-        if names is None:
-            return None
-        return set(names)
+        if merge_base and merge_base.strip():
+            return merge_base.strip()
     return None
 
 
-def excused_by_the_branch(touched, table):
-    """The rows naming a file this branch adds or edits."""
-    return sorted(key for key in table if key[0] in touched)
+def _at(root, ref, path):
+    """One file's text at `ref`, or None if that ref has no such file."""
+    run = _text_in(root)
+    if run(['git', 'cat-file', '-e', f'{ref}:{path}']) is None:
+        return None
+    return run(['git', 'show', f'{ref}:{path}'])
+
+
+def introduced_rows(table, read, root, bases=BRANCH_BASES):
+    """The rows naming a declaration the base tree does not carry.
+
+    A row is a claim about ONE DECLARATION, so the comparison is over
+    declarations and never over names or over a file list. Three shapes
+    of drift come apart under it, and a name-keyed or file-keyed rule
+    merges them:
+
+      * a site that predates the branch, in a file the branch edits for
+        an unrelated reason — excused, because the base carries the
+        identical declaration;
+      * a site the branch MOVED — excused, because it is the same
+        declaration under a different line;
+      * a second, NEW declaration of an already-tabled name — refused,
+        because no row was ever written for it.
+
+    `read(sources)` turns a `{path: text}` map into `{path: {name: set
+    of declaration digests}}`. It is the same comparison for both
+    tables, and both boundary tests below call THIS function, so a
+    mutant that stops it deciding anything turns both suites red.
+
+    None means the base could not be read, and the caller MUST refuse on
+    it rather than pass. The boundary is the property every row in both
+    tables rests on, and a checkout that cannot evaluate it is not
+    evidence that the property holds.
+    """
+    merge_base = _merge_base(root, bases)
+    if merge_base is None:
+        return None
+    paths = sorted({key[0] for key in table})
+    head = read({path: text for path in paths
+                 if (text := _at(root, 'HEAD', path)) is not None})
+    base = read({path: text for path in paths
+                 if (text := _at(root, merge_base, path)) is not None})
+    return sorted(key for key in table
+                  if _declared(head, key) - _declared(base, key))
+
+
+def _declared(digests, key):
+    """The declaration digests one row names, on one side of the diff."""
+    return digests.get(key[0], {}).get(key[1], set())
+
+
+def python_digests(sources):
+    """{path: {name: {digest}}} over the module-execution definitions.
+
+    The digest is the definition's own AST, so two declarations agree
+    exactly when they are the same definition and disagree the moment
+    either its body or its signature moves.
+    """
+    digests = {}
+    for path, source in sources.items():
+        found = {}
+        for name, nodes in definition_nodes(_parse(path, source)).items():
+            found[name] = {hashlib.sha1(
+                ast.dump(node, include_attributes=False).encode()
+            ).hexdigest() for node in nodes}
+        digests[path] = found
+    return digests
+
+
+def js_digests(sources):
+    """{path: {name: {digest}}} over the JavaScript declarations.
+
+    The digest is the declaration's own body with its whitespace
+    normalised, for the reason the Python side digests the AST: a moved
+    line must not read as a new declaration and an edited body must.
+    """
+    digests = {}
+    for path, source in sources.items():
+        found = {}
+        for text, _starts in _js_functions.documents(source, path):
+            lines = text.split('\n')
+            for item in _js_functions.declarations(text, path):
+                # `offset` is the line the `function` keyword or the
+                # `const` sits on, counted from one, and `body_lines`
+                # spans that line to the closing brace.
+                start = item.offset - 1
+                body = ' '.join(lines[start:start + item.body_lines])
+                found.setdefault(item.name, set()).add(hashlib.sha1(
+                    re.sub(r'\s+', ' ', body).strip().encode()).hexdigest())
+        digests[path] = found
+    return digests
 
 
 def _git_in(root):
-    """A `run` for `branch_paths` over one checkout, in that root."""
+    """A `run` yielding one word per line, for a repository at `root`."""
     def run(argv):
         text = _git_text(root, argv)
         return None if text is None else text.split()
@@ -324,7 +412,7 @@ def _git_in(root):
 
 
 def _text_in(root):
-    """A `run` for the same git calls that must yield a file's text."""
+    """A `run` yielding a file's text, for a repository at `root`."""
     def run(argv):
         return _git_text(root, argv)
     return run
@@ -335,6 +423,25 @@ def _git_text(root, argv):
         argv, cwd=root, capture_output=True, text=True,
         env=_util.child_coverage('scrub'))
     return None if done.returncode else done.stdout
+
+
+def _live_sources():
+    """The tracked tests modules, memoised for the suite's own duration.
+
+    Four tests read the whole tree and the two readers are the expensive
+    part; recomputing them per test cost this suite 45 seconds where the
+    shared scans cost 13.
+    """
+    global _LIVE_SOURCES
+    if _LIVE_SOURCES is None:
+        listed = subprocess.run(
+            ['git', 'ls-files', 'tests/*.py'], cwd=ROOT,
+            capture_output=True, text=True, check=True,
+            env=_util.child_coverage('scrub')).stdout.splitlines()
+        assert listed, 'git ls-files named no tests module'
+        _LIVE_SOURCES = {name: (ROOT / name).read_text(encoding='utf-8')
+                         for name in listed}
+    return _LIVE_SOURCES
 
 
 def test_no_tests_module_reimplements_a_shared_helper_name(tmp):
@@ -362,18 +469,17 @@ def test_an_allowance_row_naming_no_live_site_fails(tmp):
             f'UNCONSOLIDATED_NAMES row {key} carries no justification')
 
 
-def test_a_row_may_not_name_a_file_this_branch_touches(tmp):
+def test_a_row_may_not_name_a_declaration_this_branch_added(tmp):
     del tmp
-    touched = branch_paths(_git_in(ROOT))
-    if touched is None:
-        # A checkout that cannot name the branch's diff evaluates nothing,
-        # which is why the rule is proved on a repository built for it
-        # below rather than trusted to stay vacuous here.
-        return
-    excused = excused_by_the_branch(touched, UNCONSOLIDATED_NAMES)
-    assert not excused, (
-        'UNCONSOLIDATED_NAMES rows excuse a site in a file this branch '
-        f'adds or edits: {excused}')
+    introduced = introduced_rows(UNCONSOLIDATED_NAMES, python_digests, ROOT)
+    assert introduced is not None, (
+        'the branch boundary could not be evaluated: this checkout '
+        'resolves neither ' + ' nor '.join(BRANCH_BASES) + ', so nothing '
+        'here says a row is not excusing a definition the branch wrote. '
+        'That is a refusal, not a pass — fetch the base and re-run.')
+    assert not introduced, (
+        'UNCONSOLIDATED_NAMES rows excuse a definition the base tree does '
+        f'not carry, so the branch wrote it: {introduced}')
 
 
 def test_no_tests_module_reimplements_a_shared_javascript_name(tmp):
@@ -402,98 +508,75 @@ def test_an_allowance_row_naming_no_live_javascript_site_fails(tmp):
             f'UNCONSOLIDATED_JS_NAMES row {key} carries no justification')
 
 
-def test_a_javascript_row_may_not_name_a_site_this_branch_introduced(tmp):
+def test_a_javascript_row_may_not_name_a_declaration_this_branch_added(tmp):
     del tmp
-    introduced = _js_sites_this_branch_added()
-    if introduced is None:
-        return
-    excused = sorted(key for key in UNCONSOLIDATED_JS_NAMES
-                     if key in introduced)
-    assert not excused, (
-        'UNCONSOLIDATED_JS_NAMES rows excuse a declaration this branch '
-        f'added: {excused}')
+    introduced = introduced_rows(
+        UNCONSOLIDATED_JS_NAMES, js_digests, ROOT)
+    assert introduced is not None, (
+        'the JavaScript branch boundary could not be evaluated: this '
+        'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + '. '
+        'That is a refusal, not a pass — fetch the base and re-run.')
+    assert not introduced, (
+        'UNCONSOLIDATED_JS_NAMES rows excuse a declaration the base tree '
+        f'does not carry, so the branch wrote it: {introduced}')
 
 
-def _js_sites_this_branch_added():
-    """(path, name) keys the merge base does not already declare, or None.
+def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
+    """The boundary bites on a real repository, on both sides, in both
+    languages.
 
-    Site-scoped, where the Python table's boundary is file-scoped, and
-    for a stated reason: this branch edits twelve of the eighteen files
-    the JavaScript residue lives in, for the unrelated `eventTarget`
-    migration, so forbidding every row in a file the branch touches would
-    forbid recording sites that predate the branch. What the two forms
-    share is the property that makes either a control at all — the table
-    cannot excuse a declaration the branch itself wrote — and this one
-    reaches it by reading the base's own declarations rather than the
-    branch's file list.
-
-    None rather than an empty set when the base cannot be read, for the
-    reason `branch_paths` gives: an empty set would read as the claim
-    that the branch added nothing, which is a claim about the branch and
-    not about what this checkout can see.
-    """
-    run = _text_in(ROOT)
-    for base in BRANCH_BASES:
-        merge_base = run(['git', 'merge-base', 'HEAD', base])
-        if not merge_base or not merge_base.strip():
-            continue
-        paths = sorted({key[0] for key in UNCONSOLIDATED_JS_NAMES})
-        sources = {}
-        for path in paths:
-            at_base = run(['git', 'show', f'{merge_base.strip()}:{path}'])
-            if at_base is not None:
-                sources[path] = at_base
-        try:
-            declared = js_declarations(sources)
-        except (AssertionError, SyntaxError) as exc:
-            raise AssertionError(
-                f'the merge base JavaScript does not parse: {exc}') from exc
-        before = {(path, item.name)
-                  for path, items in declared.items() for item in items}
-        return {key for key in UNCONSOLIDATED_JS_NAMES if key not in before}
-    return None
-
-
-def test_the_branch_diff_names_a_file_the_branch_edited(tmp):
-    """The boundary bites on a real repository, not only on this one: a
-    row naming a file the branch edited is refused, and the same table
-    naming a file the branch left alone is not.
+    Three cases, and the middle one is the defect a name-keyed rule
+    misses: a row the base already carried stays excused, a row for a
+    name the base never had is refused, and a SECOND, new declaration of
+    an already-tabled name is refused too even though the first row is
+    still live. A checkout carrying neither base is a refusal and not an
+    answer.
     """
     repo = Path(tmp) / 'branch'
     repo.mkdir()
-    run = _git_in(repo)
-    subprocess.run(['git', 'init', '-q'], cwd=repo, check=True,
-                   env=_util.child_coverage('scrub'))
-    subprocess.run(['git', 'config', 'user.email', 't@example.invalid'],
-                   cwd=repo, check=True,
-                   env=_util.child_coverage('scrub'))
-    subprocess.run(['git', 'config', 'user.name', 'T'], cwd=repo,
-                   check=True, env=_util.child_coverage('scrub'))
-    (repo / 'base.py').write_text('BASE = 1\n', encoding='utf-8')
-    (repo / 'edited.py').write_text('BEFORE = 1\n', encoding='utf-8')
-    (repo / 'kept.py').write_text('KEPT = 1\n', encoding='utf-8')
+    for argv in (['git', 'init', '-q'],
+                 ['git', 'config', 'user.email', 't@example.invalid'],
+                 ['git', 'config', 'user.name', 'T']):
+        subprocess.run(argv, cwd=repo, check=True,
+                       env=_util.child_coverage('scrub'))
+    (repo / 'tests').mkdir()
+    (repo / 'tests' / '_owner.py').write_text(
+        _mod('def kept(value):', '    return 1'), encoding='utf-8')
+    (repo / 'tests' / 'test_base.py').write_text(
+        _mod('def carried(value):', '    return 1', '',
+             'HARNESS = r"""', 'function carried(l) {',
+             '  const seen = [];', '  return seen;', '}', '"""'),
+        encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'commit', '-qm', 'base'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
-    (repo / 'edited.py').write_text('AFTER = 1\n', encoding='utf-8')
-    (repo / 'added.py').write_text('ADDED = 1\n', encoding='utf-8')
+    (repo / 'tests' / 'test_base.py').write_text(_mod(
+        'def carried(value):', '    return 1',
+        'def added(value):', '    return 2', '',
+        'HARNESS = r"""', 'function carried(l) {',
+        '  const seen = [];', '  return seen;', '}',
+        'function added(l) {', '  const other = [];', '  return other;',
+        '}', '"""'), encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'commit', '-qm', 'branch'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
 
-    touched = branch_paths(run, bases=('main',))
-    assert touched == {'edited.py', 'added.py'}, touched
-    table = {('edited.py', 'name'): 'this one is the branch own',
-             ('kept.py', 'name'): 'this one predates the branch'}
-    assert excused_by_the_branch(touched, table) == [('edited.py', 'name')]
-    # The base that resolves is the merge base, so a base the branch has
-    # not merged leaves the branch's own commits in the set, and a
-    # checkout carrying neither base says it cannot read the diff.
-    assert branch_paths(run, bases=('origin/main',)) is None
+    table = {('tests/test_base.py', 'carried'): 'this one predates',
+             ('tests/test_base.py', 'added'): 'this one is the branch own'}
+    carried = introduced_rows(table, python_digests, repo, bases=('main',))
+    assert carried == [('tests/test_base.py', 'added')], carried
+    js = introduced_rows(table, js_digests, repo, bases=('main',))
+    assert js == [('tests/test_base.py', 'added')], js
+    # A checkout carrying neither base cannot evaluate the property the
+    # rows rest on, and says so rather than answering.
+    assert introduced_rows(table, python_digests, repo,
+                           bases=('origin/main',)) is None
+    assert introduced_rows(table, js_digests, repo,
+                           bases=('origin/main',)) is None
 
 
 def test_the_detector_names_the_module_and_the_name(tmp):
