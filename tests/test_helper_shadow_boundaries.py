@@ -331,13 +331,20 @@ def test_the_binder_agrees_with_cpython(tmp):
     del tmp
     disagreed = []
     for label, source, name in _WALRUS_CASES:
-        compile(source, label, 'exec')
+        # The angle brackets are the convention `exec` and `coverage` use
+        # for a name that is not a file, and coverage's source discovery
+        # skips them. A bare label is recorded as a path under the working
+        # directory, and `coverage xml` refuses a data file naming a file
+        # it cannot find. The label still rides along, so a compile error
+        # names the row that produced it.
+        filename = f'<{label}>'
+        compile(source, filename, 'exec')
         _, binds = _scan(ast.parse(source))
         walked = name in binds
         namespace = {}
         # The interpreter IS the oracle here, so executing the case is
         # the point rather than a shortcut.
-        code = compile(source, label, 'exec')
+        code = compile(source, filename, 'exec')
         exec(code, namespace)  # pylint: disable=exec-used
         interpreted = name in namespace
         if walked != interpreted:
