@@ -123,11 +123,14 @@ def _frame_escapes(node, function, handler_globals, key, label, found):
     a node is refused, so a line that both selects and subscripts a member is
     not counted twice.
     """
-    receiver = resolver.frame_read(node, key)
-    if receiver is not None:
-        origin = _origin(receiver, function, handler_globals)
-        if resolver.reads_frame_namespace(receiver, origin) is not None:
-            found.append(f'{label}: {ast.unparse(receiver)}')
+    context = (function, handler_globals, _scope_binds,
+               _comprehension_shadows)
+    selection = resolver.frame_read(node, key, *context)
+    if selection is not None:
+        origin = _origin(resolver.selection_base(selection), function,
+                         handler_globals)
+        if resolver.reads_frame_namespace(selection, origin) is not None:
+            found.append(f'{label}: {ast.unparse(selection)}')
             return
     for child in ast.iter_child_nodes(node):
         _frame_escapes(child, function, handler_globals, key, label, found)
@@ -175,11 +178,13 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 _comprehension_shadows):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
-        receiver = resolver.frame_read(node, args_name)
-        if (receiver is not None and resolver.reads_frame_namespace(
-                receiver, _origin(receiver, function, handler_globals))
-                is not None):
-            violations.append(f'namespace escape: {ast.unparse(receiver)}')
+        context = (function, handler_globals, _scope_binds,
+                   _comprehension_shadows)
+        selection = resolver.frame_read(node, args_name, *context)
+        if selection is not None and resolver.reads_frame_namespace(
+                selection, _origin(resolver.selection_base(selection),
+                                   function, handler_globals)) is not None:
+            violations.append(f'namespace escape: {ast.unparse(selection)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
             permitted = resolver.permitted_namespace_read(
@@ -521,10 +526,10 @@ def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
     for parameter in ('args', 'namespace'):
         for key in (parameter, 'args'):
             body = f"holder = helper()\n_ = holder['{key}'].undeclared_probe"
+            escape = f'namespace escape: holder[{key!r}]'
             assert _audit_fake_handler(
                 body, parameter=parameter) == (
-                [] if key != parameter else ['namespace escape: holder']), (
-                    parameter, key)
+                [] if key != parameter else [escape]), (parameter, key)
 
 
 def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):

@@ -72,9 +72,9 @@ NAMESPACE_ESCAPE_CASES = (
     ('other = args', 'other = args'),
     ('other = args\nthird = other\nthird.x', 'other = args'),
     ('other, = (args,)', '(args,)'),
-    ("getattr(*(args, 'x'))", "(args, 'x')"),
+    ("getattr(*(args, 'x'))", "getattr(*(args, 'x'))"),
     ('helper(args)', 'helper(args)'), ('helper([args])', '[args]'),
-    ('helper(*[args])', '[args]'),
+    ('helper(*[args])', 'helper(*[args])'),
     ('getattr(args, some_variable)', 'getattr(args, some_variable)'),
     ('hasattr(args, some_variable)', 'hasattr(args, some_variable)'),
     ('helper(vars(args))', 'vars(args)'),
@@ -234,43 +234,48 @@ ARGPARSE_MUTEX_PLACEMENT_CASES = (
      {'cmd': 'tabs', 'probe': 'right'},
      ('cmd', 'probe'), ('cmd', 'probe')),)
 REFLECTIVE_ESCAPE_CASES = (
-    ("_ = locals()['args'].undeclared_probe", 'locals()'),
+    ("_ = locals()['args'].undeclared_probe", "locals()['args']"),
     ("_ = eval('args.undeclared_probe')", "eval('args.undeclared_probe')"),
     ('_ = vars()', 'vars()'), ('_ = globals()', 'globals()'),
     ("exec('args.undeclared_probe')", "exec('args.undeclared_probe')"),
-    ("_ = builtins.locals()['args'].undeclared_probe", 'builtins.locals()'),
+    ("_ = builtins.locals()['args'].undeclared_probe",
+     "builtins.locals()['args']"),
     ("_ = builtins.globals()['args'].undeclared_probe",
-     'builtins.globals()'),
+     "builtins.globals()['args']"),
     ("_ = builtins.eval('args.undeclared_probe')",
      "builtins.eval('args.undeclared_probe')"),
     ("builtins.exec('args.undeclared_probe')",
      "builtins.exec('args.undeclared_probe')"),
     ('_ = builtins.vars()', 'builtins.vars()'),
-    ("locals = helper\n_ = locals()['args'].undeclared_probe", 'locals()'),
+    ("locals = helper\n_ = locals()['args'].undeclared_probe",
+     "locals()['args']"),
     ("globals = helper\n_ = globals()['args'].undeclared_probe",
-     'globals()'),
+     "globals()['args']"),
     ("eval = helper\n_ = eval('args.undeclared_probe')",
      "eval('args.undeclared_probe')"),
     ("exec = helper\nexec('args.undeclared_probe')",
      "exec('args.undeclared_probe')"),
     ('vars = helper\n_ = vars()', 'vars()'),
-    ("_ = sys._getframe().f_locals['args'].x", 'sys._getframe().f_locals'),
+    ("_ = sys._getframe().f_locals['args'].x",
+     "sys._getframe().f_locals['args']"),
     ("_ = inspect.currentframe().f_locals['args'].x",
-     'inspect.currentframe().f_locals'),
+     "inspect.currentframe().f_locals['args']"),
     ("from sys import _getframe\n"
-     "_ = _getframe().f_locals['args'].x", '_getframe().f_locals'),
+     "_ = _getframe().f_locals['args'].x", "_getframe().f_locals['args']"),
     ("from sys import _getframe as get_frame\n"
-     "_ = get_frame().f_locals['args'].x", 'get_frame().f_locals'),
+     "_ = get_frame().f_locals['args'].x",
+     "get_frame().f_locals['args']"),
     ("from inspect import currentframe as cf\n"
-     "_ = cf().f_locals['args'].x", 'cf().f_locals'),
+     "_ = cf().f_locals['args'].x", "cf().f_locals['args']"),
     ("import sys as system\n"
      "_ = system._getframe().f_locals['args'].x",
-     'system._getframe().f_locals'),
+     "system._getframe().f_locals['args']"),
     ("import inspect as insp\n_ = insp.currentframe().f_locals['args'].x",
-     'insp.currentframe().f_locals'),
+     "insp.currentframe().f_locals['args']"),
     ("_ = getattr(sys._getframe(), 'f_locals')['args'].x",
-     "getattr(sys._getframe(), 'f_locals')"),
-    ('holder = helper()\n_ = holder[\'args\'].undeclared_probe', 'holder'),)
+     "getattr(sys._getframe(), 'f_locals')['args']"),
+    ('holder = helper()\n_ = holder[\'args\'].undeclared_probe',
+     "holder['args']"),)
 # Each row splices into the real daedalus_cli/commands_eval.py: the prelude
 # after its first import, the replacement for the anchor. The last field is
 # the receiver the refusal must name. These are plants, not the rule's inputs.
@@ -278,64 +283,64 @@ FRAME_NAMESPACE_PLANTS = (
     ('attribute getter', 'import operator\n', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = operator.attrgetter('_getframe')(sys)()"
      ".f_locals['args'].undeclared_probe\n",
-     "operator.attrgetter('_getframe')(sys)().f_locals"),
+     "operator.attrgetter('_getframe')(sys)().f_locals['args']"),
     ('sibling helper', '', 'def do_reload(args):\n',
      'def _reached_namespace():\n'
      "    return sys._getframe(1).f_locals['args']\n\n\n"
      'def do_reload(args):\n'
      '    _ = _reached_namespace().undeclared_probe\n',
-     'sys._getframe(1).f_locals'),
+     "sys._getframe(1).f_locals['args']"),
     ('plain frame spelling', '', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = sys._getframe(1).f_locals['args']"
-     '.undeclared_probe\n', 'sys._getframe(1).f_locals'),
+     '.undeclared_probe\n', "sys._getframe(1).f_locals['args']"),
     ('container index', '', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = {'a': sys}['a']._getframe().f_locals"
      "['args'].undeclared_probe\n",
-     "{'a': sys}['a']._getframe().f_locals"),
+     "{'a': sys}['a']._getframe().f_locals['args']"),
     ('member the old resolver never named', '', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = sys._getframe(1).f_globals['args']"
-     '.undeclared_probe\n', 'sys._getframe(1).f_globals'),
+     '.undeclared_probe\n', "sys._getframe(1).f_globals['args']"),
     ('constant-string carrier', '', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
      "['args'].undeclared_probe\n",
-     "getattr(sys._getframe(), 'f_locals')"),
+     "getattr(sys._getframe(), 'f_locals')['args']"),
     ('constant-string carrier, no args subscript', '',
      'def do_reload(args):\n',
      "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
-     ".get('undeclared_probe')\n", 'sys._getframe()'),
+     ".get('undeclared_probe')\n", "getattr(sys._getframe(), 'f_locals')"),
     ('method of a class in the same module', '', 'def do_reload(args):\n',
      'class _Reach:\n'
      '    def namespace(self):\n'
      "        return sys._getframe(2).f_locals['args']\n\n\n"
      'def do_reload(args):\n'
      '    _ = _Reach().namespace().undeclared_probe\n',
-     'sys._getframe(2).f_locals'),
+     "sys._getframe(2).f_locals['args']"),
     ('module-level lambda',
      "_namespace = lambda: sys._getframe(1).f_locals['args']\n",
      'def do_reload(args):\n',
      'def do_reload(args):\n    _ = _namespace().undeclared_probe\n',
-     'sys._getframe(1).f_locals'),
+     "sys._getframe(1).f_locals['args']"),
     ('method of a class nested in the module',
      'class _Outer:\n    class _Inner:\n        def ns(self):\n'
      "            return sys._getframe(2).f_locals['args']\n",
      'def do_reload(args):\n',
      'def do_reload(args):\n'
      '    _ = _Outer._Inner().ns().undeclared_probe\n',
-     'sys._getframe(2).f_locals'),
+     "sys._getframe(2).f_locals['args']"),
     ('def under a module-level if',
      'if True:\n    def _helper():\n'
      "        return sys._getframe(1).f_locals['args']\n",
      'def do_reload(args):\n',
      'def do_reload(args):\n    return _helper().undeclared_probe\n',
-     'sys._getframe(1).f_locals'),
+     "sys._getframe(1).f_locals['args']"),
     ('callee the audit cannot prove', '', 'def do_reload(args):\n',
      'def do_reload(args):\n'
      '    getattr = object.__getattribute__\n'
      "    _ = getattr(sys._getframe(), 'f_locals').get('undeclared_probe')\n",
-     'sys._getframe()'),
+     "getattr(sys._getframe(), 'f_locals')"),
     ('mapping key, no member selected', '', 'def do_reload(args):\n',
      'def do_reload(args):\n    holder = helper()\n'
-     "    _ = holder['args'].undeclared_probe\n", 'holder'),
+     "    _ = holder['args'].undeclared_probe\n", "holder['args']"),
 )
 
 
@@ -385,8 +390,9 @@ def assert_every_frame_member_refused(read_module, base):
         body = (f'def do_reload(args):\n    _ = sys._getframe(1).{member}'
                 "['undeclared_probe']\n")
         escapes = read_module({'commands_eval': plant_in_reload(base, body)})
-        assert escapes == ['commands_eval.do_reload: sys._getframe(1)'], (
-            member, escapes)
+        assert escapes == [
+            f'commands_eval.do_reload: sys._getframe(1).{member}'], (
+                member, escapes)
 
 
 def assert_namespace_key_call_accepted(read_module, base):
@@ -414,7 +420,7 @@ def assert_resolved_frame_receiver_refused(read_module, base, frame):
     escapes = read_module(
         {'commands_eval': plant_in_reload(base, body)},
         extra_globals={'commands_eval': {'HELD': frame}})
-    assert escapes == ['commands_eval.do_reload: HELD'], escapes
+    assert escapes == ['commands_eval.do_reload: HELD.f_locals'], escapes
 
 
 def assert_inner_scope_bindings(audit_handler):
