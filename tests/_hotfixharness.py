@@ -21,6 +21,13 @@ REPL mode is: a top-level `await` settles and a top-level `var` or function
 declaration lands in the document's global. An evaluation that could not
 tell a statement-list guard from an IIFE wrapper cannot hold the control
 that exists for exactly that difference.
+
+A case asks for a fault by naming it — `attach`, `cdpRefused`,
+`injectedError`, `storageReadFails`, `recordVersion` — and each is refused
+shaped rather than ignored, so a double that answered a shape it does not
+model would read as a program that behaved. `commands` is the general
+spelling of the typed command list; `store` is the older one, and naming
+both is refused rather than resolved.
 """
 import json
 import shutil
@@ -46,9 +53,9 @@ const spec = JSON.parse(process.argv[process.argv.length - 1]);
 
 const HOTFIX_KEY = 'daedalus-hotfixes';
 // The version a seeded record carries. No shipped `VERSION` can equal it, so
-// "the key is gone" and "a record the worker wrote is still there" are told
-// apart by the version `list-hotfixes` answers, on every case rather than
-// only the ones that think about it.
+// "the key is gone" and "a record is still there" are told apart by the
+// version `list-hotfixes` answers — stated, not left to two constants that
+// happen to differ.
 const RECORD_VERSION = '0.00.0-fixture';
 const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
 const TAB_ID = 7;
@@ -524,11 +531,8 @@ async function waitFor(predicate) {
     }
   }
   storageStore[HOTFIX_KEY] = {
-    // A version the worker cannot produce: it stamps `VERSION` on every
-    // record it writes. A case reads the seed's version to tell a record
-    // the worker left behind from a key that is gone, and that difference
-    // has to be stated rather than inherited from two constants happening
-    // to differ. `RECORD_VERSION` is that value; a case overrides it.
+    // `RECORD_VERSION` is a value the worker cannot stamp; a case overrides
+    // it when the version is what it is reading.
     version: spec.recordVersion === undefined ? RECORD_VERSION
                                               : spec.recordVersion,
     fixes: (spec.fixes || []).map((fix) =>
