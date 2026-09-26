@@ -154,7 +154,7 @@ run().then(result => process.stdout.write(JSON.stringify(result)))
 assert '__SCENARIO__' in _POST_RESULT_HARNESS
 
 
-def _send(*answers, command_id='cmd-result-post', did=None, tab_id=None,
+def _post(*answers, command_id='cmd-result-post', did=None, tab_id=None,
           result=None, extra=None):
     """Drive one postResult call through the shipped worker source.
 
@@ -192,7 +192,7 @@ def _send(*answers, command_id='cmd-result-post', did=None, tab_id=None,
 def test_ok_answers_with_one_request_and_no_log(tmp):
     """A 2xx needs exactly the one POST and says nothing."""
     del tmp
-    seen = _send({'status': 200})
+    seen = _post({'status': 200})
     assert len(seen['requests']) == 1, seen
     assert seen['requests'][0]['method'] == 'POST', seen
     assert seen['requests'][0]['url'] == 'https://bridge.example.com/result'
@@ -203,7 +203,7 @@ def test_ok_answers_with_one_request_and_no_log(tmp):
 def test_401_is_named_and_never_retried(tmp):
     """A credential refusal cannot heal, so the caller must hear of it."""
     del tmp
-    seen = _send({'status': 401}, did='delivery-refused')
+    seen = _post({'status': 401}, did='delivery-refused')
     assert len(seen['requests']) == 1, seen
     assert seen['timerDelays'] == [], seen
     assert len(seen['errors']) == 1, seen
@@ -215,7 +215,7 @@ def test_401_is_named_and_never_retried(tmp):
 def test_400_is_named_and_never_retried(tmp):
     """A malformed-request refusal is named once, without a delivery id."""
     del tmp
-    seen = _send({'status': 400}, command_id='cmd-bad-shape')
+    seen = _post({'status': 400}, command_id='cmd-bad-shape')
     assert len(seen['requests']) == 1, seen
     assert seen['timerDelays'] == [], seen
     assert len(seen['errors']) == 1, seen
@@ -227,7 +227,7 @@ def test_400_is_named_and_never_retried(tmp):
 def test_413_gets_a_substitute_result_in_one_more_post(tmp):
     """The oversized body is the worker's own doing; it answers anyway."""
     del tmp
-    seen = _send(
+    seen = _post(
         {'status': 413}, {'status': 200}, did='delivery-413', tab_id='7',
         result='oversized result body é', extra={'world': 'page:example.com'})
     assert len(seen['requests']) == 2, seen
@@ -250,7 +250,7 @@ def test_413_gets_a_substitute_result_in_one_more_post(tmp):
 def test_a_refused_substitute_is_logged_once(tmp):
     """A substitute that is refused for another reason still names itself."""
     del tmp
-    seen = _send({'status': 413}, {'status': 503})
+    seen = _post({'status': 413}, {'status': 503})
     assert len(seen['requests']) == 2, seen
     assert seen['timerDelays'] == [], seen
     assert len(seen['errors']) == 1, seen
@@ -262,7 +262,7 @@ def test_a_refused_substitute_is_logged_once(tmp):
 def test_a_dead_substitute_network_error_is_logged_once(tmp):
     """A substitute that cannot reach the bridge names that too."""
     del tmp
-    seen = _send({'status': 413}, {'throw': 'substitute down'})
+    seen = _post({'status': 413}, {'throw': 'substitute down'})
     assert len(seen['requests']) == 2, seen
     assert seen['errors'] == [
         '[Daedalus] Substitute result POST failed: TypeError: substitute down',
@@ -272,7 +272,7 @@ def test_a_dead_substitute_network_error_is_logged_once(tmp):
 def test_413_on_the_last_attempt_after_5xx_still_substitutes(tmp):
     """A late 413 gets its substitute once the 5xx retries are spent."""
     del tmp
-    seen = _send(
+    seen = _post(
         {'status': 503}, {'status': 502}, {'status': 413}, {'status': 200},
         did='delivery-413-late', tab_id='7',
         result='late oversized é body', extra={'world': 'page:example.com'})
@@ -295,7 +295,7 @@ def test_413_on_the_last_attempt_after_5xx_still_substitutes(tmp):
 def test_network_error_after_5xx_logs_exactly_once(tmp):
     """The catch's status reset keeps the give-up log from doubling."""
     del tmp
-    seen = _send(
+    seen = _post(
         {'status': 503}, {'status': 503}, {'throw': 'relay down'})
     assert len(seen['requests']) == 3, seen
     assert seen['timerDelays'] == [300, 600, 900], seen
@@ -306,7 +306,7 @@ def test_network_error_after_5xx_logs_exactly_once(tmp):
 def test_5xx_exhaustion_names_the_last_status(tmp):
     """Three refused attempts give up out loud, naming the last status."""
     del tmp
-    seen = _send({'status': 503}, {'status': 502}, {'status': 500})
+    seen = _post({'status': 503}, {'status': 502}, {'status': 500})
     assert len(seen['requests']) == 3, seen
     assert seen['timerDelays'] == [300, 600, 900], seen
     assert len(seen['errors']) == 1, seen
@@ -318,7 +318,7 @@ def test_5xx_exhaustion_names_the_last_status(tmp):
 def test_5xx_retry_that_succeeds_stays_silent(tmp):
     """A restart-window 5xx resolves on retry, without a give-up log."""
     del tmp
-    seen = _send({'status': 503}, {'status': 502}, {'status': 200})
+    seen = _post({'status': 503}, {'status': 502}, {'status': 200})
     assert len(seen['requests']) == 3, seen
     assert seen['timerDelays'] == [300, 600], seen
     assert seen['errors'] == [], seen
@@ -328,7 +328,7 @@ def test_network_error_keeps_its_existing_final_log(tmp):
     """Three dead attempts log the existing line exactly once."""
     del tmp
     # Three attempts, as the worker's own retry loop makes them.
-    seen = _send({'throw': 'relay down'}, {'throw': 'relay down'},
+    seen = _post({'throw': 'relay down'}, {'throw': 'relay down'},
                  {'throw': 'relay down'})
     assert len(seen['requests']) == 3, seen
     assert seen['errors'] == [

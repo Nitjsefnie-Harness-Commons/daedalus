@@ -18,8 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _wfgraph import _tests_yml  # noqa: E402
 from _wfjobs import bound_source, load, workflow_files  # noqa: E402
 from _yamlscalar import YAMLReadError  # noqa: E402
+from _yamlsteps import complete_job_mapping  # noqa: E402
 
 _REAL = ROOT / '.github' / 'workflows' / 'tests.yml'
 _DIGITS = r'[0-9](?:_?[0-9])*'
@@ -515,6 +517,40 @@ def _positive_literal(bound, where):
     if value <= 0:
         return f'{where}: timeout-minutes {digits} is not greater than zero'
     return None
+
+
+# The two jobs that run the suites, named by what they invoke rather than
+# by shape: `suites` runs run_tests.py and `coverage-matrix` runs
+# coverage_suites.py --require-all, which is the same suite list.
+SUITE_RUNNING_JOBS = ('suites', 'coverage-matrix')
+
+
+def _checkout_width(job):
+    """The `fetch-depth` one job's checkout step asks for, or None."""
+    for step in complete_job_mapping(_tests_yml(), job).get('steps', []):
+        if 'actions/checkout@' in str(step.get('uses', '')):
+            return str(step.get('with', {}).get('fetch-depth', '')) or None
+    return None
+
+
+def test_every_job_that_runs_the_suites_can_read_the_merge_base(tmp):
+    """The branch-boundary controls need the merge base, so the jobs that
+    run them must fetch it.
+
+    Both allowance tables' boundary is the question "does the merge base
+    already carry this declaration", which needs the base tree. A
+    depth-1 pull-request checkout resolves neither `origin/main` nor a
+    local `main`, so both boundary tests took their `cannot read a base`
+    arm there — which used to be a `return`, and so a silent PASS. The
+    control was green in CI and evaluated nothing.
+    """
+    del tmp
+    without = {job: _checkout_width(job) for job in SUITE_RUNNING_JOBS
+               if _checkout_width(job) != '0'}
+    assert not without, (
+        'these jobs run the suites and so run the branch-boundary '
+        'controls, which cannot be evaluated without the merge base; '
+        f'give their checkout fetch-depth: 0 (found {without})')
 
 
 def _where(workflow, name):

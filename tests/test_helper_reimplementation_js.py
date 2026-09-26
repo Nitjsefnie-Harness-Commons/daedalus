@@ -30,9 +30,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _branch_boundary import introduced_rows, js_digests  # noqa: E402
 from test_helper_reimplementation import (  # noqa: E402
-    JS_FLOOR, introduced_rows, js_declarations, js_digests,
-    js_reimplementations, reimplementations)
+    JS_FLOOR, js_declarations, js_reimplementations, reimplementations)
 
 # A three-statement body, which measures five lines from brace to brace
 # and so is above JS_FLOOR whatever the head around it says.

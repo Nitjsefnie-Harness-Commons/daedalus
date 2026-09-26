@@ -127,8 +127,11 @@ UNCONSOLIDATED_NAMES = {
         'this builds one workflow run as the actions API reports it, where '
         'the shared _run boots a node scenario',
     ('tests/test_aggregate_needs.py', '_fixture'):
-        'this writes one fixture workflow into a fresh tmp directory, where '
-        'the owner reads a fake-GitHub answer fragment',
+        'byte-identical to the row for tests/test_workflow_job_timeouts.py, '
+        'and neither is a copy of the owner: this writes one fixture '
+        'workflow into a fresh tmp directory where the owner reads a '
+        'fake-GitHub answer fragment. The pair is a real duplicate and '
+        'consolidating it is deferred, not dismissed',
     ('tests/test_bash_resolver_scan.py', '_synthetic'):
         'a one-line delegate to the bash resolver own synthetic entry, and '
         'the name it collides with is the drain analyser',
@@ -149,17 +152,31 @@ UNCONSOLIDATED_NAMES = {
         'returns the CompletedProcess, where the owner parses in process, '
         'fakes ext_cmd and returns the recording with stdout',
     ('tests/test_cli_duplicate_admission.py', 'run_cli'):
-        'this spawns the real CLI as a process against a live bridge, the '
-        'half the owner deliberately is not, since a retried delivery has '
-        'to survive a real process boundary',
+        'byte-identical to the row for tests/test_cli_error_reporting.py, '
+        'and neither is a copy of the owner: both spawn the real CLI as a '
+        'process against a live bridge, the half the owner deliberately is '
+        'not, since a retried delivery and a printed traceback both have to '
+        'survive a process boundary. The pair is a real duplicate and '
+        'consolidating it is deferred, not dismissed',
     ('tests/test_cli_error_reporting.py', 'run_cli'):
-        'this spawns the real CLI to read what it prints on a malformed '
-        'argument, where the owner captures stdout from an in-process '
-        'dispatch and never sees a traceback cross a process',
+        'byte-identical to the row for tests/test_cli_duplicate_admission.'
+        'py, and neither is a copy of the owner: the owner captures stdout '
+        'from an in-process dispatch and never sees a traceback cross a '
+        'process, which is the whole point of these two. The pair is a real '
+        'duplicate and consolidating it is deferred, not dismissed',
     ('tests/test_cli_waits.py', 'run_cli'):
         'this runs a typed subcommand that enqueues a command and answers '
         'it afterwards, where the owner dispatches with the answer already '
         'canned and nothing is ever enqueued',
+    ('tests/test_config_boot_generation.py', '_run'):
+        'this drives the worker under node for one plan and reads back its '
+        'streams, where the shared _run boots a recorded scenario',
+    ('tests/test_fetch_timings_count.py', 'run_cli'):
+        'this dispatches commands_browser through build_parser and fakes '
+        'ext_cmd, where the owner dispatches commands_content through '
+        '_cli_parse.accepted, so the module under dispatch differs and '
+        'a refused argument leaves as SystemExit rather than as an '
+        'AssertionError',
     ('tests/test_screenshot_quality.py', 'run_cli'):
         'this patches three module attributes and records through its own '
         'RecordingApi, where the owner patches one ext_cmd and records '
@@ -199,8 +216,11 @@ UNCONSOLIDATED_NAMES = {
         'this runs git with text output in a scratch index, where the shared '
         'runner captures bytes',
     ('tests/test_line_lengths.py', '_git'):
-        'this runs git under a scrubbed child environment, which the shared '
-        'runner does not set',
+        'byte-identical to the row for tests/test_type_errors.py, and '
+        'neither is a copy of the owner: this runs git under a scrubbed '
+        'child environment, which the shared runner does not set. The pair '
+        'is a real duplicate and consolidating it is deferred, not '
+        'dismissed',
     ('tests/test_line_lengths.py', '_lines'):
         'this joins texts and encodes them as the byte-length source, where '
         'the owner splits a workflow keeping line endings',
@@ -237,6 +257,9 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_static_routes.py', '_load'):
         'this loads static_routes by path under a name of its own, where the '
         'owner is a JSON file reader',
+    ('tests/test_stream_backoff.py', '_run'):
+        'this runs one backoff plan against the shipped worker, where the '
+        'shared _run boots a recorded scenario',
     ('tests/test_tab_registry.py', '_load'):
         'this loads tab_registry by path under a name of its own, where the '
         'owner is a JSON file reader',
@@ -259,20 +282,35 @@ UNCONSOLIDATED_NAMES = {
         'this runs the refresh main with both streams captured, where the '
         'shared _run boots a node scenario',
     ('tests/test_type_errors.py', '_git'):
-        'this runs git under a scrubbed child environment, which the shared '
-        'runner does not set',
+        'byte-identical to the row for tests/test_line_lengths.py, and '
+        'neither is a copy of the owner: this runs git under a scrubbed '
+        'child environment, which the shared runner does not set. The pair '
+        'is a real duplicate and consolidating it is deferred, not '
+        'dismissed',
     ('tests/test_upload_races.py', '_load'):
-        'this loads upload_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'byte-identical to the row for tests/test_upload_routes.py, and '
+        'neither is a copy of the owner: this loads upload_routes by path '
+        'under a name of its own where the owner is a JSON file reader. The '
+        'pair is a real duplicate and consolidating it is deferred, not '
+        'dismissed',
     ('tests/test_upload_routes.py', '_load'):
-        'this loads upload_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'byte-identical to the row for tests/test_upload_races.py, and '
+        'neither is a copy of the owner: this loads upload_routes by path '
+        'under a name of its own where the owner is a JSON file reader. The '
+        'pair is a real duplicate and consolidating it is deferred, not '
+        'dismissed',
     ('tests/test_watch_all.py', '_run'):
         'this builds one shared-client workflow run against a SHA, where the '
         'shared _run boots a node scenario',
     ('tests/test_watcher_budget.py', '_comment'):
         'this builds one review-comment node, where the owner asks whether a '
         'line is a YAML comment',
+    ('tests/test_worker_register_throttle.py', '_observe'):
+        'this drives the register-throttle harness under a plan with '
+        'expected streams, where the owner reads one relay mode answer',
+    ('tests/test_worker_result_post.py', '_post'):
+        'this drives one postResult call through the shipped worker '
+        'source, where the owner builds one MCP answer tuple',
     ('tests/test_worker_sources.py', '_run'):
         'this runs one shipped worker program and parses its JSON, where '
         'the shared _run boots the recorded boundary harness against a '
@@ -281,8 +319,11 @@ UNCONSOLIDATED_NAMES = {
         'this returns one named step run block through the bounded reader, '
         'where the shared _run boots a node scenario',
     ('tests/test_workflow_job_timeouts.py', '_fixture'):
-        'this writes one fixture workflow into a fresh tmp directory, where '
-        'the owner reads a fake-GitHub answer fragment',
+        'byte-identical to the row for tests/test_aggregate_needs.py, and '
+        'neither is a copy of the owner: this writes one fixture workflow '
+        'into a fresh tmp directory where the owner reads a fake-GitHub '
+        'answer fragment. The pair is a real duplicate and consolidating it '
+        'is deferred, not dismissed',
     ('tests/test_workflow_job_timeouts.py', '_planted'):
         'this copies the real workflow minus the aggregate job bound, where '
         'the owner reverts one converted site in a scratch tree',

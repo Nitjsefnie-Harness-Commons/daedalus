@@ -343,7 +343,7 @@ SCENARIO_PLANS = {
 }
 
 
-def _gate(plan):
+def _run(plan):
     """Drive the worker under Node with one plan and read back."""
     planned, planned_stream = SCENARIO_PLANS[plan['scenario']]
     outcome = run_gate(
@@ -371,7 +371,7 @@ def test_a_heartbeat_alarm_during_the_config_read_joins_boot(tmp):
     credential — never a wall-clock margin.
     """
     del tmp
-    outcome = _gate({'scenario': 'boot-generation', 'holdConfig': True,
+    outcome = _run({'scenario': 'boot-generation', 'holdConfig': True,
                     'noToken': True})
     # One generation: exactly one config get ran, and the alarm's call joined
     # it rather than issuing a second.
@@ -394,7 +394,7 @@ def test_a_failed_config_generation_does_not_poison_a_later_caller(tmp):
     guarantees.
     """
     del tmp
-    outcome = _gate({'scenario': 'config-retry', 'failConfigFirst': True,
+    outcome = _run({'scenario': 'config-retry', 'failConfigFirst': True,
                     'noToken': True})
     # A fresh generation ran after the failure (a new config get), rather
     # than the later caller joining the cached rejection.
@@ -413,7 +413,7 @@ def test_a_failed_boot_config_read_still_arms_the_heartbeat(tmp):
     must be armed regardless of whether the read resolved.
     """
     del tmp
-    outcome = _gate({'scenario': 'config-retry', 'failConfigFirst': True,
+    outcome = _run({'scenario': 'config-retry', 'failConfigFirst': True,
                     'noToken': True})
     assert outcome['createdAlarms'] == [
         {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
@@ -431,7 +431,7 @@ def test_a_failed_heartbeat_config_read_is_reported_and_skips_the_tick(tmp):
     it already does.
     """
     del tmp
-    outcome = _gate({'scenario': 'heartbeat-failed-read',
+    outcome = _run({'scenario': 'heartbeat-failed-read',
                     'failConfigFirst': True, 'failConfigAlways': True})
     # The listener ran its OWN generation: boot's failed read (1) plus the
     # heartbeat's fresh read (2). A failed read never reaches the token
@@ -467,7 +467,7 @@ def test_a_cleared_token_stays_cleared_and_is_not_re_minted(tmp):
     on a token change.
     """
     del tmp
-    outcome = _gate({'scenario': 'token-cleared', 'holdIfNotHeld': True})
+    outcome = _run({'scenario': 'token-cleared', 'holdIfNotHeld': True})
     # The clear reached both stores: what the options page wrote is what the
     # worker holds, so the "not configured" state is a fact here, not an
     # inference.
@@ -497,7 +497,7 @@ def test_a_successful_boot_arms_the_heartbeat(tmp):
     period.
     """
     del tmp
-    outcome = _gate({'scenario': 'boot-success', 'noToken': True})
+    outcome = _run({'scenario': 'boot-success', 'noToken': True})
     # The alarm exists, by name and period — kills the catch-only arming.
     assert outcome['createdAlarms'] == [
         {'name': 'daedalus-heartbeat', 'periodInMinutes': 0.5}], outcome
