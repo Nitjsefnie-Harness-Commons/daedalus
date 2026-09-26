@@ -210,9 +210,7 @@ function contentScriptPage() {
     document: {
       documentElement: {
         setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) {
-          return attributes.has(name) ? attributes.get(name) : null;
-        },
+        getAttribute: (name) => (attributes.get(name) ?? null),
         removeAttribute(name) { attributes.delete(name); },
       },
       addEventListener() {},

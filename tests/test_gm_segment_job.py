@@ -16,11 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
 
 NO_RESPONSE = 'no response from background (service worker dead?)'
 NO_SIG = 'background returned no sig'
 
-_SEGMENT_JOB_HARNESS = r"""
+_SEGMENT_JOB_HARNESS = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -29,28 +30,6 @@ const vm = require('vm');
 // fake worker gives call i — `{resp}` (null for no response at all) or
 // `{lastError}` — and `order` is the sequence the answers arrive in.
 const [contentPath, pagePath, plan] = process.argv.slice(1);
-
-function contentScriptPage() {
-  const attributes = new Map();
-  return {
-    crypto: { randomUUID: () => 'content-doc-token' },
-    document: {
-      documentElement: {
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) {
-          return attributes.has(name) ? attributes.get(name) : null;
-        },
-        removeAttribute(name) { attributes.delete(name); },
-      },
-      addEventListener() {},
-      removeEventListener() {},
-      head: { appendChild() {} },
-      createElement: () => ({
-        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
-      }),
-    },
-  };
-}
 
 const listeners = { message: [] };
 const queued = [];

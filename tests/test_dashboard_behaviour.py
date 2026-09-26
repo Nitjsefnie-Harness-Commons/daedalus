@@ -45,29 +45,6 @@ function clearScheduled(collection, id) {
 function eventTarget(listeners) {
   return { addListener(listener) { listeners.push(listener); } };
 }
-
-
-function contentScriptPage() {
-  const attributes = new Map();
-  return {
-    crypto: { randomUUID: () => 'content-doc-token' },
-    document: {
-      documentElement: {
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) {
-          return attributes.has(name) ? attributes.get(name) : null;
-        },
-        removeAttribute(name) { attributes.delete(name); },
-      },
-      addEventListener() {},
-      removeEventListener() {},
-      head: { appendChild() {} },
-      createElement: () => ({
-        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
-      }),
-    },
-  };
-}
 const windowObject = {
   addEventListener() {},
   postMessage() {},
