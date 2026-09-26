@@ -15,15 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_version_contract import (  # noqa: E402
-    _copy_versioned_tree,
-    _run_checker,
-)
-from test_version_contract_dashboard_duplicates import (  # noqa: E402
+from _version_contract import _copy_versioned_tree  # noqa: E402
+from _version_contract_dashboard_duplicates import (  # noqa: E402
     _assert_duplicate_refused,
-    _assert_one_dashboard_match,
     _canonical_dashboard_value,
     _insert_before_body,
+)
+from test_version_contract import _run_checker  # noqa: E402
+from test_version_contract_dashboard_duplicates import (  # noqa: E402
+    _assert_one_dashboard_match,
 )
 
 
