@@ -399,14 +399,14 @@ def test_a_javascript_row_may_not_name_a_declaration_this_branch_added(tmp):
 
 def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     """The boundary bites on a real repository, on both sides, in both
-    languages.
+    languages, and on a SECOND copy as well as on a new name.
 
-    Three cases, and the middle one is the defect a name-keyed rule
-    misses: a row the base already carried stays excused, a row for a
-    name the base never had is refused, and a SECOND, new declaration of
-    an already-tabled name is refused too even though the first row is
-    still live. A checkout carrying neither base is a refusal and not an
-    answer.
+    Four cases, and the third is the one a name-keyed or set-keyed rule
+    misses: a second declaration whose body the base ALREADY carries
+    adds nothing to a set of digests, so a set-based comparison reports
+    the file as clean. The base carries one `twin`; the head carries
+    two, byte-identical — the issue this branch exists for, reproduced
+    inside the control that is supposed to catch it.
     """
     repo = Path(tmp) / 'branch'
     repo.mkdir()
@@ -418,23 +418,28 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
     (repo / 'tests').mkdir()
     (repo / 'tests' / '_owner.py').write_text(
         _mod('def kept(value):', '    return 1'), encoding='utf-8')
-    (repo / 'tests' / 'test_base.py').write_text(
-        _mod('def carried(value):', '    return 1', '',
-             'HARNESS = r"""', 'function carried(l) {',
-             '  const seen = [];', '  return seen;', '}', '"""'),
-        encoding='utf-8')
+    base = _mod(
+        'def twin(value):', '    return 1', '',
+        'def pair(value):', '    return 1', '',
+        'HARNESS = r"""', 'function carried(l) {',
+        '  const seen = [];', '  return seen;', '}', '"""')
+    (repo / 'tests' / 'test_base.py').write_text(base, encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'commit', '-qm', 'base'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
+    # A new name, a second BYTE-IDENTICAL copy of a name the base
+    # already carries, and a name nothing touched.
     (repo / 'tests' / 'test_base.py').write_text(_mod(
-        'def carried(value):', '    return 1',
+        'def twin(value):', '    return 1', '',
+        'def twin(value):', '    return 1', '',
+        'def pair(value):', '    return 1', '',
         'def added(value):', '    return 2', '',
         'HARNESS = r"""', 'function carried(l) {',
         '  const seen = [];', '  return seen;', '}',
-        'function added(l) {', '  const other = [];', '  return other;',
+        'function carried(l) {', '  const seen = [];', '  return seen;',
         '}', '"""'), encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
@@ -442,17 +447,20 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
                    env=_util.child_coverage('scrub'))
 
     table = {('tests/test_base.py', 'carried'): 'this one predates',
-             ('tests/test_base.py', 'added'): 'this one is the branch own'}
-    carried = introduced_rows(table, python_digests, repo, bases=('main',))
-    assert carried == [('tests/test_base.py', 'added')], carried
-    js = introduced_rows(table, js_digests, repo, bases=('main',))
-    assert js == [('tests/test_base.py', 'added')], js
-    # A checkout carrying neither base cannot evaluate the property the
-    # rows rest on, and says so rather than answering.
+             ('tests/test_base.py', 'twin'): 'this one is a second copy',
+             ('tests/test_base.py', 'pair'): 'this one is untouched',
+             ('tests/test_base.py', 'added'): 'this one is a new name'}
+    assert introduced_rows(table, python_digests, repo, bases=('main',)) == [
+        ('tests/test_base.py', 'added'),
+        ('tests/test_base.py', 'twin')], 'the second copy is not free'
+    assert introduced_rows(table, js_digests, repo, bases=('main',)) == [
+        ('tests/test_base.py', 'carried')], 'and neither is a second copy'
+    # A checkout carrying neither base, and one whose base IS the head,
+    # cannot answer the question, and both are refusals.
     assert introduced_rows(table, python_digests, repo,
                            bases=('origin/main',)) is None
-    assert introduced_rows(table, js_digests, repo,
-                           bases=('origin/main',)) is None
+    assert introduced_rows(table, python_digests, repo,
+                           bases=('HEAD',)) is None
 
 
 def test_the_detector_names_the_module_and_the_name(tmp):
