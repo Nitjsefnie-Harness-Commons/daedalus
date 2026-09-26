@@ -16,9 +16,12 @@ import _util  # noqa: E402
 from _watcher_polls import per_poll  # noqa: E402
 
 # The base comment watcher's one poll: the four REST surfaces it reads, in
-# order. The order is what makes a run of them a poll and not a set.
-BASE_POLL = ['repos/o/r/pulls/195/reviews', 'repos/o/r/pulls/195/comments',
-             'repos/o/r/issues/195/comments', 'repos/o/r/pulls/195']
+# the order the call log records them - the pull request itself first, its
+# three comment surfaces after it. The order is what makes a run of them a
+# poll and not a set, so a fixture that reordered it would leave an
+# order-sensitive measure uncaught.
+BASE_POLL = ['repos/o/r/pulls/195', 'repos/o/r/pulls/195/reviews',
+             'repos/o/r/pulls/195/comments', 'repos/o/r/issues/195/comments']
 
 
 def _logged(requests, gaps=None, step=0.01):
