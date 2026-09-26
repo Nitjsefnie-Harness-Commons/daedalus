@@ -65,6 +65,20 @@ def _is_a_runnable_suite_file(node):
                  or fnmatch.fnmatch(path, 'tests/test_*.py')))
 
 
+# The same five names tests/_bash_resolver_scan.py declares, plus the two
+# its own corpus entry names as ITS bypass: that guard enumerates those
+# five and `subprocess.getoutput` slipped past it, so an arm repeating
+# the same five would re-open a bypass this repository has already
+# recorded. Measured on this arm: `getoutput(["python3",
+# "tests/test_x.py"])` is `True` and the string form
+# `getoutput("python3 tests/test_x.py")` is `False` — the path is inside
+# the string, which is the declined class named below, not a claim that
+# the name is absent.
+_LAUNCHER_NAMES = frozenset({
+    'run', 'Popen', 'call', 'check_call', 'check_output',
+    'getoutput', 'getstatusoutput'})
+
+
 def _is_a_launch_call(node):
     """A parsed callee naming a process launcher, not a source match.
 
@@ -75,8 +89,7 @@ def _is_a_launch_call(node):
     func = node.func
     if not isinstance(func, ast.Attribute):
         return False
-    if func.attr not in ('run', 'Popen', 'call', 'check_call',
-                         'check_output'):
+    if func.attr not in _LAUNCHER_NAMES:
         return False
     return isinstance(func.value, ast.Name) and func.value.id in (
         'subprocess', 'sp')
@@ -85,27 +98,26 @@ def _is_a_launch_call(node):
 def _launches_a_tests_file(source):
     """Whether this script LAUNCHES a runnable file under tests/.
 
-    ADMITTED, each measured against this predicate:
-      * `subprocess.run([sys.executable, "tests/test_x.py"])`, and the
-        same under `Popen`, `call`, `check_call` and `check_output`,
-        written as `subprocess.<name>` or as an `import subprocess as
-        sp` alias;
+    RECOGNISES, each measured against this predicate:
+      * `subprocess.run`, `Popen`, `call`, `check_call`, `check_output`,
+        `getoutput` and `getstatusoutput`, written as `subprocess.<name>`
+        or as an `import subprocess as sp` alias, with the suite path
+        given as an argument;
       * an argument list that REACHES a suite path indirectly, so
-        `subprocess.run([..., glob.glob("tests/test_x.py")[0]])` counts
-        — the walk descends into the expression.
+        `subprocess.run([..., glob.glob("tests/test_x.py")[0]])` counts —
+        the walk descends into the expression.
 
-    DELIBERATELY NOT ADMITTED, each measured as a miss rather than
-    assumed:
-      * `os.system`, `os.popen` and `os.execv`: a `system` call carries
-        a shell string, and reading it as an argv would be a guess;
-      * `subprocess.run(args=[...])` with no positional argument — the
-        walk reads `node.args[0]`, and the `args=` keyword is not read
-        at all;
-      * `from subprocess import run`, and a callee on any other
-        owner, because the owner is a Name equal to `subprocess` or
-        `sp` and nothing else;
-      * a command assembled in an f-string, which is a string only at
-        run time.
+    EVERY OTHER SHAPE IS NOT POLICED, and that sentence is meant to
+    stand whatever this grammar turns out to contain rather than to
+    enumerate what is missing from it. The declined classes, by category
+    and with the representative measured for each: anything reached
+    through an IMPORT rather than written in the file (`plan_timed_matrix`
+    reaches the tests tree by importing `time_tests.selected`, and both
+    arms read it `False`); any launcher outside the seven names above
+    (`os.system`, `os.popen`, `os.execv`, `os.spawnv`, the asyncio pair);
+    and any suite path not written as an ARGUMENT (`args=`-only calls,
+    a command string holding the path, `+`-assembled paths, `Starred`
+    arguments, an f-string command).
     """
     for node in ast.walk(ast.parse(source)):
         if not (isinstance(node, ast.Call) and _is_a_launch_call(node)):
@@ -240,17 +252,24 @@ def test_each_job_this_guard_identifies_can_read_the_merge_base(tmp):
       * (e) JOB-SIDE LITERAL DEPENDENCY. `_invoked_scripts` needs the
         tracked filename as a literal substring of the `run:` text, so
         `run: python "$SUITE_RUNNER"` drops the job silently.
-      * (f) A `tests/` LITERAL LAUNCH *the rule this replaced never
-        caught either*: measured against the pre-wave predicate, a
-        literal `subprocess.run([py, "tests/test_x.py"])` is `False`
-        under both the old and the new rule, because the old one looked
-        only at `.glob(...)` calls. The arm exists for that gap, not
-        because the old rule lost the shape.
+      * (f) A `tests/` LITERAL LAUNCH. Measured on
+        `subprocess.run([sys.executable, "tests/test_x.py"])`: the glob
+        rule alone returns `False`, the composite before this wave's
+        tightening returned `True`, and this one returns `True`. So the
+        arm is NOT new against the previous composite — the tightening
+        changed what it drops, not whether it fires. What the glob rule
+        alone misses is the shape, and the arm is what covers a workflow
+        step that runs a suite directly.
       * (g) A WORKFLOW FILE OTHER THAN tests.yml. The guard reads
         `tests.yml`, so every other workflow file is invisible to it --
         `release.yml`, which runs `run_tests.py` from a detached tag, and
         `timed-timings.yml`, whose two suite steps at depth 1 bullet
-        (a) names.
+        (a) names;
+      * (i) A ROUTE REACHED THROUGH AN IMPORT. The planner enumerates
+        the tests tree by importing `time_tests.selected`, and both arms
+        read it `False`, so `plan-matrix` is no longer in the policed
+        set. It is named here rather than reached, because following
+        imports is a different rule from the one this guard states.
       * (h) A TRANSITIVE WRAPPER, in either direction: a job that
         reaches a runner through a script which itself reaches a runner.
         This is the route that produced the tag-build incident, and the
@@ -305,6 +324,22 @@ def test_the_glob_receiver_is_read_as_a_node_not_as_source_text(tmp):
     # this replaced counted it.
     assert not _launches_a_tests_file(
         'import subprocess\nsubprocess.runner(["python3", "docs/x.py"])\n')
+    # The two names added because the guard this arm shadows declares
+    # only five; measured on the list form, which is the only form that
+    # can carry a suite path as an argument.
+    assert _launches_a_tests_file(
+        'import subprocess\n'
+        'subprocess.getoutput(["python3", "tests/test_x.py"])\n')
+    assert _launches_a_tests_file(
+        'import subprocess\n'
+        'subprocess.getstatusoutput(["python3", "tests/test_x.py"])\n')
+    # The shape that leaves BOTH arms, measured on the real script's
+    # own import form, so the gap is pinned and cannot close by
+    # accident.
+    assert not _enumerates_the_tests_tree(
+        'from time_tests import selected\nout = selected()\n')
+    assert not _launches_a_tests_file(
+        'from time_tests import selected\nout = selected()\n')
     # A call reached through a nested expression still counts, because
     # the walk descends into the argument.
     assert _launches_a_tests_file(
@@ -328,6 +363,13 @@ def test_the_runnerhood_rule_finds_every_runner_in_the_set(tmp):
     route it is meant to cover, a workflow step that runs a suite
     directly (`timed-timings.yml`, bullet (a)), and not for a member of
     today's set.
+
+    `plan_timed_matrix.py` is deliberately NOT asserted here. It reads
+    `False` on both arms — it reaches the tests tree by importing
+    `time_tests.selected` — and is named in the disclosure as route (i)
+    rather than followed, so pinning it would pin a member the rule does
+    not claim. Pinned instead is the shape: an import-only source reads
+    `False` on both arms, so the gap cannot close by accident.
     """
     del tmp
     runners = _suite_runners(_tracked_scripts(ROOT))

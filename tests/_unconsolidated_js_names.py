@@ -371,10 +371,11 @@ UNCONSOLIDATED_JS_NAMES = {
         'cluster is the second wave of this consolidation',
     ('tests/_netcapture_harness.py', 'run'):
         'this is the capture harness own driver, 45 body lines. Ranked '
-        'from 1 over the 21 `run` declarations in the tree by body lines, '
-        'it is the seventh, where the owner is the largest at 236; the '
-        'order runs 236, 198, 137, 120, 98, 50, 45. No shared copy of '
-        'either driver would serve both harnesses',
+        'from 1 over the 21 JavaScript `run` declarations in the tree '
+        'by body lines, it is the seventh, where the owner is '
+        'tests/_relayharness.py at 236, the largest; the order runs '
+        '236, 198, 137, 120, 98, 50, 45. No shared copy of either '
+        'driver would serve both harnesses',
     ('tests/_tabs_harness.py', 'maybeReject'):
         'this refuses a chrome surface by API name, where the netcapture '
         'harness refuses a declarativeNetRequest entry by RULESET key',
