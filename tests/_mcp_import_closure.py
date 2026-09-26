@@ -9,18 +9,25 @@ too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. A CALLEE is
 read by its VALUE (`_mcp_selection_fold`): folded to what it statically
-produces — a `__call__` projection and a lambda call produce the value they
-wrap, a position is read and a key with it — a folded operation is resolved
-exactly as the direct spelling is, and one the fold cannot decide is refused
-when it mentions the operation. A value the runtime provably CANNOT reach
-through is CLEAN, whichever way it is spelled: an out-of-range position, a
-key the literal does not carry, a CONTAINER the fold decides is a list, a
-tuple, a set, a dict or a comprehension, none of which a call can invoke.
-A LAMBDA read in place is the call-result limit one step out — it is a
-function, not its body — and a lambda DELIVERED to a name is the other half
-and is not exempt, for the reason `yields_the_operation` gives. The registry
-is read at every level — base structurally, key by folding it — and a store
-that hands it away and a star import are refused too. A
+produces (`_mcp_selection_fold.static_value` is the one function that answers
+it): a `__call__` projection produces the value it projects, a position is
+read and a key with it, a dict DISPLAY keeps the last of two equal keys
+because that is what the runtime builds, a form the runtime has already
+settled is settled by asking Python's own operator, and a LAMBDA's value is
+its return — however it was reached, and however many arguments the call
+supplies. A folded operation is resolved exactly as the direct spelling is,
+and one the fold cannot decide is refused when it mentions the operation. A
+value the runtime provably CANNOT reach through is CLEAN, whichever way it
+is spelled: an out-of-range position, a key the display does not carry, a
+SLICE (which produces a new container, or raises), an index the operator
+settles to something no container is indexed by, an argument to the
+operation this walk can see is not a name, and a CONTAINER the fold decides
+is a list, a tuple, a set, a dict or a comprehension, none of which a call
+can invoke. A LAMBDA read in place is the call-result limit one step out —
+it is a function, not its body — and a lambda DELIVERED to a name is the
+other half and is not exempt, for the reason `yields_the_operation` gives.
+The registry is read at every level — base structurally, key by folding
+it — and a store that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one
 step on: a CONSTANT program handed to one is refused, and so is any store
 that DELIVERS the builtin to a name (as a name, a parameter default, a
@@ -414,7 +421,7 @@ def _looks_the_operation_up(node, bound):
 
 def _registry_mention(value, bound, stop_at_call=False):
     """True when a registry-carrying name appears anywhere in an expression's
-    own subtree — the property `_yields_the_operation` reads for the
+    own subtree — the property `yields_the_operation` reads for the
     operation, applied to the registry. Only a name bound to `sys` or the
     registry counts, so an `importlib.modules` is not a mention.
     `stop_at_call` does not follow a call's result, for the one base test
@@ -498,6 +505,15 @@ def _program_argument(call):
         if keyword.arg == 'source':
             return keyword.value
     return None
+
+
+def _may_be_a_name(node):
+    """Whether an argument to the operation may be the module name it
+    takes. No argument at all, and a constant that is not a string, are the
+    two this walk can SEE is not one — and a call that raises on its own
+    argument imports nothing, whatever the name would have been."""
+    return node is not None and not (
+        isinstance(node, ast.Constant) and not isinstance(node.value, str))
 
 
 def _folded_string(node):
@@ -606,6 +622,13 @@ def _import_targets(path, root):
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
                 targets |= _resolve_name(folded, (), root)
+            elif not _may_be_a_name(argument):
+                # The operation takes a NAME, so an argument this walk can
+                # see is not one — no argument at all, or a constant that is
+                # not a string — raises before it imports anything. The
+                # call names nothing, so this is the same decision `[op][4]`
+                # is: CLEAN rather than a refusal of the wrong question.
+                pass
             else:
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '
