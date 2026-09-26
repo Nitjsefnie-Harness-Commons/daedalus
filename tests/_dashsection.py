@@ -322,6 +322,15 @@ function openPump() {
 // it. That last one is a property of JavaScript iteration, not a choice:
 // iterating a copy would model a collection the shipped `Set` does not
 // have, and a control pinning the copy would be pinning the fake.
+//
+// The collection here is an Array where `app.js` uses a `Set`, and that
+// is a gap rather than a fourth claim. What it hides is duplicate
+// registration: the same function registered twice fires twice here and
+// once there, and `unsubscribe` removes every copy rather than one. No
+// dashboard code can reach it -- `bus.on` has three call sites, all of
+// them fresh arrow functions registered once at mount -- so changing the
+// collection would be a restructuring for a difference nothing can
+// observe.
 const bus = {
   on(fn) {
     LISTENERS.push(fn);
@@ -463,8 +472,14 @@ function resultAnswer(target, spec) {
   // `wrong` is how many leading polls carry an envelope naming somebody
   // else's command, which is what a shared result slot that has not been
   // replaced yet looks like. The count is the plan's, so a scenario that
-  // needs the third poll to be its own says so and asserts three polls --
-  // not however many fitted in a wall clock.
+  // needs the third poll to be its own says so and asserts three polls.
+  //
+  // The envelope is the anchored one with only its `id` changed, so the
+  // shipped loop rejects it at the id mismatch and at nothing else. A
+  // wrong envelope missing its `deliveryId`, or carrying its own
+  // `result`, is rejected earlier and the poll count is identical, which
+  // is why the case that uses this reads the envelopes back rather than
+  // trusting the count to say what was rejected.
   if (spec.wrong !== undefined) {
     LEDGER.polls += 1;
     if (LEDGER.polls <= spec.wrong) {
