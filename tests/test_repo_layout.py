@@ -664,12 +664,15 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     name. So a cycle is the only shape that can tell whether the guard
     is there, and its absence is a loop rather than a value. The step
     count is what can tell that; `_step_ceiling` has why it is taken in
-    a child process.
+    a child process, and why the count covers the whole analysis rather
+    than one frame.
 
-    The second assertion is the control on that choice. An in-process
-    tracer is the bug that shape exists to avoid, and under
-    `coverage run --parallel-mode` it left `sys.gettrace()` as NoneType
-    where it had been CTracer.
+    The two assertions pin the two halves of that. `child != os.getpid()`
+    pins the BOUNDARY, and it is the control that holds: an in-process
+    `within_step_ceiling` returns this process's pid and goes red.
+    `sys.gettrace() is tracer` pins the SYMPTOM — the caller's tracer slot
+    is unchanged — and it is not the boundary on its own, because an
+    in-process version that restores cleanly passes it too.
     """
     del tmp
     source = ("import importlib\n"
@@ -678,7 +681,9 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
               "mod = a.import_module('subprocess')\n"
               "mod.run(['git', 'status'], check=True, timeout=30)\n")
     tracer = sys.gettrace()
-    assert within_step_ceiling(source, 'cyclic-base') == []
+    sites, child = within_step_ceiling(source, 'cyclic-base')
+    assert sites == []
+    assert child != os.getpid()
     assert sys.gettrace() is tracer
 
 
