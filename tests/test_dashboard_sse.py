@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""What `dashboard/sse.js` reports, forgets and restarts.
+"""What `dashboard/sse.js` reports, forgets, filters and restarts.
 
-Three behaviours, and nothing else. The repeated-event-id drop and the
-connecting/connected/reconnecting sequence are already held by
-`test_dashboard_fanout` and `test_dashboard_eval`, which drive this module
-as a harness argument; re-pinning them here would duplicate a suite a
-reviewer is right to keep. What is left is the clock `lastEventAt()`
-reports, the bound that forgets the OLDEST dispatched id, and the
-`storage` event that restarts the client only on a changed token.
+Four behaviours. The repeated-id drop and the status sequence are already
+held by `test_dashboard_fanout` and `test_dashboard_eval`, which drive
+this module as a harness argument.
 """
 import re
 import sys
@@ -19,15 +15,14 @@ from _dashshell import run_scenario  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _SERVER = 'https://example.com'
-_OTHER_SERVER = 'https://other.example'
+_OTHER_SERVER = 'https://example.com/other'
 _TOKEN = 'tok-abcdefghijklmnop'
 _OTHER_TOKEN = 'tok-zyxwvutsrqponmji'
 _STREAM = _SERVER + '/stream?tab=dashboard'
 _BEARER_OLD = 'Bearer ' + _TOKEN
 _BEARER_NEW = 'Bearer ' + _OTHER_TOKEN
-# Two clock values that cannot coincide, so "a further frame moved the
-# clock" is a statement about the code and not about the millisecond the
-# runner happened to land in.
+# Wide enough that two frames cannot land in the same reading, so "the
+# clock moved" is about the code and not about the millisecond.
 _STEP_MS = 4000
 
 # Every scenario opens the same way: the storage and the one planned
@@ -51,20 +46,29 @@ _CLOSE = """
 })().catch(leave);
 """
 
-# The clock read before anything happens, with the transport log read at
-# the same point: nothing has been requested, so the zero is a fact about
-# a client that has not run rather than a client that cannot report.
+# What actually reached a subscriber, and nothing more. The frame filter
+# is NOT re-applied here: a subscriber that re-applies it sees the same
+# thing whether or not the module applies it.
+_SUBSCRIBE = r"""
+const seen = [];
+sse.subscribe((e) => seen.push([e.__internal === true, e.type,
+  e.kind === undefined ? null : e.kind, e.id === undefined ? null : e.id]));
+"""
+
+_UP = r"""
+sse.start();
+await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+"""
+
+_OPEN_STREAM = _SUBSCRIBE + _UP
+
+# The clock before anything, with the transport log read at the same
+# point: nothing requested, so the zero is a client that has not run.
 _BEFORE = r"""
 report({ lastEventAt: sse.lastEventAt(), reader: typeof sse.lastEventAt });
 """
 
-# The connect sets the clock, and the first frame moves it on. Both are
-# relative readings: the suite never names a millisecond.
-_AFTER_FRAME = r"""
-const seen = [];
-sse.subscribe((e) => { if (e.kind === 'event') seen.push(e.id); });
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+_AFTER_FRAME = _OPEN_STREAM + r"""
 const onConnect = sse.lastEventAt();
 offset += %d;
 push({ kind: 'event', id: 'e1', type: 'result' });
@@ -72,13 +76,7 @@ await bounded(settle(), 'first frame', _dashnodeStepTimeoutMs);
 report({ lastEventAt: sse.lastEventAt(), onConnect, seen });
 """ % _STEP_MS
 
-# A further frame, on its own clock, must move it again; the first
-# frame's own reading is what would survive a clock written once.
-_AFTER_FURTHER = r"""
-const seen = [];
-sse.subscribe((e) => { if (e.kind === 'event') seen.push(e.id); });
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+_AFTER_FURTHER = _OPEN_STREAM + r"""
 const onConnect = sse.lastEventAt();
 offset += %d;
 push({ kind: 'event', id: 'e1', type: 'result' });
@@ -90,48 +88,43 @@ await bounded(settle(), 'second frame', _dashnodeStepTimeoutMs);
 report({ lastEventAt: sse.lastEventAt(), onConnect, onFirst, seen });
 """ % (_STEP_MS, _STEP_MS)
 
-# The whole bound plus one, fed down a single in-process stream, then the
-# oldest id and the newest one replayed. `fed` is the oracle: if the fed
-# frames did not all arrive and dispatch, the replay that adds nothing
-# proves nothing.
-_EVICT = r"""
-const seen = [];
-sse.subscribe((e) => { if (e.kind === 'event') seen.push(e.id); });
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+# The whole bound plus one, down a single in-process stream, then the
+# oldest id and the newest one replayed.
+_EVICT = _OPEN_STREAM + r"""
+const frames = () => seen.filter((e) => e[0] === false);
 const ids = [];
 for (let i = 0; i < %d; i += 1) ids.push('e' + i);
 for (const id of ids) push({ kind: 'event', id, type: 'result' });
-for (let guard = 0; guard < 8 && seen.length < ids.length; guard += 1) {
+for (let guard = 0; guard < 8 && frames().length < ids.length; guard += 1) {
   await bounded(settle(), 'fed frames', _dashnodeStepTimeoutMs);
 }
-const fed = seen.slice();
+const fed = frames().slice();
 push({ kind: 'event', id: ids[0], type: 'result' });
 await bounded(settle(), 'oldest replayed', _dashnodeStepTimeoutMs);
-const afterOldest = seen.slice();
+const afterOldest = frames().slice();
 push({ kind: 'event', id: ids[ids.length - 1], type: 'result' });
 await bounded(settle(), 'newest replayed', _dashnodeStepTimeoutMs);
-report({ fed, afterOldest, seen, oldest: ids[0],
-  newest: ids[ids.length - 1] });
+report({ fed, afterOldest, seen: frames() });
 """
 
-# A broadcast-shaped eval command reaches this stream too, and carries no
-# `kind`. The subscriber here is deliberately plain: re-applying the
-# filter inside the harness is the defect this control exists for, and a
-# subscriber that re-applies it sees the same thing whether or not the
-# module filters.
-_FRAME_KIND = r"""
-const seen = [];
-sse.subscribe((e) => seen.push([e.__internal === true, e.type,
-  e.kind === undefined ? null : e.kind]));
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+# A broadcast eval command reaches this stream too and carries no kind.
+_FRAME_KIND = _OPEN_STREAM + r"""
 push({ type: 'result', id: 'cmd-1', code: 'document.title' });
 await bounded(settle(), 'broadcast-shaped frame', _dashnodeStepTimeoutMs);
 const afterBroadcast = seen.slice();
 push({ kind: 'event', id: 'e1', type: 'tab-updated', tabId: 3 });
 await bounded(settle(), 'event frame', _dashnodeStepTimeoutMs);
 report({ seen, afterBroadcast, read: drive.lastScript().settlements });
+"""
+
+# The three directions of the conjunction: the negative first, then a
+# changed-token event whose restart is the oracle that the log sees one.
+_CHANGED = r"""
+localStorage.setItem('daedalus-token', '%s');
+window.fire('storage', { key: 'daedalus-token', newValue: '%s' });
+await bounded(settle(), 'changed-token storage event',
+  _dashnodeStepTimeoutMs);
+report();
 """
 
 
@@ -142,10 +135,9 @@ def _run(body):
 def _bound():
     """`MAX_DISPATCHED_IDS`, read out of the module's own source.
 
-    The property under test is the eviction, so a literal here would pin
-    today's number instead of the behaviour. A declaration this reader
-    cannot see is a failure by name, never a silent zero that would make
-    every id look ancient.
+    The property is the eviction, so a literal would pin today's number
+    instead. A declaration this reader cannot see fails by name, never as
+    a silent zero that would make every id look ancient.
     """
     source = (ROOT / 'dashboard' / 'sse.js').read_text(encoding='utf-8')
     found = re.findall(
@@ -157,12 +149,9 @@ def _bound():
 
 
 def _assert_one_restart(report):
-    """The log holds the start and the restart, and nothing else.
-
-    Every direction of the `storage` conjunction ends here with the same
-    shape: the initial request on the planned route, and one restart that
-    carries the replacement token. A direction that restarted when it
-    should not reaches three; one that failed to restart reaches one.
+    """The log holds the start and one restart. A direction that
+    restarted when it should not reaches three; one that failed to
+    restart reaches one.
     """
     requests = report['requests']
     assert len(requests) == 2, report
@@ -174,10 +163,8 @@ def _assert_one_restart(report):
 
 
 def test_the_last_event_at_reads_zero_before_anything_happens(_tmp):
-    """`sse.js:49` reporting anything else before the client has run: the
-    clock has no reading yet, and the transport log is empty beside it,
-    so the zero belongs to a client that has not started rather than to
-    one that cannot report."""
+    """`sse.js:49` reporting before the client has run, where the clock
+    has no reading and the transport log is empty beside it."""
     report = _run(_BEFORE)
     assert report['reader'] == 'function', report
     assert report['lastEventAt'] == 0, report
@@ -185,41 +172,38 @@ def test_the_last_event_at_reads_zero_before_anything_happens(_tmp):
 
 
 def test_the_last_event_at_reports_the_connect_and_the_frame_after_it(_tmp):
-    """`sse.js:53` missing, or `:121` missing: the clock does not move on
-    a frame. The connect's own reading is the liveness of the assertion —
-    a client that never reported at all would satisfy a bare `== 0` here
-    too, so both readings are compared and the frame's is later."""
+    """`sse.js:53` or `:121` missing: the clock does not move on a frame.
+    The connect's own reading is the liveness of the assertion, so the
+    frame's is compared against it rather than against a bare zero."""
     report = _run(_AFTER_FRAME)
     assert report['onConnect'] > 0, report
     assert report['lastEventAt'] > report['onConnect'], report
-    assert report['seen'] == ['e1'], report
+    assert report['seen'][-1] == [False, 'result', 'event', 'e1'], report
+    assert len(report['seen']) == 3, report
 
 
 def test_the_last_event_at_moves_on_to_a_further_frame(_tmp):
     """A clock written once per connection rather than per frame. The two
-    frames carry distinct values, so the second reading separates the two
-    behaviours where a single frame cannot: it is later than the first
-    frame's, not merely later than the connect's."""
+    frames carry distinct values, so the third reading separates the two
+    behaviours where a single frame cannot."""
     report = _run(_AFTER_FURTHER)
     assert report['onConnect'] > 0, report
     assert report['onFirst'] > report['onConnect'], report
     assert report['lastEventAt'] > report['onFirst'], report
-    assert report['seen'] == ['e1', 'e2'], report
+    assert report['seen'][-1] == [False, 'result', 'event', 'e2'], report
+    assert len(report['seen']) == 4, report
 
 
 def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
-    """`sse.js:59` dropping the `kind: 'event'` filter. A broadcast eval
-    command reaches the dashboard stream too and carries no kind, so a
-    filter that stops being applied paints raw command results into the
-    event log. Two directions, because one positive is satisfied by a
-    module that dispatches everything; the negative's frame is shown to
-    have reached the reader, so its silence is the module's and not the
-    harness's."""
+    """`sse.js:59` dropping the `kind: 'event'` filter paints raw
+    broadcast command results into the event log. Two directions, because
+    one positive is satisfied by a module that dispatches everything, and
+    the negative's frame is shown to have reached the reader."""
     report = _run(_FRAME_KIND)
-    statuses = [[True, 'sse-status', None], [True, 'sse-status', None]]
+    statuses = [[True, 'sse-status', None, None]] * 2
     assert report['afterBroadcast'] == statuses, report
-    assert report['seen'] == statuses + [[False, 'tab-updated', 'event']], \
-        report
+    assert report['seen'] == statuses + [[False, 'tab-updated', 'event',
+                                         'e1']], report
     read = report['read']
     assert [entry['kind'] for entry in read] == ['chunk', 'chunk'], report
     assert 'cmd-1' in read[0]['text'], report
@@ -228,75 +212,48 @@ def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
 
 def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
     """`sse.js:65` removed, or evicting the newest id instead of the
-    oldest. The bound is read out of the module, never restated here, so
-    this pins the eviction and its ORDER rather than today's number."""
+    oldest. `fed` is the oracle: if the frames had not all arrived and
+    dispatched, the replay that adds nothing would prove nothing."""
     count = _bound() + 1
     report = _run(_EVICT % count)
     fed = report['fed']
     assert len(fed) == count, report
-    assert fed[0] == 'e0', report
-    assert fed[-1] == 'e' + str(count - 1), report
-    # The oldest is past the bound and replays; the newest is still
-    # inside it and does not.
-    assert report['afterOldest'] == fed + ['e0'], report
+    assert fed[0][3] == 'e0', report
+    assert fed[-1][3] == 'e' + str(count - 1), report
+    assert report['afterOldest'] == fed + [[False, 'result', 'event',
+                                           'e0']], report
     assert report['seen'] == report['afterOldest'], report
-    assert report['oldest'] == 'e0', report
-    assert report['newest'] == fed[-1], report
 
 
 def test_a_storage_event_with_a_changed_token_restarts_the_client(_tmp):
     """`sse.js:159-160` refusing the conjunction's positive limb. The
     second request is the restart, on the same route and carrying the
     replacement token, so the count is corroborated by what it carries."""
-    report = _run(r"""
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
-localStorage.setItem('daedalus-token', '%s');
-window.fire('storage', { key: 'daedalus-token', newValue: '%s' });
-await bounded(settle(), 'changed-token storage event',
-  _dashnodeStepTimeoutMs);
-report();
-""" % (_OTHER_TOKEN, _OTHER_TOKEN))
+    report = _run(_UP + _CHANGED % (_OTHER_TOKEN, _OTHER_TOKEN))
     _assert_one_restart(report)
 
 
 def test_a_storage_event_with_the_same_token_does_not_restart(_tmp):
-    """`sse.js:159` dropping the `newValue` comparison: the key alone
-    would restart. The negative comes first and the changed-token event
-    after it, so the log's holding exactly two is what shows the first
-    event added nothing and the second added the one restart."""
-    report = _run(r"""
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+    """`sse.js:159` dropping the `newValue` comparison. The log's holding
+    exactly two is what shows the same-value event added nothing and the
+    changed-token event after it added the one restart."""
+    report = _run(_UP + r"""
 window.fire('storage', { key: 'daedalus-token', newValue: '%s' });
 await bounded(settle(), 'unchanged-token storage event',
   _dashnodeStepTimeoutMs);
-localStorage.setItem('daedalus-token', '%s');
-window.fire('storage', { key: 'daedalus-token', newValue: '%s' });
-await bounded(settle(), 'changed-token storage event',
-  _dashnodeStepTimeoutMs);
-report();
-""" % (_TOKEN, _OTHER_TOKEN, _OTHER_TOKEN))
+""" % (_TOKEN,) + _CHANGED % (_OTHER_TOKEN, _OTHER_TOKEN))
     _assert_one_restart(report)
 
 
 def test_a_storage_event_on_another_key_does_not_restart(_tmp):
-    """`sse.js:159` dropping the key check: any storage change would
-    restart. The value here is a different one too, so the key is the
-    only limb holding; the event is delivered without the storage write a
-    browser would have made first, which this listener never reads, so
-    the restart that follows still lands on the planned route."""
-    report = _run(r"""
-sse.start();
-await bounded(settle(), 'stream connect', _dashnodeStepTimeoutMs);
+    """`sse.js:159` dropping the key check. The value differs too, so
+    the key is the only limb holding. The event is delivered without the
+    storage write a browser makes first, which this listener never reads,
+    so the restart that follows still lands on the planned route."""
+    report = _run(_UP + r"""
 window.fire('storage', { key: 'daedalus-server', newValue: '%s' });
 await bounded(settle(), 'other-key storage event', _dashnodeStepTimeoutMs);
-localStorage.setItem('daedalus-token', '%s');
-window.fire('storage', { key: 'daedalus-token', newValue: '%s' });
-await bounded(settle(), 'changed-token storage event',
-  _dashnodeStepTimeoutMs);
-report();
-""" % (_OTHER_SERVER, _OTHER_TOKEN, _OTHER_TOKEN))
+""" % (_OTHER_SERVER,) + _CHANGED % (_OTHER_TOKEN, _OTHER_TOKEN))
     _assert_one_restart(report)
 
 
