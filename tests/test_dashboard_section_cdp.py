@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""The CDP panel, run rather than read.
+
+`dashboard/sections/cdp.js` sends one raw protocol method and shows the
+answer, so what the pane says at each moment is the only report the
+operator gets: a method that was refused, a params box that will not
+parse and a bridge that detached all look alike unless the pane
+distinguishes them. The harness mounts the shipped section over the real
+`dashboard/api.js` and the real `_util.js` in Node, drives the toolbar,
+and reads the pane beside the parsed body of every request the section
+made.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _util  # noqa: E402
+import _dashsection_wave1 as shared  # noqa: E402
+from _dashsection import run_scenario  # noqa: E402
+
+SECTION = ('sections/cdp.js',)
+
+EXTRA = r"""
+const pane = () => {
+  const el = container.find('[data-role=result]');
+  return [el.className, el.textContent];
+};
+const sent = () => REQUESTS.filter((r) => r.target === '/command')
+  .map((r) => r.body);
+const methods = () => container.all()
+  .filter((el) => el.tag === 'datalist')[0].children.map((o) => o.value);
+"""
+
+TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
+        "  url: 'https://one.example.com/one' },\n"
+        "  { tabId: 22, title: '', url: 'https://two.example.com/two' }];\n"
+        "drive.route('/tabs', { json: TABS });\n")
+
+# The control values the cases set, as the JavaScript literals they are
+# assigned from.
+METHOD = '"Page.reload"'
+METHOD_PADDED = '"  Page.reload  "'
+METHOD_BLANK = '""'
+PARAMS_BLANK = '""'
+PARAMS_OBJECT = '\'{"depth": 3}\''
+PARAMS_BROKEN = '"{oops"'
+TAB_CHOSEN = '"22"'
+
+ANSWER_TEXT = "answer('cdp', { result: 'frameNavigated' });\n"
+ANSWER_OBJECT = ("answer('cdp', { result: { frameId: 'A1',"
+                 " loaderId: 'L1' } });\n")
+ANSWER_REFUSED = ("answer('cdp',"
+                  " { error: 'detached before the reply' });\n")
+
+SETTLED = ('await bounded(settle(), "after the run",'
+           ' _dashnodeStepTimeoutMs);\n')
+
+COMMON_METHODS = [
+    'Page.captureScreenshot', 'Page.reload', 'Page.navigate',
+    'Runtime.evaluate', 'Runtime.enable', 'DOM.getDocument',
+    'DOM.querySelector', 'Network.enable', 'Network.getCookies',
+    'Network.setCookie', 'Network.getResponseBody', 'Target.getTargets',
+    'Emulation.setDeviceMetricsOverride',
+    'Emulation.clearDeviceMetricsOverride', 'Input.dispatchMouseEvent',
+    'Input.dispatchKeyEvent',
+]
+
+
+def _set(role, literal):
+    """One operator action on one control, as the scenario reads it."""
+    return ('container.find("[data-role=' + role + ']").value = '
+            + literal + ';\n')
+
+
+def _press(method=None, params=None, tab=None):
+    """Fill the form the way an operator would, then press RUN.
+
+    The defaults resolve at call time, so a case reads as the control
+    values it means rather than as whatever the module held at import.
+    """
+    method = METHOD if method is None else method
+    params = PARAMS_BLANK if params is None else params
+    chosen = '' if tab is None else _set('tab', tab)
+    return (_set('method', method) + _set('params', params) + chosen
+            + 'button("RUN").click();\n')
+
+
+def scenario(body, *, setup=None, answers=(), plan=shared.COMMAND):
+    """One child: seed the token, plan every answer, mount, then drive.
+
+    `setup` lands first because the answer table is written in the scope
+    `setup` defines.
+    """
+    return ('(async () => {\n' + shared.SEED + shared.PRELUDE + EXTRA
+            + shared.open_section(SECTION[0])
+            + (TABS if setup is None else setup) + plan
+            + shared.results(*answers)
+            + shared.MOUNT + shared.SETTLE + body
+            + '})().catch(leave);\n')
+
+
+def _run(body, *, setup=None, answers=(), plan=shared.COMMAND):
+    return run_scenario(
+        scenario(body, setup=setup, answers=answers, plan=plan),
+        sections=SECTION)
+
+
+def test_the_mount_offers_the_tabs_and_leaves_the_pane_empty(_tmp):
+    """The pane starts in the `empty` state and the mount sends nothing
+    at all: the one request it makes is the tab list `bindTabSelector`
+    issues, and a mount that sent a CDP command would be attaching a
+    debugger before the operator asked for anything."""
+    report = _run('report({ pane: pane(), sent: sent(),'
+                  ' options: container.find("[data-role=tab]")'
+                  '.options.map((o) => o.textContent) });\n')
+    assert report['pane'] == ['pane empty', 'no result yet.'], report
+    assert report['sent'] == [], report
+    assert report['options'] == ['(active tab)', '11  first tab',
+                                 '22  https://two.example.com/two'], report
+    assert report['unplanned'] == [], report
+
+
+def test_the_datalist_carries_the_sixteen_common_methods_in_order(_tmp):
+    """`COMMON` is a fixed list the datalist is built from, and its order
+    is the order the browser offers: the methods an operator reaches for
+    most are the ones an earlier version put first."""
+    report = _run('report({ methods: methods() });\n')
+    assert report['methods'] == COMMON_METHODS, report
+
+
+def test_the_five_result_pane_states_are_distinguishable(_tmp):
+    """Five moments, five readings, each pinned by BOTH the class and the
+    text. The invalid-JSON and the runtime-error states share `pane err`
+    and are told apart only by the prefix, which is why the prefix is the
+    assertion and not the engine's message after it."""
+    initial = _run('report({ pane: pane() });\n', answers=(ANSWER_TEXT,))
+    flying = _run(_press() + 'report({ pane: pane(), sent: sent() });\n',
+                  answers=(ANSWER_TEXT,))
+    worked = _run(_press() + SETTLED + 'report({ pane: pane() });\n',
+                  answers=(ANSWER_TEXT,))
+    broken = _run(_press(params=PARAMS_BROKEN) + SETTLED
+                  + 'report({ pane: pane() });\n', answers=(ANSWER_TEXT,))
+    refused = _run(_press() + SETTLED + 'report({ pane: pane() });\n',
+                   answers=(ANSWER_REFUSED,))
+    assert initial['pane'] == ['pane empty', 'no result yet.'], initial
+    assert flying['pane'] == ['pane', 'running…'], flying
+    assert worked['pane'] == ['pane flash', 'frameNavigated'], worked
+    assert broken['pane'][0] == 'pane err', broken
+    assert broken['pane'][1].startswith('invalid params JSON: '), broken
+    assert refused['pane'] == ['pane err', 'detached before the reply'], \
+        refused
+
+
+def test_a_run_in_flight_has_not_reached_the_wire_yet(_tmp):
+    """The pane reads `running…` before the command leg is recorded, which
+    is what makes it a state rather than a leftover: a pane that said
+    `running…` after a reply arrived would be a lie the operator reads
+    as a slow bridge."""
+    report = _run(_press() + 'report({ pane: pane(), sent: sent() });\n',
+                  answers=(ANSWER_TEXT,))
+    assert report['pane'] == ['pane', 'running…'], report
+    assert report['sent'] == [], report
+
+
+def test_a_call_sends_the_trimmed_method_and_an_empty_params_object(_tmp):
+    """`params` is defaulted to `{}` and the key is always written, so an
+    empty box is an empty object rather than an absent member -- the
+    difference between "no arguments" and "nothing to send" on the
+    bridge. The method is trimmed on the way in."""
+    report = _run(_press(METHOD_PADDED) + SETTLED
+                  + 'report({ sent: sent(), pane: pane() });\n',
+                  answers=(ANSWER_TEXT,))
+    first = report['sent'][0]
+    assert first['type'] == 'cdp', report
+    assert first['method'] == 'Page.reload', report
+    assert first['params'] == {}, report
+    assert 'params' in first, report
+    assert 'tabId' not in first, report
+    assert report['pane'][0] == 'pane flash', report
+    assert report['unplanned'] == [], report
+
+
+def test_a_params_box_that_holds_json_reaches_the_command_parsed(_tmp):
+    """`JSON.parse(raw)` is the only validation, so what the worker
+    receives is the parsed value and not the text the operator typed."""
+    report = _run(_press(params=PARAMS_OBJECT) + SETTLED
+                  + 'report({ sent: sent(), pane: pane() });\n',
+                  answers=(ANSWER_TEXT,))
+    assert report['sent'][0]['params'] == {'depth': 3}, report
+    assert report['pane'][0] == 'pane flash', report
+
+
+def test_a_chosen_tab_arrives_as_the_string_the_select_holds(_tmp):
+    """`fields.tabId = tabSel.value` with no `Number()` around it, which is
+    the difference from `net-capture.js` and `css-injector.js` -- both send
+    the same control as a number. The bridge reads it either way; a test
+    that asserted equality alone would pass against both modules."""
+    report = _run(_press(tab=TAB_CHOSEN) + SETTLED
+                  + 'report({ sent: sent() });\n',
+                  answers=(ANSWER_TEXT,))
+    first = report['sent'][0]
+    assert first['tabId'] == '22', report
+    assert isinstance(first['tabId'], str), report
+
+
+def test_a_blank_method_toasts_method_required_and_sends_nothing(_tmp):
+    """The guard returns before the params are read, so a pane already
+    holding a result keeps it: a blank method with a stale result on
+    screen is the operator's last answer, not a new one."""
+    report = _run(_press() + SETTLED + _press(method=METHOD_BLANK) + SETTLED
+                  + 'report({ pane: pane(), toasts: toasts(),'
+                    ' sent: sent().length });\n', answers=(ANSWER_TEXT,))
+    assert report['toasts'] == [{'type': 'warn',
+                                 'text': 'method required'}], report
+    assert report['pane'] == ['pane flash', 'frameNavigated'], report
+    assert report['sent'] == 1, report
+
+
+def test_params_that_will_not_parse_render_the_invalid_state_and_send_nothing(
+        _tmp):
+    """`JSON.parse` throws before `extCmd` is called, so no command is
+    written and nothing is toasted -- the pane carries the whole report.
+    The assertion is the PREFIX, because `e.message` is the engine's."""
+    report = _run(_press(params=PARAMS_BROKEN) + SETTLED
+                  + 'report({ pane: pane(), sent: sent(),'
+                    ' toasts: toasts() });\n', answers=(ANSWER_TEXT,))
+    assert report['sent'] == [], report
+    assert report['toasts'] == [], report
+    assert report['pane'][0] == 'pane err', report
+    assert report['pane'][1].startswith('invalid params JSON: '), report
+    assert len(report['pane'][1]) > len('invalid params JSON: '), report
+
+
+def test_a_bridge_failure_renders_the_pane_and_toasts_nothing(_tmp):
+    """This is the one panel of the six that surfaces a bridge failure
+    only in the result pane. The `toasts() == []` half is the pin: a
+    module that toasted as well would still render this pane."""
+    report = _run(_press() + SETTLED + 'report({ pane: pane(),'
+                  ' toasts: toasts() });\n', answers=(ANSWER_REFUSED,))
+    assert report['pane'] == ['pane err', 'detached before the reply'], \
+        report
+    assert report['toasts'] == [], report
+
+
+def test_a_string_answer_reaches_the_pane_unquoted(_tmp):
+    """`pretty` returns a string as it is, so an answer the bridge framed
+    as text arrives as the operator typed it rather than as a quoted
+    string they would have to read past."""
+    report = _run(_press() + SETTLED + 'report({ pane: pane() });\n',
+                  answers=(ANSWER_TEXT,))
+    assert report['pane'] == ['pane flash', 'frameNavigated'], report
+    assert '"' not in report['pane'][1], report
+
+
+def test_an_object_answer_reaches_the_pane_indented(_tmp):
+    """Anything else goes through `JSON.stringify(v, null, 2)`, so the
+    pane is the two-space-indented form rather than one long line -- the
+    difference between reading an answer and scrolling it."""
+    report = _run(_press() + SETTLED + 'report({ pane: pane() });\n',
+                  answers=(ANSWER_OBJECT,))
+    assert report['pane'] == ['pane flash', '{\n'
+                              '  "frameId": "A1",\n'
+                              '  "loaderId": "L1"\n'
+                              '}'], report
+
+
+def test_a_bus_tab_event_repopulates_the_select_and_keeps_the_choice(_tmp):
+    """`bindTabSelector` is called inside `mount`, which is what
+    `app.js` calls with the bus. The event has to reach a real `/tabs`
+    fetch -- counting them is what separates a registered listener from
+    one that never was."""
+    report = _run('container.find("[data-role=tab]").value = "11";\n'
+                  'const before = REQUESTS.length;\n'
+                  'bus.emit({ type: "tabs-synced" });\n' + SETTLED
+                  + 'report({ before, after: REQUESTS.length,\n'
+                    '  chosen: container.find("[data-role=tab]").value,\n'
+                    '  options: container.find("[data-role=tab]")'
+                    '.options.map((o) => o.textContent) });\n')
+    assert report['after'] - report['before'] == 1, report
+    assert report['chosen'] == '11', report
+    assert report['options'] == ['(active tab)', '11  first tab',
+                                 '22  https://two.example.com/two'], report
+    assert report['unplanned'] == [], report
+
+
+def main():
+    return _util.runner(_util.collect(globals()), tmp_prefix='dashcdp_')
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
