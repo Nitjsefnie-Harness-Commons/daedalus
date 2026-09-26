@@ -209,19 +209,30 @@ def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
     assert _store(report)[-1]['css'] == '  a{\n  color: red; }  ', report
 
 
-def test_a_failed_inject_appends_no_session_and_re_renders_nothing(_tmp):
-    """The `catch` on INJECT covers the push as well as the command, so a
-    refused injection leaves the table with the rows it already had."""
-    report = _run('const before = rowTexts(container.all()[0]).length;\n'
-                  'container.find("[data-role=css]").value = "a{color:red}";\n'
+def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
+    """`save()` runs BEFORE `extCmd('inject-css')`, so the record is already
+    in the store when the command is refused. That is a record with no live
+    rule, and it is the safe direction: a stale record is a row the session
+    table offers and the row's own remove button takes away.
+
+    The residue is deliberate, so this case states it rather than treating it
+    as a defect. The direction that cannot be reached from here is the one
+    beside it -- a store that refuses the write never reaches the command.
+    """
+    report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts(), before,\n'
-                    '  after: rowTexts(container.all()[0]).length });\n',
+                  + 'report({ toasts: toasts(),\n'
+                    '  rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED, answers=(INJECT_REFUSED,))
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'cannot access the tab'}], report
-    assert report['after'] == report['before'], report
-    assert len(_store(report)) == 2, report
+    # The record is on offer, newest first, and the seeded two are behind it.
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{color:red}', 'a{--seed:1}', 'b{--seed:2}'], report
+    # The store keeps insertion order, so the reserved record is the LAST
+    # one there even though the table shows it first.
+    assert [entry['css'] for entry in _store(report)] == [
+        'b{--seed:2}', 'a{--seed:1}', 'a{color:red}'], report
 
 
 def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
@@ -303,6 +314,100 @@ def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     assert report['toasts'] == [{'type': 'ok', 'text': 'removed'}], report
     assert [row[3] for row in report['rows'][1:]] == ['b{--seed:2}'], report
     assert len(_store(report)) == 1, report
+
+
+# A `setItem` that refuses the one key `save()` writes, and nothing else, so
+# the token the harness seeds and the store the mount reads both still work.
+# Installed AFTER `SEEDED`, which writes that key to seed the table.
+QUOTA = ("const realSet = localStorage.setItem;\n"
+         "localStorage.setItem = (key, value) => {\n"
+         "  if (String(key) === 'daedalus-dash-css-sessions') {\n"
+         "    const refused = new Error('quota');\n"
+         "    refused.name = 'QuotaExceededError';\n"
+         "    throw refused;\n"
+         "  }\n"
+         "  return realSet(key, value);\n"
+         "};\n")
+
+
+def test_a_store_that_refuses_the_write_never_reaches_the_command(_tmp):
+    """The half the failed-command case cannot show. There the command was
+    sent and failed; here nothing is sent at all, because `save()` runs
+    first and its `setItem` throws. A `QuotaExceededError` under the old
+    order would have arrived AFTER `extCmd('inject-css')` resolved, leaving
+    a live rule with no record -- the harm #1180 exists to stop.
+
+    So the claim is two things, and the second is what makes the first mean
+    something: no command on the wire, and the store byte-for-byte as it was.
+    A handler that caught the refusal and then carried on to inject would
+    pass the first and fail the second only by luck, so both are asserted.
+    """
+    report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
+                  'button("INJECT").click();\n' + SETTLED
+                  + 'report({ toasts: toasts(),\n'
+                    '  rows: rowTexts(container.all()[0]) });\n',
+                  setup=SEEDED + QUOTA)
+    assert shared.types(report) == [], report
+    assert report['toasts'] == [
+        {'type': 'err', 'text': 'session not recorded: quota'}], report
+    # No half-written record: the two seeded entries, in the order they were
+    # seeded, and a table showing exactly those two.
+    assert [entry['css'] for entry in _store(report)] == [
+        'b{--seed:2}', 'a{--seed:1}'], report
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{--seed:1}', 'b{--seed:2}'], report
+
+
+def test_the_record_is_in_the_store_before_the_command_is_sent(_tmp):
+    """The ordering is observed rather than asserted, because the two orders
+    produce the same store and the same toast once the click has settled.
+    The only moment they differ is the request itself: reading the store as
+    the `/command` leaves the wire tells the two apart, and nothing else in
+    the panel does.
+
+    Three is two seeded records plus the one this click reserved. A handler
+    that wrote the record after the answer read two here.
+    """
+    body = ('const atSend = [];\n'
+            'const realFetch = globalThis.fetch;\n'
+            'globalThis.fetch = async (target, init) => {\n'
+            '  if (String(target).endsWith("/command")) {\n'
+            '    atSend.push(JSON.parse(localStorage.getItem(\n'
+            '      "daedalus-dash-css-sessions")).length);\n'
+            '  }\n'
+            '  return realFetch(target, init);\n'
+            '};\n'
+            'container.find("[data-role=css]").value = "a{color:red}";\n'
+            'button("INJECT").click();\n' + SETTLED
+            + 'report({ atSend, stored: JSON.parse(localStorage.getItem(\n'
+              '  "daedalus-dash-css-sessions")).length });\n')
+    report = _run(body, setup=SEEDED, answers=(INJECTED,))
+    assert report['atSend'] == [3], report
+    assert report['stored'] == 3, report
+
+
+def test_a_row_remove_the_store_refuses_says_so_and_keeps_the_row(_tmp):
+    """`remove-css` has already answered when the store is written, so a
+    `setItem` that throws here costs a record and not a rule -- the same
+    safe direction as the inject side, reached the other way round. It is
+    caught and toasted rather than left as an unhandled rejection, and the
+    table is not re-rendered onto a store it cannot write, so what the
+    operator is looking at and what the store holds are the same two rows.
+    """
+    report = _run('button("remove", container).click();\n' + SETTLED
+                  + 'report({ toasts: toasts(),\n'
+                    '  rows: rowTexts(container.all()[0]) });\n',
+                  setup=SEEDED + QUOTA, answers=(REMOVED_13,))
+    # The removal itself succeeded, and the operator is told the record is
+    # the thing that did not happen.
+    assert shared.types(report) == ['remove-css'], report
+    assert report['toasts'][-1] == {
+        'type': 'err',
+        'text': 'session not removed: quota'}, report
+    assert [entry['css'] for entry in _store(report)] == [
+        'b{--seed:2}', 'a{--seed:1}'], report
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{--seed:1}', 'b{--seed:2}'], report
 
 
 def test_a_full_session_list_refuses_the_next_injection(_tmp):

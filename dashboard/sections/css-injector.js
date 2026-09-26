@@ -79,7 +79,12 @@ export function mount(container, bus) {
               toast('removed', 'ok');
               const all = load();
               all.splice(all.length - 1 - i, 1);
-              save(all); renderSessions();
+              // The rule is already off the page, so a store that refuses
+              // this write costs a record and not a rule. Say which, rather
+              // than dropping the throw out of an async handler where it
+              // would take the child down instead of reaching the operator.
+              try { save(all); renderSessions(); }
+              catch (e) { toast('session not removed: ' + errMsg(e), 'err'); }
             },
           }, 'remove'),
         ),
@@ -106,12 +111,19 @@ export function mount(container, bus) {
             'warn');
       return;
     }
+    // The record is reserved BEFORE the command, not written after it. A
+    // store that refuses the write then returns here, with nothing
+    // injected and nothing to record, and a command that fails after the
+    // write leaves a record the operator can remove from the table — the
+    // one direction that costs nothing to undo. Writing it afterwards made
+    // every failure the other one: a live rule with no record.
+    const sessions = load();
+    sessions.push({ css: f.css, tabId: f.tabId || '', allFrames: !!f.allFrames, ts: Date.now() });
+    try { save(sessions); renderSessions(); }
+    catch (e) { toast('session not recorded: ' + errMsg(e), 'err'); return; }
     try {
       const r = await extCmd('inject-css', f);
       toast(`injected ${r && r.injected} chars → tab ${r && r.tabId}`, 'ok');
-      const sessions = load();
-      sessions.push({ css: f.css, tabId: f.tabId || '', allFrames: !!f.allFrames, ts: Date.now() });
-      save(sessions); renderSessions();
     } catch (e) { toast(errMsg(e), 'err'); }
   });
   root.querySelector('[data-role=remove]').addEventListener('click', async () => {
