@@ -137,7 +137,9 @@ def _virtual_cmdqueue_clock(
     if budget is not None and (not math.isfinite(budget) or budget < 0):
         raise ValueError('wall budget must be non-negative and finite')
     original = _cmdqueue.time
-    wall_started = original.perf_counter()
+    # A control that passed no wall budget reads no real time, not even for a
+    # start mark it will never subtract.
+    wall_started = 0.0 if budget is None else original.perf_counter()
     # A large power-of-two origin exposes sleeps too small to move the clock.
     origin = _cmdqueue.POLL_DELAY * (1 << 24)
     elapsed = [0.0]

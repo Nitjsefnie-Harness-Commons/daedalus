@@ -325,6 +325,29 @@ def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
     assert 'wall' in message, message
 
 
+def test_an_opted_out_clock_reads_no_real_time(_tmp):
+    """No wall budget means no real time, not even for a start mark.
+
+    This is the branch's central claim about the opt-out, and the start mark
+    was the one read that survived it.
+    """
+    real = _cmdqueue.time.perf_counter
+    reads = [0]
+
+    def counted():
+        reads[0] += 1
+        return real()
+
+    _cmdqueue.time.perf_counter = counted
+    try:
+        with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _ev, _or):
+            for _ in range(10):
+                clock.sleep(0.0)
+    finally:
+        _cmdqueue.time.perf_counter = real
+    assert reads[0] == 0, reads[0]
+
+
 def test_the_wall_bound_stops_a_runaway_clock_read(_tmp):
     """`monotonic` is the arm a reader polling a deadline would consult."""
     failure = None
