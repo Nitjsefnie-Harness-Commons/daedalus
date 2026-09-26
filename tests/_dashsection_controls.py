@@ -386,6 +386,26 @@ report({ bag, polled, twice, requests: REQUESTS.length,
 # `console.error` is where a section's failed mount and `app.js`'s bus
 # report reach a scenario, so the recorder has to hold a line it was given
 # and a value whose own `toString` throws.
+# A response header the transport does not model. `api.js:53` reads
+# `content-type` and it is the only header any shipped fetch path reads,
+# so no section reaches this door today and the case drives it directly --
+# the way a section that grew a second header read would. The modelled
+# name has to keep answering in the same child, or this proves nothing
+# about the guard it sits beside.
+HEADER_NAME = r"""
+(async () => {
+drive.route('/tabs', { json: { error: 'nope' }, status: 500 });
+const answer = await fetch('/tabs',
+  { headers: { Authorization: 'Bearer x' } });
+const contentType = answer.headers.get('content-type');
+let refusal = null;
+try { answer.headers.get('x-dash-header'); }
+catch (error) { refusal = error.message; }
+report({ contentType, refusal, ok: answer.ok, status: answer.status });
+})().catch(leave);
+"""
+
+
 CONSOLE_ERROR = r"""
 (async () => {
 console.error('[mount] net-capture failed', new Error('boom'));

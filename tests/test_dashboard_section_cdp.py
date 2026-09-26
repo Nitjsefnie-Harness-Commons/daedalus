@@ -158,9 +158,12 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
 
 def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
     """The `/tabs` catch renders the error only when an `errorLabel` was
-    passed, and this section passes none -- so a 500 leaves the select on
-    its placeholder with nothing on the pane to say why. The panel is
-    still runnable: an omitted tab is the active tab."""
+    passed and this section passes none, so a 500 leaves the select on
+    the option `cdp.js:28` ships in its markup -- the `placeholder`
+    argument appends the same string, but only on the success path after
+    the try/catch. Nothing is on the pane to say why, and the press above
+    is what shows the panel still runs: an omitted tab is the active tab,
+    and the pane reaches `pane flash` rather than the error state."""
     report = _run(_press() + SETTLED + 'report({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'

@@ -11,8 +11,9 @@ sibling walk that ends, an insertion that agrees with it, a class set that
 agrees with `className` in both directions, a timer that stays parked
 until it is fired, a refusal recorded as well as thrown, an envelope the
 fake cannot pass off as somebody else's, a poll loop that retries rather
-than settles for the first answer, and a bus that dispatches the way the
-shipped one does.
+than settles for the first answer, and a bus that dispatches LIVE and
+then iterates an Array where `app.js` iterates a Set -- a gap
+`_dashsection.py` records rather than closes.
 
 The scenario sources live in `tests/_dashsection_controls.py`: they are
 the fixtures this suite drives, and the two do not fit inside the
@@ -190,9 +191,13 @@ def test_a_result_plan_naming_one_command_type_refuses_the_rest(_tmp):
     """`byType` is how one `/result` plan answers a different result for a
     different command, so the plan is the scenario's own list of what it
     expects to send. A type it never named is refused and recorded exactly
-    as an unplanned target is -- the same door, the same control -- because
-    a double that answered it would be handing the section a result the
-    scenario never declared, which is the half of #1083 a route-shaped
+    as an unplanned target is, through the same `refuse` door -- but
+    through a control of its own, not the existing one.
+    `test_an_unplanned_request_is_refused_and_recorded` drives a target no
+    scenario planned, and it stayed green when this branch was planted, so
+    naming it here would be the claim the measurement overturned. A double
+    that answered an unnamed type would be handing the section a result
+    the scenario never declared, which is the half of #1083 a route-shaped
     match lets through.
 
     The declared half is the anti-vacuity: a transport that refused every
@@ -223,6 +228,27 @@ def test_a_result_plan_refuses_a_name_no_scenario_wrote_that_in_would_find(
     refused = 'unexpected request /result?tab=extension'
     assert report['seen'] == [refused] * 5, report
     assert report['inherited'] == {}, report
+
+
+def test_a_response_header_the_transport_does_not_model_is_refused(_tmp):
+    """`api.js:53` reads `content-type`, and it is the only header any
+    shipped fetch path reads, so no section reaches this door today. It is
+    driven directly anyway, the way a section that grew a second header
+    read would: the modelled name answers and every other name is refused
+    by naming itself, which is the rule `_dashshell.py`'s own header bag
+    already follows and the transport had been the one place not to.
+
+    The two halves are what make it a control rather than a demonstration:
+    reverting `get` to `() => 'application/json'` leaves `contentType`
+    intact and the modelled half passing, and only `refusal` goes.
+    """
+    report = run_scenario(scenarios.HEADER_NAME)
+    assert report['contentType'] == 'application/json', report
+    assert report['refusal'] is not None, report
+    assert 'a response header' in report['refusal'], report
+    assert 'x-dash-header' in report['refusal'], report
+    assert report['ok'] is False, report
+    assert report['status'] == 500, report
 
 
 def test_a_duplicate_route_is_refused(_tmp):
@@ -279,10 +305,12 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
 
     The wrong envelopes are read back off the responses and pinned
     member by member, because "the loop retried past somebody else's
-    envelope" is a property of what the fake handed over. Both shapes
-    below are rejected by the same `if` in `api.js:150` -- the id and
-    the delivery id are read in one condition -- and neither changes the
-    poll count. The count says how many times the loop looked; only the
+    envelope" is a property of what the fake handed over. The plan is
+    `{ wrong: 2 }`, so the two rows below are the SAME shape twice, and
+    both members the loop reads in its one condition at `api.js:150` --
+    the id and the delivery id -- are asserted on them, so a fake that
+    repaired either would be caught here. The count is unchanged by
+    either reading: it says how many times the loop looked, and only the
     envelope says what it found. The anchoring of the third envelope is
     not asserted here: `api.js:150` matches only when `res.id === cmdId`
     and `cmdId` is the id `api.js` put in the request body itself, so the
@@ -466,11 +494,11 @@ def test_console_error_is_recorded_and_an_unprintable_one_does_not_throw(_tmp):
 
 
 def test_a_scenario_records_the_six_phase_checkpoints(_tmp):
-    """`test_dashboard_harness.py` pins this trace for the five harnesses it
-    enumerates, and this one is not among them -- which is why the case
-    exists. `load` emits the two import checkpoints and `report` the two
-    that close the run, so a scenario cannot emit them out of order or
-    leave one out."""
+    """`test_dashboard_harness.py` pins this trace for the five harnesses
+    it enumerates -- content, consume, world, selector and field -- and
+    this one is not among them, which is why the case exists. `load`
+    emits the two import checkpoints and `report` the two that close the
+    run, so a scenario cannot emit them out of order or leave one out."""
     assert _phases(scenarios.PHASE_TRACE, ('api.js',)) == [
         'dashboard harness started',
         'dashboard module import started',

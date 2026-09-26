@@ -87,10 +87,14 @@ def _store(report):
 
 def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     """`bindTabSelector` returns before `api.get('/tabs')` when the token
-    is empty, so the panel asks the bridge for nothing at all, and this
-    section passes no `errorLabel`, so the select keeps the `(active tab)`
-    option the markup shipped with. `runCommand` still refuses a command
-    at `api.js:128`; this case does not press anything to say so."""
+    is empty, and the zero-request half is the claim no other tab-selector
+    case in this suite carries: a select the mount never populated has
+    nothing to say even with a command behind it. `(active tab)` is the
+    option `css-injector.js:18` ships in the MARKUP, not the one the
+    `placeholder` argument appends -- that append is on the success path,
+    after the try/catch, so it never runs here. `runCommand` still
+    refuses a command at `api.js:128`; this case does not press anything
+    to say so."""
     report = _run(SETTLED + 'report({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
@@ -106,10 +110,13 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
 
 def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
     """`_util.js:63` renders the error only when an `errorLabel` was
-    passed, and this section passes none -- so a 500 leaves the select on
-    its placeholder. What the bridge said is nowhere on the panel, which
-    is the contract the missing `errorLabel` buys. The panel is still
-    runnable: an omitted tab is the active tab."""
+    passed and this section passes none, so a 500 leaves the markup's own
+    `(active tab)` option and toasts nothing. What the bridge said is
+    nowhere on the panel, which is the contract the missing `errorLabel`
+    buys. Nothing is pressed, so that silence is the whole claim: the
+    case above makes the same disclosure about the no-token path, and
+    neither shows an INJECT still reaching the bridge under an
+    unpopulated select."""
     report = _run(SETTLED + 'report({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
@@ -364,7 +371,9 @@ def test_the_preview_collapses_whitespace_before_it_caps(_tmp):
 
 
 def test_a_row_renders_the_tab_the_frames_and_a_local_time(_tmp):
-    """The three cells that are read off the stored entry: `tabId || '—'`,
+    """Three of the five cells this row renders -- the time, the tab and
+    the frames flag, the fourth being the preview the case above pins.
+    They are read off the stored entry: `tabId || '—'`,
     `allFrames ? 'all' : 'top'`, and a time computed inline as local
     `HH:MM:SS`. The time is host-timezone dependent, so the case pins
     its SHAPE and its relation to the entry's own `ts` rather than a

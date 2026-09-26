@@ -234,8 +234,11 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
 def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
     """`_util.js:63` renders the error only when an `errorLabel` was
     passed, and this section passes none -- so a 500 leaves the select on
-    its placeholder. What the bridge said is nowhere on the panel, which
-    is the contract the missing `errorLabel` buys."""
+    the option `net-capture.js` ships in its markup. The `placeholder`
+    argument appends the same string, but only on the success path after
+    the try/catch, so it is not what is on offer here. What the bridge
+    said is nowhere on the panel, which is the contract the missing
+    `errorLabel` buys."""
     report = _run('report({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  toasts: toasts() });\n', setup=TABS_FAILING)
@@ -310,8 +313,9 @@ def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
 
 def test_the_max_is_on_the_start_command_and_on_nothing_else(_tmp):
     """`fields(true)` is what the start passes and `fields(false)` is what
-    the other two pass, and `extension/worker/netcapture.js:80` reads
-    `cmd.maxRequests` only in the start handler -- so the key on a poll is
+    the other two pass, and `extension/worker/netcapture.js:80` is the
+    only read of `cmd.maxRequests` in that file, inside
+    `handleNetCapture` -- so the key on a poll is
     a member no handler would read, and a poll that could set the capture
     depth would be the operator's first sign of it."""
     report = _run(_click('START') + _click('poll') + _click('STOP')
