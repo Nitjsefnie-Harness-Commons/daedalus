@@ -8,9 +8,11 @@ of such a value. Every other expression is unproven, which is a refusal and
 not a silent pass.
 FRAME_SURFACE is the member descriptors types.FrameType carries, read once
 from that type, so a frame attribute this file has never heard of is refused
-like a known one. A read of one of those members, or of the ARGS_KEY entry of
-one, is refused unless the audit can see the receiver's origin and that origin
-is not a frame."""
+like a known one. A read of one of those members, or of a frame mapping under
+the namespace key the caller passes, is refused unless the audit can see the
+receiver's origin and that origin is not a frame. The key is a parameter
+rather than a constant, so the frame rule reads the same name the namespace
+rule derives from a handler's own AST."""
 import argparse
 import ast
 import builtins
@@ -23,7 +25,6 @@ _FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
 FRAME_SURFACE = frozenset(
     name for name, member in vars(types.FrameType).items()
     if isinstance(member, _FRAME_DESCRIPTORS))
-ARGS_KEY = 'args'
 UNPROVEN = object()  # the verdict for a value whose origin is untraceable
 _UNKNOWN_MODULE_BINDING = object()
 
@@ -432,47 +433,48 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
     return attribute, parent, needs_presence
 
 
-def frame_read(node, is_getattr=None):
-    """Return the ``(member, receiver)`` a frame read names, or ``None``.
+def frame_read(node, namespace_key):
+    """Return the receiver of a frame read, or ``None``.
 
-    An attribute, a constant-string subscript, and the constant-string
-    selection argument of a proven builtin ``getattr`` are the carriers the
-    grammar gives a member name, and the receiver is what each selects from.
-    The call carrier is gated on ``is_getattr`` proving the callee, because
-    ``api('GET', 'args')`` names a member in the same shape and refusing it
-    would be refusing correct code.
+    The member a node names and the receiver it selects from are decided in one
+    place, because a member this file has never heard of has to be refused like
+    a known one and the answer must not be spread over three arms. The three
+    carriers are the shapes the grammar gives a member name: an attribute, a
+    constant-string subscript, and a call's constant-string selection argument.
+    Only the subscript reaches the audited namespace by its own key, so a
+    call naming a path rather than a member reads nothing, while a member
+    named through a callee the audit cannot prove is still refused, because
+    the call arm asks only what member the argument names.
     """
     if isinstance(node, ast.Attribute):
-        return node.attr, node.value
-    if isinstance(node, ast.Subscript):
-        return constant_string(node.slice), node.value
-    if (is_getattr is not None and isinstance(node, ast.Call)
-            and len(node.args) in (2, 3) and not node.keywords
-            and is_getattr(node.func)):
-        return constant_string(node.args[1]), node.args[0]
-    return None
+        member, receiver = node.attr, node.value
+        names_member = member in FRAME_SURFACE
+    elif isinstance(node, ast.Subscript):
+        member, receiver = constant_string(node.slice), node.value
+        names_member = member in FRAME_SURFACE or member == namespace_key
+    elif (isinstance(node, ast.Call) and len(node.args) in (2, 3)
+          and not node.keywords):
+        member, receiver = constant_string(node.args[1]), node.args[0]
+        names_member = member in FRAME_SURFACE
+    else:
+        return None
+    return receiver if names_member else None
 
 
-def reads_frame_namespace(read, origin):
+def reads_frame_namespace(receiver, origin):
     """Refuse a frame read whose receiver the audit cannot account for.
 
-    ``read`` is what ``frame_read`` already returned for this node and
     ``origin`` is what the audit can see the receiver to be, or ``UNPROVEN``
-    when it cannot. A member this file has never heard of is refused like a
-    known one, because the member set is read from ``types.FrameType`` rather
-    than written out here.
+    when it cannot. A receiver it has resolved to a live frame is refused on
+    the frame's own account, which is the one case a name the audit CAN see
+    still has to refuse.
     """
-    if read is None:
-        return None
-    member, receiver = read
-    if member != ARGS_KEY and member not in FRAME_SURFACE:
-        return None
     if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
         return None
     return receiver
 
 
-def assert_exact_class_vars():
+def assert_exact_module_vars():
     """A module attribute is the one attribute the audit can see through.
 
     Drives ``resolve_origin`` on a real attribute of a real module, so a
