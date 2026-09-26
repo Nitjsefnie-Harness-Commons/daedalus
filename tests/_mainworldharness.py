@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
+from _harness_helpers import SHARED_EVENT_TARGET  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
 
@@ -84,9 +85,7 @@ function nextDeadline() {
   return at;
 }
 
-function eventTarget() {
-  return { addListener() {} };
-}
+""" + SHARED_EVENT_TARGET + r"""
 
 function response(status, data) {
   return {

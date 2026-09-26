@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _harness_helpers import HOTFIX_EVENT_TARGET  # noqa: E402
 from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import import_scripts_stub  # noqa: E402
@@ -57,11 +58,7 @@ const storageStore = {
 };
 let sequence = 0;
 
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) { if (listeners) listeners.push(listener); },
-  };
-}
+""" + HOTFIX_EVENT_TARGET + r"""
 function response(status, data) {
   return {
     ok: status >= 200 && status < 300,
