@@ -212,7 +212,7 @@ def test_do_put_sends_the_file_it_read_and_waits_for_the_result(tmp):
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
     assert recorded.timeouts == [15], recorded.timeouts
-    assert out == (
+    assert _rendered(out) == (
         f'{OUT} job1 {OUT} tab0  (14 bytes)\n'
         f'{IN} job1  tab=tab0  @channel=page:cdp  3ms\n'
         'ok\n'), repr(out)
@@ -341,7 +341,7 @@ def test_do_exec_sends_the_inline_code_stripped(tmp):
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
-    assert out == (
+    assert _rendered(out) == (
         f'{OUT} job5 {OUT} tab0  (3 bytes)\n'
         f'{IN} job5  tab=tab0  @channel=page-main  7ms\n'
         'ok\n'), repr(out)
@@ -559,7 +559,7 @@ def test_do_title_asks_the_page_for_its_title_in_the_tab(tmp):
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
     assert recorded.timeouts == [10], recorded.timeouts
-    assert out == (
+    assert _rendered(out) == (
         f'{OUT} _title {OUT} tab0  (14 bytes)\n'
         f'{IN} _title  tab=tab0\n'
         'A page\n'), repr(out)
@@ -603,7 +603,7 @@ def test_do_url_asks_the_page_for_its_location_in_the_tab(tmp):
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
-    assert out == (
+    assert _rendered(out) == (
         f'{OUT} _url {OUT} tab0  (13 bytes)\n'
         f'{IN} _url  tab=tab0\n'
         'https://example.com/a\n'), repr(out)
