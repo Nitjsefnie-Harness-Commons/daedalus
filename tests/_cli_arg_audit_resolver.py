@@ -5,22 +5,15 @@ destination only when every member stores that same non-SUPPRESS destination.
 Namespace stores are refused as namespace store escapes.
 An origin the audit can see is a name a scope it reads binds, or an attribute
 of such a value. Every other expression is unproven, which is a refusal and
-not a silent pass.
-FRAME_SURFACE is the member descriptors types.FrameType carries, read once
-from that type, so a frame attribute this file has never heard of is refused
-like a known one. A read of one of those members, or of a frame mapping under
-the namespace key the caller passes, is refused unless the audit can see the
-receiver's origin and that origin is not a frame. The key is a parameter
-rather than a constant, so the frame rule reads the same name the namespace
-rule derives from a handler's own AST."""
+not a silent pass. A frame read is refused when the audit cannot see its
+receiver; ``frame_read`` and ``reads_frame_namespace`` below own that rule."""
 import argparse
 import ast
 import builtins
 import sys
 import types
 
-# The object model, not an author's list: every descriptor a live frame
-# carries, read from the interpreter's own frame type.
+# The object model, not an author's list: read from the interpreter.
 _FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
 FRAME_SURFACE = frozenset(
     name for name, member in vars(types.FrameType).items()

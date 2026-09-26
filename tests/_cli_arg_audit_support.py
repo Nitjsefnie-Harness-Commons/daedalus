@@ -4,13 +4,11 @@ non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
 Namespace stores are refused as namespace store escapes.
-FRAME_NAMESPACE_PLANTS are six ways the CLI can be made to read a frame's
-namespace, planted into a real module. They are plants, not the rule's inputs:
-the rule answers the operation once, from the member set the resolver reads
-off types.FrameType, and these rows only drive the control that refuses them.
-One plant reads a member the old resolver had never heard of, and one reaches
-the member through a constant string rather than an attribute, so a
-hand-written member list and an attribute-only carrier each fail a row."""
+FRAME_NAMESPACE_PLANTS are the ways the CLI can be made to read a frame's
+namespace, planted into a real module. They are plants, not the rule's
+inputs: the rule answers the operation once, from the member set the
+resolver reads off types.FrameType, and these rows only drive the control
+that refuses them."""
 import argparse
 import builtins
 import contextlib

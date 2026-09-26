@@ -5,10 +5,9 @@ guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
 Namespace stores are refused as namespace store escapes.
 A frame read is refused wherever it appears in the daedalus_cli package,
-including in a helper a handler calls, and a member the resolver has never
-heard of is refused like a known one because the member set is read off
-types.FrameType rather than written out. Aliases follow prefixes; headers use
-outer scope. Other parameters escape."""
+including in a helper a handler calls, and every member of the interpreter's
+frame set is refused, not only the ones this file names. Aliases follow
+prefixes; headers use outer scope. Other parameters escape."""
 import argparse
 import ast
 import importlib
@@ -112,7 +111,6 @@ def _callable_header_nodes(nested):
 
 
 def _origin(node, function, handler_globals):
-    """What the audit can see a value to be, or ``resolver.UNPROVEN``."""
     return resolver.resolve_origin(
         node, function, handler_globals, resolver.UNPROVEN, _scope_binds)
 
@@ -120,14 +118,10 @@ def _origin(node, function, handler_globals):
 def _frame_escapes(node, function, handler_globals, key, label, found):
     """Report every frame read in a callable, helpers and methods included.
 
-    The one place the rule is applied, so the package walk and the per-handler
-    walk cannot drift into two different rules. ``key`` is the name the audited
-    namespace is stored under: the handler's own parameter here, and for the
-    package walk the same name read off the dispatch table.
-
-    One read reports once: the walk stops descending as soon as a node is
-    refused, so a line that both selects a member and subscripts it is not
-    counted twice.
+    The one place the rule is applied, so the two walks calling it cannot drift
+    into two rules. One read reports once: the walk stops descending as soon as
+    a node is refused, so a line that both selects and subscripts a member is
+    not counted twice.
     """
     receiver = resolver.frame_read(node, key)
     if receiver is not None:
@@ -230,12 +224,11 @@ CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
 def _package_callables(tree):
     """Yield every callable the module defines, outermost first.
 
-    A callable is in the domain when no callable encloses it, so a
-    module-level lambda, a method of a class nested in the module, and a def
-    under a module-level if are all yielded; one defined inside another
-    callable is not, because that callable's own walk descends into it. The
-    test is the grammar's callable node types, not the module body's shape, so
-    a new binding form does not need a new arm here.
+    In the domain when no callable encloses it, so a module-level lambda, a
+    method of a nested class and a def under a module-level if are all yielded;
+    one inside another callable is not, that walk descends into it. The test is
+    the grammar's callable node types, not the module body's shape, so a new
+    binding form needs no new arm here.
     """
     callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
     pending = [tree]
@@ -250,27 +243,28 @@ def _package_callables(tree):
 def audited_namespace_key():
     """The name the audited namespace is stored under, read off the handlers.
 
-    The handler walk takes it from each handler's own AST. The package walk has
-    no handler in hand, so it reads the same name from the dispatch table and
-    asserts the table agrees with itself rather than naming a parameter here.
+    The handler walk derives it from each handler's own AST; this reads the
+    same name from the dispatch table. That the handlers agree on one is the
+    whole-tree claim test_cli_handlers_read_only_declared_args makes, so the
+    disagreement is raised there: raising here reds every control that walks
+    the package rather than the one the failure is about.
     """
     from daedalus_cli.cli import DISPATCH
     names = {next(iter(inspect.signature(handler).parameters))
              for handler in DISPATCH.values()}
-    assert len(names) == 1, f'handlers disagree on the namespace name: {names}'
-    return names.pop()
+    return sorted(names)[0]
 
 
 def package_frame_escapes(overrides=None, extra_globals=None):
     """Refuse a frame read anywhere in the CLI package, helper included.
 
-    The domain is every module of the package rather than one handler's body,
-    so a read inside a helper a handler calls is refused even when the handler
-    names no frame itself. ``overrides`` substitutes a module's source, which
-    is how the plant control runs the rule over real code it has altered;
-    names the altered source adds stay unproven, and an unproven receiver is
-    what the rule refuses. ``extra_globals`` adds bindings a real module would
-    hold and an altered source cannot, which drives a resolved receiver.
+    The domain is the package rather than one handler's body, so a read in a
+    helper a handler calls is refused even when the handler names no frame.
+    The reflective branch is per handler and stops at the callable boundary:
+    ``eval``/``exec`` in a helper is outside this walk, a frame read in one is
+    not. Names ``overrides`` adds to a module's source stay unproven, and an
+    unproven receiver is what the rule refuses; ``extra_globals`` adds a
+    binding altered source cannot hold.
     """
     key = audited_namespace_key()
     escapes = []
@@ -511,45 +505,33 @@ def test_cli_audit_resolver_only_resolves_exact_module_vars(tmp):
 def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     """A frame member read on a value the audit can see is left alone.
 
-    The refusal is about an origin the audit cannot see, so a receiver it has
-    resolved to a non-frame is not one. Without this, widening the member set
-    would refuse correct code and a later round would narrow the rule back.
+    Without this, widening the member set would refuse correct code and a
+    later round would narrow the rule back.
     """
     scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
-    # A call's second argument names a member, not a mapping key, so the
-    # shape that reads a path is not a namespace read.
+    # A call's second argument names a member, not a mapping key.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
 
 
 def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
-    """The mapping key the frame rule uses is the handler's parameter.
-
-    The frame rule takes the key as a parameter rather than naming it, so a
-    handler whose parameter is called something else is judged by that name.
-    If the rule ever hard-codes ``args`` again, the first pair below fails.
-    """
+    """A handler whose parameter is called something else is judged by that
+    name; if the rule ever hard-codes ``args`` again, the first pair fails."""
     for parameter in ('args', 'namespace'):
-        read = f"holder = helper()\n_ = holder['{parameter}'].undeclared_probe"
-        assert _audit_fake_handler(
-            read, parameter=parameter) == ['namespace escape: holder'], (
-                parameter, read)
-        other = ("holder = helper()\n_ = holder['args']"
-                 ".undeclared_probe")
-        assert _audit_fake_handler(
-            other, parameter=parameter) == (
-            [] if parameter != 'args' else ['namespace escape: holder']), (
-                parameter, other)
+        for key in (parameter, 'args'):
+            body = f"holder = helper()\n_ = holder['{key}'].undeclared_probe"
+            assert _audit_fake_handler(
+                body, parameter=parameter) == (
+                [] if key != parameter else ['namespace escape: holder']), (
+                    parameter, key)
 
 
 def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):
-    """The real CLI package holds no frame read, in any module or helper."""
     assert package_frame_escapes() == []
 
 
 def test_cli_audit_refuses_every_frame_namespace_plant(tmp):
-    """Each plant, spliced into the real handler module, is refused once."""
     base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
     audit_support.assert_every_frame_namespace_plant_refused(
         package_frame_escapes, base)
@@ -632,9 +614,13 @@ def test_cli_handlers_read_only_declared_args(tmp):
         reads, handler_violations = _handler_arg_violations(
             function, args_name, declared, guaranteed, handler.__globals__)
         handler_details[name] = {'handler': handler.__qualname__,
-                                 'declared': declared, 'reads': reads}
+                                 'declared': declared, 'reads': reads,
+                                 'args_name': args_name}
         violations.extend((name, construct, handler.__qualname__)
                           for construct in handler_violations)
+    key_names = {details['args_name'] for details in handler_details.values()}
+    assert len(key_names) == 1, (
+        f'handlers disagree on the namespace name: {sorted(key_names)}')
     for command, attribute, handler_name in \
             audit_support.KNOWN_INDIRECT_ARG_READS:
         detail = handler_details.get(command)
@@ -650,9 +636,8 @@ def test_cli_handlers_read_only_declared_args(tmp):
             handler.__module__.rsplit('.', 1)[-1], []).append(command)
     for escape in package_frame_escapes():
         module = escape.split('.', 1)[0]
-        violations.append((
-            ', '.join(sorted(commands_by_module.get(module, []))) or module,
-            escape, f'daedalus_cli/{module}.py'))
+        violations.append((', '.join(sorted(commands_by_module.get(
+            module, []))) or module, escape, f'daedalus_cli/{module}.py'))
     details = '\n'.join(f'{name}: {construct} in {handler}'
                         for name, construct, handler in violations)
     assert not violations, f'CLI argument audit violations:\n{details}'
