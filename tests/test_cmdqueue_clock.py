@@ -182,8 +182,7 @@ def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
         except AssertionError as caught:
             failure = caught
     assert isinstance(failure, AssertionError), failure
-    # The refusal, before anything derived from it: this control's verdict is
-    # which guard fired, and a delegate reads this failure's own words.
+    # The refusal first: the delegating control reads this failure's words.
     message = str(failure).lower()
     assert 'virtual clock' in message, message
     assert 'wall' not in message, message
@@ -197,10 +196,9 @@ def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
 def test_counted_runaway_outruns_real_wall_time(_tmp):
     """The no-progress guard is the one that stops a counted runaway.
 
-    It drives the control issue 1190 is about rather than a copy of its
-    loop, so what is pinned is that the fix is applied to that control — and a
-    failure the wall bound did not cause is re-raised in that control's own
-    words rather than explained here.
+    It drives that control rather than a copy of its loop, so a copy could
+    not report the fix reverted, and a failure the wall bound did not cause
+    is re-raised in that control's own words.
     """
     with _wall_time_past_limit():
         try:
@@ -242,21 +240,12 @@ def test_per_call_wall_budget_replaces_the_module_default(_tmp):
 
 
 def test_the_runaway_bound_is_five_seconds(_tmp):
-    """The value, which the two probes either side of it do not establish.
-
-    They bracket it to 4.5 < b <= 5.0; the value is what the issue's
-    constraint is about, since a runaway guard must not be raised to make a
-    control pass.
-    """
+    """The bound's value, which no probe around it establishes."""
     assert _RUNAWAY_WALL == 5.0, _RUNAWAY_WALL
 
 
 def test_omitted_wall_budget_is_the_module_default(_tmp):
-    """An omitted budget is the module's, sampled below its limit.
-
-    With the limit probe beside it, a bound above four and a half and at or
-    below five is what tells an early trip from none.
-    """
+    """An omitted budget is the module's, sampled below its limit."""
     positive = _cmdqueue.POLL_DELAY
     with _wall_time_past_limit(4.5):
         with _virtual_cmdqueue_clock() as (clock, events, origin):
@@ -267,12 +256,7 @@ def test_omitted_wall_budget_is_the_module_default(_tmp):
 
 
 def test_the_wall_bound_trips_exactly_at_its_limit(_tmp):
-    """A bound is inclusive, at the module's own limit.
-
-    Elapsed time exactly at the limit trips the guard, which an exclusive
-    comparison would let through; with the quiet probe beside it the bound is
-    bracketed to 4.5 < b <= 5.0.
-    """
+    """A bound is inclusive, and this samples elapsed time exactly at it."""
     failure = None
     with _wall_time_past_limit(5.0):
         with _virtual_cmdqueue_clock() as (clock, events, _origin):
@@ -319,9 +303,7 @@ def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
 
 
 def test_an_opted_out_clock_reads_no_real_time(_tmp):
-    """No wall budget means no real time, not even for a start mark:
-    the branch's claim about the opt-out, stated as something that can fail.
-    """
+    """No wall budget means no real time, not even for a start mark."""
     real = _cmdqueue.time.perf_counter
     reads = [0]
 
@@ -371,10 +353,8 @@ def test_the_perf_counter_alias_is_the_guarded_clock_read(_tmp):
 
 
 def test_the_slow_machine_double_restores_the_real_clock(_tmp):
-    """A double that does not restore is a double that is still installed.
-
-    It patches the real `time` module, so a leaked fake leaves every later
-    control in this process reading a clock that answers 6.0.
+    """A double that does not restore is one that is still installed, and
+    this one patches the real `time` module.
     """
     real = _cmdqueue.time.perf_counter
     try:
@@ -386,10 +366,7 @@ def test_the_slow_machine_double_restores_the_real_clock(_tmp):
 
 
 def test_the_module_bound_is_read_at_the_call(_tmp):
-    """A lowered module bound reaches a control that omits the budget.
-
-    A default bound in the signature would freeze the constant at import.
-    """
+    """A lowered module bound reaches a control that omits the budget."""
     failure = None
     original = _cmdqueue_faults._RUNAWAY_WALL
     _cmdqueue_faults._RUNAWAY_WALL = 0.0
