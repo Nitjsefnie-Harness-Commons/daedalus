@@ -126,11 +126,9 @@ def _refuse_path_operation(path, operation, failures, clock=None):
 def _virtual_cmdqueue_clock(
         max_sleeps=None,
         wall_budget: float | None | _ModuleDefault = _ModuleDefault()):
-    """Replace the command queue's time with a simulated one.
-
-    Both ceilings have three states: omitted takes the module's value as it
+    """`wall_budget` has three states: omitted takes the module's value as it
     stands when the control runs, a number is that caller's own, and None
-    means no such ceiling applies.
+    means no such ceiling applies. `max_sleeps` is off when None.
     """
     budget = _RUNAWAY_WALL if isinstance(wall_budget, _ModuleDefault) \
         else wall_budget
