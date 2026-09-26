@@ -378,6 +378,26 @@ def assert_every_frame_namespace_plant_refused(read_module, base):
         assert escapes[0].endswith(f': {receiver}'), (name, escapes)
 
 
+def assert_domain_covers_a_second_module(read_module, package):
+    """A frame read in a module other than the handler's is refused.
+
+    The headline claim is the package, and every other plant splices into the
+    handler's own module, so a walk narrowed to that one module satisfies all
+    of them. This plants into a module that holds no handler, so the only thing
+    it can be catching is the walk's module coverage.
+    """
+    source = (package / 'transport.py').read_text(encoding='utf-8')
+    anchor = 'def token():\n'
+    assert source.count(anchor) == 1
+    body = ("def _read_namespace():\n"
+            "    return sys._getframe()['f_locals']\n\n\n"
+            'def token():\n')
+    escapes = read_module(
+        {'transport': source.replace(anchor, body, 1)})
+    assert escapes == [
+        "transport._read_namespace: sys._getframe()['f_locals']"], escapes
+
+
 def assert_every_frame_member_refused(read_module, base):
     """Each member types.FrameType carries, planted, is refused once.
 

@@ -23,6 +23,10 @@ sys.path.insert(0, str(_util.ROOT))
 resolver = audit_support.resolver
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+           ast.ClassDef)
+
+
 def _binding_names(target):
     if isinstance(target, ast.Name):
         return {target.id}
@@ -34,7 +38,9 @@ def _binding_names(target):
 
 
 def _scope_binds(function, name):
-    arguments = function.args
+    arguments = getattr(function, 'args', None)
+    if arguments is None:
+        return False        # a module has no parameter of its own to bind
     parameters = (*arguments.posonlyargs, *arguments.args,
                   *arguments.kwonlyargs, arguments.vararg, arguments.kwarg)
     if name in {item.arg for item in parameters if item is not None}:
@@ -115,31 +121,41 @@ def _origin(node, function, handler_globals):
         node, function, handler_globals, resolver.UNPROVEN, _scope_binds)
 
 
-def _frame_escapes(node, function, handler_globals, key, label, found):
-    """Report every frame read in a callable, helpers and methods included.
+def _frame_escapes(node, scope, handler_globals, key, label, found):
+    """Report every frame read under a node, wherever the node sits.
 
     The one place the rule is applied, so the two walks calling it cannot drift
     into two rules. One read reports once: the walk stops descending as soon as
     a node is refused, so a line that both selects and subscripts a member is
     not counted twice.
+
+    ``scope`` is the innermost callable enclosing the node, or the module, and
+    is what a name resolves against; entering a callable changes both it and
+    the label, so a class body, a module-level statement and a nested helper
+    are all reached and each is reported against what encloses it. The unit of
+    traversal is the node rather than the callable: a callable is where a label
+    opens, not where the walk starts.
     """
-    context = (function, handler_globals, _scope_binds,
+    context = (scope, handler_globals, _scope_binds,
                _comprehension_shadows)
     selection = resolver.frame_read(node, key, *context)
     if selection is not None:
-        origin = _origin(resolver.selection_base(selection), function,
+        origin = _origin(resolver.selection_base(selection), scope,
                          handler_globals)
         if resolver.reads_frame_namespace(selection, origin) is not None:
             found.append(f'{label}: {ast.unparse(selection)}')
             return
+    if isinstance(node, _SCOPES) and getattr(node, 'name', None):
+        label, scope = f'{label}.{node.name}', node
     for child in ast.iter_child_nodes(node):
-        _frame_escapes(child, function, handler_globals, key, label, found)
+        _frame_escapes(child, scope, handler_globals, key, label, found)
 
 
-def frame_namespace_escapes(function, handler_globals, label, key):
-    _attach_parents(function)
+def frame_namespace_escapes(node, handler_globals, label, key, scope=None):
+    _attach_parents(node)
     found = []
-    _frame_escapes(function, function, handler_globals, key, label, found)
+    _frame_escapes(node, node if scope is None else scope, handler_globals,
+                   key, label, found)
     return found
 
 
@@ -226,23 +242,15 @@ def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None,
 CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
 
 
-def _package_callables(tree):
-    """Yield every callable the module defines, outermost first.
+def _package_roots(tree):
+    """Yield the one walk root a package module has: the module itself.
 
-    In the domain when no callable encloses it, so a module-level lambda, a
-    method of a nested class and a def under a module-level if are all yielded;
-    one inside another callable is not, that walk descends into it. The test is
-    the grammar's callable node types, not the module body's shape, so a new
-    binding form needs no new arm here.
+    The domain is the module, so the walk starts there and a callable opens a
+    label inside it rather than being where the walk starts. Enumerating the
+    containers that hold a callable is the narrowing that left a class body and
+    a module-level statement outside the domain.
     """
-    callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-    pending = [tree]
-    while pending:
-        for child in ast.iter_child_nodes(pending.pop()):
-            if isinstance(child, callables):
-                yield child
-            else:
-                pending.append(child)
+    yield '', tree
 
 
 def audited_namespace_key():
@@ -279,10 +287,10 @@ def package_frame_escapes(overrides=None, extra_globals=None):
             encoding='utf-8')
         imported = vars(importlib.import_module(f'daedalus_cli.{name}'))
         module_globals = {**imported, **(extra_globals or {}).get(name, {})}
-        for function in _package_callables(ast.parse(source)):
-            label = f'{name}.{getattr(function, "name", "<lambda>")}'
+        for label, root in _package_roots(_attach_parents(ast.parse(source))):
             escapes.extend(frame_namespace_escapes(
-                function, module_globals, label, key))
+                root, module_globals, f'{name}.{label}'.rstrip('.'), key,
+                scope=root))
     return escapes
 
 
@@ -540,6 +548,12 @@ def test_cli_audit_refuses_every_frame_namespace_plant(tmp):
     base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
     audit_support.assert_every_frame_namespace_plant_refused(
         package_frame_escapes, base)
+
+
+def test_cli_audit_covers_a_second_package_module(tmp):
+    """The domain is the package; one module holding every plant is not."""
+    audit_support.assert_domain_covers_a_second_module(
+        package_frame_escapes, CLI_PACKAGE)
 
 
 def test_cli_audit_refuses_every_frame_member_the_interpreter_carries(tmp):
