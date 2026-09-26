@@ -47,6 +47,12 @@ _SPELLINGS = ('literal', 'name', 'parens')
 # A star over a set display: the model cannot count what a set holds, so
 # the list built from it has no length and no exact position.
 _OPEN_LENGTH = 'x = [*{quiet(), quiet()}, quiet()]\n'
+# -L is the last key a list of length L can name and one below it is a
+# store the runtime raises on. The two sit either side of the same
+# boundary, so a guard that refused EVERY negative key would pass the
+# second row of each pair and fail the first: the boundary has to fall
+# between them rather than anywhere on that side.
+_BOUNDARY = {2: (-2, -3), 3: (-3, -4)}
 
 
 def _key(k, spelling):
@@ -74,6 +80,16 @@ def _clean(length):
 def _store_shape(k, spelling, list_shape, value, read):
     return _QUIET + _bind(k, spelling) + list_shape + _key(k, spelling) \
         + f' = {value}' + _SL + read
+
+
+def _refused_shape(k, spelling, list_shape, value, read):
+    """The same shape, with the store wrapped in the `try` a program needs
+    to reach the read at all: a key past the start raises at the store, so
+    the read after it is one the runtime would never run uncaught. Either
+    way the position is unreachable and the verdict is clean."""
+    return _QUIET + _bind(k, spelling) + list_shape \
+        + f'try:\n    {_key(k, spelling)} = {value}\nexcept IndexError:\n    pass\n' \
+        + _SL + read
 
 
 def _negative_store_verdicts(tmp, row):
@@ -109,6 +125,30 @@ def test_a_store_that_reaches_its_own_position_replaces_the_relay(tmp):
              for spelling, _, overwritten
              in _negative_store_verdicts(tmp, row)
              if overwritten != (0, 0)]
+    assert not wrong, wrong
+
+
+def test_the_last_reachable_key_is_not_the_first_refused_one(tmp):
+    # The two halves of one boundary, each read the way the runtime reads
+    # it. A key past the start is a store the runtime refuses, so the
+    # container is left exactly as it was and a clean list stays clean;
+    # the last key it does accept still writes the position that key
+    # names. Drop the second half and a guard that refused every negative
+    # key would pass; drop the first and a guard that resolved every
+    # negative key against the length would report a value the runtime
+    # never stored.
+    wrong = []
+    for length, (reachable, refused) in _BOUNDARY.items():
+        for spelling in _SPELLINGS:
+            dropped = _run(tmp, _refused_shape(
+                refused, spelling, _clean(length), 'relay()', 'x[-1]()'))
+            if dropped != (0, 0):
+                wrong.append((length, spelling, 'refused', dropped))
+            named = _run(tmp, _store_shape(
+                reachable, spelling, _clean(length), 'relay()',
+                f'x[{length + reachable}]()'))
+            if named != (1, 1):
+                wrong.append((length, spelling, 'reachable', named))
     assert not wrong, wrong
 
 
