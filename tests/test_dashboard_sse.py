@@ -122,8 +122,9 @@ const afterEvent = sse.lastEventAt();
 offset += %d;
 push({ kind: 'event', id: 'e1', type: 'result' });
 await bounded(settle(), 'replayed frame', _dashnodeStepTimeoutMs);
+const script = drive.lastScript();
 report({ onConnect, afterParse, afterFilter, afterEvent,
-  lastEventAt: sse.lastEventAt(), seen, read: drive.lastScript().settlements });
+  lastEventAt: sse.lastEventAt(), seen, read: script.settlements });
 """ % (_STEP_MS, _STEP_MS, _STEP_MS, _STEP_MS)
 
 # A broadcast eval command reaches this stream too and carries no kind.
@@ -354,7 +355,7 @@ def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
     assert report['seen'] == report['afterOldest'], report
 
 
-def test_the_dispatched_id_set_forgets_nothing_until_it_is_one_past_the_bound(_tmp):
+def test_nothing_is_forgotten_until_one_past_the_id_bound(_tmp):
     """`sse.js:64`'s `>` rather than `>=`. The eviction property and
     order both hold either way, so a suite asserting only those cannot
     tell them apart -- but at rest the set is documented to hold the
