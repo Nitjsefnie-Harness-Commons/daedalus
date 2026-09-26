@@ -301,6 +301,7 @@
 !/tests/_helper_binds.py
 !/tests/_hotfix_quota_scenario.py
 !/tests/_hotfixharness.py
+!/tests/_js_functions.py
 !/tests/_jsread.py
 !/tests/_jsroute.py
 !/tests/_jsroute_calls.py
@@ -377,6 +378,7 @@
 !/tests/_token_mask.py
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
+!/tests/_unconsolidated_js_names.py
 !/tests/_unconsolidated_names.py
 !/tests/_util.py
 !/tests/_wfassert.py
@@ -515,6 +517,7 @@
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
 !/tests/test_helper_reimplementation.py
+!/tests/test_helper_reimplementation_js.py
 !/tests/test_helper_shadow_boundaries.py
 !/tests/test_hotfix_scope.py
 !/tests/test_hotfix_scope_clear.py
