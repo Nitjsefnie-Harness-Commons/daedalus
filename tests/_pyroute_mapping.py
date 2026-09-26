@@ -252,12 +252,15 @@ def _apply_modelled_store(statement, state, claimed):
             sync_cells(state, {owner_name})
             claimed.add(id(call))
         elif call.func.attr == 'update' and mapping:
+            # `update`'s two argument kinds partition `keywords` on `arg`:
+            # a `**source` arrives with no name and is a source like any
+            # positional one, a `key=value` is a pair the model can hold.
+            starred = [keyword.value for keyword in call.keywords
+                       if keyword.arg is None]
+            pairs = {keyword.arg: keyword.value for keyword in call.keywords
+                     if keyword.arg is not None}
             _apply_mapping_store(
-                state, owner_name,
-                [*call.args, *(keyword.value for keyword in call.keywords
-                               if keyword.arg is None)], {
-                    keyword.arg: keyword.value for keyword in call.keywords
-                    if keyword.arg is not None}, call)
+                state, owner_name, [*call.args, *starred], pairs, call)
             claimed.add(id(call))
         elif call.func.attr == 'setdefault' and mapping:
             _apply_setdefault(state, call, owner_name)
