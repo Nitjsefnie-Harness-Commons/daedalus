@@ -6,7 +6,6 @@ the CLI is always run as a subprocess, the way a shell would run it, against
 a real bridge() no extension is draining.
 """
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
+from _cli_helpers import cli_env  # noqa: E402
 
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
@@ -23,17 +23,6 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-
-
-def cli_env(**overrides):
-    """A clean environment: none of the CLI's config vars leak in from ours."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
-        env.pop(k, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    env.update(overrides)
-    return env
 
 
 def run_cli(args, env):

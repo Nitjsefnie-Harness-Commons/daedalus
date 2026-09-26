@@ -7,7 +7,6 @@ a real bridge() or against a stub front end that answers the way a proxy in
 front of the bridge does.
 """
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
+from _cli_helpers import cli_env  # noqa: E402
 from _cmdqueue import clear_command_queue  # noqa: E402
 from _frontend import (  # noqa: E402
     TruncatingFrontEndHandler, truncating_front_end)
@@ -28,17 +28,6 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-
-
-def cli_env(**overrides):
-    """A clean environment: none of the CLI's config vars leak in from ours."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
-        env.pop(k, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    env.update(overrides)
-    return env
 
 
 def _run(argv, env):

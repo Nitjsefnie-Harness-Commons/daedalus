@@ -31,17 +31,24 @@ provides, which is a broken import rather than this defect. A module the
 detector cannot parse fails the control, naming the file, rather than
 being dropped.
 
-`ALLOWED` is a shrink-only table over the sites whose fix would edit a
-file another change owns, which this branch may not edit; #1160 is the
-record of what it carries. Removing a row is a move rather than a
-deletion: the table is pinned on both sides, so an offender absent from
-it is a finding AND a row that no longer names a live site is a stale
-finding. It cannot grow to hide this branch's own work.
+`ALLOWED` records the sites this branch deferred to #1160, and a row's
+reason says which: a fix that would edit a file another change owns, or
+one that would make this change harder to review. The table is pinned on
+both sides, so a row cannot be dropped to expose a site — the site is a
+finding again the moment the row is gone — and a row cannot outlive the
+site it names, which is reported as stale. The pin is on the site rather
+than on the row: a row naming a live offender silences it, and nothing
+here reads a row's reason, so the table CAN grow to cover this branch's
+own work. The fabricated row in
+`test_the_allowance_table_is_pinned_on_both_sides` is that silence, and
+what keeps the table honest is a reader of each reason rather than a check.
 
-`tests/test_helper_shadow_boundaries.py` is the sibling control, and it
-names this one: it reports a name a suite binds locally that a
-shared-helper import also binds. Between them the two close the class — a
-helper is either imported from a `tests/_*.py` module or is a suite's own.
+`tests/test_helper_shadow_boundaries.py` is the sibling control, and
+neither file names the other: it reports a name a suite binds locally
+that a shared-helper import also binds. One class is open to both — a
+helper a module re-implements under a shared helper's name while
+importing nothing, which is no shadow (there is no import to shadow) and
+no sibling-suite import (no suite is imported).
 """
 import ast
 import re
@@ -68,119 +75,88 @@ Import = namedtuple('Import', 'path lineno module spelling')
 Allowance = namedtuple('Allowance', 'path module reason')
 
 ALLOWED = (
-    # Two causes, both #1160: a fix edits a file another change owns, so
-    # every row's reason is one clause of that. A whole-module import has
-    # no helper to move — the module it names is itself the held file.
+    # Deferred sites, recorded in #1160. One row's reason says the file is
+    # held by another change; the rest say the move was cut to keep this one
+    # reviewable. A whole-module import has no helper to move — the module
+    # it names is itself the held file.
     Allowance('tests/test_dashboard_gate.py', 'test_dashboard_behaviour',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_dashboard_harness.py', 'test_dashboard_behaviour',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_dashboard_harness_metadata.py',
               'test_dashboard_behaviour',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_dashboard_node_retry.py', 'test_dashboard_behaviour',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_generator_second_consumption.py',
               'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_hotfix_scope_clear.py', 'test_hotfix_scope',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_starvation_bounds.py', 'test_cli',
               '#1160: the importing suite is being changed alongside its '
               'helper'),
     Allowance('tests/test_stream_fake_oracle.py', 'test_stream_backoff',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_collapse.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_comprehension_probe.py',
               'test_tab_routing_collapse',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_dict_construction.py',
               'test_tab_routing_dict_stores',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_dict_lengths.py',
               'test_tab_routing_dict_stores',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_dict_stores.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_dict_stores.py',
               'test_tab_routing_store_sweep',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_bodies.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_closure.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_heads.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_keys.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_net.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_operations.py',
               'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_reach.py', 'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_js_templates.py',
               'test_tab_routing_js',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_match.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_match.py', 'test_tab_routing_collapse',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_positions.py',
               'test_tab_routing_dict_stores',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_sequence_reads.py',
               'test_tab_routing_dict_stores',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_set_operations.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_setdefault.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_starred_arity.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_store_sweep.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_unmodelled_mutation.py',
               'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_unprovable.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_tab_routing_yielded_sender.py', 'test_tab_routing',
-              '#1160: moving the helper would edit a module another change '
-              'is rewriting'),
+              '#1160: deferred from this change to keep it reviewable'),
 )
 
 

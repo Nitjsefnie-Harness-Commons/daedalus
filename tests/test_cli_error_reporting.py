@@ -7,7 +7,6 @@ proxy that fronts the bridge is a stub from tests/_frontend.py.
 """
 import contextlib
 import io
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
+from _cli_helpers import cli_env  # noqa: E402
 from _frontend import html_front_end  # noqa: E402
 from _queueread import queued_command  # noqa: E402
 
@@ -24,17 +24,6 @@ from daedalus_cli.output import print_result  # noqa: E402
 
 CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 TOK = 'clitok'
-
-
-def cli_env(**overrides):
-    """A clean environment: none of the CLI's config vars leak in from ours."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
-        env.pop(k, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    env.update(overrides)
-    return env
 
 
 def run_cli(args, env):
