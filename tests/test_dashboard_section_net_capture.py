@@ -411,49 +411,53 @@ def test_stop_says_the_tab_and_what_it_captured(_tmp):
 
 def test_a_start_that_never_answers_gives_up_at_fifteen_seconds(_tmp):
     """`extCmd('net-capture', ...)` is called with no `opts`, so the
-    fifteen-second default is its budget. The budget is observable only as
-    the number of result polls the loop spends -- sixty at 250 ms each --
-    and that count is what a section calling with a different budget
-    would change."""
+    fifteen-second default is its budget. The give-up message is rendered
+    from the budget the loop was handed, so it is the exact pin and no
+    host time can move it. The legs it spent are the corroboration, and
+    they are a band rather than a number: `api.js:143` reads host time as
+    well as the virtual clock, so a slow runner reaches the deadline a leg
+    or two early. A panel calling with a different budget would fail BOTH
+    pins -- the message outright, and the band by twenty legs or more."""
     report = _run(_click('START')
                   + 'report({ polls: legs(), status: said(),'
                     '  toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
-    assert report['polls'] == 60, report
+    assert report['toasts'][0]['text'].startswith(
+        'Timeout (15000ms) waiting for _net-capture_1_'), report
+    assert shared.poll_band(report, 15000), report
     assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
         report
     assert report['toasts'][0]['type'] == 'err', report
-    assert report['toasts'][0]['text'].startswith(
-        'Timeout (15000ms) waiting for _net-capture_1_'), report
 
 
 def test_a_poll_that_never_answers_gives_up_at_thirty_seconds(_tmp):
     """The other two commands pass `{ timeout: 30000 }` explicitly, so
-    each spends a hundred and twenty polls before it gives up where the
-    start above spends sixty. A panel that had dropped the option would
-    read identically right up to that count and no further."""
+    each gives up after twice the legs the start above spends. Both pins
+    are the same pair as the start's, over a different budget: the message
+    names thirty seconds outright, and the band is twenty legs clear of the
+    fifteen-second one a panel that had dropped the option would send."""
     report = _run(_click('poll')
                   + 'report({ polls: legs(), status: said() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
-    assert report['polls'] == 120, report
-    assert report['status']['classes'] == ['red'], report
     assert report['status']['text'].startswith(
         'Timeout (30000ms) waiting for _net-capture-get_1_'), report
+    assert shared.poll_band(report, 30000), report
+    assert report['status']['classes'] == ['red'], report
 
 
 def test_a_stop_that_never_answers_gives_up_at_thirty_seconds(_tmp):
     """The stop shares the poll's budget, so the third of the three is the
-    second's count with a different command id in the message -- and the
+    second's case with a different command id in the message -- and the
     stop reports a give-up by toast, where the poll renders it inline."""
     report = _run(_click('STOP')
                   + 'report({ polls: legs(), status: said(),'
                     '  toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
-    assert report['polls'] == 120, report
-    assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
-        report
     assert report['toasts'][0]['text'].startswith(
         'Timeout (30000ms) waiting for _net-capture-stop_1_'), report
+    assert shared.poll_band(report, 30000), report
+    assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
+        report
 
 
 def test_a_failed_poll_is_rendered_inline_in_red(_tmp):
