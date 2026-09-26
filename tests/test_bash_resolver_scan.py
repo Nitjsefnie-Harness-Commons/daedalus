@@ -16,7 +16,7 @@ from _repo import ROOT, iter_tree_files  # noqa: E402
 # The one resolver call site, as (module, the spelling the site carries,
 # the bypass to plant, and the launch that would run it).
 _SITES = (
-    ('tests/test_coverage_comment_workflow.py',
+    ('tests/_coverage_comment_workflow.py',
      '        [_util.workflow_bash(),',
      "        ['bash',",
      '    return subprocess.run('),
@@ -538,12 +538,11 @@ def test_a_two_module_tree_catches_the_later_site_bypass(tmp):
 
 
 def test_a_derived_tree_tracks_a_comprehension_walrus(tmp):
-    root = _derived_tree(
-        tmp, ('tests/test_coverage_comment_workflow.py',))
-    relative = 'tests/test_coverage_comment_workflow.py'
+    root = _derived_tree(tmp, ('tests/_coverage_comment_workflow.py',))
+    relative = 'tests/_coverage_comment_workflow.py'
     target = root / relative
     source = target.read_text(encoding='utf-8')
-    anchor = 'def _run_shell_block(workdir, script, env):'
+    anchor = 'def run_shell_block(workdir, script, env):'
     snippet = ("[(program := 'bash') for item in values]\n"
                "subprocess.run([program], cwd=tmp)\n")
     assert source.count(anchor) == 1

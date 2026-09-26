@@ -9,7 +9,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _ghexpr import evaluate_if  # noqa: E402
 from _coverage_comment_steps import GH_CHECK_STUB  # noqa: E402
-import test_coverage_comment_workflow as commenter  # noqa: E402
+from _coverage_comment_workflow import (  # noqa: E402
+    run_artifact_check,
+    run_block,
+    run_comment_block,
+    run_shell_block,
+    step_condition,
+    workflow,
+    write_executable,
+)
 
 
 _BASE_REPO = 'owner/repo'
@@ -52,8 +60,7 @@ def _run_resolve_block(tmp, event_numbers, found=None):
     """Run the Resolve block against a fork-aware recording double."""
     workdir = Path(tmp) / 'resolve'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
-    commenter._write_executable(  # pylint: disable=protected-access
-        workdir / 'bin' / 'gh', _GH_FORK_STUB)
+    write_executable(workdir / 'bin' / 'gh', _GH_FORK_STUB)
     calls = workdir / 'calls.jsonl'
     calls.write_text('', encoding='utf-8')
     output = workdir / 'github-output'
@@ -73,10 +80,9 @@ def _run_resolve_block(tmp, event_numbers, found=None):
             [_PR_NUMBER] if found is None else found),
         'CURRENT_HEAD': _HEAD_SHA,
     }
-    workflow = commenter._workflow()  # pylint: disable=protected-access
-    script = commenter._run_block(  # pylint: disable=protected-access
-        workflow, _RESOLVE_STEP)
-    result = commenter._run_shell_block(  # pylint: disable=protected-access
+    text = workflow()
+    script = run_block(text, _RESOLVE_STEP)
+    result = run_shell_block(
         workdir, script, env)
     return result, calls, output
 
@@ -141,14 +147,13 @@ def test_a_closed_pull_request_run_stands_down(tmp):
                  'Download the comment artifact',
                  'Post or update the pull request comment',
                  'Publish coverage check'):
-        workflow = commenter._workflow()  # pylint: disable=protected-access
-        condition = commenter._step_condition(workflow, name)
+        condition = step_condition(workflow(), name)
         assert evaluate_if(condition, context) is False, (name, condition)
 
 
 def test_a_credited_run_patches_an_existing_marker(tmp):
     """A credited run replaces the stale marker and keeps its outputs."""
-    marked, comments, _calls, output = commenter._run_comment_block(
+    marked, comments, _calls, output = run_comment_block(
         tmp, 'Mark missing patch coverage', state=_PRIOR_MARKER,
         head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA,
         run_conclusion='cancelled')
@@ -195,7 +200,7 @@ _PRIOR_MARKER = [{
 def _run_publication(tmp, status, verdict=''):
     workdir = Path(tmp) / 'publish'
     (workdir / 'bin').mkdir(parents=True, exist_ok=True)
-    commenter._write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
+    write_executable(workdir / 'bin' / 'gh', GH_CHECK_STUB)
     state = workdir / 'state.json'
     state.write_text(json.dumps({'checks': []}), encoding='utf-8')
     calls = workdir / 'calls.jsonl'
@@ -212,20 +217,20 @@ def _run_publication(tmp, status, verdict=''):
         'STUB_STATE': str(state),
         'STUB_CALLS': str(calls),
     }
-    result = commenter._run_shell_block(
+    result = run_shell_block(
         workdir,
-        commenter._run_block(commenter._workflow(), 'Publish coverage check'),
+        run_block(workflow(), 'Publish coverage check'),
         env)
     return result, json.loads(state.read_text(encoding='utf-8'))
 
 
 def _run_missing_artifact_case(tmp, prior_comments):
-    artifact, output = commenter._run_artifact_check(
+    artifact, output = run_artifact_check(
         tmp, {'total_count': 0, 'artifacts': []})
     assert artifact.returncode == 0, (artifact.stdout, artifact.stderr)
     assert output == '', output
 
-    resolved, _state, _calls, output = commenter._run_comment_block(
+    resolved, _state, _calls, output = run_comment_block(
         tmp, 'Resolve the target pull request from the event', state=[],
         head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA)
     assert resolved.returncode == 0, (resolved.stdout, resolved.stderr)
@@ -240,11 +245,11 @@ def _run_missing_artifact_case(tmp, prior_comments):
         },
         'status': {'success': True, 'failure': False, 'cancelled': False},
     }
-    condition = commenter._step_condition(
-        commenter._workflow(), 'Mark missing patch coverage')
+    condition = step_condition(
+        workflow(), 'Mark missing patch coverage')
     assert evaluate_if(condition, context) is True, condition
 
-    marked, comments, _calls, output = commenter._run_comment_block(
+    marked, comments, _calls, output = run_comment_block(
         tmp, 'Mark missing patch coverage', state=prior_comments,
         head_sha=_MISSING_HEAD_SHA, current_head=_MISSING_HEAD_SHA)
     verdict = dict(

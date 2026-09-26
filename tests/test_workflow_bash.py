@@ -151,12 +151,12 @@ def test_non_windows_candidates_keep_path_order(tmp):
 
 def test_workflow_shell_caller_uses_shared_bash_helper(tmp):
     """The workflow shell caller must not bypass the shared resolver."""
-    import test_coverage_comment_workflow as comment_suite
+    from _coverage_comment_workflow import run_shell_block
     calls = []
     original = _util.workflow_bash
     try:
         _util.workflow_bash = lambda: calls.append(True) or sys.executable
-        result = comment_suite._run_shell_block(
+        result = run_shell_block(
             tmp, "print('caller-used', end='')", env=_COVERAGE_ENV)
     finally:
         _util.workflow_bash = original
