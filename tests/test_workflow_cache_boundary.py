@@ -2,10 +2,6 @@
 """Direct shell detection is bounded literal scanning; arbitrary shell,
 checked-in scripts, constructed names, and downloaded code are not interpreted.
 """
-# The controls below import inside the function on purpose, so a test
-# pays only for what it touches. Several of those names are also
-# imported at module level here, which a relocation made redundant.
-# pylint: disable=reimported
 import sys
 from pathlib import Path
 
@@ -211,10 +207,6 @@ def test_cache_csv_decoding_keeps_commas_and_unescapes_doubled_quotes(tmp):
 
 
 def test_malformed_controls_and_destinations_fail_closed(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_write_reason)
-
     _refuses(
         _cache_write_reason,
         {'uses': 'actions/setup-go@v6', 'with': {'cache': ['false']}},
@@ -268,7 +260,6 @@ def test_direct_cache_markers_are_token_bounded(tmp):
 
 
 def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
     from _workflow_cache_boundary import (  # noqa: PLC0415
         _direct_cache_run)
 
@@ -281,12 +272,6 @@ def test_direct_dynamic_buildx_destination_is_indeterminate(tmp):
 
 
 def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _assert_writer_inventory, _cache_writing_jobs, _insert_wheel_step,
-        _real_step)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
     workflow = _tests_yml()
     positives = (
         _real_step(uses='actions/setup-go@v6'),
@@ -315,11 +300,6 @@ def test_real_workflow_mutations_are_seen_by_the_writer_inventory(tmp):
 
 
 def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_writing_jobs, _insert_wheel_step, _real_step)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
     workflow = _tests_yml()
     for step, expected in (
             (_real_step(uses='${{ matrix.action }}'),
@@ -333,11 +313,6 @@ def test_real_workflow_unknown_and_expression_mutations_refuse(tmp):
 
 
 def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
-    from _wffixtures import _refuses  # noqa: PLC0415
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _assert_writer_inventory)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
-
     workflow = _tests_yml()
     _assert_writer_inventory(workflow)
     line = '          package-manager-cache: false\n'
@@ -350,9 +325,6 @@ def test_eslint_opt_out_keeps_the_production_set_closed(tmp):
 
 
 def test_production_cache_steps_keep_restore_and_save_separate(tmp):
-    from _workflow_cache_boundary import (  # noqa: PLC0415
-        _cache_write_reason)
-    from _wfgraph import _tests_yml  # noqa: PLC0415
     from _yamlsteps import complete_job_mapping  # noqa: PLC0415
 
     workflow = _tests_yml()

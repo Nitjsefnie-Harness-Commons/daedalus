@@ -53,10 +53,11 @@ def _spelled(node, bound, seen=(), before=0):
 
     A list is a program too, because `subprocess.run` takes its argv as
     one: its elements are read and joined, so a program assembled outside
-    the call is seen the same as an inline one. A name carries every
-    binding its scope gave it AT OR BEFORE `before`, the line of the
-    launch being judged, so a program the scope only defines afterwards
-    cannot be read into a call it did not run.
+    the call is seen the same as an inline one. A name resolves to the
+    binding in force AT `before`, the line of the launch being judged:
+    the LAST one at or before it, not every binding that ever existed by
+    then, so a name the scope reused for something else afterwards does
+    not colour a launch that ran before the reuse.
     """
     if isinstance(node, ast.Constant):
         return node.value if isinstance(node.value, str) else None
@@ -73,9 +74,11 @@ def _spelled(node, bound, seen=(), before=0):
         return None if None in parts else ''.join(parts)
     if isinstance(node, ast.Name) and id(node) not in seen:
         spelling = seen + (id(node),)
-        parts = [_spelled(value, bound, spelling, before)
-                 for line, value in bound.get(node.id, ()) if line <= before]
-        return '\n'.join(text for text in parts if text is not None)
+        eligible = [entry for entry in bound.get(node.id, ())
+                    if entry[0] <= before]
+        if not eligible:
+            return None
+        return _spelled(eligible[-1][1], bound, spelling, before)
     return None
 
 
@@ -84,19 +87,36 @@ def _statement(node):
     return node.value if isinstance(node, ast.Expr) else node
 
 
+def _captures(pattern):
+    """Every name one match pattern binds, at any depth."""
+    names = []
+    for node in ast.walk(pattern):
+        if isinstance(node, ast.MatchAs) and node.name is not None:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name is not None:
+            names.append(node.name)
+    return names
+
+
 def _bind(node, bound):
     """Record what one statement binds in its scope, and on what line.
 
     Every bare-name target Python's own statement forms offer that names
     a readable value is read: `=`, `+=`, an annotated `=`, a walrus, a
-    `for`/`in` target, and `argv.append(program)` / `argv.extend([...])`,
-    which is the other way an argv is built. The forms that name a value
-    the scan cannot read — `with`/`as` and `except`/`as` name a context
-    manager and an exception, a comprehension target and a parameter
-    default name a value of another scope — are left unbound and declared
-    in the guard's docstring rather than bound to a node that spells to
-    nothing. A target that is not a bare name — a tuple unpacking, a
-    subscript, a class attribute — is likewise not read.
+    `for`/`in` target, a match capture, and `argv.append(program)` /
+    `argv.extend([...])`, which is the other way an argv is built. A
+    match capture is bound to the match SUBJECT rather than to the value
+    its own pattern matched, which over-approximates — every capture gets
+    the whole subject — and fails toward finding a launch rather than past
+    one.
+
+    The forms that name a value the scan cannot read — `with`/`as`,
+    `except`/`as` and `except*`/`as` name a context manager and an
+    exception, a comprehension target and a parameter default name a
+    value of another scope — are left unbound and declared in the guard's
+    docstring rather than bound to a node that spells to nothing. A target
+    that is not a bare name — a tuple unpacking, a subscript, a class
+    attribute — is likewise not read.
     """
     node = _statement(node)
     line = getattr(node, 'lineno', None)
@@ -110,6 +130,9 @@ def _bind(node, bound):
         targets, value = [node.target], node.value
     elif isinstance(node, (ast.For, ast.AsyncFor)):
         targets, value = [node.target], node.iter
+    elif isinstance(node, ast.Match):
+        for name in _captures(node):
+            bound.setdefault(name, []).append((line, node.subject))
     for target in targets:
         if isinstance(target, ast.Name) and value is not None:
             bound.setdefault(target.id, []).append((line, value))
