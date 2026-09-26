@@ -285,6 +285,7 @@
 !/tests/_coverage_scopes.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
+!/tests/_dashdom.py
 !/tests/_dashnode.py
 !/tests/_dashshell.py
 !/tests/_deliveries.py
