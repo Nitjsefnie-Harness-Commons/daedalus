@@ -413,13 +413,16 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         # startup while proving nothing about the search.
         _await_alive(proc, drained, lambda: marker in drained,
                      'the child never printed its one line')
-        started = time.time()
+        # Both pins below are "opens after the child printed".
+        assert drained, 'the window opened before the child printed'
+        handshaken, started = time.monotonic(), time.monotonic()
+        assert started >= handshaken, 'the window opened before the print'
         failure = ''
         try:
             _util.await_listening_line(proc, drained, timeout=1)
         except RuntimeError as e:
             failure = str(e)
-        elapsed = time.time() - started
+        elapsed = time.monotonic() - started
         assert failure, 'a silent child was read as an announcement'
         # The bound the search applied, beside the one the caller asked
         # for; a literal, since a constant would move both sides of the
@@ -429,8 +432,7 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         # slot cannot tell them apart -- it does not certify WHICH bound
         # it printed, only that the two agreed.
         assert '(bound applied 1s)' in failure, failure
-        # The 10x headroom is now over the search loop, so it still catches
-        # a bound that was silently widened.
+        # A second line behind the assertion above, which catches widening.
         assert elapsed < 10, elapsed
         assert 'did not announce its port in 1s' in failure, failure
         assert 'nothing to do with the port' in failure, failure
