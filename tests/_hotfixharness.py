@@ -25,9 +25,7 @@ that exists for exactly that difference.
 A case asks for a fault by naming it — `attach`, `cdpRefused`,
 `injectedError`, `storageReadFails`, `recordVersion` — and each is refused
 shaped rather than ignored, so a double that answered a shape it does not
-model would read as a program that behaved. `commands` is the general
-spelling of the typed command list; `store` is the older one, and naming
-both is refused rather than resolved.
+model would read as a program that behaved.
 """
 import json
 import shutil
@@ -544,14 +542,20 @@ async function waitFor(predicate) {
     { filename: backgroundPath });
   await vm.runInContext('loadConfig()', context);
 
-  // `commands` is the general spelling: a case names each command's own
-  // `type` and the worker dispatches it as the bridge does. `store` is the
-  // older key, the same loop with `store-hotfix` defaulted. Naming both is
-  // a case this double cannot resolve, and dropping one without a word is
-  // the failure mode the module's own record default would paper over.
+  // `commands` is the general spelling; `store` is the older key, the same
+  // loop with `store-hotfix` defaulted. Naming both is a case this double
+  // cannot resolve, and dropping one without a word is the failure mode the
+  // module's own record default would paper over.
+  //
+  // The error carries a NAME as well as a message. A control telling this
+  // refusal from any other way a case can fail cannot anchor on prose: a
+  // reword is a false red, and so is anchoring on the key names the message
+  // happens to carry. Node prints `name: message` into the stack.
   if (spec.commands !== undefined && spec.store !== undefined) {
-    throw new Error('the case names both `commands` and `store`; '
-                    + 'one spelling of the command list is required');
+    const refused = new Error('the case names both `commands` and `store`; '
+                              + 'one spelling of the list is required');
+    refused.name = 'CaseShapeRefused';
+    throw refused;
   }
   const commands = spec.commands === undefined ? (spec.store || [])
                                                  : spec.commands;
