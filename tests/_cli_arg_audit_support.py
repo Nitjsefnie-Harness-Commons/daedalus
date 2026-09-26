@@ -4,39 +4,22 @@ non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Guarded or defaulted reads require DECLARED; direct reads require GUARANTEED.
 Namespace stores are refused as namespace store escapes.
-Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
-enumerated expression node types | every other ``ast.expr`` node type is
-``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
-automatically and no third bucket exists | comparisons and tuple-literal keys
-stay ``OUTSIDE`` because reproducing their Python semantics would widen the
-trusted evaluator | builtin aliases are trusted only with exact builtin
-identity at the specific call site | uncertain, rebound, closure-dependent,
-or conditional bindings fail closed | captured local aliases require exact
-identity at every proven direct invocation. Semantic claims end.
-The resolver follows exact modules, classes, methods, containers, indices, and
-slices without running code. UAdd and USub sign integer operands. Invert
-complements integer operands. Not converts any resolved literal to bool. All
-four recurse; bool values count as integer indices and slice bounds.
-Current named known-gap control families are non-exact descriptors, partial
-callables, traceback frames, other containers and iterators, comprehension
-results, instance attributes, attribute getters, runtime-built names,
-mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family maps once; contract prose and control tables cover each
-other."""
+FRAME_NAMESPACE_PLANTS are six ways the CLI can be made to read a frame's
+namespace, planted into a real module. They are plants, not the rule's inputs:
+the rule answers the operation once, from the member set the resolver reads
+off types.FrameType, and these rows only drive the control that refuses them.
+One plant reads a member the old resolver had never heard of, and one reaches
+the member through a constant string rather than an attribute, so a
+hand-written member list and an attribute-only carrier each fail a row."""
 import argparse
-import ast
 import builtins
 import contextlib
 import io
-import inspect
 import os
 import sys
 from unittest import mock
 import _cli_arg_audit_resolver as resolver
 
-_FRAME_READ = ".f_locals['args'].undeclared_probe"
-_CLASS_FRAME_ROUTES = 'class FrameRoutes:\n    active = sys._getframe'
-_DICT_FRAME_ROUTES = "FRAME_ROUTES = {'active': sys._getframe}"
 _GETATTR_SOURCE = "getattr(args, 'json', False)"
 _GETATTR_ESCAPE = ("namespace escape: getattr(args, 'json', False)",)
 _G_ESC = ("namespace escape: G(args, 'json', False)",)
@@ -47,15 +30,6 @@ _G_CLOSURE = _G_IMPORT + 'def inner():\n    return g(args, \'json\', False)\n'
 _MODULE_G_SCOPE = {'G': builtins.getattr, 'sys': sys, '__name__': __name__}
 _BUILTINS_GETATTR_ESCAPE = (
     "namespace escape: builtins.getattr(args, 'json', False)",)
-
-
-def _frame_case(prelude, construct):
-    return prelude, f'_ = {construct}{_FRAME_READ}'
-
-
-def _named_frame_case(name, prelude, construct, expected=None):
-    case = name, *_frame_case(prelude, construct)
-    return case if expected is None else (*case, expected)
 
 
 KNOWN_INDIRECT_ARG_READS = (('tabs', 'json', 'do_tabs'),)
@@ -281,266 +255,52 @@ REFLECTIVE_ESCAPE_CASES = (
     ("exec = helper\nexec('args.undeclared_probe')",
      "exec('args.undeclared_probe')"),
     ('vars = helper\n_ = vars()', 'vars()'),
-    ("_ = sys._getframe().f_locals['args'].x", 'sys._getframe()'),
+    ("_ = sys._getframe().f_locals['args'].x", 'sys._getframe().f_locals'),
     ("_ = inspect.currentframe().f_locals['args'].x",
-     'inspect.currentframe()'),
+     'inspect.currentframe().f_locals'),
     ("from sys import _getframe\n"
-     "_ = _getframe().f_locals['args'].x", '_getframe()'),
+     "_ = _getframe().f_locals['args'].x", '_getframe().f_locals'),
     ("from sys import _getframe as get_frame\n"
-     "_ = get_frame().f_locals['args'].x", 'get_frame()'),
+     "_ = get_frame().f_locals['args'].x", 'get_frame().f_locals'),
     ("from inspect import currentframe as cf\n"
-     "_ = cf().f_locals['args'].x", 'cf()'),
+     "_ = cf().f_locals['args'].x", 'cf().f_locals'),
     ("import sys as system\n"
-     "_ = system._getframe().f_locals['args'].x", 'system._getframe()'),
+     "_ = system._getframe().f_locals['args'].x",
+     'system._getframe().f_locals'),
     ("import inspect as insp\n_ = insp.currentframe().f_locals['args'].x",
-     'insp.currentframe()'),
-    ('_ = sys._getframe', 'sys._getframe'),
-    ('_ = sys._getframe.__call__()', 'sys._getframe.__call__()'),
-    ('helper(sys._getframe)', 'sys._getframe'),
-    ('helper(inspect.currentframe)', 'inspect.currentframe'),
-    ('_ = _getframe()', '_getframe()'),
-    ('_ = currentframe()', 'currentframe()'),)
-_DECIDED_SOURCES = (
-    _frame_case('from sys import _getframe as get_frame', 'get_frame()'),
-    _frame_case('', 'sys._getframe.__call__()'),
-    _frame_case('from inspect import currentframe as cf', 'cf()'),
-    _frame_case('', "getattr(sys, '_getframe')()"),
-    _frame_case('FRAME_ROUTES = [sys._getframe]', 'FRAME_ROUTES[0]()'),
-    _frame_case('TAB_FRAME_ROUTES = (sys._getframe,)',
-                'TAB_FRAME_ROUTES[0]()'),
-    _frame_case(_DICT_FRAME_ROUTES, "FRAME_ROUTES['active']()"),
-    _frame_case(_DICT_FRAME_ROUTES, "FRAME_ROUTES.get('active')()"),
-    _frame_case(_DICT_FRAME_ROUTES, "FRAME_ROUTES.get('active', None)()"),
-    _frame_case('FRAME_ROUTES = [sys._getframe]', 'FRAME_ROUTES[-1]()'),
-    _frame_case('FRAME_ROUTES = (sys._getframe,)', 'FRAME_ROUTES[-1]()'),
-    _frame_case('FRAME_ROUTES = (sys._getframe,)', 'FRAME_ROUTES[+0]()'),
-    _frame_case('BOOL_ROUTES = {True: sys._getframe}',
-                'BOOL_ROUTES[+True]()'),
-    _frame_case('BOOL_ROUTES = {-1: sys._getframe}',
-                'BOOL_ROUTES[-True]()'),
-    _frame_case('BOOL_ROUTES = {False: sys._getframe}',
-                'BOOL_ROUTES[+False]()'),
-    _frame_case('FRAME_ROUTES = [None, sys._getframe]',
-                'FRAME_ROUTES[:][-1]()'),
-    _frame_case("FRAME_ROUTES = {-1: sys._getframe}", 'FRAME_ROUTES[-1]()'),
-    _frame_case(_CLASS_FRAME_ROUTES, 'FrameRoutes.active()'),
-    _frame_case('class FrameRoutes:\n    active = staticmethod(sys._getframe)',
-                'FrameRoutes.active()'),
-    _frame_case('', "sys.__dict__['_getframe']()"),
-    _frame_case('', "sys.__dict__.get('_getframe')()"),
-    _frame_case('', "vars(sys)['_getframe']()"),)
-_DECIDED_EXPECTATIONS = (
-    'get_frame()', 'sys._getframe.__call__()', 'cf()',
-    "getattr(sys, '_getframe')()", 'FRAME_ROUTES[0]()',
-    'TAB_FRAME_ROUTES[0]()', "FRAME_ROUTES['active']()",
-    "FRAME_ROUTES.get('active')()", "FRAME_ROUTES.get('active', None)()",
-    'FRAME_ROUTES[-1]()', 'FRAME_ROUTES[-1]()', 'FRAME_ROUTES[+0]()',
-    'BOOL_ROUTES[+True]()', 'BOOL_ROUTES[-True]()', 'BOOL_ROUTES[+False]()',
-    'FRAME_ROUTES[:][-1]()', 'FRAME_ROUTES[-1]()', 'FrameRoutes.active()',
-    'FrameRoutes.active()', "sys.__dict__['_getframe']()",
-    "sys.__dict__.get('_getframe')()", "vars(sys)['_getframe']()")
-DECIDED_FRAME_ROUTE_CASES = tuple(
-    (*source, expected) for source, expected in zip(
-        _DECIDED_SOURCES, _DECIDED_EXPECTATIONS, strict=True))
-COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES = tuple(
-    f'COMPOSITE_ROUTES{suffix}' for suffix in (
-        '[~0]', '[not 0]', '[--1]', '[---1]', '[+-1]', '[~-1]', '[-~0]',
-        '[not not 0]', '[0:2][-1]', '[::2][-1]', '[::-1][-1]', '[:][-1]',
-        '[0:3][1:][-1]', '[-3:--1][-1]', '[+True]', '[-True]', '[+False]',
-        '[not False]', '[True]', '[:+True][-1]', '[-True:][-1]',
-        '[+False:][-1]', '[:True][-1]', '[:~0][-1]', '[not True:][-1]'))
-OUTSIDE_EXPRESSION_FRAME_ROUTE_CASES = (
-    _named_frame_case(
-        'comparison index', 'COMPARISON_ROUTES = (None, sys._getframe)',
-        'COMPARISON_ROUTES[0 < 1]()', 'COMPARISON_ROUTES[0 < 1]()'),
-    ('tuple-literal key', "TUPLE_ROUTES = {(0, 1): sys._getframe}",
-     f"_ = TUPLE_ROUTES[(0, 1)](){_FRAME_READ}",
-     'TUPLE_ROUTES[0, 1]()'),
-    _named_frame_case(
-        'binary index', 'FRAME_ROUTES = (None, None, sys._getframe)',
-        'FRAME_ROUTES[1 + 1]()', 'FRAME_ROUTES[1 + 1]()'),
-    _named_frame_case(
-        'nested comparison index',
-        'ROUTES = {True: (sys._getframe,)}',
-        'ROUTES[0 < 1][0]()', 'ROUTES[0 < 1][0]()'),
-    _named_frame_case(
-        'deep nested comparison index',
-        'ROUTES = {True: [((sys._getframe,),)]}',
-        'ROUTES[0 < 1][0][0][0]()', 'ROUTES[0 < 1][0][0][0]()'),)
-RESOLVER_ONLY_FRAME_ROUTE_CASES = (
-    _named_frame_case(
-        'exact classmethod route (resolver only)',
-        'class FrameRoutes:\n    active = classmethod(sys._getframe)',
-        'FrameRoutes.active()', 'FrameRoutes.active()'),
-    _named_frame_case(
-        'unresolved currentframe spelling (resolver only)', '',
-        'currentframe()', 'currentframe()'),)
-KNOWN_GAP_FRAME_ROUTE_CASES = (
-    _named_frame_case(
-        'comprehension result', 'FRAME_ROUTES = [sys._getframe]',
-        '[route for route in FRAME_ROUTES][0]()'),
-    _named_frame_case('instance attribute', _CLASS_FRAME_ROUTES,
-                      'FrameRoutes().active()'),
-    _named_frame_case(
-        'custom descriptor class attribute',
-        'class RouteDescriptor:\n    def __get__(self, obj, objtype=None):\n'
-        '        return sys._getframe\nclass FrameRoutes:\n'
-        '    active = RouteDescriptor()',
-        'FrameRoutes.active()'),
-    _named_frame_case(
-        'property descriptor',
-        'class FrameRoutes:\n    @property\n    def active(self):\n'
-        '        return sys._getframe',
-        'FrameRoutes().active()'),
-    _named_frame_case(
-        'cached-property descriptor',
-        'import functools\nclass FrameRoutes:\n'
-        '    @functools.cached_property\n    def active(self):\n'
-        '        return sys._getframe',
-        'FrameRoutes().active()'),
-    _named_frame_case(
-        'staticmethod subclass descriptor',
-        'class RouteStaticmethod(staticmethod):\n    pass\n'
-        'class FrameRoutes:\n    active = RouteStaticmethod(sys._getframe)',
-        'FrameRoutes.active()'),
-    _named_frame_case(
-        'functools.partial', 'import functools\n'
-        'FRAME_ROUTE = functools.partial(sys._getframe)', 'FRAME_ROUTE()'),
-    ('exception traceback frame', '',
-     "try:\n        raise RuntimeError('probe')\n"
-     "    except RuntimeError as err:\n"
-     "        _ = err.__traceback__.tb_frame.f_locals['args']"
-     ".undeclared_probe"),
-    ('frame acquisition in another function',
-     "def caller_namespace():\n    return sys._getframe(1).f_locals['args']",
-     '_ = caller_namespace().undeclared_probe'),
-    ('frame acquisition in nested helper', '',
-     'def caller_namespace():\n'
-     "        return sys._getframe(1).f_locals['args']\n"
-     '    _ = caller_namespace().undeclared_probe'),
-    _named_frame_case('class vars mapping-proxy get', _CLASS_FRAME_ROUTES,
-                      "vars(FrameRoutes).get('active')()"),
-    _named_frame_case(
-        'class vars mapping-proxy subscript', _CLASS_FRAME_ROUTES,
-        "vars(FrameRoutes)['active']()"),
-    _named_frame_case('other container type',
-                      'import collections\n'
-                      'FRAME_ROUTES = collections.deque((sys._getframe,))',
-                      'FRAME_ROUTES[0]()'),
-    _named_frame_case(
-        'iterator protocol', 'FRAME_ROUTES = (sys._getframe,)',
-        'next(iter(FRAME_ROUTES))()'),
-    _named_frame_case('operator.attrgetter', 'import operator',
-                      "operator.attrgetter('_getframe')(sys)()"),
-    _named_frame_case(
-        'runtime-built name', '', "getattr(sys, '_get' + 'frame')()"),
-    _named_frame_case('call-produced index',
-                      'FRAME_ROUTES = (None, sys._getframe)',
-                      'FRAME_ROUTES[len((None,))]()'),)
-KNOWN_GAP_FAMILIES = (
-    ('non-exact descriptors',
-     ('custom descriptor class attribute', 'property descriptor',
-      'cached-property descriptor', 'staticmethod subclass descriptor')),
-    ('partial callables', ('functools.partial',)),
-    ('traceback frames', ('exception traceback frame',)),
-    ('other containers and iterators',
-     ('other container type', 'iterator protocol')),
-    ('comprehension results', ('comprehension result',)),
-    ('instance attributes', ('instance attribute',)),
-    ('attribute getters', ('operator.attrgetter',)),
-    ('runtime-built names', ('runtime-built name',)),
-    ('mapping-proxy reads',
-     ('class vars mapping-proxy get',
-      'class vars mapping-proxy subscript')),
-    ('call-produced indices', ('call-produced index',)),
-    ('external frame acquisition',
-     ('frame acquisition in another function',
-      'frame acquisition in nested helper')),)
-DOCSTRING_RULE_PHRASES = (
-    'UAdd and USub sign integer operands',
-    'Invert complements integer operands',
-    'Not converts any resolved literal to bool',
-    ('A required mutually exclusive group guarantees a destination only '
-     'when every member stores that same non-SUPPRESS destination'),
-    'Namespace stores are refused as namespace store escapes',
-    'contract prose and control tables cover each other',)
-SEMANTIC_CONTRACT_CLAIMS = (
-    ("``DECIDED`` consists only of the resolver's explicitly enumerated "
-     'expression node types'),
-    ('every other ``ast.expr`` node type is ``OUTSIDE`` by definition, so '
-     'future AST node types enter the fail-closed side automatically and no '
-     'third bucket exists'),
-    ('comparisons and tuple-literal keys stay ``OUTSIDE`` because '
-     'reproducing their Python semantics would widen the trusted evaluator'),
-    ('builtin aliases are trusted only with exact builtin identity at the '
-     'specific call site'),
-    ('uncertain, rebound, closure-dependent, or conditional bindings fail '
-     'closed'),
-    ('captured local aliases require exact identity at every proven direct '
-     'invocation'),)
-
-
-def assert_dict_get_default(frame_value):
-    unresolved = object()
-    for expression, expected in (('+True', 1), ('-True', -1),
-                                 ('+False', 0)):
-        value = resolver._constant_value(
-            ast.parse(expression, mode='eval').body, unresolved)
-        assert (type(value), value) == (int, expected), expression
-    resolved = resolver._constant_value(
-        ast.parse('routes[:+True]', mode='eval').body.slice, unresolved)
-    assert (type(resolved.stop), resolved.stop) == (int, 1)
-    invalid = ast.parse("routes['not-an-index':]", mode='eval').body.slice
-    assert resolver._constant_value(invalid, unresolved) is unresolved
-    function = ast.parse(
-        "def do_tabs(args):\n"
-        "    return ROUTES.get('active', DEFAULT_ROUTE)\n").body[0]
-    call = function.body[0].value
-    handler_globals = {'ROUTES': {'active': sys._getframe},
-                       'DEFAULT_ROUTE': inspect.currentframe}
-    assert frame_value(call, function, handler_globals, {}) is sys._getframe
-    handler_globals['ROUTES'] = {}
-    assert frame_value(call, function, handler_globals, {}) \
-        is inspect.currentframe
-    literal_function = ast.parse(
-        "def do_tabs(args):\n"
-        "    return ROUTES.get('active', None)\n").body[0]
-    literal_call = literal_function.body[0].value
-    assert frame_value(literal_call, literal_function,
-                       {'ROUTES': {}}, {}) is None
-
-
-def assert_every_unary_operator():
-    unresolved = object()
-    operator_cases = (
-        ('+0', ast.UAdd, int, 0), ('-0', ast.USub, int, 0),
-        ('~0', ast.Invert, int, -1), ('not 0', ast.Not, bool, True),)
-    assert {operator for _, operator, _, _ in operator_cases} == \
-        set(ast.unaryop.__subclasses__())
-    combination_cases = (
-        ('~-1', int, 0), ('-~0', int, 1),
-        ('not not 0', bool, False), ('+True', int, 1),
-        ('-True', int, -1), ('~False', int, -1),
-        ('not False', bool, True), ('not 1.0', bool, False),
-        ("not ''", bool, True), ('not None', bool, True),)
-    for expression, operator, expected_type, expected in operator_cases:
-        node = ast.parse(expression, mode='eval').body
-        assert isinstance(node.op, operator), expression
-        value = resolver._constant_value(node, unresolved)
-        assert (type(value), value) == (expected_type, expected), expression
-    for expression, expected_type, expected in combination_cases:
-        node = ast.parse(expression, mode='eval').body
-        value = resolver._constant_value(node, unresolved)
-        assert (type(value), value) == (expected_type, expected), expression
-    slice_cases = (
-        ('routes[:~0]', slice(None, -1, None)),
-        ('routes[-~0:]', slice(1, None, None)),
-        ('routes[:(not 0)]', slice(None, True, None)),
-        ('routes[(not not 0):]', slice(False, None, None)),)
-    for expression, expected in slice_cases:
-        node = ast.parse(expression, mode='eval').body.slice
-        value = resolver._constant_value(node, unresolved)
-        assert value == expected, expression
+     'insp.currentframe().f_locals'),
+    ("_ = getattr(sys._getframe(), 'f_locals')['args'].x",
+     "getattr(sys._getframe(), 'f_locals')"),
+    ('holder = helper()\n_ = holder[\'args\'].undeclared_probe', 'holder'),)
+# Each row splices into the real daedalus_cli/commands_eval.py: the prelude
+# after its first import, the replacement for the anchor. The last field is
+# the receiver the refusal must name. These are plants, not the rule's inputs.
+FRAME_NAMESPACE_PLANTS = (
+    ('attribute getter', 'import operator\n', 'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = operator.attrgetter('_getframe')(sys)()"
+     ".f_locals['args'].undeclared_probe\n",
+     "operator.attrgetter('_getframe')(sys)().f_locals"),
+    ('sibling helper', '', 'def do_reload(args):\n',
+     'def _reached_namespace():\n'
+     "    return sys._getframe(1).f_locals['args']\n\n\n"
+     'def do_reload(args):\n'
+     '    _ = _reached_namespace().undeclared_probe\n',
+     'sys._getframe(1).f_locals'),
+    ('plain frame spelling', '', 'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = sys._getframe(1).f_locals['args']"
+     '.undeclared_probe\n', 'sys._getframe(1).f_locals'),
+    ('container index', '', 'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = {'a': sys}['a']._getframe().f_locals"
+     "['args'].undeclared_probe\n",
+     "{'a': sys}['a']._getframe().f_locals"),
+    ('member the old resolver never named', '', 'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = sys._getframe(1).f_globals['args']"
+     '.undeclared_probe\n', 'sys._getframe(1).f_globals'),
+    ('constant-string carrier', '', 'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
+     "['args'].undeclared_probe\n",
+     "getattr(sys._getframe(), 'f_locals')"),
+)
 
 
 def assert_inner_scope_bindings(audit_handler):

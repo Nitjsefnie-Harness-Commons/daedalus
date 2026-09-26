@@ -4,26 +4,14 @@ required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
 Namespace stores are refused as namespace store escapes.
-Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
-enumerated expression node types | every other ``ast.expr`` node type is
-``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
-automatically and no third bucket exists | comparisons and tuple-literal keys
-stay ``OUTSIDE`` because reproducing their Python semantics would widen the
-trusted evaluator | builtin aliases are trusted only with exact builtin
-identity at the specific call site | uncertain, rebound, closure-dependent,
-or conditional bindings fail closed | captured local aliases require exact
-identity at every proven direct invocation. Semantic claims end.
-Aliases follow prefixes; headers use outer scope. Other parameters escape;
-unresolved frame spellings are refused. UAdd and USub sign integer operands.
-Invert complements integer operands. Not converts any resolved literal to
-bool. All four recurse; bool values are integer indices and slice bounds.
-Current named known-gap control families are non-exact descriptors, partial
-callables, traceback frames, other containers and iterators, comprehension
-results, instance attributes, attribute getters, runtime-built names,
-mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family maps; contract prose and control tables cover each other."""
+A frame read is refused wherever it appears in the daedalus_cli package,
+including in a helper a handler calls, and a member the resolver has never
+heard of is refused like a known one because the member set is read off
+types.FrameType rather than written out. Aliases follow prefixes; headers use
+outer scope. Other parameters escape."""
 import argparse
 import ast
+import importlib
 import inspect
 import sys
 import textwrap
@@ -123,109 +111,78 @@ def _callable_header_nodes(nested):
         yield returns
 
 
-_FRAME_ROUTE_ATTRS = {'sys': '_getframe', 'inspect': 'currentframe'}
-_FRAME_ROUTE_MODULES = {'sys': sys, 'inspect': inspect}
-_UNRESOLVED = object()
+def _origin(node, function, handler_globals):
+    """What the audit can see a value to be, or ``resolver.UNPROVEN``."""
+    return resolver.resolve_origin(
+        node, function, handler_globals, resolver.UNPROVEN, _scope_binds)
 
 
-def _frame_imports(function):
-    bindings = {}
+def _frame_escapes(node, function, handler_globals, label, found):
+    """Refuse a frame read whose receiver the audit cannot account for.
+
+    The walk is over the whole callable and does not stop at a nested
+    function's own header, so a read in a helper the callable calls is
+    reported against the callable that reaches it. One read reports once:
+    the walk stops descending as soon as a node is refused, so a line that
+    both selects a member and subscripts it is not counted twice.
+    """
+    read = resolver.frame_read(node)
+    if read is not None:
+        receiver = resolver.reads_frame_namespace(
+            node, _origin(read[1], function, handler_globals))
+        if receiver is not None:
+            found.append(f'{label}: {ast.unparse(receiver)}')
+            return
+    for child in ast.iter_child_nodes(node):
+        _frame_escapes(child, function, handler_globals, label, found)
+
+
+def frame_namespace_escapes(function, handler_globals, label):
+    found = []
+    _frame_escapes(function, function, handler_globals, label, found)
+    return found
+
+
+def _attach_parents(function):
     for node in ast.walk(function):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in _FRAME_ROUTE_MODULES:
-                    bindings[alias.asname or alias.name] = \
-                        _FRAME_ROUTE_MODULES[alias.name]
-        elif isinstance(node, ast.ImportFrom):
-            route = _FRAME_ROUTE_ATTRS.get(node.module)
-            if route is None:
-                continue
-            for alias in node.names:
-                if alias.name == route:
-                    bindings[alias.asname or alias.name] = getattr(
-                        _FRAME_ROUTE_MODULES[node.module], route)
-    return bindings
-
-
-def _frame_value(node, function, handler_globals, imports):
-    return resolver.resolve_frame_value(
-        node, function, handler_globals, imports, _UNRESOLVED,
-        _scope_binds, resolver.constant_string)
-
-
-def _unknown_frame_route(node, function, handler_globals, imports):
-    if isinstance(node, ast.Name):
-        return (node.id in _FRAME_ROUTE_ATTRS.values()
-                and _frame_value(node, function, handler_globals, imports)
-                is _UNRESOLVED)
-    return (isinstance(node, ast.Attribute)
-            and node.attr in _FRAME_ROUTE_ATTRS.values()
-            and _frame_value(node.value, function, handler_globals, imports)
-            is _UNRESOLVED)
-
-
-def _frame_route_access(node, function, handler_globals, imports):
-    resolved = _frame_value(node, function, handler_globals, imports)
-    if resolver.is_frame_route(resolved):
-        return True
-    if isinstance(node, ast.Call):
-        function_value = _frame_value(
-            node.func, function, handler_globals, imports)
-        return (resolver.is_frame_route(function_value)
-                or resolver.is_outside_expression(function_value)
-                or (isinstance(node.func, ast.Attribute)
-                    and resolver.is_frame_route(_frame_value(
-                        node.func.value, function, handler_globals, imports)))
-                or _unknown_frame_route(
-                    node.func, function, handler_globals, imports))
-    if not isinstance(node, (ast.Name, ast.Attribute)):
-        return False
-    return ((isinstance(node, ast.Attribute)
-             and resolver.is_frame_route(_frame_value(
-                 node.value, function, handler_globals, imports)))
-            or _unknown_frame_route(
-                node, function, handler_globals, imports))
-
-
-def _reflective_call(node, function, handler_globals, imports,
-                     inspect_frame_routes=True):
-    return (resolver.reflective_builtin_call(
-            node, function, handler_globals, _scope_binds,
-            _comprehension_shadows)
-            or inspect_frame_routes and _frame_route_access(
-            node, function, handler_globals, imports))
+        for child in ast.iter_child_nodes(node):
+            child._parent = node
+    return function
 
 
 def _handler_arg_violations(function, args_name, declared, guaranteed,
                             handler_globals=None):
-    for node in ast.walk(function):
-        for child in ast.iter_child_nodes(node):
-            child._parent = node
+    _attach_parents(function)
     if handler_globals is None:
         handler_globals = globals()
-    frame_imports = _frame_imports(function)
     reads, read_requirements, violations = {}, {}, []
 
-    def check(node, inspect_frame_routes=True):
+    def check(node):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                              ast.Lambda)):
             for header in _callable_header_nodes(node):
-                check(header, inspect_frame_routes)
+                check(header)
             if not _scope_binds(node, args_name):
                 body = (node.body if isinstance(node.body, list)
                         else [node.body])
                 for statement in body:
-                    check(statement, False)
+                    check(statement)
             return
         if (isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                               ast.GeneratorExp))
                 and _comprehension_shadows(node, args_name)):
-            check(node.generators[0].iter, inspect_frame_routes)
+            check(node.generators[0].iter)
             return
-        if _reflective_call(
-                node, function, handler_globals, frame_imports,
-                inspect_frame_routes):
+        if resolver.reflective_builtin_call(
+                node, function, handler_globals, _scope_binds,
+                _comprehension_shadows):
             violations.append(f'namespace escape: {ast.unparse(node)}')
+            return
+        read = resolver.frame_read(node)
+        if read is not None and resolver.reads_frame_namespace(
+                node, _origin(read[1], function, handler_globals)) is not None:
+            violations.append(
+                f'namespace escape: {ast.unparse(read[1])}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
             permitted = resolver.permitted_namespace_read(
@@ -242,7 +199,7 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 reads.setdefault(attribute, set()).add(rendered)
                 read_requirements[(attribute, rendered)] = needs_presence
         for child in ast.iter_child_nodes(node):
-            check(child, inspect_frame_routes)
+            check(child)
     for child in ast.iter_child_nodes(function):
         check(child)
     for (attribute, construct), needs_presence in sorted(
@@ -261,6 +218,48 @@ def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
     _, violations = _handler_arg_violations(
         function, 'args', set(dests), set(present), scope)
     return violations
+
+
+CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
+
+
+def _package_callables(tree):
+    """Yield every callable the package defines, outermost first.
+
+    Outermost first because a callable's own walk descends into the ones it
+    contains; a module-level function and the method of a module-level class
+    are the two places the package defines one.
+    """
+    callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    for node in tree.body:
+        if isinstance(node, callables):
+            yield node
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield member
+
+
+def package_frame_escapes(overrides=None):
+    """Refuse a frame read anywhere in the CLI package, helper included.
+
+    The domain is every module of the package rather than one handler's body,
+    so a read inside a helper a handler calls is refused even when the
+    handler names no frame itself. ``overrides`` substitutes a module's
+    source, which is how the plant control runs the rule over real code it
+    has altered; names the altered source adds stay unproven, and an
+    unproven receiver is what the rule refuses.
+    """
+    escapes = []
+    for path in sorted(CLI_PACKAGE.glob('*.py')):
+        name = path.stem
+        source = (overrides or {}).get(name) or path.read_text(
+            encoding='utf-8')
+        module_globals = vars(importlib.import_module(f'daedalus_cli.{name}'))
+        for function in _package_callables(ast.parse(source)):
+            escapes.extend(frame_namespace_escapes(
+                function, module_globals, f'{name}.{function.name}'))
+    return escapes
 
 
 def _tabs_namespace_dests(parser):
@@ -325,26 +324,6 @@ def _assert_real_tabs_dispatch_crashes(handler_module):
         assert False, audit_support.DISPATCH_PROBE_ERROR
     finally:
         cli.DISPATCH['tabs'], sys.argv, handler_module.api = original
-
-
-def _assert_real_frame_case(package_name, prelude, body, label,
-                            expected_construct=None, dispatch=True):
-    """Audit a temporary handler and optionally prove its runtime read."""
-    handler_module = _mutated_cli_tabs(package_name, prelude, body)
-    try:
-        violations = _audit_real_tabs_handler(handler_module)
-        matched = (violations == [] if expected_construct is None else any(
-            expected_construct in item for item in violations))
-        assert matched, (label, violations)
-        if dispatch:
-            _assert_real_tabs_dispatch_crashes(handler_module)
-    finally:
-        sys.modules.pop(handler_module.__dict__['__name__'], None)
-
-
-def _contract_drift(unsupported=(), undocumented=()):
-    return {'unsupported': list(unsupported),
-            'undocumented': list(undocumented)}
 
 
 def test_cli_real_dispatch_helper_neutralizes_bridge(tmp):
@@ -498,71 +477,50 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
     for body, construct in audit_support.REFLECTIVE_ESCAPE_CASES:
         assert _audit_fake_handler(body) == [
             f'namespace escape: {construct}'], body
-    calls = []
-
-    class Descriptor:
-        def __get__(self, obj, objtype=None):
-            calls.append('descriptor __get__ invoked')
-            return sys._getframe
-
-    class FrameRoutes:
-        active = Descriptor()
-    function = ast.parse(
-        "def do_tabs(args):\n    FrameRoutes.active()\n").body[0]
-    attr_node = function.body[0].value.func
-    value = _frame_value(
-        attr_node, function, {'FrameRoutes': FrameRoutes}, {})
-    assert value is FrameRoutes.__dict__['active']
-    assert calls == []
 
 
-def test_cli_audit_resolver_resolves_dict_get_default(tmp):
-    audit_support.assert_dict_get_default(_frame_value)
+def test_cli_audit_resolver_only_resolves_exact_module_vars(tmp):
+    resolver.assert_exact_class_vars()
 
 
-def test_cli_audit_resolver_decides_every_unary_operator(tmp):
-    audit_support.assert_every_unary_operator()
+def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
+    """A frame member read on a value the audit can see is left alone.
+
+    The refusal is about an origin the audit cannot see, so a receiver it has
+    resolved to a non-frame is not one. Without this, widening the member set
+    would refuse correct code and a later round would narrow the rule back.
+    """
+    scope = {'ROUTES': {'f_locals': 1}, **globals()}
+    assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
+    scope = {'ROUTES': {'f_locals': 1}, **globals()}
+    assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
 
 
-def test_cli_audit_resolver_partitions_every_expression_type(tmp):
-    resolver.assert_total_expression_partition()
+def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):
+    """The real CLI package holds no frame read, in any module or helper."""
+    assert package_frame_escapes() == []
 
 
-def test_cli_audit_resolver_only_resolves_exact_class_vars(tmp):
-    resolver.assert_exact_class_vars(_frame_value)
+def test_cli_audit_refuses_every_frame_namespace_plant(tmp):
+    """Each plant, spliced into the real handler module, is refused once.
 
-
-def test_cli_audit_refuses_frame_routes_in_real_handler_module(tmp):
-    for index, (module_prelude, body, construct) in enumerate(
-            audit_support.DECIDED_FRAME_ROUTE_CASES):
-        _assert_real_frame_case(
-            f'mutated_cli_{index}', module_prelude, body,
-            (module_prelude, body), construct)
-    composite_routes = 'COMPOSITE_ROUTES = (sys._getframe,) * 3'
-    for index, expression in enumerate(
-            audit_support.COMPOSITE_SUBSCRIPT_FRAME_ROUTE_CASES):
-        body = f"_ = {expression}().f_locals['args'].undeclared_probe"
-        _assert_real_frame_case(
-            f'composite_subscript_cli_{index}', composite_routes, body,
-            expression, f'{expression}()')
-    for index, case in enumerate(
-            audit_support.OUTSIDE_EXPRESSION_FRAME_ROUTE_CASES):
-        case_name, module_prelude, body, construct = case
-        _assert_real_frame_case(
-            f'outside_expression_cli_{index}', module_prelude, body,
-            case_name, construct)
-    ordinary = {'ROUTES': {True: [((len,),)]}}
-    assert _audit_fake_handler(
-        '_ = ROUTES[0 < 1][0][0][0]()', scope=ordinary) == []
-    for index, (case_name, module_prelude, body, construct) in enumerate(
-            audit_support.RESOLVER_ONLY_FRAME_ROUTE_CASES):
-        _assert_real_frame_case(
-            f'resolver_only_cli_{index}', module_prelude, body,
-            case_name, construct, dispatch=False)
-    for index, (case_name, module_prelude, body) in enumerate(
-            audit_support.KNOWN_GAP_FRAME_ROUTE_CASES):
-        _assert_real_frame_case(
-            f'known_gap_cli_{index}', module_prelude, body, case_name)
+    The plants are run against the real ``commands_eval.py`` with the real
+    package walk, not against a synthetic tree, so a rule that only fires on
+    a fixture's shape cannot pass this.
+    """
+    base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
+    for name, prelude, anchor, replacement, receiver in \
+            audit_support.FRAME_NAMESPACE_PLANTS:
+        source = base
+        if prelude:
+            assert source.count('import json\n') == 1, name
+            source = source.replace(
+                'import json\n', 'import json\n' + prelude, 1)
+        assert source.count(anchor) == 1, name
+        escapes = package_frame_escapes(
+            {'commands_eval': source.replace(anchor, replacement, 1)})
+        assert len(escapes) == 1, (name, escapes)
+        assert escapes[0].endswith(f': {receiver}'), (name, escapes)
 
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):
@@ -598,61 +556,6 @@ def test_cli_audit_module_has_no_dead_imports(tmp):
         node.id for node in ast.walk(tree)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
     assert imported <= loaded, sorted(imported - loaded)
-
-
-def test_cli_audit_docstrings_match_control_tables(tmp):
-    documents = {
-        'test_cli_arg_audit': __doc__,
-        '_cli_arg_audit_support': audit_support.__doc__,
-        '_cli_arg_audit_resolver': resolver.__doc__}
-    known_families = audit_support.KNOWN_GAP_FAMILIES
-    known_cases = audit_support.KNOWN_GAP_FRAME_ROUTE_CASES
-    resolver.assert_docstrings_match(
-        documents, audit_support.DOCSTRING_RULE_PHRASES,
-        audit_support.SEMANTIC_CONTRACT_CLAIMS, known_families, known_cases)
-    unsupported_documents = dict(documents)
-    unsupported_documents['_cli_arg_audit_support'] = \
-        audit_support.__doc__.replace(
-            ', and external frame acquisition.',
-            ', comparison routes, and external frame acquisition.')
-    contradictory_documents = dict(documents)
-    contradictory_documents['_cli_arg_audit_resolver'] = (
-        resolver.__doc__
-        + ' Semantic claims are Comparisons and tuple-literal keys are '
-        'DECIDED. Semantic claims end.')
-    missing_documents = dict(documents)
-    missing_documents.pop('_cli_arg_audit_resolver')
-    undocumented_families = audit_support.KNOWN_GAP_FAMILIES + (
-        ('comparison routes', ('comparison route control',)),)
-    undocumented_cases = audit_support.KNOWN_GAP_FRAME_ROUTE_CASES + (
-        ('comparison route control', '', ''),)
-    drift_cases = (
-        ('missing-module', missing_documents, known_families, known_cases,
-         {'missing': ['_cli_arg_audit_resolver'], 'unknown': []}),
-        ('contradictory-semantic-claim', contradictory_documents,
-         known_families, known_cases,
-         {'_cli_arg_audit_resolver': _contract_drift(unsupported=(
-             'Comparisons and tuple-literal keys are DECIDED',))}),
-        ('unsupported-prose', unsupported_documents, known_families,
-         known_cases,
-         {'_cli_arg_audit_support': _contract_drift(
-             unsupported=('comparison routes',))}),
-        ('undocumented-control', documents, undocumented_families,
-         undocumented_cases, {
-             module: _contract_drift(undocumented=('comparison routes',))
-             for module in ('test_cli_arg_audit', '_cli_arg_audit_support',
-                            '_cli_arg_audit_resolver')}),)
-    for name, drift_documents, families, cases, expected in drift_cases:
-        try:
-            resolver.assert_docstrings_match(
-                drift_documents, audit_support.DOCSTRING_RULE_PHRASES,
-                audit_support.SEMANTIC_CONTRACT_CLAIMS,
-                families, cases)
-        except AssertionError as error:
-            assert error.args == (expected,), {
-                'case': name, 'expected': expected, 'actual': error.args}
-        else:
-            assert False, f'{name}: drift was accepted'
 
 
 def test_cli_handlers_read_only_declared_args(tmp):
@@ -691,6 +594,15 @@ def test_cli_handlers_read_only_declared_args(tmp):
             f'{command}: {attribute} absent from handler source')
         assert attribute in detail['declared'], (
             f'{command}: {attribute} not declared by parser')
+    commands_by_module = {}
+    for command, handler in DISPATCH.items():
+        commands_by_module.setdefault(
+            handler.__module__.rsplit('.', 1)[-1], []).append(command)
+    for escape in package_frame_escapes():
+        module = escape.split('.', 1)[0]
+        violations.append((
+            ', '.join(sorted(commands_by_module.get(module, []))) or module,
+            escape, f'daedalus_cli/{module}.py'))
     details = '\n'.join(f'{name}: {construct} in {handler}'
                         for name, construct, handler in violations)
     assert not violations, f'CLI argument audit violations:\n{details}'

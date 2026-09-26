@@ -1,55 +1,31 @@
-"""Static argparse, builtin-identity, and constant-resolution helpers. DECLARED
-covers stored action destinations and parser defaults; GUARANTEED adds required
-and non-suppressed values. A required mutually exclusive group guarantees a
+"""Static argparse, builtin-identity, and origin helpers. DECLARED covers
+stored action destinations and parser defaults; GUARANTEED adds required and
+non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Namespace stores are refused as namespace store escapes.
-Semantic claims are ``DECIDED`` consists only of the resolver's explicitly
-enumerated expression node types | every other ``ast.expr`` node type is
-``OUTSIDE`` by definition, so future AST node types enter the fail-closed side
-automatically and no third bucket exists | comparisons and tuple-literal keys
-stay ``OUTSIDE`` because reproducing their Python semantics would widen the
-trusted evaluator | builtin aliases are trusted only with exact builtin
-identity at the specific call site | uncertain, rebound, closure-dependent,
-or conditional bindings fail closed | captured local aliases require exact
-identity at every proven direct invocation. Semantic claims end. An OUTSIDE key
-that could select a frame route fails closed.
-UAdd and USub sign integer operands. Invert complements integer operands. Not
-converts any resolved literal to bool. All four recurse; bool values count as
-integer indices and slice bounds use that definition.
-Current named known-gap control families are non-exact descriptors, partial
-callables, traceback frames, other containers and iterators, comprehension
-results, instance attributes, attribute getters, runtime-built names,
-mapping-proxy reads, call-produced indices, and external frame acquisition.
-Each named family maps once; contract prose and control tables cover each
-other."""
+An origin the audit can see is a name a scope it reads binds, or an attribute
+of such a value. Every other expression is unproven, which is a refusal and
+not a silent pass.
+FRAME_SURFACE is the member descriptors types.FrameType carries, read once
+from that type, so a frame attribute this file has never heard of is refused
+like a known one. A read of one of those members, or of the ARGS_KEY entry of
+one, is refused unless the audit can see the receiver's origin and that origin
+is not a frame."""
 import argparse
 import ast
 import builtins
-import inspect
 import sys
-_FRAME_ROUTE_OBJECTS = (sys._getframe, inspect.currentframe)
-_OUTSIDE_EXPRESSION, _UNKNOWN_MODULE_BINDING = object(), object()
-EXPRESSION_DECIDED, EXPRESSION_OUTSIDE = 'DECIDED', 'OUTSIDE'
-DECIDED_EXPRESSION_TYPES = frozenset((
-    ast.Attribute, ast.Call, ast.Constant, ast.Name, ast.Slice,
-    ast.Subscript, ast.UnaryOp))
+import types
 
-
-def _expression_node_types():
-    return frozenset(value for value in vars(ast).values() if isinstance(
-        value, type) and value is not ast.expr and issubclass(value, ast.expr))
-
-
-def expression_type_disposition(node_type):
-    if (not isinstance(node_type, type) or node_type is ast.expr
-            or not issubclass(node_type, ast.expr)):
-        raise TypeError('expected a concrete ast.expr node type')
-    return (EXPRESSION_DECIDED if node_type in DECIDED_EXPRESSION_TYPES
-            else EXPRESSION_OUTSIDE)
-
-
-def is_outside_expression(value):
-    return value is _OUTSIDE_EXPRESSION
+# The object model, not an author's list: every descriptor a live frame
+# carries, read from the interpreter's own frame type.
+_FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
+FRAME_SURFACE = frozenset(
+    name for name, member in vars(types.FrameType).items()
+    if isinstance(member, _FRAME_DESCRIPTORS))
+ARGS_KEY = 'args'
+UNPROVEN = object()   # the resolver's verdict for a value it cannot trace
+_UNKNOWN_MODULE_BINDING = object()
 
 
 def namespace_dests(parser):
@@ -309,6 +285,43 @@ def _captured_identity_is_exact(node, reference_name, expected, function,
         for call in invocations)
 
 
+def _has_exact_type(value, *expected):
+    # Exact identity is intentional: subclasses remain outside the resolver.
+    return type(value) in expected  # pylint: disable=unidiomatic-typecheck
+
+
+def _static_attribute(base, attribute, unresolved):
+    if not _has_exact_type(base, type(sys)):
+        return unresolved
+    return (base.__dict__ if attribute == '__dict__' else
+            base.__dict__.get(attribute, unresolved))
+
+
+def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
+                   bindings=None):
+    """Return the value the audit can see a name or attribute names.
+
+    A name resolves through ``bindings`` when the audit has tracked one for
+    it, then through the scope it reads; an attribute resolves through a base
+    it has already resolved. Every other expression — a call, a subscript, a
+    comprehension — is unproven, because its value is produced by running code
+    the audit does not run.
+    """
+    if isinstance(node, ast.Name):
+        if bindings is not None and node.id in bindings:
+            return bindings[node.id]
+        if scope_binds(function, node.id):
+            return unresolved
+        return handler_globals.get(node.id, unresolved)
+    if isinstance(node, ast.Attribute):
+        return _static_attribute(
+            resolve_origin(
+                node.value, function, handler_globals, unresolved,
+                scope_binds, bindings),
+            node.attr, unresolved)
+    return unresolved
+
+
 def is_builtin_reference(node, name, function, handler_globals,
                          scope_binds, comprehension_shadows):
     expected = getattr(builtins, name)
@@ -335,9 +348,9 @@ def is_builtin_reference(node, name, function, handler_globals,
                 node, reference_name, expected, function,
                 handler_globals, unresolved, scope_binds):
             return False
-        value = resolve_frame_value(
-            node, function, handler_globals, bindings, unresolved,
-            scope_binds, constant_string)
+        value = resolve_origin(
+            node, function, handler_globals, unresolved, scope_binds,
+            bindings)
         if reference_name in bindings or value is not unresolved:
             return value is expected
         if reference_name != name:
@@ -363,9 +376,8 @@ def is_builtin_reference(node, name, function, handler_globals,
             node, module_name, builtins, function,
             handler_globals, unresolved, scope_binds):
         return False
-    value = resolve_frame_value(
-        node, function, handler_globals, bindings, unresolved,
-        scope_binds, constant_string)
+    value = resolve_origin(
+        node, function, handler_globals, unresolved, scope_binds, bindings)
     return value is expected
 
 
@@ -420,277 +432,57 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
     return attribute, parent, needs_presence
 
 
-def is_frame_route(value):
-    return any(value is route for route in _FRAME_ROUTE_OBJECTS)
+def frame_read(node):
+    """Return the ``(member, receiver)`` a frame read names, or ``None``.
 
-
-def _has_exact_type(value, *expected):
-    # Exact identity is intentional: subclasses remain outside the resolver.
-    return type(value) in expected  # pylint: disable=unidiomatic-typecheck
-
-
-def _constant_value(node, unresolved):
-    """Resolve constants, slices, and all four Python unary operators.
-    ``UAdd`` and ``USub`` sign an integer, ``Invert`` complements an integer,
-    and ``Not`` converts any resolved literal to ``bool``. Operators recurse;
-    unsupported operands and nodes remain unresolved."""
-    if (isinstance(node, ast.expr)
-            and expression_type_disposition(type(node)) == EXPRESSION_OUTSIDE):
-        return _OUTSIDE_EXPRESSION
-    if isinstance(node, ast.Constant):
-        return node.value
-    if isinstance(node, ast.Slice):
-        bounds = []
-        for bound in (node.lower, node.upper, node.step):
-            value = None if bound is None else _constant_value(
-                bound, unresolved)
-            if is_outside_expression(value):
-                return value
-            if (value is unresolved
-                    or (value is not None
-                        and not isinstance(value, int))):
-                return unresolved
-            bounds.append(value)
-        return slice(*bounds)
-    if isinstance(node, ast.UnaryOp):
-        value = _constant_value(node.operand, unresolved)
-        if value is unresolved or is_outside_expression(value):
-            return value
-        if isinstance(node.op, ast.Not):
-            return not value
-        if not isinstance(value, int):
-            return unresolved
-        if isinstance(node.op, ast.USub):
-            return -value
-        if isinstance(node.op, ast.UAdd):
-            return +value
-        if isinstance(node.op, ast.Invert):
-            return ~int(value)
-    return unresolved
-
-
-def _static_attribute(base, attribute, unresolved):
-    if is_outside_expression(base):
-        return base
-    if _has_exact_type(base, type(sys)):
-        return (base.__dict__ if attribute == '__dict__' else
-                base.__dict__.get(attribute, unresolved))
-    if _has_exact_type(base, type):
-        for owner in base.__mro__:
-            namespace = owner.__dict__
-            if attribute not in namespace:
-                continue
-            value = namespace[attribute]
-            if _has_exact_type(value, staticmethod):
-                return value.__func__
-            if _has_exact_type(value, classmethod):
-                return value.__func__
-            return value
-        return unresolved
-    return unresolved
-
-
-def _static_subscript(base, key, unresolved):
-    if (_has_exact_type(base, list, tuple)
-            and (isinstance(key, int) or _has_exact_type(key, slice))):
-        try:
-            return base[key]
-        except (IndexError, TypeError, ValueError):
-            return unresolved
-    if _has_exact_type(base, dict):
-        try:
-            return base.get(key, unresolved)
-        except TypeError:
-            return unresolved
-    return unresolved
-
-
-def _contains_frame_route(container):
-    if is_frame_route(container):
-        return True
-    if _has_exact_type(container, dict):
-        container = container.values()
-    elif not _has_exact_type(container, list, tuple):
-        return False
-    return any(_contains_frame_route(value) for value in container)
-
-
-def _builtin_call(node, function, handler_globals, imports, unresolved,
-                  scope_binds, string_resolver):
-    if not isinstance(node, ast.Call):
-        return unresolved
-    if (isinstance(node.func, ast.Attribute)
-            and node.func.attr == 'get'
-            and len(node.args) in (1, 2)
-            and not node.keywords):
-        key = _constant_value(node.args[0], unresolved)
-        base = resolve_frame_value(
-            node.func.value, function, handler_globals, imports, unresolved,
-            scope_binds, string_resolver)
-        if is_outside_expression(base):
-            return base
-        if is_outside_expression(key):
-            return (_OUTSIDE_EXPRESSION
-                    if _contains_frame_route(base) else unresolved)
-        if key is not unresolved and _has_exact_type(base, dict):
-            if key in base:
-                return base[key]
-            if len(node.args) == 2:
-                default = _constant_value(node.args[1], unresolved)
-                return (default if default is not unresolved else
-                        resolve_frame_value(
-                            node.args[1], function, handler_globals, imports,
-                            unresolved, scope_binds, string_resolver))
-    if (not isinstance(node.func, ast.Name)
-            or node.keywords
-            or any(isinstance(arg, ast.Starred) for arg in node.args)):
-        return unresolved
-    name = node.func.id
-    if (scope_binds(function, name) or name in handler_globals
-            or not node.args):
-        return unresolved
-    base = resolve_frame_value(
-        node.args[0], function, handler_globals, imports, unresolved,
-        scope_binds, string_resolver)
-    if name == 'getattr' and len(node.args) in (2, 3):
-        attribute = string_resolver(node.args[1])
-        if attribute is not None:
-            return _static_attribute(base, attribute, unresolved)
-    if name == 'vars' and len(node.args) == 1:
-        if _has_exact_type(base, type(sys), type):
-            return base.__dict__
-    return unresolved
-
-
-def resolve_frame_value(node, function, handler_globals, imports, unresolved,
-                        scope_binds, string_resolver):
-    if isinstance(node, ast.Name):
-        if node.id in imports:
-            return imports[node.id]
-        if scope_binds(function, node.id):
-            return unresolved
-        return handler_globals.get(node.id, unresolved)
+    An attribute and a constant-string subscript are the two carriers the
+    grammar gives a member name, and the receiver is the base each selects
+    from. A member reached as a call's constant-string argument is NOT a
+    carrier here: ``api('GET', 'args')`` would name one too, and refusing it
+    would be refusing correct code.
+    """
     if isinstance(node, ast.Attribute):
-        base = resolve_frame_value(
-            node.value, function, handler_globals, imports, unresolved,
-            scope_binds, string_resolver)
-        return _static_attribute(base, node.attr, unresolved)
+        return node.attr, node.value
     if isinstance(node, ast.Subscript):
-        key = _constant_value(node.slice, unresolved)
-        base = resolve_frame_value(
-            node.value, function, handler_globals, imports, unresolved,
-            scope_binds, string_resolver)
-        if is_outside_expression(base):
-            return base
-        if is_outside_expression(key):
-            return (_OUTSIDE_EXPRESSION
-                    if _contains_frame_route(base) else unresolved)
-        if key is not unresolved:
-            return _static_subscript(base, key, unresolved)
-    if isinstance(node, ast.Call):
-        return _builtin_call(
-            node, function, handler_globals, imports, unresolved,
-            scope_binds, string_resolver)
-    return unresolved
+        return constant_string(node.slice), node.value
+    return None
 
 
-def assert_exact_class_vars(frame_value):
-    class FrameRoutes:
-        active = sys._getframe
+def reads_frame_namespace(node, origin):
+    """Refuse a frame read whose receiver the audit cannot account for.
 
+    ``origin`` is what the audit can see the receiver to be, or ``UNPROVEN``
+    when it cannot. A member this file has never heard of is refused like a
+    known one, because the member set is read from ``types.FrameType`` rather
+    than written out here.
+    """
+    read = frame_read(node)
+    if read is None:
+        return None
+    member, receiver = read
+    if member != ARGS_KEY and member not in FRAME_SURFACE:
+        return None
+    if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
+        return None
+    return receiver
+
+
+def assert_exact_class_vars():
+    """A module attribute is the one attribute the audit can see through.
+
+    Drives ``resolve_origin`` on a real attribute of a real module, so a
+    resolver that stopped reading modules would fail here rather than quietly
+    widening every module attribute to an unproven origin.
+    """
     function = ast.parse(
         "def do_tabs(args):\n"
-        "    return vars(FrameRoutes)\n").body[0]
-    value = frame_value(
-        function.body[0].value, function, {'FrameRoutes': FrameRoutes}, {})
-    assert isinstance(value, type(FrameRoutes.__dict__))
-    assert value['active'] is sys._getframe
-
-
-def assert_total_expression_partition():
-    universe = _expression_node_types()
-    classified = {
-        node_type: expression_type_disposition(node_type)
-        for node_type in universe}
-    decided = {
-        node_type for node_type, disposition in classified.items()
-        if disposition == EXPRESSION_DECIDED}
-    outside = set(universe) - decided
-    assert DECIDED_EXPRESSION_TYPES <= universe
-    assert decided == set(DECIDED_EXPRESSION_TYPES)
-    assert decided.isdisjoint(outside)
-    assert decided | outside == set(universe)
-    assert set(classified.values()) == {EXPRESSION_DECIDED, EXPRESSION_OUTSIDE}
-    assert {ast.Compare, ast.Tuple} <= outside
-
-
-def _documented_semantic_claims(document):
-    normalized = ' '.join(document.split())
-    claims = set()
-    prefix, suffix = 'Semantic claims are ', '. Semantic claims end.'
-    while prefix in normalized:
-        _, _, remainder = normalized.partition(prefix)
-        block, marker, normalized = remainder.partition(suffix)
-        if not marker:
-            return frozenset()
-        claims.update(block.split(' | '))
-    return frozenset(claims)
-
-
-def _documented_known_gap_families(document):
-    normalized = ' '.join(document.split())
-    prefix = 'Current named known-gap control families are '
-    suffix = '. Each named family'
-    _, marker, remainder = normalized.partition(prefix)
-    if not marker:
-        return frozenset()
-    families, marker, _ = remainder.partition(suffix)
-    if not marker:
-        return frozenset()
-    return frozenset(families.replace(', and ', ', ').split(', '))
-
-
-def _document_drift(documents, controlled, extractor):
-    controlled = set(controlled)
-    drift = {}
-    for module, document in documents.items():
-        documented = extractor(document)
-        unsupported = sorted(documented - controlled)
-        undocumented = sorted(controlled - documented)
-        if unsupported or undocumented:
-            drift[module] = {
-                'unsupported': unsupported, 'undocumented': undocumented}
-    return drift
-
-
-def assert_docstrings_match(documents, rule_phrases, semantic_claims,
-                            known_gap_families, known_gap_cases):
-    required_documents = {'test_cli_arg_audit', '_cli_arg_audit_support',
-                          '_cli_arg_audit_resolver'}
-    document_drift = {
-        'missing': sorted(required_documents - documents.keys()),
-        'unknown': sorted(documents.keys() - required_documents)}
-    assert not any(document_drift.values()), document_drift
-    missing = {
-        module: [phrase for phrase in rule_phrases
-                 if phrase not in ' '.join(document.split())]
-        for module, document in documents.items()}
-    missing = {module: claims for module, claims in missing.items() if claims}
-    assert missing == {}, missing
-    semantic_drift = _document_drift(
-        documents, semantic_claims, _documented_semantic_claims)
-    assert semantic_drift == {}, semantic_drift
-    control_families = {family for family, _ in known_gap_families}
-    route_drift = _document_drift(
-        documents, control_families, _documented_known_gap_families)
-    assert route_drift == {}, route_drift
-    controls = {case[0] for case in known_gap_cases}
-    mapped = [
-        control for _, family_controls in known_gap_families
-        for control in family_controls]
-    duplicates = sorted({
-        control for control in mapped if mapped.count(control) > 1})
-    assert duplicates == [], duplicates
-    assert set(mapped) == controls, {
-        'unmapped': sorted(controls - set(mapped)),
-        'unknown': sorted(set(mapped) - controls)}
+        "    return sys._getframe\n").body[0]
+    unresolved = object()
+    value = resolve_origin(
+        function.body[0].value, function, {'sys': sys}, unresolved,
+        lambda _function, _name: False)
+    assert value is sys._getframe
+    assert resolve_origin(
+        ast.parse('text.upper', mode='eval').body, function,
+        {'text': 'not a module'}, unresolved,
+        lambda _function, _name: False) is unresolved
