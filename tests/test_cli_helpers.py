@@ -19,9 +19,13 @@ from _cli_helpers import cli_env  # noqa: E402
 
 # The names a subcommand must not read from us: the DAEDALUS_ configuration
 # vars, the bare TOKEN the CLI resolves as a fallback, and the stream encoding
-# it applies its own rule to.
+# it applies its own rule to. The first group is a sample, not the rule — the
+# rule is the prefix, and the last case below is what pins it.
 BRIDGE_NAMES = ('DAEDALUS_TOKEN', 'DAEDALUS_URL', 'DAEDALUS_MCP_PORT')
 RUNNER_NAMES = ('TOKEN', 'ID', 'PYTHONIOENCODING')
+# A real CLI var the sample never names: a helper that filtered these three
+# by name instead of by prefix is caught here rather than passing every case.
+OFF_LIST_NAME = 'DAEDALUS_DIR'
 NEUTRAL = 'CLIHELPER_SUITE_NEUTRAL'
 
 
@@ -33,7 +37,7 @@ def _runner_environment():
     reads the same on a developer machine and on a bare CI leg.
     """
     seeded: dict[str, str] = dict.fromkeys(
-        BRIDGE_NAMES + RUNNER_NAMES + (NEUTRAL,), 'seeded')
+        BRIDGE_NAMES + RUNNER_NAMES + (OFF_LIST_NAME, NEUTRAL), 'seeded')
     saved = {name: os.environ[name] for name in seeded if name in os.environ}
     os.environ.update(seeded)
     try:
@@ -50,6 +54,13 @@ def test_the_cli_environment_carries_no_bridge_configuration_of_our_own(tmp):
         env = cli_env()
     leaked = [name for name in BRIDGE_NAMES + RUNNER_NAMES if name in env]
     assert leaked == [], leaked
+
+
+def test_a_bridge_name_the_sample_never_names_is_stripped_too(tmp):
+    del tmp
+    with _runner_environment():
+        env = cli_env()
+    assert OFF_LIST_NAME not in env, OFF_LIST_NAME
 
 
 def test_the_cli_environment_keeps_the_rest_of_our_environment(tmp):

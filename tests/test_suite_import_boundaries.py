@@ -34,11 +34,12 @@ being dropped.
 
 A string constant is a string and `exec` is not one of the four dynamic
 callees, so `exec('import test_sibling')` executes the sibling and the
-rule does not see it. That is the shape of the fourteen sibling-suite
-import string constants in tests/_coverage_mutation_specs.py and the
-one in tests/_mutation_sweep.py: a mutation child runs each to invoke a
-named test, which is a suite used as a library rather than a
-private-helper grab.
+rule does not see it. The tree carries constants of that shape — a
+mutation child runs one to invoke a named test, which is a suite used
+as a library rather than a private-helper grab — and none is reported.
+The count is deliberately not given: it is a property of the tree
+rather than of this rule, so a list of files and totals here would read
+as complete and stop being true at the next mutation spec.
 
 `ALLOWED` records the sites this branch deferred to #1160, and it is
 pinned on both sides: a row cannot be dropped without the site it names
@@ -50,12 +51,12 @@ fabricated row in `test_the_allowance_table_is_pinned_on_both_sides` is
 that silence, and a reader of each reason is what keeps the table
 honest.
 
-`tests/test_helper_shadow_boundaries.py` is the sibling control, and
-neither file names the other: it reports a name a suite binds locally
-that a shared-helper import also binds. One class is open to both — a
-helper a module re-implements under a shared helper's name while
-importing nothing, which is no shadow (there is no import to shadow) and
-no sibling-suite import (no suite is imported).
+`tests/test_helper_shadow_boundaries.py` is the sibling control: it
+reports a name a suite binds locally that a shared-helper import also
+binds. One class is open to both — a helper a module re-implements
+under a shared helper's name while importing nothing, which is no
+shadow (there is no import to shadow) and no sibling-suite import (no
+suite is imported).
 """
 import ast
 import re
@@ -306,7 +307,7 @@ def _stale_message(stale):
         ['an allowance row is stale: it names a site that is no longer an '
          'offender, so the table shrank without the row:']
         + [f'  {row.path} -> {row.module} ({row.reason})' for row in stale]
-        + ['drop the row; the table only ever shrinks.'])
+        + ['drop the row; the site it names is no longer an offender.'])
 
 
 def _disagreements_message(unallowed, stale):
@@ -366,6 +367,9 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
         ('test_f.py', 'from . import test_sibling', ['test_sibling']),
         ('test_g.py', 'from .test_sibling import SIBLING', ['test_sibling']),
         ('test_h.py', 'import json, test_sibling', ['test_sibling']),
+        # An alias on a from-import: same sibling, different spelling.
+        ('test_x.py', 'from test_sibling import SIBLING as sib',
+         ['test_sibling']),
         # A nested import still executes the sibling's body.
         ('test_nested.py', _mod('def load():', '    import test_sibling'),
          ['test_sibling']),
@@ -433,6 +437,13 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
     for filename, _text, want in cases:
         relpath = 'tests/' + filename
         assert sorted(got.get(relpath, [])) == sorted(want), (relpath, got)
+    # The loop reads the module each case names; the alias is the other half
+    # of an aliased spelling, and a report that dropped the `as` clause would
+    # name a clause the source does not carry. Nothing above would see it.
+    reported = {item.path: item.spelling for item in findings}
+    assert reported['tests/test_b.py'] == 'import test_sibling as sib'
+    assert reported['tests/test_x.py'] == (
+        'from test_sibling import SIBLING as sib')
 
 
 def test_the_allowance_table_is_pinned_on_both_sides(tmp):
