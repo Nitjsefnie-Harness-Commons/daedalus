@@ -13,6 +13,8 @@ nothing and asserts nothing.
 """
 from pathlib import Path
 
+from _repo import git_index
+
 # A launcher-shaped module, written as the source a control plants. It hangs
 # forever, so a bound handed to its `wait` is a bound that fires; and it
 # catches the expiry and raises a class of its own, so it is the PERMITTED
@@ -54,10 +56,18 @@ def write_source_tree(root, files):
     The planted subdirectory a control needs — `pkg/child.py` — is created
     on the way, because the point of several controls is a module below the
     top level of the suite directory.
+
+    The tree is indexed as well as written, because the scope derivation
+    enumerates through `tests/_repo.py` `iter_tree_files` and that reads the
+    index; a throwaway root that is not a checkout has no tracked paths, and
+    the derivation would find nothing to audit. `init` plus `add` is enough:
+    no commit is made or needed.
     """
     root = Path(root)
     for relative, text in files.items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding='utf-8')
+    git_index(root, 'init', '-q')
+    git_index(root, 'add', '-A', '--', '.')
     return root

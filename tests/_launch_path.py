@@ -15,6 +15,9 @@ import inspect
 import subprocess
 from typing import TypeGuard
 
+from _coverage_memo import analysed
+from _repo import iter_tree_files
+
 LAUNCHER_MODULES = ('_noderun.py', '_stream_fake.py')
 CHILD_ENDING_MODULES = ('_processtree.py',)
 
@@ -33,6 +36,7 @@ _CHILD_PARAMETERS = {}
 _TREES = {}
 _BODIES = {}
 _IMPORTS = {}
+_SOURCES = {}
 
 
 _SUBPROCESS_MEMBERS = (
@@ -302,19 +306,81 @@ def _launch_bound_names(body, receivers, direct, aliases=()):
     return bound
 
 
+def _parse_analysis(relative, source, keeps):
+    """One module's parse, the functions it defines and what it imports.
+
+    Every derivation of the path re-reads the same tree, and each control
+    that drives `census()` derives it again, so the parse goes through the
+    repository's memo rather than being repeated per derivation. The content
+    is half the key, so a control that plants a defect by editing a file is
+    parsed again rather than served the pre-plant tree.
+    """
+    tree = ast.parse(source, filename=relative)
+    keeps.append((tree, _function_bodies(tree), _imported(tree)))
+    return []
+
+
+def _binding_analysis(relative, source, keeps):
+    """What each of this module's functions binds a launcher to, and calls.
+
+    `_handed_a_child` asks this of every module already on the path, once
+    for every module it has not yet placed, so recomputing it there read
+    the same forty-odd files several hundred times over: 240 s of a 248 s
+    `census()`. The answer is a function of this file and nothing else —
+    the module being asked about enters only as the name set the call is
+    matched against, which the caller supplies — so it is memoised per
+    (analyser, path, content) like every other per-file read here.
+    """
+    tree = ast.parse(source, filename=relative)
+    receivers = _subprocess_receivers(tree)
+    direct = _from_import_launches(tree)
+    bound, calls = {}, {}
+    for name, body in _function_bodies(tree).items():
+        aliases = _member_aliases(body, receivers, direct)
+        bound[name] = frozenset(
+            _launch_bound_names(body, receivers, direct, aliases))
+        calls[name] = tuple(
+            (_callee_name(call),
+             frozenset(argument.id for argument in call.args
+                       if isinstance(argument, ast.Name)))
+            for call in ast.walk(body) if _is_call(call))
+    keeps.append((bound, calls))
+    return []
+
+
+def _memoised(analysis, relative, source):
+    """`analysis(relative, source, keeps)`, once per (analyser, path, content).
+
+    The payload rides out through `keeps` because these two readers have no
+    violations: the memo stores a return value and replays the appends, and
+    the thing worth keeping is the analysis itself.
+    """
+    keeps = []
+    analysed(analysis, relative, source, keeps)
+    return keeps[0]
+
+
+def _bindings(relative):
+    """`(function -> launch-bound names, function -> its calls)`, memoised."""
+    return _memoised(_binding_analysis, relative, _SOURCES[relative])
+
+
 def _parse_all(tests_dir):
     """Parse the tree once and keep it for the whole closure."""
-    global _TREES, _BODIES, _IMPORTS  # noqa: PLW0603
-    _TREES, _BODIES, _IMPORTS = {}, {}, {}
-    for path in sorted(tests_dir.rglob('*.py')):
+    global _TREES, _BODIES, _IMPORTS, _SOURCES  # noqa: PLW0603
+    _TREES, _BODIES, _IMPORTS, _SOURCES = {}, {}, {}, {}
+    for path in sorted(iter_tree_files(tests_dir)):
         relative = path.relative_to(tests_dir).as_posix()
+        source = path.read_text(encoding='utf-8')
         try:
-            tree = ast.parse(path.read_text(encoding='utf-8'))
+            tree, bodies, imports = _memoised(
+                _parse_analysis, relative, source)
         except SyntaxError:
             continue
         _TREES[relative] = tree
-        _BODIES[relative] = _function_bodies(tree)
-        _IMPORTS[relative] = _imported(tree)
+        _BODIES[relative] = bodies
+        _IMPORTS[relative] = imports
+        _SOURCES[relative] = source
     return _BODIES
 
 
@@ -404,21 +470,15 @@ def _handed_a_child(relative):
     the process the launch returned.
     """
     names = set(_BODIES[relative])
-    for other, in_path in _KNOWN.items():
-        tree = _TREES[other]
-        receivers = _subprocess_receivers(tree)
-        direct = _from_import_launches(tree)
-        for name in in_path:
-            body = _BODIES[other][name]
-            aliases = _member_aliases(body, receivers, direct)
-            bound = _launch_bound_names(body, receivers, direct, aliases)
-            if not bound:
+    if not names:
+        return False
+    for other in _KNOWN:
+        bound, calls = _bindings(other)
+        for name, held in bound.items():
+            if not held:
                 continue
-            for call in ast.walk(body):
-                if not _is_call(call) or _callee_name(call) not in names:
-                    continue
-                if bound & {argument.id for argument in call.args
-                            if isinstance(argument, ast.Name)}:
+            for callee, arguments in calls[name]:
+                if callee in names and held & arguments:
                     return True
     return False
 
@@ -435,14 +495,11 @@ def _child_parameters():
     """
     filled = {}
     for other, in_path in _KNOWN.items():
-        tree = _TREES[other]
-        receivers = _subprocess_receivers(tree)
-        direct = _from_import_launches(tree)
-        constants = _module_constants(tree)
+        constants = _module_constants(_TREES[other])
+        held_by_function, _ = _bindings(other)
         for name in in_path:
             body = _BODIES[other][name]
-            aliases = _member_aliases(body, receivers, direct)
-            bound = _launch_bound_names(body, receivers, direct, aliases)
+            bound = held_by_function[name]
             for call in ast.walk(body):
                 if not _is_call(call):
                     continue
