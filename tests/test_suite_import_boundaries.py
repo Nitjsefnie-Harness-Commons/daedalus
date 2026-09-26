@@ -21,27 +21,34 @@ behaviour` inside triple-quoted synthetic-violation fixtures, and a text
 rule reports all three as offenders when none of them executes.
 
 What the control does not see, by design: a `from X import *` names
-nothing the rule can enumerate, so only its `X` is examined; a module name
-built at runtime rather than written as a literal; a suite spelled by
-directory as well as stem, which the literal clause does not match; a
-suite whose stem falls outside `^test_[a-z0-9_]+$`, such as one carrying
-an upper-case letter; a sibling's private reached by copy rather than by
+nothing the rule can enumerate, so only its `X` is examined; a module
+name built at runtime rather than written as a literal; a suite spelled
+`tests.test_x` inside a dynamic literal, which `_DYNAMIC` admits no dot
+for though the static clause's `_leaf` drops that prefix; a suite whose
+stem falls outside `^test_[a-z0-9_]+$`, such as one carrying an
+upper-case letter; a sibling's private reached by copy rather than by
 import; and a name shaped like a suite that no tracked tests module
 provides, which is a broken import rather than this defect. A module the
 detector cannot parse fails the control, naming the file, rather than
 being dropped.
 
-`ALLOWED` records the sites this branch deferred to #1160, and a row's
-reason says which: a fix that would edit a file another change owns, or
-one that would make this change harder to review. The table is pinned on
-both sides, so a row cannot be dropped to expose a site — the site is a
-finding again the moment the row is gone — and a row cannot outlive the
-site it names, which is reported as stale. The pin is on the site rather
-than on the row: a row naming a live offender silences it, and nothing
-here reads a row's reason, so the table CAN grow to cover this branch's
-own work. The fabricated row in
-`test_the_allowance_table_is_pinned_on_both_sides` is that silence, and
-what keeps the table honest is a reader of each reason rather than a check.
+A string constant is a string and `exec` is not one of the four dynamic
+callees, so `exec('import test_sibling')` executes the sibling and the
+rule does not see it. That is the shape of the fourteen sibling-suite
+import string constants in tests/_coverage_mutation_specs.py and the
+one in tests/_mutation_sweep.py: a mutation child runs each to invoke a
+named test, which is a suite used as a library rather than a
+private-helper grab.
+
+`ALLOWED` records the sites this branch deferred to #1160, and it is
+pinned on both sides: a row cannot be dropped without the site it names
+becoming a finding again, and a row cannot outlive its site, which is
+reported as stale. The pin is on the site rather than on the row — a row
+naming a live offender silences it, and nothing here reads a row's
+reason, so the table CAN grow to cover this branch's own work. The
+fabricated row in `test_the_allowance_table_is_pinned_on_both_sides` is
+that silence, and a reader of each reason is what keeps the table
+honest.
 
 `tests/test_helper_shadow_boundaries.py` is the sibling control, and
 neither file names the other: it reports a name a suite binds locally
@@ -206,12 +213,7 @@ def _from_spelling(node):
 
 
 def _scan(tree, own, stems):
-    """Every sibling-suite import this module executes, with its spelling.
-
-    `own` is the file's own stem and `stems` every tracked tests stem, so
-    a suite importing itself and a name shaped like a suite that no
-    tracked module provides are both excluded.
-    """
+    """Every sibling-suite import this module executes, with its spelling."""
     hits = []
 
     def sibling(name):
@@ -273,8 +275,6 @@ def _import_findings(sources):
 def _partition(findings, table):
     """(unallowed, stale) — the two ways the table disagrees with the tree.
 
-    Pinned on both sides, so the table can neither grow past the sites it
-    holds nor keep a row whose site an owning merge has already removed.
     One finding per site is reported, the first in path-then-line order,
     so a file importing one sibling at two lines is named once.
     """
@@ -471,11 +471,11 @@ def test_the_allowance_table_is_pinned_on_both_sides(tmp):
         assert fragment in message, message
     assert _disagreements_message(unallowed, stale) == message
 
-    # The state this branch actually sits in: an unallowed site in a file
-    # another seat holds, beside a row in the same table that has gone
-    # stale. Asserting the two lists in sequence made the stale half
-    # unreachable while the unallowed site existed, so a stale row was
-    # reported only when nothing else was wrong. One failure names both.
+    # The state a held file produces: an unallowed site beside a row in the
+    # same table that has gone stale. Asserting the two lists in sequence
+    # made the stale half unreachable while the unallowed site existed, so a
+    # stale row was reported only when nothing else was wrong. One failure
+    # names both.
     _fabricate(root, sources, 'tests/test_importer_two.py',
                _mod('import test_sibling'))
     compile(sources['tests/test_importer_two.py'], 'test_importer_two.py',
