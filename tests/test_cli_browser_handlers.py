@@ -81,7 +81,6 @@ def test_do_cookies_asks_with_no_filter_and_sends_neither_field(tmp):
 
 
 def test_do_cookies_carries_the_domain_only_when_it_was_given(tmp):
-    """`-d` adds `domain`; the sibling `url` filter stays off."""
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com'}
@@ -97,7 +96,6 @@ def test_do_cookies_carries_the_domain_only_when_it_was_given(tmp):
 
 
 def test_do_cookies_carries_the_url_only_when_it_was_given(tmp):
-    """`-u` adds `url`, and `domain` is still absent on this arm."""
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/'}
@@ -111,7 +109,6 @@ def test_do_cookies_carries_the_url_only_when_it_was_given(tmp):
 
 
 def test_do_cookies_carries_both_filters_when_both_were_given(tmp):
-    """The two filters are independent; asking for both sends both."""
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com',
@@ -221,10 +218,8 @@ def test_do_cookies_exits_with_the_error_the_extension_reported(tmp):
 # ── do_set_cookie ────────────────────────────────────────────────────
 
 def test_do_set_cookie_sends_the_three_required_fields_and_nothing_else(tmp):
-    """The bare arm: url, name and value, with every option off the body.
-
-    The options are pinned by their absence here, because the sibling test
-    that turns all six on cannot tell a handler that always sent them.
+    """Every option is pinned by its absence here, because the sibling
+    test that turns all six on cannot tell a handler that always sent them.
     """
     del tmp
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,

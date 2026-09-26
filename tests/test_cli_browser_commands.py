@@ -92,7 +92,6 @@ def test_do_cdp_sends_empty_params_and_neither_option_when_none_given(tmp):
 
 
 def test_do_cdp_sends_the_params_it_was_given(tmp):
-    """`-p` travels as the value the parser decoded, object or not."""
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.navigate',
             'params': {'url': 'https://example.com/'}, 'token': TOK,
@@ -127,7 +126,6 @@ def test_do_cdp_carries_the_chrome_tab_only_when_it_was_given(tmp):
 
 
 def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
-    """`--keep-session` adds `keep_session` and nothing else."""
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Profiler.enable',
             'params': {}, 'token': TOK, 'tab': 'extension',
@@ -143,7 +141,6 @@ def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
 
 
 def test_do_cdp_renders_the_header_cells_the_result_carries(tmp):
-    """A result with a tab, a channel and a duration prints all three cells."""
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Runtime.evaluate',
             'params': {}, 'token': TOK, 'tab': 'extension'}
@@ -160,7 +157,6 @@ def test_do_cdp_renders_the_header_cells_the_result_carries(tmp):
 
 
 def test_do_cdp_prints_the_whole_envelope_as_json_when_raw(tmp):
-    """`--raw` hands the machine the envelope and prints no header line."""
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
             'token': TOK, 'tab': 'extension'}
@@ -533,7 +529,6 @@ def test_do_fetch_timings_counts_the_whole_buffer_not_the_tail_it_shows(tmp):
 # ── do_ext_self_reload ───────────────────────────────────────────────
 
 def test_do_ext_self_reload_reports_the_version_it_reloaded_from(tmp):
-    """The one call, the version it echoes, and the reconnect sentence."""
     del tmp
     recorded, out = run_cli(
         ['ext-self-reload'], [{'version': '2.7.1'}],
