@@ -34,14 +34,17 @@ whatever that callable would have done. WHICH read forms pay that is the
 member's own split, not the domain's, and `_SILENT` carries it per member.
 
 **Not this suite's bucket.** A store path that folds an unreadable source
-into a `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`, `update(...)`,
-`update(**...)`, a plain assignment -- leaves the value at the key already
-joined to an unprovable sender. A bare routed-lambda call through it still
-reads clean, because a `tab` living in the callee's body is not a reporting
-shape for an unprovable sender. That is a different mechanism, tracked as
-1010, and none of those members is a row here -- except through a source the
-model already holds unaccountable, which no store folds at all and which
-`_SILENT` carries by read form.
+into its OWNER's `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`,
+`update(...)`, `update(**...)`, a plain assignment -- leaves the value at the
+key already joined to an unprovable sender. A bare routed-lambda call through
+it still reads clean, because a `tab` living in the callee's body is not a
+reporting shape for an unprovable sender. That is a different mechanism,
+tracked as 1010, and a member reached only that way is not in this suite's
+bucket. What separates the `_SILENT` rows from those is WHICH NAME carries
+the fold: a store that marks its owner answers joined at the key being read,
+and a store that only propagates an unknown length from a source reached
+through a name leaves the fold on the SOURCE name, so the owner's own reads
+answer clean. Those members are `_SILENT`, split by read form.
 """
 import sys
 from pathlib import Path
@@ -185,6 +188,7 @@ _ACCOUNTED = {
 # starred source the other way round.
 _CONTAINER_READS = ('get', 'setdefault')
 _SUBSCRIPT = ('subscript',)
+_ALL_READS = tuple(sorted(_READS))
 
 # The rest of the domain, at the polarity that still reads silent. A key the
 # model recorded while it could still see the value, and an unreadable source
@@ -216,13 +220,14 @@ _SILENT = {
     # store never reaches `_mark_unprovable` on the OWNER: the container lands
     # at `items=[]`, `length=None`, no unknown-key slot, and every read of it
     # answers a clean absence. The container reads join anyway, off the marked
-    # SOURCE name. The subscript is silent on its own clean row, so the repair
-    # there is FREE -- not 1010's invoke arm, where the `tab` lives in the
-    # callee's body rather than at this call site. The starred rows are the
-    # same false green as 1162 and carry it; the two bare rows name no issue
-    # because the repair is free and the filing is with the maintainer.
-    # `dict(<name>)` is the same defect silent on all three forms, filed as
-    # 1163.
+    # SOURCE name, so the subscript is the only silent one. Joining it is one
+    # factored predicate at `at_position`, and not 1010's invoke arm, where the
+    # `tab` lives in the callee's body rather than at this call site. It is not
+    # free: measured on a throwaway export, it moves all five `_SUBSCRIPT`
+    # rows' clean subscript from `(0, 0)` to `(0, 1)`, and the width-8 state
+    # count from 53 to 674, which fails
+    # `test_conditional_ordinary_stores_scale_linearly` at `(62, 674)`. The two
+    # bare rows name no issue because the filing is with the maintainer.
     'update-unaccountable-name': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(o)', None, _SUBSCRIPT, (0, 1)),
     'update-unaccountable-name-star': (
@@ -232,6 +237,14 @@ _SILENT = {
         (0, 1)),
     'ior-unaccountable-name': (
         _UNACCOUNTABLE + '\nd = {}\nd |= o', None, _SUBSCRIPT, (0, 1)),
+    # The same name-source defect with a constructor store: `_dict_call_value`
+    # folds no item out of an uncounted source and hands back no container, so
+    # every form answers a clean absence. Filed as 1163, and the clean cost is
+    # `(0, 0)` on all three, so the fourth field carries nothing.
+    'dict-name': (
+        _UNACCOUNTABLE + '\nd = dict(o)', 1163, _ALL_READS, (0, 0)),
+    'dict-name-star': (
+        _UNACCOUNTABLE + '\nd = dict(**o)', 1163, _ALL_READS, (0, 0)),
 }
 
 
