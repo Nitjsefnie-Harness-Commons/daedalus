@@ -96,6 +96,14 @@ import subprocess
 def go():
     operator.call((yield from subprocess.run), 1)
 """, 'operator.call('),
+        ('conditional orelse', """import operator
+import subprocess
+operator.call(None if flag else subprocess.run, 1)
+""", 'operator.call('),
+        ('conditional test', """import operator
+import subprocess
+operator.call(plain() if subprocess.run else other(), 1)
+""", 'operator.call('),
         ('assigned conditional', """import subprocess
 go = subprocess.run if flag else None
 """, 'go = '),
@@ -270,11 +278,11 @@ operator.call(
 
 
 def _comprehension_cases():
-    """The two halves of a comprehension, in a position the guard judges.
+    """Every position of a comprehension the guard judges.
 
-    The walk opens the element a comprehension repeats; the iterable is
-    the comprehension arm's own business, which is what makes the walk's
-    not opening it a fact rather than a gap.
+    The walk opens the element a comprehension repeats and its
+    conditions; the iterable is the comprehension arm's own business, so
+    the three meet without the walk having to reach it twice.
     """
     return (
         ('element carries a launcher', """import operator
@@ -291,6 +299,86 @@ go = [subprocess.run for x in xs]
         ('iterable carries a launcher, bound', """import subprocess
 go = [x for x in [subprocess.run]]
 """, 'go = '),
+        ('condition carries a launcher', """import operator
+import subprocess
+operator.call([x for x in xs if subprocess.run], 1)
+""", 'operator.call('),
+        ('two conditions, one carries', """import operator
+import subprocess
+operator.call([x for x in xs if x and subprocess.run], 1)
+""", 'operator.call('),
+        ('dictcomp condition carries', """import operator
+import subprocess
+operator.call({x: x for x in xs if subprocess.run}, 1)
+""", 'operator.call('),
+        ('setcomp condition carries', """import operator
+import subprocess
+operator.call({x for x in xs if subprocess.run}, 1)
+""", 'operator.call('),
+        ('genexp condition carries', """import operator
+import subprocess
+operator.call((x for x in xs if subprocess.run), 1)
+""", 'operator.call('),
+        ('condition carries a launcher, bound', """import subprocess
+go = [x for x in xs if subprocess.run]
+""", 'go = '),
+    )
+
+
+def _comprehension_free_cases():
+    """Comprehensions whose conditions carry nothing stay clean."""
+    return (
+        ('condition calls a builtin', """import json
+json.loads([x.strip() for x in text.split(',')])
+"""),
+        ('condition compares', """import json
+json.dumps({x: x for x in text if x > ','})
+"""),
+        ('condition is a bound name', """import json
+json.dumps({x for x in text if wanted})
+"""),
+        ('condition yields from a call', """import json
+json.loads([x for x in text.split(',') if x.strip() != ''])
+"""),
+    )
+
+
+def _opened_form_free_cases():
+    """A launcher-free spelling of every class the walk now opens.
+
+    A matcher that widens has to widen its negative table, so each
+    opened class gets a spelling that carries nothing. They differ from
+    one another on purpose: two rows sharing a spelling prove only that
+    one of them does.
+    """
+    return (
+        ('conditional', """import operator
+operator.call(1 if flag else 2, 1)
+"""),
+        ('boolean operator', """import operator
+operator.call(flag and 2, 1)
+"""),
+        ('lambda', """import operator
+operator.call(lambda: 2, 1)
+"""),
+        ('f-string', """import operator
+import subprocess
+go = f"{name}"
+"""),
+        ('slice', """import operator
+operator.call(d[0:2], 1)
+"""),
+        ('awaited', """import operator
+async def go():
+    operator.call(await 2, 1)
+"""),
+        ('yielded', """import operator
+def go():
+    operator.call((yield 2), 1)
+"""),
+        ('walrus', """import operator
+operator.call((held := 2), 1)
+"""),
     )
 
 

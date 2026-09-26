@@ -9,14 +9,17 @@ plants into a copied test module, so the refusal is proved against real
 code and not only against a source string. That table now lives in
 tests/_coverage_mutation_specs.py, and the planted snippets with it.
 """
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _carrier_cases import (  # noqa: E402
     _BESPOKE, _bare_form, _callee_chain_cases, _comprehension_cases,
-    _grammar_forms, _receiver_atom_cases, _receiver_carrier_cases,
+    _comprehension_free_cases, _grammar_forms, _opened_form_free_cases,
+    _receiver_atom_cases, _receiver_carrier_cases,
     _transforming_cases, _value_preserving_cases)
+import _coverage_guard  # noqa: E402
 from _coverage_guard import (  # noqa: E402
     _BINDING_MESSAGE, _synthetic_violations)
 
@@ -379,6 +382,11 @@ def test_a_transforming_form_stays_an_atom(tmp):
     _accepted(_transforming_cases())
 
 
+def test_a_launcher_free_spelling_of_an_opened_form_stays_clean(tmp):
+    del tmp
+    _accepted(_opened_form_free_cases())
+
+
 def test_a_receiver_that_carries_a_launcher_is_refused(tmp):
     del tmp
     _refused(_receiver_carrier_cases())
@@ -399,6 +407,11 @@ def test_both_halves_of_a_comprehension_are_judged(tmp):
     _refused(_comprehension_cases())
 
 
+def test_a_comprehension_condition_that_carries_nothing_stays_clean(tmp):
+    del tmp
+    _accepted(_comprehension_free_cases())
+
+
 def test_every_grammar_expression_form_is_classified(tmp):
     """A form no class names is refused, never read as carrying nothing."""
     from _coverage_bindings import (
@@ -409,21 +422,105 @@ def test_every_grammar_expression_form_is_classified(tmp):
     unclassified = _grammar_forms() - classified
     assert not unclassified, sorted(
         form.__name__ for form in unclassified)
-    for form in _grammar_forms() & classified:
+    for form in classified:
         parts = list(_carried_parts(_bare_form(form)))
         assert _UNRECOGNISED not in parts, form.__name__
 
 
-def test_the_boundary_docstring_names_what_the_walk_does(tmp):
-    """The walk's prose is a claim about the code beside it."""
-    from _coverage_bindings import (
-        _CARRIED_FIELDS, _LEAVES, _carried_parts)
+def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
+    """A guard's prose is a claim about the code beside it, in both files.
+
+    The lists come from the table rather than from the prose, so a form
+    swapped across the line or left out of a docstring fails here, and
+    the two claims a reader cannot check by eye — the comprehension's
+    conditions and the receiver's subscript carry — are held to the code
+    that has to back them.
+    """
+    from _coverage_bindings import _carried_parts
 
     del tmp
-    prose = _carried_parts.__doc__ or ''
-    for form in {*_BESPOKE, *_CARRIED_FIELDS, *_LEAVES}:
-        assert form.__name__ in prose, form.__name__
-    assert 'refused' in prose, prose
+    opened, leaves = _classification()
+    for prose in _carried_parts.__doc__ or '', _GUARD_PROSE:
+        flat = _squash(prose)
+        # The lists, spelled out and in order: a form moved to the other
+        # clause, or left out of the prose, changes what the two sides
+        # have to say and fails here rather than passing on vocabulary.
+        assert _squash(opened) in flat, opened
+        assert _squash(leaves) in flat, leaves
+        # The claim, whole and not merely its opening words: a paragraph
+        # that keeps "refused" while inverting the sentence is the false
+        # green this replaces, and only the full claim catches it.
+        assert _squash(FAIL_CLOSED) in flat, prose
+        assert ('conditions' in flat) == _opens_conditions(), prose
+    assert _squash(RECEIVER_CARRY) in _squash(_GUARD_PROSE), _GUARD_PROSE
+    assert _receiver_carries_a_subscript(), _BINDING_MESSAGE
+    assert _an_unrecognised_form_is_refused(), 'the fail-closed branch'
+
+
+def _an_unrecognised_form_is_refused():
+    """Whether a form in neither class is refused rather than read clean.
+
+    A subclass stands in for the expression form a later Python adds:
+    the walk keys its table on the exact type, so a subclass is the one
+    input the table cannot name even by accident. It is driven straight
+    into the walk and both predicates, because no parser emits it.
+    """
+    from _coverage_bindings import (
+        _UNRECOGNISED, _carried_parts, _carries_launch_value,
+        _carries_launcher)
+    from _coverage_guard import _ModuleFacts
+
+    class _Unrecognised(ast.IfExp):
+        """The form a later Python adds, which this walk cannot name."""
+
+    node = _Unrecognised(test=ast.Name(id='subprocess'),
+                         body=ast.Name(id='x'), orelse=ast.Name(id='y'))
+    parts = list(_carried_parts(node))
+    assert _UNRECOGNISED in parts, parts
+    facts = _ModuleFacts(ast.parse('import subprocess'))
+    return (_carries_launch_value(parts, facts)
+            and _carries_launcher(parts, facts))
+
+
+def _squash(text):
+    """A claim as a reader meets it, with the wrapping taken out."""
+    return ''.join(text.split())
+
+
+def _opens_conditions():
+    """Whether the table reaches a comprehension's conditions at all."""
+    from _coverage_bindings import _CARRIED_FIELDS
+
+    return ast.comprehension in _CARRIED_FIELDS
+
+
+def _classification():
+    """The opened and leaf form names, read from the walk's own table.
+
+    Joined and sorted because a docstring states each list as prose, and
+    the control matches it on whitespace alone: a claim that survives a
+    rewrap is the claim a reader reads.
+    """
+    from _coverage_bindings import _CARRIED_FIELDS, _LEAVES
+
+    return (",".join(sorted(form.__name__
+                            for form in {*_BESPOKE, *_CARRIED_FIELDS})),
+            ",".join(sorted(form.__name__ for form in _LEAVES)))
+
+
+def _receiver_carries_a_subscript():
+    """Whether the receiver arm still hands over what its prose claims."""
+    from _coverage_bindings import _call_receiver_parts
+
+    statement = ast.parse("d[subprocess].run(['python3', 'child.py'])").body[0]
+    assert isinstance(statement, ast.Expr)
+    return any(isinstance(part, ast.Name) and part.id == 'subprocess'
+               for part in _call_receiver_parts(statement.value))
+
+
+_GUARD_PROSE = _coverage_guard.__doc__ or ''
+FAIL_CLOSED = 'a form in neither class is refused rather than read as clean'
+RECEIVER_CARRY = 'every subscript the descent consumes'
 
 
 if __name__ == '__main__':
