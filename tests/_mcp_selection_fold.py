@@ -56,6 +56,7 @@ instead. `unresolvable_callee` is what tells the two apart.
 """
 import ast
 import operator
+from typing import TypeGuard
 
 # The container literals a folded value can BE. A call on one raises before
 # it reaches anything, so a callee the fold DECIDED to be one is clean
@@ -63,13 +64,13 @@ import operator
 CONTAINERS = (ast.List, ast.Tuple, ast.Set, ast.Dict,
               ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
-# The containers no subscript can reach at all, whatever key or position it
-# names: a set is not a sequence and a generator is not either, so `s[0]`,
-# `s['a']` and `s[i]` are one `TypeError` between them. A DICT comprehension
-# is not here — it is a mapping, and a key reaches into it — nor is a LIST
-# comprehension, whose length is a runtime value and whose position is
-# genuinely unknown.
-UNINDEXED = (ast.Set, ast.SetComp, ast.GeneratorExp)
+# The decided base values no subscript can reach at all, whatever key or
+# position it names: a set is not a sequence and a generator is not either,
+# so `s[0]`, `s['a']` and `s[i]` are one `TypeError` between them, and a
+# constant is not a container at all. A DICT comprehension is not here — it
+# is a mapping, and a key reaches into it — nor is a LIST comprehension,
+# whose length is a runtime value and whose position is genuinely unknown.
+UNSUBSCRIPTABLE = (ast.Set, ast.SetComp, ast.GeneratorExp, ast.Constant)
 
 
 # The two names the operation map tracks. `DYNAMIC_ATTRIBUTES` are the
@@ -135,7 +136,7 @@ def _index_value(node):
     return None, False
 
 
-def _is_nullary_callable(func):
+def _is_nullary_callable(func: ast.expr) -> TypeGuard[ast.Lambda]:
     """Whether a lambda can be called with NO arguments, so such a call
     produces its own body. A REQUIRED positional or keyword-only parameter
     (no default) blocks it; a vararg, a kwarg and a defaulted parameter do
@@ -295,8 +296,7 @@ def selected_value(node, bound):
     base, decided = selected_value(node.value, bound)
     if not decided:
         return node, False
-    if base is None or isinstance(base, UNINDEXED) \
-            or isinstance(base, ast.Constant) \
+    if base is None or isinstance(base, UNSUBSCRIPTABLE) \
             or _is_the_operation(base, bound):
         return None, True
     if isinstance(base, ast.Dict):

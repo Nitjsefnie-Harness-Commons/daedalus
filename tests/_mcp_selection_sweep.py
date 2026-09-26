@@ -7,14 +7,13 @@ case proves the spelling it names and nothing else, and a marker that cannot
 express a class cannot sweep it: a member of the grammar is the only way a
 class the hand cases miss becomes covered here.
 
-Both duty markers are read off the CONSTRUCTION — which element positions
-the builder placed, and whether the container is one a subscript names a
-position in — so neither borrows the guard's own answer to the question it
-is checking, and neither is a spelling proxy for a value property.
-
-The universe is the PROPERTY and not the builders that happen to exist: a
-class the grammar cannot name has no row, and a class its builders spell one
-way has one row that a fold can get wrong without it showing.
+Every duty marker is read off the CONSTRUCTION — which element positions
+the builder placed, whether the container is one a subscript reaches, and
+whether a projected one can be called at all — so none borrows the guard's
+own answer to the question it is checking, and none is a spelling proxy for
+a value property. The universe is the PROPERTY and not the builders that
+happen to exist: a class the grammar cannot name has no row, and a class its
+builders spell one way has one row a fold can get wrong without it showing.
 """
 import json
 import subprocess
@@ -22,10 +21,6 @@ import sys
 
 import _mcp_import_closure
 
-
-# The sweep. The forms above are a sample; these are the PRODUCT of a
-# grammar over its axes, checked against a runtime oracle, so a spelling
-# nobody thought of is covered too.
 
 _FILLER = '0'
 
@@ -66,8 +61,8 @@ _CONTAINERS = {
         '(' + ', '.join(e) + ',)', range(len(e))),
     # A dict is a MAPPING, so its keys are the operation's own spellings
     # and the string-key step reads one of them. The bare names this used to
-    # emit are not a dict at all, which left a third of the product
-    # un-evaluable and its oracle deciding nothing.
+    # emit are not a dict at all, and a third of the product measured
+    # nothing.
     'a dict literal': lambda e, at, op: (
         '{' + ', '.join(repr(chr(97 + n)) + ': ' + item
                         for n, item in enumerate(e)) + '}', range(len(e))),
@@ -90,9 +85,9 @@ _CONTAINERS = {
     'a nested literal': lambda e, at, op: (
         '[[' + ', '.join(e) + ']]', range(len(e))),
     # The element is a SELECTION, so the fold descends through it and the
-    # next step names a position in what that selection produces. Nesting by
-    # wrapping literals cannot reach this shape, and it is the only container
-    # the fold's recursion over the selected element exists for.
+    # next step names a position in what that produces. Wrapping literals
+    # cannot reach this shape, and it is the only container the fold's
+    # recursion over the selected element exists for.
     'a subscript element': lambda e, at, op: (
         '([' + ', '.join(e) + '][' + str(at) + '])',
         range(len(e))),
@@ -107,19 +102,16 @@ _BRANCHING = ('a conditional', 'a disjunction')
 # select a container, which says nothing about the operation.
 _NESTED = 'a nested literal'
 
-# How the container is WRAPPED. `__call__` is how Python spells "this
-# object is callable", and calling a projection calls the value it
-# projects, so this is a route to the operation the walk reads as a VALUE.
-# The sibling code-eval axis closes it; before this axis the product could
-# not express it at all, which is a blind spot shared with the hand cases.
+# How the container is WRAPPED. `__call__` is how Python spells "this object
+# is callable", so a projection is a route to the operation the walk reads as
+# a VALUE — one the sibling code-eval axis closes and this product could not
+# express at all.
 _PROJECTIONS = ('', '.__call__')
 
 # The steps of the index axis, each with whether the FOLD settles the value
-# it names. A settled step is one the runtime settles too — a position
-# inside the container selects an element, and one outside it, or of
-# another kind, raises — so the form's debt is the ORACLE's class. An
-# unsettled step needs a value the literal does not carry, so its debt is
-# the mention property instead.
+# it names. A settled step is one the runtime settles too, so the form's
+# debt is the ORACLE's class; an unsettled step needs a value the literal
+# does not carry, so its debt is the mention property instead.
 _STEPS = (
     # (name, spelling, settled, the position it names). The position is what
     # says whether a step SELECTS the element a one-element outer list holds
@@ -200,15 +192,15 @@ def _steps(kind, at, width):
     value each names, and the position that step names.
 
     A BARE step — no subscript at all — is generated only for the two
-    branching containers, whose value the oracle's own binding pins to the
-    operation. Everywhere else the container's own value is a container,
-    and this axis is about reading the operation OUT of one, so a bare
-    literal is a shape it does not generate.
+    branching containers, whose value is the operation itself. Everywhere
+    else the container's own value is a container, and this axis is about
+    reading the operation OUT of one.
     """
     far, beyond = 0 if at else width - 1, width + 4
     fields = {'at': at, 'far': far, 'beyond': beyond}
     spellings = [(name, _filled(spelling, at, far, beyond), settled,
-                  fields.get(declared, declared))
+                  fields[declared] if isinstance(declared, str)
+                  else declared)
                  for name, spelling, settled, declared in _STEPS]
     for depth in (1, 2, 3):
         if kind == _NESTED and depth == 1:
@@ -224,12 +216,65 @@ def _steps(kind, at, width):
 
 
 def _nested(source, depth):
-    """The container wrapped in one more literal per extra level, so every
-    level of `depth` is a real selection rather than the first followed by
-    a subscript of whatever it selected."""
+    """One more literal per extra level, so every level of `depth` is a
+    real selection rather than the first followed by a subscript of what it
+    selected."""
     for _ in range(depth - 1):
         source = '[' + source + ']'
     return source
+
+
+def _pinned(kind, depth, settled, named):
+    """What the CONSTRUCTION says the fold settles about this form.
+
+    A function and a set are settled whatever the step names; a container
+    the fold reads is settled by a settled step, and past the first level so
+    is a chain whose element it reads; and the builders it cannot read settle
+    at the outer list only when the step raises short of the element — a
+    position the one-element list does not have, or a key a sequence is not
+    indexed by.
+    """
+    if kind == _FUNCTION and depth == 1 or kind in _UNINDEXED and depth == 1:
+        return True
+    if kind in _DECIDED:
+        return settled and (depth > 1 or kind in _INDEXED)
+    return (settled and depth > 1
+            and (named is None or named not in (0, -1)))
+
+
+def _forms(kind, build, at, width, operation):
+    """Every form one builder at one position contributes, over the depth,
+    step and wrapper axes.
+
+    A branching builder's own value is the operation, so a projection of it
+    reaches; every other builder's is a container, and a container has no
+    `__call__` to project. Past the first level every builder's value is the
+    list `_nested` wrapped it in, so the depth axis makes it a one-element
+    list whatever the builder was. `mentions` is what the STORE side is held
+    to — it reads the container, not whether the store can complete — so it
+    stays the construction's own answer; `carries` is the call side's, and
+    the two part company on exactly the projected container and the projected
+    function.
+    """
+    elements = [_FILLER] * at + [operation] + [_FILLER] * (width - at - 1)
+    for depth, step, spelling, settled, named in _steps(kind, at, width):
+        source, placed = build(elements, at, operation)
+        pinned = _pinned(kind, depth, settled, named)
+        # A branching builder's value IS the operation and a projection of it
+        # reaches; every other builder's is a container at the first level,
+        # which has no `__call__` to project, and the one-element list past
+        # it. A builder that reads the operation out of a literal produces
+        # the FUNCTION, which a projection does reach.
+        projectable = kind in _BRANCHING and depth == 1
+        for projection in _PROJECTIONS:
+            container = _nested(source, depth) + projection
+            yield {
+                'kind': kind, 'step': step, 'depth': depth,
+                'callee': container + spelling, 'container': container,
+                'imports': None, 'mentions': at in placed, 'pinned': pinned,
+                'carries': at in placed and not (
+                    (projection and not projectable)
+                    or (kind == _FUNCTION and depth == 1 and not projection))}
 
 
 def generated():
@@ -249,53 +294,12 @@ def generated():
     for binding, imports, operation in _BINDINGS:
         for kind, build in _CONTAINERS.items():
             for position, at, width in _POSITIONS:
-                elements = ([_FILLER] * at + [operation]
-                            + [_FILLER] * (width - at - 1))
-                for depth, step, spelling, settled, named in _steps(
-                        kind, at, width):
-                    source, placed = build(elements, at, operation)
-                    # A branching builder's own value is the operation, so a
-                    # projection of it reaches; every other builder's is a
-                    # container, and a container has no `__call__` to
-                    # project. Past the first level every builder's value is
-                    # the list `_nested` wrapped it in, so the depth axis
-                    # makes it a one-element list whatever the builder was.
-                    # `mentions` is what the STORE side is held to — it reads
-                    # the container, not whether the store can complete — so
-                    # it stays the construction's own answer.
-                    holds = kind not in _BRANCHING or depth > 1
-                    function = kind == _FUNCTION and depth == 1
-                    # What the fold settles. A function and a set are settled
-                    # whatever the step names. A container the fold reads is
-                    # settled by a settled step, and past the first level so
-                    # is a chain whose element it reads. The builders it
-                    # cannot read settle at the outer list only when the step
-                    # raises short of the element — a position the
-                    # one-element list does not have, or a key a sequence is
-                    # not indexed by.
-                    if function or kind in _UNINDEXED and depth == 1:
-                        pinned = True
-                    elif kind in _DECIDED:
-                        pinned = settled and (depth > 1 or kind in _INDEXED)
-                    else:
-                        pinned = (settled and depth > 1
-                                  and (named is None
-                                       or named not in (0, -1)))
-                    for projection in _PROJECTIONS:
-                        container = _nested(source, depth) + projection
-                        callee = container + spelling
-                        if callee in seen:
-                            continue
-                        seen[callee] = {
-                            'kind': kind, 'binding': binding,
-                            'position': position, 'step': step,
-                            'depth': depth, 'callee': callee,
-                            'imports': imports, 'container': container,
-                            'mentions': at in placed,
-                            'carries': at in placed
-                            and not (projection and holds)
-                            and not (function and not projection),
-                            'pinned': pinned}
+                for form in _forms(kind, build, at, width, operation):
+                    if form['callee'] in seen:
+                        continue
+                    seen[form['callee']] = dict(
+                        form, binding=binding, position=position,
+                        imports=imports)
     return list(seen.values())
 
 
@@ -369,11 +373,9 @@ def _verdict(root, form, stored):
     return 'resolved' if 'pkg/leaf.py' in names else 'silent'
 
 
-# The swept product, per process. Three of the suite's cases ask the same
+# The swept product, per process: three of the suite's cases ask the same
 # question of the same deterministic forms, and scanning every one of them
-# once per case triples a cost no assertion is buying. The verdict depends
-# on the guard as this process loaded it and on nothing outside `root`,
-# whose layout every caller writes the same way.
+# once per case triples a cost no assertion is buying.
 _SWEEPED = {}
 
 
@@ -394,22 +396,19 @@ def sweep(root, forms):
 def duty(form):
     """What the guard owes this form, and the class that decides it.
 
-    A PINNED form — one a subscript names a position in, read by a step that
-    settles — has a value both the oracle and the walk can settle, so its
-    debt is the oracle's class: a form that reaches the operation is
-    resolved to the target or refused, one that does not reach it is silent,
+    A PINNED form (`_pinned`) has a value both the oracle and the walk can
+    settle, so its debt is the oracle's class: one that reaches the
+    operation is resolved or refused, one that does not reach it is silent,
     and one that RAISES is silent too, because the call raises on the
     expression itself and a refusal there is a false one. A false positive
     costs a real closure entry, which is why the does-not-reach class is
     silence rather than a resolved target.
 
-    Every other form's reach depends on something outside the literal — a
-    free name, a position the walk declines, a container it cannot read — so
-    it is the walk's UNDETERMINED class, and its debt is the mention
-    property instead: refused when the expression carries the operation,
-    silent when it does not. `carries` and not `mentions` is the projected
-    container, which mentions the operation in its text and produces
-    nothing to call.
+    Every other form's reach depends on something outside the literal, so it
+    is the walk's UNDETERMINED class and its debt is the mention property:
+    refused when the expression carries the operation, silent when it does
+    not. `carries` and not `mentions` is the projected container, which
+    mentions the operation in its text and produces nothing to call.
     """
     if not form['pinned']:
         return ('refused',) if form['carries'] else ('silent',)
