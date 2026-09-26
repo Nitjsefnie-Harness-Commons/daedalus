@@ -165,16 +165,17 @@ BOUNDED_GIT_LAUNCHES = {
         'records, it does not launch',
     ('tests/test_dashboard_gate.py', 102,
      'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
-        'a wait on a holder this test killed on the line above;'
-        ' the suite runner is the bound',
+        'a wait on a holder this test started, in a teardown that'
+        ' kills it only while it is still running; the timeout is'
+        ' the bound itself',
     ('tests/test_dashboard_gate.py', 104,
      'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
-        'the gate child this test started; the suite runner is'
-        ' the bound',
+        'the gate child this test started; the timeout is the'
+        ' bound itself',
     ('tests/test_dashboard_node_retry.py', 681,
      'test_two_dashboard_children_cannot_be_inside_the_gate_together'):
         'a wait on the two gate children this test started;'
-        ' the suite runner is the bound',
+        ' the timeout is the bound itself',
     ('tests/test_mcp_entry_point.py', 37, '_cleanup_mcp'):
         'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
