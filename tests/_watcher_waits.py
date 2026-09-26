@@ -89,6 +89,29 @@ def await_calls(fake, count, child, what):
         time.sleep(POLL)
 
 
+def await_polls(fake, polls, child, what):
+    """The call log, once it carries `polls` distinct poll markers.
+
+    A watcher names its own poll boundary by publishing an index its `gh`
+    children inherit, so the log says how many polls ran rather than leaving
+    the count to be inferred from the calls. Polls are counted rather than
+    calls because a poll's width is data-dependent - a follow-up query and a
+    paginated connection both make it wider - and the measurement is the one
+    thing that must not assume it.
+
+    The last marker seen names a poll that may still be in flight, so the
+    caller reads the ones before it. The same trade as `await_calls` holds: a
+    child that stays up and never publishes leaves this wait nothing to end
+    it.
+    """
+    while True:
+        calls = fake.calls()
+        if len({call.get('poll') for call in calls}) >= polls:
+            return calls
+        assert child.alive(), f'{what}:\n' + child.captured()
+        time.sleep(POLL)
+
+
 def await_gone(pids, child, what, alive, backstop=BACKSTOP):
     """Wait for those processes to be gone, reporting live state at expiry.
 

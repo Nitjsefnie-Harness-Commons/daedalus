@@ -1,10 +1,17 @@
-"""What one poll of a watcher costs, measured by running one.
+"""What one poll of a watcher costs, measured by running it.
 
-A poll IS one `--once` invocation, so the figure is the exact number of
-requests in that invocation's call log. Nothing is inferred and no clock is
-read: the process is gone before the log is, so the log is complete, and
-two identical calls inside one poll are two - the case a figure read off a
-repeated sequence could not tell from two polls of one call each.
+A poll is the set of log entries sharing one poll marker - the watcher names
+its own boundary, because a poll's width is data-dependent and only the
+watcher knows it - or the whole log of a single `--once` invocation, which is
+one poll because the process exited. Nothing is inferred and no clock is
+read: the marker is in the log, so the log is complete by the time it is
+read, and two identical calls inside one poll are two.
+
+The figure is the largest call count in any one of the polls the run made.
+Not the first poll's: a bound that reads one poll bounds one poll, and a loop
+that starts spending an extra request from its third poll on is then
+measured as the poll before it - a number half the real cost, reported as a
+measurement.
 
 The module binds no fixture: a caller hands in the answers and the fake, so
 the same harness measures this tree's watchers and the base commit's. It is
@@ -20,10 +27,15 @@ from pathlib import Path
 import _fake_gh
 import _util
 from _watcher_waits import Stream
-from _watcher_waits import await_calls
+from _watcher_waits import await_polls
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
+
+# How many complete polls a measurement reads. Three is the first count a
+# poll that starts growing later can be seen in: the second mutating a run
+# is judged on is its third.
+POLLS = 3
 
 
 class Child:
@@ -72,7 +84,50 @@ def once(script, args, fake, limit=60):
     return fake.calls()
 
 
-def measure(script, args, fake, interval):
+def planted(directory, name, *splices):
+    """A runnable copy of the tracked watcher, each plant spliced in turn.
+
+    A copy rather than an edit, so a defect sits in a real module and the
+    tracked script is never a control's subject. Each splice is an
+    `(anchor, plant)` pair, and each anchor must occur exactly once so the
+    plant lands where the control means it to. Taking the planted text back
+    out must give the tracked file byte for byte, which is what says no
+    other line moved along with the plant. The copy carries `gh_client`
+    beside it, because a script puts its own directory on `sys.path` and
+    imports from there.
+    """
+    tracked = (SKILL / name).read_text(encoding='utf-8')
+    text = tracked
+    for anchor, plant in splices:
+        assert text.count(anchor) == 1, (name, anchor)
+        text = text.replace(anchor, plant + anchor)
+    here = Path(directory)
+    here.mkdir(parents=True, exist_ok=True)
+    script = here / name
+    script.write_text(text, encoding='utf-8')
+    written = script.read_text(encoding='utf-8')
+    for _, plant in reversed(splices):
+        written = written.replace(plant, '', 1)
+    assert written == tracked, name
+    shutil.copy(SKILL / 'gh_client.py', here / 'gh_client.py')
+    return script
+
+
+def polls_in(calls):
+    """`(poll marker, calls in that poll)` per poll, in the order polled.
+
+    The boundary is the watcher's, so this reads rather than infers: a poll
+    is the set of entries sharing one marker, and the number of such sets is
+    how many polls the run made.
+    """
+    counts = {}
+    for call in calls:
+        marker = call.get('poll')
+        counts[marker] = counts.get(marker, 0) + 1
+    return list(counts.items())
+
+
+def measure(script, args, fake, interval, polls=POLLS):
     """Calls per poll for one watcher: what one `--once` run asked for.
 
     `interval` is passed so the printed hourly figure names the tick the
@@ -80,60 +135,3 @@ def measure(script, args, fake, interval):
     """
     seen = once(script, args + ['--interval', str(interval)], fake)
     return len(seen), seen
-
-
-def planted(directory, name, anchor, plant):
-    """A runnable copy of the tracked watcher, `plant` spliced above `anchor`.
-
-    A copy rather than an edit, so a defect sits in a real module and the
-    tracked script is never a control's subject. Removing the planted text
-    must give the tracked file back byte for byte, which is what says no
-    other line moved along with the plant. The copy carries `gh_client`
-    beside it, because a script puts its own directory on `sys.path` and
-    imports from there.
-    """
-    tracked = (SKILL / name).read_text(encoding='utf-8')
-    assert tracked.count(anchor) == 1, (name, anchor)
-    here = Path(directory)
-    here.mkdir(parents=True, exist_ok=True)
-    script = here / name
-    script.write_text(tracked.replace(anchor, plant + anchor),
-                      encoding='utf-8')
-    written = script.read_text(encoding='utf-8')
-    assert written.replace(plant, '', 1) == tracked, name
-    shutil.copy(SKILL / 'gh_client.py', here / 'gh_client.py')
-    return script
-
-
-def loop_requests(directory, script, args, count, answers, interval):
-    """The loop's first `count` requests, read once they are logged."""
-    fake = _fake_gh.FakeGh(directory, answers)
-    child = Child(script, args + ['--interval', str(interval)], fake)
-    try:
-        logged = await_calls(fake, count, child, f'{count} gh call(s)')
-    finally:
-        child.stop()
-    return [call['request'] for call in logged[:count]]
-
-
-def once_versus_loop(directory, script, args, answers, interval):
-    """One trial run's requests, and the loop's first two of them.
-
-    `N` is what the trial asked for and the loop is read against it, chunk
-    for chunk, with no poll boundary anywhere: the loop's first `N` requests
-    and its next `N` must both BE the trial's `N`. Chunking rather than one
-    prefix is what gives the comparison teeth without inventing a boundary -
-    a loop whose poll spends a different number of requests stops lining up
-    with `N` at the second chunk.
-
-    What a prefix cannot reach, and this does not claim to: a loop poll that
-    spends the trial's requests and then repeats the last of them, invisible
-    to any comparison of a fixed-length prefix. That shape is what
-    `test_a_poll_asking_the_same_question_twice_costs_two` pins on the
-    measure itself.
-    """
-    trial = [call['request'] for call in
-             once(script, args, _fake_gh.FakeGh(directory, answers))]
-    polled = loop_requests(Path(directory) / 'loop', script, args,
-                           2 * len(trial), answers, interval)
-    return trial, polled
