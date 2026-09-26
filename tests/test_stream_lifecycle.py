@@ -415,12 +415,22 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
                      'the child never printed its one line')
         started = time.time()
         failure = ''
+        applied = None
         try:
             _util.await_listening_line(proc, drained, timeout=1)
         except RuntimeError as e:
             failure = str(e)
+            applied = getattr(e, 'applied', None)
         elapsed = time.time() - started
         assert failure, 'a silent child was read as an announcement'
+        # The bound the search actually applied, read off that search rather
+        # than off the clock. The message above interpolates the CALLER's
+        # timeout, so it still reads 1s when the search was given a shorter
+        # one; only this notices. The helper rounds to a microsecond
+        # because an epoch-scale double plus a whole second does not always
+        # subtract back to that second exactly -- the size of that
+        # representation error, not a timing allowance.
+        assert applied == 1, applied
         # The 10x headroom is now over the search loop, so it still catches
         # a bound that was silently widened.
         assert elapsed < 10, elapsed
