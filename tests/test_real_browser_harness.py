@@ -17,82 +17,49 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _evalpages  # noqa: E402
+import _realbrowser_broken_worker as _broken_worker  # noqa: E402
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers as _WORKERS  # noqa: E402
 import _util  # noqa: E402
-import test_real_browser_eval as _real_browser_eval  # noqa: E402
+from _realbrowser_fixture_controls import (  # noqa: E402
+    _browser_requirements, _browser_version, _enter_fixture,
+    _fixture_runtime, _popen_double, _ProcessDouble)
 
 
-class _ProcessDouble:
-    def __init__(self):
-        self.terminated = False
-        self.wait_timeouts = []
+def test_the_process_double_keeps_the_refusals_a_popen_has(tmp):
+    """A shared double is only a model of Popen while it keeps its refusals.
 
-    def terminate(self):
-        assert not self.terminated, 'process terminated twice'
-        self.terminated = True
-
-    def wait(self, *, timeout):
-        assert self.terminated, 'process waited before termination'
-        self.wait_timeouts.append(timeout)
-        return 0
-
-    def kill(self):
-        raise AssertionError('fixture unexpectedly killed its browser')
-
-
-def _popen_double(tmp):
+    Two suites read this double, so a wrong one now fails nobody in
+    particular: a browser is waited on only after it was terminated, is
+    terminated once, and is never killed. Each refusal is a teardown order
+    the fixture has to keep, and each is otherwise asserted nowhere.
+    """
+    del tmp
     process = _ProcessDouble()
-    launches = []
+    try:
+        process.wait(timeout=10)
+    except AssertionError as refusal:
+        assert 'waited before termination' in str(refusal), refusal
+    else:
+        raise AssertionError('the double waited before termination')
 
-    def popen(args, *, cwd, stdin, stdout, stderr):
-        assert cwd == _realbrowser.ROOT, cwd
-        assert stdin is subprocess.DEVNULL, stdin
-        assert stdout is subprocess.DEVNULL, stdout
-        assert stderr is subprocess.DEVNULL, stderr
-        assert not launches, 'fixture launched more than one browser'
-        launches.append(list(args))
-        return process
+    process.terminate()
+    assert process.wait(timeout=10) == 0
+    assert process.wait_timeouts == [10], process.wait_timeouts
+    try:
+        process.terminate()
+    except AssertionError as refusal:
+        assert 'terminated twice' in str(refusal), refusal
+    else:
+        raise AssertionError('the double accepted a second termination')
 
-    profile = Path(tmp) / 'chromium-profile'
-    return popen, process, launches, profile
-
-
-def _browser_requirements():
-    return 'node-for-control', '/controlled/chromium'
-
-
-def _browser_version(args, *, capture_output, text, timeout):
-    assert args == ['/controlled/chromium', '--version'], args
-    assert capture_output is True, capture_output
-    assert text is True, text
-    assert timeout == 15, timeout
-    return types.SimpleNamespace(
-        returncode=0, stdout='Chromium 151.0.7922.169\n', stderr='')
-
-
-def _devtools_ready(expected_profile, expected_process):
-    page = {'webSocketDebuggerUrl': 'ws://page'}
-    workers = [{'type': 'service_worker',
-                'url': 'chrome-extension://controlled/background.js',
-                'webSocketDebuggerUrl': 'ws://worker'}]
-
-    def wait_for_devtools(profile, process, declared_worker):
-        assert Path(profile) == expected_profile, profile
-        assert process is expected_process, process
-        assert declared_worker == 'background.js', declared_worker
-        return page, workers, '9222'
-
-    return wait_for_devtools, page, workers
-
-
-def _ready_worker(node, workers):
-    assert node == 'node-for-control', node
-    assert workers == [{'type': 'service_worker',
-                        'url': 'chrome-extension://controlled/background.js',
-                        'webSocketDebuggerUrl': 'ws://worker'}], workers
-    return 'ws://worker', True, None
+    try:
+        process.kill()
+    except AssertionError as refusal:
+        assert 'unexpectedly killed' in str(refusal), refusal
+    else:
+        raise AssertionError('the double let the fixture kill its browser')
 
 
 def test_cdp_eval_preserves_typed_evaluation_failure(tmp):
@@ -158,43 +125,6 @@ def test_worker_transport_failure_stays_unreached(tmp):
             'node-for-control', workers)
     assert target is None, target
     assert reached is False, reason
-
-
-def _configured_worker(node, target, expression):
-    assert node == 'node-for-control', node
-    assert target == 'ws://worker', target
-    assert 'chrome.storage.local.set' in expression, expression
-    assert 'startStream()' in expression, expression
-    return True
-
-
-@contextlib.contextmanager
-def _fixture_runtime(tmp, cdp_call, *, subprocess_run=None):
-    popen, process, launches, profile = _popen_double(tmp)
-    wait_for_devtools, _page, _workers = _devtools_ready(profile, process)
-    patches = [
-        mock.patch.object(
-            _realbrowser, 'browser_requirements', _browser_requirements),
-        mock.patch.object(_realbrowser.subprocess, 'Popen', popen),
-        mock.patch.object(
-            _realbrowser, '_wait_for_devtools', wait_for_devtools),
-        mock.patch.object(_realbrowser, 'ready_worker', _ready_worker),
-        mock.patch.object(_realbrowser, 'cdp_eval', _configured_worker),
-        mock.patch.object(_realbrowser, 'cdp_call', cdp_call),
-    ]
-    if subprocess_run is not None:
-        patches.append(mock.patch.object(
-            _realbrowser.subprocess, 'run', subprocess_run))
-    with contextlib.ExitStack() as stack:
-        for patcher in patches:
-            stack.enter_context(patcher)
-        yield process, launches
-
-
-def _enter_fixture(tmp, page_url='http://127.0.0.1:2/plain.html'):
-    return _realbrowser.real_extension_page(
-        tmp, 'http://127.0.0.1:1', 'controltoken',
-        page_url)
 
 
 def _successful_run_recorder(recorded):
@@ -512,16 +442,15 @@ def _controlled_pages():
 
 
 def _run_broken_worker_control(tmp, page_fixture):
+    """Drive the shared property with one of the fixture's own verdicts."""
     with mock.patch.object(
-            _real_browser_eval, 'browser_requirements', lambda: None), \
+            _broken_worker, 'browser_requirements', lambda: None), \
             mock.patch.object(
-                _real_browser_eval._util, 'bridge', _controlled_bridge), \
-            mock.patch.object(
-                _real_browser_eval, 'eval_page_server', _controlled_pages), \
-            mock.patch.object(
-                _real_browser_eval, 'real_extension_page', page_fixture):
-        return _real_browser_eval \
-            .test_a_worker_that_loads_broken_is_a_failure_not_a_skip(tmp)
+                _broken_worker, 'real_extension_page', page_fixture), \
+            _controlled_bridge() as (bridge_url, _docroot), \
+            _controlled_pages() as pages:
+        _broken_worker.assert_broken_worker_is_a_failure(
+            tmp, bridge_url, pages)
 
 
 class _RaisingContext:
@@ -565,6 +494,34 @@ def test_broken_worker_wrapper_still_fails_for_broken_extension(tmp):
         raise AssertionError(
             'the broken-worker wrapper excused a broken extension'
         ) from skipped
+
+
+def test_broken_worker_wrapper_turns_a_skip_into_a_failure(tmp):
+    """The verdict in between the other two is the one that used to be lost.
+
+    The environment skip must survive and the extension's own failure must be
+    reported; neither of those says what happens to a plain skip, and a plain
+    skip is what the fixture used to reach for. `run_controls` guards only
+    `ControlRequirementSkipped`, so a skip escaping this path is reported as a
+    skip — a green that means the property was not exercised at all.
+    """
+    excised = _util.Skipped('the worker never finished loading')
+
+    def skipped(*args, **kwargs):
+        del args, kwargs
+        return _RaisingContext(excised)
+
+    try:
+        _run_broken_worker_control(tmp, skipped)
+    except _util.Skipped as survived:
+        raise AssertionError(
+            'the broken-worker control excused a broken extension as a skip'
+        ) from survived
+    except AssertionError as failure:
+        assert failure.__cause__ is excised, failure.__cause__
+        assert 'reported as an environment skip' in str(failure), failure
+    else:
+        raise AssertionError('a skip on a broken extension was accepted')
 
 
 def test_first_navigation_non_timeout_failure_stays_failure(tmp):

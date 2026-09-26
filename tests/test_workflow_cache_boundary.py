@@ -11,7 +11,6 @@ from _repo import ROOT  # noqa: E402
 from _wffixtures import _refuses  # noqa: E402
 from _wfgraph import _tests_yml  # noqa: E402
 from _workflow_cache_boundary import (  # noqa: E402
-    REVIEWED_CACHE_RELEASES,
     _CACHE_WRITING_JOBS,
     _assert_writer_inventory,
     _cache_to_records,
@@ -20,10 +19,6 @@ from _workflow_cache_boundary import (  # noqa: E402
     _insert_wheel_step,
     _real_step,
 )
-
-# The two pip-cache suites read the review point through this suite;
-# __all__ says it is a re-export rather than a dead import.
-__all__ = ('REVIEWED_CACHE_RELEASES',)
 
 
 def test_only_the_recorded_jobs_write_the_actions_cache(tmp):

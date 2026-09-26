@@ -5,8 +5,8 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 The whole engine moved here out of tests/test_workflow_cache_boundary.py,
 which tests/test_static_guard_regressions.py imported whole for six of
 these names. That suite keeps its own tests and imports back what they
-use; this module's `REVIEWED_CACHE_RELEASES` stays reachable through it
-for the two pip-cache suites, whose sites another wave owns.
+use, and `REVIEWED_CACHE_RELEASES` now has its only home here: the two
+pip-cache suites read it here rather than through that suite.
 """
 import csv
 import io
@@ -410,6 +410,8 @@ def _cache_writing_jobs(workflow):
     writers = set()
     for job in _job_names(workflow):
         mapping = complete_job_mapping(workflow, job)
+        if mapping is None:
+            continue
         if 'uses' in mapping:
             raise AssertionError(
                 f"cache boundary cannot classify reusable job {job!r}: "
@@ -432,6 +434,7 @@ def _real_step(uses=None, run=None, inputs=None):
     if uses is not None:
         lines = [f'      - uses: {uses}']
     else:
+        assert run is not None, 'a step is either a uses or a run'
         lines = ['      - run: |']
         lines.extend(f'          {line}' for line in run.splitlines())
     if inputs:
