@@ -156,8 +156,12 @@ _HARNESS = r"""
   return seen;
 })();
 """'''),
-        # A declaration nested inside another is not a top-level one.
-        ('nested declaration', '''\
+        # A declaration inside a RECOGNISED declaration's body is
+        # skipped, because the reader jumps past the body it matched.
+        # A declaration inside an `if` or an object literal is found,
+        # because nothing was open when it was reached — the rule is
+        # about skipping a matched body, not about nesting.
+        ('nested in a recognised body', '''\
 _HARNESS = r"""
 function outer() {
   function eventTarget(listener) {
@@ -182,41 +186,77 @@ const target = { ['event' + 'Target']() {
   return 1;
 } };
 """'''),
+        # A program assembled by something other than `+`: the parts are
+        # separate string constants, so a body split across them is a
+        # fragment in each and the declaration is lost.
+        ('split across a join', '''\\
+_LINES = [
+    'function eventTarget(listener) {',
+    '  const seen = [];',
+    '  seen.push(listener);',
+    '  return seen;',
+    '}',
+]
+'''),
+        # A declaration inside an `if` or an object literal IS read:
+        # nothing was open, so skipping it would be a reader stopping
+        # where it did not have to.
+        ('inside an if block', _mod(
+            '_HARNESS = r"""', 'if (true) {', HEADS[0], THREE_LINES,
+            '}', '}', '"""')),
     ]
     for label, text in unread:
         path = f'tests/{label}'
         compile(text, path, 'exec')
         names = [item.name for item in
                  js_declarations({path: text}).get(path, [])]
-        assert 'eventTarget' not in names, (label, names)
+        if label in ('inside an if block',):
+            assert names == ['eventTarget'], (label, names)
+        else:
+            assert 'eventTarget' not in names, (label, names)
 
 
-def test_a_body_that_never_closes_is_refused_loudly(tmp):
-    """The fail-closed half, and the difference from a fragment.
+def test_a_mismatched_bracket_is_refused_and_a_fragment_is_dropped(tmp):
+    """The one refusal, and the three fragments it has to tolerate.
 
-    A document that runs out inside a body is a fragment — a list of
-    lines a later step joins — and is dropped. A body that opens with
-    program still after it is the reader losing the plot, and raises
-    naming the constant, because everything after it would be read at
-    the wrong nesting.
+    A bracket that closes the WRONG thing means this reader has lost the
+    nesting, and every later declaration in the document would be read at
+    the wrong depth — so it raises, naming the constant. A document that
+    merely runs out with a bracket open is a fragment: a list of lines a
+    later step joins, a fixture built to attack a wrapper's delimiters.
+    The reader cannot tell that from a program left truncated, so it
+    drops both, and the earlier form of this control only tolerated the
+    degenerate fragment that happens to have no body — which is why a
+    fragment carrying one body statement used to be a refusal.
     """
     del tmp
-    fragment = _mod('_LINES = [', "    'function eventTarget(listener) {',",
-                    ']')
-    # Assembled, not written out: a constant holding an unclosed body
-    # would fail the live scan that reads this file.
-    opened = _document(HEADS[0],
-                       '  const seen = [];\n  const after = 1;\n'
-                       'const afterTwo = 2;', close='')
-    compile(fragment, 'fragment', 'exec')
-    compile(opened, 'opened', 'exec')
-    assert js_declarations({'tests/fragment.py': fragment}) == {}
+    fragments = {
+        'head only': _mod(
+            '_LINES = [',
+            "    'function eventTarget(l) {',", ']'),
+        'head and one body line': _mod(
+            '_LINES = [',
+            "    'function eventTarget(l) {',",
+            "    '  const seen = [];',", ']'),
+        'head, body and a later line': _mod(
+            '_LINES = [',
+            "    'function eventTarget(l) {',",
+            "    '  const seen = [];',",
+            "    'const after = 1;',", ']'),
+    }
+    for label, text in fragments.items():
+        path = f'tests/fragment-{label.replace(" ", "-")}.py'
+        compile(text, path, 'exec')
+        assert js_declarations({path: text}) == {}, label
+    mismatched = _mod('_HARNESS = r"""', HEADS[0], '  const seen = [];',
+                      '  return seen;', ') ;', '"""')
+    compile(mismatched, 'mismatched', 'exec')
     try:
-        js_declarations({'tests/opened.py': opened})
+        js_declarations({'tests/mismatched.py': mismatched})
     except AssertionError as exc:
-        assert 'eventTarget' in str(exc), exc
+        assert "expected '}'" in str(exc), exc
     else:
-        raise AssertionError('the reader accepted a body it cannot close')
+        raise AssertionError('the reader accepted a mismatched bracket')
 
 
 def test_the_owner_set_is_read_as_a_set(tmp):
@@ -276,12 +316,7 @@ def test_the_two_recognisers_do_not_read_each_other(tmp):
         'def eventTarget(listener):',
         '    """A Python binding of the same name."""',
         '    return [listener]')
-    js_only = f'''\
-_HARNESS = r"""
-function eventTarget(listener) {{
-{THREE_LINES}
-}}
-"""'''
+    js_only = _document(HEADS[0])
     sources = {
         # The owner carries both languages' half of the name, so each
         # control has an owner to find and neither can borrow the other.
@@ -379,10 +414,21 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
         '  return 1;',
         '}}',
         '"""')
+    interpolated = _mod(
+        'def _harness(n):',
+        '    return f"""',
+        HEADS[0].replace('{', '{{'),
+        '  const seen = [{n}];',
+        '  seen.push(listener);',
+        '  return seen;',
+        '}}',
+        '"""')
     for path, text in (('tests/split.py', split), ('tests/prose.py', prose),
-                       ('tests/braces.py', braces)):
+                       ('tests/braces.py', braces),
+                       ('tests/interpolated.py', interpolated)):
         compile(text, path, 'exec')
-    for path, text in (('tests/split.py', split), ('tests/braces.py', braces)):
+    for path, text in (('tests/split.py', split), ('tests/braces.py', braces),
+                       ('tests/interpolated.py', interpolated)):
         names = [item.name for item in js_declarations({path: text}).get(
             path, [])]
         assert names == ['eventTarget'], (path, names)
