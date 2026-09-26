@@ -22,6 +22,7 @@ from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _duplicate_the_package_version,
     _duplicate_the_page_js_version,
+    _run_checker,
     _versioned_git_tree,
 )
 
@@ -93,23 +94,6 @@ def test_check_versions_sites_all_present_in_copy(tmp):
     expected = len({(p, d) for p, d, _ in checker.SITES})
     m = re.search(r'consistent across (\d+) sites', r.stdout)
     assert m and int(m.group(1)) == expected, r.stdout
-
-
-def _run_checker(copy_root, *args):
-    """Run the copied checker from inside the copy.
-
-    `cwd` is what decides whether the run is measured at all: coverage
-    resolves its relative `source` against the process's own directory, so a
-    copy driven from the repository root is outside the measured tree and its
-    lines are silently absent from the report. The checker itself is
-    indifferent — it derives its own root from `__file__`.
-    """
-    return subprocess.run(
-        [sys.executable, str(copy_root / 'scripts' / 'check_versions.py'),
-         *args],
-        cwd=str(copy_root),
-        env=_util.child_coverage('keep', cwd=copy_root),
-        capture_output=True, text=True, timeout=60)
 
 
 def test_check_versions_set_rewrites_every_site(tmp):
