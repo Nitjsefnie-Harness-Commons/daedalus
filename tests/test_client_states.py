@@ -17,26 +17,52 @@ import _util  # noqa: E402
 # client that is alive and wedged, and then only to name what never arrived.
 BOOT_DEADLINE = 120
 
+# The bound the publish wait is declared to carry. A control below reads the
+# bound back off the wait and pins it, which is the only way to notice it
+# being shortened: the client publishes the moment it boots, so the wait
+# never comes near its own deadline and no elapsed time ever reflects it.
+PUBLISH_BOUND = 5
 
-def _wait_for_path(process, booted, path):
+
+class _FixedClock:
+    """A monotonic reading that never advances.
+
+    Used by the control that pins the publish bound, so the bound's
+    arithmetic is exact rather than exact-by-luck: an epoch-scale reading
+    plus five seconds does not always subtract back to five, and a control
+    whose passing path could fail on that is a flake waiting to happen.
+    """
+
+    def __init__(self, at=100.0):
+        self.at = at
+
+    def __call__(self):
+        return self.at
+
+
+def _wait_for_path(process, booted, path, clock=time.monotonic):
     """Wait for the client to boot, then for the path it publishes.
+
+    Returns the bound the publish wait actually applied.
 
     The bound above governs the boot so the one below covers the publish and
     not a fresh interpreter's startup. The boot marker is a file rather than
     the child's printed line because every caller reads that line through
     client_states, which reads the stdout pipe itself.
     """
-    deadline = time.monotonic() + BOOT_DEADLINE
+    deadline = clock() + BOOT_DEADLINE
     while not booted.exists():
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before booting')
-        assert time.monotonic() < deadline, (
+        assert clock() < deadline, (
             f'the client is alive and never published {booted.name}')
         time.sleep(0.01)
-    deadline = time.monotonic() + 5
-    while not path.exists() and time.monotonic() < deadline:
+    opened = clock()
+    deadline = opened + PUBLISH_BOUND
+    while not path.exists() and clock() < deadline:
         time.sleep(0.01)
     assert path.exists(), f'{path.name} was not published'
+    return deadline - opened
 
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
@@ -66,6 +92,38 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     assert state['returncode'] is None, state
     assert state['stdout'] == 'started', state
     assert state['stderr'] == '', state
+
+
+def test_the_publish_wait_applies_the_bound_the_suite_declares(tmp):
+    """A shortened publish bound has to be caught by its arithmetic.
+
+    The client publishes the moment it boots, so the wait returns on its
+    first check and no elapsed time ever comes near the bound it was
+    given. The bound is therefore read back off the wait rather than
+    measured, and the wait is given a clock that never advances, so this
+    says nothing about how fast the machine is. A publish bound cut to a
+    millisecond is caught here by name.
+    """
+    ready_path = Path(tmp) / 'bound.ready'
+    booted_path = Path(tmp) / 'bound.booted'
+    client = (
+        'import sys, time\n'
+        'from pathlib import Path\n'
+        'print("started", flush=True)\n'
+        'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
+        'assert Path(sys.argv[2]).exists(), "published before boot"\n'
+        'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
+        'time.sleep(60)\n'
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        applied = _wait_for_path(process, booted_path, ready_path,
+                                 clock=_FixedClock())
+        assert applied == PUBLISH_BOUND, applied
+    finally:
+        _drain.kill_and_drain(process)
 
 
 class _KillRecordsOwnStatus:
