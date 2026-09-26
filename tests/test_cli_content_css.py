@@ -7,12 +7,6 @@ two options only when it was asked for, so this file asserts all three
 choices per handler: the inline string, the contents of a named file, and
 the `tabId` / `allFrames` fields the operator did and did not name.
 
-`--chrome-tab 0` is the value that separates `is not None` from a
-truthiness test, so the tab is pinned with the zero Chrome really can
-number a tab rather than with a large number. A handler that had written
-`if args.chrome_tab:` would drop that field and leave every other test in
-this file green.
-
 No marker glyphs are folded here: both handlers print plain ASCII, so the
 expected lines are the literals below with nothing between them.
 """
