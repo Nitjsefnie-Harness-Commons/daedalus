@@ -15,7 +15,8 @@ unreadable-subscript arm is pinned on both sides, by different
 controls: four rows below are the sole catchers of its refusal, and the
 real tree is the control for its exemption, since removing the
 range-and-tuple exemption refuses the eleven correct slices the CLI
-already has. CONDITIONS_PINNED rows C10 and C11 name the two."""
+already has. The ledger in tests/_cli_arg_audit_conditions.py names the
+control for each half."""
 import argparse
 import builtins
 import contextlib
