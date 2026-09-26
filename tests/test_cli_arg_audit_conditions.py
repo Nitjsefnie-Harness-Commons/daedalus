@@ -18,8 +18,9 @@ satisfies its row.
 
 Running this module with ``--reach`` re-derives the figures quoted in
 ``tests/_cli_arg_audit_conditions.py`` and exits nonzero if any of them has
-moved. It is a reporting mode, not a test: the suite does not run it, and the
-run above is why."""
+moved. It is a reporting mode, not a test, and **nothing runs it**: no timed
+leg, no coverage leg, no PR check, so a figure that has moved is invisible
+until a reader runs the command. The run above is why the mode is opt-in."""
 import ast
 import contextlib
 import hashlib
@@ -223,12 +224,16 @@ def _conditions(source, names):
     keyword hides is one the walk would answer with silence. So is a decision
     a return makes inline.
 
-    Four more refusals this walk does not reach, each named here rather than
-    counted: a refusal nested in a statement inside an arm, one inside a loop
-    or under ``try``/``except`` or ``with`` in a scoped function - none of
-    which is a top-level statement, and only a return is read - and a refusal
-    raised rather than returned, or raised through a helper, since no
-    ``ast.Raise`` is read at all.
+    Sixteen refusals this walk does not reach, each planted behaviour-neutrally
+    in the resolver with both suites green and named here rather than counted.
+    One is not a return at all: raised, raised through a helper, asserted. One
+    is not a top-level statement of a scoped function: inside a ``for``, a
+    ``while``, a ``try``/``except``, a ``try``/``finally``, a ``with``, a
+    ``match``, a ``try``'s ``else``, a lambda, a comprehension, a closure. One
+    is nested inside an arm's body rather than beside it, and one nested twice.
+    The sixteenth is written inside a function the scope does not name - the
+    ``SCOPE`` comment names which, and why a refusal *delegated* to one is not
+    among them: the call is itself a derived arm.
     """
     starts = _line_starts(source)
     for function in ast.parse(source).body:
@@ -393,12 +398,33 @@ def _assert_recorded_reach(mutated):
             + reach['both_directions']) == reach['pairs'], reach
     assert reach['both_directions'] + reach['one_direction'] == (
         reach['pairs'] - reach['unnoticed']), reach
+    assert _docstring_bindings() == reach, (
+        'the ledger docstring publishes figures that are not the recorded '
+        f'ones: {_docstring_bindings()}')
+
+
+def _docstring_bindings():
+    """The figures the ledger docstring binds, by value.
+
+    The docstring publishes its reach twice over: the rule in prose, and the
+    figures in a binding line this parses. Checking the binding against the
+    recorded constants catches a docstring that states the complement -
+    "771 detected, 249 not" - which a presence check passes, because both
+    numbers appear either way. Each figure appearing exactly once in the whole
+    docstring is the second half: a stray figure in prose cannot sit beside
+    the binding and disagree with it.
+    """
     document = ledger.__doc__ or ''
-    for name, value in reach.items():
-        if name == 'cells':
-            continue
-        assert re.search(rf'\b{value}\b', document), (
-            f'the ledger docstring no longer says {name} = {value}')
+    bound = {}
+    for line in document.splitlines():
+        for name, value in re.findall(r'([a-z_]+) (\d+)(?: |$)', line):
+            bound[name] = int(value)
+    for value in RECORDED_REACH.values():
+        assert len(re.findall(rf'(?<![\w.]){value}(?![\w.])',
+                              document)) == 1, (
+            f'{value} appears more than once in the ledger docstring, so a '
+            f'figure in the prose can contradict the binding')
+    return bound
 
 
 def _measure_reach(copied, mutated, tmp):
@@ -459,8 +485,8 @@ def _report_reach():
         verdict = 'ok' if recorded == value else f'MOVED (recorded {recorded})'
         print(f'  {name:<{width}}  {value:>5}   {verdict}')
     print()
-    moved = sorted(name for name in measured
-                   if measured[name] != RECORDED_REACH[name])
+    moved = sorted(name for name, value in measured.items()
+                   if value != RECORDED_REACH[name])
     if moved:
         print(f'THE RECORDED FIGURES NO LONGER DESCRIBE THIS TREE: {moved}',
               file=sys.stderr)
@@ -475,9 +501,12 @@ def _report_reach():
 def _failed(run):
     """Whether running a control raises, whatever it raises.
 
-    Not a type filter, and deliberately not one: a second assertion in the
-    same test going red is an AssertionError too, so a type filter would close
-    only the two exposures it looks like it closes. Attribution comes from
+    Not a type filter, and deliberately not one. An AssertionError is the
+    EXPECTED failure of a test control detecting a missing refusal, so
+    filtering for it would reject genuine deaths while still admitting a
+    structural TypeError; and a second assertion in the same test going red is
+    an AssertionError too, which such a filter would not have caught.
+    Attribution comes from
     where this is called - a control that raises with the condition still in
     place is reported, not counted. One row's control fails structurally rather
     than by assertion - taking the walk's only yield leaves ``_package_roots``
