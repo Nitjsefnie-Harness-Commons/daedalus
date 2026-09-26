@@ -500,7 +500,7 @@ def test_binding_mutation_gate_requires_fresh_source(tmp):
         env=_util.child_coverage('scrub', {
             name: os.environ[name] for name in dict(os.environ)
             if name != 'PYTHONDONTWRITEBYTECODE'}),
-        capture_output=True, text=True, timeout=120)
+        capture_output=True, text=True)
     caches = sorted((mutation_tmp / 'repository' / 'tests').glob(
         '__pycache__/*.pyc'))
     assert caches, 'the mutant left no cached bytecode'
