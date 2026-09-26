@@ -126,10 +126,10 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_repo.py', 45, 'git_index'):
         'a generic git runner: the bound covers the index-writing'
         'commands its callers pass, not only the reads',
-    ('tests/_speedharness.py', 171, '_reap_process'):
+    ('tests/_speedharness.py', 167, '_reap_process'):
         "a measurement process wait inside the harness's own"
         'teardown',
-    ('tests/_speedharness.py', 187, '_reap_process'):
+    ('tests/_speedharness.py', 183, '_reap_process'):
         'the reap that follows it, on the same process',
     ('tests/_util.py', 369, '_startup_observations'):
         'a thread join on a thread this helper started',
