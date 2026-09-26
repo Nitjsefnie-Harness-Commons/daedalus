@@ -200,15 +200,14 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
     not the command's and keeps polling to its own budget. Repairing the
     envelope in the double hands the section a result it never sent.
 
-    The discriminator is the consume leg, not the poll count. A poll count
-    turns on `api.js`'s `Date.now() - t0 < 700` against a clock that is
-    host time plus virtual time, so it passes only while the host stays
-    under 200 ms across three pump turns. The consume leg was reached or
-    it was not, and it is reached only for a result the loop accepted.
-
-    The poll leg is asserted first, and on its own terms, so the consume
-    assertion is not dark: a recorder that logged nothing would satisfy
-    `consumed == []` for the wrong reason."""
+    The discriminator is the consume leg, and it is exact: the consume leg
+    was reached or it was not, and it is reached only for a result the
+    loop accepted. The `> 1` on the poll leg is what keeps that exact
+    enough to be worth anything -- a loop that polled once and gave up, or
+    a recorder that logged nothing, both satisfy `consumed == []` for the
+    wrong reason. THIS case still runs the loop to a 700 ms budget on
+    purpose, because "gave up" is the behaviour under test; the retry case
+    below is the one whose budget had to grow."""
     report = run_scenario(scenarios.ENVELOPE, sections=('api.js',))
     _command, polls, consumed = _legs(report)
     assert len(polls) > 1, (
@@ -222,14 +221,23 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
 
 
 def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
-    """The loop retries rather than accepting the first envelope, and the
-    count is the PLAN's rather than the host's: two leading polls carry
-    somebody else's envelope, so the third has to be reached. A
-    `continue` turned into a `break` in the shipped loop would answer on
-    the first poll and time out, which is the shape this pins.
+    """The loop retries rather than accepting the first envelope: two
+    leading polls carry somebody else's envelope, so the third has to be
+    reached. A `continue` turned into a `break` in the shipped loop would
+    answer on the first poll and time out, which is the shape this pins.
 
-    No wall-clock term appears in the assertion, which the replaced
-    `len(polls) == 4` had and this does not."""
+    Three polls is the PLAN's number, not the host's, and the scenario
+    runs a 5 s budget so the loop's own clock check -- host time plus the
+    750 ms the pump spent -- has seconds of margin rather than 200 ms. The
+    sleeps are virtual, so the margin costs no wall time.
+
+    The wrong envelopes are read back off the responses and pinned
+    member by member, because "the loop retried past somebody else's
+    envelope" is a property of what the fake handed over. An envelope
+    missing its `deliveryId`, or carrying its own `result`, would be
+    rejected at a different check in `api.js` and leave the poll count
+    identical, so the count alone cannot say the id mismatch was what
+    the loop saw."""
     report = run_scenario(scenarios.LATE_ENVELOPE, sections=('api.js',))
     _command, polls, consumed = _legs(report)
     # A result that is `undefined` vanishes from the report rather than
@@ -238,6 +246,19 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
     assert report['result'] == 'the right result', report
     assert len(polls) == 3, report
     assert len(consumed) == 1, report
+    # Anchored on the command, wrong only in its id, and carrying no
+    # result: an envelope the loop can reject on `id` and only on `id`.
+    assert report['seen'][:2] == [
+        {'id': 'a command this is not', 'deliveryId': 'd1',
+         'resultGeneration': 1},
+        {'id': 'a command this is not', 'deliveryId': 'd1',
+         'resultGeneration': 1},
+    ], report
+    assert report['seen'][2] == {
+        'id': report['seen'][2]['id'], 'deliveryId': 'd1',
+        'resultGeneration': 1, 'result': 'the right result',
+        'error': None,
+    }, report
     assert report['unplanned'] == [], report
 
 

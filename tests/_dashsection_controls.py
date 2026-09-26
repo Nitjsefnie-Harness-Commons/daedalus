@@ -189,18 +189,39 @@ report({ outcome });
 
 # The result is only its own on the third poll: the first two carry an
 # envelope naming another command, which is what a shared result slot that
-# has not been replaced yet looks like. The count is the plan's, not the
-# host's, so the assertion is a wall-clock-free pin on the retry loop.
+# has not been replaced yet looks like. The count is the plan's, so the
+# assertion pins three polls rather than however many fitted in a budget.
+#
+# The 5000 ms budget is deliberate and the sleeps are virtual: the loop's
+# own `Date.now() - t0` check reads the host clock plus what the pump has
+# spent, so the third check sits at 750 ms against 700 and had 200 ms of
+# real host time to spare. A budget in seconds turns that margin from a
+# window a loaded runner can close into a wall the test cannot cross, and
+# it costs no wall time because nothing here sleeps for real.
 LATE_ENVELOPE = r"""
 (async () => {
 """ + SEED + IMPORT_API + r"""
 drive.route('/command', { did: 'd1', result: 'the right result' });
 drive.route('/result?tab=extension',
   { wrong: 2, result: 'the right result' });
+// The envelopes themselves, read back off the responses, so the case pins
+// WHICH envelope the wrong polls carried and not merely that three polls
+// happened. Reading them through the wire is the only place they are
+// visible; the harness records no envelope of its own.
+const seen = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (target, init) => {
+  const answered = await realFetch(target, init);
+  const key = String(target);
+  if (key.startsWith('/result') && key.indexOf('consume') < 0) {
+    seen.push(await answered.json());
+  }
+  return answered;
+};
 const result = await bounded(api.extCmd('list-block-rules', {},
-  { timeout: 700 }), 'a command the third poll answers',
+  { timeout: 5000 }), 'a command the third poll answers',
   _dashnodeStepTimeoutMs);
-report({ result });
+report({ result, seen });
 })().catch(leave);
 """
 
