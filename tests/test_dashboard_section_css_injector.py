@@ -89,7 +89,6 @@ def test_the_tab_list_labels_a_tab_with_its_id_and_two_spaces(_tmp):
     assert report['options'] == ['(active tab)', '11  first tab',
                                  '22  https://two.example.com/two'], report
     assert report['values'] == ['', '11', '22'], report
-    # A select the population left alone is still the active tab.
     assert report['chosen'] == '', report
     assert report['unplanned'] == [], report
 
@@ -195,11 +194,13 @@ def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
     from the form, so a rule injected into one tab on all frames is removed
     from that tab on those frames even though the form says something else
     by now. A row with no tab and no frames flag carries neither key."""
-    report = _run('const dels = container.all().filter(\n'
+    # The second click goes through the tree as it is after the first
+    # one rebuilt it, so the case proves the rebuilt table is interactive
+    # rather than that a detached button still answers.
+    report = _run('container.all().filter(\n'
                   '  (el) => el.tag === "button" &&\n'
-                  '    el.textContent === "remove");\n'
-                  'dels[0].click();\n' + SETTLED
-                  + 'dels[1].click();\n' + SETTLED
+                  '    el.textContent === "remove")[0].click();\n' + SETTLED
+                  + 'button("remove", container).click();\n' + SETTLED
                   + 'report({ toasts: toasts() });\n',
                   setup=SEEDED, answers=(REMOVED,))
     first, second = shared.commands(report)

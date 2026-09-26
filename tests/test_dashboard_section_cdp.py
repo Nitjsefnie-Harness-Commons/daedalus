@@ -290,9 +290,11 @@ def test_params_that_will_not_parse_render_the_invalid_state_and_send_nothing(
 
 
 def test_a_bridge_failure_renders_the_pane_and_toasts_nothing(_tmp):
-    """This is the one panel of the six that surfaces a bridge failure
-    only in the result pane. The `toasts() == []` half is the pin: a
-    module that toasted as well would still render this pane."""
+    """A bridge failure reaches the result pane and nothing else. The
+    `toasts() == []` half is the pin: a module that toasted as well
+    would still render this pane. `net-capture.js`'s poll does the same
+    to its own status line, so what the two share is the absence of a
+    toast, not the presence of the pane."""
     report = _run(_press() + SETTLED + 'report({ pane: pane(),'
                   ' toasts: toasts() });\n', answers=(ANSWER_REFUSED,))
     assert report['pane'] == ['pane err', 'detached before the reply'], \

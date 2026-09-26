@@ -3,11 +3,6 @@
 `tests/_dashsection.py` owns the shell and the strict transport; this owns
 what the three suites repeat. A section suite's own file is its cases, and
 these are the strings they are assembled from.
-
-A scenario that needs a different result for a different command names
-them with `results()` and the transport's `byType` plan member, which is
-where that strictness lives. A command type the scenario did not name is
-refused and recorded there, by the same door an unplanned target is.
 """
 import json
 import re
@@ -36,8 +31,10 @@ const headers = (root) => {
   return head ? head.children[0].children.map((th) => th.textContent) : [];
 };
 const hasClass = (el, name) => el.className.indexOf(name) >= 0;
-// `El` dispatches clicks and nothing else, so a keydown reaches the shipped
-// listener the same way the double reaches a click handler.
+// `El` dispatches clicks and nothing else, so a keydown is driven by
+// calling the listener the double stored. The boundary that leaves: the
+// listener is handed `{ key }` and no `Event`, so one reading
+// `e.currentTarget` would pass here and fail in a browser.
 const pressEnter = (el) => {
   for (const fn of el.listeners.keydown || []) fn({ key: 'Enter' });
 };
