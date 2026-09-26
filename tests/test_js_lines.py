@@ -332,7 +332,7 @@ def test_shipped_denominators_are_pinned_for_witness_files(tmp):
     """A mis-lex that swallows code lines must fail, not quieten."""
     del tmp
     pinned = {
-        'dashboard/app.js': 109,
+        'dashboard/app.js': 110,
         'extension/page.js': 290,
     }
     for relative, expected in sorted(pinned.items()):

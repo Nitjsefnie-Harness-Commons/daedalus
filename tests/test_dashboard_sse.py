@@ -236,7 +236,7 @@ def _assert_one_restart(report):
 
 
 def test_the_last_event_at_reads_zero_before_anything_happens(_tmp):
-    """`sse.js:49` reporting before the client has run, where the clock
+    """`lastEventAt` reporting before the client has run, where the clock
     has no reading and the transport log is empty beside it."""
     report = _run(_BEFORE)
     assert report['reader'] == 'function', report
@@ -245,7 +245,8 @@ def test_the_last_event_at_reads_zero_before_anything_happens(_tmp):
 
 
 def test_the_last_event_at_reports_the_connect_and_the_frame_after_it(_tmp):
-    """`sse.js:53` or `:121` missing: the clock does not move on a frame.
+    """`emit`'s stamp or `run`'s connect stamp missing: the clock does
+    not move on a frame.
     The connect's own reading is the liveness of the assertion, so the
     frame's is compared against it rather than against a bare zero."""
     report = _run(_AFTER_FRAME)
@@ -268,7 +269,7 @@ def test_the_last_event_at_moves_on_to_a_further_frame(_tmp):
 
 
 def test_a_frame_the_module_never_dispatched_does_not_move_the_clock(_tmp):
-    """`sse.js:53` stamping on the way in rather than on the way to a
+    """`emit` stamping on the way in rather than on the way to a
     dispatch. The clock is the dashboard's "last event" readout and
     `relTime` renders anything under two seconds as "now", so a frame the
     module threw away reads as a live one.
@@ -298,14 +299,14 @@ def test_a_listener_added_during_a_dispatch_joins_it_in_sse_js(_tmp):
     live: it visits what the set holds at each step rather than what it
     held when iteration began. The subscriber arranges nothing here, so
     this pins the shape the module already has, beside the identical
-    one on `app.js:64`."""
+    one on `app.js`'s `bus.emit`."""
     report = _run(_JOINING_LISTENER)
     assert report['order'] == ['first', 'joined:e1'], report
     assert report['seen'][-1] == [False, 'result', 'event', 'e1'], report
 
 
 def test_a_throwing_listener_neither_silences_the_rest_nor_escapes(_tmp):
-    """`sse.js:40`'s try/catch around each listener, which nothing else on
+    """`dispatch`'s try/catch around each listener, which nothing else on
     the branch holds. Both halves are asserted because either alone is
     satisfied by a dispatch that drops every listener on the first
     throw: the recorder behind the thrower has to have run, and the
@@ -325,7 +326,7 @@ def test_a_throwing_listener_neither_silences_the_rest_nor_escapes(_tmp):
 
 
 def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
-    """`sse.js:59` dropping the `kind: 'event'` filter paints raw
+    """`emit` dropping the `payload.kind === 'event'` filter paints raw
     broadcast command results into the event log. Two directions, because
     one positive is satisfied by a module that dispatches everything, and
     the negative's frame is shown to have reached the reader."""
@@ -341,7 +342,8 @@ def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
 
 
 def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
-    """`sse.js:65` removed, or evicting the newest id instead of the
+    """`emit`'s eviction removed, or evicting the newest id instead of
+    the
     oldest. `fed` is the oracle: if the frames had not all arrived and
     dispatched, the replay that adds nothing would prove nothing."""
     count = _bound() + 1
@@ -356,7 +358,8 @@ def test_the_oldest_dispatched_id_is_forgotten_and_the_newest_is_not(_tmp):
 
 
 def test_nothing_is_forgotten_until_one_past_the_id_bound(_tmp):
-    """`sse.js:64`'s `>` rather than `>=`. The eviction property and
+    """`emit`'s `dispatchedIds.size > MAX_DISPATCHED_IDS` written `>=`.
+    The eviction property and
     order both hold either way, so a suite asserting only those cannot
     tell them apart -- but at rest the set is documented to hold the
     whole bound, and `>=` leaves it one short.
@@ -377,7 +380,8 @@ def test_nothing_is_forgotten_until_one_past_the_id_bound(_tmp):
 
 
 def test_a_storage_event_with_a_changed_token_restarts_the_client(_tmp):
-    """`sse.js:159-160` refusing the conjunction's positive limb. The
+    """`sse.js`'s `storage` listener refusing the conjunction's positive
+    limb. The
     second request is the restart, on the same route and carrying the
     replacement token, so the count is corroborated by what it carries."""
     report = _run(_UP + _CHANGED % (_OTHER_TOKEN, _OTHER_TOKEN))
@@ -385,7 +389,8 @@ def test_a_storage_event_with_a_changed_token_restarts_the_client(_tmp):
 
 
 def test_a_storage_event_with_the_same_token_does_not_restart(_tmp):
-    """`sse.js:159` dropping the `newValue` comparison. The log's holding
+    """`sse.js`'s `storage` listener dropping the `newValue` comparison.
+    The log's holding
     exactly two is what shows the same-value event added nothing and the
     changed-token event after it added the one restart."""
     report = _run(_UP + r"""
@@ -397,7 +402,8 @@ await bounded(settle(), 'unchanged-token storage event',
 
 
 def test_a_storage_event_on_another_key_does_not_restart(_tmp):
-    """`sse.js:159` dropping the key check. The value differs too, so
+    """`sse.js`'s `storage` listener dropping the `e.key` check. The
+    value differs too, so
     the key is the only limb holding. The event is delivered without the
     storage write a browser makes first, which this listener never reads,
     so the restart that follows still lands on the planned route."""

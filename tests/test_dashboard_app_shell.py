@@ -13,6 +13,10 @@ from _repo import ROOT  # noqa: E402
 _SERVER = 'https://example.com'
 _TOKEN = 'tok-abcdefghijklmnop'
 _SHORT = 'short-tokenx'
+# One past the boundary `maskToken` draws, so `<= 12` written `<= 13`
+# cannot pass: twelve characters is the valid member, thirteen is the
+# member that has to be masked.
+_OVER = 'short-tokenxy'
 _ELLIPSIS = '…'
 _DASH = '—'
 # Truthy on an object literal, so it takes the mount path; not
@@ -133,11 +137,15 @@ def _bar(body, storage=None, modules=_APP):
 
 
 def _masked(token):
+    """`maskToken`: verbatim at twelve or fewer, masked above that."""
+    if len(token) <= 12:
+        return token
     return token[:8] + _ELLIPSIS + token[-4:]
 
 
 def test_a_loading_document_defers_the_boot_to_domcontentloaded(_tmp):
-    """`app.js:152` inverted: the cells are masked before the event."""
+    """`app.js`'s `readyState` check inverted: the cells are masked
+    before the event."""
     report = _bar(_READ_CELL + _IMPORT
                   + "const before = cell('[data-meta=\"token\"]');\n"
                   + _FIRE
@@ -148,7 +156,7 @@ def test_a_loading_document_defers_the_boot_to_domcontentloaded(_tmp):
 
 
 def test_a_ready_document_boots_without_waiting_for_the_event(_tmp):
-    """`app.js:152` always deferring: the seeded cells survive."""
+    """`app.js` always deferring its boot: the seeded cells survive."""
     report = _bar(_READ_CELL + _IMPORT_NOW + r"""
 report({ readyState: document.readyState,
   after: cell('[data-meta="token"]'),
@@ -162,7 +170,8 @@ report({ readyState: document.readyState,
 def test_an_interactive_document_boots_before_the_event_too(_tmp):
     """A document `interactive` boots on the import, as `complete` does.
 
-    `app.js:152` reads one value, not one direction: gating on
+    `app.js`'s `readyState` check reads one value, not one direction:
+    gating on
     `complete` alone leaves the shipped page unbooted, green here."""
     report = _bar(_READ_CELL + _IMPORT_INTERACTIVE + r"""
 report({ readyState: document.readyState,
@@ -175,7 +184,7 @@ report({ readyState: document.readyState,
 
 
 def test_each_section_is_mounted_with_its_own_element_and_the_bus(_tmp):
-    """`app.js:81` passing no bus, or one element to every mount."""
+    """`mountSections` passing no bus, or one element to every mount."""
     report = _run(r"""
 const a = h('div', { class: 'panel-b', 'data-section': 'overview' }, 'OWN-A');
 const b = h('div', { class: 'panel-b', 'data-section': 'settings' }, 'OWN-B');
@@ -205,7 +214,7 @@ report({ a: seen(a, 'OWN-A'), b: seen(b, 'OWN-B') });
 
 
 def test_a_section_with_no_module_renders_the_message_after_a_clear(_tmp):
-    """`app.js:77` dropping the message, or `:76` the clear."""
+    """`mountSections`'s no-module arm dropping the message, or `clear`."""
     report = _run(r"""
 const el = h('div', { class: 'panel-b', 'data-section': 'nonesuch' },
   'SEED-CHILD');
@@ -224,7 +233,8 @@ report({ children: el.children.length,
 
 
 def test_a_section_that_throws_is_reported_and_the_next_still_mounts(_tmp):
-    """`app.js:84` swallowing the throw, or the loop breaking."""
+    """`mountSections`'s catch swallowing the throw, or the loop
+    breaking."""
     head = r"""
 const bad = h('div', { class: 'panel-b', 'data-section': '%s' },
   'SEED-CHILD');
@@ -249,7 +259,8 @@ report({ tag: pane === null ? null : pane.tag,
 
 
 def test_the_meta_bar_masks_the_token_once_and_the_short_token_apart(_tmp):
-    """`app.js:93-94` swapping the selectors, `:40` dropping the mask."""
+    """`wireMetaBar` swapping the selectors, `maskToken` dropping the
+    mask."""
     long_token = _bar(_READ_CELL + _IMPORT_NOW + r"""
 report({ token: cell('[data-meta="token"]'),
   short: cell('[data-meta="token-short"]'),
@@ -274,14 +285,9 @@ report({ token: cell('[data-meta="token"]'),
     assert absent['server'] == '(same origin)', absent
 
 
-def test_a_saved_token_reads_the_same_in_the_bar_as_it_did_at_boot(_tmp):
-    """`settings.js:78`'s own mask, which has no length guard: a token of
-    twelve or fewer reads verbatim when the bar is wired and masked
-    behind an ellipsis after a save. The panel delegates to `app.js`'s
-    mask, so a mutation in that mask turns this red; a copy kept in
-    `settings.js` would not. The short cell and the server label are
-    read beside it because the same three writes are one delegation."""
-    report = _run(_BAR + r"""
+# The settings panel mounted, its token field saved unchanged, and the
+# three bar cells read either side of the save.
+_SAVE_PANEL = _BAR + r"""
 const panel = h('div', { class: 'panel-b', 'data-section': 'settings' });
 document.body.appendChild(panel);
 drive.route('https://example.com/tabs', { json: [] });
@@ -296,19 +302,30 @@ panel.querySelector('[data-role=save]').click();
 await bounded(settle(), 'the save and its server probe',
   _dashnodeStepTimeoutMs);
 report({ before, after: read() });
-""", storage=_storage(_SHORT))
-    assert report['before'] == {'token': _SHORT,
-                                'short': _SHORT[:8] + _ELLIPSIS,
-                                'server': _SERVER}, report
-    # The restart is the liveness of the assertion: two stream requests
-    # and the server probe is what a save actually did, so a handler that
-    # never ran cannot leave the two readings equal.
-    assert [r['target'] for r in report['requests']] == [
-        _SERVER + '/stream?tab=dashboard',
-        _SERVER + '/stream?tab=dashboard',
-        _SERVER + '/tabs'], report['requests']
-    assert report['after'] == report['before'], report
-    assert report['unplanned'] == [], report
+"""
+
+
+def test_a_saved_token_reads_the_same_in_the_bar_as_it_did_at_boot(_tmp):
+    """`settings.js`'s own mask, which had no length guard: a token of
+    twelve or fewer reads verbatim when the bar is wired and masked
+    behind an ellipsis after a save. The panel delegates to `app.js`'s
+    mask, so a mutation in that mask turns this red; a copy kept in
+    `settings.js` would not. The short cell and the server label are
+    read beside it because the same three writes are one delegation."""
+    for token in (_SHORT, _OVER):
+        report = _run(_SAVE_PANEL, storage=_storage(token))
+        assert report['before'] == {'token': _masked(token),
+                                    'short': token[:8] + _ELLIPSIS,
+                                    'server': _SERVER}, (token, report)
+        # The restart is the liveness of the assertion: two stream
+        # requests and the server probe is what a save actually did, so a
+        # handler that never ran cannot leave the two readings equal.
+        assert [r['target'] for r in report['requests']] == [
+            _SERVER + '/stream?tab=dashboard',
+            _SERVER + '/stream?tab=dashboard',
+            _SERVER + '/tabs'], (token, report['requests'])
+        assert report['after'] == report['before'], (token, report)
+        assert report['unplanned'] == [], (token, report)
 
 
 def test_the_settings_panel_does_not_import_the_entry_point(_tmp):
@@ -329,7 +346,8 @@ def test_the_settings_panel_does_not_import_the_entry_point(_tmp):
 
 
 def test_an_internal_sse_status_reaches_the_dot_and_both_status_texts(_tmp):
-    """`app.js:105-108` dropping the guard, the dot or `txt2`."""
+    """`wireStatusLine`'s status subscriber dropping the guard, the
+    dot or `txt2`."""
     report = _bar(_READ_CELL + _IMPORT_BUS + r"""
 const sse = await bounded(load('sse.js'), 'sse import',
   _dashnodeStepTimeoutMs);
@@ -369,7 +387,7 @@ report({ connected, rogue, page, idle: read(),
 
 
 def test_the_last_event_clock_writes_nothing_until_its_interval_runs(_tmp):
-    """`app.js:113` called at wire time, or dropped."""
+    """`wireStatusLine`'s interval called at wire time, or dropped."""
     report = _bar(_READ_CELL + _IMPORT + _FIRE + r"""
 const live = drive.live();
 const before = cell('[data-meta="last-event"]');
@@ -384,7 +402,7 @@ report({ live, before, after: cell('[data-meta="last-event"]') });
 
 
 def test_rel_time_reports_each_band_from_its_nearest_miss_boundary(_tmp):
-    """`app.js:55-57`: one `<` becoming `<=` moves one boundary."""
+    """`relTime`'s `<` bands: one `<` becoming `<=` moves one boundary."""
     ticks = ''.join(
         f"clock = start + {off};\ndrive.fire(id);\n"
         f"""seen.push([{off}, cell('[data-meta="last-event"]')]);\n"""
@@ -415,7 +433,8 @@ report({ id, text: cell('[data-meta="last-event"]') });
 
 
 def test_the_observer_activates_the_intersecting_link_nearest_the_top(_tmp):
-    """`app.js:132-133` taking the last visible or dropping the sort.
+    """`wireRailHighlight`'s sort taking the last visible or dropping
+    it.
 
     The `rootMargin` asserted below is DISPUTED, not endorsed: a -60%
     bottom margin shrinks the root to the top 40% of the viewport, so
@@ -451,7 +470,8 @@ report({ start, afterClick, nearest: active(),
 
 
 def test_the_observer_activates_nothing_when_no_entry_is_intersecting(_tmp):
-    """`app.js:131` removed: an empty list throws or clears the rail."""
+    """`wireRailHighlight`'s empty-list guard removed: an empty list
+    throws or clears the rail."""
     report = _run(_RAIL + _IMPORT + _FIRE + r"""
 const links = Array.from(document.querySelectorAll('.rail-list a'));
 const active = () => links.map((a) => a.classList.contains('active'));
@@ -475,7 +495,8 @@ report({ before, after: active(), refusal });
 
 
 def test_the_bus_reaches_every_listener_and_contains_a_throwing_one(_tmp):
-    """`app.js:64-65` one listener, an escaping throw, a no-op unsubscribe."""
+    """`bus.emit` reaching one listener, an escaping throw, a no-op
+    unsubscribe."""
     report = _run(_IMPORT_BUS + r"""
 const bus = app.bus;
 const seen = [];
@@ -517,7 +538,7 @@ report({ order });
 
 
 def test_an_event_sse_dispatches_reaches_the_bus(_tmp):
-    """`app.js:69` dropped leaves the listener nothing."""
+    """`app.js`'s bus forwarder dropped leaves the listener nothing."""
     report = _run(_IMPORT_BUS + r"""
 const sse = await bounded(load('sse.js'), 'sse import',
   _dashnodeStepTimeoutMs);

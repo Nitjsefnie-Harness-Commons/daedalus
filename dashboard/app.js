@@ -1,5 +1,6 @@
 // Daedalus dashboard — entry point. Loads sections, boots SSE, wires meta bars.
 
+import { getToken, getServer } from './api.js';
 import { h, clear, wireMetaBar } from './sections/_util.js';
 import { start as startSse, subscribe, lastEventAt } from './sse.js';
 
@@ -119,7 +120,7 @@ function wireRailHighlight() {
 }
 
 function boot() {
-  wireMetaBar();
+  wireMetaBar(getToken(), getServer());
   wireStatusLine();
   wireRailHighlight();
   mountSections();
