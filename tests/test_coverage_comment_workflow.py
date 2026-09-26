@@ -13,6 +13,7 @@ from _repo import ROOT  # noqa: E402
 from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
+from _wfgraph import _job_section  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
     GH_ARTIFACT_STUB as _GH_ARTIFACT_STUB,
@@ -115,15 +116,6 @@ def test_workflow_harness_scrubs_coverage_environment(tmp):
         })
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert 'present=true' not in output, output
-
-
-def _job_section(workflow, job, next_job):
-    """Return one top-level jobs section without neighboring jobs."""
-    _, marker, section = workflow.partition(f'\n  {job}:\n')
-    assert marker, workflow
-    section, marker, _ = section.partition(f'\n  {next_job}:\n')
-    assert marker, workflow
-    return section
 
 
 def _step_condition(workflow, step_name):
@@ -319,8 +311,8 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
     del tmp
     workflow = (ROOT / '.github' / 'workflows' / 'tests.yml').read_text(
         encoding='utf-8')
-    coverage = _job_section(workflow, 'coverage', 'diff-coverage')
-    diff = _job_section(workflow, 'diff-coverage', 'plan-matrix')
+    coverage = '\n'.join(_job_section(workflow, 'coverage'))
+    diff = '\n'.join(_job_section(workflow, 'diff-coverage'))
     checkouts = re.findall(
         r'actions/checkout@.*?\n(?P<body>.*?)(?=\n      - |\Z)',
         coverage, re.DOTALL)

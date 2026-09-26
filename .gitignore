@@ -319,6 +319,7 @@
 !/tests/_jsroute_sweep.py
 !/tests/_jsroute_sweep_grammar.py
 !/tests/_jsroute_tab.py
+!/tests/_jsroute_target.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
 !/tests/_launch_refusal_rows.py
