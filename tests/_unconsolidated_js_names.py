@@ -331,14 +331,17 @@ UNCONSOLIDATED_JS_NAMES = {
         'the postResult harness answers only the disabled error, where the '
         'shared factory also answers a hang',
     ('tests/_dashdom.py', 'textNode'):
-        'this is the DOM node factory the jsdom-less shell own document '
-        'uses, where the owner belongs to the Node harness document',
+        'this is the text-node factory the jsdom-less shell document '
+        'uses. Its twin is the row for tests/_dashnode.py, five body '
+        'lines each, and that twin is the owner',
     ('tests/_dashnode.py', 'jsonResponse'):
         'this is the JSON answer the dashboard node own reader expects, '
         'where the owner is the shell harness one',
     ('tests/_dashnode.py', 'textNode'):
-        'this is the text-node factory the dashboard node document uses, '
-        'where the owner is the shell harness DOM stand-in',
+        'this is the text-node factory the dashboard node document uses. '
+        'Its twin is the row for tests/_dashdom.py, five body lines each, '
+        'and that twin is the owner: tests/_dashshell.py, which an '
+        'earlier draft of this row named, defines no textNode at all',
     ('tests/_dashshell.py', 'jsonResponse'):
         'this is the JSON answer the shell harness own reader expects, '
         'where the owner belongs to the dashboard node harness',
@@ -368,9 +371,11 @@ UNCONSOLIDATED_JS_NAMES = {
         'duplication is real and deferred, and the wider response-factory '
         'cluster is the second wave of this consolidation',
     ('tests/_netcapture_harness.py', 'run'):
-        'this is the capture harness own driver, the largest JS function '
-        'in the tree, and the owner is the relay harness driver over a '
-        'different plan',
+        'this is the capture harness own driver, 45 body lines and the '
+        'sixth largest of the 21 `run` declarations in the tree, where '
+        'the owner is the relay harness driver (236 body lines, the '
+        'largest) over a different plan; no shared copy of either would '
+        'serve both',
     ('tests/_tabs_harness.py', 'maybeReject'):
         'this refuses a chrome surface by API name, where the netcapture '
         'harness refuses a declarativeNetRequest entry by RULESET key',

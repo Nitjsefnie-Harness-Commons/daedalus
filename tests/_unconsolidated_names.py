@@ -337,41 +337,60 @@ UNCONSOLIDATED_NAMES = {
         'this is the client-side request the whole suite shares, where '
         'the recorder in _netcapture_harness is one capture own request',
     ('tests/test_cli_browser_commands.py', '_ext'):
-        'this drives one handler module ext calls directly, where the '
-        'owner builds one MCP answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_tabs.py, test_cli_content_css.py and '
+        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
+        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_browser_commands.py', '_put'):
-        'this names the args one handler put takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_handlers.py, test_cli_content_block.py and '
+        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
+        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_browser_handlers.py', '_put'):
-        'this names the args one handler put takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_handlers.py, test_cli_content_block.py and '
+        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
+        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_browser_tabs.py', '_ext'):
-        'this names the args one handler ext takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_tabs.py, test_cli_content_css.py and '
+        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
+        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_content_block.py', '_put'):
-        'this names the args one handler put takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_handlers.py, test_cli_content_block.py and '
+        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
+        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_content_capture.py', '_ext'):
-        'this names the args one handler ext takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'this one differs from the other four _ext sites (digest '
+        '04c21b05e5), and the owner builds the answer tuple for the whole '
+        'tool surface',
     ('tests/test_cli_content_css.py', '_ext'):
-        'this names the args one handler ext takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_tabs.py, test_cli_content_css.py and '
+        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
+        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_content_hotfixes.py', '_ext'):
-        'this names the args one handler ext takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_tabs.py, test_cli_content_css.py and '
+        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
+        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_content_hotfixes.py', '_stored'):
         'this is the stored-hotfix record this suite reads back, where '
         'the owner store key is the one the route answers with',
     ('tests/test_cli_eval_handlers.py', '_get'):
-        'this names the args one handler get takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_eval_handlers.py and '
+        'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '
+        'is a copy of the owner, whose own digest is d10f3df3d',
     ('tests/test_cli_eval_handlers.py', '_put'):
-        'this names the args one handler put takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_browser_commands.py, '
+        'test_cli_browser_handlers.py, test_cli_content_block.py and '
+        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
+        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_result_handlers.py', '_get'):
-        'this names the args one handler get takes, where the owner '
-        'builds the answer tuple for the whole tool surface',
+        'byte-identical to the other test_cli_eval_handlers.py and '
+        'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '
+        'is a copy of the owner, whose own digest is d10f3df3d',
     ('tests/test_dashboard_app_shell.py', '_run'):
         'this runs one dashboard scenario in this suite own shell, where '
         'the owner runs the recorded boundary harness a plan names',

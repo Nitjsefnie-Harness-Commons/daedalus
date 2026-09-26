@@ -534,6 +534,7 @@ def test_a_javascript_row_may_not_name_a_declaration_this_branch_added(tmp):
         'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + '. '
         'That is a refusal, not a pass — fetch the base and re-run.')
     if boundary.reason:
+        print(f'[js] the branch boundary was NOT evaluated: {boundary.reason}')
         return
     assert not boundary.introduced, (
         'UNCONSOLIDATED_JS_NAMES rows excuse a declaration the base tree '

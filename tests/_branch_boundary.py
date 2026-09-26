@@ -21,10 +21,14 @@ one it did not, and this branch edits fifteen of the twenty-seven files
 the JavaScript residue lives in, so a path-scoped boundary would forbid
 recording rows for sites that predate it.
 
-A checkout that cannot see a base returns None and the caller MUST
-refuse on it. None is "this checkout cannot answer"; an empty set is
-"the base resolves and names nothing", and the two are facts about
-different things.
+A checkout that cannot answer says WHICH WAY in `reason`, and the
+two are not interchangeable. `UNREADABLE` is a REFUSAL the caller must
+fail on: the control could not read the base, so nothing here says a row
+is not excusing what the branch wrote. `IS_THE_BASE` is a SKIP: on a
+tree that is already the base -- a push to main, a release tag cut from
+it -- there is no branch to compare against, which is not a failure.
+`None` for the reason means the comparison WAS made and found nothing
+introduced, which is the only one of the three that is a clean result.
 """
 import ast
 import hashlib
