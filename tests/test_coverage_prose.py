@@ -40,7 +40,7 @@ def _prose():
 
 
 def _paragraph():
-    """The coverage paragraph alone, so a number elsewhere cannot satisfy it."""
+    """The coverage paragraph alone, so a number elsewhere cannot pass it."""
     text = _prose()
     start = text.index('Coverage is two numbers')
     return text[start:]
@@ -53,9 +53,10 @@ def test_the_unreached_module_line_count_is_the_trees(tmp):
     said = re.search(r'at 0 of (\d+) code\s+lines', _paragraph())
     assert said, 'the paragraph no longer states the unreached module count'
     source = (ROOT / UNREACHED).read_text(encoding='utf-8')
-    assert int(said.group(1)) == len(code_lines(source, UNREACHED)), (
-        'CONTRIBUTING.md says %s of %s code lines; the file has %d'
-        % (said.group(1), UNREACHED, len(code_lines(source, UNREACHED))))
+    real = len(code_lines(source, UNREACHED))
+    assert int(said.group(1)) == real, (
+        f'CONTRIBUTING.md says {said.group(1)} of {UNREACHED} code lines; '
+        f'the file has {real}')
 
 
 def test_the_denominator_is_every_tracked_shipped_javascript_file(tmp):
@@ -68,10 +69,9 @@ def test_the_denominator_is_every_tracked_shipped_javascript_file(tmp):
     sources = tracked_sources(ROOT)
     total = sum(len(code_lines(text, rel)) for rel, text in sources.items())
     assert int(said.group(1)) == total, (
-        'CONTRIBUTING.md says the number is measured over %s; the tree has %d'
-        % (said.group(1), total))
-    assert UNREACHED in sources, (
-        '%s is not in the measured population' % UNREACHED)
+        f'CONTRIBUTING.md says the number is measured over {said.group(1)}; '
+        f'the tree has {total}')
+    assert UNREACHED in sources, f'{UNREACHED} is not in the population'
 
 
 def test_the_paragraph_still_claims_the_unreached_module(tmp):
@@ -90,17 +90,18 @@ def test_no_run_only_figure_is_restated_in_prose(tmp):
     belong to that run's step summary rather than to this file.
 
     The one percentage the paragraph may carry is the derivable one: `about
-    1%` is the unreached module's share of the denominator, and both of those
-    are checked above, so it cannot rot on its own. Any other percentage is a
-    measurement of a run, and this suite would not be able to check it — which
-    is how the total sat wrong here twice without a gate noticing.
+    1%` is the unreached module's share of the denominator, and both are
+    checked above, so it cannot rot on its own. Any other percentage is a
+    measurement of a run this suite cannot check — which is how the total sat
+    wrong here twice without a gate noticing.
     """
     del tmp
     text = _paragraph()
     for said in re.finditer(r'\d+(?:\.\d+)?%', text):
-        assert text[max(0, said.start() - 6):said.start()].endswith('about '), (
-            'the paragraph restates %r, which only a coverage run can measure '
-            'and nothing here can check' % said.group(0))
+        lead = text[max(0, said.start() - 6):said.start()]
+        assert lead.endswith('about '), (
+            f'the paragraph restates {said.group(0)!r}, which only a coverage '
+            'run can measure and nothing here can check')
     assert 'the total is' not in text, (
         'the coverage total is a measurement of a run, not a fact about the '
         'tree, and it must not be restated here')
