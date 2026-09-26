@@ -69,6 +69,10 @@ Import = namedtuple('Import', 'path lineno module spelling')
 Allowance = namedtuple('Allowance', 'path module reason')
 
 ALLOWED = (
+    # A whole-module import, so there is no helper to relocate: the module
+    # it names is held under the #1094 eventTarget rule.
+    Allowance('tests/test_dashboard_gate.py',
+              'test_dashboard_behaviour', 'PR 1082, #1094 eventTarget'),
     Allowance('tests/test_dashboard_harness.py',
               'test_dashboard_accessibility', 'PR 1082'),
     Allowance('tests/test_dashboard_harness.py',
@@ -122,6 +126,8 @@ ALLOWED = (
     Allowance('tests/test_tab_routing_store_sweep.py',
               'test_tab_routing', 'PR 1063'),
     Allowance('tests/test_tab_routing_unprovable.py',
+              'test_tab_routing', 'PR 1063'),
+    Allowance('tests/test_tab_routing_unmodelled_mutation.py',
               'test_tab_routing', 'PR 1063'),
     Allowance('tests/test_tab_routing_yielded_sender.py',
               'test_tab_routing', 'PR 1063'),

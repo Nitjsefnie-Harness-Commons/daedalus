@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Executable contracts for the privileged patch-coverage commenter."""
-import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -15,77 +12,35 @@ from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
 from _coverage_comment_steps import (  # noqa: E402
-    GH_ARTIFACT_STUB as _GH_ARTIFACT_STUB,
     GH_COMMENT_STUB as _GH_COMMENT_STUB,
+)
+from _coverage_comment_workflow import (  # noqa: E402
+    run_artifact_check as _run_artifact_check,
+    run_block as _run_block,
+    run_comment_block as _run_comment_block,
+    run_shell_block as _run_shell_block,
+    step_condition as _step_condition,
+    workflow as _workflow,
+    write_executable as _write_executable,
 )
 from _yamlread import (  # noqa: E402
     YAMLReadError, _indent, job_mapping, job_scalar,
     step_scalar, step_scalars,
 )
 
-
-def _workflow():
-    """Read the commenter workflow under test."""
-    return (ROOT / '.github' / 'workflows' / 'coverage-comment.yml').read_text(
-        encoding='utf-8')
-
-
-def _run_block(workflow, step_name):
-    """Extract one Actions run block as a standalone shell script."""
-    marker = f'      - name: {step_name}\n'
-    _, found, after = workflow.partition(marker)
-    assert found, f'missing workflow step: {step_name}'
-    _, found, after = after.partition('        run: |\n')
-    assert found, f'{step_name} has no shell block'
-    lines = []
-    for line in after.splitlines():
-        if line and not line.startswith('          '):
-            break
-        lines.append(line[10:])
-    return '\n'.join(lines) + '\n'
-
-
-def _write_executable(path, content):
-    """Write an executable test double."""
-    path.write_text(content, encoding='utf-8')
-    path.chmod(0o755)
+# The three suites that read this one kept their own import lines when these
+# seven names moved to _coverage_comment_workflow.py, so they still arrive
+# as attributes here. __all__ says they are re-exports, not dead imports.
+__all__ = (
+    '_GH_COMMENT_STUB',
+    '_run_artifact_check', '_run_block', '_run_comment_block',
+    '_run_shell_block', '_step_condition', '_workflow', '_write_executable',
+)
 
 
 def _step_outputs(path):
     return dict(line.split('=', 1) for line in path.read_text(
         encoding='utf-8').splitlines())
-
-
-def _run_shell_block(workdir, script, env):
-    """Run a workflow shell block with coverage disabled in its children."""
-    return subprocess.run(
-        [_util.workflow_bash(), '-c', script], cwd=workdir,
-        env=_util.child_coverage('scrub', env),
-        capture_output=True, text=True, timeout=60)
-
-
-def _run_artifact_check(tmp, response, extra_env=None):
-    """Run artifact-presence shell against one endpoint-shaped fixture."""
-    workdir = Path(tmp) / 'artifact-check'
-    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
-    _write_executable(workdir / 'bin' / 'gh', _GH_ARTIFACT_STUB)
-    output = workdir / 'github-output'
-    output.write_text('', encoding='utf-8')
-    env = {
-        **os.environ,
-        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
-        'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo',
-        'RUN_ID': '123',
-        'GITHUB_OUTPUT': str(output),
-        'STUB_RESPONSE': json.dumps(response),
-    }
-    if extra_env:
-        env.update(extra_env)
-    result = _run_shell_block(
-        workdir,
-        _run_block(_workflow(), 'Check for the comment artifact'), env)
-    return result, output.read_text(encoding='utf-8')
 
 
 def test_artifact_selection_executes_against_both_endpoint_shapes(tmp):
@@ -124,13 +79,6 @@ def _job_section(workflow, job, next_job):
     section, marker, _ = section.partition(f'\n  {next_job}:\n')
     assert marker, workflow
     return section
-
-
-def _step_condition(workflow, step_name):
-    """Return a named step's complete Actions condition."""
-    condition = step_scalar(workflow, 'comment', step_name, 'if')
-    assert condition is not None, f'missing condition for step: {step_name}'
-    return condition
 
 
 def _job_condition(workflow, job):
@@ -341,43 +289,6 @@ def test_merge_coordinates_are_pinned_and_have_a_parent(tmp):
             checkout
     assert 'HEAD^1 HEAD > patch.diff' in diff, diff
     assert 'github.event.pull_request.base.sha' not in diff, diff
-
-
-def _run_comment_block(tmp, block_name, *, state, current_head='B',
-                       head_sha='B', pr_number='170', claimed='170',
-                       body='### Coverage\n', jobs=None,
-                       run_conclusion=None):
-    """Run one commenter block with a recording GitHub double."""
-    workdir = Path(tmp) / block_name.replace(' ', '-')
-    (workdir / 'bin').mkdir(parents=True, exist_ok=True)
-    _write_executable(workdir / 'bin' / 'gh', _GH_COMMENT_STUB)
-    state_path = workdir / 'state.json'
-    state_path.write_text(json.dumps(state), encoding='utf-8')
-    calls = workdir / 'calls.jsonl'
-    calls.write_text('', encoding='utf-8')
-    output = workdir / 'github-output'
-    output.write_text('', encoding='utf-8')
-    (workdir / 'body.md').write_text(body, encoding='utf-8')
-    (workdir / 'pr-number.txt').write_bytes((claimed + '\n').encode('utf-8'))
-    env = {
-        **os.environ,
-        'PATH': f'{workdir / "bin"}{os.pathsep}{os.environ["PATH"]}',
-        'GH_TOKEN': 'stub',
-        'REPO': 'owner/repo', 'HEAD_REPO': 'owner/repo', 'RUN_ID': '123',
-        'PR_NUMBER': pr_number,
-        'HEAD_SHA': head_sha,
-        'CURRENT_HEAD': current_head,
-        'EVENT_NUMBERS': json.dumps([int(pr_number)]),
-        'GITHUB_OUTPUT': str(output),
-        'STUB_STATE': str(state_path),
-        'STUB_CALLS': str(calls),
-        'STUB_JOBS': json.dumps(jobs or []),
-        'RUN_CONCLUSION': run_conclusion or '',
-    }
-    result = _run_shell_block(
-        workdir, _run_block(_workflow(), block_name), env)
-    return (result, json.loads(state_path.read_text(encoding='utf-8')), calls,
-            output)
 
 
 def test_trusted_destination_and_body_bound_are_executable(tmp):
