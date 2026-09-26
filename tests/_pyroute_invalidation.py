@@ -16,13 +16,12 @@ otherwise.
 """
 import ast
 
-from _pyroute_keys import _literal_key
-from _pyroute_positions import at_position
+from _pyroute_reads import _attribute_selection, _receiver_value
 from _pyroute_storage import replace_deferred_storage
 from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
                              DeferredContainer, DeferredGenerator,
-                             DeferredInstance, DeferredMethod,
-                             _known_value, merge_yielded, sync_cells)
+                             DeferredMethod, _known_value, merge_yielded,
+                             sync_cells)
 
 # The names a container surface carries that only read: the non-assigning
 # operators and their reflected forms, the read protocol, and the named
@@ -74,47 +73,6 @@ def _containers(value):
         return tuple(found for nested in value.values
                      for found in _containers(nested))
     return ()
-
-
-def _receiver_value(receiver, state):
-    """The deferred value a receiver expression names.
-
-    A named expression, a subscript and an instance attribute each resolve
-    through the storage the model records for them; a name resolves through
-    its own binding, so an alias reaches the one container it shares.
-    """
-    if isinstance(receiver, ast.NamedExpr):
-        receiver = receiver.value
-    if isinstance(receiver, ast.Subscript):
-        owner = _receiver_value(receiver.value, state)
-        if isinstance(owner, DeferredContainer):
-            return merge_yielded(
-                at_position(owner, _literal_key(receiver.slice, state)))
-    if isinstance(receiver, ast.Attribute):
-        owner = _receiver_value(receiver.value, state)
-        if isinstance(owner, DeferredInstance):
-            return owner.attributes.get(receiver.attr)
-    return _known_value(receiver, state)
-
-
-def _attribute_selection(selection, state):
-    """The receiver and method name a call that selects a method by name
-    names, or None when the call is not such a selection. A name the model
-    cannot fold is reported as None, so the selection is read as a mutation
-    of whatever container the receiver may hold."""
-    if isinstance(selection.func, ast.Attribute) \
-            and selection.func.attr == '__getattribute__' \
-            and len(selection.args) == 1:
-        receiver, name = selection.func.value, selection.args[0]
-    elif isinstance(selection.func, ast.Name) \
-            and selection.func.id == 'getattr' \
-            and 2 <= len(selection.args) <= 3 and not selection.keywords:
-        receiver, name = selection.args[0], selection.args[1]
-    else:
-        return None
-    if isinstance(name, ast.Constant) and isinstance(name.value, str):
-        return receiver, name.value
-    return receiver, None
 
 
 def _mutated(call, state):

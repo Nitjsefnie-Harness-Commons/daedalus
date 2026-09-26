@@ -1,30 +1,16 @@
 """The store path's write side: one store target, whatever form it takes.
 
-A name, an instance attribute, a subscript, and the two helpers that write a
+A name, an instance attribute, a subscript, and the helper that writes a
 container back. Nothing here reads the flow; each takes the container and the
 state it must change, so the store path above it stays a dispatcher.
 """
 import ast
 
 from _pyroute_keys import _UNRESOLVED_KEY, _literal_key
-from _pyroute_storage import replace_deferred_storage
-from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
-                             DeferredContainer, DeferredInstance,
-                             is_deferred_value, merge_yielded, sync_cells)
-
-
-def dict_length(items, counted=True):
-    return len(items) if counted and DYNAMIC_KEY not in items else None
-
-
-def container_copy(owner, items, unknown_length=False):
-    """A copy of owner holding items; a dict's length is recounted."""
-    length = owner.length
-    if owner.kind == 'dict':
-        length = dict_length(
-            items, owner.length is not None and not unknown_length)
-    return DeferredContainer(items, length, owner.kind, owner.identity,
-                             owner.star_display)
+from _pyroute_storage import (container_copy, fold_dynamic,
+                              replace_deferred_storage)
+from _pyroute_values import (UNPROVABLE_SENDER, DeferredContainer,
+                             DeferredInstance, is_deferred_value, sync_cells)
 
 
 def replace_container(state, owner_name, owner,
@@ -32,11 +18,6 @@ def replace_container(state, owner_name, owner,
     replacement = container_copy(owner, items, unknown_length)
     replace_deferred_storage(state, owner, replacement)
     sync_cells(state, {owner_name})
-
-
-def fold_dynamic(target, value):
-    target[DYNAMIC_KEY] = merge_yielded(
-        (target.get(DYNAMIC_KEY), value))
 
 
 def store_deferred_target(

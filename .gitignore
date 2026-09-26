@@ -348,6 +348,7 @@
 !/tests/_pyroute_match.py
 !/tests/_pyroute_pop.py
 !/tests/_pyroute_positions.py
+!/tests/_pyroute_reads.py
 !/tests/_pyroute_setops.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
