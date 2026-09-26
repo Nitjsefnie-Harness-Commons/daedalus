@@ -184,20 +184,20 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_mcp_server.py', 122, '_mcp_request'):
         'a connection constructor: it opens a socket and returns'
         ' a client, and no git process sits behind a socket',
-    ('tests/test_mcp_server.py', 111, '_surface_responder_errors'):
+    ('tests/test_mcp_server.py', 110, '_surface_responder_errors'):
         'a thread join on a thread the fixture started',
-    ('tests/test_mcp_server.py', 940, 'callers'):
+    ('tests/test_mcp_server.py', 913, 'callers'):
         "an MCP tool call whose timeout is the tool's, not a bound"
         'on a process',
-    ('tests/test_mcp_server.py', 554,
+    ('tests/test_mcp_server.py', 527,
      'test_a_nonpositive_mcp_timeout_admits_no_command'):
         "the test's subject: an MCP call the server must reject for"
         'its timeout',
-    ('tests/test_mcp_server.py', 1149,
+    ('tests/test_mcp_server.py', 1122,
      'test_bearer_middleware_rejects_duplicate_authorization_headers'):
         'a connection constructor: it opens a socket and returns'
         ' a client, and no git process sits behind a socket',
-    ('tests/test_mcp_server.py', 1429,
+    ('tests/test_mcp_server.py', 1402,
      'test_mcp_port_zero_announces_the_actual_bound_port'):
         'an assertion on a bound event the module sets; the wait IS'
         'the assertion',
@@ -224,9 +224,9 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_real_browser_classification.py', 323,
      'test_unreadable_control_answer_polls_again_instead_of_settling'):
         'the same mock assertion, on the unreadable control',
-    ('tests/test_real_browser_harness.py', 617, 'exercise'):
+    ('tests/test_real_browser_harness.py', 574, 'exercise'):
         "the same navigation, on the harness's own page",
-    ('tests/test_real_browser_harness.py', 610, 'first_navigation'):
+    ('tests/test_real_browser_harness.py', 567, 'first_navigation'):
         'a browser navigation whose timeout is the bound itself',
     ('tests/test_segment_routes.py', 101, 'refusing'):
         'a test double delegating with its arguments; it launches'
