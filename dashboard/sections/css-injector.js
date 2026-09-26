@@ -43,7 +43,14 @@ export function mount(container, bus) {
   });
 
   function load() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+      // Valid JSON is not necessarily a list. Without this a `{}` store
+      // reads as a length of `undefined`, so the cap check compares
+      // `undefined >= 20` -- false -- and the guard passes; the failure
+      // then surfaces at the first `.slice`, blaming the wrong line.
+      return Array.isArray(stored) ? stored : [];
+    } catch { return []; }
   }
   function save(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-STORE_MAX))); }
 
@@ -59,7 +66,7 @@ export function mount(container, bus) {
         h('th', {}, 'css (preview)'),
         h('th', { style: { width: '160px', textAlign: 'right' } }, ''),
       )),
-      h('tbody', {}, arr.slice().reverse().map((s, i) => h('tr', {},
+      h('tbody', {}, arr.slice().reverse().map((s) => h('tr', {},
         h('td', { class: 'dimmer small' }, new Date(s.ts).toTimeString().slice(0, 8)),
         h('td', { class: 'mono' }, s.tabId || '—'),
         h('td', { class: 'small dim' }, s.allFrames ? 'all' : 'top'),
@@ -78,7 +85,16 @@ export function mount(container, bus) {
               catch (e) { toast(errMsg(e), 'err'); return; }
               toast('removed', 'ok');
               const all = load();
-              all.splice(all.length - 1 - i, 1);
+              // By the record's own contents, not by the position this row
+              // was rendered at: the store is re-read here, so anything that
+              // changed it between the render and this click moved every
+              // index after the one that changed. A `splice` on an index
+              // that is now past the end takes the LAST record instead.
+              const at = all.findIndex((entry) => entry.css === s.css
+                && entry.tabId === s.tabId && entry.allFrames === s.allFrames
+                && entry.ts === s.ts);
+              if (at < 0) { renderSessions(); return; }
+              all.splice(at, 1);
               // The rule is already off the page, so a store that refuses
               // this write costs a record and not a rule. Say which, rather
               // than dropping the throw out of an async handler where it
@@ -113,10 +129,18 @@ export function mount(container, bus) {
     }
     // The record is reserved BEFORE the command, not written after it. A
     // store that refuses the write then returns here, with nothing
-    // injected and nothing to record, and a command that fails after the
-    // write leaves a record the operator can remove from the table — the
-    // one direction that costs nothing to undo. Writing it afterwards made
-    // every failure the other one: a live rule with no record.
+    // injected and nothing to record. A command that fails after the write
+    // leaves a record with no live rule, which is the safe direction: the
+    // reverse order's failure is a rule applied to a page that nothing
+    // recorded, and that one the operator cannot take off at all.
+    //
+    // The residue is not free, and saying otherwise would be false. The
+    // row's remove asks the worker to remove a rule that is not there, the
+    // worker refuses, and the record stays -- so a failed injection leaves
+    // a row this panel will not clear, and enough of them reach the cap,
+    // where the next injection is refused too. Clearing the store key by
+    // hand is the only way out. That is a bounded annoyance against an
+    // unrecoverable rule, which is why the order is this way round.
     const sessions = load();
     sessions.push({ css: f.css, tabId: f.tabId || '', allFrames: !!f.allFrames, ts: Date.now() });
     try { save(sessions); renderSessions(); }
