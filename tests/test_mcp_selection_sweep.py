@@ -108,6 +108,7 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
     produces the body, a call it does not is the `TypeError` before any
     value exists, and near-misses all landing on the clean side would hold
     the shape of the rule and not its edge.
+
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '[(lambda: importlib.import_module)][0]()',
@@ -153,6 +154,30 @@ def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
                                                      'does not reach'}, name
 
 
+def _owed(form):
+    """The verdicts a CORRECT guard may answer for this form.
+
+    Stated here rather than read from `duty`, because the instrument's own
+    allowance cannot be the witness that it has not been widened.
+
+    A verdict is wrong when the value the walk settled contradicts it, so
+    RESOLVED is right only where the walk settled the value to the operation
+    and SILENT only where it settled it to something else. Where the walk
+    cannot settle the value at all the honest answer is not a verdict but the
+    walk's own property: a form that CARRIES the operation is REFUSED, and
+    one that carries nothing to call is silent. A refusal is owed in one place
+    more, where the value IS the operation, because resolving it and refusing
+    it agree about the reach — and owed nowhere else, since refusing a
+    settled form that reaches nothing is the false positive that costs a
+    real closure entry.
+    """
+    if not form['pinned']:
+        return {'refused'} if form['carries'] else {'silent'}
+    if form['oracle'] == 'reaches':
+        return {'resolved', 'refused'}
+    return {'silent'}
+
+
 def test_every_generated_form_pays_what_it_owes(_tmp):
     """The whole generated product, against the oracle, form by form.
 
@@ -160,13 +185,25 @@ def test_every_generated_form_pays_what_it_owes(_tmp):
     oracle decided nothing has measured nothing and would pass on any guard
     at all. The pinned does-not-reach class is what a rule that read the
     whole CONTAINER instead of the value would fail, so its count is
-    reported next to the others.
+    reported next to the others. The ALLOWANCE the zero is read against is
+    the contract and not `duty` itself, form by form, and a control says
+    `unpaid` still names a form the contract forbids.
     """
     forms = _swept(_tmp)
     assert all(_mcp_selection_sweep.tally(
         forms, 'oracle', _mcp_selection_sweep.CLASSES).values())
     unpaid = _mcp_selection_sweep.unpaid(forms)
     assert unpaid == f'0 unpaid of {len(forms)}:\n', unpaid
+    for form in forms:
+        allowance = set(_mcp_selection_sweep.duty(form))
+        assert allowance == _owed(form), (
+            f'{form["callee"]}: allowance {sorted(allowance)} is not the '
+            f'contract {sorted(_owed(form))}')
+    unpinned = next(form for form in forms if not form['pinned'])
+    probe = dict(unpinned,
+                 inline='silent' if unpinned['carries'] else 'refused')
+    assert _mcp_selection_sweep.unpaid([probe]).startswith('1 unpaid of 1:'), \
+        'unpaid did not name a form the contract forbids'
 
 
 def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
