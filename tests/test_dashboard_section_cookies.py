@@ -62,11 +62,9 @@ def _run(body, *, setup=LIST, answers=(), plan=shared.COMMAND):
 
 
 def _list_for(query, how='click'):
-    """Type a query and ask for the listing the way a scenario names it.
-
-    `how` picks the trigger: the LIST button, or Enter in the query field,
-    which reaches the same command through the field's own listener.
-    """
+    """Type a query and trigger the listing. `how` is the LIST button, or
+    Enter in the field, which reaches the command through its own
+    listener."""
     return ('container.find("[data-role=q]").value = "' + query + '";\n'
             + ('button("LIST").click();\n' if how == 'click'
                else 'pressEnter(container.find("[data-role=q]"));\n')

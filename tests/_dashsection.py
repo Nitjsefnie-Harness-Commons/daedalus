@@ -1,13 +1,13 @@
 """The strict harness every `dashboard/sections/*.js` suite shares.
 
-`_dashnode.DOM` mounts one section into a fresh container. Six of the
-shipped sections read surface that double does not carry -- a
-document-wide selector, sibling links, a real class set, a clock the
-scenario drives, and an observable `innerHTML` -- and every one of those
-gaps is silent: an unmodelled member answers `undefined`, the section
-misbehaves, and the suite pins the misbehaviour as though it were
-behaviour. Each gap is filled here and each fill is controlled by a case
-in `tests/test_dashsection_harness.py`.
+`_dashnode.DOM` mounts one section into a fresh container. The shipped
+sections read surface that double does not carry -- a document-wide
+selector, sibling links, a real class set, a clock the scenario drives,
+an observable `innerHTML` -- and each gap is silent: an unmodelled
+member answers `undefined`, the section misbehaves, and the suite pins
+the misbehaviour as though it were behaviour. Every gap is filled here
+and every fill is controlled by a case in
+`tests/test_dashsection_harness.py`.
 
 The house rule is `_dashdom`'s and it is the reason the fills refuse
 rather than answer: a surface that is not modelled fails by name, because
@@ -61,8 +61,9 @@ duplicate selector, and the `console.error` recorder. What is not held
 and is a refusal by inspection only: `removeChild` of a non-child,
 `remove()` outside the tree, an `insertBefore` reference outside its
 parent, an `innerHTML` read, a non-string body and a body that will not
-parse. A refusal nothing exercises is still better than an answer, but
-it is not a control and should not be counted as one.
+parse, a response header other than `content-type`. A refusal nothing
+exercises is still better than an answer, but it is not a control and
+should not be counted as one.
 """
 import json
 
@@ -76,7 +77,7 @@ from _jsread import blank_js_comments
 __all__ = ['SHELL', 'build_harness', 'run_scenario', 'section_path']
 
 
-# The six gaps `_dashnode.DOM` carries for a section, and the bus the
+# The gaps `_dashnode.DOM` carries for a section, and the bus the
 # section's second argument is. Everything here either answers a name the
 # shipped sections read or refuses by naming itself.
 _ELEMENTS = r"""
@@ -204,9 +205,10 @@ class DashEl extends El {
 }
 El = DashEl;
 
-// The three modules that reset a list host assign this one bare div and
-// nothing else, so the parser is held to that shape and refuses the rest
-// by naming the assignment rather than producing an empty list.
+// Every `innerHTML` assignment in the shipped sections is one bare
+// `<div class="...">` holding text, or the empty string, so the parser is
+// held to that shape and refuses the rest by naming the assignment rather
+// than producing an empty list.
 function parseFragment(html) {
   const text = String(html).trim();
   if (text === '') return null;
@@ -337,10 +339,15 @@ function openPump() {
 // listening: a `Set` keeps it in place, and a `push` moves it to the end,
 // so the two dispatch it at different points. The other difference is
 // that the same function registered twice fires twice here and once
-// there. No dashboard code reaches either: `bus.on` has three call
-// sites, all of them fresh arrow functions registered once at mount. So
-// this is recorded rather than restructured, because the difference is
-// one nothing can observe.
+// there. Nothing shipped reaches either today: the three `bus.on` call
+// sites -- `overview.js:111`, `tabs.js:198` and `_util.js:90` -- each
+// register a fresh arrow, and none is registered twice. The gap is one
+// a NEW section could walk into, and `_util.js:90` is the way in:
+// `bindTabSelector` is an EXPORTED helper, so a section that calls it
+// off the mount path -- a button handler, a timer, another listener --
+// registers outside mount, where the push orders it differently from
+// the Set. RULE FOR A NEW SECTION: register a bus listener during
+// `mount`, and nowhere else.
 const bus = {
   on(fn) {
     LISTENERS.push(fn);
