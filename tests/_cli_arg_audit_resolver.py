@@ -495,12 +495,18 @@ def _call_read(node, function, handler_globals, scope_binds,
 
     A visible constant member is decided by the member test, at any argument
     position rather than only the second, because a call can name a member
-    wherever the callee looks for it. Everything else the grammar gives a
-    member name and the audit cannot read is a read too, and is reported so the
-    receiver's origin refuses it: a starred expansion hides the whole argument
-    list, a callee that is itself a call has a value the audit cannot see, and
-    a proven builtin ``getattr`` whose name is an expression selected a member
-    the source does not spell. A one-argument call with a callee the audit can
+    wherever the callee looks for it. The price is deliberate and measured:
+    131 calls in ``daedalus_cli/`` pass a constant string as a second
+    argument, 46 distinct values, none of them a frame member, so
+    ``api('GET', 'f_locals')`` is refused whatever the callee is and nothing
+    in the tree is refused today. Gating on the callee instead would let a
+    member be named through a shadowed one, which is the false green I-1
+    closed. Everything else the grammar gives a member name and the audit
+    cannot read is a read too, and is reported so the receiver's origin
+    refuses it: a starred expansion hides the whole argument list, a callee
+    that is itself a call has a value the audit cannot see, and a proven
+    builtin ``getattr`` whose name is an expression selected a member the
+    source does not spell. A one-argument call with a callee the audit can
     see is not a selection to reason about, which is what keeps the CLI's own
     ``value.lower()`` and ``res.get('result', [])`` out of the answer.
     """
