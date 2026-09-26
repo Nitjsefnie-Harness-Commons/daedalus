@@ -29,6 +29,7 @@ SKILL.md beside this script.
 """
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -40,6 +41,10 @@ DEFAULT_REPO = 'Nitjsefnie-Harness-Commons/daedalus'
 DEFAULT_INTERVAL = 60
 FAIL_ESCALATE = 5
 DEBOUNCE_SECONDS = 60
+# The poll index this watcher names for its own boundary, published where
+# the `gh` children inherit it. Nothing reads it back; real `gh` ignores an
+# environment variable it does not know.
+POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 TARGET = ('repository', 'ref', 'target')
 CONTEXTS = TARGET + ('statusCheckRollup', 'contexts')
@@ -154,7 +159,10 @@ def main():
     pending = []
     window_opened = None
     watcher = gh_client.Watcher(f'CI {args.branch} watcher')
+    poll_index = 0
     while True:
+        poll_index += 1
+        os.environ[POLL_MARK] = str(poll_index)
         try:
             immediate, held = watcher.poll(
                 lambda: poll(args.repo, args.branch, seen))

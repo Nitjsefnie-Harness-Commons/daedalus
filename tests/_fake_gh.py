@@ -39,6 +39,13 @@ REASONS = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden',
 # tree and a base commit's scripts.
 GRAPHQL_MARK = 'graphql'
 
+# The name a watcher publishes its poll index under, which its `gh` children
+# inherit. Recorded beside every request so a poll is a group in the log
+# rather than a width inferred from the requests. A watcher that publishes
+# none - a base commit's, or a `--once` trial - logs `None`, and its whole
+# log is one poll because the process ran one.
+POLL_MARK = 'DAEDALUS_WATCHER_POLL'
+
 
 def _self_test(launcher):
     """Prove the launcher this platform writes actually executes."""
@@ -136,7 +143,7 @@ def main(argv):
     fragment, response = _fixture(answers, request)
     _logged(os.environ['DAEDALUS_FAKE_GH_LOG'],
             {'t': time.time(), 'argv': list(argv), 'request': request,
-             'fragment': fragment})
+             'fragment': fragment, 'poll': os.environ.get(POLL_MARK)})
     if response is None:
         sys.stderr.write(f'fake gh: no fixture carries {request[:200]!r}\n')
         return 1
