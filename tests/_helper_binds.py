@@ -12,7 +12,18 @@ as _Y` establishes `_Y`.
 `scan` returns every bind, because a shadow is any rebind of an imported
 name. `definitions` returns only the `def`, `async def` and `class`
 binds, because a re-implementation is a second definition of a name, not
-a second assignment to a module's own constant.
+a second assignment to a module's own constant — and a PEP 695 `type X =
+...` is a bind, not one of those three.
+
+WHERE A NESTED SCOPE BINDS ANYWAY. A comprehension and a generator
+expression are NOT scopes for an assignment expression: a walrus
+anywhere inside one binds in the containing scope, which is the rule the
+language states and the rule this walker used to skip them against. A
+`def` and a `lambda` ARE scopes, so a walrus in their BODY binds
+nothing — but their DEFAULTS, their annotations and a `def`'s decorators
+are evaluated where they are written, so a walrus in those binds the
+containing scope. A class body is a scope of its own, so nothing in it
+binds the module.
 """
 import ast
 
@@ -56,20 +67,51 @@ def _module_execution(tree):
     def imported(name, lineno, source):
         imports.setdefault(name, {}).setdefault(lineno, set()).add(source)
 
-    def collect_walrus(node):
-        stack = list(ast.iter_child_nodes(node))
+    def evaluated_here(node):
+        """The parts of a def or lambda evaluated in the ENCLOSING scope.
+
+        Defaults, annotations and decorators run where the def is
+        written; the body does not, and a class body never binds the
+        module. Returning only the first group is what makes a walrus in
+        a default a module-scope bind and a walrus in a body not one.
+        """
+        if isinstance(node, ast.ClassDef):
+            return []
+        arguments = node.args
+        positional = (list(getattr(arguments, 'posonlyargs', []))
+                      + arguments.args + arguments.kwonlyargs)
+        parts = list(getattr(node, 'decorator_list', []))
+        parts += [argument.annotation for argument in positional
+                  if argument.annotation is not None]
+        if arguments.vararg is not None and arguments.vararg.annotation:
+            parts.append(arguments.vararg.annotation)
+        if arguments.kwarg is not None and arguments.kwarg.annotation:
+            parts.append(arguments.kwarg.annotation)
+        parts += list(arguments.defaults)
+        parts += [default for default in arguments.kw_defaults
+                  if default is not None]
+        if getattr(node, 'returns', None) is not None:
+            parts.append(node.returns)
+        return parts
+
+    def collect_walrus(roots):
+        # The roots themselves are seeded, not their children: a walrus
+        # that IS a default is the node handed in, and a walk that only
+        # looked below its roots would step over it.
+        stack = list(roots)
         while stack:
             current = stack.pop()
             if isinstance(current, ast.NamedExpr):
                 if isinstance(current.target, ast.Name):
                     bind(current.target.id, current.lineno)
                 stack.extend(ast.iter_child_nodes(current))
-            elif isinstance(current, DEFN):
-                continue
             elif isinstance(current, ast.Lambda):
-                continue
-            elif isinstance(current, COMPREHENSION):
-                continue
+                # A lambda's body is its own scope; its defaults are
+                # not. A comprehension is not a scope at all, so it is
+                # descended into like any other expression.
+                stack.extend(evaluated_here(current))
+            elif isinstance(current, DEFN):
+                stack.extend(evaluated_here(current))
             else:
                 stack.extend(ast.iter_child_nodes(current))
 
@@ -87,6 +129,12 @@ def _module_execution(tree):
             for target in node.targets:
                 for name in _target_names(target):
                     bind(name, node.lineno)
+        elif isinstance(node, ast.TypeAlias):
+            # `type X = ...` binds X at module scope. It is a bind and
+            # not one of the three DEFINING forms, so a `type X` beside
+            # a `def X` is a rebind (the shadow control's) rather than a
+            # second definition (this control's).
+            bind(node.name.id, node.lineno)
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
             for name in _target_names(node.target):
                 bind(name, node.lineno)
@@ -111,9 +159,13 @@ def _module_execution(tree):
 
     def statement(node):
         if isinstance(node, DEFN):
+            # A def's defaults, annotations and decorators are evaluated
+            # where it is written; its body is its own scope, so the
+            # walk is handed the first group and not the node.
+            collect_walrus(evaluated_here(node))
             bind(node.name, node.lineno, defining=True)
             return
-        collect_walrus(node)
+        collect_walrus([node])
         record(node)
         for field in ('body', 'orelse', 'finalbody'):
             children = getattr(node, field, None)
@@ -144,3 +196,18 @@ def definitions(tree):
     """{name: {lineno}} for the def, async def and class binds alone."""
     _, _, definitions = _module_execution(tree)
     return definitions
+
+
+def definition_nodes(tree):
+    """{name: [node]} for the def, async def and class binds alone.
+
+    The nodes, not just their lines, so a caller can compare two
+    definitions by CONTENT: the branch boundary keys an allowance row on
+    a declaration, and a declaration is identified by what it contains
+    rather than by the line it sits on.
+    """
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, DEFN):
+            found.setdefault(node.name, []).append(node)
+    return found
