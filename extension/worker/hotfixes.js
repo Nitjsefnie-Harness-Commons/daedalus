@@ -80,12 +80,21 @@ function _scopedIdentity(parsed) {
 //
 // `location` is the coarse one: unforgeable, so the page cannot spoof it, but
 // a prerender and the document it will replace carry the SAME location. The
-// token is the fine one, and it can only be planted by the document that
-// asked. A page can read the token and rewrite it — the value is in its own
-// DOM by construction — and that buys it exactly one thing: suppressing its
-// own fix. It cannot make a fix run in a document it does not hold, because
-// planting a token there is not something it can do. The direction is the
-// property, not the secrecy.
+// token is the fine one. A page can read the token and rewrite it — the value
+// is in its own DOM by construction — and that buys it exactly one thing:
+// suppressing its own fix. It cannot make a fix run in a document it does not
+// hold, and NOT because it cannot reach one: a same-origin
+// `iframe.contentDocument`, or a same-origin `window.open` reference, both
+// reach a second document's DOM and it could plant a token in either. Two
+// facts carry the property instead.
+//
+// The evaluation is submitted to `{tabId}` with no `contextId`, so it always
+// reads the tab's TOP-FRAME document and never a subframe's — a planted token
+// in a frame it owns is in a document this check never consults. And the
+// asker holds no handle to a second top-frame document in its own tab: a
+// successor document is reached only by navigating, and the successor's own
+// content script plants its own token, which is the case the comparison
+// refuses. The direction is the property, not the secrecy.
 const DOCUMENT_GONE = 'the document that asked for this fix is no longer'
   + ' the tab\'s live document';
 const PAGE_IDENTITY = 'location.protocol + \'//\' + location.host'
