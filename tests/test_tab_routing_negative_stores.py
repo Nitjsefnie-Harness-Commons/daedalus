@@ -53,6 +53,19 @@ _OPEN_LENGTH = 'x = [*{quiet(), quiet()}, quiet()]\n'
 # second row of each pair and fail the first: the boundary has to fall
 # between them rather than anywhere on that side.
 _BOUNDARY = {2: (-2, -3), 3: (-3, -4)}
+# A tuple and a set have no item assignment at all, so every subscript
+# store into one is a store the runtime refuses - in either sign, and not
+# only where the key is out of range. Each row is (seed, name, key, the
+# lines between the store and the read, the read), because a set is read
+# by spreading it and a tuple by subscripting it.
+_NO_ITEM_ASSIGNMENT = {
+    'tuple_negative': ('t = (quiet(), quiet())\n', 't', -1, '', 't[1]()'),
+    'tuple_positive': ('t = (quiet(), quiet())\n', 't', 1, '', 't[1]()'),
+    'set_negative': ('s = {quiet(), quiet()}\n', 's', -1, 'x = [*s]\n',
+                     'x[0]()'),
+    'set_positive': ('s = {quiet(), quiet()}\n', 's', 0, 'x = [*s]\n',
+                     'x[0]()'),
+}
 
 
 def _key(k, spelling):
@@ -90,6 +103,15 @@ def _refused_shape(k, spelling, list_shape, value, read):
     return _QUIET + _bind(k, spelling) + list_shape \
         + f'try:\n    {_key(k, spelling)} = {value}\n' \
         + 'except IndexError:\n    pass\n' + _SL + read
+
+
+def _no_assignment_shape(seed, name, k, prelude, read):
+    """A store into a kind with no item assignment, carrying the program's
+    own `try`: the store raises TypeError, and the read only runs because
+    the program caught it. The container is then whatever the runtime left
+    it as, which is what the verdict has to agree with."""
+    return _QUIET + seed + f'try:\n    {name}[{k}] = relay()\n' \
+        + 'except TypeError:\n    pass\n' + prelude + _SL + read
 
 
 def _negative_store_verdicts(tmp, row):
@@ -149,6 +171,29 @@ def test_the_last_reachable_key_is_not_the_first_refused_one(tmp):
                 f'x[{length + reachable}]()'))
             if named != (1, 1):
                 wrong.append((length, spelling, 'reachable', named))
+    assert not wrong, wrong
+
+
+def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
+    # Immutable in both directions, so neither sign of the key makes the
+    # store happen. A guard that gated only the negative sign, or only an
+    # out-of-range key, would report a value the runtime never stored on
+    # the other three rows here.
+    #
+    # The last leg is the one that makes the other three mean anything: a
+    # list, which does take item assignment, where the same negative store
+    # must still be recorded. A gate that declined every store instead of
+    # every store into a kind without assignment would pass all four rows
+    # above and fail this one.
+    wrong = []
+    for name, row in _NO_ITEM_ASSIGNMENT.items():
+        verdict = _run(tmp, _no_assignment_shape(*row))
+        if verdict != (0, 0):
+            wrong.append((name, verdict))
+    recorded = _run(tmp, _store_shape(
+        -1, 'literal', _clean(2), 'relay()', 'x[1]()'))
+    if recorded != (1, 1):
+        wrong.append(('list_negative', recorded))
     assert not wrong, wrong
 
 
