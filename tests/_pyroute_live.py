@@ -1,8 +1,8 @@
 """Resolve deferred expression values against live flow state."""
 import ast
 
-from _pyroute_mapping import (_selected_values, apply_assignment_bindings,
-                              resolve_expression_value)
+from _pyroute_mapping import apply_assignment_bindings
+from _pyroute_reads import _selected_values, resolve_expression_value
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredAlternatives,
                              DeferredCallable, DeferredClass,
                              DeferredContainer, DeferredInstance, _known_value,

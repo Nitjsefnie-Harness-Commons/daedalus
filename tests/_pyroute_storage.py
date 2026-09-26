@@ -1,7 +1,27 @@
 """Shared storage updates for deferred aggregate values."""
 from dataclasses import replace
 
-from _pyroute_values import DeferredContainer, sync_cells
+from _pyroute_values import (DYNAMIC_KEY, DeferredContainer, merge_yielded,
+                             sync_cells)
+
+
+def dict_length(items, counted=True):
+    return len(items) if counted and DYNAMIC_KEY not in items else None
+
+
+def container_copy(owner, items, unknown_length=False):
+    """A copy of owner holding items; a dict's length is recounted."""
+    length = owner.length
+    if owner.kind == 'dict':
+        length = dict_length(
+            items, owner.length is not None and not unknown_length)
+    return DeferredContainer(items, length, owner.kind, owner.identity,
+                             owner.star_display)
+
+
+def fold_dynamic(target, value):
+    target[DYNAMIC_KEY] = merge_yielded(
+        (target.get(DYNAMIC_KEY), value))
 
 
 def _replace_value(value, identity, replacement, memo):
