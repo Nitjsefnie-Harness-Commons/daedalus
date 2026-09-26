@@ -14,14 +14,10 @@ module globals those names resolve to — in the module under test, and in
 `module=` says whose globals are rebound, so one harness reaches every
 `commands_*` module rather than only the one it was written for.
 
-Faking a namespace is not the same as containing the process, and a handler
-can open a socket by a path its own globals never name — `commands_media`
-once did, while every faked name reported a run it had contained. So while a
-module is wired the harness seals the layer below the namespace: no socket
-connection can be opened at all, from any name. An unmodelled path therefore
-raises a harness refusal naming the line it came from, rather than reaching a
-service, and that refusal is the boundary. The name list below is a
-convenience inside it, not the closure.
+Faking a namespace is not the same as containing the process, so while a
+module is wired the harness seals the layer below it: an unmodelled path
+raises a refusal naming the line it came from rather than reaching a
+service.
 """
 import contextlib
 import io
@@ -130,9 +126,7 @@ def _no_socket():
 
 
 class VirtualTime:
-    """The clock a handler reads, on the test's terms rather than the wall's.
-
-    `do_ping` renders its round trip in milliseconds, so pinning its output
+    """`do_ping` renders its round trip in milliseconds, so pinning its output
     means pinning what the clock said. `readings` are taken in order and the
     last one repeats, so `clock=[1000.0, 1000.25]` reports 250ms and the
     empty default reports 0ms. Anything this class does not define is the
@@ -162,9 +156,7 @@ class VirtualTime:
 
 
 class RecordingExtCmd:
-    """Records every wire call a handler makes and replays canned answers.
-
-    The name is the original one and stays: this records `ext_cmd`, and the
+    """The name is the original one and stays: this records `ext_cmd`, and the
     direct `api` / `wait_for_result` shape beside it. `api_raw` and
     `api_delete` are recorded too, for the media module's two call sites
     that no other handler uses. A `plan` makes the recorder strict — each
@@ -351,7 +343,6 @@ def _dispatch(argv, answers, module, plan, **options):
 
 
 def run_cli(argv, answers, module=commands_content, plan=None, **options):
-    """Parse argv with the real parser, dispatch, return (calls, stdout)."""
     recorded, out, code = _dispatch(argv, answers, module, plan, **options)
     if code is not None:
         raise SystemExit(code)
