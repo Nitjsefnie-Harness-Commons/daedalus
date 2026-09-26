@@ -25,9 +25,11 @@ HERE = Path(__file__).resolve().parent
 # (file, the module name a reload rebinds, the functions the rule decides in).
 # A declared claim, and what defends it is narrower than the list looks:
 # selection_shaped_outside_the_scope recognises one shape of an unnamed refusal
-# - two or more positional arguments, returning the first by name - and
-# nothing for a one-argument helper, a later argument, a tuple, a bool, or a
-# decision nested inside a helper.
+# - two or more positional arguments, returning the first by name - and nothing
+# for a one-argument helper, a later argument, a tuple, a bool, or a decision
+# nested inside a helper. permitted_namespace_read is the mirror of
+# _subscript_read and decides the exemption side; a refusal added there leaves
+# this control and the audit suite both green.
 SCOPE = (
     (HERE / '_cli_arg_audit_resolver.py', '_cli_arg_audit_resolver',
      ('frame_read', '_subscript_read', '_call_read',
@@ -41,8 +43,6 @@ SUBJECT_FILES = ('_cli_arg_audit_resolver.py', '_cli_arg_audit_support.py',
                  'test_cli_arg_audit.py')
 SUBJECT_MODULES = ('_cli_arg_audit_resolver', '_cli_arg_audit_support',
                    'test_cli_arg_audit')
-# The copy is registered under the name a reload re-finds it by, and the
-# copy's own directory is on sys.path while it is loaded.
 ENTRY = 'test_cli_arg_audit'
 
 
@@ -70,9 +70,8 @@ def _span(starts, node):
 def _operand_spans(starts, guard):
     """The span deleting each operand of a disjunction or a conjunction.
 
-    Each span runs from the end of the previous operand to the end of its own,
-    so the operator joining them goes with the operand that leaves; the first
-    operand's span runs to the start of the second.
+    Each span ends with the operator joining it to the operand it leaves, so
+    the two joiners go with the two operands that leave and the rest stays.
     """
     values = guard.values
     for index, value in enumerate(values):
@@ -85,7 +84,7 @@ def _operand_spans(starts, guard):
 
 
 def _own_returns(statement):
-    """The returns written in this statement, not in a callable inside it."""
+    """The returns written in this statement, not in a callable inside."""
     found = []
     stack = list(ast.iter_child_nodes(statement))
     while stack:
@@ -107,10 +106,8 @@ def _is_allow(expression):
 def _refuses(statement):
     """Whether the arm's own return is the refusal, the allow, or neither.
 
-    The direction is what tells a removal from a widening: a guard that
-    refuses loses refusals as its test stops holding, and a guard that allows
-    loses them as its test stops allowing. An arm that does not return, or
-    whose returns disagree, is unclassified and its test is taken whole.
+    An arm that does not return, or whose returns disagree, is unclassified and
+    its test is taken whole.
     """
     returns = _own_returns(statement)
     if not returns:
@@ -125,12 +122,12 @@ def _refuses(statement):
 def _splits(guard, refuses):
     """Whether each operand of a compound test is a condition of its own.
 
-    True for a disjunction in front of a refusal - any one operand reaching
-    the arm is a refusal on its own, and dropping it drops that refusal - and
-    for a conjunction in front of an allow, where every operand has to hold to
-    allow and dropping one allows what the arm used to refuse. The other two
-    combinations widen the rule when an operand is dropped, which is not what
-    a row in this ledger claims.
+    True for a disjunction in front of a refusal - any one operand reaching the
+    arm is a refusal on its own, so dropping it drops that refusal - and for a
+    conjunction in front of an allow, where every operand must hold to allow,
+    so dropping one allows what the arm used to refuse. The other two widen the
+    rule when an operand goes, which is not what a row in this ledger claims,
+    and a condition whose removal widens the rule is not a condition.
     """
     if not isinstance(guard, ast.BoolOp) or len(guard.values) < 2:
         return False
@@ -140,7 +137,6 @@ def _splits(guard, refuses):
 
 
 def _arm_conditions(starts, function, statement):
-    """Yield (key, span, replacement) for one arm of an if/elif chain."""
     refuses = _refuses(statement)
     if _splits(statement.test, refuses):
         for operand, span in _operand_spans(starts, statement.test):
@@ -157,14 +153,13 @@ def _arm_conditions(starts, function, statement):
 
 
 def _allows(expression):
-    """Whether an expression is the allow, the refusal, or neither.
+    """Which branch of an inline conditional is the allow.
 
-    An inline conditional decides by returning one branch or the other, so the
-    direction is read off the conditional itself: ``return X if P else None``
-    and ``return None if P else X`` make the same decision with the allow in
-    opposite positions, and reading it off the statement's return value calls
-    both of them a refusal. A conditional with two allows or two refusals is
-    not a decision this table can read, and is taken whole.
+    ``return X if P else None`` and ``return None if P else X`` decide the same
+    question with the allow in opposite positions, so the direction is read off
+    the conditional rather than off the statement's return value, which calls
+    both of them a refusal. Two allows or two refusals is not a decision this
+    table can read, and is taken whole.
     """
     body_allows = _is_allow(expression.body)
     if body_allows == _is_allow(expression.orelse):
@@ -175,10 +170,8 @@ def _allows(expression):
 def _inline_conditions(starts, function, statement):
     """Yield the decision a return makes inline, as a condition of its own.
 
-    ``return <one branch> if <test> else <the other>`` decides the same
-    question an ``if`` arm does, in the return rather than beside it. Removing
-    the decision is leaving the allow, so the return is what the condition
-    takes with it - and which branch that is depends on the conditional.
+    Removing the decision is leaving the allow, so the whole return is what the
+    condition takes with it.
     """
     if not isinstance(statement.value, ast.IfExp):
         return
@@ -197,7 +190,6 @@ def _inline_conditions(starts, function, statement):
 
 
 def _chain(statement):
-    """Yield each arm of an if/elif chain, the first one first."""
     node = statement
     while isinstance(node, ast.If):
         yield node
@@ -210,11 +202,12 @@ def _chain(statement):
 def _conditions(source, names):
     """Yield (key, span, replacement) for every condition in the scope.
 
-    Every arm of an if/elif chain is one however the chain is spelled: an
-    ``elif`` desugars to a nested ``if`` in the ``orelse``, and a refusal a
-    keyword can hide is one the walk would answer with silence. A return that
-    decides inline carries its own decision. A nested statement inside an arm
-    is not descended into: it has its own control flow.
+    Every arm of an if/elif chain is one however the chain is spelled, because
+    an ``elif`` desugars to a nested ``if`` in the ``orelse`` and a refusal a
+    keyword hides is one the walk would answer with silence. So is a decision
+    a return makes inline. A nested statement inside an arm is NOT descended
+    into: it has its own control flow, and a refusal there is invisible to
+    this control.
     """
     starts = _line_starts(source)
     for function in ast.parse(source).body:
@@ -245,7 +238,6 @@ def _conditions(source, names):
 
 
 def rule_conditions(root):
-    """Return {key: entry} for every condition, from the files under root."""
     found = {}
     for path, module, names in SCOPE:
         target = root / path.name
@@ -259,12 +251,11 @@ def rule_conditions(root):
 def selection_shaped_outside_the_scope():
     """Scoped-file functions of that one shape, outside the scope.
 
-    Recognises a function of two or more positional arguments that returns its
-    first argument by name. Returns nothing for a one-argument helper, for one
-    returning a later argument, for a tuple or a bool, or for a decision nested
-    inside a helper - so a refusal the rule delegates to an unnamed function
-    of those shapes is not caught here. The claim is what this recognises, not
-    that the scope list is defended.
+    Returns nothing for a one-argument helper, for one returning a later
+    argument, for a tuple or a bool, or for a decision nested inside a helper,
+    so a refusal the rule delegates to an unnamed function of those shapes is
+    not caught here. The claim is what this recognises, not that the scope
+    list is defended.
     """
     unscoped = []
     for path, _module, names in SCOPE:
@@ -285,7 +276,6 @@ def selection_shaped_outside_the_scope():
 
 
 def _copied_subject(destination):
-    """The rule's three modules, copied byte for byte, to be mutated."""
     copied = destination / 'mutated'
     copied.mkdir(parents=True)
     for name in SUBJECT_FILES:
@@ -300,13 +290,18 @@ def _subject_loaded(copied):
 
     What is mutated is the rule's three modules and the real ``daedalus_cli``
     behind them, never a fixture: the copy is byte-identical to the files in
-    the tree, which it checks. It is a copy rather than the tree because
-    ``run_tests.py`` starts every suite in one parallel wave, so an in-place
-    edit would hand a half-mutated module to whichever suite imports it next.
-    The real tests directory stays on ``sys.path``, so ``_util`` and
-    ``daedalus_cli`` are the real ones; the copy's names leave ``sys.modules``
-    for the length of the block, so its imports cannot fall through to the
-    originals.
+    the tree, which it checks. It is a copy rather than the tree because a
+    killed run cannot leave the tree dirty, and because the byte-identity and
+    ``__file__`` checks below are what make the mutation demonstrably reach the
+    subject rather than a copy of the harness. The real tests directory stays
+    on ``sys.path``, so ``_util`` and ``daedalus_cli`` are the real ones; the
+    copy's names leave ``sys.modules`` for the length of the block, so its
+    imports cannot fall through to the originals.
+
+    That block is unguarded global state: two suites sharing one interpreter
+    would break each other, and nothing here takes a lock. ``run_tests.py``
+    gives each suite its own subprocess, so nothing this repository runs
+    reaches it.
     """
     saved = {name: sys.modules.pop(name, None)
              for name in SUBJECT_MODULES}
@@ -342,11 +337,9 @@ def _died(run):
 def _condition_removed(key, entry, found):
     """The condition taken out of the copied rule, for as long as it is.
 
-    The bytes go back and are compared; the removed region is re-derived from
-    the mutated file before the reload and is in the failure message, because
-    a mutation that did not apply is a green indistinguishable from a control
-    that stopped discriminating - and a green is the only answer this control
-    normally produces.
+    The bytes go back and are compared, and the removed region is re-derived
+    from the mutated file before the reload: a mutation that did not apply is a
+    green indistinguishable from a control that stopped discriminating.
     """
     path, module, source, span, replacement, _line = entry
     original = path.read_bytes()
@@ -395,8 +388,7 @@ def _plant_refused(mutated, name, prelude, _anchor, replacement, receiver):
     """One plant, through the real package walk, refused once.
 
     Spelled out rather than delegated to the whole-table helper, so what this
-    control reads is the plant and the walk, not the helper that would report
-    a red for some other row.
+    control reads is the plant and the walk.
     """
     base = (mutated.CLI_PACKAGE / 'commands_eval.py').read_text(
         encoding='utf-8')
