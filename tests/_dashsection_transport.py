@@ -98,8 +98,9 @@ function jsonAnswer(data, status) {
 // swallowed one is not. `byType` refuses through this same door rather
 // than a second one, which is the whole of the answer-table strictness
 // this file claims one control for. It is not the only throw here:
-// `unmodelled()` is a separate door, it is not recorded, and nothing in
-// this file's suite controls it.
+// `unmodelled()` is a second door, it is not recorded, and
+// `test_a_headers_bag_a_poll_with_no_command_and_a_twice_registered_selector`
+// reaches it and pins the message it throws.
 function refuse(target) {
   REFUSALS.push({ n: REQUESTS.length, target: String(target) });
   throw new Error('unexpected request ' + String(target));
@@ -161,13 +162,15 @@ function resultAnswer(target, spec) {
   // different command TYPE: the type is read off the command the
   // transport received, and the patch is applied to the envelope it
   // anchored, so the delivery id and generation the loop matched on stay
-  // the real ones. A type the scenario did not name is refused like an
-  // unplanned target -- a double that answered it would be answering
-  // something the scenario never declared.
+  // the real ones. Any name that is not an OWN key of the table is
+  // refused like an unplanned target, which is what the check below is
+  // for; the control beside it samples five `Object.prototype` names,
+  // so the guarantee here is the `hasOwnProperty`, not the sample.
   if (spec.byType !== undefined) {
-    // `hasOwnProperty`, not `in`: a command type named after an
-    // `Object.prototype` member is a name no scenario wrote, and `in`
-    // would find it on the prototype and answer a result nobody declared.
+    // `hasOwnProperty`, not `in`: `in` walks the prototype, so a type
+    // named `toString` would pass the check and be answered with the
+    // anchored envelope and nothing else -- a result-less poll the
+    // shipped loop accepts, from a plan nobody wrote.
     if (!Object.prototype.hasOwnProperty.call(spec.byType, command.type)) {
       refuse(target);
     }
