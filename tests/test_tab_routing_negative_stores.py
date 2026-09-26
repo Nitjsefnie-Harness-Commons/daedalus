@@ -34,12 +34,9 @@ def _run(tmp, shape, clean=False):
         tmp, (_PRE_CLEAN if clean else _PRE) + shape, counts=True)
 
 
-# A negative key names a position counted from the end, so a store at `-1`
-# writes the position `L - 1` and one at `-L` writes position 0. Each row
-# below names that position and derives its expectation from the runtime's
-# own arithmetic, and every row runs through all three spellings
-# `_literal_key` reaches by different routes, so no spelling can diverge
-# from the arithmetic the other two follow.
+# Each row is (store key, length, the position that key names).
+# `zero_of_three` is the non-negative spelling of the same shape, so a
+# regression on the non-negative path fails it.
 _NEGATIVE_STORES = {
     'minus_one_of_two': (-1, 2, 1),
     'minus_length': (-2, 2, 0),
