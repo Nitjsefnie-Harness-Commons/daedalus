@@ -29,7 +29,8 @@ TOK = 'clitok'
 
 
 def _get(path):
-    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None}
+    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None,
+            'timeout': 30}
 
 
 def _rendered(out):

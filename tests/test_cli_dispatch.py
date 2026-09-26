@@ -40,14 +40,17 @@ from daedalus_cli import (SEGMENT_SIG_HEADER, commands_eval,  # noqa: E402
 drive = _cli_dispatch.drive
 run_cli = _cli_dispatch.run_cli
 
-TABS = {'via': 'api', 'method': 'GET', 'path': '/tabs', 'body': None}
+TABS = {'via': 'api', 'method': 'GET', 'path': '/tabs', 'body': None,
+        'timeout': 30}
 COMMAND = {'via': 'api', 'method': 'PUT', 'path': '/command',
-           'body': {'token': 'clitok', 'id': 'job0', 'code': '1+1'}}
+           'body': {'token': 'clitok', 'id': 'job0', 'code': '1+1'},
+           'timeout': 30}
 STORE = {'via': 'ext_cmd', 'id': '_store_hf', 'type': 'store-hotfix',
          'fields': {'fixId': 'fx'}, 'timeout': 30}
 SEGMENT_STATUS_PATH = '/segment-status?job=j0'
 SEGMENT_STATUS = {'via': 'api', 'method': 'GET', 'path': SEGMENT_STATUS_PATH,
-                  'body': None, 'headers': {SEGMENT_SIG_HEADER: 'sigvalue'}}
+                  'body': None, 'timeout': 30,
+                  'headers': {SEGMENT_SIG_HEADER: 'sigvalue'}}
 SCREENSHOT_PATH = '/screenshot?path=job0/shot.png'
 DOWNLOAD = {'via': 'api_raw', 'method': 'GET', 'path': SCREENSHOT_PATH}
 REMOVAL = {'via': 'api_delete', 'path': '/upload',
@@ -307,7 +310,7 @@ def test_run_cli_refuses_a_plan_the_handler_never_fully_issued(tmp):
     body = {'token': 'clitok', 'id': '_nav',
             'code': 'location.href = "https://example.com/"', 'tab': 'tab0'}
     plan = [{'via': 'api', 'method': 'PUT', 'path': '/command',
-             'body': body},
+             'body': body, 'timeout': 30},
             {'via': 'wait_for_result', 'id': '_nav', 'tab': 'tab0',
              'delivery': 'd0', 'timeout': 15, 'interval': 0.5}]
     try:
@@ -502,7 +505,7 @@ def test_the_target_tab_and_token_are_the_tests_own(tmp):
         space.api('PUT', '/command', body)
 
     recorded = drive(reads_both, [{}], [{'via': 'api', 'method': 'PUT',
-                                         'path': '/command',
+                                         'path': '/command', 'timeout': 30,
                                          'body': {'tab': 'tab7',
                                                   'token': 'clitok'}}],
                      target_tab='tab7', token='clitok')
@@ -598,7 +601,7 @@ def test_do_screenshot_downloads_through_the_recorder_and_no_socket(tmp):
     # which the synthetic `DOWNLOAD` entry above does not model.
     download = dict(DOWNLOAD, path='/screenshot?path=job0%2Fshot.png')
     plan = [
-        {'via': 'api', 'method': 'PUT', 'path': '/command',
+        {'via': 'api', 'method': 'PUT', 'path': '/command', 'timeout': 30,
          'body': {'id': '_ss', 'type': 'screenshot', 'token': 'clitok',
                   'tab': 'extension'}},
         {'via': 'wait_for_result', 'id': '_ss', 'tab': 'extension',
