@@ -107,6 +107,31 @@ await bounded(settle(), 'newest replayed', _dashnodeStepTimeoutMs);
 report({ fed, afterOldest, seen: frames() });
 """
 
+# Every frame the module does not dispatch, in the order it meets them: one
+# that will not parse, one the kind filter drops, and one replayed after it
+# has already been dispatched. Each is stamped under, and a real frame
+# between them is not.
+_DISCARDED = _OPEN_STREAM + r"""
+const onConnect = sse.lastEventAt();
+offset += %d;
+drive.lastScript().push('event: command\ndata: {not json\n\n');
+await bounded(settle(), 'unparseable frame', _dashnodeStepTimeoutMs);
+const afterParse = sse.lastEventAt();
+offset += %d;
+push({ type: 'result', id: 'cmd-1', code: 'document.title' });
+await bounded(settle(), 'broadcast-shaped frame', _dashnodeStepTimeoutMs);
+const afterFilter = sse.lastEventAt();
+offset += %d;
+push({ kind: 'event', id: 'e1', type: 'result' });
+await bounded(settle(), 'event frame', _dashnodeStepTimeoutMs);
+const afterEvent = sse.lastEventAt();
+offset += %d;
+push({ kind: 'event', id: 'e1', type: 'result' });
+await bounded(settle(), 'replayed frame', _dashnodeStepTimeoutMs);
+report({ onConnect, afterParse, afterFilter, afterEvent,
+  lastEventAt: sse.lastEventAt(), seen, read: drive.lastScript().settlements });
+""" % (_STEP_MS, _STEP_MS, _STEP_MS, _STEP_MS)
+
 # A broadcast eval command reaches this stream too and carries no kind.
 _FRAME_KIND = _OPEN_STREAM + r"""
 push({ type: 'result', id: 'cmd-1', code: 'document.title' });
@@ -192,6 +217,31 @@ def test_the_last_event_at_moves_on_to_a_further_frame(_tmp):
     assert report['lastEventAt'] > report['onFirst'], report
     assert report['seen'][-1] == [False, 'result', 'event', 'e2'], report
     assert len(report['seen']) == 4, report
+
+
+def test_a_frame_the_module_never_dispatched_does_not_move_the_clock(_tmp):
+    """`sse.js:53` stamping on the way in rather than on the way to a
+    dispatch. The clock is the dashboard's "last event" readout and
+    `relTime` renders anything under two seconds as "now", so a frame the
+    module threw away reads as a live one.
+
+    Three discards, because `emit` has three: a frame that will not
+    parse, one the `kind` filter drops, and one whose id is already
+    dispatched. `errors` is the liveness of the first -- a frame that
+    never arrived would leave the clock unmoved too -- and the real frame
+    in the middle is what shows the clock still moves at all."""
+    report = _run(_DISCARDED)
+    statuses = [[True, 'sse-status', None, None]] * 2
+    assert report['onConnect'] > 0, report
+    assert any('[sse] parse error' in line for line in report['errors']), \
+        report['errors']
+    assert len(report['read']) == 4, report['read']
+    assert report['afterParse'] == report['onConnect'], report
+    assert report['afterFilter'] == report['onConnect'], report
+    assert report['afterEvent'] > report['afterFilter'], report
+    assert report['lastEventAt'] == report['afterEvent'], report
+    assert report['seen'] == statuses + [[False, 'result', 'event', 'e1']], \
+        report
 
 
 def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
