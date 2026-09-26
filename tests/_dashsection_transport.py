@@ -19,7 +19,7 @@ TRANSPORT = r"""
 const ROUTES = new Map();
 const REQUESTS = [];
 const REFUSALS = [];
-const LEDGER = { command: null, generation: 0, polls: 0 };
+const LEDGER = { command: null, generation: 0, wrong: 0, stale: 0 };
 
 function queryValue(target, name) {
   const at = target.indexOf('?');
@@ -107,6 +107,17 @@ function commandAnswer(spec, body) {
     : { did: String(spec.did) });
 }
 
+// The anchored envelope for the first N polls a plan says to skip, or
+// null once they are spent. One counter per member, because a plan uses
+// one at a time and a shared counter would let the second one's count
+// answer for the first.
+function leading(spec, key, shape, anchored) {
+  if (spec[key] === undefined) return null;
+  LEDGER[key] += 1;
+  return LEDGER[key] <= spec[key]
+    ? Object.assign({}, anchored, shape) : null;
+}
+
 // Anchored on the command the transport actually received, so a default
 // envelope is a result the section can match. An `envelope` in the plan
 // is answered verbatim, which is how a scenario plants a wrong one: a
@@ -133,24 +144,19 @@ function resultAnswer(target, spec) {
   if (!anchored) {
     throw unmodelled('a result poll before any command for', target);
   }
-  // `wrong` is how many leading polls carry an envelope naming somebody
-  // else's command, which is what a shared result slot that has not been
-  // replaced yet looks like. The count is the plan's, so a scenario that
-  // needs the third poll to be its own says so and asserts three polls.
-  //
-  // The envelope is the anchored one with only its `id` changed, so the
-  // shipped loop rejects it at the id mismatch and at nothing else. A
-  // wrong envelope missing its `deliveryId`, or carrying its own
-  // `result`, is rejected earlier and the poll count is identical, which
-  // is why the case that uses this reads the envelopes back rather than
-  // trusting the count to say what was rejected.
-  if (spec.wrong !== undefined) {
-    LEDGER.polls += 1;
-    if (LEDGER.polls <= spec.wrong) {
-      return jsonAnswer(Object.assign({}, anchored,
-        { id: 'a command this is not' }));
-    }
-  }
+  // A plan may declare how many leading polls carry an envelope the
+  // shipped loop has to skip, which is what the two shared-slot states
+  // look like before the result is the caller's: `wrong` is a result left
+  // by another command, `stale` is one that has not been stamped with a
+  // generation yet. Each is the anchored envelope with ONE member
+  // changed, so the loop reaches the branch that member is read in --
+  // `api.js:150` for `wrong`, `api.js:152` for `stale` -- and the count
+  // says how many times it looked. The case that uses these reads the
+  // envelopes back, because the count cannot say which member differed.
+  const skipped = leading(spec, 'wrong', { id: 'a command this is not' },
+                          anchored)
+    || leading(spec, 'stale', { resultGeneration: 0 }, anchored);
+  if (skipped) return jsonAnswer(skipped);
   if (spec.pending
       || (spec.result === undefined && spec.error === undefined)) {
     return jsonAnswer({ pending: true });

@@ -169,6 +169,13 @@ report({ refusal, planned: drive.planned() });
 """
 
 
+# No envelope this plan answers ever names the command, so the loop gives
+# up. The budget is 5000 ms for the same reason the retry case's is: the
+# check reads host time plus what the pump spent, and a 700 ms budget
+# left ~200 ms of real host time to decide. At 5000 it makes 20 polls,
+# every one carrying the wrong envelope, and costs about 10 ms of host.
+# What this case tests is that the loop gives up at all, and the number
+# of wrong polls it swallows on the way there is not the claim.
 ENVELOPE = r"""
 (async () => {
 """ + SEED + IMPORT_API + r"""
@@ -178,7 +185,7 @@ drive.route('/command', { did: 'd1', result: 'the right result' });
 drive.route('/result?tab=extension', { envelope });
 let outcome = null;
 try {
-  await bounded(api.extCmd('list-block-rules', {}, { timeout: 700 }),
+  await bounded(api.extCmd('list-block-rules', {}, { timeout: 5000 }),
     'a command no envelope matches', _dashnodeStepTimeoutMs);
 } catch (error) { outcome = error.message; }
 await bounded(settle(), 'after the give-up', _dashnodeStepTimeoutMs);
@@ -194,10 +201,11 @@ report({ outcome });
 #
 # The 5000 ms budget is deliberate and the sleeps are virtual: the loop's
 # own `Date.now() - t0` check reads the host clock plus what the pump has
-# spent, so the third check sits at 750 ms against 700 and had 200 ms of
-# real host time to spare. A budget in seconds turns that margin from a
-# window a loaded runner can close into a wall the test cannot cross, and
-# it costs no wall time because nothing here sleeps for real.
+# spent, and the check that decides -- the one after the third poll --
+# reads about 500 virtual ms against 5000, so roughly 4500 ms of real
+# host time is the margin. A budget in seconds turns that from a window a
+# loaded runner can close into a wall the test cannot cross, and it costs
+# no wall time because nothing here sleeps for real.
 LATE_ENVELOPE = r"""
 (async () => {
 """ + SEED + IMPORT_API + r"""
@@ -222,6 +230,25 @@ const result = await bounded(api.extCmd('list-block-rules', {},
   { timeout: 5000 }), 'a command the third poll answers',
   _dashnodeStepTimeoutMs);
 report({ result, seen });
+})().catch(leave);
+"""
+
+
+# `api.js:148-157` is a four-branch match sequence, and `if (!generation)
+# continue;` is the branch none of the other cases reaches. This is it:
+# two leading polls carry an envelope that names the command correctly
+# and is not stamped with a generation yet, so the loop has to look
+# twice more before the stamped one answers.
+UNSTAMPED = r"""
+(async () => {
+""" + SEED + IMPORT_API + r"""
+drive.route('/command', { did: 'd1', result: 'the right result' });
+drive.route('/result?tab=extension',
+  { stale: 2, result: 'the right result' });
+const result = await bounded(api.extCmd('list-block-rules', {},
+  { timeout: 5000 }), 'a command the stamped poll answers',
+  _dashnodeStepTimeoutMs);
+report({ result });
 })().catch(leave);
 """
 
