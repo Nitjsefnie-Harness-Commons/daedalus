@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _cli_helpers as cli  # noqa: E402
+import _mcp_load as mcp  # noqa: E402
+import _mcp_tools_helpers as mcp_tools  # noqa: E402
 import _util  # noqa: E402
-import test_cli as cli  # noqa: E402
-import test_mcp_server as mcp  # noqa: E402
-import test_mcp_tools as mcp_tools  # noqa: E402
 
 from daedalus_cli.output import print_result  # noqa: E402
 

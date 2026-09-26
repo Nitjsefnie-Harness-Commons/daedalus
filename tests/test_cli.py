@@ -22,13 +22,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
-from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
+from _cli_helpers import (  # noqa: E402
+    CLI,
+    TOK,
+    BRIDGE_ENV,
+    _answer_one_ext_command,
+    cli_env,
+    run_cli,
+)
 from _queueread import queued_command  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 from daedalus_cli import __version__  # noqa: E402
-
-CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 
 # The CLI picks its decorative markers from what the console can encode, so a
 # test that pinned the arrow would pass here and fail on a Windows code page
@@ -36,28 +41,6 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 # immediately precedes the id, not which glyph carries it.
 OUT_MARKS = ('\u2192', '->')
 IN_MARKS = ('\u2190', '<-')
-TOK = 'clitok'
-BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-
-
-def cli_env(**overrides):
-    """A clean environment: none of the CLI's config vars leak in from ours."""
-    env = {name: value for name, value in os.environ.items()
-           if not name.startswith('DAEDALUS_')}
-    # PYTHONIOENCODING goes too, so the CLI applies its own rule for a piped
-    # stream instead of inheriting whatever this runner was started with. A
-    # test that wants a specific one passes it back through overrides.
-    for k in ('TOKEN', 'ID', 'PYTHONIOENCODING'):
-        env.pop(k, None)
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    env.update(overrides)
-    return env
-
-
-def run_cli(args, env, timeout=60):
-    return subprocess.run(CLI + args, cwd=str(_util.ROOT), env=env,
-                          capture_output=True, text=True, encoding='utf-8',
-                          timeout=timeout)
 
 
 def run_python(code, env, timeout=60):
@@ -1056,38 +1039,6 @@ def test_connection_failure_is_a_clean_error(tmp):
                                   DAEDALUS_TOKEN=TOK))
     assert r.returncode != 0, (r.returncode, r.stdout)
     assert 'Connection failed' in r.stderr, r.stderr
-
-
-def _answer_one_ext_command(base, docroot, argv, result, env):
-    """Run one typed subcommand and answer the command it enqueues.
-
-    Returns (returncode, stdout, stderr, the payload the bridge received).
-    The payload is the point: every one of these subcommands is a wire
-    contract: the `type` the extension dispatches on, and the fields it reads
-    off the command. The repository already carries a guard for confusing
-    `tab` with a browser `tabId`, and this pins the senders themselves.
-    """
-    # Nothing consumes this queue — there is no extension here — so a command
-    # from an earlier case may remain. Clearing and excluding refused survivors
-    # makes the file this case waits for unambiguously its own.
-    qdir = Path(docroot) / 'commands' / f'{TOK}_extension'
-    ignored_names = clear_command_queue(qdir)
-    proc = subprocess.Popen(
-        CLI + argv, cwd=str(_util.ROOT), env=env, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, encoding='utf-8')
-    try:
-        queued = wait_for_command(qdir, 15, ignored_names=ignored_names)
-        if queued is None:
-            raise AssertionError(
-                f'timed out waiting for the command {argv[0]} enqueues')
-        status, _ = _util.post_json(base + '/result', {
-            'token': TOK, 'tabId': 'extension', 'id': queued['id'],
-            'result': result, 'error': None, 'ts': 1, '_did': queued['_did']})
-        assert status == 200, (argv, status)
-        out, err = proc.communicate(timeout=60)
-    finally:
-        _drain.kill_and_drain(proc)
-    return proc.returncode, out, err, queued
 
 
 def test_every_typed_subcommand_sends_its_documented_command(tmp):

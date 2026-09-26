@@ -271,6 +271,7 @@
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
 !/tests/_cli_dispatch.py
+!/tests/_cli_helpers.py
 !/tests/_cli_parse.py
 !/tests/_clientstate.py
 !/tests/_cmdqueue.py
@@ -334,6 +335,7 @@
 !/tests/_mcp_import_closure.py
 !/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
+!/tests/_mcp_tools_helpers.py
 !/tests/_mcp_transport_probes.py
 !/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
@@ -390,6 +392,7 @@
 !/tests/_version_contract.py
 !/tests/_version_contract_dashboard_duplicates.py
 !/tests/_version_contract_scanners.py
+!/tests/_watcher_waits.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
 !/tests/_wffixtures.py

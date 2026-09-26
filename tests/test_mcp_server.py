@@ -29,30 +29,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
 import _util  # noqa: E402
 import _mcp_load  # noqa: E402
-from _cmdqueue import clear_command_queue, wait_for_command  # noqa: E402
 from _queueread import queued_command, queued_commands  # noqa: E402
 
-# find_spec asks whether the dependency is installed without importing it: an
-# import kept only for its truthiness reads as dead code to every linter.
-DEPS = all(importlib.util.find_spec(name) is not None
-           for name in ('httpx', 'mcp', 'starlette'))
+DEPS = _mcp_load.DEPS
 if DEPS:
     import logging
     logging.getLogger('httpx').setLevel(logging.WARNING)  # quiet per-request logs
     logging.getLogger('mcp').setLevel(logging.WARNING)  # quiet mcp INFO logs
 
+# The shared load-and-drive helpers. They are re-exported rather than imported
+# under their own names so every importer of this suite's namespace — including
+# held ones this branch may not edit — keeps reading the same object.
 TOK, BRIDGE_ENV = _mcp_load.TOK, _mcp_load.BRIDGE_ENV
+_need_deps = _mcp_load._need_deps
 _load_mcp = _mcp_load._load_mcp
 _load_mcp_at_port = _mcp_load._load_mcp_at_port
 _start_in_thread = _mcp_load._start_in_thread
 _start_mcp_in_process = _mcp_load._start_mcp_in_process
 _wait_for_mcp = _mcp_load._wait_for_mcp
-os.environ.update(BRIDGE_ENV)
-
-
-def _need_deps():
-    if not DEPS:
-        _util.skip('daedalus_mcp.server dependencies (httpx/mcp/starlette) not installed')
+_mcp_request = _mcp_load._mcp_request
+_mcp_payload = _mcp_load._mcp_payload
+_open_mcp_session = _mcp_load._open_mcp_session
+_call_mcp_tool = _mcp_load._call_mcp_tool
+_mcp_tool_text = _mcp_load._mcp_tool_text
 
 
 def _await_mcp_line(output, proc):
@@ -115,76 +114,50 @@ def _surface_responder_errors(thread, errors, timeout, stop=None):
             raise failure from None
 
 
-def _mcp_request(port, body, authorizations=None, session_ids=None,
-                 hosts=None, origins=None):
-    """Send one MCP request while preserving repeated physical headers."""
-    raw = body if isinstance(body, bytes) else json.dumps(body).encode()
-    connection = http.client.HTTPConnection(
-        '127.0.0.1', port, timeout=10)
-    connection.putrequest('POST', '/mcp', skip_host=hosts is not None)
-    connection.putheader('Content-Type', 'application/json')
-    connection.putheader('Accept', 'application/json, text/event-stream')
-    connection.putheader('Content-Length', str(len(raw)))
-    values = ([f'Bearer {TOK}'] if authorizations is None
-              else authorizations)
-    for authorization in values:
-        connection.putheader('Authorization', authorization)
-    for session_id in session_ids or ():
-        connection.putheader('Mcp-Session-Id', session_id)
-    for host in hosts or ():
-        connection.putheader('Host', host)
-    for origin in origins or ():
-        connection.putheader('Origin', origin)
-    connection.endheaders(raw)
-    response = connection.getresponse()
-    status = response.status
-    session_id = response.getheader('Mcp-Session-Id')
-    response_body = response.read()
-    connection.close()
-    return status, session_id, response_body
+def test_the_dependency_check_is_one_shared_definition(tmp):
+    """`DEPS`/`_need_deps` decide skip-or-run for every MCP suite at once.
 
+    A shared copy that is subtly wrong does not fail loudly: it makes each
+    caller SKIP, so a broken front end reads green. What counts as present, and
+    the refusal a missing dependency gets, are therefore pinned here rather
+    than left to hold only because of where the helper was defined.
 
-def _mcp_payload(raw):
-    """Decode either a JSON MCP response or its streamable-HTTP SSE wrapper."""
-    for line in raw.splitlines():
-        if line.startswith(b'data: '):
-            return json.loads(line[6:])
-    return json.loads(raw)
-
-
-def _open_mcp_session(port):
-    """Initialize one live MCP session and return its transport id."""
-    initialize = {
-        'jsonrpc': '2.0', 'id': 'initialize', 'method': 'initialize',
-        'params': {'protocolVersion': '2024-11-05', 'capabilities': {},
-                   'clientInfo': {'name': 'security-regression',
-                                  'version': '0'}}}
-    status, session_id, raw = _mcp_request(port, initialize)
-    assert status == 200 and session_id, (status, session_id, raw)
-    status, _unused, raw = _mcp_request(
-        port, {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
-        session_ids=(session_id,))
-    assert status == 202, (status, raw)
-    return session_id
-
-
-def _call_mcp_tool(port, session_id, request_id, name, arguments=None):
-    """Call one tool through the authenticated live MCP transport."""
-    status, _unused, raw = _mcp_request(
-        port,
-        {'jsonrpc': '2.0', 'id': request_id, 'method': 'tools/call',
-         'params': {'name': name, 'arguments': arguments or {}}},
-        session_ids=(session_id,))
-    assert status == 200, (status, raw)
-    return _mcp_payload(raw)
-
-
-def _mcp_tool_text(reply):
-    """Join the text blocks returned by one MCP tools/call response."""
-    return ''.join(
-        item.get('text', '')
-        for item in reply.get('result', {}).get('content', [])
-        if isinstance(item, dict))
+    The flag is put back in a `finally` on BOTH arms, because leaving it False
+    does not fail this test — it disarms every test that runs after it, which
+    is the same false green this control exists to prevent, one level down.
+    """
+    del tmp
+    assert _mcp_load.DEPS is DEPS, 'the suite reads a second dependency check'
+    assert _mcp_load._need_deps is _need_deps, _need_deps
+    assert DEPS == all(importlib.util.find_spec(name) is not None
+                       for name in ('httpx', 'mcp', 'starlette')), DEPS
+    # Present: the call returns, so no suite is silently disarmed.
+    _mcp_load.DEPS = True
+    try:
+        _mcp_load._need_deps()
+    finally:
+        _mcp_load.DEPS = DEPS
+    # Absent: a skip naming the three, not a pass and not a failure — a suite
+    # that failed on a missing optional front end would be wrong.
+    _mcp_load.DEPS = False
+    try:
+        _mcp_load._need_deps()
+    except _util.Skipped as skipped:
+        for name in ('httpx', 'mcp', 'starlette'):
+            assert name in str(skipped), skipped
+    else:
+        raise AssertionError('a missing dependency did not skip the suite')
+    finally:
+        _mcp_load.DEPS = DEPS
+    assert _mcp_load.DEPS, 'the check left the suite disarmed'
+    assert _mcp_load.TOK is TOK and _mcp_load.BRIDGE_ENV is BRIDGE_ENV, (
+        'the bridge fixture has a second home')
+    # The bind re-reads the environment, so the token the listener
+    # authenticates against has to be published, not only mapped. Asserting
+    # the value rather than the presence keeps this from passing on a runner
+    # that happens to export a DAEDALUS_TOKEN of its own.
+    assert os.environ.get('DAEDALUS_TOKEN') == TOK, (
+        'the fixture no longer publishes the token the bind re-reads')
 
 
 def test_wait_for_mcp_refuses_a_non_mcp_listener(tmp):
@@ -1527,48 +1500,6 @@ def test_an_unrelated_crash_naming_the_bind_text_is_not_retried(tmp):
         assert 'serve crashed: address already in use' in err_text, captured
     finally:
         _mcp_load._load_mcp_at_port = real_loader
-
-
-def _answer_mcp_command(base, docroot, mod, call, result, tab='extension'):
-    """Run one MCP tool that sends a command, and answer what it sends.
-
-    The tool awaits a result that only an extension would post, and there is
-    none here, so the answer comes from this thread once the command lands in
-    the queue. Returns (what the tool returned, the payload the bridge got).
-    """
-    qdir = Path(docroot) / 'commands' / f'{TOK}_{tab}'
-    ignored_names = clear_command_queue(qdir)
-    box = {}
-
-    def run():
-        # The token is a ContextVar, and a thread starts with a fresh context:
-        # setting it on the caller's thread leaves the tool answering "no token
-        # in context". BearerAuth sets it per request for the same reason.
-        mod._token.set(TOK)
-        try:
-            box['value'] = asyncio.run(call())
-        except Exception as exc:  # pylint: disable=broad-except
-            box['error'] = exc
-
-    worker = threading.Thread(target=run)
-    worker.start()
-    try:
-        queued = wait_for_command(qdir, 20, producer_alive=worker.is_alive,
-                                  ignored_names=ignored_names)
-        if queued is None:
-            worker.join(timeout=5)
-            if 'error' in box:
-                raise box['error']
-            raise AssertionError('the tool enqueued no command')
-        status, _ = _util.post_json(base + '/result', {
-            'token': TOK, 'tabId': tab, 'id': queued['id'], 'result': result,
-            'error': None, 'ts': 1, '_did': queued['_did']})
-        assert status == 200, status
-    finally:
-        worker.join(timeout=60)
-    if 'error' in box:
-        raise box['error']
-    return box.get('value'), queued
 
 
 if __name__ == '__main__':
