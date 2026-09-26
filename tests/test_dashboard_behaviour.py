@@ -23,9 +23,11 @@ import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _worker_sources import event_target_stub  # noqa: E402
 
 
-_CONTENT_KEEPALIVE_HARNESS = _dashnode.DashboardNodeHarness(r"""
+_CONTENT_KEEPALIVE_HARNESS = _dashnode.DashboardNodeHarness(
+    r"""
 phase('dashboard harness started');
 const fs = require('fs');
 const vm = require('vm');
@@ -42,9 +44,7 @@ function clearScheduled(collection, id) {
   const item = collection.find((candidate) => candidate.id === id);
   if (item) item.cleared = true;
 }
-function eventTarget(listeners) {
-  return { addListener(listener) { listeners.push(listener); } };
-}
+""" + event_target_stub() + r"""
 const windowObject = {
   addEventListener() {},
   postMessage() {},

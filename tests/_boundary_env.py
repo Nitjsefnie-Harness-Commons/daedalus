@@ -16,7 +16,8 @@ import json
 # this module and _stream_fake do not import each other.
 from _noderun import run_node_program  # noqa: F401,E501 pylint: disable=W0611
 from _stream_fake import STRICT_FETCH
-from _worker_sources import STREAM_RESPONSE, import_scripts_stub
+from _worker_sources import (
+    STREAM_RESPONSE, event_target_stub, import_scripts_stub)
 
 BRIDGE = 'https://initial.example.com'
 REPLACEMENT = 'https://replacement.example.com'
@@ -106,7 +107,8 @@ SCENARIO_PLANS = {
 
 
 ENVIRONMENT = (
-    'const ALL_PLANS = ' + json.dumps(SCENARIO_PLANS) + ';\n'
+    event_target_stub()
+    + 'const ALL_PLANS = ' + json.dumps(SCENARIO_PLANS) + ';\n'
     + r"""
 const fs = require('fs');
 const vm = require('vm');
@@ -155,14 +157,6 @@ function response(status, data) {
     body: null,
     json: async () => data,
     text: async () => JSON.stringify(data),
-  };
-}
-
-function eventTarget(listeners = null) {
-  return {
-    addListener(listener) {
-      if (listeners) listeners.push(listener);
-    },
   };
 }
 
