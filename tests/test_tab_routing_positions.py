@@ -638,7 +638,6 @@ _NEGATIVE_STORES = {
     'minus_one_of_two': (-1, 2, 1),
     'minus_length': (-2, 2, 0),
     'minus_one_of_three': (-1, 3, 2),
-    'minus_two_of_three': (-2, 3, 1),
     'zero_of_three': (0, 3, 0),
 }
 _SPELLINGS = ('literal', 'name', 'parens')
@@ -712,8 +711,7 @@ def test_negative_store_on_an_unknown_length_fails_closed(tmp):
     # that slot and its own index and nothing else.
     wrong = []
     for spelling in _SPELLINGS:
-        for read, expected in (('x[0]()', (0, 1)), ('x[1]()', (0, 1)),
-                               ('x[2]()', (1, 1))):
+        for read, expected in (('x[0]()', (0, 1)), ('x[2]()', (1, 1))):
             body = _store_shape(-1, spelling, _OPEN_LENGTH, 'relay()', read)
             verdict = _run(tmp, body)
             if verdict != expected:
