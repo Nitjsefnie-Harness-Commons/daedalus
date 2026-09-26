@@ -36,6 +36,7 @@ from pathlib import Path
 
 from _jsread import blank_js_comments
 from _repo import ROOT
+from _worker_sources import CONTENT_SCRIPT_PAGE
 
 
 # Enough DOM for `h`, `field`, `clear` and the selectors each section uses.
@@ -156,7 +157,7 @@ _DASHBOARD_PROCESS_GRACE_S = 5
 _DASHBOARD_DRAIN_TIMEOUT_S = 1
 _BOUNDED_AWAIT = re.compile(r'\bawait\s+bounded\s*\(')
 
-_DASHBOARD_PRELUDE = r"""
+_DASHBOARD_PRELUDE = CONTENT_SCRIPT_PAGE + r"""
 const _dashnodeSetTimeout = globalThis.setTimeout;
 const _dashnodeClearTimeout = globalThis.clearTimeout;
 
@@ -303,11 +304,9 @@ def dashboard_child_timeout(bounded_steps,
 
 
 def _output_text(value):
-    if value is None:
-        return ''
     if isinstance(value, bytes):
         return value.decode('utf-8', errors='replace')
-    return value
+    return '' if value is None else value
 
 
 def _latest_output(latest, earlier):

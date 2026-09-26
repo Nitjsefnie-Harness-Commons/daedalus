@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import ROOT  # noqa: E402
+from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
 
 SINGLE_ORIGIN = 'https://storage-test.example.com'
 FAILURE_ORIGIN = 'https://storage-failure.example.com'
@@ -26,7 +27,7 @@ ORIGIN_B = 'https://beta.example.com'
 
 # Shared prelude: build the service-worker realm once per harness. makeStorage
 # receives the worker's chrome.runtime so a failing store can set lastError.
-_PRELUDE = r"""
+_PRELUDE = CONTENT_SCRIPT_PAGE + r"""
 const fs = require('fs');
 const vm = require('vm');
 
@@ -77,28 +78,6 @@ function frameChrome(storage, background, origin) {
       },
     },
     storage: { local: storage },
-  };
-}
-
-function contentScriptPage() {
-  const attributes = new Map();
-  return {
-    crypto: { randomUUID: () => 'content-doc-token' },
-    document: {
-      documentElement: {
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) {
-          return attributes.has(name) ? attributes.get(name) : null;
-        },
-        removeAttribute(name) { attributes.delete(name); },
-      },
-      addEventListener() {},
-      removeEventListener() {},
-      head: { appendChild() {} },
-      createElement: () => ({
-        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
-      }),
-    },
   };
 }
 
