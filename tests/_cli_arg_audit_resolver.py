@@ -19,6 +19,8 @@ FRAME_SURFACE = frozenset(
     name for name, member in vars(types.FrameType).items()
     if isinstance(member, _FRAME_DESCRIPTORS))
 UNPROVEN = object()  # the verdict for a value whose origin is untraceable
+# A subscript key that is a range or a tuple is a position, not a name.
+_RANGE_OR_TUPLE_KEYS = (ast.Slice, ast.Tuple, ast.List, ast.Starred)
 _UNKNOWN_MODULE_BINDING = object()
 
 
@@ -293,14 +295,19 @@ def _static_attribute(base, attribute, unresolved):
 
 def resolve_origin(node, function, handler_globals, unresolved, scope_binds,
                    bindings=None):
-    """Return the value the audit can see a name or attribute names.
+    """Return the value the audit can see a name, attribute or literal names.
 
     A name resolves through ``bindings`` when the audit has tracked one for
     it, then through the scope it reads; an attribute resolves through a base
-    it has already resolved. Every other expression — a call, a subscript, a
-    comprehension — is unproven, because its value is produced by running code
-    the audit does not run.
+    it has already resolved; a literal resolves to itself. Every other
+    expression — a call, a subscript, a comprehension — is unproven, because
+    its value is produced by running code the audit does not run. A literal
+    receiver is the cheap half of the frame rule's selectivity: a selection on
+    a string the audit can see cannot be a frame member, and refusing it would
+    refuse the CLI's own ``api('GET', path)`` calls.
     """
+    if isinstance(node, ast.Constant):
+        return node.value
     if isinstance(node, ast.Name):
         if bindings is not None and node.id in bindings:
             return bindings[node.id]
@@ -426,45 +433,108 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
     return attribute, parent, needs_presence
 
 
-def frame_read(node, namespace_key):
+def frame_read(node, namespace_key, *context):
     """Return the receiver of a frame read, or ``None``.
 
-    The member a node names and the receiver it selects from are decided in one
-    place, because a member this file has never heard of has to be refused like
-    a known one and the answer must not be spread over three arms. The three
-    carriers are the shapes the grammar gives a member name: an attribute, a
-    constant-string subscript, and a call's constant-string selection argument.
-    Only the subscript reaches the audited namespace by its own key, so a
-    call naming a path rather than a member reads nothing, while a member
-    named through a callee the audit cannot prove is still refused, because
-    the call arm asks only what member the argument names.
+    A position that can carry a member name and one the audit cannot read are
+    the same position as far as the guard is concerned, and answering the
+    second "no member" is silence: a computed name, a starred expansion and a
+    member chosen by a callee the audit cannot see all reach ``f_locals`` and
+    none of them names it in the source. Each is reported as a read, and
+    ``reads_frame_namespace`` refuses it on the receiver's origin exactly as
+    it refuses a constant member. Deciding a name the audit can read is what
+    keeps that cheap: a selection on a receiver whose value the audit can see
+    is not a frame read, and a literal is the case the CLI's own calls hit.
+
+    A member this file has never heard of is refused like a known one, which is
+    why the member test is the set read off ``types.FrameType``. Only the
+    subscript reaches the audited namespace by its own key, so a call naming a
+    path rather than a member reads nothing.
     """
     if isinstance(node, ast.Attribute):
-        member, receiver = node.attr, node.value
-        names_member = member in FRAME_SURFACE
-    elif isinstance(node, ast.Subscript):
-        member, receiver = constant_string(node.slice), node.value
-        names_member = member in FRAME_SURFACE or member == namespace_key
-    elif (isinstance(node, ast.Call) and len(node.args) in (2, 3)
-          and not node.keywords):
-        member, receiver = constant_string(node.args[1]), node.args[0]
-        names_member = member in FRAME_SURFACE
-    else:
-        return None
-    return receiver if names_member else None
+        return node if node.attr in FRAME_SURFACE else None
+    if isinstance(node, ast.Subscript):
+        return _subscript_read(node, namespace_key)
+    if isinstance(node, ast.Call):
+        return _call_read(node, *context)
+    return None
 
 
-def reads_frame_namespace(receiver, origin):
+def selection_base(selection):
+    """The value a member selection is made from — what has to be a frame."""
+    if isinstance(selection, ast.Call):
+        return selection.args[0] if selection.args else selection.func
+    return selection.value
+
+
+def _subscript_read(node, namespace_key):
+    """A subscript names a member by its key; an unreadable key names one too.
+
+    A constant the audit can read is decided, and a key that is a range or a
+    tuple is a position rather than a name; an expression is neither, so it is
+    a member the source does not spell and the receiver's origin refuses it.
+    """
+    if isinstance(node.slice, ast.Constant):
+        key = constant_string(node.slice)
+        return node if (key is not None and (key in FRAME_SURFACE
+                                             or key == namespace_key)) \
+            else None
+    if isinstance(node.slice, _RANGE_OR_TUPLE_KEYS):
+        return None            # a range or a tuple key is not a member name
+    return node                # an expression the audit cannot read is one
+
+
+def _call_read(node, function, handler_globals, scope_binds,
+               comprehension_shadows):
+    """A call selects a member by an argument the audit may not be able to
+    read.
+
+    A visible constant member is decided by the member test, at any argument
+    position rather than only the second, because a call can name a member
+    wherever the callee looks for it. Everything else the grammar gives a
+    member name and the audit cannot read is a read too, and is reported so the
+    receiver's origin refuses it: a starred expansion hides the whole argument
+    list, a callee that is itself a call has a value the audit cannot see, and
+    a proven builtin ``getattr`` whose name is an expression selected a member
+    the source does not spell. A one-argument call with a callee the audit can
+    see is not a selection to reason about, which is what keeps the CLI's own
+    ``value.lower()`` and ``res.get('result', [])`` out of the answer.
+    """
+    if not node.args:
+        return None            # nothing is selected from, so nothing is read
+    visible = [argument for argument in node.args
+               if isinstance(argument, ast.Constant)
+               and argument.value in FRAME_SURFACE]
+    if visible or _has_starred(node) or isinstance(node.func, ast.Call):
+        return node
+    if (len(node.args) in (2, 3) and not node.keywords
+            and not isinstance(node.args[1], ast.Constant)
+            and is_builtin_reference(
+                node.func, 'getattr', function, handler_globals,
+                scope_binds, comprehension_shadows)):
+        return node
+    return None
+
+
+def _has_starred(node):
+    return any(isinstance(argument, ast.Starred) for argument in node.args)
+
+
+def reads_frame_namespace(selection, origin):
     """Refuse a frame read whose receiver the audit cannot account for.
 
-    ``origin`` is what the audit can see the receiver to be, or ``UNPROVEN``
+    ``selection`` is the expression a reader has to look at and ``origin`` is
+    what the audit can see the receiver it selects from to be, or ``UNPROVEN``
     when it cannot. A receiver it has resolved to a live frame is refused on
     the frame's own account, which is the one case a name the audit CAN see
-    still has to refuse.
+    still has to refuse. The selection is returned rather than its receiver
+    because the receiver is the argument the callee happened to take first:
+    ``api('GET', 'f_locals')`` is triggered by its second argument, and a
+    message naming ``'GET'`` sends the reader to the wrong place.
     """
     if origin is not UNPROVEN and not isinstance(origin, types.FrameType):
         return None
-    return receiver
+    return selection
 
 
 def assert_exact_module_vars():
