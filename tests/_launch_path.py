@@ -430,14 +430,18 @@ def _child_parameters():
                           if keyword.arg in names]
                 pairs.sort()
                 for position, value in pairs:
-                    if position >= len(names):
+                    # Every caller-supplied NAME is recorded, not only a
+                    # child, because a DEADLINE arrives the same way: the
+                    # number is the caller's, and a scan that judged it in
+                    # the callee's scope would refuse the shipped cleanup's
+                    # own bounded reap. The flag says which kind it was.
+                    if position >= len(names) or not isinstance(
+                            value, ast.Name):
                         continue
-                    is_child = (isinstance(value, ast.Name)
-                                and value.id in bound)
                     filled.setdefault(owner, {}).setdefault(
                         names[position], []).append(
                             (other, call.lineno, value, body, constants,
-                             is_child))
+                             value.id in bound))
     return filled
 
 

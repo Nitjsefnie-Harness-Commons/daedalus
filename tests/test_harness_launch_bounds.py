@@ -60,6 +60,75 @@ def _full_census(root):
     return census.census(Path(root), ('_noderun.py', '_stream_fake.py'))
 
 
+def test_the_timeout_concept_is_read_whatever_the_receiver(tmp):
+    """The deadline CONCEPT, not the launch shape, is what this catches.
+
+    A route rule reads a bound where it can prove the number reaches a
+    child, which is why a narrowed version of this audit missed all three
+    of the first plants here: `queue.get` and `thread.join` are not
+    subprocess launches, and nothing in a launch-only reading sees them.
+    The scan is receiver-independent and signature-reading, so a `timeout=`
+    on ANY call on the path is refused and a `timeout` parameter on a path
+    FUNCTION is refused from its signature alone.
+
+    The last plant is the one the disclosure used to leave implicit: a
+    defaulted `timeout=` on a path function is an undeclared way to bound a
+    child, and the signature is the only place that shows.
+    """
+    del tmp
+    plants = {
+        'a-child-wait': _DETECTOR.replace(
+            'process.wait(timeout=DEADLINE_S)', 'process.wait(timeout=30)'),
+        'a-queue-read': _DETECTOR.replace(
+            '        returncode = process.wait(timeout=DEADLINE_S)',
+            '        item = queue.get(timeout=5)\n'
+            '        returncode = process.wait(timeout=DEADLINE_S)'),
+        'a-thread-join': _DETECTOR.replace(
+            '        returncode = process.wait(timeout=DEADLINE_S)',
+            '        worker.join(timeout=2)\n'
+            '        returncode = process.wait(timeout=DEADLINE_S)'),
+        'a-defaulted-parameter': _DETECTOR.replace(
+            'def launch(argv):',
+            'def launch(argv, *, timeout=None):')
+        + '\n    del timeout\n',
+    }
+    expected = {
+        'a-child-wait': 'timeout= keyword',
+        'a-queue-read': 'timeout= keyword',
+        'a-thread-join': 'timeout= keyword',
+        'a-defaulted-parameter': 'timeout parameter',
+    }
+    for label, body in plants.items():
+        routes = _codes(body)
+        assert expected[label] in routes, (label, routes, _routes(body))
+
+
+def test_a_call_that_is_not_a_deadline_is_not_one(tmp):
+    """The negative direction: a `timeout=` that is PERMITTED stays green.
+
+    Without this the scan is a rule that only fires true, which is how a
+    false-positive generator starts. Three near misses, all on a path
+    function: the launcher's own derived and classified deadline, a caller
+    that fills the cleanup's deadline parameter with a composed constant, and
+    an unrelated keyword that is not a deadline at all.
+    """
+    del tmp
+    assert not _codes(_DETECTOR), _routes(_DETECTOR)
+    # The cleanup's own deadline, filled by the caller with a composed
+    # constant: judged at the CALL SITE, where the number lives, so the
+    # shipped bounded reap is not a fault in the callee that receives it.
+    tail = 'CLEANUP_TAIL_S = round(SLOWEST_S * MULTIPLE)'
+    forwarded = _DETECTOR.replace(
+        'CLEANUP_S = 5', f'CLEANUP_S = 5\n{tail}').replace(
+            'cleanup_process_tree(process, CLEANUP_S)',
+            'cleanup_process_tree(process, CLEANUP_TAIL_S)')
+    assert not _codes(forwarded), _routes(forwarded)
+    # A value that is not a deadline keyword at all.
+    positional = _DETECTOR.replace(
+        'process.wait(timeout=DEADLINE_S)', 'process.wait(DEADLINE_S)')
+    assert not _codes(positional), _routes(positional)
+
+
 def _swapped(old, new, in_path=('launch',)):
     """The detector with one thing changed, and the route that fires on it.
 
