@@ -31,9 +31,11 @@ const sent = () => REQUESTS.filter((r) => r.target === '/command')
 const withoutToken = () => localStorage.removeItem('daedalus-token');
 """
 
-# One worker entry. `extension/worker/messaging.js` records all nine members
-# on the success leg and only `ms_total` on the error leg, which is why the
-# default here carries all nine and the error entries below do not.
+# One worker entry. `extension/worker/messaging.js:110` records all nine of
+# its members on the success leg, and its error leg at `:136` carries two of
+# those nine -- `ms_total` and `ts` -- beside `url`, `method` and `error`.
+# The default here carries all nine; an error entry drops the seven the
+# error leg never sets and keeps those two.
 ENTRY = ("const E = (over) => Object.assign({ url:"
          " 'https://one.example.com/asset.js', method: 'GET',"
          " status: 200, bodySize: 2048, ms_bodyDecode: 1.5,"
@@ -52,12 +54,13 @@ FAILED = ("const T = [{ url: 'https://one.example.com/x.m3u8',\n"
 MIXED = ENTRY + ("const T = [E({ url: 'https://one.example.com/a.js' }),\n"
                  "  E({ url: 'https://one.example.com/b.js' }),\n"
                  "  { url: 'https://one.example.com/x.m3u8',\n"
-                 "    method: 'POST', error: 'aborted', ms_total: 3.5 }];\n")
+                 "    method: 'POST', error: 'aborted', ms_total: 3.5,\n"
+                 "    ts: 1750000000000 }];\n")
 NO_STATUS = ENTRY + "const T = [E({ status: undefined })];\n"
 ZERO_STATUS = ENTRY + "const T = [E({ status: 0 })];\n"
 
 # A url longer than the 100 characters both row kinds cut it to, and a
-# 404 on a row that otherwise succeeded: `messaging.js:102` records
+# 404 on a row that otherwise succeeded: `messaging.js:113` records
 # `status: resp.status` on the success leg, so a 4xx carries no `error`
 # and the red class is the only thing that says so.
 LONG_URL = 'https://one.example.com/' + 'b' * 90 + '.js'
@@ -247,10 +250,11 @@ def test_a_status_cell_reads_green_when_the_status_is_missing_or_zero(_tmp):
 
 
 def test_an_error_row_renders_four_bare_cells_and_the_error_in_the_url(_tmp):
-    """`e.error` takes the whole row down a different branch: the four
-    timing cells carry no class and no text because the worker never
-    recorded them on the error leg, and the reason is interpolated raw
-    into the url cell behind TWO spaces."""
+    """`e.error` takes the whole row down a different branch: the size,
+    decode, fetch and encode cells carry no class and no text because the
+    error leg records none of those four, and the reason is interpolated
+    raw into the url cell behind TWO spaces. The total cell is the one
+    timing cell that leg does set, so it still reads its number."""
     report = _run('report({ rows: cells(list()).slice(1) });\n',
                   setup=FAILED, answers=(answer('T'),))
     assert report['rows'] == [[['mono', 'GET'], ['mono red', 'ERR'],
