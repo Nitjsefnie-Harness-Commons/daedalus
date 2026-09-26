@@ -237,18 +237,28 @@ def test_do_close_tab_sends_several_ids_as_a_list(tmp):
 
 
 def test_do_close_tab_reports_each_tab_the_extension_could_not_close(tmp):
-    """A refusal is one line per tab, id then error, in the order given."""
+    """A refusal is one line per tab, id then error, in the order given.
+
+    Two errors, not one, and the ids deliberately NOT in ascending order:
+    a single-element fixture leaves this docstring's claim about order
+    unfalsifiable, because a handler iterating the list backwards prints
+    the same lone line and the suite stays green. Expecting `102` before
+    `101` is what makes the ordering claim a control.
+    """
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabIds': [101, 102]}
     plan = [_put(body), _wait('_close_tab', 'd2', 10)]
-    answer = {'errors': [{'id': 102, 'error': 'no such tab'}]}
+    answer = {'errors': [{'id': 102, 'error': 'no such tab'},
+                         {'id': 101, 'error': 'busy'}]}
     _recorded, out = run_cli(
         ['close-tab', '101', '102'],
         [{'did': 'd2'}, _envelope(id='_close_tab', result=answer)],
         module=commands_browser, plan=plan, token=TOK)
 
-    assert out == 'Failed tab 102: no such tab\n', repr(out)
+    assert out == (
+        'Failed tab 102: no such tab\n'
+        'Failed tab 101: busy\n'), repr(out)
 
 
 def test_do_close_tab_reports_a_partial_close_as_both_lines(tmp):
