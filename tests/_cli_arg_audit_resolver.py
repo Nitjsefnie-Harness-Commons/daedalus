@@ -510,8 +510,6 @@ def _call_read(node, function, handler_globals, scope_binds,
     see is not a selection to reason about, which is what keeps the CLI's own
     ``value.lower()`` and ``res.get('result', [])`` out of the answer.
     """
-    if not node.args:
-        return None            # nothing is selected from, so nothing is read
     visible = [argument for argument in node.args
                if isinstance(argument, ast.Constant)
                and argument.value in FRAME_SURFACE]
