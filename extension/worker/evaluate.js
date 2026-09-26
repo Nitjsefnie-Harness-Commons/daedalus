@@ -1,6 +1,6 @@
 /* exported _takeEvalRelay, _canUseMainWorldEval, _raceMainWorldEval */
 /* exported _executeMainWorldEval, handleEval */
-/* global _cdpSessions, _netCaptures, _releaseCdpObjects */
+/* global cdpClaimAttachment, _releaseCdpObjects */
 /* global _cdpError, _cdpSettle, postResult */
 
 // ─── Eval: route to content script ───
@@ -50,12 +50,11 @@ function _takeEvalRelay(relayId, tabId) {
 // it.
 // Returns true after CDP dispatch, false only before submitted source runs.
 async function _evalViaCdp(cmd, chromeTabId) {
-  // A capture or a kept CDP session already owns the attachment; reuse it and
-  // leave it in place, because detaching would end that capture or session.
-  const held = Boolean(_cdpSessions[chromeTabId])
-    || Boolean(_netCaptures[chromeTabId]);
+  // Joining a capture's or a kept session's attachment is the claim's job;
+  // this call gives back only the share it took, so neither is ended here.
+  const claim = cdpClaimAttachment(chromeTabId);
   try {
-    if (!held) await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
+    await claim.ready;
   } catch (_) {
     return false;
   }
@@ -120,11 +119,7 @@ async function _evalViaCdp(cmd, chromeTabId) {
     } catch (_) {}
     return true;
   } finally {
-    if (!held) {
-      try {
-        await chrome.debugger.detach({ tabId: chromeTabId });
-      } catch (_) {}
-    }
+    await claim.release();
   }
 }
 

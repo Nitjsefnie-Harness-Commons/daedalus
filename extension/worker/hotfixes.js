@@ -1,6 +1,6 @@
 /* exported handleHotfixReplay, handleStoreHotfix, handleClearHotfix */
 /* exported handleClearAllHotfixes, handleSetPermanent, handleListHotfixes */
-/* global VERSION, _serializer, _cdpSessions, _netCaptures */
+/* global VERSION, _serializer, cdpClaimAttachment */
 /* global _cdpError, _releaseCdpObjects */
 /* global _canUseMainWorldEval, _executeMainWorldEval */
 /* global _raceMainWorldEval, postResult */
@@ -83,12 +83,12 @@ const PAGE_IDENTITY = 'location.protocol + \'//\' + location.host'
   + ' + location.pathname + location.search';
 
 async function _replayViaCdp(chromeTabId, identity, code) {
-  // A capture or a kept session already owns the attachment; reuse it and
-  // leave it in place, because detaching would end that capture or session.
-  const held = Boolean(_cdpSessions[chromeTabId])
-    || Boolean(_netCaptures[chromeTabId]);
+  // A capture or a kept session already owns the attachment; the claim
+  // joins it rather than attaching over it, and the release below gives back
+  // only this replay's share.
+  const claim = cdpClaimAttachment(chromeTabId);
   try {
-    if (!held) await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
+    await claim.ready;
   } catch (error) {
     return 'cdp attach failed: ' + (error && (error.message || String(error)));
   }
@@ -110,11 +110,7 @@ async function _replayViaCdp(chromeTabId, identity, code) {
   } catch (error) {
     return error && (error.message || String(error));
   } finally {
-    if (!held) {
-      try {
-        await chrome.debugger.detach({ tabId: chromeTabId });
-      } catch (_) {}
-    }
+    await claim.release();
   }
 }
 
