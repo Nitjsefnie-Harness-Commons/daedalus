@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _coverage_guard import _synthetic_violations  # noqa: E402
-from test_coverage_scope_bindings import (  # noqa: E402
+from _binding_assertions import (  # noqa: E402
     _IMPORT_LAUNCH, _unresolved_dict)
+from _coverage_guard import _synthetic_violations  # noqa: E402
 
 
 # Name(Store) covers targets; other binders use string fields.

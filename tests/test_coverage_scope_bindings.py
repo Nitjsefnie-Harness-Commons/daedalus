@@ -4,127 +4,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _binding_assertions import (  # noqa: E402
+    _IMPORT_LAUNCH, _rebound_owner, _unresolved_dict)
 from _coverage_guard import (  # noqa: E402
     _coverage_environment_violations, _synthetic_violations)
 
 
-_IMPORT_LAUNCH = "dict(['python3', 'child.py'], cwd=tmp)"
 _ANNOTATED_LAUNCH = "subprocess.run(['python3', 'child.py'])"
 _DECLARATION = "_COVERAGE_ENV = _util.child_coverage('scrub')\n"
 _REAL_MODULE = 'tests/test_diff_coverage.py'
-_ROOT_PROVENANCE_INVOKE = (
-    'import test_coverage_scope_bindings as binding_suite; '
-    'binding_suite.test_import_bindings_do_not_rebind_root_'
-    'spellings(None)')
-_ROOT_PROVENANCE_MUTATIONS = (
-    ('a star import refuses every root spelling', 'scopes',
-     (("    if _ALL_NAMES in shadowed_names:\n        return False\n",
-       ""),), _ROOT_PROVENANCE_INVOKE),
-    ('a rebound proof name is unprovable', 'scopes',
-     (("    names = _routed_bindings(imports, destinations)[tree]\n",
-       "    names = set()\n"),), _ROOT_PROVENANCE_INVOKE),
-    ('Path is independently a proof name', 'scopes',
-     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({'str', 'ROOT', _ALL_NAMES})\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('str is independently a proof name', 'scopes',
-     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({'Path', 'ROOT', _ALL_NAMES})\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('a canonical import is exact', 'scopes',
-     (("            and (node.module, alias.name) == "
-       "_CANONICAL_MEMBERS.get(bound))\n",
-       "            and bound in _CANONICAL_MEMBERS)\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('a relative import is not canonical', 'scopes',
-     (("    return (not node.level\n", "    return (True\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('scope shadows carry the unprovable names', 'scopes',
-     (("    shadows[tree].update(unprovable)\n", ""),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('module shadows carry the unprovable names', 'scopes',
-     (("    names.update(unprovable)\n", ""),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('the _util.ROOT arm needs an owner', 'scopes',
-     (("        return '_util' in owners\n", "        return True\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('an unbound ROOT is unprovable', 'scopes',
-     (("    if not facts.root_assignments and not root_imported:\n"
-       "        names.add('ROOT()')\n", ""),), _ROOT_PROVENANCE_INVOKE),
-    ('owner imports never prove constructors or builtins', 'scopes',
-     (("    if isinstance(node, ast.Import):\n        return False\n",
-       "    if isinstance(node, ast.Import):\n"
-       "        return alias.name in _ROOT_MODULES\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('proof shadows distinguish calls from owner attributes', 'scopes',
-     (("                              if bound in {'Path', 'str', 'ROOT'} "
-       "else bound)"
-       "\n", "                              if False else bound)\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('str calls consult their import proof shadow', 'scopes',
-     (("        return ('str()' not in shadowed_names\n"
-       "                and _is_root_spelling(node.args[0], "
-       "shadowed_names, owners))\n",
-       "        return _is_root_spelling(node.args[0], "
-       "shadowed_names, owners)\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('Path assignments consult their import proof shadow', 'scopes',
-     (("    return (not {'Path', 'Path()'} & shadowed_names\n",
-       "    return (not {'Path'} & shadowed_names\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('a constructor import retires an owner', 'scopes',
-     (("                        and alias.name in _ROOT_MODULES):\n",
-       "                        and alias.name in _ROOT_MODULES) "
-       "and not _canonical_import(node, alias, bound):\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('a literal ROOT import establishes provenance', 'scopes',
-     (("                if canonical and bound == 'ROOT':\n"
-       "                    root_imported = True\n", ""),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('ROOT is independently a proof name', 'scopes',
-     (("_PROOF_NAMES = frozenset({'Path', 'str', 'ROOT', _ALL_NAMES})\n",
-       "_PROOF_NAMES = frozenset({'Path', 'str', _ALL_NAMES})\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('ROOT provenance requires the literal member', 'scopes',
-     (("        return (alias.name == 'ROOT'\n"
-       "                and alias.asname in (None, alias.name))\n",
-       "        return True\n"),), _ROOT_PROVENANCE_INVOKE),
-    ('ROOT provenance allows a same-name alias', 'scopes',
-     (("        return (alias.name == 'ROOT'\n"
-       "                and alias.asname in (None, alias.name))\n",
-       "        return alias.name == 'ROOT' and alias.asname is None\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('local imports do not taint module proofs', 'scopes',
-     (("    names = _routed_bindings(imports, destinations)[tree]\n",
-       "    names = set().union(*imports.values())\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('chdir sees local import shadows', 'guard',
-     (("                                       scopes[node], "
-       "self.scope_shadows,\n",
-       "                                       tree, self.scope_shadows,\n"
-       ),), _ROOT_PROVENANCE_INVOKE),
-    ('imports shadow their containing scope', 'scopes',
-     (("        shadows[scope].update(imports.get(node, ()))\n",
-       "        shadows[tree].update(imports.get(node, ()))\n"),),
-     _ROOT_PROVENANCE_INVOKE),
-    ('local imports still shadow local launches', 'scopes',
-     (("        shadows[scope].update(imports.get(node, ()))\n",
-       ""),), _ROOT_PROVENANCE_INVOKE),
-    ('an assignment cannot erase a ROOT import shadow', 'scopes',
-     (("            and not _other_root_bindings(facts, root_values)\n",
-       ""),), 'import test_coverage_root_provenance as root_suite; '
-     'root_suite._assert_root_binding_site(17)'),
-)
-
-
-def _unresolved_dict(line):
-    return [f'tests/synthetic.py:{line}: unresolved callee dict '
-            'cwd=tmp declares no env=']
-
-
-def _rebound_owner(line, spelling='behaviour.ROOT'):
-    return [f'tests/synthetic.py:{line}: subprocess.run '
-            f'cwd={spelling} declares no env=']
 
 
 def _import_bindings():

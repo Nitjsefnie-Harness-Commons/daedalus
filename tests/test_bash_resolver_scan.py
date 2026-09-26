@@ -67,86 +67,6 @@ def _synthetic(source):
     return _bash_resolver_scan._synthetic_violations(source)
 
 
-_MATCH_INVOKE = (
-    "__import__('test_bash_resolver_scan')."
-    "test_match_captures_shadow_outer_bindings('.')")
-_WALRUS_INVOKE = (
-    "__import__('test_bash_resolver_scan')."
-    'test_comprehension_walrus_binds_in_containing_scope(None)')
-_BASH_MUTATION_SPECS = (
-    ('MatchAs scope', 'scopes', ((
-        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
-        "ast.MatchStar)):\n",
-        "    if isinstance(node, (ast.ExceptHandler, ast.MatchStar)):\n"),),
-     _MATCH_INVOKE),
-    ('MatchStar scope', 'scopes', ((
-        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
-        "ast.MatchStar)):\n",
-        "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs)):\n"),),
-     _MATCH_INVOKE),
-    ('MatchMapping scope', 'scopes', ((
-        "    if isinstance(node, ast.MatchMapping):\n"
-        "        return {node.rest} if node.rest else set()\n", ""),),
-     _MATCH_INVOKE),
-    ('Bash walrus binding', 'bash', ((
-        "    elif isinstance(node, ast.NamedExpr):\n"
-        "        targets, value = [node.target], node.value\n", ""),),
-     _WALRUS_INVOKE),
-    ('Bash walrus binding scope', 'bash', ((
-        "            if isinstance(node, ast.NamedExpr):\n"
-        "                scope = _containing_binding_scope("
-        "scope, self.parents)\n", ""),), _WALRUS_INVOKE),
-)
-
-
-_CACHE_INVOKE = (
-    'import tempfile; from pathlib import Path; '
-    'import test_static_guard_regressions as regression; '
-    'scratch = tempfile.TemporaryDirectory(); ')
-_CACHE_MUTATIONS = (
-    ('mutation children start cache-free', 'runner',
-     (("            clear_bytecode(root)\n", ''),),
-     _CACHE_INVOKE + 'regression.test_mutation_gate_clears_caches_before_'
-     'every_child(Path(scratch.name)); scratch.cleanup()'),
-    ('nested mutation children inherit bytecode prevention', 'runner',
-     (("                    **os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}),\n",
-       "                    **os.environ, "
-       "'PYTHONDONTWRITEBYTECODE': ''}),\n"),),
-     _CACHE_INVOKE + 'regression.test_mutation_gate_rejects_a_cached_'
-     'equivalent_edit(Path(scratch.name)); scratch.cleanup()'),
-    ('bytecode cleanup descends through the copied tree', 'owned',
-     (("    for cache in root.rglob('__pycache__'):\n",
-       "    for cache in root.glob('__pycache__'):\n"),),
-     _CACHE_INVOKE + 'regression.test_mutation_gate_clears_caches_before_'
-     'every_child(Path(scratch.name)); scratch.cleanup()'),
-    ('bytecode cleanup refuses checkout destinations', 'owned',
-     (("        raise ValueError(\n"
-       "            f'clear_bytecode root lies inside the checkout: {root}')"
-       "\n", "        pass\n"),),
-     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
-     'paths(Path(scratch.name)); scratch.cleanup()'),
-    ('bytecode cleanup is a control-owned writer', 'calls',
-     (("                   ('_owned_writes', 'clear_bytecode'): ('root', 0)}",
-       "                   }"),),
-     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
-     'paths(Path(scratch.name)); scratch.cleanup()'),
-    ('mutation environment may defer its helper import', 'calls',
-     (("    ('_util', 'child_coverage'),\n", ''),),
-     _CACHE_INVOKE + 'regression.test_bytecode_cleanup_refuses_checkout_'
-     'paths(Path(scratch.name)); scratch.cleanup()'),
-    ('mutation children skip site initialization', 'runner',
-     (("[sys.executable, '-B', '-S', '-c', program]",
-       "[sys.executable, '-B', '-c', program]"),),
-     _CACHE_INVOKE + 'regression.test_mutation_gate_rejects_a_cached_'
-     'equivalent_edit(Path(scratch.name)); scratch.cleanup()'),
-    ('mutation children verify site isolation', 'runner',
-     (('                "assert sys.flags.no_site, '
-       "'site initialization enabled'\\n\"\n", ''),),
-     _CACHE_INVOKE + 'regression.test_mutation_gate_refuses_site_'
-     'initialization(Path(scratch.name)); scratch.cleanup()'),
-)
-
-
 def test_every_launch_names_the_shared_resolver(tmp):
     del tmp
     violations = _bash_resolver_scan._tree_violations(ROOT)
@@ -558,7 +478,7 @@ def test_a_derived_tree_tracks_a_comprehension_walrus(tmp):
 def test_binding_mutation_gate_requires_fresh_source(tmp):
     root = Path(tmp) / 'freshness-repository'
     copy_test_tree(root)
-    target = root / 'tests' / 'test_coverage_bindings.py'
+    target = root / 'tests' / '_mutation_sweep.py'
     source = target.read_text(encoding='utf-8')
     needle = ("[sys.executable, '-B', '-S', '-c', program], cwd=root,\n"
               "                env=child_coverage('scrub', {")
