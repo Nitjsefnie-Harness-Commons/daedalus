@@ -210,27 +210,33 @@ def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
     assert 'allFrames' not in second, report
 
 
-def test_a_row_remove_that_failed_still_deletes_the_local_session(_tmp):
-    """The splice, the save and the re-render sit OUTSIDE the try, so a
-    refused `remove-css` toasts and then drops the row anyway. This is
-    the case a handler that always deletes and one that never deletes
-    each fail: the success case beside it is the other half."""
+def test_a_row_remove_that_failed_keeps_the_local_session(_tmp):
+    """A refused `remove-css` leaves the record alone, and the workflow is
+    why: `chrome.scripting.removeCSS` needs an exact match, and that
+    record is the only place the string is kept. Drop it and a rule still
+    applied to the page can only come off by retyping the rule by hand,
+    with the operator working from a preview that is gone.
+
+    The success case beside it is the other half: a handler that never
+    deletes fails there, and one that always deletes fails here.
+    """
     plan = (SEEDED
             + "answer('remove-css',"
             " { error: 'removeCSS rejected it' });\n")
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
-                  'report({ toasts: toasts(), rows,\n'
-                  '  live: drive.live().length });\n',
+                  + 'report({ toasts: toasts(), rows,\n'
+                    '  live: drive.live().length });\n',
                   setup=plan)
     assert shared.types(report) == ['remove-css'], report
     assert report['toasts'] == [{'type': 'err',
                                  'text': 'removeCSS rejected it'}], report
-    # The table now carries the header and the one row that was left.
-    assert [row[3] for row in report['rows'][1:]] == ['b{--seed:2}'], report
-    assert [entry['css'] for entry in _store(report)] == ['b{--seed:2}'], \
-        report
+    # The row is still on offer, in the order the store holds it.
+    assert [row[3] for row in report['rows'][1:]] == [
+        'a{--seed:1}', 'b{--seed:2}'], report
+    assert [entry['css'] for entry in _store(report)] == [
+        'b{--seed:2}', 'a{--seed:1}'], report
     # The toast's 2600 ms fade is still parked, so the operator can still
     # read what the refused remove said.
     assert report['live'] == 1, report
@@ -251,12 +257,18 @@ def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     assert len(_store(report)) == 1, report
 
 
-def test_the_sessions_are_newest_first_and_the_store_keeps_twenty(_tmp):
-    """`arr.slice().reverse()` is what puts the newest row at the top, and
-    `save` writes `arr.slice(-20)`, so a twenty-first push silently
-    evicts the oldest entry. The evicted one is read off the store, not
-    just off the table, because a table that hid a row while the store
-    kept it would be a different defect."""
+def test_a_full_session_list_refuses_the_next_injection(_tmp):
+    """The store holds twenty records and the twenty-first injection is
+    refused before anything is sent. The workflow is why: the panel's own
+    hint calls this list the way back to an exact `removeCSS` match, so a
+    twenty-first rule that is applied and then not recorded is one the
+    operator can only take off by retyping.
+
+    Twenty successful injections are the other half of this case: a panel
+    that always refuses fails on the first of them, and a panel that never
+    refuses fails on the twenty-first. The cap itself is pinned by what
+    the refusal proves, not by an eviction being observed.
+    """
     body = ('const css = container.find("[data-role=css]");\n'
             'const inject = async () => {\n'
             '  for (let i = 0; i < 21; i += 1) {\n'
@@ -267,20 +279,26 @@ def test_the_sessions_are_newest_first_and_the_store_keeps_twenty(_tmp):
             '};\n'
             'await bounded(inject(), "twenty-one injections",'
             ' _dashnodeStepTimeoutMs);\n'
-            'report({ rows: rowTexts(container.all()[0]) });\n')
+            'report({ rows: rowTexts(container.all()[0]),'
+            ' toasts: toasts() });\n')
     plan = (TABS_ONLY
             + "answer('inject-css',"
             + " { result: { injected: 9, tabId: 0 } });\n")
     report = _run(body, setup=plan)
+    # Twenty commands, and the twenty-first injection never reached the
+    # wire, so the rule it named is not sitting on a page unrecorded.
+    assert shared.types(report).count('inject-css') == 20, report
+    assert len(report['toasts']) == 21, report
+    assert report['toasts'][-1] == {
+        'type': 'warn',
+        'text': 'session list full (20) — remove one first'}, report
     previews = [row[3] for row in report['rows'][1:]]
     assert len(previews) == 20, report
-    assert previews[0] == 'a{--i:20}', report
-    assert previews[19] == 'a{--i:1}', report
+    assert previews[0] == 'a{--i:19}' and previews[-1] == 'a{--i:0}', report
     stored = [entry['css'] for entry in _store(report)]
     assert len(stored) == 20, report
-    assert stored[0] == 'a{--i:1}' and stored[-1] == 'a{--i:20}', report
-    assert 'a{--i:0}' not in stored, report
-    assert shared.types(report).count('inject-css') == 21, report
+    assert stored[0] == 'a{--i:0}' and stored[-1] == 'a{--i:19}', report
+    assert 'a{--i:20}' not in stored, report
 
 
 def test_the_preview_collapses_whitespace_before_it_caps(_tmp):
