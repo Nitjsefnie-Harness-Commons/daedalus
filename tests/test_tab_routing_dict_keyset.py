@@ -7,24 +7,32 @@ key it knows is absent really is absent. When it cannot -- an unknown length
 with no unknown-key slot standing for what it never learned -- a read of a
 key the model never recorded may select anything the unenumerated part
 carried, so it joins instead of answering "nothing". Answering "nothing" is
-the silent outcome this suite exists to keep empty.
+the silent outcome this suite exists to police.
 
-**The silent bucket is empty by name.** `_AXES` is the census: one member
-per way a tracked dict acquires a key the model did not learn, driven from
-the mutator rather than from a spelling, over the three axes that domain
+**The census is not a closed set.** `_AXES` is the census: one member per
+way a tracked dict acquires a key the model did not learn, driven from the
+mutator rather than from a spelling, over the three axes that domain
 spans -- the mutator, the COMBINATION of a readable and an unreadable
 source in one call, and the FRESHNESS of a value the model recorded before
 an unreadable source could have replaced it. `_DISPOSITION` names every
 member's outcome, and `test_every_axis_member_is_refused_or_declared` fails
 on a member present in one and not the other, so the bucket cannot grow by
-omission. `test_an_unlisted_member_of_the_domain_is_rejected` hands the
-census a member of its own stated domain that it does not list and requires
-the census to consider it. `_SILENT` carries the members of the same domain
-that do read silent: each names the issue it is parked against, or records
-that the filing is still with the maintainer, and
-`test_every_silent_member_is_listed_and_not_refused` pins the measurement,
-so a repair turns this suite red on the commit that moves the member into
-`_AXES` rather than leaving it listed as unconsidered.
+omission.
+
+It does not claim that every member of that domain is listed, because
+measurement says otherwise. The domain is closed under {mutator shape} x
+{COMBINATION, FRESHNESS}, and every round of enumeration this branch has
+run has left members of the census's own domain unlisted -- nine at the
+last, the name-source family crossed with the other two axes. They are rows
+now. What the two tables' tests actually prove is narrower than a closed
+set, and this is the whole of it: the silent-member test pins each
+`_SILENT` row's own measurement, so a repair of a LISTED member turns this
+suite red on the commit that has to move it into `_AXES`; and
+`test_an_unlisted_member_of_the_domain_is_rejected` shows the census
+CONSIDERS a member of its own stated domain that it does not list, which
+is not a claim that no such member exists. A repair of an UNLISTED member
+would leave this suite green, so each new row is here because the next
+round should not have to find that member again.
 
 The two outcomes differ in what the read costs once nothing is routed. A
 refused read resolves to a tracked callable, so the guard reads that
@@ -41,10 +49,13 @@ it still reads clean, because a `tab` living in the callee's body is not a
 reporting shape for an unprovable sender. That is a different mechanism,
 tracked as 1010, and a member reached only that way is not in this suite's
 bucket. What separates the `_SILENT` rows from those is WHICH NAME carries
-the fold: a store that marks its owner answers joined at the key being read,
-and a store that only propagates an unknown length from a source reached
-through a name leaves the fold on the SOURCE name, so the owner's own reads
-answer clean. Those members are `_SILENT`, split by read form.
+the fold, and not every member has a name to answer for. A store that marks
+its owner answers joined at the key being read; a store that propagates an
+unknown length from a source reached through a NAME leaves the fold on the
+source name, so the owner's own reads answer clean; and a starred
+positional source marks neither name, its fold sitting on no name at all.
+Those shapes are what `_SILENT` names, with the read form each member is
+silent on carried per member.
 """
 import sys
 from pathlib import Path
@@ -185,7 +196,8 @@ _ACCOUNTED = {
 
 # Which read forms a parked member is silent on, per member: the freshness
 # stores report on the subscript and read clean on the container reads, the
-# starred source the other way round.
+# starred source the other way round, and a constructor store that folds
+# nothing out of an uncounted source reports on none of the three.
 _CONTAINER_READS = ('get', 'setdefault')
 _SUBSCRIPT = ('subscript',)
 _ALL_READS = tuple(sorted(_READS))
@@ -196,10 +208,11 @@ _ALL_READS = tuple(sorted(_READS))
 # loses: the read answers the recorded value or its own default, so a
 # `relay()` the runtime really does call is reported nothing. Each names the
 # issue it is parked against, or `None` where the filing is still with the
-# maintainer, because the census's value is that its unconsidered bucket is
-# empty BY NAME. The fourth field is the clean cost of
-# the read forms the member does NOT name, which its own shape already
-# reports through.
+# maintainer. The table is what the branch measured, not a closed set, so a
+# member of the domain it does not carry is a silent read nothing here
+# watches; the docstring says what that costs. The fourth field is the clean
+# cost of the read forms the member does NOT name, which its own shape
+# already reports through.
 _SILENT = {
     'stale-recorded-zip': (
         'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154,
@@ -245,6 +258,51 @@ _SILENT = {
         _UNACCOUNTABLE + '\nd = dict(o)', 1163, _ALL_READS, (0, 0)),
     'dict-name-star': (
         _UNACCOUNTABLE + '\nd = dict(**o)', 1163, _ALL_READS, (0, 0)),
+    # The name-source family crossed with FRESHNESS: `d` holds a key the
+    # model recorded, and a source reached through an unaccountable NAME
+    # has since put something else there. The bare name-source rows report
+    # on the container reads; the recorded key is what turns those reports
+    # into silence, so every form reads silent and the clean cost is
+    # `(0, 0)` on all three. No issue: #1154's arm is the recorded value,
+    # and the name-reach that takes the subscript with it is the two bare
+    # rows' unfiled crossing.
+    'stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)', None,
+        _ALL_READS, (0, 0)),
+    'stale-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)', None,
+        _ALL_READS, (0, 0)),
+    'stale-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**{**o})', None,
+        _ALL_READS, (0, 0)),
+    'ior-stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o', None,
+        _ALL_READS, (0, 0)),
+    # The same crossing through the constructor. `d = dict(o)` rebinds, so
+    # the recorded key is not on the dict the read sees, and it measures
+    # identical to `dict-name` with that recorded binding left out -- which
+    # is what makes this #1163 rather than a second filing.
+    'dict-stale-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd = dict(o)', 1163,
+        _ALL_READS, (0, 0)),
+    # And the same constructor under a second, readable store, which is not
+    # load-bearing either: measured identical to `dict-name` again.
+    'ior-after-dict-name': (
+        _UNACCOUNTABLE + '\nd = dict(o)\nd |= {"j": 1}', 1163,
+        _ALL_READS, (0, 0)),
+    # The same family crossed with COMBINATION: a readable pair in the same
+    # `update` call, which is not load-bearing either -- measured identical
+    # to the `**` rows above it, subscript silent and the container reads
+    # reporting. That split is `update-starred-source`'s, so these are #1162.
+    'update-unaccountable-name-mixed': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update([("a", 1)], **o)', 1162,
+        _SUBSCRIPT, (0, 1)),
+    'update-unaccountable-name-mixed-keyed': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{"a": 1}, **o)', 1162,
+        _SUBSCRIPT, (0, 1)),
+    'update-unaccountable-name-mixed-doubled': (
+        _UNACCOUNTABLE + '\nd = {}\nd.update(**{**{"a": 1}, **o})', 1162,
+        _SUBSCRIPT, (0, 1)),
 }
 
 
@@ -258,8 +316,8 @@ def _verdict(tmp, store, read, prefix=_PRE):
 
 
 def test_every_axis_member_is_refused_or_declared(tmp):
-    """The silent bucket is empty by name, not by assertion: both
-    directions of the census fail here rather than passing unnoticed."""
+    """The two tables agree in both directions: a member in one and not the
+    other fails here rather than passing unnoticed."""
     assert sorted(_DISPOSITION) == sorted(_AXES), sorted(
         set(_AXES) ^ set(_DISPOSITION))
     assert {outcome for outcome, _ in _DISPOSITION.values()} \
