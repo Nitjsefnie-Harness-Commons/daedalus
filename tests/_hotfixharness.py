@@ -529,8 +529,6 @@ async function waitFor(predicate) {
     }
   }
   storageStore[HOTFIX_KEY] = {
-    // `RECORD_VERSION` is a value the worker cannot stamp; a case overrides
-    // it when the version is what it is reading.
     version: spec.recordVersion === undefined ? RECORD_VERSION
                                               : spec.recordVersion,
     fixes: (spec.fixes || []).map((fix) =>
@@ -547,10 +545,9 @@ async function waitFor(predicate) {
   // cannot resolve, and dropping one without a word is the failure mode the
   // module's own record default would paper over.
   //
-  // The error carries a NAME as well as a message. A control telling this
-  // refusal from any other way a case can fail cannot anchor on prose: a
-  // reword is a false red, and so is anchoring on the key names the message
-  // happens to carry. Node prints `name: message` into the stack.
+  // The error carries a NAME, reported on stdout by the handler at the end
+  // of this program. A control telling this refusal from any other way a
+  // case can fail cannot anchor on prose: a reword is a false red.
   if (spec.commands !== undefined && spec.store !== undefined) {
     const refused = new Error('the case names both `commands` and `store`; '
                               + 'one spelling of the list is required');
@@ -674,6 +671,9 @@ async function waitFor(predicate) {
     armings: timers.filter((timer) => !timer.cleared).map((t) => t.delay),
   }), () => process.exit(0));
 })().catch((error) => {
+  // The failing error's own NAME, on its own channel, for a control that has
+  // to tell one refusal from another: stdout is empty on every other path.
+  process.stdout.write(((error && error.name) || 'Error') + '\n');
   process.stderr.write((error.stack || String(error)) + '\n',
                        () => process.exit(1));
 });

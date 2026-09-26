@@ -32,7 +32,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-import _hotfixharness  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 
@@ -589,26 +588,21 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     a guard narrowed to "and the second is not empty" resolves the empty case
     silently — which is the shape this whole refusal exists to end.
 
-    The anchor's soundness rests on two conditions — the name is minted at one
-    site and the double writes to stderr from one — and neither is visible to
-    an assertion over a case's output, so both are checked here. Reading the
-    double's own source is the opposite direction from reading a subject to
-    compute an expectation: this is a PRECONDITION on a pin made over that
-    subject, and nothing below is derived from the text it reads.
+    The anchor is the double's own `error.name` for this refusal, which its
+    catch handler reports on stdout — a channel that is empty on every other
+    path. Reading a channel the subject EMITS, rather than counting
+    occurrences of a name in the subject's TEXT, is what makes this sound: a
+    count can be evaded by a hoisted constant and false-reds on a
+    documentation sentence, and neither is a change in how the double
+    behaves. A second refusal reusing the name is caught the moment it fires
+    on a case this control drives; if it never fires here, the anchor is
+    unambiguous for the control that uses it.
+
+    The stderr arm below is a second, narrower check and nothing more: it
+    holds that the error's name opens the stack, so a diagnostic written to
+    stderr ahead of it cannot satisfy a looser `in`.
     """
     del tmp
-    # PRECONDITION, not expectation: a second minting of the name would make
-    # a differently motivated refusal indistinguishable from this one, and a
-    # refusal that no longer mints it at all is the same control with
-    # nothing to anchor on. The count is in the message because either
-    # number is a failure and they are not the same one.
-    minted = Path(_hotfixharness.__file__).read_text(
-        encoding='utf-8').count(f"'{CASE_SHAPE_REFUSED}'")
-    assert minted == 1, (
-        f'the double mints {CASE_SHAPE_REFUSED} at {minted} sites, not one: '
-        f'at none there is no refusal for this control to recognise, and at '
-        f'more than one a refusal for some other shape would satisfy it. The '
-        f'double is tests/_hotfixharness.py.')
     for label, store in (('a populated store', [STORE_FIX]),
                          ('an empty store', [])):
         try:
@@ -618,15 +612,21 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
             # assertion's message.
             assert len(failure.args) == 1 and len(failure.args[0]) == 3, (
                 failure)
-            _returncode, _stdout, stderr = failure.args[0]
-            # `startswith`, not `in`: node's UNCAUGHT echo prints a source
-            # excerpt beginning `file:line`, so the name could otherwise
-            # arrive by a route that never ran the refusal.
+            _returncode, reported, stderr = failure.args[0]
+            reported = reported.strip()
+            assert reported == CASE_SHAPE_REFUSED, (
+                f'the case was refused over {label}, but the double reported '
+                f'{reported!r} rather than a {CASE_SHAPE_REFUSED}, so this '
+                f'control cannot tell that refusal from a double broken for '
+                f'some other reason. The double said: {stderr!r}')
+            # `startswith`, not `in`, and this arm is the only reason: the
+            # channel above carries the name, so what this holds is that the
+            # error's name OPENS the stack. A diagnostic written to stderr
+            # ahead of the error would satisfy an `in` on the same stream.
             assert stderr.startswith(CASE_SHAPE_REFUSED + ':'), (
-                f'the case was refused over {label}, but the refusal did not '
-                f'open with a {CASE_SHAPE_REFUSED}, so this control cannot '
-                f'tell it from a double broken for some other reason. The '
-                f'double said: {stderr!r}')
+                f'the case was refused over {label} and the double reported '
+                f'the right name, but the stack does not open with it: '
+                f'{stderr!r}')
             continue
         raise AssertionError(
             f'a case naming both `commands` and `store` with {label} was '
@@ -640,10 +640,20 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
             outcome = run_hotfix_case(dict(
                 {'documents': [SITE], 'ask': False, 'fixes': []}, **named))
         except AssertionError as failure:
+            assert len(failure.args) == 1 and len(failure.args[0]) == 3, (
+                failure)
+            _returncode, reported, stderr = failure.args[0]
+            reported = reported.strip()
+            # What the double said decides which of the two things this is.
+            # A crash and an over-refusal both exit nonzero, and a half that
+            # calls a crash a refusal tells the reader the opposite of what
+            # happened.
+            kind = ('refused it anyway' if reported == CASE_SHAPE_REFUSED
+                    else f'crashed on it instead, reporting {reported!r}')
             raise AssertionError(
-                f'this half exists to catch an OVER-refusal — {named} is a '
-                f'legitimate case that runs nothing, and the double refused '
-                f'it anyway: {failure}') from failure
+                f'this half exists to catch an OVER-refusal, and {named} is a '
+                f'legitimate case that runs nothing — the double {kind}. '
+                f'The double said: {stderr!r}') from failure
         assert outcome['posted'] == [], (named, outcome)
         assert outcome['record'] == [], (named, outcome)
 
