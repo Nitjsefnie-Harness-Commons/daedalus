@@ -68,10 +68,11 @@ KEPT = {
         ('DAEDALUS_TOKEN', 'TOKEN'),
         'the request guard reads the token at request time, which is the '
         'read direction and not this mechanism'),
-    'test_mcp_server': (
+    '_mcp_load': (
         None,
-        'the request guard reads this token at request time; the mapping is '
-        'imported, so what it publishes is not readable from this file'),
+        'the fixture that owns the MCP token publishes it, because the '
+        'listener bind re-reads the environment after the load isolation has '
+        'ended; the row moved here from test_mcp_server with the site'),
     'test_result_routes': (
         ('DAEDALUS_DIR', 'DAEDALUS_PORT'),
         'the in-process load reads this root back, which is the write'),

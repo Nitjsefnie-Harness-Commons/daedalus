@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _util  # noqa: E402
+import _mcp_load as mcp  # noqa: E402
 import _mcp_tool_commands  # noqa: E402
-import test_mcp_server as mcp  # noqa: E402
+import _util  # noqa: E402
 
 TOK = mcp.TOK
 BRIDGE_ENV = mcp.BRIDGE_ENV
