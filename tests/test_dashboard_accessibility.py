@@ -7,13 +7,12 @@ colour pair below 4.5:1 is text somebody cannot read, and a document with no
 a second test proving it can still fail, because a scan that cannot reject
 anything passes everything.
 """
-import json
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _dashnode  # noqa: E402
+import _dashfield  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT, iter_tree_files  # noqa: E402
@@ -349,74 +348,9 @@ def test_every_static_label_names_a_control(tmp):
     assert not dangling, '\n'.join(dangling)
 
 
-_FIELD_HARNESS = _dashnode.DashboardNodeHarness(
-    r"""
-import { pathToFileURL } from 'node:url';
-
-phase('dashboard harness started');
-(async () => {
-// Enough DOM for `h`; the helpers under test are the real ones.
-class El {
-  constructor(tag) {
-    this.tag = tag;
-    this.children = [];
-    this.text = '';
-    this.attrs = {};
-    this.style = {};
-    this.dataset = {};
-  }
-  // A real element reflects the id attribute onto the property, and `field`
-  // reads the property; a double that does not reflect would report an
-  // association the browser never makes.
-  get id() { return this.attrs.id || ''; }
-  set id(v) { this.attrs.id = String(v); }
-  appendChild(child) { this.children.push(child); return child; }
-  setAttribute(name, v) { this.attrs[name] = String(v); }
-  addEventListener() {}
-}
-globalThis.document = {
-  createElement: (tag) => new El(tag),
-  createTextNode: (t) => ({ tag: '#text', text: String(t), children: [] }),
-};
-
-phase('dashboard module import started');
-const { h, field, spacer } = await bounded(
-  import(pathToFileURL(process.argv[1]).href),
-  'dashboard module import', _dashnodeStepTimeoutMs,
-);
-phase('dashboard module imported');
-
-function describe(pair) {
-  const [label, control] = pair;
-  return {
-    labelTag: label.tag,
-    labelFor: label.attrs.for,
-    labelText: label.children.map((c) => c.text).join(''),
-    controlId: control.id,
-    associated: label.attrs.for === control.id,
-  };
-}
-
-phase('dashboard call started');
-const first = describe(field('url', h('input', { type: 'text' })));
-const second = describe(field('name', h('select', {})));
-const preset = describe(field('code', h('textarea', { id: 'chosen-id' })));
-const styled = describe(field('css', h('input', {}), { style: { margin:"""
-    r""" '0' } }));
-const blank = spacer();
-phase('dashboard call settled');
-
-process.stdout.write(JSON.stringify({
-  first, second, preset, styled,
-  unique: first.controlId !== second.controlId,
-  spacerTag: blank.tag,
-  spacerHidden: blank.attrs['aria-hidden'],
-  spacerClass: blank.className,
-}));
-phase('dashboard harness finished');
-})().catch(leave);
-""", bounded_steps=1, module=True, arguments=(
-        ROOT / 'dashboard' / 'sections' / '_util.js',))
+# The harness and the check over its output moved to tests/_dashfield.py,
+# which two sibling suites now read instead of importing this suite whole.
+# Nothing imported the private spelling, so no re-export is left binding it.
 
 
 def test_field_associates_every_label_with_its_control(tmp):
@@ -428,31 +362,45 @@ def test_field_associates_every_label_with_its_control(tmp):
     stopped emitting `for` would leave the scan perfectly green.
     """
     del tmp
-    result = _dashnode.run_dashboard_node(_FIELD_HARNESS)
-    seen = json.loads(result.stdout)
+    seen = _dashfield.read_field_associations()
+    problems = _dashfield.field_association_failures(seen)
+    assert not problems, '\n'.join(problems)
 
-    for key in ('first', 'second', 'preset', 'styled'):
-        entry = seen[key]
-        assert entry['labelTag'] == 'label', entry
-        assert entry['associated'], entry
-        assert entry['labelFor'], entry
-        assert entry['controlId'], entry
 
-    assert seen['first']['labelText'] == 'url', seen
-    assert seen['unique'], seen['first']['controlId']
+def test_the_field_check_rejects_a_label_with_no_associated_control(tmp):
+    """The association check is worthless if it cannot reject the defect.
 
-    # An id the caller already chose is kept: overwriting it would break
-    # whatever else names that element.
-    assert seen['preset']['controlId'] == 'chosen-id', seen['preset']
-    assert seen['preset']['labelFor'] == 'chosen-id', seen['preset']
+    A `field()` that quietly stopped writing `for` leaves the source scan
+    above perfectly green, because the scan only proves the control was
+    built inside a `field()` call. So the check is run here against the
+    output such a helper would produce, with no browser involved.
+    """
+    del tmp
+    named = {'labelTag': 'label', 'labelFor': 'url', 'labelText': 'url',
+             'controlId': 'url', 'associated': True}
+    chosen = dict(named, labelFor='chosen-id', controlId='chosen-id',
+                  labelText='code')
+    healthy = dict(named, first=named, second=dict(named, controlId='name'),
+                   preset=chosen, styled=named, unique=True,
+                   spacerTag='span', spacerHidden='true',
+                   spacerClass='label-spacer')
+    assert _dashfield.field_association_failures(healthy) == []
 
-    # Caller attributes survive alongside the `for` the helper adds.
-    assert seen['styled']['associated'], seen['styled']
+    broken = dict(healthy,
+                  first=dict(named, labelFor='', controlId='',
+                             associated=False))
+    problems = _dashfield.field_association_failures(broken)
+    assert problems, 'the check accepted a label naming no control'
+    assert any('no control is associated' in problem
+               for problem in problems), problems
 
-    # The alignment cell is presentation, and says so.
-    assert seen['spacerTag'] == 'span', seen
-    assert seen['spacerHidden'] == 'true', seen
-    assert seen['spacerClass'] == 'label-spacer', seen
+    duplicated = dict(healthy, unique=False)
+    problems = _dashfield.field_association_failures(duplicated)
+    assert any('same control id' in problem for problem in problems), problems
+
+    unhidden = dict(healthy, spacerHidden=None)
+    problems = _dashfield.field_association_failures(unhidden)
+    assert any('spacerHidden' in problem for problem in problems), problems
 
 
 def main():

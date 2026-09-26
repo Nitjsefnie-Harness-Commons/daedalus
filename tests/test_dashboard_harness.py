@@ -16,9 +16,9 @@ from pathlib import Path
 from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfield  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
-import test_dashboard_accessibility as accessibility  # noqa: E402
 import test_dashboard_behaviour as behaviour  # noqa: E402
 
 
@@ -453,7 +453,7 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
         'selector': _dashnode.run_dashboard_node(
             behaviour._TAB_SELECTOR_HARNESS),
         'field': _dashnode.run_dashboard_node(
-            accessibility._FIELD_HARNESS),
+            _dashfield.FIELD_HARNESS),
     }
     expected = [
         'dashboard harness started',
@@ -465,6 +465,20 @@ def test_shipped_harnesses_emit_the_complete_phase_trace(tmp):
     ]
     actual = {name: _phase_trace(result) for name, result in runs.items()}
     assert actual == {name: expected for name in runs}, actual
+
+
+def test_field_associates_every_label_with_its_control(tmp):
+    """`field()` is the association, so this suite runs it as well.
+
+    The mechanism lives in tests/_dashfield.py, shared with the suite that
+    owns the source scan over the same helper. Running it here is what lets
+    this suite keep the property without executing another suite's body to
+    reach it.
+    """
+    del tmp
+    seen = _dashfield.read_field_associations()
+    problems = _dashfield.field_association_failures(seen)
+    assert not problems, '\n'.join(problems)
 
 
 def test_accessibility_field_case_uses_the_shared_runner(tmp):
@@ -479,8 +493,7 @@ def test_accessibility_field_case_uses_the_shared_runner(tmp):
     with patch.object(
             _dashnode, 'run_dashboard_node', stop_at_shared_runner):
         try:
-            accessibility.test_field_associates_every_label_with_its_control(
-                None)
+            test_field_associates_every_label_with_its_control(None)
         except SharedRunnerReached:
             pass  # The sentinel proves the shared boundary was reached.
         else:
