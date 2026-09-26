@@ -12,30 +12,45 @@ was watched go red with its own condition removed.
 
 What no row here is worth reading as: ``frame_read``'s attribute arm and the
 member test inside it cannot be told apart by any control in the tree - two
-separate them from the rest. Six shapes of refusal reach neither this table nor
-the control, and each is named in the suite beside the code that misses it: a
-refusal delegated to a function the walk's scope does not name, a refusal
-written inside one, a refusal raised rather than returned, one raised through a
-helper, one inside a loop, one under ``try``/``except`` and one under ``with``.
+separate them from the rest. Sixteen shapes of refusal reach neither this table
+nor the control, each planted behaviour-neutrally in the real resolver with
+both suites green, and each named in the suite beside the code that misses it:
+one that is not a return at all (raised, raised through a helper, asserted);
+one that is not a top-level statement of a scoped function (inside a ``for``,
+a ``while``, a ``try``/``except``, a ``try``/``finally``, a ``with``, a
+``match``, a ``try``'s ``else``, a lambda, a comprehension, a closure); one
+nested inside
+an arm's body rather than beside it, and one nested twice; and one written
+inside a function the walk's scope does not name, which is how
+``reflective_builtin_call`` refuses today.
 
-The row key is the code's own text, so a behaviour-preserving rewrite of a
-guard's boolean algebra - pushing a negation through, reordering operands - is
-a red asking for a renamed row: the text the key names has changed and the
-decision has not. The cost is accepted rather than argued; what a normaliser
-would buy and lose is in the pull request.
+The row key is the code's own text, so a behaviour-preserving rewrite that
+pushes a negation through a guard is a red asking for a renamed row: the text
+the key names has changed and the decision has not. Reordering a guard's
+operands is not a cost - measured green, split and non-split, because the key
+is an operand's text and the set of them does not move. The cost is accepted
+rather than argued; what a normaliser would buy and lose is in the pull
+request.
 
 Its reach, stated so the numbers follow from the rules. Domain one: every row
-in this table - 20 of them - against every OTHER control the tree offers, the
-31 the audit suite's runner collects plus the 21 plant rows, 52 in all: 20 x 51
-= 1020 cells, a cell detected when that control does not survive the row's own
-condition removal. 249 are detected and 771 are not, 24%. Domain two: the 190
-unordered pairs of rows, exchanging the two rows' named controls and nothing
-else; the exchange is unnoticed when each row's control survives under the
-OTHER row's condition, which is 91 pairs, with 85 caught in exactly one
-direction and 14 caught in both. Both domains grow with the tree, so the
-figures measure it rather than bounding anything. Every figure here is
-re-measured by ``python3 tests/test_cli_arg_audit_conditions.py --reach``,
-which exits nonzero if one has moved."""
+in this table against every OTHER control the tree offers - the controls the
+audit suite's runner collects, plus the plant rows - and a cell is detected
+when that control does not survive the row's own condition removal. Domain
+two: the unordered pairs of rows, exchanging the two rows' named controls and
+nothing else; the exchange is unnoticed when each row's control survives under
+the OTHER row's condition. The figures, in the form this module checks against
+the tree and against this paragraph:
+
+    rows 20 | controls 52 | cells 1020 | detected 249 | undetected 771
+    pairs 190 | unnoticed 91 | one_direction 85 | both_directions 14
+
+Detected is 24% of the cells, and both domains grow with the tree, so the
+figures measure it rather than bounding anything. **Nothing runs ``--reach`` on
+any suite**: no timed leg, no coverage leg, no PR check. A figure that has
+moved is therefore invisible until a reader runs
+``python3 tests/test_cli_arg_audit_conditions.py --reach`` by hand, which
+exits nonzero when one has. Binding all of them to the tree on every suite run
+is filed as #1181."""
 CONDITIONS_PINNED = (
     ('frame_read|isinstance(node, ast.Attribute)',
      'an attribute read is a selection the rule reads a member from',
