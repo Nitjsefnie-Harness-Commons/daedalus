@@ -1,6 +1,5 @@
 """Deterministic ASGI contract for early MCP request refusals."""
 import asyncio
-import importlib.util
 import os
 import sys
 import time
@@ -12,19 +11,10 @@ import _mcp_load  # noqa: E402
 import _util  # noqa: E402
 
 
-DEPS = all(importlib.util.find_spec(name) is not None
-           for name in ('httpx', 'mcp', 'starlette'))
 TOK = 'mcptok'
 REFUSED_PAYLOAD = bytes(range(256)) * 32
 os.environ['TOKEN'] = ''
 os.environ['DAEDALUS_TOKEN'] = TOK
-
-
-def _need_deps():
-    if not DEPS:
-        _util.skip(
-            'daedalus_mcp.server dependencies (httpx/mcp/starlette) '
-            'not installed')
 
 
 def _request_contains_payload(request, payload):
@@ -59,7 +49,7 @@ def _request_contains_payload(request, payload):
 
 def test_payload_search_does_not_create_request_state(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
@@ -70,7 +60,7 @@ def test_payload_search_does_not_create_request_state(tmp):
 
 def test_payload_search_has_no_recursion_limit(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
@@ -84,7 +74,7 @@ def test_payload_search_has_no_recursion_limit(tmp):
 
 def test_payload_search_visits_dictionary_keys(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
@@ -95,7 +85,7 @@ def test_payload_search_visits_dictionary_keys(tmp):
 
 def test_payload_search_reads_memoryviews(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
@@ -106,7 +96,7 @@ def test_payload_search_reads_memoryviews(tmp):
 
 def test_payload_search_ignores_released_memoryviews(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import Request
 
     request = Request({'type': 'http'})
@@ -119,7 +109,7 @@ def test_payload_search_ignores_released_memoryviews(tmp):
 
 def test_unrelated_request_bytes_do_not_look_like_refused_body(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _load_mcp(max_body_size=4096)
     captured = []
     outbound = []
@@ -177,7 +167,7 @@ def _load_mcp(max_body_size=None):
 
 def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     for name, value in (('DAEDALUS_MCP_PORT', 'abc'),
                         ('DAEDALUS_MCP_MAX_BODY_SIZE', 'bad')):
         previous = os.environ.get(name)
@@ -196,7 +186,7 @@ def test_a_poisoned_shell_cannot_reach_the_in_process_loads(tmp):
 
 
 def test_mcp_load_restores_an_absent_token(_tmp):
-    _need_deps()
+    _mcp_load._need_deps()
     original = dict(os.environ)
     try:
         os.environ.pop('TOKEN', None)
@@ -211,7 +201,7 @@ def test_mcp_load_restores_an_absent_token(_tmp):
 
 
 def test_mcp_load_restores_a_different_prior_token(_tmp):
-    _need_deps()
+    _mcp_load._need_deps()
     original = dict(os.environ)
     try:
         os.environ['TOKEN'] = 'shell-token'
@@ -304,7 +294,7 @@ def test_isolated_restores_environment_after_exception(_tmp):
 
 def test_request_token_is_public_guard_state(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _load_mcp()
 
     assert mod._token is mod.request_guard.request_token
@@ -312,7 +302,7 @@ def test_request_token_is_public_guard_state(tmp):
 
 def test_disconnect_during_drain_preserves_refusal(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     from starlette.requests import ClientDisconnect
 
     mod = _load_mcp()
@@ -361,7 +351,7 @@ def test_disconnect_during_drain_preserves_refusal(tmp):
 
 def test_every_early_refusal_discards_a_bounded_body_after_deciding(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _load_mcp(max_body_size=4096)
     assert mod.MAX_BODY_SIZE + 1 < mod.request_guard.REFUSED_BODY_DRAIN
     valid_auth = (b'authorization', f'Bearer {TOK}'.encode())

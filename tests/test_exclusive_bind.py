@@ -10,7 +10,6 @@ platform the SO_REUSEADDR bind is kept byte-for-byte, because POSIX needs
 it for a quick restart through TIME_WAIT.
 """
 import contextlib
-import importlib.util
 import io
 import socket
 import sys
@@ -21,16 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _daedalus_env  # noqa: E402
 import _mcp_load  # noqa: E402
 import _util  # noqa: E402
-
-DEPS = all(importlib.util.find_spec(name) is not None
-           for name in ('httpx', 'mcp', 'starlette'))
-
-
-def _need_deps():
-    if not DEPS:
-        _util.skip(
-            'daedalus_mcp.server dependencies (httpx/mcp/starlette) not '
-            'installed')
 
 
 class _StubSocket:
@@ -194,7 +183,7 @@ def test_the_posix_bridge_listener_keeps_reuse_address(tmp):
 
 def test_the_windows_mcp_arm_excludes_the_port(tmp):
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59981)
     created = []
     mod.socket = _StubSocketModule(created)
@@ -212,7 +201,7 @@ def test_the_posix_mcp_arm_keeps_the_reuse_path(tmp):
     zero is unset on both.
     """
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 0)
     mod.WIN32 = False
     handed, banner = _serve_with_fake_uvicorn(mod)
@@ -246,7 +235,7 @@ def test_the_armed_bridge_platform_value_matches_the_host(tmp):
 def test_the_armed_mcp_platform_value_matches_the_host(tmp):
     """The front end's platform read, held to the host the same way."""
     del tmp
-    _need_deps()
+    _mcp_load._need_deps()
     mod = _mcp_load._load_mcp_at_port('http://127.0.0.1:1', 59980)
     expected = sys.platform == 'win32'
     assert mod.WIN32 == expected, (mod.WIN32, sys.platform)
