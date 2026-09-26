@@ -32,12 +32,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _branch_boundary import (  # noqa: E402
-    IS_THE_BASE, UNREADABLE, introduced_rows, js_digests)
-from test_helper_reimplementation import (  # noqa: E402
-    BRANCH_BASES, JS_FLOOR, ROOT, _live_sources, js_declarations,
-    js_reimplementations, reimplementations)
+    BRANCH_BASES, IS_THE_BASE, UNREADABLE, introduced_rows, js_digests)
+from _helper_reimplementation import (  # noqa: E402
+    JS_FLOOR, _live_sources, js_declarations, js_reimplementations,
+    reimplementations)
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
+
+ROOT = _util.ROOT
 
 # A three-statement body, which measures five lines from brace to brace
 # and so is above JS_FLOOR whatever the head around it says.
