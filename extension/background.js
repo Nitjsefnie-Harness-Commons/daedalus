@@ -37,6 +37,7 @@ importScripts(
   'worker/cookies.js',
   'worker/blocking.js',
   'worker/tabs.js',
+  'worker/cdp_attach.js',
   'worker/cdp.js',
   'worker/netcapture.js',
   'worker/hotfix_scope.js',

@@ -200,6 +200,7 @@
 !/extension/worker/blocking.js
 !/extension/worker/capture.js
 !/extension/worker/cdp.js
+!/extension/worker/cdp_attach.js
 !/extension/worker/config.js
 !/extension/worker/cookies.js
 !/extension/worker/evaluate.js
@@ -286,9 +287,7 @@
 !/tests/_coverage_scopes.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
-!/tests/_dashdom.py
 !/tests/_dashnode.py
-!/tests/_dashshell.py
 !/tests/_deliveries.py
 !/tests/_drain.py
 !/tests/_drain_scan.py
@@ -367,7 +366,6 @@
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_speedharness.py
-!/tests/_step_ceiling.py
 !/tests/_stream_fake.py
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
@@ -469,7 +467,6 @@
 !/tests/test_coverage_suites.py
 !/tests/test_coverage_unfollowable_forms.py
 !/tests/test_dashboard_accessibility.py
-!/tests/test_dashboard_app_shell.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_dashboard_drain_blocking.py
 !/tests/test_dashboard_eval.py
@@ -480,10 +477,8 @@
 !/tests/test_dashboard_hotfixes.py
 !/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_sections.py
-!/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
-!/tests/test_dashshell_harness.py
-!/tests/test_dashshell_selectors.py
+!/tests/test_debugger_attachment.py
 !/tests/test_delivery_matching.py
 !/tests/test_delivery_stripe_acceptance.py
 !/tests/test_delivery_stripes.py

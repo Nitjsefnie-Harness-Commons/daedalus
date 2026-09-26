@@ -1,9 +1,6 @@
-/* exported _cdpSessions, handleCdp, _cdpError */
+/* exported handleCdp, _cdpError */
 /* exported _releaseCdpObjects, _cdpSettle */
-/* global postResult, _netCaptures */
-
-// chromeTabId -> true while a sticky CDP session is held
-const _cdpSessions = {};
+/* global cdpClaimAttachment, postResult */
 
 async function handleCdp(cmd) {
   if (!cmd.method) return postResult(
@@ -20,27 +17,24 @@ async function handleCdp(cmd) {
     chromeTabId = typeof chromeTabId === 'number'
       ? chromeTabId : parseInt(chromeTabId);
 
-    // A capture or a kept CDP session already owns the attachment; reuse it
-    // and leave it in place, because detaching would end that capture or
-    // session. This call detaches only the attachment it created itself.
-    const held = Boolean(_cdpSessions[chromeTabId])
-      || Boolean(_netCaptures[chromeTabId]);
+    // The claim is the whole ownership rule: a capture or a kept session
+    // already holding the tab is joined rather than attached over, and this
+    // call gives back only the share it took. A kept session is the caller's
+    // own attachment to keep, so nothing is released for it.
     const keep = !!cmd.keep_session;
-    if (!held) {
-      await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
+    const claim = cdpClaimAttachment(chromeTabId, { keep });
+    try {
+      await claim.ready;
+    } catch (e) {
+      await postResult(cmd._execution, null, e.message, 'extension');
+      return;
     }
-    if (keep) _cdpSessions[chromeTabId] = true;
     try {
       const result = await chrome.debugger.sendCommand(
         { tabId: chromeTabId }, cmd.method, cmd.params || {});
       await postResult(cmd._execution, result, null, 'extension');
     } finally {
-      if (!keep && !held) {
-        delete _cdpSessions[chromeTabId];
-        try {
-          await chrome.debugger.detach({ tabId: chromeTabId });
-        } catch (_) {}
-      }
+      if (!keep) await claim.release();
     }
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');

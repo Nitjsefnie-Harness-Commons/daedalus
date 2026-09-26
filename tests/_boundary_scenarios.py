@@ -328,8 +328,10 @@ async function runNetCaptureOwnership() {
   // an attachment it found exactly as it was, and stopping a capture never
   // detaches an attachment a kept cdp session still needs.
   const readState = (tabId) => {
+    // `cdpSession` keeps its meaning: a claim marked keep, on this tab.
     const keys = JSON.parse(vm.runInContext(
-      'JSON.stringify([Object.keys(_cdpSessions),'
+      'JSON.stringify([Array.from(_cdpClaims.entries()).filter('
+      + '([, e]) => e.keep).map(([id]) => String(id)),'
       + ' Object.keys(_netCaptures)])', context));
     return {
       cdpSession: keys[0].includes(String(tabId)),
