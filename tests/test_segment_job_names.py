@@ -165,6 +165,71 @@ def test_the_reservation_covers_exactly_the_names_the_layout_writes(tmp):
         assert not store.reserved_bookkeeping_name(job), job
 
 
+def test_a_case_variant_suffixed_bookkeeping_name_is_refused(tmp):
+    """`.{job}.json.DIRTY` and `.{job}.json.TMP` are the reserved names.
+
+    The stripe key folds case, so on a case-insensitive filesystem this
+    name and `.{job}.json.dirty` are one directory: the refused spelling
+    and the accepted one would be the same entry, and the accepted one
+    parks a directory exactly where `mark_dirty` has to write. #1167.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, docroot):
+        job = seg_job()
+        for reserved in (f'.{job}.json.DIRTY', f'.{job}.json.TMP'):
+            status, body = mint_job(base, TOK, reserved)
+            assert (status, body) == (
+                409, {'error': 'job name unavailable'}), (
+                    reserved, status, body)
+            assert not (Path(docroot) / 'segments' / reserved).exists(), (
+                f'{reserved!r} was refused but its directory was written')
+
+
+def test_a_case_variant_owner_alone_is_refused(tmp):
+    """`.{JOB}.json.dirty` — the owner limb on its own, suffix spelled right.
+
+    Pinned separately because fixing one limb and missing its twin is the
+    mistake the review rounds caught on the fold controls: here the owner is
+    the only thing case-varied, so a suffix-only fix would not touch it and a
+    control written only for the suffix would not notice.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        job = seg_job()
+        reserved = f'.{job.upper()}.json.dirty'
+        status, body = mint_job(base, TOK, reserved)
+        assert (status, body) == (409, {'error': 'job name unavailable'}), (
+            reserved, status, body)
+
+
+def test_the_empty_owner_carve_out_survives_the_fold(tmp):
+    """`.json.dirty` and its case variants still have no owner, and mint.
+
+    The boundary the fold could move: both limbs are case-varied here and
+    neither may become reserved, because no job reserves either name. A
+    fold applied to the length check rather than to the comparison is what
+    would over-refuse, so the case variants are checked too.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        for job in ('.json.dirty', '.JSON.DIRTY', '.json.tmp', '.JSON.TMP'):
+            status, body = mint_job(base, TOK, job)
+            assert status == 200, (job, status, body)
+            status, body = _store_one_segment(base, job, body['sig'])
+            assert status == 200, (job, status, body)
+
+
+def test_a_dotted_name_still_mints_under_the_folded_reservation(tmp):
+    """A legitimate dotted name is unaffected by the fold.
+
+    The rule is still the two bookkeeping shapes and nothing wider: a name
+    with a dot in it that is not one of them is a job, folded or not.
+    """
+    with _util.bridge(tmp, env=BRIDGE_ENV) as (base, _docroot):
+        for job in (f'{seg_job()}.1', f'{seg_job().upper()}.Ts'):
+            status, body = mint_job(base, TOK, job)
+            assert status == 200, (job, status, body)
+            status, body = _store_one_segment(base, job, body['sig'])
+            assert status == 200, (job, status, body)
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='segjobnames_')
