@@ -3,6 +3,7 @@
 import { h, field, spacer, clear, toast, errMsg, armedAction } from './_util.js';
 import { getToken, setToken, getServer, setServer, extCmd, api } from '../api.js';
 import { restart as restartSse } from '../sse.js';
+import { wireMetaBar } from '../app.js';
 
 export function mount(container, bus) {
   const root = h('div', {},
@@ -74,10 +75,9 @@ export function mount(container, bus) {
     setServer(srv);
     restartSse();
     statusEl.textContent = 'saved — verifying…';
-    // Update top bar meta
-    for (const el of document.querySelectorAll('[data-meta=token]')) el.textContent = tok.slice(0, 8) + '…' + tok.slice(-4);
-    for (const el of document.querySelectorAll('[data-meta=token-short]')) el.textContent = tok.slice(0, 8) + '…';
-    for (const el of document.querySelectorAll('[data-meta=server]')) el.textContent = srv || '(same origin)';
+    // The top bar's three cells are written where the token is masked, so
+    // a save cannot render a different one than the boot did.
+    wireMetaBar();
     try {
       await api.get('/tabs');
       setStatus(h('span', { class: 'green' }, 'connected'));
