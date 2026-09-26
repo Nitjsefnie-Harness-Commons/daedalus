@@ -184,9 +184,14 @@ def _mapping_lookup(owner, key, default):
     model cannot enumerate is not an absent key: an unknown length with no
     unknown-key slot says the key set holds entries the model never
     learned, so that read joins rather than answering the default for a
-    key the runtime may well hold. The subscript of the same mapping
-    reaches the model's own unprovable marking for the name; this read
-    answers from the container and has to join for itself."""
+    key the runtime may well hold. This read answers from the container and
+    has to join for itself, where the subscript of the same mapping
+    reaches the model's own unprovable marking for the name -- but only
+    where the STORE left one: a store that marks the owner as it folds the
+    source is what the subscript picks up, and a store that merely
+    propagates an unknown length from a source reached through a name
+    marks the source name instead, leaving this read to join for itself
+    and the subscript with nothing to reach."""
     if DYNAMIC_KEY in owner.items:
         return merge_yielded((*_selected_values(owner, key), default))
     if key in owner.items:
