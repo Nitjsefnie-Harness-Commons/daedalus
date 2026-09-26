@@ -33,19 +33,35 @@ module bare rather than a launcher read off it
 (`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
 on an unrecognised callee.
 
-The carrier walk is total over `ast.expr`. It descends through a call's
-own arguments, through containers, subscripts and a callee chain, and
-through every form that hands a sub-value on unchanged — a conditional
-expression, a boolean operator, a comprehension, a lambda body, an
-f-string, a slice, an awaited or yielded value and a walrus — so a
+The carrier walk is total over `ast.expr`. It opens Await, BoolOp,
+Call, Dict, DictComp, FormattedValue, GeneratorExp, IfExp, JoinedStr,
+Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice, Starred,
+Subscript, Tuple, Yield, YieldFrom, comprehension — a call with its
+arguments and its call-based callee, the containers and a subscript
+with its index, and every form that hands a sub-value on unchanged. A
 launcher behind any of them is judged by every arm here, in the
 argument position and in the decorator and assignment binding
-positions alike. What it does not open is a form that builds a new
-value out of its operands, because a launcher inside one is
-transformed rather than carried; a form it does not recognise at all is
-refused rather than read as clean. `tests/_coverage_bindings.py` names
-every form on both sides of that line, and a control fails when its
-prose and its table stop agreeing.
+positions alike. The four comprehension forms reach their conditions
+through the statement-level node their `generators` hold, and not
+through their own iterable, which `_bound_values` judges as the
+comprehension arm's own business; and FormattedValue is opened on the
+issue's requirement rather than on that argument, since `f"{launcher}"`
+binds a string and not the launcher.
+
+The leaves are Attribute, BinOp, Compare, Constant, Name, UnaryOp:
+the first three are atoms the predicates judge, and the last three
+build a new value out of their operands, so a launcher inside one is
+transformed rather than carried. Beyond both classes, a form in
+neither class is refused rather than read as clean, so one a later
+Python adds fails closed instead. The receiver position adds one rule
+of its own: the descent that walks a callee hands the walk every
+subscript the descent consumes, index and bounds included, and hands
+the base over only when the base is not an atom — a direct launch
+bottoms out at one and must not be refused where the receiver reads a
+launch method off what it carries.
+
+`tests/_coverage_bindings.py` names every form on both sides of that
+line, and a control fails when its prose and its table stop agreeing.
 """
 import ast
 
