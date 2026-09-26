@@ -2,10 +2,11 @@
 
 Each string is one Node child: the shell prelude, a setup block, and a
 `report` the case asserts on. They live here rather than beside the
-assertions because the cases are what the file is for, and the cases
-were closing on the 700-line `tests/` ceiling while their fixtures grew
-under them -- a file at its ceiling shares its headroom with every other
-branch, and this one is read by a suite a reviewer mutates.
+assertions because the cases are what the file is for, and because the
+two no longer fit inside the 700-line `tests/` ceiling together. Every
+one of these is a control over a shared helper, so a failure in one
+names the module the suite is named for, which is the tell that says
+where to look.
 
 Nothing here asserts. A scenario is a fixture, and a fixture that
 asserts is a control hiding where nobody looks for it.
@@ -355,9 +356,9 @@ report({ result, planted, live: drive.live() });
 """
 
 
-# The three refusals that are cheap to reach and were unreached: a
-# `Headers` bag the transport cannot read a credential from, a result poll
-# with no command behind it, and a selector registered twice.
+# Three refusals this one child reaches and the message each one throws:
+# a `Headers` bag the transport cannot read a credential from, a result
+# poll with no command behind it, and a selector registered twice.
 REFUSALS = r"""
 (async () => {
 let bag = null;
@@ -437,7 +438,8 @@ report({ declared, refusal });
 # The same refusal, for a name no scenario wrote that `in` would still
 # find: every `Object.prototype` member is inherited by a plain object
 # literal, so an `in` check would answer a plan nobody declared and the
-# comment above `byType` would be false for eleven spellings.
+# comment above `byType` would be false for every one of them. Five names
+# are driven, so a fix that special-cased one fails on the other four.
 BY_TYPE_PROTOTYPE = r"""
 (async () => {
 """ + SEED + IMPORT_API + r"""
