@@ -87,7 +87,10 @@ function mountSections() {
   }
 }
 
-function wireMetaBar() {
+// Exported because the settings panel writes the same three cells after a
+// save, and a second copy of the mask is how a twelve-character token came
+// to read verbatim at boot and masked a moment later.
+export function wireMetaBar() {
   const token = getToken();
   const server = getServer();
   setAll('[data-meta="token"]', maskToken(token));
