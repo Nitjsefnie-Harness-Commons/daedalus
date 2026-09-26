@@ -181,9 +181,6 @@ BOUNDED_GIT_LAUNCHES = {
         'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
         'the reap after that wait, on the same process',
-    ('tests/test_mcp_server.py', 122, '_mcp_request'):
-        'a connection constructor: it opens a socket and returns'
-        ' a client, and no git process sits behind a socket',
     ('tests/test_mcp_server.py', 110, '_surface_responder_errors'):
         'a thread join on a thread the fixture started',
     ('tests/test_mcp_server.py', 913, 'callers'):
