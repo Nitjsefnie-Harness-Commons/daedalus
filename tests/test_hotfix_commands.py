@@ -44,11 +44,14 @@ CODE = "daedalusHits.push('fix1')"
 # told apart by what `list-hotfixes` answers — stated, not inherited from two
 # constants that happen to differ.
 FIXTURE_VERSION = '0.00.0-fixture'
-# What the double says when a case names both command keys. Carried here so
-# the control can tell that refusal from any other way a case can fail; the
-# double spells it independently, and a control that recomputed it from the
-# double's text would pass on a double that stopped refusing for it.
-BOTH_KEYS_REFUSAL = 'names both `commands` and `store`'
+# The double gives the both-keys refusal a NAME, and that name is what this
+# control anchors on. The sentence the message carries is prose: rewording it
+# is a false red, and so is anchoring on the key names the sentence happens to
+# mention, because a reword can drop those too. Node prints `name: message`
+# into the stack, so the name is the one token a reword cannot lose. The
+# corpus check before relying on it: the name occurs exactly once in the
+# double, and the double writes to stderr from exactly one site.
+CASE_SHAPE_REFUSED = 'CaseShapeRefused'
 
 
 def _declared(source_path, name):
@@ -107,6 +110,11 @@ MIXED = [{'id': 'kept', 'code': CODE, 'permanent': True},
 # each command before dispatching it, so this is never written to.
 DROP_RECORD = {'id': 'remove', 'type': 'clear-all-hotfixes',
                'includePermanent': True}
+# One command under each of the two keys, for the case that names both. The
+# `fixId` on each is what would tell them apart if a case ever got past the
+# refusal, which is what the both-keys control is checking does not happen.
+COMMAND_FIX = {'id': 'via-commands', 'fixId': 'first', 'code': CODE}
+STORE_FIX = {'id': 'via-store', 'fixId': 'second', 'code': CODE}
 
 
 def test_a_store_naming_no_fix_id_or_no_code_is_refused(tmp):
@@ -567,28 +575,50 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     result. A case that would run neither list looks exactly like a case
     whose commands all did nothing.
 
-    The refusal is identified by its own words, not by the fact that node
-    exited nonzero. `run_hotfix_case` raises a bare `AssertionError` for
-    every failure the child can have, so a bare `except` would read "the
-    double refused" for a harness broken for any other reason at all — and
-    report the refusal working at a point where it was never reached.
+    The refusal is identified by the NAME the double gives it, not by the
+    fact that node exited nonzero and not by the sentence around them.
+    `run_hotfix_case` raises a bare `AssertionError` for every failure the
+    child can have, so a bare `except` would read "the double refused" for a
+    harness broken for any other reason at all; and a control anchored on
+    the message goes red on a reword of that prose while the refusal keeps
+    working, saying the opposite of what happened. The two failures are
+    separate assertions with separate messages, because a control that
+    reports the wrong diagnosis is the same defect as one that reports the
+    wrong verdict.
+
+    Both keys are exercised with a populated and with an empty list, because
+    a guard narrowed to "and the second is not empty" resolves the empty case
+    silently — which is the shape this whole refusal exists to end.
     """
     del tmp
-    try:
-        _run([{'id': 'via-commands', 'fixId': 'first', 'code': CODE}],
-             store=[{'id': 'via-store', 'fixId': 'second', 'code': CODE}])
-    except AssertionError as failure:
-        # `(returncode, stdout, stderr)` is what the helper puts in the
-        # assertion's message.
-        assert len(failure.args) == 1 and len(failure.args[0]) == 3, failure
-        _returncode, _stdout, stderr = failure.args[0]
-        assert BOTH_KEYS_REFUSAL in stderr, (
-            'the case failed, but not for the reason this control is about; '
-            f'the double said: {stderr!r}')
-        return
-    raise AssertionError(
-        'a case naming both `commands` and `store` was accepted; the double '
-        'has to refuse the shape rather than pick one of the two lists')
+    for label, store in (('a populated store', [STORE_FIX]),
+                         ('an empty store', [])):
+        try:
+            _run([COMMAND_FIX], store=store)
+        except AssertionError as failure:
+            # `(returncode, stdout, stderr)` is what the helper puts in the
+            # assertion's message.
+            assert len(failure.args) == 1 and len(failure.args[0]) == 3, (
+                failure)
+            _returncode, _stdout, stderr = failure.args[0]
+            assert CASE_SHAPE_REFUSED in stderr, (
+                f'the case was refused over {label}, but not with a '
+                f'{CASE_SHAPE_REFUSED}, so this control cannot tell that '
+                f'refusal from a double broken for some other reason. The '
+                f'double said: {stderr!r}')
+            continue
+        raise AssertionError(
+            f'a case naming both `commands` and `store` with {label} was '
+            f'accepted; the double has to refuse the shape rather than pick '
+            f'one of the two lists')
+    # The anti-vacuity half: one key naming nothing is a case that runs
+    # nothing, and that is not the shape this control is about. A guard that
+    # refused whenever either key was present would pass both halves above.
+    for named in ({'commands': []}, {'store': []}):
+        outcome = run_hotfix_case(dict(
+            {'documents': [SITE], 'ask': False, 'fixes': []}, **named))
+        assert outcome['posted'] == [], (named, outcome)
+        assert outcome['record'] == [], (named, outcome)
 
 
 def main():
