@@ -286,6 +286,17 @@ _WALRUS_CASES = (
     ('def default', 'def g(q=(_y := 1)):\n    return q', '_y'),
     ('def annotation',
      'def g(q: int = (_y := 1)):\n    return q', '_y'),
+    # A class BODY is a scope of its own; a class HEADER is not. Its
+    # decorators, its bases and its keywords all evaluate where the
+    # class is written, so a walrus in any of them binds the module.
+    ('class decorator', 'def _d(f):\n    return f\n@(_y := _d)\n'
+     'class K:\n    pass', '_y'),
+    ('class base expression', 'class K((_y := object)):\n    pass', '_y'),
+    ('class keyword',
+     'class K(metaclass=(_y := type)):\n    pass', '_y'),
+    ('class body statement', 'class K:\n    (_y := 1)', None),
+    ('class body method default',
+     'class K:\n    def m(self, q=(_y := 1)):\n        return q', None),
     ('decorator',
      'def _d(q=None):\n    return 1\n@(_y := _d)\ndef g():\n    pass',
      '_y'),

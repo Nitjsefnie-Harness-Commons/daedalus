@@ -22,8 +22,10 @@ language states and the rule this walker used to skip them against. A
 `def` and a `lambda` ARE scopes, so a walrus in their BODY binds
 nothing — but their DEFAULTS, their annotations and a `def`'s decorators
 are evaluated where they are written, so a walrus in those binds the
-containing scope. A class body is a scope of its own, so nothing in it
-binds the module.
+containing scope. A class BODY is a scope of its own, so
+nothing in it binds the module, while a class HEADER is not: its
+decorators, its bases and its keywords all evaluate where the class is
+written.
 """
 import ast
 
@@ -71,12 +73,16 @@ def _module_execution(tree):
         """The parts of a def or lambda evaluated in the ENCLOSING scope.
 
         Defaults, annotations and decorators run where the def is
-        written; the body does not, and a class body never binds the
-        module. Returning only the first group is what makes a walrus in
-        a default a module-scope bind and a walrus in a body not one.
+        written, and a class HEADER — its decorators, its bases and its
+        keywords — runs there too, so a walrus in any of them binds the
+        module. What does not is the BODY: a function's, a lambda's and
+        a class's, each its own scope. Returning the first group and not
+        the second is what makes a walrus in a default a module-scope
+        bind and a walrus in a body not one.
         """
         if isinstance(node, ast.ClassDef):
-            return []
+            return list(node.decorator_list) + list(node.bases) + [
+                keyword.value for keyword in node.keywords]
         arguments = node.args
         positional = (list(getattr(arguments, 'posonlyargs', []))
                       + arguments.args + arguments.kwonlyargs)
