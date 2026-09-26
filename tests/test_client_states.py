@@ -27,10 +27,14 @@ PUBLISH_BOUND = 5
 class _FixedClock:
     """A monotonic reading that never advances.
 
-    Used by the control that pins the publish bound, so the bound's
-    arithmetic is exact rather than exact-by-luck: an epoch-scale reading
-    plus five seconds does not always subtract back to five, and a control
-    whose passing path could fail on that is a flake waiting to happen.
+    The control that pins the bounds needs a deadline's arithmetic to be
+    reproducible, and `(base + N) - base` reproduces N only when N is
+    exactly representable. A whole number of seconds is, at any scale; a
+    small one is not, at any scale either -- a small base shrinks the size
+    of the residue by about five orders of magnitude, it does not remove
+    it. So the fix is a base small enough to keep that residue far below
+    anything a bound here would have to tell apart, not a base that makes
+    the subtraction exact, which no base can do.
     """
 
     def __init__(self, at=100.0):
@@ -43,18 +47,21 @@ class _FixedClock:
 def _wait_for_path(process, booted, path, clock=time.monotonic):
     """Wait for the client to boot, then for the path it publishes.
 
-    Returns the bound the publish wait actually applied.
+    Returns the boot bound and the publish bound this call applied.
 
     The bound above governs the boot so the one below covers the publish and
     not a fresh interpreter's startup. The boot marker is a file rather than
     the child's printed line because every caller reads that line through
-    client_states, which reads the stdout pipe itself.
+    client_states, which reads the stdout pipe itself. The two deadlines are
+    named apart because the second is reassigned below: a pair of returns
+    reading one name would hand back the publish bound twice.
     """
-    deadline = clock() + BOOT_DEADLINE
+    boot_opened = clock()
+    boot_deadline = boot_opened + BOOT_DEADLINE
     while not booted.exists():
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before booting')
-        assert clock() < deadline, (
+        assert clock() < boot_deadline, (
             f'the client is alive and never published {booted.name}')
         time.sleep(0.01)
     opened = clock()
@@ -62,7 +69,7 @@ def _wait_for_path(process, booted, path, clock=time.monotonic):
     while not path.exists() and clock() < deadline:
         time.sleep(0.01)
     assert path.exists(), f'{path.name} was not published'
-    return deadline - opened
+    return boot_deadline - boot_opened, deadline - opened
 
 
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
@@ -98,11 +105,16 @@ def test_the_publish_wait_applies_the_bound_the_suite_declares(tmp):
     """A shortened publish bound has to be caught by its arithmetic.
 
     The client publishes the moment it boots, so the wait returns on its
-    first check and no elapsed time ever comes near the bound it was
-    given. The bound is therefore read back off the wait rather than
-    measured, and the wait is given a clock that never advances, so this
-    says nothing about how fast the machine is. A publish bound cut to a
-    millisecond is caught here by name.
+    first check and no elapsed time ever comes near either bound it was
+    given. Both are therefore read back off the wait rather than measured,
+    and the wait is given a clock that never advances, so this says nothing
+    about how fast the machine is.
+
+    The two expectations are LITERALS and must stay that way. Compared
+    against BOOT_DEADLINE and PUBLISH_BOUND they would compare each wait
+    against the very constant it was built from, so shortening either
+    bound would move both sides of the assertion and the shortened bound
+    would pass -- which is the defect this control exists to catch.
     """
     ready_path = Path(tmp) / 'bound.ready'
     booted_path = Path(tmp) / 'bound.booted'
@@ -119,9 +131,10 @@ def test_the_publish_wait_applies_the_bound_the_suite_declares(tmp):
         [sys.executable, '-c', client, str(ready_path), str(booted_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        applied = _wait_for_path(process, booted_path, ready_path,
-                                 clock=_FixedClock())
-        assert applied == PUBLISH_BOUND, applied
+        boot_applied, applied = _wait_for_path(
+            process, booted_path, ready_path, clock=_FixedClock())
+        assert boot_applied == 120, boot_applied
+        assert applied == 5, applied
     finally:
         _drain.kill_and_drain(process)
 

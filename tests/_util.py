@@ -437,14 +437,13 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
                 + _startup_observations(
                     proc, drained, time.time() - started))
         if time.time() > deadline:
-            failure = RuntimeError(
-                f'bridge did not announce its port in {timeout}s: '
+            # Both bounds: a short one reports a timeout it never had.
+            applied = round(deadline - started, 6)
+            raise RuntimeError(
+                f'bridge did not announce its port in {timeout}s '
+                f'(bound applied {applied:g}s): '
                 + _startup_observations(
                     proc, drained, time.time() - started))
-            # The bound this search used rather than the one the caller
-            # asked for; the control that pins it says why that matters.
-            setattr(failure, 'applied', round(deadline - started, 6))
-            raise failure
         time.sleep(0.05)
 
 
