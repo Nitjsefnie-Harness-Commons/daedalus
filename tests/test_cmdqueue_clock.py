@@ -12,6 +12,7 @@ import _cmdqueue  # noqa: E402
 import _cmdqueue_faults  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _RUNAWAY_ELAPSED,
+    _RUNAWAY_WALL,
     _virtual_cmdqueue_clock,
 )
 
@@ -241,11 +242,23 @@ def test_per_call_wall_budget_replaces_the_module_default(_tmp):
             clock.monotonic(), origin, positive)
 
 
-def test_omitted_wall_budget_is_the_module_default(_tmp):
-    """An omitted budget is the module's, sampled below it.
+def test_the_runaway_bound_is_five_seconds(_tmp):
+    """The value, which the two probes either side of it do not establish.
 
-    Beside the control that samples the limit itself, the module's bound is
-    five seconds and the comparison at that value is inclusive.
+    They bracket the module's bound to 4.5 < b <= 5.0, and a bound that
+    drifts inside that interval trips neither; the value is what the issue's
+    constraint is about, since a runaway guard must not be raised to make a
+    control pass.
+    """
+    assert _RUNAWAY_WALL == 5.0, _RUNAWAY_WALL
+
+
+def test_omitted_wall_budget_is_the_module_default(_tmp):
+    """An omitted budget is the module's, sampled below its limit.
+
+    With the limit probe beside it and the value pinned, a bound above four
+    and a half and at or below five is what tells a bound that trips early
+    from one that does not.
     """
     positive = _cmdqueue.POLL_DELAY
     with _wall_time_past_limit(4.5):
@@ -257,10 +270,12 @@ def test_omitted_wall_budget_is_the_module_default(_tmp):
 
 
 def test_the_wall_bound_trips_exactly_at_its_limit(_tmp):
-    """A bound is inclusive, and this is the module's own value.
+    """A bound is inclusive, at the module's own limit.
 
-    Elapsed time exactly at the limit trips the guard; with the quiet probe
-    below the limit, that pins the module's bound at five seconds.
+    Elapsed time exactly at the limit trips the guard, which an exclusive
+    comparison would let through; with the quiet probe beside it the module's
+    bound is bracketed to 4.5 < b <= 5.0, and the value inside that interval
+    is pinned by the control named for it.
     """
     failure = None
     with _wall_time_past_limit(5.0):
