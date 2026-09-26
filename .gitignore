@@ -260,8 +260,6 @@
 !/tests/_argv_read.py
 !/tests/_bash_resolver_scan.py
 !/tests/_bound_site_rows.py
-!/tests/_bound_site_rows.py
-!/tests/_bound_site_rows.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
 !/tests/_boundary_scenarios.py
@@ -326,12 +324,8 @@
 !/tests/_jsroute_tab.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
-!/tests/_launch_audit.py
-!/tests/_launch_audit.py
 !/tests/_launch_census.py
 !/tests/_launch_path.py
-!/tests/_launch_refusal_rows.py
-!/tests/_launch_refusal_rows.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
 !/tests/_mcp_code_eval.py
