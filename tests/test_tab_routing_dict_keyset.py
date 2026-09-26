@@ -174,24 +174,33 @@ _ACCOUNTED = {
     'dict-call-clean': ('d = dict([("k", ordinary)])', 'd["k"]'),
 }
 
-# The FRESHNESS axis at the other polarity. A key the model recorded while
-# it could still see the value, and an unreadable source has since put
-# something else there: the read answers the recorded value, so a
-# `relay()` that the runtime really does call is reported nothing. Each
-# is listed with the issue it is parked against, because the census's
-# value is that its unconsidered bucket is empty BY NAME. The subscript
-# form of every one of these stores already reports, so only the two
-# container-answering read forms are silent.
+# Which read forms a parked member is silent on, per member: the freshness
+# stores report on the subscript and read clean on the container reads, the
+# starred source the other way round.
+_CONTAINER_READS = ('get', 'setdefault')
+
+# The rest of the domain, at the polarity that still reads silent. A key the
+# model recorded while it could still see the value, and an unreadable source
+# has since put something else there, or a source the model folds and then
+# loses: the read answers the recorded value or its own default, so a
+# `relay()` the runtime really does call is reported nothing. Each names the
+# issue it is parked against, because the census's value is that its
+# unconsidered bucket is empty BY NAME.
 _SILENT = {
     'stale-recorded-zip': (
-        'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154),
+        'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154,
+        _CONTAINER_READS),
     'stale-recorded-frozenset': (
-        'd = {"k": ordinary}\nd.update(frozenset([("k", relay())]))', 1154),
+        'd = {"k": ordinary}\nd.update(frozenset([("k", relay())]))', 1154,
+        _CONTAINER_READS),
     'stale-recorded-later-store': (
         'd = {"k": ordinary}\nd.update(zip(["j"], [1]))'
-        '\nd.update(zip(["k"], [relay()]))', 1154),
+        '\nd.update(zip(["k"], [relay()]))', 1154, _CONTAINER_READS),
+    # A positional source reached through a star, so the container answers
+    # the subscript from the fold and joins the two container reads instead.
+    'update-starred-source': (
+        'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, ('subscript',)),
 }
-_SILENT_READS = ('get', 'setdefault')
 
 
 def _body(store, read, prefix):
@@ -204,10 +213,8 @@ def _verdict(tmp, store, read, prefix=_PRE):
 
 
 def test_every_axis_member_is_refused_or_declared(tmp):
-    """The silent bucket is empty by name, not by assertion: a member of
-    `_AXES` no `_DISPOSITION` names is a gap in the census, and a
-    `_DISPOSITION` no `_AXES` carries claims a member that does not exist.
-    Both fail here rather than passing unnoticed."""
+    """The silent bucket is empty by name, not by assertion: both
+    directions of the census fail here rather than passing unnoticed."""
     assert sorted(_DISPOSITION) == sorted(_AXES), sorted(
         set(_AXES) ^ set(_DISPOSITION))
     assert {outcome for outcome, _ in _DISPOSITION.values()} \
@@ -228,9 +235,8 @@ def test_no_axis_member_reads_a_key_the_model_never_recorded_clean(tmp):
 
 
 def test_a_declared_read_costs_where_a_refused_read_does_not(tmp):
-    """Each member's cost once nothing is routed, pinned per member
-    because the name's own alias and the read's verdict contribute to it
-    separately."""
+    """The name's own alias and the read's verdict contribute to a
+    member's cost separately, so it is pinned per member."""
     for label, (_, cost) in sorted(_DISPOSITION.items()):
         for name, read in sorted(_READS.items()):
             clean = _verdict(tmp, _AXES[label], read, _CLEAN)
@@ -252,7 +258,7 @@ def test_an_unlisted_member_of_the_domain_is_rejected(tmp):
 def test_an_accountable_key_read_stays_clean(tmp):
     """The false-positive limb, end to end: the model can see the key, or
     can see that it is absent, and the read yields a value that routes
-    nothing. `(0, 0)` on both prefixes."""
+    nothing."""
     for label, (store, read) in sorted(_ACCOUNTED.items()):
         assert _verdict(tmp, store, read) == (0, 0), (label, read)
         assert _verdict(tmp, store, read, _CLEAN) == (0, 0), (label, read)
@@ -297,11 +303,14 @@ def test_every_silent_member_is_listed_and_not_refused(tmp):
     join would be a new false positive rather than a repair."""
     assert not {name for name, _ in _AXES.items()} & set(_SILENT)
     assert all(isinstance(issue, int) and issue > 0
-               for _, issue in _SILENT.values())
-    for label, (store, _) in sorted(_SILENT.items()):
-        for name in _SILENT_READS:
+               for _, issue, _ in _SILENT.values())
+    for label, (store, _, names) in sorted(_SILENT.items()):
+        for name in names:
             read = _READS[name]
-            assert _verdict(tmp, store, read) == (1, 0), (label, name)
+            calls, found = _verdict(tmp, store, read)
+            assert (calls, found) == (1, 0), (
+                label, name, calls, found,
+                'a repair moves the member into _AXES, not into the suite')
             assert _verdict(tmp, store, read, _CLEAN) == (0, 0), (label, name)
 
 

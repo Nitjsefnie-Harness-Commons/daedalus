@@ -4,7 +4,10 @@ Every read of a value the model tracks is resolved here -- a position, an
 attribute, a literal key, a whole mapping literal, a receiver expression --
 and answers from the storage the model recorded rather than from the source
 text alone. A read the model cannot name joins the unknown slot instead of
-naming one value. The store side is `_pyroute_mapping` and `_pyroute_stores`.
+naming one value. `pop` is the one write, and it is here because
+`resolve_expression_value` reaches it while resolving the read that names
+the key it removes. The store side is `_pyroute_mapping` and
+`_pyroute_stores`.
 """
 import ast
 
