@@ -438,22 +438,19 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
 
 
 def frame_read(node, namespace_key, *context):
-    """Return the receiver of a frame read, or ``None``.
+    """The member selection to refuse, or ``None``.
 
     A position that can carry a member name and one the audit cannot read are
-    the same position as far as the guard is concerned, and answering the
-    second "no member" is silence: a computed name, a starred expansion and a
-    member chosen by a callee the audit cannot see all reach ``f_locals`` and
-    none of them names it in the source. Each is reported as a read, and
-    ``reads_frame_namespace`` refuses it on the receiver's origin exactly as
-    it refuses a constant member. Deciding a name the audit can read is what
-    keeps that cheap: a selection on a receiver whose value the audit can see
-    is not a frame read, and a literal is the case the CLI's own calls hit.
-
-    A member this file has never heard of is refused like a known one, which is
-    why the member test is the set read off ``types.FrameType``. Only the
-    subscript reaches the audited namespace by its own key, so a call naming a
-    path rather than a member reads nothing.
+    the same position, and answering the second "no member" is silence: a
+    computed name, a starred expansion and a member chosen by a callee the
+    audit cannot see all reach ``f_locals`` without naming it. Each is
+    reported, and ``reads_frame_namespace`` refuses it on the receiver's
+    origin exactly as it refuses a constant member. Deciding a name the audit
+    CAN read is what keeps that cheap, and a literal receiver is the case the
+    CLI's own calls hit. A member this file has never heard of is refused like
+    a known one, which is why the member test is the set read off
+    ``types.FrameType``. Only the subscript reaches the audited namespace by
+    its own key, so a call naming a path reads nothing.
     """
     if isinstance(node, ast.Attribute):
         return node if node.attr in FRAME_SURFACE else None
@@ -490,25 +487,21 @@ def _subscript_read(node, namespace_key):
 
 def _call_read(node, function, handler_globals, scope_binds,
                comprehension_shadows):
-    """A call selects a member by an argument the audit may not be able to
-    read.
+    """A call selects a member by an argument the audit cannot always read.
 
     A visible constant member is decided by the member test, at any argument
-    position rather than only the second, because a call can name a member
-    wherever the callee looks for it. The price is deliberate and measured:
-    131 calls in ``daedalus_cli/`` pass a constant string as a second
-    argument, 46 distinct values, none of them a frame member, so
+    position, because a call can name a member wherever the callee looks for
+    it. The price is measured: 131 calls in ``daedalus_cli/`` pass a constant
+    string as a second argument, 46 distinct values, none a frame member, so
     ``api('GET', 'f_locals')`` is refused whatever the callee is and nothing
     in the tree is refused today. Gating on the callee instead would let a
-    member be named through a shadowed one, which is the false green I-1
-    closed. Everything else the grammar gives a member name and the audit
-    cannot read is a read too, and is reported so the receiver's origin
-    refuses it: a starred expansion hides the whole argument list, a callee
-    that is itself a call has a value the audit cannot see, and a proven
-    builtin ``getattr`` whose name is an expression selected a member the
-    source does not spell. A one-argument call with a callee the audit can
-    see is not a selection to reason about, which is what keeps the CLI's own
-    ``value.lower()`` and ``res.get('result', [])`` out of the answer.
+    member be named through a shadowed one — the false green I-1 closed.
+    What the audit cannot read is a read too: a starred expansion hides the
+    whole argument list, a callee that is itself a call has a value the audit
+    cannot see, and a proven builtin ``getattr`` whose name is an expression
+    selected a member the source does not spell. A one-argument call with a
+    callee the audit can see is not a selection, which keeps ``value.lower()``
+    and ``res.get('result', [])`` out of the answer.
     """
     visible = [argument for argument in node.args
                if isinstance(argument, ast.Constant)
