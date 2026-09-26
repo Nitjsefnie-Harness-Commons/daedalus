@@ -512,13 +512,13 @@ def path_functions(tests_dir, launcher_modules=LAZY_MODULES):
                 growing = True
     _KNOWN = known
     ending = set(CHILD_ENDING_MODULES)
-    for relative in own:
+    for relative, functions in own.items():
         if relative in known or relative.rsplit('/', 1)[-1] not in ending:
             continue
         if _handed_a_child(relative):
-            known[relative] = set(own[relative])
-            by_stem[relative[:-len('.py')]] = set(own[relative])
-            names |= set(own[relative])
+            known[relative] = set(functions)
+            by_stem[relative[:-len('.py')]] = set(functions)
+            names |= set(functions)
     _CHILD_PARAMETERS.clear()
     _CHILD_PARAMETERS.update(_child_parameters())
     return {relative: found for relative, found in known.items() if found}
