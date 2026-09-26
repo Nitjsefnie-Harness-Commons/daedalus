@@ -158,16 +158,23 @@ their child processes inherit. It also needs one piece of context.
 `sections/settings.js` over `api.js`, `sse.js` and the shared
 `sections/_util.js` helper; `tests/test_dashboard_sections.py` mounts
 `sections/screenshot.js`, `sections/tabs.js` and `sections/uploads.js`
-over `api.js` and `_util.js`; `tests/test_dashboard_behaviour.py`
+over `api.js` and `_util.js`; the six
+`tests/test_dashboard_section_*.py` suites each mount one of
+`sections/block-rules.js`, `cdp.js`, `cookies.js`, `css-injector.js`,
+`fetch-timings.js` and `net-capture.js` over the same two modules, and
+`tests/test_dashboard_hotfixes.py` mounts `sections/hotfixes.js`;
+`tests/test_dashboard_app_shell.py` and `tests/test_dashshell_harness.py`
+mount `dashboard/app.js` itself, which is the only route to
+`sections/overview.js` — no suite names that module;
+`tests/test_dashboard_behaviour.py`
 and `tests/test_dashboard_harness.py` drive `api.js` and `_util.js`
 beside `extension/content.js`; and the extension's background, worker,
 content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
-`tests/test_gm_*.py` suites. No suite reaches `dashboard/app.js`, the
-`block-rules`, `cdp`, `cookies`, `css-injector`, `fetch-timings`,
-`hotfixes`, `net-capture` and `overview` sections, or the extension
-options page, so those modules read as zero — about a fifth of the
-shipped code lines. That is the true state of the tests, not a
+`tests/test_gm_*.py` suites. The one shipped module no suite reaches is
+the extension options page, `extension/options.js`, at 0 of 51 code
+lines — about 1% of the 4852 the number is measured over, and the
+total is 85.5%. That is the true state of the tests, not a
 shortfall in the measurement — the fix is tests, not tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
