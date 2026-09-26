@@ -15,20 +15,15 @@ under it, and a name-keyed or file-keyed rule merges them:
     because no row was ever written for it.
 
 It reaches that by reading the merge base's OWN definitions, which is a
-content comparison. A path list cannot tell a site the branch wrote from
-one it did not, and it cost this branch five renames in test files it
-was not asked to touch before the form changed. `tests/` carries 71
-files with a Python row and 27 with a JavaScript one, and this branch
-edits fifteen of the twenty-seven, so a path-scoped boundary would have
-forbidden recording rows for sites that predate it.
+content comparison; a path list cannot tell a site the branch wrote from
+one it did not, and this branch edits fifteen of the twenty-seven files
+the JavaScript residue lives in, so a path-scoped boundary would forbid
+recording rows for sites that predate it.
 
 A checkout that cannot see a base returns None and the caller MUST
 refuse on it. None is "this checkout cannot answer"; an empty set is
-"the base resolves and names nothing", and the two are different facts
-about different things. Before this refusal existed, both boundary tests
-took the None arm with a bare `return` — and the only CI job that runs
-the suites checks out at depth 1, so the control was green there and had
-evaluated nothing.
+"the base resolves and names nothing", and the two are facts about
+different things.
 """
 import ast
 import hashlib
