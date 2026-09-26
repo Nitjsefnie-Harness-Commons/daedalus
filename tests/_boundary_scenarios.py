@@ -323,12 +323,14 @@ async function runNetCapture() {
 }
 
 async function runNetCaptureOwnership() {
-  // One attachment owner per tab: a cdp command and a net capture reuse each
-  // other's attachment instead of attaching over it, a transient cdp leaves
-  // an attachment it found exactly as it was, and stopping a capture never
-  // detaches an attachment a kept cdp session still needs.
+  // `cdpSession` is the one flag in this table with no observable proxy, so
+  // it is read out of the worker rather than driven: the rows that turn it on
+  // carry attach/detach counts identical to the rows before them, because a
+  // kept record's survival changes nothing Chrome is asked to do. An exported
+  // accessor would be a production surface added for one test, and there is
+  // nothing observable here for it to replace. It reads two private symbols,
+  // `_cdpClaims` and `_netCaptures`, not one.
   const readState = (tabId) => {
-    // `cdpSession` keeps its meaning: a claim marked keep, on this tab.
     const keys = JSON.parse(vm.runInContext(
       'JSON.stringify([Array.from(_cdpClaims.entries()).filter('
       + '([, e]) => e.keep).map(([id]) => String(id)),'
@@ -349,22 +351,16 @@ async function runNetCaptureOwnership() {
       state: readState(tabId) };
   };
 
-  // Tab 7: capture, a transient cdp over it, then stop with no other owner.
   const capture = await run('net-capture', 7);
   const cdpOverCapture = await run('cdp', 7, { method: 'Runtime.enable' });
   const stopCapture = await run('net-capture-stop', 7);
 
-  // Tab 8: a kept cdp session, a transient cdp and a capture that reuse it,
-  // then stop the capture — the kept session must survive and keep it.
   const keepSession = await run(
     'cdp', 8, { method: 'Runtime.enable', keep_session: true });
   const transientOverKept = await run('cdp', 8, { method: 'Runtime.enable' });
   const captureOverKept = await run('net-capture', 8);
   const stopOverKept = await run('net-capture-stop', 8);
 
-  // Tab 9: a capture, a keep-session cdp that reuses it, then stop — the
-  // record must survive the reuse so the stop leaves it standing. Tab 8 is
-  // still attached, so this also proves a different tab may attach.
   const captureTab9 = await run('net-capture', 9);
   const keepSessionOverCapture = await run(
     'cdp', 9, { method: 'Runtime.enable', keep_session: true });

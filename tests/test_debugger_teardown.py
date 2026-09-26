@@ -147,9 +147,9 @@ def test_a_second_release_on_one_handle_detaches_once(tmp):
     What carries this is the ENTRY guard in `_cdpRelease`: the first release
     took the entry out of the map, so the second finds nothing installed and
     no-ops. The handle's own "released once" guard is defence in depth for a
-    caller that releases twice — no shipped call site does — and removing it
-    alone leaves this control green, which is why it carries no weight here
-    and is named in `cdp_attach.js` rather than pinned here.
+    caller that releases twice, which no shipped call site does. Removing it
+    alone leaves this control green, which is why it carries no weight
+    here and is named in `cdp_attach.js` rather than pinned here.
     """
     del tmp
     outcome = run_attachment_case({'actions': [
@@ -193,6 +193,10 @@ def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
     alive, and the record is released. A caught refusal that leaves no trace
     is a refused detach and a successful one indistinguishable, so the third
     thing asserted is that the refusal is visible at all.
+
+    One of two controls, one per detach site, and not to be merged: this one
+    drives `cdpForgetAttachment`, the release site has its own, and a change
+    to either leaves the other green.
     """
     del tmp
     outcome = run_attachment_case({
@@ -223,11 +227,20 @@ def test_a_refused_detach_on_a_closed_capturing_tab_is_survived_and_traced(
 
 
 def test_a_refused_detach_on_a_transient_release_is_survived_and_traced(tmp):
-    """#1161 on the other detach site, which settles for a joining claim.
+    """#1161 on the RELEASE detach site, which settles for a joining claim.
 
-    A claim's release records the same refusal and settles unconditionally:
-    a claim arriving in the window chains onto that promise, and one that
-    never settles is a worse defect than the refusal it was hiding.
+    One of two controls, one per detach site, and not to be merged: the
+    capturing-tab control above drives `cdpForgetAttachment`, this one drives
+    `_cdpRelease`, and each site has its own mutant — a change to one leaves
+    the other green. What they share is the scenario — a detaching
+    `chrome.debugger.detach` that rejects — which is why both names say
+    which site they reach.
+
+    A claim's release records the refusal and settles UNCONDITIONALLY: a
+    claim arriving in the window chains onto that promise, and one that never
+    settles is a worse defect than the refusal it was hiding. The later claim
+    below is how that is observed — it is free to run rather than waiting
+    forever on a promise nobody settles.
     """
     del tmp
     outcome = run_attachment_case({
@@ -241,8 +254,13 @@ def test_a_refused_detach_on_a_transient_release_is_survived_and_traced(tmp):
         ]})
     assert outcome['detachCalls'] == [7], outcome
     assert outcome['unhandled'] == [], outcome
-    # The second claim attached and is still holding, so the record outlived
-    # the refused release rather than being dropped by it.
+    # The later claim ran rather than waiting on a promise nobody settles,
+    # which is the unconditional settling this control exists for. It did
+    # NOT get in: the detach was refused, so Chrome still holds the tab and
+    # the claim's own attach is refused with it. `live == [7]` is Chrome's
+    # holding, not a claim's — the record itself was released by the first
+    # release, which is why the later claim got far enough to attempt an
+    # attach at all.
     assert outcome['attachCalls'] == [7, 7], outcome
     assert outcome['live'] == [7], outcome
     assert any('detach refused' in line for line in outcome['refused']), \

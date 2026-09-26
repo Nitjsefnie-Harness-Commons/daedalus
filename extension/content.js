@@ -276,12 +276,9 @@ function connectKeepAlive() {
 // mechanism beside the check itself.
 (function replayHotfixes() {
   // `crypto.randomUUID` is [SecureContext] and this script is declared on
-  // `<all_urls>`, so it is absent on a plain-http page. A token minted there
-  // does not have to be unguessable: the binding is directional, not secret.
-  // A forged value buys the forger exactly one thing, suppressing its own
-  // fix, because the check reads the value in the document the evaluation
-  // runs in — the tab's top frame — and a successor document's own token
-  // fails that comparison. That is what the argument above turns on.
+  // `<all_urls>`, so it is absent on a plain-http page. The fallback need
+  // only produce a value that DIFFERS per document, for the reason the
+  // argument above gives — the binding is directional, not secret.
   const docToken = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : Date.now().toString(36) + Math.random().toString(36).slice(2);
