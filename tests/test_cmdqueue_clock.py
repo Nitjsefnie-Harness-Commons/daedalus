@@ -197,11 +197,10 @@ def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
 def test_counted_runaway_outruns_real_wall_time(_tmp):
     """The no-progress guard is the one that stops a counted runaway.
 
-    This drives the control issue 1190 is about rather than a copy of its
-    loop, so what is pinned is that the fix is applied to that control. The
-    machine is this double's, so the verdict is not this box's — and a failure
-    that is not the wall bound is not this control's to explain, so it is
-    re-raised in the counted control's own words.
+    It drives the control issue 1190 is about rather than a copy of its
+    loop, so what is pinned is that the fix is applied to that control — and a
+    failure the wall bound did not cause is re-raised in that control's own
+    words rather than explained here.
     """
     with _wall_time_past_limit():
         try:
@@ -245,8 +244,7 @@ def test_per_call_wall_budget_replaces_the_module_default(_tmp):
 def test_the_runaway_bound_is_five_seconds(_tmp):
     """The value, which the two probes either side of it do not establish.
 
-    They bracket the module's bound to 4.5 < b <= 5.0, and a bound that
-    drifts inside that interval trips neither; the value is what the issue's
+    They bracket it to 4.5 < b <= 5.0; the value is what the issue's
     constraint is about, since a runaway guard must not be raised to make a
     control pass.
     """
@@ -256,9 +254,8 @@ def test_the_runaway_bound_is_five_seconds(_tmp):
 def test_omitted_wall_budget_is_the_module_default(_tmp):
     """An omitted budget is the module's, sampled below its limit.
 
-    With the limit probe beside it and the value pinned, a bound above four
-    and a half and at or below five is what tells a bound that trips early
-    from one that does not.
+    With the limit probe beside it, a bound above four and a half and at or
+    below five is what tells an early trip from none.
     """
     positive = _cmdqueue.POLL_DELAY
     with _wall_time_past_limit(4.5):
@@ -273,9 +270,8 @@ def test_the_wall_bound_trips_exactly_at_its_limit(_tmp):
     """A bound is inclusive, at the module's own limit.
 
     Elapsed time exactly at the limit trips the guard, which an exclusive
-    comparison would let through; with the quiet probe beside it the module's
-    bound is bracketed to 4.5 < b <= 5.0, and the value inside that interval
-    is pinned by the control named for it.
+    comparison would let through; with the quiet probe beside it the bound is
+    bracketed to 4.5 < b <= 5.0.
     """
     failure = None
     with _wall_time_past_limit(5.0):
@@ -308,10 +304,7 @@ def test_a_zero_wall_budget_is_a_bound_not_an_absence(_tmp):
 
 
 def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
-    """The guard is consulted on reads as well as on sleeps.
-
-    `record_read` is the arm that would see a read loop that never ends.
-    """
+    """`record_read` is the arm that sees a read loop never ending."""
     failure = None
     with _wall_time_past_limit():
         with _virtual_cmdqueue_clock() as (clock, events, _origin):
@@ -326,10 +319,8 @@ def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
 
 
 def test_an_opted_out_clock_reads_no_real_time(_tmp):
-    """No wall budget means no real time, not even for a start mark.
-
-    This is the branch's central claim about the opt-out, and the start mark
-    was the one read that survived it.
+    """No wall budget means no real time, not even for a start mark:
+    the branch's claim about the opt-out, stated as something that can fail.
     """
     real = _cmdqueue.time.perf_counter
     reads = [0]
@@ -365,8 +356,7 @@ def test_the_wall_bound_stops_a_runaway_clock_read(_tmp):
 def test_the_perf_counter_alias_is_the_guarded_clock_read(_tmp):
     """`perf_counter` is a second name for that method, not a second method.
 
-    Nothing in the tree calls it, so without this the alias could be replaced
-    by an unguarded read and no control would notice.
+    Nothing in the tree calls it, so only this control notices a replacement.
     """
     failure = None
     with _wall_time_past_limit():
@@ -384,9 +374,7 @@ def test_the_slow_machine_double_restores_the_real_clock(_tmp):
     """A double that does not restore is a double that is still installed.
 
     It patches the real `time` module, so a leaked fake leaves every later
-    control in this process reading a clock that answers 6.0. This control
-    restores the real clock whatever its own verdict, so a failure here
-    cannot poison the controls that run after it.
+    control in this process reading a clock that answers 6.0.
     """
     real = _cmdqueue.time.perf_counter
     try:
@@ -400,8 +388,7 @@ def test_the_slow_machine_double_restores_the_real_clock(_tmp):
 def test_the_module_bound_is_read_at_the_call(_tmp):
     """A lowered module bound reaches a control that omits the budget.
 
-    A default bound in the signature would freeze the constant at import, and
-    lowering it is how a session checks what a control escapes.
+    A default bound in the signature would freeze the constant at import.
     """
     failure = None
     original = _cmdqueue_faults._RUNAWAY_WALL
@@ -425,10 +412,8 @@ def test_the_module_bound_is_read_at_the_call(_tmp):
 def test_virtual_clock_rejects_an_unusable_wall_budget(_tmp):
     """A budget that cannot be compared is not a budget.
 
-    `nan` and `inf` compare false against every elapsed time, so accepting
-    one turns the runaway bound off without saying so; a negative budget is
-    a bound no caller means and it trips at once. `sleep` refuses the same
-    class for its own argument, thirty lines below.
+    `nan` and `inf` compare false against every elapsed time, so one of
+    them turns the runaway bound off without saying so.
     """
     for budget in (math.nan, math.inf, -math.inf, -1.0):
         failure = None
