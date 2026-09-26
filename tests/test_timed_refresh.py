@@ -17,6 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT, git_index  # noqa: E402
+from _timed_basis import (  # noqa: E402
+    assert_the_generator_wrote_the_basis, verify_recorded_count)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -104,15 +106,6 @@ def _file(tmp, data, name='suite-timings.json'):
     path = Path(tmp) / name
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
     return path
-
-
-# The shipped-basis control below rebuilds the committed `basis` through
-# a helper, which lives in the suite that pins WHICH cell count that
-# helper is fed. Imported after the fixtures above, and not at the top,
-# because the two suites reference each other and both names must be
-# bound by the time either one is reached.
-from test_timed_basis_feed import (  # noqa: E402
-    _assert_the_generator_wrote_the_basis)
 
 
 def _run(refresh, args, expect=0):
@@ -480,10 +473,21 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     it is an INPUT rather than a derivation: the refresher supplies the
     cells the selected run measured (`refresh_timings.py:389`, and the
     `max_cells` it derived from that same run on a seed, `:427`). The file
-    records the number only in that prose and re-deriving it would need
-    the downloaded runs, so the compare covers every other clause and the
-    PROSE of that one, and only a fresh measurement could check the number
-    itself.
+    records the number only in that prose, so the compare covers every
+    other clause and the PROSE of that one -- the wording, its position,
+    the `1 cell`/`N cells` plural, the sentence around it -- and not the
+    truth of the count.
+
+    WHAT CHECKS THE COUNT. `verify_recorded_count` re-derives it through
+    the refresher's own `discover_runs` and `select`, the two calls
+    `refresh()` makes before it attaches a basis, and asserts the
+    committed prose records what the selected run measured. It reads
+    `<repo>/runs`, where the refresher is pointed, so it is live in
+    exactly one place: `timed-timings.yml` downloads the runs there and
+    its "Verify the change" step runs this suite in the same job with
+    them on disk, so the number is pinned at the step that writes it.
+    The pull-request `suites` job has no artifacts, so there the check
+    cannot run; it says so on stderr rather than passing silently.
 
     The boundary is not where it first looks. The target clause's cell
     count, heaviest cell and median come from `plan_matrix`, and the plan
@@ -510,7 +514,11 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     """
     planner = _planner()
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
-    _assert_the_generator_wrote_the_basis(tmp, data)
+    assert_the_generator_wrote_the_basis(tmp, data)
+    # The count is read out of the file, so nothing else checks it. This
+    # prints what the cross-check did or could not do, on every run: a
+    # skip that says nothing is indistinguishable from a pass.
+    print(verify_recorded_count(data, ROOT / 'runs'), file=sys.stderr)
 
 
 def test_the_shipped_file_satisfies_the_margin_it_names(tmp):
