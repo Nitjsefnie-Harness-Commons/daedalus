@@ -408,6 +408,7 @@
 !/tests/_version_contract.py
 !/tests/_version_contract_dashboard_duplicates.py
 !/tests/_version_contract_scanners.py
+!/tests/_watcher_once.py
 !/tests/_watcher_polls.py
 !/tests/_watcher_waits.py
 !/tests/_wfassert.py
