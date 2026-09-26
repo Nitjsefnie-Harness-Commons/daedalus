@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
+import _watcher_polls as polls  # noqa: E402
 import _watcher_waits as waits  # noqa: E402
 
 ROOT = _util.ROOT
@@ -182,55 +183,6 @@ def _await_calls(fake, count, child):
     return waits.await_calls(fake, count, child, f'{count} gh call(s)')
 
 
-def _repeated_width(requests):
-    """The shortest prefix of the window the window repeats in full.
-
-    Only the first two complete repetitions decide the width: whether the
-    rest of the window still agrees at that width is `_per_poll`'s to refuse
-    on, and a window too short to hold two repetitions has no width yet.
-    """
-    for width in range(1, len(requests) // 2 + 1):
-        if requests[:width] == requests[width:2 * width]:
-            return width
-    return None
-
-
-def _refuse(requests, why):
-    """The refusal a window that is not one number gets.
-
-    The recorded sequence is in the message because a figure read off a log
-    nobody can check is a claim, and a helper that answered anyway would
-    satisfy every assertion in this file.
-    """
-    return AssertionError(f'no poll width to report: {why}; recorded '
-                          f'{[request[:40] for request in requests]}')
-
-
-def _per_poll(calls):
-    """Calls one poll spends: the width of the sequence the window repeats.
-
-    A watcher repeats one ordered sequence of requests every poll, so the
-    figure is that width and the clock decides nothing - a poll the host
-    stretched reads the same as one it did not. A trailing partial poll is
-    trimmed, because the log is read some time after the wait ends; a window
-    that establishes no width, or whose later polls change shape, is reported
-    rather than averaged, because neither is one number.
-    """
-    requests = [call['request'] for call in calls]
-    width = _repeated_width(requests)
-    if width is None:
-        raise _refuse(requests, 'no prefix of it repeats in full')
-    for start in range(2 * width, len(requests) - width + 1, width):
-        if requests[start:start + width] != requests[:width]:
-            raise _refuse(requests,
-                          f'the poll at call {start} is another shape')
-    polls, _ = divmod(len(requests), width)
-    # The numerator counts the whole polls alone: a trailing partial one is
-    # trimmed, because the log is read some time after the wait returns.
-    whole = polls * width
-    return whole // polls
-
-
 def _hourly(per_poll, tick):
     return per_poll * (3600 / tick)
 
@@ -261,117 +213,16 @@ def _pid_alive(pid):
     return text.rsplit(')', 1)[-1].split()[0] != 'Z'
 
 
-def _await_polls(fake, child, what):
-    """The call log, once it holds two complete repetitions of one poll.
-
-    `waits.await_calls`' liveness contract, restated here rather than
-    inherited silently: the log is a file the children append to, so it is
-    polled; a child that has exited can make no further call, which ends the
-    wait with its own output in the failure; and no time bound sits on the
-    passing path. Two repetitions rather than one, so the width the
-    measurement then reads is confirmed rather than a single coincidence.
-    It lives here beside its two callers because it is not a shared helper,
-    and putting it in `_watcher_waits` would widen a module and a control
-    suite on a branch whose whole subject is one measurement.
-    """
-    while True:
-        calls = fake.calls()
-        if _repeated_width([call['request'] for call in calls]) is not None:
-            return calls
-        assert child.alive(), f'{what}:\n' + child.captured()
-        time.sleep(waits.POLL)
-
-
 def _measure(tmp, name, args, fake):
     """Calls per poll for one watcher, measured from what gh received."""
     child = _watcher(name, args, fake)
     try:
-        _await_polls(fake, child, f'{name} to run two whole polls')
+        polls.await_polls(fake, child, f'{name} to run two whole polls')
     finally:
         child.stop()
     seen = fake.calls()
-    per_poll = _per_poll(seen)
+    per_poll = polls.per_poll(seen)
     return per_poll, seen
-
-
-# The base comment watcher's one poll: the four REST surfaces it reads, in
-# order. The order is what makes a run of them a poll and not a set.
-BASE_POLL = ['repos/o/r/pulls/195/reviews', 'repos/o/r/pulls/195/comments',
-             'repos/o/r/issues/195/comments', 'repos/o/r/pulls/195']
-
-
-def _logged(requests, gaps=None, step=0.01):
-    """The call log a watcher appends, timed by its inter-call gaps.
-
-    A gap is the wait between two consecutive calls, so a poll the host
-    stretched reaches the log as one long gap and nothing else.
-    """
-    calls, t = [], 0.0
-    for index, request in enumerate(requests):
-        if index:
-            t += step if gaps is None else gaps[index - 1]
-        calls.append({'request': request, 't': t})
-    return calls
-
-
-# Two whole polls of that sequence, timed three ways: evenly, with one long
-# gap inside a poll, and with every intra-poll gap long. The one long gap in
-# the first row is the boundary between the two polls.
-_TIMINGS = (
-    [.01, .01, .01, 2, .01, .01, .01],
-    [.01, .01, 3.0, 2, .01, .01, .01],
-    [3.0, .01, 3.0, 2, 3.0, .01, .01],
-)
-
-
-def test_the_figure_does_not_move_when_one_poll_is_slow(tmp):
-    """What one poll costs is a property of the request sequence.
-
-    A host that stretches one call inside a poll moves the timestamps and
-    nothing else, so every timing of one sequence reads the same. The
-    expected width is read off the sequence itself, so this control cannot
-    pass by quoting back a constant its own fixture also carries.
-    """
-    del tmp
-    figures = [_per_poll(_logged(BASE_POLL * 2, gaps)) for gaps in _TIMINGS]
-    assert figures == [len(BASE_POLL)] * len(_TIMINGS), figures
-
-
-def test_a_window_that_establishes_no_width_is_refused(tmp):
-    """A number reported where there is none still reads as a measurement.
-
-    A single call, two different calls, a warm-up poll that differs from
-    the polls after it, and a poll that changes shape once a width is
-    established are four refusals, each naming what it recorded.
-    """
-    del tmp
-    rows = (
-        (BASE_POLL[:1], 'a single call'),
-        (BASE_POLL[:2], 'two different requests'),
-        (['warmup'] + BASE_POLL * 2, 'a warm-up poll of another shape'),
-        (BASE_POLL * 2 + ['other', 'shape', 'entirely', 'now'],
-         'a poll that changes shape'),
-    )
-    for requests, why in rows:
-        try:
-            _per_poll(_logged(requests))
-        except AssertionError as exc:
-            message = str(exc)
-        else:
-            raise AssertionError(f'{why} was reported as a number')
-        assert requests[0][:40] in message, (why, message)
-
-
-def test_a_trailing_partial_poll_is_trimmed_rather_than_refused(tmp):
-    """The log is read some time after the wait ends, so a ninth call is
-    already on disk. A window stopping part-way through a poll is trimmed
-    to whole polls; refusing it trades this flake for a sharper one.
-    """
-    del tmp
-    for extra in (1, 3):
-        trailing = BASE_POLL * 2 + BASE_POLL[:extra]
-        assert _per_poll(_logged(trailing)) == len(BASE_POLL), (
-            extra, trailing)
 
 
 def _base_answers():
@@ -490,10 +341,11 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
         child = _Child([sys.executable, '-u', str(script),
                         *args, '--interval', str(TICK)], fake.env())
         try:
-            _await_polls(fake, child, f'base {name} to run two whole polls')
+            polls.await_polls(fake, child,
+                              f'base {name} to run two whole polls')
         finally:
             child.stop()
-        before[name] = _per_poll(fake.calls())
+        before[name] = polls.per_poll(fake.calls())
     total = sum(before.values())
     assert total >= 6, before
     print(f'\n  BEFORE an idle watched pull request cost {total:.0f} gh '
