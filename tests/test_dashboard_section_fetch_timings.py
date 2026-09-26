@@ -62,11 +62,9 @@ def answer(expr, native='true'):
             + ", hasNativeToBase64: " + native + " } });\n")
 
 
-ANSWER_ONE = answer('T')
-ANSWER_TWO = answer('T')
-ANSWER_NONE = answer('T')
-ANSWER_FOUR = answer('T')
-ANSWER_MIXED = answer('T')
+# One answer for every case: the setup above it is what says whether T
+# holds one entry, four, or only failures.
+ANSWER = answer('T')
 ANSWER_NO_NATIVE = "answer('fetch-timings', { result: { timings: T } });\n"
 ANSWER_NULL = "answer('fetch-timings', { result: null });\n"
 ANSWER_REFUSED = ("answer('fetch-timings',"
@@ -107,7 +105,7 @@ def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
     report = _run('report({ sub: sub.textContent,\n'
                   '  head: headers(list()),\n'
                   '  rows: cells(list()) });\n',
-                  setup=ONE, answers=(ANSWER_ONE,))
+                  setup=ONE, answers=(ANSWER,))
     assert shared.types(report) == ['fetch-timings'], report
     assert sorted(shared.commands(report)[0]) == [
         'id', 'tab', 'token', 'type'], report
@@ -125,7 +123,7 @@ def test_a_single_entry_is_counted_in_the_singular(_tmp):
     """`t.length === 1` is the whole of the singular test, so one entry
     and no entries are the two counts a shared plural would get wrong."""
     report = _run('report({ sub: sub.textContent });\n',
-                  setup=ONE, answers=(ANSWER_ONE,))
+                  setup=ONE, answers=(ANSWER,))
     assert report['sub'] == '1 entry', report
 
 
@@ -134,11 +132,11 @@ def test_no_entries_and_two_entries_are_both_plural(_tmp):
     written above the `length === 0` return."""
     empty = _run('report({ sub: sub.textContent,'
                  '  list: list().textContent });\n',
-                 setup=NONE, answers=(ANSWER_NONE,))
+                 setup=NONE, answers=(ANSWER,))
     assert empty['sub'] == '0 entries', empty
     assert empty['list'] == 'ring buffer empty.', empty
     two = _run('report({ sub: sub.textContent });\n',
-               setup=TWO, answers=(ANSWER_TWO,))
+               setup=TWO, answers=(ANSWER,))
     assert two['sub'] == '2 entries', two
 
 
@@ -147,7 +145,7 @@ def test_rows_are_rendered_in_the_reverse_of_the_buffer_order(_tmp):
     the opposite of the order the worker recorded them in. A panel that
     dropped the reverse would show the oldest first."""
     report = _run('report({ rows: cells(list()).slice(1) });\n',
-                  setup=TWO, answers=(ANSWER_TWO,))
+                  setup=TWO, answers=(ANSWER,))
     assert [row[7][1] for row in report['rows']] == [
         'https://one.example.com/b.js',
         'https://one.example.com/a.js'], report
@@ -205,7 +203,7 @@ def test_the_median_of_an_even_count_is_the_upper_middle(_tmp):
     median reports 25. The mean beside it is the ordinary one, which is
     what makes the pair worth reading together."""
     report = _run('report({ text: meta().textContent });\n',
-                  setup=FOUR, answers=(ANSWER_FOUR,))
+                  setup=FOUR, answers=(ANSWER,))
     assert report['text'] == ('nativeToBase64 = true'
                               '  ·  median 30ms'
                               '  ·  mean 25ms'
@@ -255,7 +253,7 @@ def test_the_stats_block_counts_the_entries_that_worked(_tmp):
     buffer and an error entry moves the denominator only."""
     report = _run('report({ text: meta().textContent,'
                   '  rows: cells(list()).slice(1) });\n',
-                  setup=MIXED, answers=(ANSWER_MIXED,))
+                  setup=MIXED, answers=(ANSWER,))
     assert report['text'] == ('nativeToBase64 = true'
                               '  ·  median 14ms'
                               '  ·  mean 14ms'
@@ -275,7 +273,7 @@ def test_the_meta_span_survives_a_load_that_failed(_tmp):
                   'button("refresh").click();\n' + SETTLED
                   + 'report({ text: meta().textContent,\n'
                     '  pane: panes(list()) });\n',
-                  setup=FAILED, answers=(ANSWER_ONE,))
+                  setup=FAILED, answers=(ANSWER,))
     assert report['text'] == 'nativeToBase64 = true', report
     assert len(report['pane']) == 1, report
     assert report['pane'][0][0] == 'pane err', report
@@ -290,7 +288,7 @@ def test_the_refresh_click_sends_no_reset(_tmp):
     would turn the argument into a `reset`."""
     report = _run('button("refresh").click();\n' + SETTLED
                   + 'report({});\n',
-                  setup=ONE, answers=(ANSWER_ONE,))
+                  setup=ONE, answers=(ANSWER,))
     first, second = shared.commands(report)
     assert 'reset' not in first, report
     assert 'reset' not in second, report
@@ -310,7 +308,7 @@ def test_the_reset_arms_on_the_first_click_and_sends_on_the_second(_tmp):
                   'reset.click();\n' + SETTLED
                   + 'report({ before, mid, sent: sent().map(\n'
                     '  (b) => [b.type, b.reset]) });\n',
-                  setup=ONE, answers=(ANSWER_ONE,))
+                  setup=ONE, answers=(ANSWER,))
     assert report['mid']['parked'] > 0, report
     assert report['mid']['label'] == 'confirm reset', report
     assert 'armed' in report['mid']['armed'], report
@@ -347,7 +345,7 @@ def test_a_reset_that_worked_toasts_ok_and_leaves_no_pane(_tmp):
                   'reset.click();\n' + SETTLED
                   + 'report({ pane: panes(list()),\n'
                     '  toasts: toasts(), rows: cells(list()).length });\n',
-                  setup=ONE, answers=(ANSWER_ONE,))
+                  setup=ONE, answers=(ANSWER,))
     assert report['toasts'] == [{'type': 'ok', 'text': 'reset'}], report
     assert report['pane'] == [], report
     assert report['rows'] == 2, report
