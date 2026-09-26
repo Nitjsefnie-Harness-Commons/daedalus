@@ -75,13 +75,20 @@ class Signalled:
         # marker it produces is a fact about the acquire, and a site on
         # another stripe simply succeeds inside the window and is recorded
         # as an overlap instead.
+        mine = threading.get_ident()
         if not self._real.acquire(timeout=_ACQUIRE_GRACE):
             # One line each, in a shared file: three requests for ONE job
             # would otherwise write one filename and count as one.
             note("blocked", self._job)
             note(f"blocked-{self._job}", "waited")
+            note("settled", f"{mine} {self._job} blocked")
             self._real.acquire()
-        last_acquirer[0] = threading.get_ident()
+        else:
+            # The other half of the hand-off. A request that took a lock
+            # during the hold has also recorded what it was asked for, which
+            # is what makes the name check exact rather than hashed.
+            note("settled", f"{mine} {self._job} acquired")
+        last_acquirer[0] = mine
         # Read BEFORE this acquire joins the count: the question is whether
         # some OTHER lock was already held, and a lock counts itself the
         # moment it is taken.
@@ -216,6 +223,8 @@ def install():
         # acquires, which is exactly what the premise check has to notice.
         (gate / "holding").write_text("announcing", encoding="utf-8")
         with Signalled(held_lock, held_job):
+            (gate / "holder-thread").write_text(
+                str(threading.get_ident()), encoding="utf-8")
             # Counted from inside the hold, so the line is the requests'
             # own and the holder's acquisition is not one of them. No
             # request is in flight yet: the test starts them after `held`.
@@ -445,29 +454,46 @@ def _job_record(docroot, job):
             encoding='utf-8'))
 
 
-def _await_blocked_or_overlap(gate_dir, count):
-    """Wait until `count` requests have provably failed to take the lock.
+def _holder_thread(gate_dir):
+    """The injected holder's thread ident, recorded from inside its hold."""
+    path = gate_dir / 'holder-thread'
+    return path.read_text(encoding='utf-8').strip() if path.is_file() else ''
 
-    A request that merely REACHED a lock has not shown it was kept out of
-    one: its acquire can still complete after the hold is released, which is
-    how an off-stripe site slips past a control that only counted arrivals.
-    The seam's bounded attempt turns "could not get it while the hold was in
-    place" into a recorded fact, and this waits for that fact from every
-    request — or for the overlap that a site on its own stripe produces
-    instead, which is the other way round.
+
+def _settlements(gate_dir):
+    """The recorded outcomes, as (thread ident, name asked for, outcome)."""
+    path = gate_dir / 'settled'
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            out.append(tuple(parts))
+    return out
+
+
+def _await_settlements(gate_dir, count, exclude):
+    """Wait until `count` distinct requests have each recorded an outcome.
+
+    A hand-off, not a count and not a poll interval. Every request records
+    the name it asked for and whether it was kept out of the lock or took
+    one, and the release waits for one record per request — identified by
+    its thread, so a request that contributes two records cannot stand in
+    for two requests, which is the window a bare count leaves open.
+
+    It waits for the records and not for the overlap, because an overlap is
+    the DEFECT and the release must not depend on having already seen it.
     """
-    deadline = time.time() + 30
+    deadline = time.time() + 60
     while True:
-        marks = gate_dir / 'blocked'
-        blocked = (len(marks.read_text(encoding='utf-8').splitlines())
-                   if marks.is_file() else 0)
-        if (gate_dir / 'overlap').exists():
-            return
-        if blocked >= count:
+        idents = {ident for ident, _name, _outcome in _settlements(gate_dir)
+                  if ident != exclude}
+        if len(idents) >= count:
             return
         assert time.time() < deadline, (
-            f'only {blocked} of {count} requests were kept out of the held '
-            f'lock, and no overlap was recorded')
+            f'only {len(idents)} of {count} requests recorded an outcome: '
+            f'{_settlements(gate_dir)!r}')
         time.sleep(0.01)
 
 
@@ -639,7 +665,15 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
         ]
         for thread in threads:
             thread.start()
-        _await_blocked_or_overlap(gate_dir, 3)
+        exclude = _holder_thread(gate_dir)
+        _await_settlements(gate_dir, 3, exclude)
+        # What the release acted on, recorded so the hand-off is a fact a
+        # reader can check rather than a claim: this says how many distinct
+        # requests had recorded an outcome at the moment the hold was let go.
+        held_in_hand = {i for i, _n, _o in _settlements(gate_dir)
+                        if i != exclude}
+        (gate_dir / 'released-with').write_text(
+            str(len(held_in_hand)), encoding='utf-8')
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         for thread in threads:
             thread.join(timeout=60)
@@ -657,7 +691,18 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
         # The mint and the lookup are both idempotent resumes of one job.
         assert answers['mint'] == (200, {'ok': True, 'sig': sig}), answers
         assert answers['lookup'] == (200, {'ok': True, 'sig': sig}), answers
-        assert set(_job_lock_ids(gate_dir, job)) == {_holder_lock(gate_dir)[1]}
+        # Every request asked for THIS job, by name. That is exact — no hash
+        # and no stripe count between the record and the claim — so a site
+        # that decorates the name to reach a stripe of its own is caught here
+        # by the name it asked for rather than by a coincidence of hashing.
+        # The old form compared lock ids for the exact job name, which a
+        # decorated name simply never appears under.
+        for ident, asked, outcome in _settlements(gate_dir):
+            assert asked == job, (
+                f'thread {ident} was handed {asked!r} for job {job!r} '
+                f'({outcome}); every site must ask for the job by name')
+        held_ids = set(_job_lock_ids(gate_dir, job))
+        assert held_ids == {_holder_lock(gate_dir)[1]}, (held_ids, job)
 
 
 def main():
