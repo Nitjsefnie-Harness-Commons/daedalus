@@ -147,7 +147,8 @@ def do_net_capture_stop(args):
     if args.raw:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
-    print(f'Captured {len(requests)} requests from tab {result.get("tabId", "?")}')
+    print(f'Captured {len(requests)} requests from tab '
+          f'{result.get("tabId", "?")}')
     for r in requests:
         status = r.get('status', '???')
         method = r.get('method', '?')
