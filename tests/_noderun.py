@@ -7,6 +7,7 @@ gate) and `tests/_stream_fake.py` (the gate belongs to it) from importing
 each other, a cycle pylint reads as R0401 and CI treats as fatal.
 """
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,60 @@ CLEANUP_FRACTION = 0.05
 CLEANUP_DEADLINE_S = round(CHILD_DEADLINE_S * CLEANUP_FRACTION)
 
 
+def _remove_tree(directory):
+    """Delete a scratch tree, letting the caller record a failure."""
+    shutil.rmtree(directory)
+
+
+class _Scratch:
+    """A scratch directory whose removal is best-effort AND REPORTED.
+
+    `tempfile.TemporaryDirectory` deletes its tree in `__exit__`, and a file
+    another process still holds is not deletable on Windows — so a plain
+    context manager lets an `OSError` out of the `rmtree` replace whatever
+    the caller raised. Here that is `ChildDeadlineExceeded`: the reader would
+    get a bare errno naming no child, no deadline, no output and no cleanup
+    report, which is the whole thing this class exists to prevent. The read
+    door had the same shape and was closed by reordering; this is the other
+    door, closed by not letting the removal raise at all.
+
+    `tempfile.mkdtemp` rather than `TemporaryDirectory` so there is no
+    failing `__exit__` left to be reached: the removal happens here, its
+    outcome is appended to `outcomes`, and the caller's exception keeps
+    travelling.
+    """
+
+    def __init__(self, prefix, outcomes):
+        self._path = Path(tempfile.mkdtemp(prefix=prefix))
+        self._name = self._path
+        self._outcomes = outcomes
+
+    def __enter__(self):
+        return self._name
+
+    def close(self):
+        """Remove the tree, recording a failure rather than raising it.
+
+        Idempotent, so the expiry handler can call it to have the outcome in
+        the report it is about to build, and `__exit__` can call it again
+        afterwards without a second removal.
+        """
+        if self._path is None:
+            return
+        try:
+            _remove_tree(self._path)
+        except OSError as failure:
+            self._outcomes.append(
+                f'; the scratch directory {self._path.name} was not fully '
+                f'removed ({type(failure).__name__}: {failure}), which on '
+                f'Windows is a surviving child still holding a file open')
+        self._path = None
+
+    def __exit__(self, *_exc):
+        self.close()
+        return False
+
+
 class ChildDeadlineExceeded(Exception):
     """A harness child did not finish inside the hang detector's budget.
 
@@ -63,19 +118,21 @@ class ChildDeadlineExceeded(Exception):
     where its partial output is the only evidence there is.
     """
 
-    def __init__(self, argv, deadline_s, stdout, stderr, cleanup):
+    def __init__(self, argv, deadline_s, stdout, stderr, cleanup,
+                 unlinked=''):
         self.argv = argv
         self.deadline_s = deadline_s
         self.stdout = stdout
         self.stderr = stderr
         self.cleanup_diagnostic = cleanup
+        self.unlinked = unlinked
         super().__init__(
             f'a Node child did not finish within {deadline_s}s and was '
             f'killed; the suite ceiling is a weaker backstop because it '
             f'sends SIGTERM to the suite and leaves this child running.\n'
             f'  child: {argv[0]} {Path(str(argv[1])).name}\n'
             f'  deadline: {deadline_s}s\n'
-            f'  cleanup: {cleanup}\n'
+            f'  cleanup: {cleanup}{unlinked}\n'
             f'  stdout: {stdout[:2000]!r}\n'
             f'  stderr: {stderr[:2000]!r}')
 
@@ -105,6 +162,10 @@ def run_node_program(node, program, arguments, cwd, payload=None):
     the tree is killed through `taskkill /T` instead, which is why the
     cleanup lives in `tests/_processtree.py` rather than here.
 
+    Both scratch directories are `_Scratch`, not `TemporaryDirectory`, so a
+    removal that fails is recorded in the report instead of replacing it —
+    see `_Scratch` for the Windows shape that makes that matter.
+
     The child runs with `child_coverage('scrub')` evaluated **here, at
     launch**, not snapshotted at import. A module-level snapshot cannot be
     correct for a value chosen per call: `test_js_coverage.py` sets
@@ -112,7 +173,9 @@ def run_node_program(node, program, arguments, cwd, payload=None):
     directory, and an import-time snapshot would send the child to the wrong
     directory.
     """
-    with tempfile.TemporaryDirectory(prefix='daedalus-node-') as directory:
+    unlinked = []
+    directory_scratch = _Scratch('daedalus-node-', unlinked)
+    with directory_scratch as directory:
         program_path = Path(directory) / 'program.js'
         prologue = 'process.argv.splice(1, 1);'
         if payload is not None:
@@ -124,8 +187,8 @@ def run_node_program(node, program, arguments, cwd, payload=None):
         # stdout and stderr go to files rather than to pipes: a pipe buffer
         # the child fills and nobody drains would block the child itself and
         # make this detector fire on a child that was only talking.
-        with tempfile.TemporaryDirectory(
-                prefix='daedalus-node-out-') as output:
+        output_scratch = _Scratch('daedalus-node-out-', unlinked)
+        with output_scratch as output:
             stdout_path = Path(output) / 'stdout'
             stderr_path = Path(output) / 'stderr'
             with (stdout_path.open('wb') as stdout,
@@ -150,9 +213,15 @@ def run_node_program(node, program, arguments, cwd, payload=None):
                     stdout, stderr = _read(stdout_path), _read(stderr_path)
                     cleanup = cleanup_process_tree(
                         process, CLEANUP_DEADLINE_S)
+                    # The scratch trees come down HERE, before the report is
+                    # built, so a removal that fails is IN the report rather
+                    # than replacing it. Left to `__exit__` the outcome
+                    # would not exist yet when the message is made.
+                    output_scratch.close()
+                    directory_scratch.close()
                     raise ChildDeadlineExceeded(
-                        argv, CHILD_DEADLINE_S, stdout, stderr,
-                        cleanup) from None
+                        argv, CHILD_DEADLINE_S, stdout, stderr, cleanup,
+                        ''.join(unlinked)) from None
             return subprocess.CompletedProcess(
                 argv, returncode, _read(stdout_path), _read(stderr_path))
 

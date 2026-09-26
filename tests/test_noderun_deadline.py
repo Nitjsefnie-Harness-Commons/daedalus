@@ -12,6 +12,7 @@ plant, so nothing asserted its message: truncating the child's output or
 replacing the cleanup report both left every suite green. These are the two
 controls that close that.
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -115,6 +116,80 @@ def test_exactly_one_module_under_tests_ends_a_child(tmp):
             if path.name != Path(__file__).name
             and marker in path.read_text(encoding='utf-8'))
         assert found == ['_processtree.py'], (marker, found)
+
+
+class StuckAgain:
+    """A child already past the detector, for the unlink-door control."""
+
+    pid = 4343
+
+    def wait(self, timeout=None):
+        """Time out however long it is given."""
+        raise subprocess.TimeoutExpired(['node', 'x'], timeout or 1)
+
+    def kill(self):
+        """Nothing to kill in this double."""
+
+
+def test_a_failed_scratch_removal_does_not_replace_the_classified_error(tmp):
+    """A removal that raises is recorded, not raised over the report.
+
+    The unlink door: on Windows a surviving grandchild still holding the
+    inherited stdout/stderr write handle makes the scratch removal fail, and
+    a plain `TemporaryDirectory` lets that `PermissionError` out in place of
+    `ChildDeadlineExceeded`. The whole value of the class is the report — the
+    child, the deadline, its output and the cleanup's own outcome — so a fix
+    that let the right TYPE out while dropping the report would satisfy a
+    type assertion and still deliver the bare errno.
+
+    Deterministic and cross-platform: the removal is the thing that fails,
+    not the platform. `_remove_tree` is patched to raise at exactly that
+    point and the real launcher path runs otherwise.
+    """
+    import _noderun  # noqa: E402
+
+    real_remove = _noderun._remove_tree
+    real_popen = _noderun.subprocess.Popen
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    real_cleanup = _noderun.cleanup_process_tree
+    _noderun._remove_tree = _raise_permission_error
+    _noderun.subprocess.Popen = _stuck_popen
+    _noderun.cleanup_process_tree = lambda process, bound: 'simulated cleanup'
+    _noderun.CHILD_DEADLINE_S = 1
+    caught = None
+    try:
+        _noderun.run_node_program(
+            shutil.which('node'), 'while (true) {}', [], tmp)
+    except BaseException as failure:  # noqa: BLE001
+        caught = failure
+    finally:
+        _noderun._remove_tree = real_remove
+        _noderun.subprocess.Popen = real_popen
+        _noderun.cleanup_process_tree = real_cleanup
+        _noderun.CHILD_DEADLINE_S = real_deadline
+    assert isinstance(caught, _noderun.ChildDeadlineExceeded), (
+        f'the removal replaced the classified error with '
+        f'{type(caught).__name__ if caught else "nothing"}: {caught}')
+    message = str(caught)
+    for line in ('deadline: 1s', "stdout: 'out'", "stderr: 'err'",
+                 'simulated cleanup'):
+        assert line in message, (line, message)
+    # and the removal's own outcome is IN the report, which is the half a
+    # type assertion alone would not have caught.
+    assert 'was not fully removed' in message, message
+    assert 'PermissionError' in message, message
+
+
+def _raise_permission_error(directory):
+    del directory
+    raise PermissionError(32, 'The process cannot access the file')
+
+
+def _stuck_popen(argv, **kwargs):
+    """A launch that writes the output the report must carry, then sticks."""
+    kwargs['stdout'].write(b'out')
+    kwargs['stderr'].write(b'err')
+    return StuckAgain()
 
 
 def main():
