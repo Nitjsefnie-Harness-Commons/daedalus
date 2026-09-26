@@ -20,6 +20,8 @@ Only the argv and head reading lives in `_argv_read.py`. It binds no
 configuration of its own.
 """
 import ast
+import inspect
+import subprocess
 
 from _argv_read import ArgvReader
 
@@ -49,6 +51,23 @@ def _parameters(node):
         if extra is not None:
             names.add(extra.arg)
     return names
+
+
+def _launch_keywords():
+    """What a launch may legitimately be handed, read from the stdlib.
+
+    From `inspect.signature` rather than from a list, so a keyword a future
+    interpreter adds is admitted and a misspelling of one is a refusal
+    rather than a silent pass. A hand list here is what made `pipesize` a
+    false red once already. `_argv_read` owns the argv; this owns the
+    keywords, and the two are read from the same place for the same reason.
+    """
+    popen = inspect.signature(subprocess.Popen.__init__).parameters
+    run = inspect.signature(subprocess.run).parameters
+    return frozenset(popen) | frozenset(run)
+
+
+_LAUNCH_KEYWORDS = _launch_keywords()
 
 
 def launch_refusals(source, here, bound_sink=None):
@@ -588,6 +607,19 @@ def launch_refusals(source, here, bound_sink=None):
                 f'{msg_head} launch')
             if bound_sink is not None:
                 bound_sink.append((node.lineno, head, 'timeout'))
+        foreign = [name for name in keywords
+                   if name is not None and name not in _LAUNCH_KEYWORDS]
+        if foreign:
+            # A keyword the stdlib rejects is a `TypeError` at runtime, and
+            # the interesting case is a MISSPELLED bound: `timout=30` never
+            # runs, so the bound it was trying to place is invisible to
+            # every check that reads the word `timeout`.
+            refusals.append(
+                f'{here}:{node.lineno} carries '
+                f'{sorted(foreign)[0]}=, which this subprocess does not '
+                f'take, on a {msg_head} launch')
+            if bound_sink is not None:
+                bound_sink.append((node.lineno, head, 'keyword'))
         check = keywords.get('check')
         if not (isinstance(check, ast.Constant) and check.value is True):
             refusals.append(

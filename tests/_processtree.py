@@ -25,8 +25,18 @@ def cleanup_process_tree(process, cleanup_timeout):
     group is not a thing `os` can signal, so the tree is killed through
     `taskkill /T`, which takes the whole tree by pid instead.
     """
-    return _reap(process, _kill_tree(process, cleanup_timeout),
-                 cleanup_timeout)
+    try:
+        killed = _kill_tree(process, cleanup_timeout)
+    except Exception as error:  # pylint: disable=broad-except
+        # Keep a cleanup failure from masking the expiry the caller is
+        # about to report. An unexpected exception here would replace a
+        # named, classified failure with an unrelated one, which is the
+        # one thing the caller's error class exists to prevent.
+        killed = f'process-tree kill raised {error!r}'
+    try:
+        return _reap(process, killed, cleanup_timeout)
+    except Exception as error:  # pylint: disable=broad-except
+        return f'{killed}; cleanup reap raised {error!r}'
 
 
 def _kill_tree(process, cleanup_timeout):

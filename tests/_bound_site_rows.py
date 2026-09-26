@@ -326,4 +326,38 @@ BOUND_SITE_ROWS = (
      "go = get()\n"
      "go(['git', 'status'], check=True, timeout=30)\n",
      [(5, 'unreadable', 'unplaced')]),
+    # Not part of the NAMED guard set above, and deliberately outside it.
+    # Those rows are the controls for arms 1134 classified as CONTROLLED,
+    # REDUNDANT-with-a-bound or DEAD; these are two routes this branch
+    # handed OUT of `tests/_launch_census.py` and INTO the analyser, so
+    # the repo has one answer about a launch call rather than two. Adding
+    # a row here is not adding an arm to that set, and the set's closure
+    # argument is unchanged by these three.
+    # Two routes inside the analyser's unit, handed to it from
+    # `tests/_launch_census.py` so the repo has one answer about a launch
+    # call rather than two. A `**` unpacked on a launch, and a keyword the
+    # stdlib does not take: each is a bound that can reach a child without
+    # the word `timeout` appearing anywhere on the call. A launcher built by
+    # `functools.partial` needs no row here — main's `unplaced` arm already
+    # reports it, at `unreadable`, which is the head the gate keeps.
+    ('unpack-at-a-non-git-launch',
+     "import subprocess\n"
+     "def probe():\n"
+     "    subprocess.run(['node', 'x.js'], **{'timeout': 30})\n",
+     [(3, 'non-git', 'unpack')]),
+    ('foreign-keyword-on-a-launch',
+     "import subprocess\n"
+     "def probe():\n"
+     "    subprocess.run(['git', 'status'], check=True, timout=30)\n",
+     [(3, 'git', 'keyword')]),
+    # Negative space for both: a launch that takes only what the stdlib
+    # takes emits nothing, so neither rule can be firing on every launch.
+    # This is the direction that keeps them from becoming false-positive
+    # generators, and it is why the keyword set is read from the signature
+    # rather than written down.
+    ('a-clean-launch-emits-nothing',
+     "import subprocess\n"
+     "def probe():\n"
+     "    return subprocess.run(['git', 'status'], check=True, cwd='/tmp')\n",
+     []),
 )
