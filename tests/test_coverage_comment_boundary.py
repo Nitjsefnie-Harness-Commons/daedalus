@@ -640,12 +640,59 @@ def test_the_shared_stub_writer_is_verbatim_and_executable(tmp):
     what neither reports. Bytes that gained a trailing newline would
     reach every reader as a shell syntax error, and a mode that lost
     its execute bits as a permission failure at run time.
+
+    The BYTE half is portable and is asserted on every platform. The MODE
+    half is POSIX-only: Windows has no execute bit to record, `os.chmod`
+    toggles the read-only flag there and `st_mode` reports 0o666 whatever
+    the caller asked for, so the skip covers this assertion alone.
     """
     target = Path(tmp) / 'bin' / 'gh'
     target.parent.mkdir(parents=True)
     write_executable(target, _GH_COMMENT_STUB)
     assert target.read_bytes() == _GH_COMMENT_STUB.encode('utf-8')
-    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+    if os.name != 'nt':
+        assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
+def test_the_stub_writer_does_not_translate_the_content_it_is_given(tmp):
+    """A `\\r\\n` and a non-ASCII character both survive.
+
+    `Path.write_text` defaults to `newline=None`, which rewrites every
+    `\\n` it writes to `os.linesep`. On Linux that is a no-op, so this
+    case alone cannot tell the two apart; the translation shows only
+    where `os.linesep` differs. Windows would turn the `\\r\\n` below into
+    `\\r\\r\\n` and every reader's shell double would arrive changed. The
+    escapes keep this file ASCII while the content is not, which is what
+    makes the encoding half observable: every stub in the tree is ASCII,
+    so nothing else would notice a narrower encode.
+    """
+    target = Path(tmp) / 'gh'
+    content = '#!/bin/sh\r\nprintf \'café\'\n'
+    write_executable(target, content)
+    assert target.read_bytes() == content.encode('utf-8')
+
+
+def test_the_stub_writer_never_reaches_the_text_layer(tmp):
+    """The mechanism behind the case above, asserted where it is invisible.
+
+    No content distinguishes `write_bytes` from `write_text` on a
+    platform whose `os.linesep` is `\\n`, so a mutation back to text mode
+    would survive every other pin in this suite on Linux and macOS while
+    changing what six readers get on Windows. Recording the subclass
+    makes it fail everywhere, and pins the mechanism rather than one
+    platform's rendering of it.
+    """
+    class RecordingPath(type(Path())):
+        text_writes = 0
+
+        def write_text(self, data, encoding=None, errors=None, newline=None):
+            RecordingPath.text_writes += 1
+            return super().write_text(data, encoding, errors, newline)
+
+    target = RecordingPath(tmp) / 'gh'
+    write_executable(target, _GH_COMMENT_STUB)
+    assert RecordingPath.text_writes == 0
+    assert target.read_bytes() == _GH_COMMENT_STUB.encode('utf-8')
 
 
 if __name__ == '__main__':
