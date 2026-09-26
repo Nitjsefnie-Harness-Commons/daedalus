@@ -6,25 +6,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_version_contract import (  # noqa: E402
-    _copy_versioned_tree,
-    _run_checker,
+from _version_contract import _copy_versioned_tree  # noqa: E402
+from _version_contract_dashboard_duplicates import (  # noqa: E402
+    _assert_duplicate_refused,
+    _canonical_dashboard_value,
+    _dashboard_site,
+    _insert_before_body,
 )
+from test_version_contract import _run_checker  # noqa: E402
 
 
 _SITE_CASES = (
     ('rail-foot', 'dashboard rail footer'),
     ('sl-v', 'dashboard status line'),
 )
-
-
-def _insert_before_body(copy_root, markup):
-    dashboard = copy_root / 'dashboard' / 'index.html'
-    text = dashboard.read_text(encoding='utf-8')
-    anchor = '</body>'
-    assert text.count(anchor) == 1, text
-    dashboard.write_text(text.replace(anchor, markup + '\n' + anchor),
-                         encoding='utf-8')
 
 
 def _replace_dashboard_once(copy_root, old, new):
@@ -57,19 +52,6 @@ def _use_single_quotes_for_only_site(copy_root, class_name):
     dashboard.write_text(rewritten, encoding='utf-8')
 
 
-def _dashboard_site(checker, desc):
-    entries = [entry for entry in checker.SITES
-               if entry[:2] == ('dashboard/index.html', desc)]
-    assert len(entries) == 1, (desc, entries)
-    return entries[0]
-
-
-def _canonical_dashboard_value(copy_root, checker, desc):
-    path, _site_desc, pattern = _dashboard_site(checker, desc)
-    text = (copy_root / path).read_text(encoding='utf-8')
-    return re.search(pattern, text).group('v')
-
-
 def _assert_one_dashboard_match(copy_root, checker, desc):
     """Markup the matcher must ignore leaves the real site counted once."""
     result = _run_checker(copy_root)
@@ -78,15 +60,6 @@ def _assert_one_dashboard_match(copy_root, checker, desc):
     path, _site_desc, pattern = _dashboard_site(checker, desc)
     dashboard = (copy_root / path).read_text(encoding='utf-8')
     assert len(list(re.finditer(pattern, dashboard))) == 1, desc
-
-
-def _assert_duplicate_refused(result, desc, canonical, second_value):
-    assert result.returncode != 0, (result.returncode, result.stdout,
-                                    result.stderr)
-    assert 'matches 2 times' in result.stderr, result.stderr
-    assert desc in result.stderr, result.stderr
-    assert repr(canonical) in result.stderr, result.stderr
-    assert repr(second_value) in result.stderr, result.stderr
 
 
 def test_check_versions_refuses_single_quoted_rail_footer_duplicate(tmp_path):

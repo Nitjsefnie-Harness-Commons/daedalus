@@ -380,6 +380,9 @@
 !/tests/_token_policy.py
 !/tests/_token_policy_cases.py
 !/tests/_util.py
+!/tests/_version_contract.py
+!/tests/_version_contract_dashboard_duplicates.py
+!/tests/_version_contract_scanners.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
 !/tests/_wffixtures.py

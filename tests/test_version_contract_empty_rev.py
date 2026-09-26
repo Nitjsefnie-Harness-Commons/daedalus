@@ -12,10 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_version_contract import (  # noqa: E402
-    _run_checker,
-    _versioned_git_tree,
-)
+from _version_contract import _versioned_git_tree  # noqa: E402
+from test_version_contract import _run_checker  # noqa: E402
 
 
 def test_check_versions_refuses_an_empty_revision_name(tmp):
