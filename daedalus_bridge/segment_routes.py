@@ -71,7 +71,7 @@ def admit_segment(seg_dir_root, params, sig):
     # request. Only the server-minted record controls storage.
     try:
         seg_dir = path_safety.under(seg_dir_root, job)
-        with segment_store.seg_lock:
+        with segment_store.seg_lock_for(job):
             record = segment_store.record_for_sig(seg_dir_root, job, sig)
             quota = (segment_store.quota(record)
                      if record is not None else None)
@@ -92,14 +92,14 @@ def store_segment(raw, admission):
 
     The capability, the parameter shapes and the quota were settled by
     admit_segment. What is left has to be atomic: the file listing, the
-    byte sum and the write happen under one hold of
-    segment_store.seg_lock, so two segments arriving together cannot both
-    spend the same remaining bytes.
+    byte sum and the write happen under one hold of this job's own stripe
+    (segment_store.seg_lock_for), so two segments arriving together cannot
+    both spend the same remaining bytes. Two jobs do not share that hold.
     """
     job, segment_index, quota, seg_dir, seg_dir_root = admission
     _, max_count, max_bytes = quota
     marks = segment_store.timing_marks()
-    with segment_store.seg_lock:
+    with segment_store.seg_lock_for(job):
         if marks is not None:
             marks.append(('acquire', time.perf_counter()))
         filename = f'{segment_index:06d}.ts'
@@ -225,7 +225,7 @@ def lookup_job(seg_dir_root, token, params):
     job = params.get('job', [''])[0]
     if not job or path_safety.unsafe_component(job):
         return 400, {'error': 'bad job'}
-    with segment_store.seg_lock:
+    with segment_store.seg_lock_for(job):
         try:
             record = segment_store.load_record(seg_dir_root, job)
         except ValueError:
