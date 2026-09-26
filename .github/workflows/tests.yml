@@ -1235,6 +1235,10 @@ jobs:
           # the cells run.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # This job only PLANS the timed matrix, and the planner is in
+          # the suite-runner set the branch-boundary guard derives, so it
+          # carries the base like the jobs that do run suites.
+          fetch-depth: 0
 
       - name: Plan the matrix
         id: plan
@@ -1578,6 +1582,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: head
           persist-credentials: false
+          # This job runs slices of tests/ through the timing
+          # instrument, so the branch-boundary controls in
+          # test_helper_reimplementation.py run here and need the
+          # merge base; see the suites job.
+          fetch-depth: 0
 
       - name: Check out the baseline
         if: steps.baseline.outputs.point != ''
@@ -1586,6 +1595,8 @@ jobs:
           ref: ${{ steps.baseline.outputs.point }}
           path: base
           persist-credentials: false
+          # Same reason as the head checkout above.
+          fetch-depth: 0
 
       - name: Probe the head scripts for options
         id: probe
