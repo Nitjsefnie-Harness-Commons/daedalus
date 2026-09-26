@@ -277,9 +277,13 @@ def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
     Python's own operator for the value rather than by reading the spelling,
     which is what leaves no one operator to forget.
 
-    A walrus binds a name and produces the same value, `bool(0)` is `0`, and
-    `/` and a division by zero are the two that cannot: a float is not a
-    position and a `ZeroDivisionError` raises before the container is read.
+    A walrus binds a name and produces the same value, and `bool`
+    NORMALISES rather than passing its argument through: `bool(0)` names
+    position zero and `bool(2)` names position one, so the two disagree
+    about the same call and a fold that settled to the argument itself would
+    agree with the first and fail the second. `/` and a division by zero are
+    the two that cannot settle: a float is not a position and a
+    `ZeroDivisionError` raises before the container is read.
     """
     for index in ('0 * 1', '1 - 1', '1 % 1', '0 ** 1', '(j := 0)',
                   'bool(0)', '+0', '-(-0)'):
@@ -287,7 +291,7 @@ def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
             == 'resolved', index
         assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
             == 'silent', index
-    for index in ('2 - 1', '1 + 0', '1 * 1', '1 ** 1', '1 // 1'):
+    for index in ('2 - 1', '1 + 0', '1 * 1', '1 ** 1', '1 // 1', 'bool(2)'):
         assert _scan(_tmp, f'[importlib.import_module][{index}]') \
             == 'silent', index
         assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
