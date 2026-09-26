@@ -117,6 +117,13 @@ def _origin(node, function, handler_globals):
         node, function, handler_globals, resolver.UNPROVEN, _scope_binds)
 
 
+def _is_getattr(node, function, handler_globals):
+    """Whether a callee is the builtin ``getattr`` the audit can prove."""
+    return resolver.is_builtin_reference(
+        node, 'getattr', function, handler_globals, _scope_binds,
+        _comprehension_shadows)
+
+
 def _frame_escapes(node, function, handler_globals, label, found):
     """Refuse a frame read whose receiver the audit cannot account for.
 
@@ -126,10 +133,11 @@ def _frame_escapes(node, function, handler_globals, label, found):
     the walk stops descending as soon as a node is refused, so a line that
     both selects a member and subscripts it is not counted twice.
     """
-    read = resolver.frame_read(node)
+    read = resolver.frame_read(
+        node, lambda callee: _is_getattr(callee, function, handler_globals))
     if read is not None:
         receiver = resolver.reads_frame_namespace(
-            node, _origin(read[1], function, handler_globals))
+            read, _origin(read[1], function, handler_globals))
         if receiver is not None:
             found.append(f'{label}: {ast.unparse(receiver)}')
             return
@@ -138,6 +146,7 @@ def _frame_escapes(node, function, handler_globals, label, found):
 
 
 def frame_namespace_escapes(function, handler_globals, label):
+    _attach_parents(function)
     found = []
     _frame_escapes(function, function, handler_globals, label, found)
     return found
@@ -178,9 +187,11 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 _comprehension_shadows):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
-        read = resolver.frame_read(node)
+        read = resolver.frame_read(
+            node, lambda callee: _is_getattr(
+                callee, function, handler_globals))
         if read is not None and resolver.reads_frame_namespace(
-                node, _origin(read[1], function, handler_globals)) is not None:
+                read, _origin(read[1], function, handler_globals)) is not None:
             violations.append(
                 f'namespace escape: {ast.unparse(read[1])}')
             return
@@ -494,6 +505,9 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
     scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
+    # The call carrier is gated on a proven builtin getattr, so the same
+    # member-name shape on any other callee stays correct code.
+    assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
 
 
 def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):
