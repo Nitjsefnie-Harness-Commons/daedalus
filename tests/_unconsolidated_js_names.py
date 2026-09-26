@@ -48,7 +48,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'e50263b1658e3244). This is the sixteen-harness response cluster '
         'this module own docstring records as the second wave of the '
         'consolidation, and this branch is the first wave: the eventTarget '
-        'copy it migrates',
+        'copy it migrates. The cluster stays tabled to #1149',
     ('tests/_dashfield.py', 'describe'):
         'this destructures a [label, control] pair and returns the '
         'label/control association record the a11y assertions read, where the '

@@ -120,6 +120,9 @@ ALLOWED = (
     Allowance('tests/test_tab_routing_dict_construction.py',
               'test_tab_routing_dict_stores',
               '#1160: deferred from this change to keep it reviewable'),
+    Allowance('tests/test_tab_routing_dict_keyset.py', 'test_tab_routing',
+              '#1160: deferred from this change to keep it reviewable, row '
+              'added in #1206'),
     Allowance('tests/test_tab_routing_dict_lengths.py',
               'test_tab_routing_dict_stores',
               '#1160: deferred from this change to keep it reviewable'),
