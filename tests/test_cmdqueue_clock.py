@@ -310,6 +310,55 @@ def test_the_wall_bound_stops_a_runaway_read_loop(_tmp):
     assert 'wall' in message, message
 
 
+def test_the_wall_bound_stops_a_runaway_clock_read(_tmp):
+    """`monotonic` is the arm a reader polling a deadline would consult."""
+    failure = None
+    with _wall_time_past_limit():
+        with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+            try:
+                clock.monotonic()
+            except AssertionError as caught:
+                failure = caught
+    assert isinstance(failure, AssertionError), failure
+    message = str(failure).lower()
+    assert 'wall' in message, message
+
+
+def test_the_perf_counter_alias_is_the_guarded_clock_read(_tmp):
+    """`perf_counter` is a second name for that method, not a second method.
+
+    Nothing in the tree calls it, so without this the alias could be replaced
+    by an unguarded read and no control would notice.
+    """
+    failure = None
+    with _wall_time_past_limit():
+        with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+            try:
+                clock.perf_counter()
+            except AssertionError as caught:
+                failure = caught
+    assert isinstance(failure, AssertionError), failure
+    message = str(failure).lower()
+    assert 'wall' in message, message
+
+
+def test_the_slow_machine_double_restores_the_real_clock(_tmp):
+    """A double that does not restore is a double that is still installed.
+
+    It patches the real `time` module, so a leaked fake leaves every later
+    control in this process reading a clock that answers 6.0. This control
+    restores the real clock whatever its own verdict, so a failure here
+    cannot poison the controls that run after it.
+    """
+    real = _cmdqueue.time.perf_counter
+    try:
+        with _wall_time_past_limit():
+            assert _cmdqueue.time.perf_counter is not real, 'not installed'
+        assert _cmdqueue.time.perf_counter is real, 'not restored'
+    finally:
+        _cmdqueue.time.perf_counter = real
+
+
 def test_the_module_bound_is_read_at_the_call(_tmp):
     """A lowered module bound reaches a control that omits the budget.
 
