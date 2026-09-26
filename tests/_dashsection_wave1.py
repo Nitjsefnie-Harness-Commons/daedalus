@@ -12,8 +12,9 @@ TOKEN = 'tok-abcdefghijklmnop'
 SEED = "localStorage.setItem('daedalus-token', '" + TOKEN + "');\n"
 
 # `jsonResponse`, `new El`, `container`, `drive`, `bus`, `settle` and the
-# report keys all come from `_dashsection.SHELL`; this adds the two things
-# every section case asks for. The toasts are searched in the tree rather
+# report keys all come from `_dashsection.SHELL`; what follows adds the
+# readers the section suites ask for, and the toasts among them. The
+# toasts are searched in the tree rather
 # than resolved by id because `_dashnode.DOM`'s `getElementById` answers
 # null for every id, so `toast()` mints a host per call and appends to
 # `document.body`.
