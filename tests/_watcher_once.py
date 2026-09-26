@@ -24,7 +24,6 @@ import sys
 import threading
 from pathlib import Path
 
-import _fake_gh
 import _util
 from _watcher_waits import Stream
 from _watcher_waits import await_polls
