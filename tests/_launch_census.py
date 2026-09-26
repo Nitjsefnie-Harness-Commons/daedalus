@@ -353,6 +353,15 @@ def _deadline_faults(relative, call, scope, constants):
              reason)]
 
 
+def _functions_in(scope):
+    """The function definitions a scope holds, so each is read once.
+
+    A module's top-level statements carry no definitions, and a path
+    function's own nested defs are read here rather than twice.
+    """
+    return [node for node in ast.walk(scope) if _is_def(node)]
+
+
 def _enclosing_scope(tree, node):
     """The function a node sits in, or the module when it sits in none."""
     best = tree
@@ -366,7 +375,7 @@ def _enclosing_scope(tree, node):
     return best
 
 
-def _parameter_bound_faults(relative, bound, scope, constants):
+def _parameter_bound_faults(relative, bound, scope, constants, route):
     """A bound that arrived as a parameter, judged where it was passed.
 
     The number is the caller's, so it is the CALLER's constants and scope
@@ -378,8 +387,73 @@ def _parameter_bound_faults(relative, bound, scope, constants):
         other, line, value, caller_scope, caller_constants, _child = entry
         reason = _permitted(value, caller_scope, caller_constants)
         if reason:
-            faults.append((other, line,
-                           'positional timeout on a launched child', reason))
+            faults.append((other, line, route, reason))
+    return faults
+
+
+def _parameter_names(function):
+    """The names a function's signature exposes, star-args excluded."""
+    args = function.args
+    names = set()
+    for group in (args.posonlyargs, args.args, args.kwonlyargs):
+        for arg in group:
+            names.add(arg.arg)
+    return names
+
+
+def _timeout_faults(relative, function, scope, constants, handed=frozenset()):
+    """Every place the deadline CONCEPT `timeout` appears in one function.
+
+    Receiver-independent and signature-reading, which is the generality the
+    route rules gave up: a `timeout=` on ANY call is read here, so
+    `queue.get(timeout=5)` and `thread.join(timeout=2)` are refused on a
+    launch-path function even though neither is a subprocess launch, and a
+    `timeout` parameter on such a function is read from the signature.
+
+    The concept enters a child four ways: a `timeout=` keyword on any call,
+    a `timeout` parameter, a `'timeout'` key stored into a container, and a
+    `'timeout'` key in a dict a `**` spread forwards. A bare `**opts` with
+    no `timeout` anywhere is deliberately not a fault: a spread is not
+    evidence of a bound.
+
+    A `timeout` PARAMETER is refused outright, because a launcher that
+    accepts one has an undeclared way to bound a child and the signature is
+    the only place that shows. Every other hit goes through the same
+    permission the route rules use, so the launcher's own detector — a
+    derived, classified, failure-reporting deadline — is not a fault here
+    either. A parameter the CALLER fills is left to the hand-off rule,
+    which judges the number where it was passed, because judging it here
+    would refuse the shipped cleanup's own bounded reap.
+    """
+    faults = []
+    if (function is scope and 'timeout' in _parameter_names(function)
+            and 'timeout' not in handed):
+        faults.append((relative, function.lineno, 'timeout parameter',
+                       'a path function takes a deadline parameter, so a '
+                       'bound reaches the child through the signature'))
+    for node in ast.walk(function):
+        if isinstance(node, ast.Subscript) and not isinstance(
+                node.ctx, ast.Load) and _const_str(node.slice) == 'timeout':
+            faults.append((relative, node.lineno, "'timeout' key write",
+                           "a 'timeout' key stored into a container"))
+        elif (isinstance(node, ast.Dict)
+              and any(_const_str(key) == 'timeout'
+                      for key in node.keys)):
+            faults.append((relative, node.lineno,
+                           "'timeout' key in a dict",
+                           "a '**' spread forwards a mapping holding a"
+                           " 'timeout' key"))
+    for node in ast.walk(function):
+        if not isinstance(node, ast.keyword) or node.arg != 'timeout':
+            continue
+        if isinstance(node.value, ast.Name) and node.value.id in handed:
+            faults.extend(_parameter_bound_faults(
+                relative, node.value, scope, constants,
+                'timeout= keyword at a caller-filled parameter'))
+            continue
+        reason = _permitted(node.value, scope, constants)
+        if reason:
+            faults.append((relative, node.lineno, 'timeout= keyword', reason))
     return faults
 
 
@@ -392,7 +466,11 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     callees = set(in_path) | set(callable_names)
     constants = _module_constants(tree)
     faults = []
+    handed = set(_CHILD_PARAMETERS.get(relative, {}))
     for scope in _bodies_in_scope(tree, in_path):
+        for function in _functions_in(scope):
+            faults.extend(
+                _timeout_faults(relative, function, scope, constants, handed))
         for node in ast.walk(scope):
             if not _is_call(node):
                 continue
@@ -410,8 +488,9 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
         scope = _enclosing_scope(tree, node)
         if (isinstance(bound, ast.Name)
                 and bound.id in _CHILD_PARAMETERS.get(relative, {})):
-            faults.extend(
-                _parameter_bound_faults(relative, bound, scope, constants))
+            faults.extend(_parameter_bound_faults(
+                relative, bound, scope, constants,
+                'positional timeout on a launched child'))
             continue
         reason = _permitted(bound, scope, constants)
         if reason:
