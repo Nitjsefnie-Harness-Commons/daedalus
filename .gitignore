@@ -329,6 +329,7 @@
 !/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_transport_probes.py
+!/tests/_netcapture_harness.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_overlap.py
@@ -646,6 +647,7 @@
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py
+!/tests/test_worker_netcapture.py
 !/tests/test_worker_register_throttle.py
 !/tests/test_worker_result_post.py
 !/tests/test_worker_route_guard.py
