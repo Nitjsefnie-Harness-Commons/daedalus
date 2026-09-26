@@ -348,6 +348,7 @@
 !/tests/_pyroute_match.py
 !/tests/_pyroute_pop.py
 !/tests/_pyroute_positions.py
+!/tests/_pyroute_reads.py
 !/tests/_pyroute_setops.py
 !/tests/_pyroute_state.py
 !/tests/_pyroute_storage.py
@@ -607,6 +608,7 @@
 !/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_comprehension_probe.py
 !/tests/test_tab_routing_dict_construction.py
+!/tests/test_tab_routing_dict_keyset.py
 !/tests/test_tab_routing_dict_lengths.py
 !/tests/test_tab_routing_dict_stores.py
 !/tests/test_tab_routing_js.py
