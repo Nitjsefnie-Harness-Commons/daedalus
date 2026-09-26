@@ -282,6 +282,20 @@ def _stale_message(stale):
         + ['drop the row; the table only ever shrinks.'])
 
 
+def _disagreements_message(unallowed, stale):
+    """Every kind of disagreement in one failure, each under its own heading.
+
+    Asserting the two lists in sequence left the stale half unevaluated
+    while any unallowed site existed, so a row that had gone stale went
+    unreported until someone called `_partition` by hand. One message over
+    both lists rather than the two asserts in either order: either ordering
+    hides live sites behind bookkeeping the moment a row goes stale.
+    """
+    parts = ([_unallowed_message(unallowed)] if unallowed else [])
+    parts += [_stale_message(stale)] if stale else []
+    return '\n\n'.join(parts)
+
+
 def _mod(*lines):
     return ''.join(line + '\n' for line in lines)
 
@@ -303,8 +317,8 @@ def test_no_tests_module_imports_a_sibling_suite(tmp):
     sources = {name: (ROOT / name).read_text(encoding='utf-8')
                for name in listed}
     unallowed, stale = _partition(_import_findings(sources), ALLOWED)
-    assert not unallowed, _unallowed_message(unallowed)
-    assert not stale, _stale_message(stale)
+    assert not unallowed and not stale, _disagreements_message(
+        unallowed, stale)
 
 
 def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
@@ -410,6 +424,9 @@ def test_the_allowance_table_is_pinned_on_both_sides(tmp):
     for fragment in ('tests/test_importer.py:1', 'import test_sibling',
                      'sibling suite test_sibling'):
         assert fragment in message, message
+    # One kind alone is that kind's own message, with no empty heading for
+    # the other.
+    assert _disagreements_message(unallowed, stale) == message
 
     unallowed, stale = _partition(findings, (
         Allowance('tests/test_importer.py', 'test_sibling', 'PR 9999'),
@@ -424,6 +441,32 @@ def test_the_allowance_table_is_pinned_on_both_sides(tmp):
         ('tests/test_sibling.py', 'test_sibling')], stale
     message = _stale_message(stale)
     for fragment in ('stale', 'tests/test_fixed.py', 'PR 9999'):
+        assert fragment in message, message
+    assert _disagreements_message(unallowed, stale) == message
+
+    # The state this branch actually sits in: an unallowed site in a file
+    # another seat holds, beside a row in the same table that has gone
+    # stale. Asserting the two lists in sequence made the stale half
+    # unreachable while the unallowed site existed, so a stale row was
+    # reported only when nothing else was wrong. One failure names both.
+    _fabricate(root, sources, 'tests/test_importer_two.py',
+               _mod('import test_sibling'))
+    compile(sources['tests/test_importer_two.py'], 'test_importer_two.py',
+            'exec')
+    findings = _import_findings(sources)
+    unallowed, stale = _partition(findings, (
+        Allowance('tests/test_importer.py', 'test_sibling', 'PR 9999'),
+        Allowance('tests/test_fixed.py', 'test_sibling', 'PR 9999')))
+    assert [item.path for item in unallowed] == [
+        'tests/test_importer_two.py'], unallowed
+    assert [(row.path, row.module) for row in stale] == [
+        ('tests/test_fixed.py', 'test_sibling')], stale
+    message = _disagreements_message(unallowed, stale)
+    for fragment in ('no allowance row covers the site',
+                     'tests/test_importer_two.py:1',
+                     'import test_sibling imports sibling suite',
+                     'an allowance row is stale',
+                     'tests/test_fixed.py -> test_sibling (PR 9999)'):
         assert fragment in message, message
 
 
