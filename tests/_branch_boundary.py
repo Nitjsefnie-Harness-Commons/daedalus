@@ -42,7 +42,7 @@ from _helper_binds import definition_nodes
 BRANCH_BASES = ('origin/main', 'main')
 
 
-def _parse(path, source):
+def _parsed(path, source):
     try:
         return ast.parse(source, filename=path)
     except SyntaxError as exc:
@@ -67,7 +67,7 @@ def _merge_base(root, bases=BRANCH_BASES):
     return None
 
 
-def _at(root, ref, path):
+def _text_at(root, ref, path):
     """One file's text at `ref`, or None if that ref has no such file."""
     run = _text_in(root)
     if run(['git', 'cat-file', '-e', f'{ref}:{path}']) is None:
@@ -106,14 +106,14 @@ def introduced_rows(table, read, root, bases=BRANCH_BASES):
         return None
     paths = sorted({key[0] for key in table})
     head = read({path: text for path in paths
-                 if (text := _at(root, 'HEAD', path)) is not None})
+                 if (text := _text_at(root, 'HEAD', path)) is not None})
     base = read({path: text for path in paths
-                 if (text := _at(root, merge_base, path)) is not None})
+                 if (text := _text_at(root, merge_base, path)) is not None})
     return sorted(key for key in table
-                  if _declared(head, key) - _declared(base, key))
+                  if _digests_for(head, key) - _digests_for(base, key))
 
 
-def _declared(digests, key):
+def _digests_for(digests, key):
     """The declaration digests one row names, on one side of the diff."""
     return digests.get(key[0], {}).get(key[1], set())
 
@@ -128,7 +128,7 @@ def python_digests(sources):
     digests = {}
     for path, source in sources.items():
         found = {}
-        for name, nodes in definition_nodes(_parse(path, source)).items():
+        for name, nodes in definition_nodes(_parsed(path, source)).items():
             found[name] = {hashlib.sha1(
                 ast.dump(node, include_attributes=False).encode()
             ).hexdigest() for node in nodes}
@@ -192,7 +192,7 @@ def python_digests(sources):
     digests = {}
     for path, source in sources.items():
         found = {}
-        for name, nodes in definition_nodes(_parse(path, source)).items():
+        for name, nodes in definition_nodes(_parsed(path, source)).items():
             found[name] = {hashlib.sha1(
                 ast.dump(node, include_attributes=False).encode()
             ).hexdigest() for node in nodes}
@@ -275,7 +275,7 @@ def python_digests(sources):
     digests = {}
     for path, source in sources.items():
         found = {}
-        for name, nodes in definition_nodes(_parse(path, source)).items():
+        for name, nodes in definition_nodes(_parsed(path, source)).items():
             found[name] = {hashlib.sha1(
                 ast.dump(node, include_attributes=False).encode()
             ).hexdigest() for node in nodes}
