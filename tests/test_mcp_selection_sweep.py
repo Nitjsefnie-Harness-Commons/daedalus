@@ -109,6 +109,12 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
     value exists, and near-misses all landing on the clean side would hold
     the shape of the rule and not its edge.
 
+    The KEYWORD arms are pinned the same way, because a name and a `**`
+    unpack are two spellings of one binding and a keyword-only parameter
+    with a default is a parameter that is not required: each has a row the
+    runtime produces the body on and a row it raises on, so a rule that
+    accepted every name, or required every keyword-only parameter, fails
+    here rather than passing on the shape.
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '[(lambda: importlib.import_module)][0]()',
@@ -121,12 +127,17 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
                    '(lambda a=0: importlib.import_module)(1)',
                    '(lambda *a: importlib.import_module)(1)',
                    '(lambda **k: importlib.import_module)(a=1)',
+                   '(lambda **k: importlib.import_module)(**{"x": 1})',
                    '(lambda a, *, b: importlib.import_module)(1, b=2)',
+                   '(lambda *, b=0: importlib.import_module)()',
                    '[(lambda a: importlib.import_module)][0](1)'):
         assert _scan(_tmp, callee) == 'resolved', callee
     for callee in ('(lambda a: importlib.import_module)()',
                    '(lambda a, b: importlib.import_module)(1)',
                    '(lambda a: print)(1)',
+                   '(lambda: importlib.import_module)(x=1)',
+                   '(lambda: importlib.import_module)(**{"x": 1})',
+                   '(lambda *, b: importlib.import_module)()',
                    '[(lambda a: importlib.import_module)][0]()',
                    # A function's value is a FUNCTION, so the projection of
                    # a lambda is not the lambda's return.
