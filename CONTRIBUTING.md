@@ -173,7 +173,7 @@ content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
 `tests/test_gm_*.py` suites. The one shipped module no suite reaches is
 the extension options page, `extension/options.js`, at 0 of 51 code
-lines — about 1% of the 4936 the number is measured over, and the
+lines — about 1% of the 4943 the number is measured over, and the
 total is 87.7%. That is the true state of the tests, not a
 shortfall in the measurement — the fix is tests, not tooling.
 
