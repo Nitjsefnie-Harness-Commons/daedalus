@@ -3,10 +3,14 @@ stored action destinations and parser defaults; GUARANTEED adds required and
 non-suppressed values. A required mutually exclusive group guarantees a
 destination only when every member stores that same non-SUPPRESS destination.
 Namespace stores are refused as namespace store escapes.
-An origin the audit can see is a name a scope it reads binds, or an attribute
-of such a value. Every other expression is unproven, which is a refusal and
-not a silent pass. A frame read is refused when the audit cannot see its
-receiver; ``frame_read`` and ``reads_frame_namespace`` below own that rule."""
+An origin the audit can see is a module-level name, a literal, or an
+attribute of such a value. A name a local scope binds is NOT one, so
+``data = {'f_locals': 1}`` read as ``data['f_locals']`` is refused: a
+binding the audit does not read is unproven, and unproven is the refusal.
+That is the one over-refusal this rule accepts, and it is a name the audit
+cannot see rather than one it can. A frame read is refused when the audit
+cannot see its receiver; ``frame_read`` and ``reads_frame_namespace`` below
+own that rule."""
 import argparse
 import ast
 import builtins
