@@ -23,9 +23,11 @@ sys.path.insert(0, str(_util.ROOT))
 
 HERE = Path(__file__).resolve().parent
 # (file, the module name a reload rebinds, the functions the rule decides in).
-# A function outside this list returning its first parameter is a refusal arm
-# the ledger cannot see, so the control refuses to start until the list names
-# it: a new helper the rule delegates to is what a hand list would drop.
+# A declared claim, and what defends it is narrower than the list looks:
+# selection_shaped_outside_the_scope recognises one shape of an unnamed refusal
+# - two or more positional arguments, returning the first by name - and
+# nothing for a one-argument helper, a later argument, a tuple, a bool, or a
+# decision nested inside a helper.
 SCOPE = (
     (HERE / '_cli_arg_audit_resolver.py', '_cli_arg_audit_resolver',
      ('frame_read', '_subscript_read', '_call_read',
@@ -52,61 +54,171 @@ def _line_starts(source):
     return starts
 
 
+def _first_line(source, span):
+    return source.count('\n', 0, span[0]) + 1
+
+
+def _last_line(source, span):
+    return source.count('\n', 0, span[1]) + 1
+
+
 def _span(starts, node):
     return (starts[node.lineno - 1] + node.col_offset,
             starts[node.end_lineno - 1] + node.end_col_offset)
 
 
-def _guard_spans(starts, guard, arm):
-    """The span removing one condition from a guard, and its identity.
+def _operand_spans(starts, guard):
+    """The span deleting each operand of a disjunction or a conjunction.
 
-    Each operand of a top-level ``or`` reaches the arm alone, so each is a
-    condition and each is removable alone; a conjunct is not, because dropping
-    one widens the arm instead of removing it, so the whole test is the
-    condition and is named by its first conjunct. ``arm`` is the whole ``if``
-    statement, which is what a condition that is the entire test takes.
+    Each span runs from the end of the previous operand to the end of its own,
+    so the operator joining them goes with the operand that leaves; the first
+    operand's span runs to the start of the second.
     """
-    if isinstance(guard, ast.BoolOp) and isinstance(guard.op, ast.Or) \
-            and len(guard.values) > 1:
-        for index, value in enumerate(guard.values):
-            if index == 0:
-                begin = _span(starts, value)[0]
-                end = _span(starts, guard.values[1])[0]
-            else:
-                begin = _span(starts, guard.values[index - 1])[1]
-                end = _span(starts, value)[1]
-            yield (f'{ast.unparse(value)}', (begin, end))
+    values = guard.values
+    for index, value in enumerate(values):
+        if index == 0:
+            yield (value, (_span(starts, value)[0],
+                           _span(starts, values[1])[0]))
+        else:
+            yield (value, (_span(starts, values[index - 1])[1],
+                           _span(starts, value)[1]))
+
+
+def _own_returns(statement):
+    """The returns written in this statement, not in a callable inside it."""
+    found = []
+    stack = list(ast.iter_child_nodes(statement))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.Lambda, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.Return):
+            found.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _refuses(statement):
+    """Whether the arm's own return is the refusal, the allow, or neither.
+
+    The direction is what tells a removal from a widening: a guard that
+    refuses loses refusals as its test stops holding, and a guard that allows
+    loses them as its test stops allowing. An arm that does not return, or
+    whose returns disagree, is unclassified and its test is taken whole.
+    """
+    returns = _own_returns(statement)
+    if not returns:
+        return None
+    verdicts = {not (isinstance(node.value, ast.Constant)
+                     and node.value.value is None)
+                for node in returns if node.value is not None}
+    if len(verdicts) != 1:
+        return None
+    return verdicts.pop()
+
+
+def _splits(guard, refuses):
+    """Whether each operand of a compound test is a condition of its own.
+
+    True for a disjunction in front of a refusal - any one operand reaching
+    the arm is a refusal on its own, and dropping it drops that refusal - and
+    for a conjunction in front of an allow, where every operand has to hold to
+    allow and dropping one allows what the arm used to refuse. The other two
+    combinations widen the rule when an operand is dropped, which is not what
+    a row in this ledger claims.
+    """
+    if not isinstance(guard, ast.BoolOp) or len(guard.values) < 2:
+        return False
+    if isinstance(guard.op, ast.Or):
+        return refuses
+    return refuses is False
+
+
+def _arm_conditions(starts, function, statement):
+    """Yield (key, span, replacement) for one arm of an if/elif chain."""
+    refuses = _refuses(statement)
+    if _splits(statement.test, refuses):
+        for operand, span in _operand_spans(starts, statement.test):
+            yield (f'{function.name}|{ast.unparse(operand)}', span, '',
+                   operand.lineno)
+    else:
+        first = statement.test
+        if isinstance(first, ast.BoolOp):
+            first = first.values[0]
+        yield (f'{function.name}|{ast.unparse(first)}',
+               _span(starts, statement), '', statement.lineno)
+    for node in _own_returns(statement):
+        yield from _inline_conditions(starts, function, node)
+
+
+def _inline_conditions(starts, function, statement):
+    """Yield the decision a return makes inline, as a condition of its own.
+
+    ``return <refusal> if <test> else <allow>`` decides the same question an
+    ``if`` arm does, in the return rather than beside it. Removing the
+    decision is leaving the allow, so the return is what the condition takes
+    with it.
+    """
+    if not isinstance(statement.value, ast.IfExp):
+        return
+    guard = statement.value.test
+    if _splits(guard, True):
+        for operand, span in _operand_spans(starts, guard):
+            yield (f'{function.name}|{ast.unparse(operand)}', span, '',
+                   operand.lineno)
         return
     first = guard.values[0] if isinstance(guard, ast.BoolOp) else guard
-    yield (ast.unparse(first), arm)
+    yield (f'{function.name}|{ast.unparse(first)}', _span(starts, statement),
+           f'return {ast.unparse(statement.value.orelse)}', guard.lineno)
+
+
+def _chain(statement):
+    """Yield each arm of an if/elif chain, the first one first."""
+    node = statement
+    while isinstance(node, ast.If):
+        yield node
+        if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+            node = node.orelse[0]
+        else:
+            return
 
 
 def _conditions(source, names):
-    """Yield (key, span) for every condition the named functions implement."""
+    """Yield (key, span, replacement) for every condition in the scope.
+
+    Every arm of an if/elif chain is one however the chain is spelled: an
+    ``elif`` desugars to a nested ``if`` in the ``orelse``, and a refusal a
+    keyword can hide is one the walk would answer with silence. A return that
+    decides inline carries its own decision. A nested statement inside an arm
+    is not descended into: it has its own control flow.
+    """
     starts = _line_starts(source)
     for function in ast.parse(source).body:
         if not isinstance(function, ast.FunctionDef) \
                 or function.name not in names:
             continue
         for statement in function.body:
-            if isinstance(statement, ast.If) and any(
-                    isinstance(child, ast.Return)
-                    for child in ast.walk(statement)):
-                for identity, span in _guard_spans(
-                        starts, statement.test, _span(starts, statement)):
-                    yield (f'{function.name}|{identity}', span)
+            if isinstance(statement, ast.If) and _own_returns(statement):
+                for arm in _chain(statement):
+                    if not _own_returns(arm):
+                        continue
+                    yield from _arm_conditions(starts, function, arm)
             elif isinstance(statement, ast.Return) \
                     and statement.value is not None \
                     and not (isinstance(statement.value, ast.Constant)
                              and statement.value.value is None):
-                yield (f'{function.name}|{UNGUARDED}',
-                       _span(starts, statement))
+                if isinstance(statement.value, ast.IfExp):
+                    yield from _inline_conditions(starts, function, statement)
+                else:
+                    yield (f'{function.name}|{UNGUARDED}',
+                           _span(starts, statement), '', statement.lineno)
             elif isinstance(statement, ast.Expr) \
                     and isinstance(statement.value, ast.Yield) \
                     and statement.value.value is not None:
                 yield (f'{function.name}|'
                        f'{ast.unparse(statement.value.value)}',
-                       _span(starts, statement))
+                       _span(starts, statement), '', statement.lineno)
 
 
 def rule_conditions(root):
@@ -115,14 +227,22 @@ def rule_conditions(root):
     for path, module, names in SCOPE:
         target = root / path.name
         source = target.read_text(encoding='utf-8')
-        for key, span in _conditions(source, names):
+        for key, span, replacement, line in _conditions(source, names):
             assert key not in found, f'two conditions answer to {key}'
-            found[key] = (target, module, source, span)
+            found[key] = (target, module, source, span, replacement, line)
     return found
 
 
 def selection_shaped_outside_the_scope():
-    """Functions returning a selection the ledger's scope does not name."""
+    """Scoped-file functions of that one shape, outside the scope.
+
+    Recognises a function of two or more positional arguments that returns its
+    first argument by name. Returns nothing for a one-argument helper, for one
+    returning a later argument, for a tuple or a bool, or for a decision nested
+    inside a helper - so a refusal the rule delegates to an unnamed function
+    of those shapes is not caught here. The claim is what this recognises, not
+    that the scope list is defended.
+    """
     unscoped = []
     for path, _module, names in SCOPE:
         for function in ast.parse(path.read_text(encoding='utf-8')).body:
@@ -180,7 +300,8 @@ def _subject_loaded(copied):
         yield mutated
     finally:
         sys.path[:] = saved_path
-        sys.modules.pop(ENTRY, None)
+        for name in (*SUBJECT_MODULES, ENTRY):
+            sys.modules.pop(name, None)
         sys.modules.update(
             {name: module for name, module in saved.items()
              if module is not None})
@@ -204,15 +325,20 @@ def _condition_removed(key, entry, found):
     that stopped discriminating - and a green is the only answer this control
     normally produces.
     """
-    path, module, source, span = entry
+    path, module, source, span, replacement, _line = entry
     original = path.read_bytes()
-    path.write_bytes(f'{source[:span[0]]}{source[span[1]:]}'.encode())
+    path.write_bytes(
+        f'{source[:span[0]]}{replacement}{source[span[1]:]}'.encode())
     try:
         mutated = rule_conditions(path.parent)
         assert key not in mutated, f'the mutation left {key} in place'
-        assert len(mutated) == len(found) - 1, (
-            f'the mutation took {len(found) - len(mutated)} conditions, '
-            f'not the one it was aimed at')
+        removed = set(range(_first_line(source, span),
+                            _last_line(source, span) + 1))
+        strayed = sorted(
+            name for name in set(found) - set(mutated)
+            if found[name][5] not in removed)
+        assert not strayed, (
+            f'the mutation changed conditions it did not touch: {strayed}')
         importlib.reload(sys.modules[module])
         yield source[span[0]:span[1]]
     finally:
@@ -261,8 +387,8 @@ def _plant_refused(mutated, name, prelude, _anchor, replacement, receiver):
 def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
     unpinned = selection_shaped_outside_the_scope()
     assert not unpinned, (
-        f'return a selection, and the ledger scope does not name them: '
-        f'{unpinned}')
+        f'return their first argument, and the ledger scope does not name '
+        f'them: {unpinned}')
     rows = {key: controls for key, _what, controls
             in ledger.CONDITIONS_PINNED}
     assert len(rows) == len(ledger.CONDITIONS_PINNED), (
@@ -277,6 +403,7 @@ def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
             f'ledger rows no condition backs: {stale}')
         survivors = []
         for key, named in rows.items():
+            assert named, f'row {key} names no control'
             runners = [_control(mutated, control, tmp)
                        for control in named]
             with _condition_removed(
@@ -285,6 +412,10 @@ def test_the_ledger_names_the_control_that_dies_with_its_condition(tmp):
                     f'{key} -> {control}\n    removed: {removed.strip()!r}'
                     for control, run in zip(named, runners)
                     if not _died(run))
+    left = sorted(name for name in SUBJECT_MODULES
+                  if str(getattr(sys.modules.get(name), '__file__', ''))
+                  .startswith(str(copied)))
+    assert not left, f'the copy is still bound in sys.modules: {left}'
     assert not survivors, (
         'every control these rows name stayed green with its own condition '
         'removed:\n' + '\n'.join(survivors))

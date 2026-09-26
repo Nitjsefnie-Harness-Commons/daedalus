@@ -4,12 +4,22 @@ when each is removed. One row per condition;
 rule's own source and reports a condition with no row, a row naming another
 condition's control, and a row no condition backs. The second field is the
 condition's identity - the function it lives in, and the first operand of the
-guard that selects it - and the third names the controls, ``test:<name>`` for
+guard that selects it - and the third names the control, ``test:<name>`` for
 one in ``tests/test_cli_arg_audit.py`` and ``plant:<name>`` for a row of
 ``FRAME_NAMESPACE_PLANTS``. Every control named here was watched go red with
-its own condition removed."""
+its own condition removed.
+
+Two conditions cannot be told apart by any control in the tree, and the table
+says which: the attribute arm of ``frame_read`` and the member test inside it,
+which exactly two controls separate from the rest. A refusal the rule
+delegates to a function the walk's scope does not name is not carried here at
+all; the scope is declared, and the shapes the control cannot see are named in
+the suite that reads this table."""
 CONDITIONS_PINNED = (
     ('frame_read|isinstance(node, ast.Attribute)',
+     'an attribute read is a selection the rule reads a member from',
+     ('test:test_cli_audit_refuses_a_resolved_frame_receiver',)),
+    ('frame_read|node.attr in FRAME_SURFACE',
      'the member set is read off types.FrameType',
      ('test:test_cli_audit_refuses_every_frame_member'
       '_the_interpreter_carries',)),
@@ -22,6 +32,9 @@ CONDITIONS_PINNED = (
     ('_subscript_read|isinstance(node.slice, ast.Constant)',
      'a constant key the audit can read is decided there',
      ('test:test_cli_audit_respects_comprehension_shadowing',)),
+    ('_subscript_read|key is not None',
+     'a key it can read is a member, a key it cannot is refused',
+     ('plant:class body',)),
     ('_subscript_read|isinstance(node.slice, _RANGE_OR_TUPLE_KEYS)',
      'a range or a tuple key is a position, not a member name',
      ('test:test_cli_audit_refuses_frame_namespaces'
@@ -42,14 +55,15 @@ CONDITIONS_PINNED = (
      'a proven getattr whose name is an expression',
      ('plant:getattr whose name is an expression',)),
     ('reads_frame_namespace|origin is not UNPROVEN',
-     'a receiver the audit resolved is refused only when it cannot '
-     'account for it, which is the frame half and the unproven half '
-     'together',
-     ('test:test_cli_audit_refuses_a_frame_read_on_a_proven_receiver',
-      'test:test_cli_audit_refuses_a_resolved_frame_receiver')),
+     'a name a local scope binds is unproven, and unproven is refused',
+     ('test:test_cli_audit_refuses_a_frame_read'
+      '_on_a_proven_receiver',)),
+    ('reads_frame_namespace|not isinstance(origin, types.FrameType)',
+     'a receiver resolved to a live frame is refused on that account',
+     ('test:test_cli_audit_refuses_a_resolved_frame_receiver',)),
     ('reads_frame_namespace|return',
      'a frame read is refused at all',
-     ('test:test_cli_audit_refuses_a_resolved_frame_receiver',)),
+     ('plant:computed key, a bound name',)),
     ('resolve_origin|isinstance(node, ast.Constant)',
      "resolve_origin sees a literal, which is the call arm's price",
      ('test:test_cli_audit_accepts_a_real_call'
@@ -62,7 +76,7 @@ CONDITIONS_PINNED = (
      ('test:test_cli_audit_resolver_only_resolves_exact_module_vars',)),
     ('resolve_origin|return',
      'every other expression is unproven, and unproven is the refusal',
-     ('plant:class body',)),
+     ('test:test_cli_audit_refuses_reflective_namespace_access',)),
     ("_package_roots|('', tree)",
      'the walk starts at the module, not at a callable',
      ('test:test_cli_audit_covers_a_second_package_module',)),
