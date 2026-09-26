@@ -25,11 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub)
+    event_target_stub, import_scripts_stub, resolve_target_stub)
 
 
 _MAINWORLD_HARNESS = (
-    event_target_stub()
+    event_target_stub() + resolve_target_stub()
     + r"""
 const fs = require('fs');
 const vm = require('vm');
@@ -131,34 +131,16 @@ const chrome = {
 """ + INERT_WORKER_APIS + r"""
 };
 
-// The tab's document. Chrome resolves a bare tab id to whatever the tab
-// holds at injection time and a documentIds target to the document it
-// names, and a documentId the answer carries back; the double models both
-// target shapes and refuses any other, so a binding it cannot see is never
-// quietly accepted.
 const PAGE_URL = 'https://page.example.com/';
 const documents = { 'doc-7': { id: 'doc-7', url: PAGE_URL, live: true } };
 let liveDocument = 'doc-7';
 
-function resolveTarget(target) {
-  if (!target || target.tabId === undefined) {
-    throw new Error('unmodelled injection target ' + JSON.stringify(target));
-  }
-  const shape = Object.keys(target).sort().join(',');
-  if (shape === 'tabId') return documents[liveDocument];
-  if (shape === 'documentIds,tabId') {
-    const named = target.documentIds;
-    if (!Array.isArray(named) || named.length !== 1) {
-      throw new Error('unmodelled documentIds ' + JSON.stringify(named));
-    }
-    const doc = documents[named[0]];
-    if (!doc || !doc.live) {
-      throw new Error('Cannot access contents of the page');
-    }
-    return doc;
-  }
-  throw new Error('unmodelled injection target ' + shape);
-}
+// The tab's document. Chrome's resolution of an injection target is the
+// shared stub — a bare tab id lands on whatever the tab holds at injection
+// time, a documentIds target lands on the document it names, and any other
+// shape is refused by name — so the two accessors it takes, inlined at the
+// one call site rather than named, are all this double contributes.
+
 
 // The shared double's executeScript is inert and its debugger refuses every
 // call; both are replaced here. The live executeScript runs the injected
@@ -170,7 +152,9 @@ chrome.scripting.executeScript = async (injection) => {
   if (injection.world !== 'MAIN') {
     throw new Error('unmodelled injection world ' + injection.world);
   }
-  const doc = resolveTarget(injection.target);
+  const doc = resolveTarget(
+    injection.target, (id) => documents[id],
+    () => documents[liveDocument]);
   if (injection.func.name === '_canUseMainWorldEval') {
     probeCount++;
     if ((mode === 'replay-probe-hang' || mode === 'eval-probe-hang')
