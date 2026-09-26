@@ -401,6 +401,62 @@ def _parameter_names(function):
     return names
 
 
+def _is_deadline_name(name):
+    """Whether a parameter NAME is the deadline concept.
+
+    The concept read from a spelling rather than from a keyword, so the
+    signature half of the scan covers a bound handed POSITIONALLY — which is
+    how a caller passes a cleanup deadline, and which no `timeout=` reading
+    can see.
+    """
+    return name == 'timeout' or name.endswith('_timeout')
+
+
+def _positional_deadline_faults(relative, function, scope, constants,
+                                handed=frozenset()):
+    """A deadline handed to a path FUNCTION by position or by name.
+
+    The counterpart to the keyword arm: the caller's number reaches the
+    child's cleanup as an argument, so the call site is where the bound
+    lives and the callee's signature is what says the slot is a deadline.
+    Judged here, in the CALLER's scope, because the number is the caller's.
+    """
+    faults = []
+    for node in ast.walk(function):
+        if not _is_call(node):
+            continue
+        callee = _callee_name(node)
+        if callee is None or callee in handed:
+            continue
+        target = _path_body(callee)
+        if target is None:
+            continue
+        names = [argument.arg for argument in
+                 list(target.args.posonlyargs) + list(target.args.args)]
+        pairs = list(enumerate(node.args))
+        pairs += [(names.index(keyword.arg), keyword.value)
+                  for keyword in node.keywords if keyword.arg in names]
+        for position, value in pairs:
+            if position >= len(names) or not _is_deadline_name(
+                    names[position]):
+                continue
+            if isinstance(value, ast.Name) and value.id in handed:
+                faults.extend(_parameter_bound_faults(
+                    relative, value, scope, constants,
+                    'deadline handed to a path function'))
+                continue
+            reason = _permitted(value, scope, constants)
+            if reason:
+                faults.append((relative, node.lineno,
+                               'deadline handed to a path function', reason))
+    return faults
+
+
+def _path_body(name):
+    """A path function's body by bare name, or None."""
+    return path.body_named(name)
+
+
 def _timeout_faults(relative, function, scope, constants, handed=frozenset()):
     """Every place the deadline CONCEPT `timeout` appears in one function.
 
@@ -466,11 +522,13 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     callees = set(in_path) | set(callable_names)
     constants = _module_constants(tree)
     faults = []
-    handed = set(_CHILD_PARAMETERS.get(relative, {}))
+    handed = frozenset(_CHILD_PARAMETERS.get(relative, {}))
     for scope in _bodies_in_scope(tree, in_path):
         for function in _functions_in(scope):
             faults.extend(
                 _timeout_faults(relative, function, scope, constants, handed))
+            faults.extend(_positional_deadline_faults(
+                relative, function, scope, constants, handed))
         for node in ast.walk(scope):
             if not _is_call(node):
                 continue
