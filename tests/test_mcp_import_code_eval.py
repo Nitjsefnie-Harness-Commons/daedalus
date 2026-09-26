@@ -305,23 +305,31 @@ def load(name):
 
 def test_a_getattr_lookup_reaches_the_builtin(_tmp):
     """A `getattr` off builtins hands the builtin out; an unreadable one is
-    refused rather than let through."""
-    for source in (
-            '''
+    refused rather than let through.
+
+    The two are refused by DIFFERENT axes, which is the point of naming
+    both. A readable key is an ordinary lookup this axis reads: the call
+    that follows it evaluates a program, and the code-eval arm refuses. An
+    unreadable key may be `__call__`, so the operation axis reads the
+    lookup as the value it reads off — the builtins module — and refuses
+    the callee before either of the others is asked.
+    """
+    for source, phrase in (
+            ('''
 import builtins
 
 
 def load(name):
     return getattr(builtins, 'eval')('importlib')(name)
-''',
-            '''
+''', 'code-evaluating builtin'),
+            ('''
 import builtins
 
 
 def load(attribute, name):
     return getattr(builtins, attribute)('importlib')(name)
-'''):
-        _assert_refusal(_tmp, source, 6, 'code-evaluating')
+''', 'reaches the import-by-name operation')):
+        _assert_refusal(_tmp, source, 6, phrase)
 
 
 def test_a_store_of_a_code_eval_calls_result_is_the_declared_limit(_tmp):

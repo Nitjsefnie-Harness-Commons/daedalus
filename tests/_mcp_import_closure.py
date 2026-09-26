@@ -9,15 +9,17 @@ too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
 same hole the tracked-name map left open, and both are refused. A CALLEE is
 read by its VALUE (`_mcp_selection_fold`): folded to what it statically
-produces, a folded operation is resolved exactly as the direct spelling is,
-and one the fold cannot decide is refused when it mentions the operation. A
-value the runtime cannot CALL is CLEAN, whichever way it is spelled: a
-LAMBDA is the call-result limit one step out — read in place it is a
-function, not its body — and a CONTAINER the fold decides is a list, a tuple,
-a set, a dict or a comprehension, none of which a call can invoke. A lambda
-DELIVERED to a name is the other half and is not exempt, for the reason
-`_yields_the_operation` gives. The registry is
-read at every level — base structurally, key by folding it — and a store
+produces — a `__call__` projection and a lambda call produce the value they
+wrap, a position is read and a key with it — a folded operation is resolved
+exactly as the direct spelling is, and one the fold cannot decide is refused
+when it mentions the operation. A value the runtime provably CANNOT reach
+through is CLEAN, whichever way it is spelled: an out-of-range position, a
+key the literal does not carry, a CONTAINER the fold decides is a list, a
+tuple, a set, a dict or a comprehension, none of which a call can invoke.
+A LAMBDA read in place is the call-result limit one step out — it is a
+function, not its body — and a lambda DELIVERED to a name is the other half
+and is not exempt, for the reason `yields_the_operation` gives. The registry
+is read at every level — base structurally, key by folding it — and a store
 that hands it away and a star import are refused too. A
 code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one
 step on: a CONSTANT program handed to one is refused, and so is any store
@@ -28,13 +30,15 @@ EFFECTIVE CALLEE receives the call's RESULT — the declared call-result
 limit below, not a delivery — and the callee is resolved by the VALUE it
 produces, so a builtin in a DATA position of it (an argument, a lookup key)
 stays a delivery. Three shapes it cannot follow are ACCEPTED as declared
-limits: a value reached through a call's result, a tracked module or the
-operation handed as a call ARGUMENT (`use(sys)`), and a value COMPUTED at
-runtime — an interpolated
-f-string, a subscript that selects one (`['n'][0]`, `('n',)[0]`,
-`{'k':'n'}['k']`), a starred argument — pinned in
-`test_the_fold_limit_facets_are_accepted`. Any accepted shape leaves the
-closure quietly short.
+limits, each pinned by the case named beside it. A value reached through a
+call's result, and a tracked module or the operation handed as a call
+ARGUMENT (`use(sys)`), in
+`test_the_operation_delivered_as_a_call_argument_is_the_declared_limit`
+and `test_the_registry_module_delivered_as_a_call_argument_is_the_limit`.
+A value COMPUTED at runtime — an interpolated f-string, a subscript that
+selects one (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`), a starred argument
+— in `test_the_fold_limit_facets_are_accepted`. Any accepted shape leaves
+the closure quietly short.
 """
 import ast
 from pathlib import Path
@@ -46,7 +50,7 @@ import _mcp_selection_fold
 
 # The two name sets the moved recognisers read. They live in the fold
 # module beside the property that uses them, and are named here for the
-# four readers this module keeps.
+# five readers this module keeps.
 DYNAMIC_ATTRIBUTES = _mcp_selection_fold.DYNAMIC_ATTRIBUTES
 REGISTRY_NAMES = _mcp_selection_fold.REGISTRY_NAMES
 
@@ -163,7 +167,7 @@ def _unresolved_callee_mentions(call, bound):
     it reaches anything, and the mention the container carries is then a
     fact about the wrong value.
     """
-    value = _mcp_selection_fold.unresolvable_callee(call)
+    value = _mcp_selection_fold.unresolvable_callee(call, bound)
     return value is not None and _mcp_selection_fold.yields_the_operation(
         value, bound)
 
@@ -597,7 +601,7 @@ def _import_targets(path, root):
                     targets |= _resolve_name(name, base, root)
         elif isinstance(node, ast.Call) \
                 and _mcp_selection_fold.is_dynamic_import(
-                    _mcp_selection_fold.callee_value(node), bound):
+                    _mcp_selection_fold.callee_value(node, bound), bound):
             argument = node.args[0] if node.args else None
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
