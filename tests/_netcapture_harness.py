@@ -14,7 +14,8 @@ A scenario is a list of `steps`, replayed in order, and each step is one
 input the worker observes: a command (through the real `dispatchCommand`),
 a CDP event, a tab closing, or Chrome detaching us. The harness answers
 with every posted `postResult` payload, every recorded `chrome.*` call,
-the worker's own `_netCaptures` / `_cdpSessions` state, and the strict
+the worker's own `_netCaptures` / `_cdpClaims` state — the second read as
+the tabs whose claim is a kept session — and the strict
 fetch gate's own verdict. The suites supply the steps and assert all of
 it; this module decides nothing about what a handler should do.
 """
@@ -245,7 +246,14 @@ async function run() {
         + ' requestIds: _netCaptures[key].requests.map('
         + '   function (entry) { return entry.requestId; }) };'
         + ' })'),
-      cdpSessions: evaluate('Object.keys(_cdpSessions).sort()'),
+      // The kept-session set, read the way tests/_boundary_scenarios.py
+      // reads it: a claim whose `keep` is true. A kept record's survival
+      // changes nothing Chrome is asked to do, so there is no observable for
+      // it — the reasoning is recorded above that function.
+      cdpSessions: evaluate(
+        'Array.from(_cdpClaims.entries()).filter('
+        + 'function (pair) { return pair[1].keep; })'
+        + '.map(function (pair) { return String(pair[0]); }).sort()'),
     },
     gate: {
       contractFaults: gateContractFaults,
