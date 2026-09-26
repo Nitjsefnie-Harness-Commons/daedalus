@@ -53,11 +53,17 @@ _SIBLINGS = r"""
 const parent = new El('tbody');
 const rows = [new El('tr'), new El('tr'), new El('tr')];
 parent.append(...rows);
+// A raw `undefined` vanishes from the report rather than failing on it,
+// so the past-the-end value is reported both as the claim and as a kind
+// a reader can see.
+const kind = (value) => (value === null ? 'null' : String(value));
 report({
   first: rows[0].nextSibling === rows[1],
   second: rows[1].nextSibling === rows[2],
-  end: rows[2].nextSibling,
-  orphan: new El('tr').nextSibling,
+  end: rows[2].nextSibling === null,
+  endKind: kind(rows[2].nextSibling),
+  orphan: new El('tr').nextSibling === null,
+  orphanKind: kind(new El('tr').nextSibling),
   parentNode: rows[0].parentNode === parent,
   depth: rows[1].children.length,
 });
@@ -77,7 +83,7 @@ report({ returned: returned === detail,
   index: parent.children.indexOf(detail),
   afterFirst: first.nextSibling === detail,
   afterDetail: detail.nextSibling === last,
-  afterLast: last.nextSibling,
+  afterLast: last.nextSibling === null,
   identity: detail.parentNode === parent,
   size: parent.children.length });
 })().catch(leave);
@@ -235,7 +241,8 @@ _PHASE_TRACE = r"""
 """ + _SEED + _IMPORT_API + r"""
 drive.route('/command', { did: 'd1', result: [] });
 drive.route('/result?tab=extension', { result: [] });
-await bounded(api.extCmd('list-block-rules'), 'the command', _dashnodeStepTimeoutMs);
+await bounded(api.extCmd('list-block-rules'), 'the command',
+  _dashnodeStepTimeoutMs);
 await bounded(settle(), 'settled', _dashnodeStepTimeoutMs);
 report();
 })().catch(leave);
@@ -277,8 +284,10 @@ def test_next_sibling_walks_and_ends(_tmp):
     report = run_scenario(_SIBLINGS)
     assert report['first'] is True, report
     assert report['second'] is True, report
-    assert report['end'] is None, report
-    assert report['orphan'] is None, report
+    assert report['end'] is True, report
+    assert report['endKind'] == 'null', report
+    assert report['orphan'] is True, report
+    assert report['orphanKind'] == 'null', report
     assert report['parentNode'] is True, report
     assert report['depth'] == 0, report
 
@@ -293,7 +302,7 @@ def test_insert_before_agrees_with_the_sibling_walk(_tmp):
     assert report['index'] == 1, report
     assert report['afterFirst'] is True, report
     assert report['afterDetail'] is True, report
-    assert report['afterLast'] is None, report
+    assert report['afterLast'] is True, report
     assert report['identity'] is True, report
     assert report['size'] == 3, report
 
@@ -304,7 +313,8 @@ def test_the_class_set_and_class_name_agree_in_both_directions(_tmp):
     string leaves `rewritten.has` true and a control that only ever adds
     passes against a set that never removes."""
     report = run_scenario(_CLASSES)
-    assert report['added'] == {'value': 'meta-v dim armed', 'has': True}, report
+    assert report['added'] == {'value': 'meta-v dim armed',
+                               'has': True}, report
     assert report['rewritten'] == {'value': 'meta-v', 'has': False}, report
     assert report['value'] == 'meta-v', report
     assert report['has'] is False, report
@@ -375,6 +385,8 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
     not the command's and keeps polling to its own budget. Repairing the
     envelope in the double hands the section a result it never sent."""
     report = run_scenario(_ENVELOPE, sections=('api.js',))
+    assert report['outcome'] is not None, (
+        'the mismatched envelope was delivered as a match', report)
     assert report['outcome'].startswith('Timeout (700ms) waiting for '), report
     polls = [r for r in report['requests'] if 'consume' not in r['target']]
     assert len(polls) == 4, report
@@ -389,8 +401,10 @@ def test_the_envelope_the_transport_anchors_is_the_commands_own(_tmp):
     report = run_scenario(_OWN_ENVELOPE, sections=('api.js',))
     assert report['result'] == 'the right result', report
     assert report['unplanned'] == [], report
-    consumed = [r['target'] for r in report['requests'] if 'consume' in r['target']]
-    assert consumed == ['/result?tab=extension&consume=1&expected=1'], report
+    consumed = [r['target'] for r in report['requests']
+                if 'consume' in r['target']]
+    assert consumed == [
+        '/result?tab=extension&consume=1&expected=1'], report
 
 
 def test_the_session_store_round_trips(_tmp):
