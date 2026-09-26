@@ -392,10 +392,7 @@ def test_a_unix_socket_subclass_binds_the_way_the_stdlib_binds_it(tmp):
 
 
 def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
-    """The search is bounded, and says what the child printed instead.
-
-    The window opens only once the child has demonstrably printed.
-    """
+    """The search is bounded, and says what the child printed instead."""
     del tmp
     # Built before the list rather than inside it: two adjacent literals
     # between commas read as a missing comma, which is a different program.
@@ -413,7 +410,10 @@ def test_a_child_that_never_announces_fails_on_the_deadline(tmp):
         # startup while proving nothing about the search.
         _await_alive(proc, drained, lambda: marker in drained,
                      'the child never printed its one line')
-        # Both pins below are "opens after the child printed".
+        # Both pins below are "opens after the child printed", and both
+        # compare monotonic readings, which is why they are an ordering and
+        # not a margin: no duration is held against a threshold, so neither
+        # can be spent on a slow machine however the box is loaded.
         assert drained, 'the window opened before the child printed'
         handshaken, started = time.monotonic(), time.monotonic()
         assert started >= handshaken, 'the window opened before the print'
