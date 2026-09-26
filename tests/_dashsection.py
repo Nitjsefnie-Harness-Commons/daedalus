@@ -41,11 +41,10 @@ turn against a virtual clock. One `settle()` is then all a scenario
 needs, and a two-click `armedAction` and a toast that has not faded stay
 assertable because nothing outside a window runs.
 
-The transport half lives in `tests/_dashsection_transport.py`, and the two
-share one scope in the child, so neither reads a name the other does not
-put there first. The file that was carrying both was at 616 of the 700
-lines a `tests/` module is allowed, and a file at its ceiling shares its
-headroom with every other branch.
+The transport half lives in `tests/_dashsection_transport.py`, and that
+file's docstring names every name the two halves share. The file that was
+carrying both was at 616 of the 700 lines a `tests/` module is allowed, and
+a file at its ceiling shares its headroom with every other branch.
 
 Not every refusal in here is controlled, and the docstring should not
 read as though it were. What
