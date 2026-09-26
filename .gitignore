@@ -409,7 +409,6 @@
 !/tests/_version_contract_dashboard_duplicates.py
 !/tests/_version_contract_scanners.py
 !/tests/_watcher_once.py
-!/tests/_watcher_polls.py
 !/tests/_watcher_waits.py
 !/tests/_wfassert.py
 !/tests/_wfcheckout.py
@@ -706,7 +705,6 @@
 !/tests/test_vm_file_load_guard.py
 !/tests/test_watch_all.py
 !/tests/test_watcher_budget.py
-!/tests/test_watcher_polls.py
 !/tests/test_watcher_waits.py
 !/tests/test_wf_suite_boundaries.py
 !/tests/test_wfcheckout.py
