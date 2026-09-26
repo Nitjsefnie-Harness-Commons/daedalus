@@ -11,10 +11,11 @@ import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 
 # Sized so it cannot be spent on a real boot, which is what makes it a
-# liveness escape rather than a wall-clock assertion. A real boot outlasts
-# the publish bound below by a wide margin, so a bound that has to cover one
-# is several times the bound that does not. It fires only on a client that
-# is alive and wedged, and then only to name what never arrived.
+# liveness escape rather than a wall-clock assertion. A boot on a loaded
+# machine outlasts the publish bound below by more than its own margin,
+# while on an idle one it is quicker, so the bound has to cover the slow
+# case rather than be compared against the fast one. It fires only on a
+# client that is alive and wedged, and then only to name what never arrived.
 BOOT_DEADLINE = 120
 
 # A control below reads this bound back off the wait and pins it, which is
@@ -30,18 +31,21 @@ class _SteppingClock:
     Two things need a clock they can drive. A control that proves a bound
     fires cannot wait BOOT_DEADLINE out for real, so a step large enough to
     cross a short bound reaches that expiry by arithmetic. A control that
-    proves where a window OPENED cannot use a frozen reading at all, since
-    a frozen clock makes the gap between two windows zero whichever order
-    they were taken in. `reads` is here so a control can tell that the
-    clock it installed is the one the wait actually used.
+    proves where a window OPENED cannot use a reading that stands still,
+    since a clock that never moves makes the gap between two windows zero
+    whichever order they were taken in. `reads` is here so a control can
+    tell that the clock it installed is the one the wait actually used.
 
-    Stepping is also what keeps the arithmetic exact. A control here
+    Stepping is also what makes the interval exact. A control here
     compares the interval a wait returns for equality, and
     `(base + N) - base` reproduces N only when N is exactly
-    representable. A small step keeps the base small, which is where that
-    holds; an epoch-scale reading is large enough to lose a bound to its
-    own ulp, and is why this is not `time.monotonic`. So a control that
-    depends on exactness says so here rather than inheriting it.
+    representable. A real clock is not the reason to step: at the scales
+    either a boot-relative or an epoch reading reaches, both bounds come
+    back exactly, and only a base near 1e16 loses a five-second bound to
+    its own ulp. What stepping buys is that the wait costs no wall time,
+    which is the whole point of a control whose subject is the bound.
+    So a control depending on exactness says so here rather than
+    inheriting it.
     """
 
     def __init__(self, step):
@@ -79,11 +83,11 @@ def _wait_for_path(process, booted, path, clock=time.monotonic,
     opened = clock()
     deadline = opened + PUBLISH_BOUND
     while not path.exists() and clock() < deadline:
-        # The boot loop above is not the only wait here that can hang, and
-        # a clock that does not advance leaves this one no time to run out:
-        # `clock() < deadline` would be true forever. So the client dying
-        # is checked here too, which is what makes a frozen clock safe
-        # rather than merely survivable.
+        # The boot loop above is not the only wait here that can hang. This
+        # one has a deadline, but a client that dies does not reach it: the
+        # condition is re-read and re-true for as long as the clock is, so
+        # the check the boot loop has is what turns a dead client into a
+        # named exit rather than a wait out the rest of the bound.
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before publishing: '
             + (process.stderr.read() if process.stderr else ''))
@@ -261,6 +265,47 @@ def test_the_boot_wait_names_a_client_that_exits_before_it_boots(tmp):
     # M3: the child's own words, which is where an ordering violation
     # reports itself and what a reader needs to see it.
     assert 'client refused to start' in message, message
+
+
+def test_the_publish_wait_names_a_client_that_dies_between_the_two(tmp):
+    """A client that boots and then dies is named by its exit, not the bound.
+
+    The boot wait's escape has a control of its own and this is the publish
+    wait's, for the same reason: the check is worth nothing while nothing
+    reaches it, and every other fixture here publishes one statement after
+    it boots, so the loop exits on its condition without ever entering its
+    body. The way in is a client that announces itself and then dies before
+    publishing -- it boots, so the first loop is satisfied, and the second
+    finds no file and a client that is already gone.
+    """
+    ready_path = Path(tmp) / 'half.ready'
+    booted_path = Path(tmp) / 'half.booted'
+    client = (
+        'import sys\n'
+        'from pathlib import Path\n'
+        'print("started", flush=True)\n'
+        'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
+        'assert Path(sys.argv[2]).exists(), "published before boot"\n'
+        'sys.stderr.write("client gave up after announcing\\n")\n'
+        'sys.exit(4)\n'
+    )
+    process = subprocess.Popen(
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    message = ''
+    try:
+        process.wait(timeout=10)
+        _wait_for_path(process, booted_path, ready_path,
+                       clock=_SteppingClock(0.01), boot_bound=1)
+    except AssertionError as failure:
+        message = str(failure)
+    else:
+        message = 'a client that died after announcing was waited on'
+    finally:
+        _drain.kill_and_drain(process)
+    assert message.startswith(
+        'the client exited with 4 before publishing'), message
+    assert 'client gave up after announcing' in message, message
 
 
 class _KillRecordsOwnStatus:
