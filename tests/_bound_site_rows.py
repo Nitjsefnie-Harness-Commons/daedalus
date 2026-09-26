@@ -229,17 +229,17 @@ BOUND_SITE_ROWS = (
     # review round falsified the last round's version of it one arm further
     # out. The named guards are the four limbs of proved_fixed's
     # disjunction, the machinery_route loop, the four `seen` guards in
-    # _argv_read.py, the launcher-factory arm of the bound fixpoint, and
-    # the NamedExpr placement arm. Each is in one of two states, written
-    # at the clause as well as here:
-    #
-    #   CONTROLLED  a row below, or a control in test_repo_layout.py,
-    #               fails when the clause is deleted
-    #   NOT         no control, and the comment at the clause says which:
-    #               REDUNDANT (a named bound guarantees it), DEAD (no
-    #               input reaches it), or LOAD-BEARING and unpinned
-    #
-    # A named guard in neither state is a hole in this table.
+    # _argv_read.py, and the launcher-factory arm of the bound fixpoint.
+    # Each is CONTROLLED — a row below, or a control in
+    # test_repo_layout.py, that fails when the clause is deleted — or it
+    # is not controlled, for one of exactly two closed reasons written at
+    # the clause: REDUNDANT, where a named bound guarantees it, or DEAD,
+    # where no input reaches it. There is no third answer, and that is
+    # deliberate: a category for "live and unpinned" would admit the
+    # analyser's whole residue and make the rule a licence rather than a
+    # check. The arms that are live and unpinned are named at their own
+    # clauses and tracked at issue #1144, which is where a reader who
+    # trusts this set should look next.
     # A name that spelled a subprocess import and was then rebound to a
     # fixed value sits in `safe_names` and NOT in `bound`, so the
     # `subprocess_names` limb of proved_fixed is the only thing refusing
