@@ -54,9 +54,19 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
   return _cdpClaimHandle(entry);
 }
 
-// The release belongs to the HANDLE, not to the entry: two joiners share one
-// entry and each owns one share of it, so the "released once" guard has to
-// be per-handle or the second joiner's release is swallowed by the first.
+// Two joiners share one entry and each owns one share of it, so a release
+// has to be counted per-HANDLE: on the entry it would be the first joiner's
+// release that spoke for the second one's.
+//
+// The "released once" guard here is defence in depth, and the entry guard in
+// `_cdpRelease` is what currently carries the property. Removing this guard
+// alone is green across every suite; the entry guard is what turns a second
+// release on one handle from a second detach into a no-op, because the first
+// release already took the entry out of the map. This one is there for a
+// caller that releases twice, which no shipped call site does — the four
+// claim once and release once, and the net-capture stop is guarded by its
+// own early return. It is kept, and named, rather than left reading as the
+// thing doing the work.
 function _cdpClaimHandle(entry) {
   let released = false;
   return {
