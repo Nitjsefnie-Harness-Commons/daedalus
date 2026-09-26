@@ -26,6 +26,35 @@ not this one.
 """
 
 UNCONSOLIDATED_JS_NAMES = {
+    ('tests/_boundary_env.py', 'clearScheduled'):
+        'the boundary fake clears a timer by id out of its own array, and '
+        'the hotfix harness clearing one is the other side of this pair '
+        'rather than a suite reading a shared helper',
+    ('tests/_boundary_env.py', 'schedule'):
+        'the boundary fake arms a timer and fires it itself on the route '
+        'scenarios, where the hotfix harness arms one and never fires it, '
+        'so the two would answer differently for one callback',
+    ('tests/_hotfixharness.py', 'clearScheduled'):
+        'the hotfix fake clears the timer at an index it minted, where the '
+        'boundary fake finds the timer by id out of a list it searched',
+    ('tests/_hotfixharness.py', 'delay'):
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
+    ('tests/_hotfixharness.py', 'response'):
+        'the fetch-response factory, one of the copies the second wave of '
+        'this consolidation is about',
+    ('tests/_hotfixharness.py', 'schedule'):
+        'the hotfix fake arms a timer and returns its index without ever '
+        'firing it, where the boundary fake fires it on the route '
+        'scenarios itself',
+    ('tests/_hotfixharness.py', 'sendCommand'):
+        'the hotfix double refuses every CDP method but Runtime.evaluate, '
+        'where the CDP harness answers the whole protocol and compiles '
+        'through it, so neither could stand in for the other',
+    ('tests/_hotfixharness.py', 'waitFor'):
+        'the hotfix wait polls two thousand times and answers a boolean, '
+        'where the boundary wait throws on exhaustion and the overlap one '
+        'takes a deadline',
     ('tests/_boundary_env.py', 'copy'):
         'the structural-clone helper each harness writes for itself, one of '
         'five copies of the same expression',
@@ -55,6 +84,11 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_bridge_fake_oracle_harness.py', 'streamResponse'):
         'the oracle harness own stream factory, which carries a hang body '
         'the shared copy also carries, so the two are copies of one another',
+    ('tests/_cdpharness.py', 'sendCommand'):
+        'the CDP harness answers the whole protocol and compiles through '
+        'it, and the hotfix double refusing every method but '
+        'Runtime.evaluate is the other side of this pair rather than a '
+        'copy of it',
     ('tests/_cdpharness.py', 'delay'):
         'the next-turn delay, the same three lines as the other six copies',
     ('tests/_cdpharness.py', 'response'):

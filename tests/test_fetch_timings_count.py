@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _cli_dispatch import RecordingExtCmd  # noqa: E402
 from _cli_parse import refused  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -35,18 +36,6 @@ TIMINGS = (
 )
 CANNED = {'timings': list(TIMINGS), 'count': len(TIMINGS),
           'hasNativeToBase64': False}
-
-
-class RecordingExtCmd:
-    """Records each ext_cmd call and replays canned answers in order."""
-
-    def __init__(self, answers):
-        self.answers = list(answers)
-        self.calls = []
-
-    def __call__(self, cmd_id, cmd_type, timeout=10, **fields):
-        self.calls.append((cmd_id, cmd_type, fields))
-        return self.answers.pop(0)
 
 
 def run_cli(argv, answers):
