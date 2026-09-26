@@ -188,7 +188,10 @@ async function runEval(id, code) {
     fs.readFileSync(backgroundPath, 'utf8'), context,
     { filename: backgroundPath });
   await delay();
-  vm.runInContext('_cdpSessions[7] = true', context);
+  // A kept claim is what an attachment another feature already holds
+  // looks like now; it is held for the rest of the run.
+  await vm.runInContext(
+    'cdpClaimAttachment(7, { keep: true }).ready', context);
 
   await runEval('compile', 'return compile-case');
   await runEval('throw', 'throw-case');

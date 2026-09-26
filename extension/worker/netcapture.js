@@ -1,10 +1,12 @@
-/* exported _netCaptures, handleNetCapture */
+/* exported handleNetCapture */
 /* exported handleNetCaptureStop, handleNetCaptureGet */
-/* global _cdpSessions, postResult */
+/* global cdpClaimAttachment, cdpForgetAttachment, postResult */
 
 // ─── Network capture (CDP) ───
 
-const _netCaptures = {}; // tabId → { requests: [], maxRequests }
+// The claim travels with the capture: it is what holds the attachment for
+// as long as the capture runs, and the stop gives it back.
+const _netCaptures = {}; // tabId → { requests, maxRequests, claim }
 
 // A capture buffer lives in the service worker and grows to hold headers and
 // response bodies, so its size is a memory budget rather than a preference.
@@ -83,30 +85,26 @@ async function handleNetCapture(cmd) {
       return postResult(cmd._execution, { already: true, tabId: chromeTabId, buffered: _netCaptures[chromeTabId].requests.length }, null, 'extension');
     }
 
-    // The `already` return above ruled out an existing capture, so only a kept
-    // CDP session can hold the attachment here; reuse it and give it back only
-    // if this call created it.
-    const held = Boolean(_cdpSessions[chromeTabId]);
+    // The `already` return above ruled out an existing capture, so the only
+    // claim this can join is a kept CDP session's — joined, not replaced.
 
     // Publish the capture only once attach AND Network.enable have succeeded.
     // A half-set-up capture would make the next call answer `already: true`
     // over a tab nothing is attached to, and leak the attachment when
     // Network.enable is what failed.
-    let attached = false;
+    let claim = null;
     try {
-      if (!held) {
-        await chrome.debugger.attach({ tabId: chromeTabId }, '1.3');
-        attached = true;
-      }
-      // A reused attachment still needs the domain enabled for this capture.
+      claim = cdpClaimAttachment(chromeTabId);
+      await claim.ready;
+      // A joined attachment still needs the domain enabled for this capture.
       await chrome.debugger.sendCommand({ tabId: chromeTabId }, 'Network.enable', {});
     } catch (e) {
-      if (attached) {
-        try { await chrome.debugger.detach({ tabId: chromeTabId }); } catch (_) {}
-      }
+      if (claim) await claim.release();
       return postResult(cmd._execution, null, e.message, 'extension');
     }
-    _netCaptures[chromeTabId] = { requests: [], maxRequests: limit };
+    _netCaptures[chromeTabId] = {
+      requests: [], maxRequests: limit, claim,
+    };
     await postResult(cmd._execution, { capturing: true, tabId: chromeTabId }, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');
@@ -141,11 +139,9 @@ async function handleNetCaptureStop(cmd) {
 
     const requests = cap.requests.slice();
     delete _netCaptures[chromeTabId];
-    // A kept CDP session on the same tab still needs the attachment; only the
-    // stop's own owner line releases it.
-    if (!_cdpSessions[chromeTabId]) {
-      try { await chrome.debugger.detach({ tabId: chromeTabId }); } catch (_) {}
-    }
+    // The capture's own claim, given back — a kept CDP session on the same
+    // tab still holds its share and keeps the attachment.
+    if (cap.claim) await cap.claim.release();
     await postResult(cmd._execution, { stopped: true, tabId: chromeTabId, count: requests.length, requests }, null, 'extension');
   } catch (e) {
     await postResult(cmd._execution, null, e.message, 'extension');
@@ -193,23 +189,21 @@ async function handleNetCaptureGet(cmd) {
 // Wire up CDP event listener (once, globally)
 chrome.debugger.onEvent.addListener(_netEventHandler);
 
-// Clean up on tab close. One attachment serves both maps, so it is released
-// once whether a capture, a kept session, or both held it.
+// Clean up on tab close. One attachment serves both features, so the claim
+// decides whether there is anything to give back, and the capture record
+// goes with it.
 chrome.tabs.onRemoved.addListener((tabId) => {
-  const held = Boolean(_netCaptures[tabId]) || Boolean(_cdpSessions[tabId]);
   delete _netCaptures[tabId];
-  delete _cdpSessions[tabId];
-  if (held) {
-    try { chrome.debugger.detach({ tabId }); } catch (_) {}
-  }
+  cdpForgetAttachment(tabId, { detach: true });
 });
 
 // Drop sticky CDP state when Chrome detaches us (DevTools opened, target
 // crashed, etc.). A capture whose attachment is gone receives no further
-// events, so it must not keep answering `already: true` either.
+// events, so it must not keep answering `already: true` either. Chrome has
+// already detached, so there is nothing left to detach.
 chrome.debugger.onDetach.addListener((source) => {
   if (source && source.tabId != null) {
-    delete _cdpSessions[source.tabId];
     delete _netCaptures[source.tabId];
+    cdpForgetAttachment(source.tabId, { detach: false });
   }
 });
