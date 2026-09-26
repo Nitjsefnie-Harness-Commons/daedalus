@@ -303,13 +303,14 @@ def test_do_set_cookie_sends_the_secure_flag_on_its_own(tmp):
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123', 'secure': True}
     plan = [_put(body), _wait('_set_cookie', 'd2', 10)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123', '--secure'],
         [{'did': 'd2'}, _envelope(id='_set_cookie', result={})],
         module=commands_browser, plan=plan, token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == 'Set: sid=abc123 on https://example.com/\n', repr(out)
 
 
 def test_do_set_cookie_truncates_the_value_it_echoes_at_sixty_columns(tmp):

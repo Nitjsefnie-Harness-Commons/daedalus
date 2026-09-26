@@ -98,13 +98,14 @@ def test_do_cdp_sends_the_params_it_was_given(tmp):
             'params': {'url': 'https://example.com/'}, 'token': TOK,
             'tab': 'extension'}
     plan = [_put(body), _wait('_cdp', 'd1', 30)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['cdp', 'Page.navigate', '-p', '{"url": "https://example.com/"}'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
         module=commands_browser, plan=plan, token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
 
 
 def test_do_cdp_carries_the_chrome_tab_only_when_it_was_given(tmp):
@@ -117,13 +118,14 @@ def test_do_cdp_carries_the_chrome_tab_only_when_it_was_given(tmp):
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
             'token': TOK, 'tab': 'extension', 'tabId': 0}
     plan = [_put(body), _wait('_cdp', 'd1', 30)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['cdp', 'Page.enable', '--chrome-tab', '0'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
         module=commands_browser, plan=plan, token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
 
 
 def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
@@ -132,13 +134,14 @@ def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
             'params': {}, 'token': TOK, 'tab': 'extension',
             'keep_session': True}
     plan = [_put(body), _wait('_cdp', 'd1', 30)]
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['cdp', 'Profiler.enable', '--keep-session'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
         module=commands_browser, plan=plan, token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert _rendered(out) == f'{IN} _cdp\n{{}}\n', repr(out)
 
 
 def test_do_cdp_renders_the_header_cells_the_result_carries(tmp):
