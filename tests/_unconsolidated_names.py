@@ -330,4 +330,52 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_workflow_job_timeouts.py', '_scan'):
         'this checks one workflow and through a local caller its target, '
         'where the owner scans a module text with a memo',
+    ('tests/_netcapture_harness.py', 'request'):
+        'this answers one recorded request, where the owner in _util is '
+        'the process-wide request the worker client made',
+    ('tests/_util.py', 'request'):
+        'this is the client-side request the whole suite shares, where '
+        'the recorder in _netcapture_harness is one capture own request',
+    ('tests/test_cli_browser_commands.py', '_ext'):
+        'this drives one handler module ext calls directly, where the '
+        'owner builds one MCP answer tuple for the whole tool surface',
+    ('tests/test_cli_browser_commands.py', '_put'):
+        'this names the args one handler put takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_browser_handlers.py', '_put'):
+        'this names the args one handler put takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_browser_tabs.py', '_ext'):
+        'this names the args one handler ext takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_content_block.py', '_put'):
+        'this names the args one handler put takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_content_capture.py', '_ext'):
+        'this names the args one handler ext takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_content_css.py', '_ext'):
+        'this names the args one handler ext takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_content_hotfixes.py', '_ext'):
+        'this names the args one handler ext takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_content_hotfixes.py', '_stored'):
+        'this is the stored-hotfix record this suite reads back, where '
+        'the owner store key is the one the route answers with',
+    ('tests/test_cli_eval_handlers.py', '_get'):
+        'this names the args one handler get takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_eval_handlers.py', '_put'):
+        'this names the args one handler put takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_cli_result_handlers.py', '_get'):
+        'this names the args one handler get takes, where the owner '
+        'builds the answer tuple for the whole tool surface',
+    ('tests/test_dashboard_app_shell.py', '_run'):
+        'this runs one dashboard scenario in this suite own shell, where '
+        'the owner runs the recorded boundary harness a plan names',
+    ('tests/test_dashboard_sse.py', '_run'):
+        'this runs one SSE scenario in this suite own shell, where the '
+        'owner runs the recorded boundary harness a plan names',
 }

@@ -330,4 +330,60 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_worker_result_post.py', 'streamResponse'):
         'the postResult harness answers only the disabled error, where the '
         'shared factory also answers a hang',
+    ('tests/_dashdom.py', 'textNode'):
+        'this is the DOM node factory the jsdom-less shell own document '
+        'uses, where the owner belongs to the Node harness document',
+    ('tests/_dashnode.py', 'jsonResponse'):
+        'this is the JSON answer the dashboard node own reader expects, '
+        'where the owner is the shell harness one',
+    ('tests/_dashnode.py', 'textNode'):
+        'this is the text-node factory the dashboard node document uses, '
+        'where the owner is the shell harness DOM stand-in',
+    ('tests/_dashshell.py', 'jsonResponse'):
+        'this is the JSON answer the shell harness own reader expects, '
+        'where the owner belongs to the dashboard node harness',
+    ('tests/_dashshell.py', 'streamResponse'):
+        'this answers the shell harness own stream shape, where the owner '
+        'is the shared hang/disabled factory two harnesses splice in',
+    ('tests/_netcapture_harness.py', 'copy'):
+        'byte-identical to the row for tests/_tabs_harness.py, and '
+        'neither is a copy of the owner: the same chrome-double helper '
+        'written into two harnesses. Consolidating them means editing '
+        '_netcapture_harness.py, which another seat owns, so the '
+        'duplication is real and deferred',
+    ('tests/_netcapture_harness.py', 'maybeReject'):
+        'this refuses a declarativeNetRequest entry by RULESET key, where '
+        'the tabs harness refuses a chrome surface by API name',
+    ('tests/_netcapture_harness.py', 'record'):
+        'byte-identical to the row for tests/_tabs_harness.py, and '
+        'neither is a copy of the owner: the same chrome-double helper '
+        'written into two harnesses. Consolidating them means editing '
+        '_netcapture_harness.py, which another seat owns, so the '
+        'duplication is real and deferred',
+    ('tests/_netcapture_harness.py', 'response'):
+        'byte-identical to the row for tests/_tabs_harness.py, and '
+        'neither is a copy of the owner: the same chrome-double helper '
+        'written into two harnesses. Consolidating them means editing '
+        '_netcapture_harness.py, which another seat owns, so the '
+        'duplication is real and deferred, and the wider response-factory '
+        'cluster is the second wave of this consolidation',
+    ('tests/_netcapture_harness.py', 'run'):
+        'this is the capture harness own driver, the largest JS function '
+        'in the tree, and the owner is the relay harness driver over a '
+        'different plan',
+    ('tests/_tabs_harness.py', 'maybeReject'):
+        'this refuses a chrome surface by API name, where the netcapture '
+        'harness refuses a declarativeNetRequest entry by RULESET key',
+    ('tests/_tabs_harness.py', 'record'):
+        'byte-identical to the row for tests/_netcapture_harness.py, and '
+        'neither is a copy of the owner: the same chrome-double helper '
+        'written into two harnesses. Consolidating them means editing '
+        '_netcapture_harness.py, which another seat owns, so the '
+        'duplication is real and deferred',
+    ('tests/test_dashboard_accessibility.py', 'describe'):
+        'this is the suite own a11y description builder, where the owner '
+        'describes one node for the shell harness',
+    ('tests/test_tab_routing.py', 'load'):
+        'this is the routing suite own payload loader, where the owner is '
+        'the shell harness node loader',
 }
