@@ -30,13 +30,22 @@ import ast
 import hashlib
 import re
 import subprocess
-from collections import Counter
+from collections import Counter, namedtuple
 
 import _js_functions
 import _util
 from _helper_binds import definition_nodes
 
 BRANCH_BASES = ('origin/main', 'main')
+
+# The two ways the comparison cannot be made, and they are DIFFERENT
+# questions with different answers. Conflating them is how a red release
+# build shipped: a tag is a commit ON main, so the base IS the head there.
+UNREADABLE = 'the base tree could not be read'
+IS_THE_BASE = (
+    'this tree is the base, so there is no branch to compare it against')
+
+Boundary = namedtuple('Boundary', 'introduced reason')
 
 
 def _parsed(path, source):
@@ -84,27 +93,32 @@ def introduced_rows(table, read, root, bases=BRANCH_BASES):
     both suites call THIS function, so a mutant that stops it deciding
     anything turns them red.
 
-    None means the base could not be read, and the caller MUST refuse on
-    it rather than pass: the boundary is the property every row rests
-    on, and a checkout that cannot evaluate it is not evidence that it
-    holds.
+    A `reason` means the comparison was not made, and the two reasons
+    are not interchangeable: `UNREADABLE` is a REFUSAL the caller must
+    fail on, `IS_THE_BASE` is a SKIP, because on a tree that is already
+    the base the question has no answer rather than a bad one.
     """
     merge_base = _merge_base(root, bases)
-    head = _git_text(root, ['git', 'rev-parse', 'HEAD']) or ''
-    if merge_base is None or merge_base == head.strip():
-        # No base, or a base that IS the head: either way there is
-        # nothing to compare against, and a tree compared to itself
-        # reports "no row excuses a branch-written declaration" for a
-        # comparison that could not have failed. Both are the refusal
-        # the None arm exists for.
-        return None
+    head = (_git_text(root, ['git', 'rev-parse', 'HEAD']) or '').strip()
+    if merge_base is None:
+        # The control cannot say anything, and must REFUSE rather than
+        # pass: this is what Critical 1 is about.
+        return Boundary([], UNREADABLE)
+    if merge_base == head:
+        # The tree IS the base, so "did this branch introduce anything"
+        # has no answer on it — a release tag, checked out from main,
+        # lands exactly here. Nothing failed, so this is a skip with its
+        # own reason, and folding it into the refusal above turned every
+        # tag build red.
+        return Boundary([], IS_THE_BASE)
     paths = sorted({key[0] for key in table})
     head = read({path: text for path in paths
                  if (text := _text_at(root, 'HEAD', path)) is not None})
     base = read({path: text for path in paths
                  if (text := _text_at(root, merge_base, path)) is not None})
-    return sorted(key for key in table
-                  if _digests_for(head, key) - _digests_for(base, key))
+    return Boundary(sorted(
+        key for key in table
+        if _digests_for(head, key) - _digests_for(base, key)), None)
 
 
 def _digests_for(digests, key):

@@ -31,7 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _branch_boundary import introduced_rows, js_digests  # noqa: E402
+from _branch_boundary import (  # noqa: E402
+    IS_THE_BASE, UNREADABLE, introduced_rows, js_digests)
 from test_helper_reimplementation import (  # noqa: E402
     BRANCH_BASES, JS_FLOOR, ROOT, _live_sources, js_declarations,
     js_reimplementations, reimplementations)
@@ -526,15 +527,17 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
 
 def test_a_javascript_row_may_not_name_a_declaration_this_branch_added(tmp):
     del tmp
-    introduced = introduced_rows(
+    boundary = introduced_rows(
         UNCONSOLIDATED_JS_NAMES, js_digests, ROOT)
-    assert introduced is not None, (
-        'the JavaScript branch boundary could not be evaluated: this '
+    assert boundary.reason != UNREADABLE, (
+        'UNCONSOLIDATED_JS_NAMES: the base tree could not be read. This '
         'checkout resolves neither ' + ' nor '.join(BRANCH_BASES) + '. '
         'That is a refusal, not a pass — fetch the base and re-run.')
-    assert not introduced, (
+    if boundary.reason:
+        return
+    assert not boundary.introduced, (
         'UNCONSOLIDATED_JS_NAMES rows excuse a declaration the base tree '
-        f'does not carry, so the branch wrote it: {introduced}')
+        'does not carry, so the branch wrote it: {boundary.introduced}')
 
 
 def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
@@ -580,12 +583,19 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
 
     table = {('tests/test_base.py', 'kept'): 'this one predates the branch',
              ('tests/test_base.py', 'added'): 'this one is the branch own'}
-    introduced = introduced_rows(table, js_digests, repo, bases=('main',))
-    assert introduced == [('tests/test_base.py', 'added')], introduced
-    # A checkout carrying neither base cannot evaluate the property the
-    # rows rest on, and must say so rather than answer.
-    assert introduced_rows(table, js_digests, repo,
-                           bases=('origin/main',)) is None
+    boundary = introduced_rows(
+        table, js_digests, repo, bases=('main',))
+    assert boundary.introduced == [('tests/test_base.py', 'added')], boundary
+    # Neither base and base-is-head are DIFFERENT questions, and a tag
+    # build is the second one: a release tag is a commit ON main, so the
+    # base IS the head and there is nothing to compare.
+    assert introduced_rows(
+        table, js_digests, repo, bases=('origin/main',)).reason == UNREADABLE
+    assert introduced_rows(
+        table, js_digests, repo, bases=('HEAD',)).reason == IS_THE_BASE
+    assert UNREADABLE != IS_THE_BASE, (
+        'the refusal and the skip must never carry the same reason, or a '
+        'tag build and an unreadable checkout report alike')
 
 
 def main():
