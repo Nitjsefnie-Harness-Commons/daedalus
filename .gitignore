@@ -371,6 +371,7 @@
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
 !/tests/_teardown.py
+!/tests/_timed_basis.py
 !/tests/_timed_matrix.py
 !/tests/_token_mask.py
 !/tests/_token_policy.py
