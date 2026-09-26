@@ -120,7 +120,7 @@ def _is_allow(expression):
             and expression.value is None)
 
 
-def _refuses(statement):
+def _arm_refuses(statement):
     """Whether the arm's own return is the refusal, the allow, or neither.
 
     An arm that does not return, or whose returns disagree, is unclassified and
@@ -154,7 +154,7 @@ def _splits(guard, refuses):
 
 
 def _arm_conditions(starts, function, statement):
-    refuses = _refuses(statement)
+    refuses = _arm_refuses(statement)
     if _splits(statement.test, refuses):
         for operand, span in _operand_spans(starts, statement.test):
             yield (f'{function.name}|{ast.unparse(operand)}', span, '',
