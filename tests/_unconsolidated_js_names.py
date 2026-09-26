@@ -30,6 +30,33 @@ not this one.
 """
 
 UNCONSOLIDATED_JS_NAMES = {
+    ('tests/_boundary_scenarios.py', 'settle'):
+        'this is the one-turn drain a boundary scenario awaits, where the '
+        'attachment harness own settle loops a caller-named number of turns '
+        '(times || 6) so an in-flight dispatch can be awaited',
+    ('tests/_debugger_attachment_harness.py', 'settle'):
+        'this loops a caller-named number of turns (times || 6) so an '
+        'in-flight dispatch can be awaited, where the boundary scenario own '
+        'settle drains exactly one turn',
+    ('tests/_debugger_attachment_harness.py', 'dispatch'):
+        'this runs one command through dispatchCommand in the VM and parks '
+        'the promise in inFlight, where the GM harnesses deliver a page '
+        'message to a registered listener and the tabs harness runs the next '
+        'queued command',
+    ('tests/_debugger_attachment_harness.py', 'response'):
+        'byte-identical to the other fifteen owners (every one digest '
+        'e50263b1658e3244). This is the sixteen-harness response cluster '
+        'this module own docstring records as the second wave of the '
+        'consolidation, and this branch is the first wave: the eventTarget '
+        'copy it migrates',
+    ('tests/_dashfield.py', 'describe'):
+        'this destructures a [label, control] pair and returns the '
+        'label/control association record the a11y assertions read, where the '
+        'shell own describe renders an arbitrary value to a display string',
+    ('tests/_dashshell.py', 'describe'):
+        'this renders an arbitrary value to a display string and answers '
+        '[unprintable value] when rendering throws, where the field own '
+        'describe destructures a label/control pair',
     ('tests/_boundary_env.py', 'clearScheduled'):
         'the boundary fake clears a timer by id out of its own array, and '
         'the hotfix harness clearing one is the other side of this pair '
@@ -385,9 +412,6 @@ UNCONSOLIDATED_JS_NAMES = {
         'written into two harnesses. Consolidating them means editing '
         '_netcapture_harness.py, which another seat owns, so the '
         'duplication is real and deferred',
-    ('tests/test_dashboard_accessibility.py', 'describe'):
-        'this is the suite own a11y description builder, where the owner '
-        'describes one node for the shell harness',
     ('tests/test_tab_routing.py', 'load'):
         'this is the routing suite own payload loader, where the owner is '
         'the shell harness node loader',
