@@ -267,15 +267,26 @@ def test_clear_all_of_a_record_with_nothing_to_keep_removes_the_key(tmp):
     written leaves nothing to remove at all. The second is reached through
     the first — one command takes the key away, the next finds it absent —
     so both are the real call site rather than a case that skipped setup.
+
+    An empty record and an absent one are indistinguishable through the
+    stored fixes, so the key going is read from what `list-hotfixes` answers
+    afterwards: an absent record is answered with the worker's own version,
+    while a record left behind carries whatever version wrote it. That
+    version is what `_eligibleHotfixes` compares to decide whether a
+    non-permanent fix runs at all, so a leftover empty record keeps an old
+    one gating replay for no reason.
     """
     del tmp
-    ordinary = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'}],
+    ordinary = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'},
+                     {'id': 'list', 'type': 'list-hotfixes'}],
                     [MIXED[1], dict(MIXED[1], id='also-ordinary')])
     row = _rows(ordinary)['clear-all']
     assert row['error'] is None, ordinary
     assert row['result'] == {
         'cleared': True, 'removed': 2, 'kept': 0}, ordinary
     assert ordinary['record'] == [], ordinary
+    assert _rows(ordinary)['list']['result'] == {
+        'version': _version(), 'fixes': []}, ordinary
     absent = _run([DROP_RECORD,
                    {'id': 'clear-all', 'type': 'clear-all-hotfixes'}], MIXED)
     row = _rows(absent)['clear-all']
