@@ -294,6 +294,10 @@
 !/tests/_dashdom.py
 !/tests/_dashfield.py
 !/tests/_dashnode.py
+!/tests/_dashsection.py
+!/tests/_dashsection_controls.py
+!/tests/_dashsection_transport.py
+!/tests/_dashsection_wave1.py
 !/tests/_dashshell.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
@@ -498,9 +502,16 @@
 !/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_hotfixes.py
 !/tests/test_dashboard_node_retry.py
+!/tests/test_dashboard_section_block_rules.py
+!/tests/test_dashboard_section_cdp.py
+!/tests/test_dashboard_section_cookies.py
+!/tests/test_dashboard_section_css_injector.py
+!/tests/test_dashboard_section_fetch_timings.py
+!/tests/test_dashboard_section_net_capture.py
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
+!/tests/test_dashsection_harness.py
 !/tests/test_dashshell_harness.py
 !/tests/test_dashshell_selectors.py
 !/tests/test_debugger_attachment.py
