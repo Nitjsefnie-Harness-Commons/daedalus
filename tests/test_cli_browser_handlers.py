@@ -269,6 +269,37 @@ def test_do_set_cookie_sends_every_option_it_was_given(tmp):
     assert out == 'Set: sid=abc123 on https://example.com/\n', repr(out)
 
 
+def test_do_set_cookie_sends_an_expiry_of_zero_because_it_is_not_unset(tmp):
+    """`--expires 0` is a real expiry, and the field is `is not None`.
+
+    Every other option on this handler is guarded by truthiness, so this
+    is the one that is not: `args.expires is not None` is what lets a zero
+    reach the wire. `transport.expiration_timestamp` documents the type as
+    "`float()`'s whole domain, inf and nan included", so `0` is
+    operator-reachable and a truthiness guard would silently drop it —
+    turning a cookie the caller asked to expire into a session cookie,
+    with the `Set:` line reporting success either way.
+
+    The expected body carries `expirationDate` and no other optional
+    field, so this arm is the one that says the value is sent on its own
+    rather than riding along with the six-option test above.
+    """
+    del tmp
+    body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
+            'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
+            'value': 'abc123', 'expirationDate': 0.0}
+    plan = [_put(body), _wait('_set_cookie', 'd2', 10)]
+    recorded, out = run_cli(
+        ['set-cookie', 'https://example.com/', 'sid', 'abc123',
+         '--expires', '0'],
+        [{'did': 'd2'}, _envelope(id='_set_cookie', result={})],
+        module=commands_browser, plan=plan, token=TOK)
+
+    assert recorded.api_calls == [('PUT', '/command', body)], \
+        recorded.api_calls
+    assert out == 'Set: sid=abc123 on https://example.com/\n', repr(out)
+
+
 def test_do_set_cookie_sends_the_secure_flag_on_its_own(tmp):
     """`--secure` alone: `httpOnly` and `sameSite` are still absent."""
     del tmp
