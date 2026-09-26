@@ -200,7 +200,7 @@ def do_store_hotfix(args):
     # of these two runs.
     if args.clear_scope:
         fields['clearScope'] = True
-    elif args.match:
+    elif args.match is not None:
         fields['match'] = args.match
     result = ext_cmd('_store_hf', 'store-hotfix', **fields)
     perm = ' [PERM]' if result.get('permanent') else ''
