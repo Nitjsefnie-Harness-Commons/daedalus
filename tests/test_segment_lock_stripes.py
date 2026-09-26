@@ -212,14 +212,29 @@ def test_a_held_job_stripe_blocks_only_that_job(tmp):
         # completes — was satisfied. A fixture that announces it is holding
         # without holding is not a block, and the seam now counts real holds
         # rather than reading that announcement.
-        overlap = _overlap_report(gate_dir, held_job)
-        assert not overlap, overlap
-
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         held_thread.join(timeout=30)
         assert not held_thread.is_alive(), held_box
         assert held_box.get('error') is None, held_box
         assert held_box.get('value') == (200, b'{"ok": true}'), held_box
+
+        # Read AFTER the join, where a marker can exist at all. Before it,
+        # the only thread that could record `overlap-<held job>` is the held
+        # write — which is blocked inside acquire() and never reaches the
+        # recording line — so the assertion was reading a file that had not
+        # been written, and a marker the run does produce is
+        # `overlap-<unrelated>`, which this does not read.
+        #
+        # CORROBORATING, not load-bearing. The two assertions that carry
+        # this control are the settlement hand-off — three requests recorded
+        # an outcome, which a site on its own stripe cannot do — and the
+        # `asked == job` check in the site-agreement control, which is exact
+        # where this is a hash. Deleting the hand-off because this marker
+        # looks sufficient is how this control goes green with a site
+        # pointed at its own stripe; `_overlap_report`'s docstring names
+        # the two.
+        assert not _overlap_report(gate_dir, held_job), \
+            _overlap_report(gate_dir, held_job)
 
         failed = _holder_failure(gate_dir)
         if failed is not None:
@@ -261,14 +276,17 @@ def _settlements(gate_dir):
 def _await_settlements(gate_dir, count, exclude):
     """Wait until `count` distinct requests have each recorded an outcome.
 
-    A hand-off, not a count and not a poll interval. Every request records
-    the name it asked for and whether it was kept out of the lock or took
-    one, and the release waits for one record per request — identified by
-    its thread, so a request that contributes two records cannot stand in
-    for two requests, which is the window a bare count leaves open.
+    A hand-off, not a count and not a poll interval. Every request records a
+    settlement — its thread, the name it asked for, and whether it was kept
+    out of the lock or took one — and the release waits for one record per
+    request, identified by its thread, so a request that contributes two
+    records cannot stand in for two.
 
-    It waits for the records and not for the overlap, because an overlap is
-    the DEFECT and the release must not depend on having already seen it.
+    The `blocked` half is what carries the release: a site on its own stripe
+    acquires, so it never contributes one, and a run in which all three
+    settled as blocked cannot have had one. It waits for the records and not
+    for the overlap, because an overlap is the DEFECT and the release must not
+    depend on having already seen it.
     """
     deadline = time.time() + 60
     while True:
@@ -293,11 +311,21 @@ def _overlap_report(gate_dir, job=None):
     defect); the held-stripe control wants the first, because an unrelated
     job is *supposed* to take its own stripe while another is held.
 
-    Read only once every request has finished. A selection trace cannot
+    What it is NOT: the assertion that carries these controls. The hand-off
+    in `_await_settlements` is — three distinct requests each recording an
+    outcome, which a site pointed at its own stripe cannot produce — and so
+    is the `asked == job` check in the site-agreement control, which is
+    exact where this is a hash. This marker is CORROBORATING: it names which
+    job took a lock during a hold, which the other two do not, and it is
+    worth reading when one of them fires.
+
+    Read it only once every request has finished. A selection trace cannot
     answer this — a request can be seen choosing a stripe and still be
     blocked on it — so what is recorded is the acquire itself, against the
     state of the world at that instant. That is the difference between this
-    and a thread's liveness sampled at a moment.
+    and a thread's liveness sampled at a moment. Read it BEFORE the release
+    and it says nothing: the only thread that can record a per-job marker
+    is the blocked one.
     """
     path = gate_dir / ('overlap' if job is None else f'overlap-{job}')
     if not path.exists():
@@ -452,13 +480,6 @@ def test_every_site_takes_one_stripe_for_a_job(tmp):
             thread.start()
         exclude = _holder_thread(gate_dir)
         _await_settlements(gate_dir, 3, exclude)
-        # What the release acted on, recorded so the hand-off is a fact a
-        # reader can check rather than a claim: this says how many distinct
-        # requests had recorded an outcome at the moment the hold was let go.
-        held_in_hand = {i for i, _n, _o in _settlements(gate_dir)
-                        if i != exclude}
-        (gate_dir / 'released-with').write_text(
-            str(len(held_in_hand)), encoding='utf-8')
         (gate_dir / 'release').write_text('release', encoding='utf-8')
         for thread in threads:
             thread.join(timeout=60)
