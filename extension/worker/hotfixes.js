@@ -340,10 +340,16 @@ async function handleClearHotfix(cmd) {
       const data = await chrome.storage.local.get([HOTFIX_KEY]);
       const stored = data[HOTFIX_KEY];
       if (!stored) return { cleared: cmd.fixId, found: false };
+      // `found` reports the fix, not the record: an id the record never held
+      // was not found, and `set-permanent` says so for the same id. The
+      // count is the evidence, and `remaining` beside it is the whole
+      // answer either way.
+      const before = stored.fixes.length;
       stored.fixes = stored.fixes.filter(f => f.id !== cmd.fixId);
       await chrome.storage.local.set({ [HOTFIX_KEY]: stored });
       return {
-        cleared: cmd.fixId, found: true, remaining: stored.fixes.length,
+        cleared: cmd.fixId, found: stored.fixes.length !== before,
+        remaining: stored.fixes.length,
       };
     });
     await postResult(cmd._execution, outcome, null, 'extension');
