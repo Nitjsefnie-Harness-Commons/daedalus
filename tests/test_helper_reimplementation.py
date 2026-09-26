@@ -301,6 +301,25 @@ def _live_js():
     return sources, js_reimplementations(sources)
 
 
+def _live_sources():
+    """The tracked tests modules, memoised for the suite's own duration.
+
+    Four tests read the whole tree and the two readers are the expensive
+    part; recomputing them per test cost this suite 45 seconds where the
+    shared scans cost 13.
+    """
+    global _LIVE_SOURCES
+    if _LIVE_SOURCES is None:
+        listed = subprocess.run(
+            ['git', 'ls-files', 'tests/*.py'], cwd=ROOT,
+            capture_output=True, text=True, check=True,
+            env=_util.child_coverage('scrub')).stdout.splitlines()
+        assert listed, 'git ls-files named no tests module'
+        _LIVE_SOURCES = {name: (ROOT / name).read_text(encoding='utf-8')
+                         for name in listed}
+    return _LIVE_SOURCES
+
+
 def test_no_tests_module_reimplements_a_shared_helper_name(tmp):
     del tmp
     sources, findings = _live()
