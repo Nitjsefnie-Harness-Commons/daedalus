@@ -144,12 +144,11 @@ def test_a_second_release_on_one_handle_detaches_once(tmp):
     and deliberately never released, which leaves a repeat release as the
     only thing that could take its attachment down.
 
-    What carries this is the ENTRY guard in `_cdpRelease`: the first release
-    took the entry out of the map, so the second finds nothing installed and
-    no-ops. The handle's own "released once" guard is defence in depth for a
-    caller that releases twice, which no shipped call site does. Removing it
-    alone leaves this control green, which is why it carries no weight
-    here and is named in `cdp_attach.js` rather than pinned here.
+    What carries this is the ENTRY guard in `_cdpRelease`, not the handle's
+    own "released once" guard. `worker/cdp_attach.js`'s `_cdpClaimHandle`
+    states the pair and why, and is the place to read it; the consequence
+    for THIS control is that removing the handle guard alone leaves it green,
+    so it pins the entry guard and nothing else.
     """
     del tmp
     outcome = run_attachment_case({'actions': [

@@ -6,12 +6,13 @@
 // live is refused with `Another debugger is already attached` — a refusal
 // that reaches the caller as a failed command. Four features want the
 // attachment, so two dispatched in the same turn both attached and one of
-// the two came back an error.
+// the two came back an error. Nothing was misrouted; a call simply failed.
 //
 // The record and `ready` are written before this returns, and that
-// synchronous stretch is the whole of the fix: the second caller finds the
-// first caller's `ready` instead of racing a second attach, and a refused
-// attach fails every joiner with the one error rather than each retrying.
+// synchronous stretch is the whole of the fix: the second caller in the same
+// turn finds the first caller's `ready` instead of racing a second attach,
+// and a refused attach fails every joiner with the one error rather than
+// each retrying.
 const _cdpClaims = new Map();
 
 // A detach issued but not yet settled. A tab stays held until the PROMISE
@@ -24,7 +25,8 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
   if (held) {
     held.refs += 1;
     // Unreachable at every shipped call site, and kept on purpose: no
-    // claimant releases a kept claim today, so `refs` cannot reach 0 on a
+    // claimant releases a kept claim today (cdp.js never releases one it
+    // asked to keep), so `refs` cannot reach 0 on a
     // kept entry and the `keep` arm in `_cdpRelease` never fires. A caller
     // that did release its kept share would find the record standing, which
     // is the right answer, and this is what makes it so.
@@ -124,7 +126,7 @@ function _cdpRelease(entry) {
 // in flight. Its documented reasons — `canceled_by_user`, `target_closed`,
 // `replaced_with_chrome_devtools` — name none of them, so the window is
 // unreachable on the documented reasons, unguarded in the code, and one line
-// from guarded.
+// from guarded. Settling the Chrome behaviour settles it.
 function cdpForgetAttachment(tabId, { detach } = {}) {
   const held = _cdpClaims.get(tabId);
   _cdpClaims.delete(tabId);
