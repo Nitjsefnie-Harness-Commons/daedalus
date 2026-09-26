@@ -7,25 +7,28 @@ import is either read or refused by name and line. A spelling that binds
 the import-by-name operation to a NAME the map does not track is refused
 too, and so is one that reaches it through a string: a string that NAMES
 the operation, and a module read out of the registry by string, are the
-same hole the tracked-name map left open, and both are refused. The
-registry is read at every level — the base structurally, the key by folding
-it — and a store that hands it away and a star import are refused too. A
-code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one step
-on: a CONSTANT program handed to one is refused, and so is any store that
-DELIVERS the builtin to a name (as a name, a parameter default, a container
-or a call argument), read through the SAME store grammar as the operation
-and the registry. A store that USES the builtin as a call's EFFECTIVE CALLEE
-receives the call's RESULT — the declared call-result limit below, not a
-delivery — and the callee is resolved by the VALUE it produces, so a builtin
-in a DATA position of it (an argument, a lookup key) stays a delivery. Three
-shapes it cannot follow are ACCEPTED as declared limits: a value reached
-through a call's result, a tracked module or the operation handed as a call
-ARGUMENT (`use(sys)`), and a value the walk cannot fold to a constant — an
-import name or a program. The third is a MECHANISM: a value COMPUTED at
-runtime is accepted, so an interpolated f-string, a subscript that selects
-it (`['n'][0]`, `('n',)[0]`, `{'k':'n'}['k']`) and a starred argument are
-facets of it, pinned in `test_the_fold_limit_facets_are_accepted`. Any
-accepted shape leaves the closure quietly short.
+same hole the tracked-name map left open, and both are refused. A CALLEE is
+read by its VALUE: folded to what it statically produces, a folded
+operation is resolved exactly as the direct spelling is, and one the fold
+cannot decide is refused when it mentions the operation. The registry is
+read at every level — base structurally, key by folding it — and a store
+that hands it away and a star import are refused too. A
+code-evaluating builtin (`eval`/`exec`/`compile`) is the same hole one
+step on: a CONSTANT program handed to one is refused, and so is any store
+that DELIVERS the builtin to a name (as a name, a parameter default, a
+container or a call argument), read through the SAME store grammar as the
+operation and the registry. A store that USES the builtin as a call's
+EFFECTIVE CALLEE receives the call's RESULT — the declared call-result
+limit below, not a delivery — and the callee is resolved by the VALUE it
+produces, so a builtin in a DATA position of it (an argument, a lookup key)
+stays a delivery. Three shapes it cannot follow are ACCEPTED as declared
+limits: a value reached through a call's result, a tracked module or the
+operation handed as a call ARGUMENT (`use(sys)`), and a value COMPUTED at
+runtime — an interpolated
+f-string, a subscript that selects one (`['n'][0]`, `('n',)[0]`,
+`{'k':'n'}['k']`), a starred argument — pinned in
+`test_the_fold_limit_facets_are_accepted`. Any accepted shape leaves the
+closure quietly short.
 """
 import ast
 from pathlib import Path
@@ -129,6 +132,38 @@ def _dynamic_callees(tree):
                     elif node.module == 'sys' and alias.name == 'modules':
                         bound[alias.asname or 'modules'] = 'registry'
     return bound
+
+
+def _selected_value(node):
+    """The value an expression statically produces, and whether the fold
+    decided it exactly. A subscript of a literal tuple or list by a
+    non-negative constant index inside it selects exactly that element, so
+    the fold takes it; a base that is itself a subscript is folded FIRST,
+    which leaves the depth unbounded and each step terminating. Everything
+    else is UNDETERMINED, which is not silence — the caller reads the
+    mention property over the expression instead. A `Dict` or `Set` is keyed
+    rather than positioned, a slice is not an element, a starred element
+    puts every other position out of reach, and a non-constant, negative or
+    out-of-range index is a position this walk cannot read.
+    """
+    if not isinstance(node, ast.Subscript):
+        return node, True
+    base, decided = _selected_value(node.value)
+    if not decided or not isinstance(base, (ast.Tuple, ast.List)) \
+            or any(isinstance(e, ast.Starred) for e in base.elts):
+        return node, False
+    index = node.slice
+    if not (isinstance(index, ast.Constant)
+            and isinstance(index.value, int)
+            and 0 <= index.value < len(base.elts)):
+        return node, False
+    return _selected_value(base.elts[index.value])
+
+
+def _callee_value(call):
+    """A call's callee value: folded where the fold decides, else whole."""
+    value, decided = _selected_value(call.func)
+    return value if decided else call.func
 
 
 def _is_dynamic_import(func, bound):
@@ -550,23 +585,30 @@ def _refused_string_reads(tree, bound, refuse):
 def _import_targets(path, root):
     """The repo-local files one module's source can import.
 
-    A call's result stays outside the property on purpose, and is accepted
-    rather than skipped in silence: a call evaluates to whatever its callee
-    returns, so refusing every store of one would refuse
-    `mod = importlib.import_module('fcntl')` and every `x = f()` with it; a
-    value reached through a call's result is followed by neither the operation
-    map nor these refusals, whether it is bound to a name or read inline as a
-    base, attribute or subscript (`__import__('sys').modules[k]`). A tracked
-    module or the operation delivered as a call ARGUMENT is likewise accepted
-    — `use(importlib)` and `use(sys)`, whose registry is reachable only past
-    the argument — because the walk follows nothing a call returns or is
-    handed. A string ASSEMBLED at runtime that the walk cannot fold to a
-    constant is the third declared limit, named by the mechanism rather than
-    one spelling: an interpolated f-string, a concatenation with a name, a
-    `''.join`, a `.format()`, `%`. A string that DOES fold to a constant — a
-    field-less f-string, a concatenation of literals — is refused like any
-    other literal. A star import is refused because it binds names this map
-    cannot hold.
+    A CALLEE is a value, and is read as one: folded to what it statically
+    produces — a subscript of a literal tuple or list by a constant position
+    in it, however deeply nested — a folded operation is resolved exactly as
+    the direct spelling is, and a callee the fold cannot decide is refused
+    when it mentions the operation. Reading the CONTAINER rather than the
+    value is the failure that follows: `(0, importlib.import_module)[0]` is
+    a `0`, and is accepted.
+
+    A call's RESULT stays outside the property on purpose: a call evaluates
+    to whatever its callee returns, so refusing every store of one would
+    refuse `mod = importlib.import_module('fcntl')` and every `x = f()`; a
+    value reached through one is followed by neither the operation map nor
+    these refusals, bound to a name or read inline as a base, attribute or
+    subscript (`__import__('sys').modules[k]`). A tracked module or the
+    operation delivered as a call ARGUMENT is likewise accepted —
+    `use(importlib)` and `use(sys)`, reachable only past the argument —
+    because the walk follows nothing a call returns or is handed. A string
+    ASSEMBLED at runtime that the walk cannot fold to a constant is the
+    third declared limit, named by the mechanism rather than one spelling:
+    an interpolated f-string, a concatenation with a name, a `''.join`, a
+    `.format()`, `%`. A string that DOES fold to a constant — a field-less
+    f-string, a concatenation of literals — is refused like any other
+    literal. A star import is refused because it binds names this map cannot
+    hold.
     """
     targets = set()
     source = path.read_text(encoding='utf-8')
@@ -595,7 +637,7 @@ def _import_targets(path, root):
                         else alias.name
                     targets |= _resolve_name(name, base, root)
         elif isinstance(node, ast.Call) and _is_dynamic_import(
-                node.func, bound):
+                _callee_value(node), bound):
             argument = node.args[0] if node.args else None
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
@@ -604,6 +646,13 @@ def _import_targets(path, root):
                 _refuse(path, root, node,
                         'import_module/__import__ is called with a name '
                         'this scan cannot read statically')
+        elif isinstance(node, ast.Call) and not isinstance(
+                node.func, ast.Lambda) and _yields_the_operation(
+                _callee_value(node), bound):
+            # A lambda is the property's call limit one step out.
+            _refuse(path, root, node,
+                    f'{ast.unparse(node.func)} reaches the import-by-name '
+                    'operation through a value this scan cannot resolve')
         elif isinstance(node, ast.Call) and _looks_the_operation_up(
                 node, bound):
             _refuse(path, root, node,
