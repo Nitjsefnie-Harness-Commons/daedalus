@@ -15,12 +15,12 @@ a value property. The universe is the PROPERTY and not the builders that
 happen to exist, so a class the grammar cannot name has NO ROW and a class
 its builders spell one way has one row a fold can get wrong without it
 showing. The classes named in `PROPERTY_CLASSES` are the two that were
-members of the property and of no builder at all; six cells still have no
+members of the property and of no builder at all; seven cells still have no
 row and are held by hand cases instead — the `getattr` spelling of the
 projection, a star over a literal tuple, a nested star, a `bool()` index, a
-walrus index, and a dict with a `**` unpack. Each is a spelling someone
-typed rather than a shape the grammar composes, and each is named beside the
-case that pins it.
+walrus index, a dict with a `**` unpack, and a dict key that is an unhashable
+literal. Each is a spelling someone typed rather than a shape the grammar
+composes, and each is named beside the case that pins it.
 """
 import json
 import subprocess
