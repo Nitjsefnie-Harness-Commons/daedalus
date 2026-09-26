@@ -601,6 +601,7 @@
 !/tests/test_stream_registration.py
 !/tests/test_stream_route.py
 !/tests/test_stream_service.py
+!/tests/test_suite_import_boundaries.py
 !/tests/test_suite_runner.py
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
