@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""What the dashboard's entry point does, pinned by breaking it.
-
-`app.js` had no suite of its own. Each test drives the real module in
-a Node child, reads what the shell recorded, and names the production
-change that turns it red -- the only evidence a control is one.
-"""
+"""What the dashboard's entry point does, each test pinned by the
+production change that turns it red."""
 import sys
 from pathlib import Path
 
@@ -14,11 +10,13 @@ from _dashshell import run_scenario  # noqa: E402
 
 _SERVER = 'https://example.com'
 _TOKEN = 'tok-abcdefghijklmnop'
-_SHORT = 'short-token'
+_SHORT = 'short-tokenx'
 _ELLIPSIS = '…'
 _DASH = '—'
-# `MOUNTS` is an object literal, so `__proto__` is truthy and takes
-# the mount path; it is not callable, so the call throws in the try.
+# Truthy on an object literal, so it takes the mount path; not
+# callable, so the call throws in the try. Chosen against the CURRENT
+# lookup: a null-prototype table or an `Object.hasOwn` guard would send
+# it down the no-module path, and the test would fail on the tag.
 _THROWS = '__proto__'
 
 _APP = ('app.js', 'sections/_util.js')
@@ -32,14 +30,13 @@ const util = await bounded(load('sections/_util.js'), 'util import',
 const h = util.h;
 """
 
-# A deferring scenario sets `readyState` before the import.
 _IMPORT = r"""
 document.readyState = 'loading';
 await bounded(load('app.js'), 'app import', _dashnodeStepTimeoutMs);
 await bounded(settle(), 'import with boot deferred', _dashnodeStepTimeoutMs);
 """
 
-# The same import, keeping the namespace so a scenario reaches `bus`.
+# The same import, keeping the namespace for `bus`.
 _IMPORT_BUS = r"""
 document.readyState = 'loading';
 const app = await bounded(load('app.js'), 'app import',
@@ -50,6 +47,15 @@ await bounded(settle(), 'import with boot deferred', _dashnodeStepTimeoutMs);
 _IMPORT_NOW = r"""
 await bounded(load('app.js'), 'app import', _dashnodeStepTimeoutMs);
 await bounded(settle(), 'import booted immediately', _dashnodeStepTimeoutMs);
+"""
+
+# A module script is deferred, so `index.html:124` presents this, not
+# `complete`.
+_IMPORT_INTERACTIVE = r"""
+document.readyState = 'interactive';
+await bounded(load('app.js'), 'app import', _dashnodeStepTimeoutMs);
+await bounded(settle(), 'import booted while interactive',
+  _dashnodeStepTimeoutMs);
 """
 
 _FIRE = r"""
@@ -97,8 +103,7 @@ _READ_CELL = (
     "document.querySelector(selector).textContent;\n"
 )
 
-# `relTime`'s bands at each boundary and one step inside it. The
-# scenario pins `Date.now`, so no assertion is a wall-clock margin.
+# `relTime`'s bands at each boundary and one step inside it.
 _BANDS = [
     (0, 'now'), (1999, 'now'), (2000, '2s ago'), (59999, '59s ago'),
     (60000, '1m ago'), (3599999, '59m ago'), (3600000, '1h ago'),
@@ -106,7 +111,6 @@ _BANDS = [
 
 
 def _storage(token=_TOKEN, server=_SERVER):
-    """The storage a booted shell reads, and the one stream."""
     return (
         "localStorage.setItem('daedalus-token', '" + token + "');\n"
         "localStorage.setItem('daedalus-server', '" + server + "');\n"
@@ -127,7 +131,6 @@ def _bar(body, storage=None, modules=_APP):
 
 
 def _masked(token):
-    """What `maskToken` renders above 12 characters."""
     return token[:8] + _ELLIPSIS + token[-4:]
 
 
@@ -154,6 +157,21 @@ report({ readyState: document.readyState,
     assert report['short'] == _TOKEN[:8] + _ELLIPSIS, report
 
 
+def test_an_interactive_document_boots_before_the_event_too(_tmp):
+    """A document `interactive` boots on the import, as `complete` does.
+
+    `app.js:152` reads one value, not one direction: gating on
+    `complete` alone leaves the shipped page unbooted, green here."""
+    report = _bar(_READ_CELL + _IMPORT_INTERACTIVE + r"""
+report({ readyState: document.readyState,
+  after: cell('[data-meta="token"]'),
+  short: cell('[data-meta="token-short"]') });
+""")
+    assert report['readyState'] == 'interactive', report
+    assert report['after'] == _masked(_TOKEN), report
+    assert report['short'] == _TOKEN[:8] + _ELLIPSIS, report
+
+
 def test_each_section_is_mounted_with_its_own_element_and_the_bus(_tmp):
     """`app.js:81` passing no bus, or one element to every mount."""
     report = _run(r"""
@@ -164,17 +182,20 @@ document.body.appendChild(a);
 """ + _IMPORT + _FIRE + r"""
 const seen = (el, own) => {
   const err = el.querySelector('pre.pane.err');
-  return { mine: el.textContent.includes(own),
+  return { seeded: el.textContent.includes(own),
     overview: el.textContent.includes('LIVE EVENT STREAM'),
     settings: el.textContent.includes('bridge token'),
     failed: err === null ? null : err.textContent };
 };
 report({ a: seen(a, 'OWN-A'), b: seen(b, 'OWN-B') });
 """)
+    # `seeded` certifies the fixture; "its own element" is the
+    # cross-assertions -- a mount landing in the other container puts
+    # its marker there.
+    assert report['a']['seeded'] is True, report
+    assert report['b']['seeded'] is True, report
     assert report['a']['failed'] is None, report
     assert report['b']['failed'] is None, report
-    assert report['a']['mine'] is True, report
-    assert report['b']['mine'] is True, report
     assert report['a']['overview'] is True, report
     assert report['b']['overview'] is False, report
     assert report['b']['settings'] is True, report
@@ -253,29 +274,38 @@ report({ token: cell('[data-meta="token"]'),
 
 def test_an_internal_sse_status_reaches_the_dot_and_both_status_texts(_tmp):
     """`app.js:105-108` dropping the guard, the dot or `txt2`."""
-    report = _bar(_READ_CELL + r"""
+    report = _bar(_READ_CELL + _IMPORT_BUS + r"""
 const sse = await bounded(load('sse.js'), 'sse import',
   _dashnodeStepTimeoutMs);
-""" + _IMPORT + _FIRE + r"""
+const delivered = [];
+app.bus.on((ev) => delivered.push(ev.type + '/' + (ev.__internal === true)));
+""" + _FIRE + r"""
 const read = () => ({
   status: bar.querySelector('[data-meta="sse-dot"]').dataset.status,
   one: cell('[data-meta="sse-text"]'),
   two: cell('[data-meta="sse-text2"]'),
 });
-const connected = read();
 const frame = (payload) => drive.lastScript().push('event: command\ndata: '
   + JSON.stringify(payload) + '\n\n');
+const connected = read();
 frame({ kind: 'event', id: 'e1', type: 'sse-status', status: 'rogue' });
 await bounded(settle(), 'rogue status frame', _dashnodeStepTimeoutMs);
 const rogue = read();
+const rogueDelivered = delivered.slice();
 frame({ kind: 'event', id: 'e2', type: 'tab-updated', tabId: 7 });
 await bounded(settle(), 'page event frame', _dashnodeStepTimeoutMs);
 const page = read();
+const pageDelivered = delivered.slice();
 sse.stop();
-report({ connected, rogue, page, idle: read() });
+report({ connected, rogue, page, idle: read(),
+  rogueDelivered, pageDelivered });
 """, modules=_APP_SSE)
     assert report['connected'] == {'status': 'connected', 'one': 'connected',
                                    'two': 'connected'}, report
+    # An absence is worth nothing unless the frame arrived, so the
+    # bus says so first: the anchors above travel another channel.
+    assert 'sse-status/false' in report['rogueDelivered'], report
+    assert 'tab-updated/false' in report['pageDelivered'], report
     assert report['rogue'] == report['connected'], report
     assert report['page'] == report['connected'], report
     assert report['idle'] == {'status': 'idle', 'one': 'idle',
@@ -285,14 +315,15 @@ report({ connected, rogue, page, idle: read() });
 def test_the_last_event_clock_writes_nothing_until_its_interval_runs(_tmp):
     """`app.js:113` called at wire time, or dropped."""
     report = _bar(_READ_CELL + _IMPORT + _FIRE + r"""
-const ids = drive.ids((slot) => slot.kind === 'interval');
+const live = drive.live();
 const before = cell('[data-meta="last-event"]');
-if (ids.length !== 1) { return report({ ids, before }); }
-drive.fire(ids[0]);
-report({ ids, before, after: cell('[data-meta="last-event"]') });
+if (live.length !== 1) { return report({ live, before }); }
+drive.fire(live[0].id);
+report({ live, before, after: cell('[data-meta="last-event"]') });
 """)
     assert report['before'] == 'SEED', report
-    assert report['ids'] == [1], report
+    assert report['live'] == [{'id': 1, 'kind': 'interval', 'delay': 1000}], \
+        report
     assert report['after'] == 'now', report
 
 
@@ -311,9 +342,11 @@ const id = drive.ids((slot) => slot.kind === 'interval')[0];
 if (id === undefined) { return report({ id: null }); }
 const seen = [];
 """ + ticks + r"""
-report({ id, seen });
+report({ id, seen, live: drive.live() });
 """)
     assert bands['id'] is not None, bands
+    assert bands['live'] == [{'id': 1, 'kind': 'interval', 'delay': 1000}], \
+        bands
     assert bands['seen'] == [[off, text] for off, text in _BANDS], bands
     missing = _bar(_READ_CELL + _IMPORT + _FIRE + r"""
 const id = drive.ids((slot) => slot.kind === 'interval')[0];
@@ -326,7 +359,15 @@ report({ id, text: cell('[data-meta="last-event"]') });
 
 
 def test_the_observer_activates_the_intersecting_link_nearest_the_top(_tmp):
-    """`app.js:132-133` taking the last visible or dropping the sort."""
+    """`app.js:132-133` taking the last visible or dropping the sort.
+
+    The `rootMargin` asserted below is DISPUTED, not endorsed: a -60%
+    bottom margin shrinks the root to the top 40% of the viewport, so
+    at the bottom of a long page the last section may stop being
+    highlighted. The shell cannot settle it -- its observer double
+    never reads the margin -- and it is filed as its own issue.
+    Fixing it turns the assertion red: that is it reporting that it
+    moved."""
     report = _run(_RAIL + _IMPORT + _FIRE + r"""
 const links = Array.from(document.querySelectorAll('.rail-list a'));
 const active = () => links.map((a) => a.classList.contains('active'));
@@ -405,8 +446,8 @@ def test_a_listener_added_during_a_dispatch_joins_it_in_app_js(_tmp):
     """A listener added during a dispatch joins that dispatch.
 
     `bus.emit` iterates the `Set` itself, and a `Set` iterator visits
-    entries added while it runs, so the brief's expected snapshot is
-    not what the code does. This pins what it does, and why."""
+    entries added while it runs -- so the snapshot the brief expected
+    is not what the code does. This pins what it does, and why."""
     report = _run(_IMPORT_BUS + r"""
 const order = [];
 app.bus.on(() => {
