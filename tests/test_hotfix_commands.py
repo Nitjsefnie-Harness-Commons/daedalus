@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _hotfixharness  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 
@@ -48,9 +49,7 @@ FIXTURE_VERSION = '0.00.0-fixture'
 # control anchors on. The sentence the message carries is prose: rewording it
 # is a false red, and so is anchoring on the key names the sentence happens to
 # mention, because a reword can drop those too. Node prints `name: message`
-# into the stack, so the name is the one token a reword cannot lose. The
-# corpus check before relying on it: the name occurs exactly once in the
-# double, and the double writes to stderr from exactly one site.
+# into the stack, so the name is the one token a reword cannot lose.
 CASE_SHAPE_REFUSED = 'CaseShapeRefused'
 
 
@@ -589,8 +588,27 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     Both keys are exercised with a populated and with an empty list, because
     a guard narrowed to "and the second is not empty" resolves the empty case
     silently — which is the shape this whole refusal exists to end.
+
+    The anchor's soundness rests on two conditions — the name is minted at one
+    site and the double writes to stderr from one — and neither is visible to
+    an assertion over a case's output, so both are checked here. Reading the
+    double's own source is the opposite direction from reading a subject to
+    compute an expectation: this is a PRECONDITION on a pin made over that
+    subject, and nothing below is derived from the text it reads.
     """
     del tmp
+    # PRECONDITION, not expectation: a second minting of the name would make
+    # a differently motivated refusal indistinguishable from this one, and a
+    # refusal that no longer mints it at all is the same control with
+    # nothing to anchor on. The count is in the message because either
+    # number is a failure and they are not the same one.
+    minted = Path(_hotfixharness.__file__).read_text(
+        encoding='utf-8').count(f"'{CASE_SHAPE_REFUSED}'")
+    assert minted == 1, (
+        f'the double mints {CASE_SHAPE_REFUSED} at {minted} sites, not one: '
+        f'at none there is no refusal for this control to recognise, and at '
+        f'more than one a refusal for some other shape would satisfy it. The '
+        f'double is tests/_hotfixharness.py.')
     for label, store in (('a populated store', [STORE_FIX]),
                          ('an empty store', [])):
         try:
@@ -601,10 +619,13 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
             assert len(failure.args) == 1 and len(failure.args[0]) == 3, (
                 failure)
             _returncode, _stdout, stderr = failure.args[0]
-            assert CASE_SHAPE_REFUSED in stderr, (
-                f'the case was refused over {label}, but not with a '
-                f'{CASE_SHAPE_REFUSED}, so this control cannot tell that '
-                f'refusal from a double broken for some other reason. The '
+            # `startswith`, not `in`: node's UNCAUGHT echo prints a source
+            # excerpt beginning `file:line`, so the name could otherwise
+            # arrive by a route that never ran the refusal.
+            assert stderr.startswith(CASE_SHAPE_REFUSED + ':'), (
+                f'the case was refused over {label}, but the refusal did not '
+                f'open with a {CASE_SHAPE_REFUSED}, so this control cannot '
+                f'tell it from a double broken for some other reason. The '
                 f'double said: {stderr!r}')
             continue
         raise AssertionError(
@@ -615,8 +636,14 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     # nothing, and that is not the shape this control is about. A guard that
     # refused whenever either key was present would pass both halves above.
     for named in ({'commands': []}, {'store': []}):
-        outcome = run_hotfix_case(dict(
-            {'documents': [SITE], 'ask': False, 'fixes': []}, **named))
+        try:
+            outcome = run_hotfix_case(dict(
+                {'documents': [SITE], 'ask': False, 'fixes': []}, **named))
+        except AssertionError as failure:
+            raise AssertionError(
+                f'this half exists to catch an OVER-refusal — {named} is a '
+                f'legitimate case that runs nothing, and the double refused '
+                f'it anyway: {failure}') from failure
         assert outcome['posted'] == [], (named, outcome)
         assert outcome['record'] == [], (named, outcome)
 
