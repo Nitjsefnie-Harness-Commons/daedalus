@@ -181,13 +181,16 @@ def test_virtual_clock_stops_nonzero_observable_stall(_tmp):
         except AssertionError as caught:
             failure = caught
     assert isinstance(failure, AssertionError), failure
+    # The refusal, before anything derived from it: this control's verdict is
+    # which guard fired, and a delegate reads this failure's own words.
+    message = str(failure).lower()
+    assert 'virtual clock' in message, message
+    assert 'wall' not in message, message
+    assert 'progress' in message, message
+    assert _has_numeric_token(message, str(expected_sleeps)), message
     assert tripped_at == expected_sleeps + 1, tripped_at
     assert len(events) == expected_sleeps, len(events)
     assert clock.monotonic() == origin, (clock.monotonic(), origin)
-    message = str(failure).lower()
-    assert 'virtual clock' in message, message
-    assert 'progress' in message, message
-    assert _has_numeric_token(message, str(expected_sleeps)), message
 
 
 def test_counted_runaway_outruns_real_wall_time(_tmp):
@@ -195,15 +198,19 @@ def test_counted_runaway_outruns_real_wall_time(_tmp):
 
     This drives the control issue 1190 is about rather than a copy of its
     loop, so what is pinned is that the fix is applied to that control. The
-    machine is this double's, so the verdict is not this box's.
+    machine is this double's, so the verdict is not this box's — and a failure
+    that is not the wall bound is not this control's to explain, so it is
+    re-raised in the counted control's own words.
     """
     with _wall_time_past_limit():
         try:
             test_virtual_clock_stops_nonzero_observable_stall(_tmp)
         except AssertionError as counted:
-            raise AssertionError(
-                f'the counted control failed on a slow machine: {counted}'
-            ) from counted
+            if 'wall' in str(counted).lower():
+                raise AssertionError(
+                    'the counted control lost its race to the wall bound: '
+                    f'{counted}') from counted
+            raise
 
 
 def test_virtual_clock_bounds_wait_by_real_wall_time(_tmp):
