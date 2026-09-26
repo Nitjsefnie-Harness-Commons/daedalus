@@ -35,12 +35,15 @@ _CARRIED_FIELDS = {
     ast.YieldFrom: ('value',),
 }
 
-# The leaves: the atoms `_names_one_of` and `_is_launch_value` judge, and
-# the forms that build a new value out of their operands, where a
-# launcher is transformed rather than carried and opening one would only
-# manufacture refusals.
-_LEAVES = (ast.Name, ast.Attribute, ast.Constant,
-           ast.BinOp, ast.UnaryOp, ast.Compare)
+# The atoms `_names_one_of` and `_is_launch_value` judge, and the forms
+# that build a new value out of their operands, where a launcher is
+# transformed rather than carried and opening one would only manufacture
+# refusals. The two are leaves together and are told apart wherever the
+# distinction decides something — a receiver position reads a launch
+# method off what it carries, so only an atom is excluded there.
+_ATOMS = (ast.Name, ast.Attribute, ast.Constant)
+_TRANSFORMED = (ast.BinOp, ast.UnaryOp, ast.Compare)
+_LEAVES = _ATOMS + _TRANSFORMED
 
 # What a form in neither class yields, so every arm refuses it.
 _UNRECOGNISED = object()
@@ -198,10 +201,18 @@ def _has_cwd_control(value):
 
 
 def _call_receiver_parts(value):
+    """What a call's receiver carries, a container callee aside.
+
+    An atom callee is a name or an attribute the other arms already read:
+    handing one to the walk would find a bare module name and call it a
+    launcher here, where the receiver position is the one that reads a
+    launch method off what it carries. Every other form is a form the
+    walk opens, and a launcher behind it is this arm's subject.
+    """
     callee = value.func
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         callee = callee.value
-    if isinstance(callee, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
+    if not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
 
 

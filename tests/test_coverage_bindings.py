@@ -33,6 +33,13 @@ _SUBSCRIPT_INVOKE = (
 _FORM_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_value_preserving_form_is_refused(None)')
+_RECEIVER_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_receiver_that_only_names_a_launcher_stays_clean(None)')
+_CHAIN_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_launcher_used_as_a_callee_is_reached_through_'
+    'the_chain(None)')
 
 
 def _mutation_specs():
@@ -102,9 +109,44 @@ def _mutation_specs():
         "ast.Slice: ('lower', 'upper', 'step'),",
         "ast.Slice: ('lower', 'upper'),")
     call_receiver = (
-        "    if isinstance(callee, (ast.Tuple, ast.List, ast.Set, ast.Dict)):"
-        "\n        yield from _carried_parts(callee)\n",
+        "    if not isinstance(callee, _ATOMS):\n"
+        "        yield from _carried_parts(callee)\n",
         "    if False:\n        yield from _carried_parts(callee)\n")
+    # The gate is only a narrowing: handing an atom to the walk finds a
+    # bare module name and calls it a launcher in the receiver position,
+    # which is where a direct launch must not be refused. Without this
+    # row the set proves the arm exists and not that it is shut.
+    receiver_atoms = (
+        "    if not isinstance(callee, _ATOMS):\n"
+        "        yield from _carried_parts(callee)\n",
+        "    if True:\n        yield from _carried_parts(callee)\n")
+    # The whole elif chain, so the arm is deleted rather than narrowed.
+    # One arm at a time no longer shows: the refusal branch answers for
+    # whatever the chain stops opening, so a single deleted arm reads as
+    # a stricter walk rather than a gap.
+    walk_arms = (
+        "    elif isinstance(value, (ast.Tuple, ast.List, ast.Set)):\n"
+        "        for part in value.elts:\n"
+        "            yield from _carried_parts(part)\n"
+        "    elif isinstance(value, ast.Dict):\n"
+        "        for part in [*value.keys, *value.values]:\n"
+        "            if part is not None:\n"
+        "                yield from _carried_parts(part)\n"
+        "    elif isinstance(value, ast.Subscript):\n"
+        "        yield from _carried_parts(value.value)\n"
+        "        yield from _carried_parts(value.slice)\n"
+        "    elif isinstance(value, ast.Starred):\n"
+        "        yield from _carried_parts(value.value)\n"
+        "    elif type(value) in _CARRIED_FIELDS:\n"
+        "        for field in _CARRIED_FIELDS[type(value)]:\n"
+        "            for part in _field_parts(getattr(value, field)):\n"
+        "                yield from _carried_parts(part)\n"
+        "    elif isinstance(value, _LEAVES):\n"
+        "        yield value\n"
+        "    else:\n"
+        "        yield _UNRECOGNISED\n",
+        "    else:\n        yield value\n")
+
     default_scope = (
         "            for value in (*node.args.defaults, "
         "*node.args.kw_defaults):\n"
@@ -203,16 +245,16 @@ def _mutation_specs():
          'suite.test_function_defaults_refuse_hidden_launchers(None)'),
         ('match subject', 'bindings', (match,),
          'suite.test_match_capture_refuses_a_hidden_launcher(None)'),
-        ('callee base', 'bindings', (callee,),
-         'import test_coverage_unfollowable_forms as form_suite; '
-         'form_suite.test_a_launcher_reached_only_through_a_callee_chain_is_'
-         'refused(None)'),
+        ('callee base', 'bindings', (callee,), _CHAIN_INVOKE),
         ('dict values', 'bindings', (dict_values,),
          _INLINE_INVOKE),
         ('subscript values', 'bindings', (subscript,),
          _SUBSCRIPT_INVOKE),
         ('ifexp field', 'bindings', (ifexp_field,), _FORM_INVOKE),
         ('slice field', 'bindings', (slice_field,), _FORM_INVOKE),
+        ('walk arms', 'bindings', (walk_arms,), _FORM_INVOKE),
+        ('receiver opens atoms', 'bindings', (receiver_atoms,),
+         _RECEIVER_INVOKE),
         ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),
