@@ -290,6 +290,7 @@
 !/tests/_dashdom.py
 !/tests/_dashnode.py
 !/tests/_dashsection.py
+!/tests/_dashsection_controls.py
 !/tests/_dashshell.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
