@@ -8,7 +8,11 @@ rather than a per-suite one: a suite that spawns the CLI with the runner's own
 `DAEDALUS_*` inherited, or that answers the command out of a different queue
 than the one the subcommand wrote to, is testing a bridge the operator never
 meets. So the env the CLI runs under, the token naming its queue, and the
-answer half live here, and every suite that drives the CLI reads this copy.
+answer half live here, and a suite that drives the CLI reads this copy rather
+than carrying its own. The two environments built elsewhere are named where
+they are built — tests/_overlap_clients.py and tests/test_cli_result_wait.py —
+because each strips a different set than this one.
+tests/test_cli_helpers.py pins what `cli_env` strips and sets.
 """
 import os
 import subprocess
