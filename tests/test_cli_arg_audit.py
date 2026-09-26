@@ -4,9 +4,10 @@ required and non-suppressed values. A required mutually exclusive group
 guarantees a destination only when every member stores that same non-SUPPRESS
 destination. Direct reads require GUARANTEED; guarded reads require DECLARED.
 Namespace stores are refused as namespace store escapes.
-A frame read is refused wherever it appears in the daedalus_cli package,
-including in a helper a handler calls, and every member of the interpreter's
-frame set is refused, not only the ones this file names. Aliases follow
+A frame read is refused in every statement of every daedalus_cli module the
+walk reaches, and every member of the interpreter's frame set is refused, not
+only the ones this file names. A read in a helper a handler calls is in that
+domain; a read in a module the walk does not reach is not. Aliases follow
 prefixes; headers use outer scope. Other parameters escape."""
 import argparse
 import ast
@@ -145,8 +146,9 @@ def _frame_escapes(node, scope, handler_globals, key, label, found):
         if resolver.reads_frame_namespace(selection, origin) is not None:
             found.append(f'{label}: {ast.unparse(selection)}')
             return
-    if isinstance(node, _SCOPES) and getattr(node, 'name', None):
-        label, scope = f'{label}.{node.name}', node
+    name = getattr(node, 'name', None) if isinstance(node, _SCOPES) else None
+    if name:
+        label, scope = f'{label}.{name}', node
     for child in ast.iter_child_nodes(node):
         _frame_escapes(child, scope, handler_globals, key, label, found)
 
