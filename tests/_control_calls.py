@@ -21,6 +21,23 @@ _PURE_IMPORTS = frozenset({
     ('_control_writes', 'control_write_violations'),
     ('_coverage_guard', '_coverage_environment_violations'),
     ('_coverage_guard', '_synthetic_violations'),
+    # The planted sources and expected verdicts moved here out of the
+    # suites that grew them; every one of these only reads text.
+    ('_binding_assertions', '_assert_binding_pair'),
+    ('_binding_assertions', '_binding_violation'),
+    ('_binding_assertions', '_scope_cases'),
+    ('_binding_assertions', '_scope_violations'),
+    ('_binding_assertions', '_rebound_owner'),
+    ('_binding_assertions', '_unresolved_dict'),
+    # The cache-boundary engine reads and parses workflow text and asserts;
+    # nothing in it writes.
+    ('_workflow_cache_boundary', '_assert_writer_inventory'),
+    ('_workflow_cache_boundary', '_cache_to_records'),
+    ('_workflow_cache_boundary', '_cache_write_reason'),
+    ('_workflow_cache_boundary', '_cache_writing_jobs'),
+    ('_workflow_cache_boundary', '_direct_cache_run'),
+    ('_workflow_cache_boundary', '_insert_wheel_step'),
+    ('_workflow_cache_boundary', '_real_step'),
 })
 _PURE_METHODS = frozenset({
     'append', 'count', 'decode', 'encode', 'endswith', 'glob', 'index',
@@ -36,7 +53,10 @@ _WRITER_METHODS = {'write_bytes': (None, None), 'write_text': (None, None),
                    '_runner_tree': (None, 0)}
 _WRITER_MODULE_CALLS = {'_util.load': (None, 0),
                         'subprocess.run': ('cwd', None)}
-_WRITER_IMPORTS = {('_owned_writes', 'copy_test_tree'): ('root', 0),
+# The mutation sweep writes into the tree it copies under the directory
+# it is handed, exactly as the two rows below do.
+_WRITER_IMPORTS = {('_mutation_sweep', 'mutation_sweep'): (None, 0),
+                   ('_owned_writes', 'copy_test_tree'): ('root', 0),
                    ('_owned_writes', 'clear_bytecode'): ('root', 0)}
 
 

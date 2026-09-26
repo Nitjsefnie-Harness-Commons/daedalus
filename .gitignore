@@ -259,6 +259,7 @@
 !/tests/
 !/tests/_argv_read.py
 !/tests/_bash_resolver_scan.py
+!/tests/_binding_assertions.py
 !/tests/_bound_site_rows.py
 !/tests/_boundary.py
 !/tests/_boundary_env.py
@@ -285,6 +286,7 @@
 !/tests/_coverage_comment_workflow.py
 !/tests/_coverage_guard.py
 !/tests/_coverage_memo.py
+!/tests/_coverage_mutation_specs.py
 !/tests/_coverage_scopes.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
@@ -333,6 +335,7 @@
 !/tests/_mcp_load.py
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_transport_probes.py
+!/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
@@ -397,6 +400,7 @@
 !/tests/_worker_routes.py
 !/tests/_worker_runtime.py
 !/tests/_worker_sources.py
+!/tests/_workflow_cache_boundary.py
 !/tests/_workflowrun.py
 !/tests/_workflows.py
 !/tests/_yamllines.py

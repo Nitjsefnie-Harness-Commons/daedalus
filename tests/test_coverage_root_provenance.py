@@ -5,20 +5,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _binding_assertions import _rebound_owner  # noqa: E402
+from _coverage_mutation_specs import (  # noqa: E402
+    _DECLARED_FORMS, _DERIVATION, _DERIVATIONS,
+    _PERMITTED_BINDINGS, _ROOT_BINDING_FORMS)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings, _scope_shadows, _shadowed_names)
-from test_coverage_scope_bindings import _rebound_owner  # noqa: E402
 
 
 _PRELUDE = ('import os\nimport subprocess\nfrom _repo import ROOT\n'
             'from pathlib import Path\n')
-_DECLARED_FORMS = (
-    ('ROOT', 'from _repo import ROOT', 'ROOT = other', 'ROOT'),
-    ('str', 'str = str', 'from helpers import str', 'str(ROOT)'),
-    ('Path', 'from pathlib import Path', 'from helpers import Path', 'ROOT'),
-)
-_DERIVATION = 'ROOT = Path(__file__).resolve().parents[1]\n'
 
 
 def _declared_source(declaration, name, seed, binding):
@@ -91,31 +88,6 @@ def test_import_markers_reach_the_declared_destination(tmp):
 
 _ROOT_PREFIX = ('import os\nimport subprocess\nimport _util\n'
                 'ROOT = _util.ROOT\n')
-_ROOT_BINDING_FORMS = (
-    ('for', 'for ROOT in items:\n    pass\n'),
-    ('walrus', '(ROOT := other)\n'),
-    ('with', 'with manager as ROOT:\n    pass\n'),
-    ('except', 'try:\n    pass\nexcept Exception as ROOT:\n    pass\n'),
-    ('match-as', 'match value:\n    case ROOT:\n        pass\n'),
-    ('match-star', 'match value:\n    case [*ROOT]:\n        pass\n'),
-    ('match-rest', 'match value:\n    case {**ROOT}:\n        pass\n'),
-    ('comprehension', '[ROOT for ROOT in items]\n'),
-    ('del', 'del ROOT\n'),
-    ('augmented', 'ROOT += other\n'),
-    ('function', 'def ROOT():\n    pass\n'),
-    ('async-function', 'async def ROOT():\n    pass\n'),
-    ('class', 'class ROOT:\n    pass\n'),
-    ('parameter', 'def f(ROOT):\n    pass\n'),
-    ('vararg', 'def f(*ROOT):\n    pass\n'),
-    ('kwarg', 'def f(**ROOT):\n    pass\n'),
-    ('import', 'import helpers as ROOT\n'),
-    ('from-alias', 'from helpers import other as ROOT\n'),
-    ('same-name-alias', 'from helpers import ROOT as ROOT\n'),
-    ('mixed-import', 'from helpers import ROOT, other as ROOT\n'),
-    ('star-import', 'from helpers import *\n'),
-    ('uninitialized-annotation', 'ROOT: object\n'),
-    ('unaccepted-assignment', 'ROOT = other\n'),
-)
 
 
 def _assert_root_binding_site(form):
@@ -206,26 +178,6 @@ def test_root_alias_owner_and_bare_roles_reach_both_consumers(tmp):
 
 
 # Other-scope bindings and Path names unread by owners leave module ROOT alone.
-_PERMITTED_BINDINGS = (
-    ('owner', 'ROOT', 'local_store', 'def unused():\n    ROOT = other\n'),
-    ('constructor', 'ROOT', 'local_store',
-     'def unused():\n    ROOT = other\n'),
-) + tuple(('owner', 'Path', name, binding) for name, binding in (
-    ('parameter', 'def unused(Path):\n    pass\n'),
-    ('vararg', 'def unused(*Path):\n    pass\n'),
-    ('kwarg', 'def unused(**Path):\n    pass\n'),
-    ('local_store', 'def unused():\n    Path = other\n'),
-    ('comprehension', '[Path for Path in items]\n'),
-    ('module_store', 'Path = other\n'),
-    ('module_annotation', 'Path: object\n'),
-    ('global_store', 'def unused():\n    global Path\n    Path = other\n'),
-))
-_DERIVATIONS = {
-    'owner': 'import _util\nROOT = _util.ROOT\n',
-    'constructor': 'from pathlib import Path\n' + _DERIVATION,
-}
-
-
 def _permitted_transitions():
     for derivation, name, form, binding in _PERMITTED_BINDINGS:
         prefix = 'import os\nimport subprocess\n'
@@ -257,234 +209,6 @@ def test_permitted_root_transitions_keep_refusing_twins(tmp):
     for name in ('ROOT', 'Path'):
         for consumer in ('cwd', 'chdir'):
             _assert_permitted_transitions(name, consumer)
-
-
-_INVOKE = 'import test_coverage_root_provenance as root_suite; '
-_ROUTING = (
-    "    return _routed_bindings(shadows, destinations)\n",
-    "    return shadows\n")
-_ROOT_PROVENANCE_MUTATIONS = (
-    ('global shadows reach explicit cwd', 'scopes', (_ROUTING,),
-     _INVOKE + 'root_suite.test_declared_bindings_reach_explicit_cwd(None)'),
-    ('global shadows reach chdir', 'scopes', (_ROUTING,),
-     _INVOKE + 'root_suite.test_declared_bindings_reach_chdir(None); '
-     "root_suite._assert_declared_destination('global', 1)"),
-    ('global import shadows reach root assignments', 'scopes',
-     (("    names = _routed_bindings(imports, destinations)[tree]\n",
-       "    names = imports[tree]\n"),),
-     _INVOKE + 'root_suite.test_declared_bindings_reach_explicit_cwd(None)'),
-    ('global destinations are shared', 'scopes',
-     (("    destinations = {scope: dict.fromkeys(names, module)\n",
-       "    destinations = {scope: {}\n"),),
-     _INVOKE + 'root_suite.test_import_markers_reach_the_'
-     'declared_destination(None)'),
-    ('nonlocal destinations are shared', 'scopes',
-     (("            destinations[scope][name] = module "
-       "if target is None else target\n",
-       "            destinations[scope][name] = scope\n"),),
-     _INVOKE + 'root_suite.test_import_markers_reach_the_'
-     'declared_destination(None)'),
-) + tuple(
-    (f'{declaration} {name} routes its proof role', 'scopes',
-     (("            target = destinations[scope].get("
-       "name.removesuffix('()'), scope)\n",
-       "            target = scope\n" if name == 'ROOT' else
-       "            target = destinations[scope].get(name, scope)\n"),),
-     _INVOKE + f'root_suite._assert_declared_destination('
-     f'{declaration!r}, {form})')
-    for declaration in ('global', 'nonlocal')
-    for form, (name, _, _, _) in enumerate(_DECLARED_FORMS))
-
-
-_NAME_BINDING = (
-    "    if (isinstance(node, ast.Name)\n"
-    "            and isinstance(node.ctx, (ast.Store, ast.Del))):\n"
-    "        return {node.id}\n")
-_DEFINITION_BINDING = (
-    "    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, "
-    "ast.ClassDef,\n                         *_TYPE_PARAMETERS)):\n")
-_PATTERN_BINDING = (
-    "    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, "
-    "ast.MatchStar)):\n")
-_SITE_MUTANTS = {
-    'name': (_NAME_BINDING, ''),
-    'scope': ("                if self.destinations[scope].get('ROOT', scope) "
-              "is self.tree\n", "                if True\n"),
-    'annotation': ("                and node not in annotations}\n",
-                   "                }\n"),
-    'del': (_NAME_BINDING, _NAME_BINDING.replace(
-        '(ast.Store, ast.Del)', 'ast.Store')),
-    'parameter': ("    if isinstance(node, ast.arg):\n"
-                  "        return {node.arg}\n", ''),
-    'import': ("    if isinstance(node, (ast.Import, ast.ImportFrom)):\n"
-               "        return {_import_bound_name(node, alias) "
-               "for alias in node.names}\n", ''),
-    'same-name-alias': (
-        "        return (alias.name == 'ROOT'\n"
-        "                and alias.asname in (None, alias.name))\n",
-        "        return alias.name == 'ROOT' and alias.asname is None\n"),
-    'star-import': ("        if not _bound_names(node) "
-                    "& {'ROOT', _ALL_NAMES}:\n",
-                    "        if 'ROOT' not in _bound_names(node):\n"),
-    'match-rest': ("    if isinstance(node, ast.MatchMapping):\n"
-                   "        return {node.rest} if node.rest else set()\n", ''),
-    'unaccepted-assignment': (
-        "            and all(_is_repository_root_binding(value, owners, "
-        "names)\n"
-        "                    for value in root_values.values())):\n",
-        "            ):\n"),
-}
-_SITE_MUTANTS.update(
-    (name, (needle, needle.replace(kind + ', ', '').replace(', ' + kind, '')))
-    for name, needle, kind in (
-        ('function', _DEFINITION_BINDING, 'ast.FunctionDef'),
-        ('async-function', _DEFINITION_BINDING, 'ast.AsyncFunctionDef'),
-        ('class', _DEFINITION_BINDING, 'ast.ClassDef'),
-        ('except', _PATTERN_BINDING, 'ast.ExceptHandler'),
-        ('match-as', _PATTERN_BINDING, 'ast.MatchAs'),
-        ('match-star', _PATTERN_BINDING, 'ast.MatchStar')))
-_SITE_KINDS = {
-    'comprehension': 'scope', 'parameter': 'scope',
-    'vararg': 'scope', 'kwarg': 'scope',
-    'uninitialized-annotation': 'annotation',
-    'from-alias': 'import', 'same-name-alias': 'same-name-alias',
-    'mixed-import': 'import',
-}
-_ROOT_PROVENANCE_MUTATIONS += tuple(
-    (f'ROOT census includes {name}', 'scopes',
-     (_SITE_MUTANTS[_SITE_KINDS.get(
-         name, name if name in _SITE_MUTANTS else 'name')],),
-     _INVOKE + f'root_suite._assert_root_binding_site({form})')
-    for form, (name, _) in enumerate(_ROOT_BINDING_FORMS)) + (
-        ('ROOT census excludes accepted assignment targets', 'scopes',
-         (("        if node in assignments:\n            continue\n", ''),),
-         _INVOKE + 'root_suite.test_only_accepted_root_bindings_'
-         'discard_the_shadow(None)'),
-        ('ROOT census allows literal imports', 'scopes',
-         (("                or _canonical_import(node, alias, 'ROOT')\n",
-           "                or False\n"),),
-         _INVOKE + 'root_suite.test_only_accepted_root_bindings_'
-         'discard_the_shadow(None)'),
-        ('ROOT census ignores nonbinding nodes', 'scopes',
-         (("        if not _bound_names(node) & {'ROOT', _ALL_NAMES}:\n"
-           "            continue\n", ''),),
-         _INVOKE + 'root_suite.test_only_accepted_root_bindings_'
-         'discard_the_shadow(None)'),
-        ('ROOT census gates the assignment exemption', 'scopes',
-         (("            and not _other_root_bindings(facts, root_values)\n",
-           ''),),
-         _INVOKE + 'root_suite.test_every_root_binding_site_'
-         'must_be_accepted(None)'),
-)
-
-
-_ROOT_PROVENANCE_MUTATIONS += ((
-    ('type parameters enter the shared shadow census', 'scopes',
-     (("                         *_TYPE_PARAMETERS)):\n",
-       "                         )):\n"),),
-     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
-     'proof_role(None)'),
-    ('root proofs use annotation scopes', 'scopes',
-     (("def _evaluation_scopes(tree, type_scopes=True):\n",
-       "def _evaluation_scopes(tree, type_scopes=False):\n"),),
-     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
-     'proof_role(None)'),
-    ('parameters enter their binding scope', 'scopes',
-     (("            scoped.append((argument, binding_scope))\n", ''),),
-     _INVOKE + 'root_suite.test_import_markers_reach_the_'
-     'declared_destination(None); '
-     'import test_coverage_name_bindings as names; '
-     'names.test_every_grammar_binding_removes_only_its_builtin_'
-     'exemption(None)'),
-) if hasattr(ast, 'TypeVar') else ())
-
-_ROOT_PROVENANCE_MUTATIONS += ((
-    ('scoped shadows read the binding census', 'scopes',
-     (("            shadows[scope].update(_bound_names(node))\n",
-       "            pass\n"),),
-     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
-     'proof_role(None)'),
-    ('aggregate shadows read the binding census', 'scopes',
-     (("    names = set().union(*(_bound_names(node) "
-       "for node in memo_nodes(tree)\n"
-       "                          if not isinstance(node, (ast.Import,\n"
-       "                                                   ast.ImportFrom))))"
-       "\n", "    names = set()\n"),),
-     _INVOKE + 'root_suite.test_type_parameters_shadow_each_root_'
-     'proof_role(None)'),
-) if hasattr(ast, 'TypeVar') else ())
-
-_ROOT_PROVENANCE_MUTATIONS += (
-    ('ROOT assignments use their destination scope', 'scopes',
-     (("                if target in self.root_scope_nodes}\n",
-       "                }\n"),),
-     _INVOKE + 'root_suite.test_local_root_bindings_leave_the_module_'
-     'root_alone(None)'),
-    ('ROOT census resolves global destinations', 'scopes',
-     (("                if self.destinations[scope].get('ROOT', scope) "
-       "is self.tree\n", "                if scope is self.tree\n"),),
-     _INVOKE + 'root_suite.test_local_root_bindings_leave_the_module_'
-     'root_alone(None)'),
-)
-
-_ROOT_PROVENANCE_MUTATIONS += (
-    ('ROOT imports preserve the owner role', 'scopes',
-     (("                              if bound in {'Path', 'str', 'ROOT'} "
-       "else bound)\n",
-       "                              if bound in {'Path', 'str'} "
-       "else bound)\n"),),
-     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
-     'reach_both_consumers(None)'),
-    ('absent bare ROOT leaves the owner role alone', 'scopes',
-     (("        names.add('ROOT()')\n", "        names.add('ROOT')\n"),),
-     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
-     'reach_both_consumers(None)'),
-    ('bare ROOT consults its proof marker', 'scopes',
-     (("        return 'ROOT()' not in shadowed_names\n",
-       "        return True\n"),),
-     _INVOKE + 'root_suite.test_root_alias_owner_and_bare_roles_'
-     'reach_both_consumers(None)'),
-)
-
-
-_ROOT_PROVENANCE_MUTATIONS += (
-    ('owner derivations ignore Path shadows', 'scopes',
-     (("            and '_util' not in names\n",
-       "            and not {'Path', 'Path()', '_util'} & names\n"),),
-     'import test_coverage_scope_bindings as scope; '
-     'scope.test_owner_derivation_does_not_depend_on_path(None)'),
-)
-
-
-_ROOT_PROVENANCE_MUTATIONS += (
-    ('chdir keeps aggregate shadows beside scoped imports', 'guard',
-     (("                                   node.args[0], self.shadowed_names\n"
-       "                                   | _visible_scope_shadows(\n",
-       "                                   node.args[0], "
-       "_visible_scope_shadows(\n"),),
-     'import test_coverage_scope_bindings as scope; '
-     'scope.test_chdir_keeps_aggregate_binding_refusals(None)'),
-)
-
-
-_ROOT_PROVENANCE_MUTATIONS += tuple(
-    (f'permitted {name} transitions through {consumer}', 'scopes',
-     (("                if target in self.root_scope_nodes}\n",
-       "                }\n") if name == 'ROOT' else
-      ("            and '_util' not in names\n",
-       "            and not {'Path', 'Path()', '_util'} & names\n"),),
-     _INVOKE + f'root_suite._assert_permitted_transitions('
-     f'{name!r}, {consumer!r})')
-    for name in ('ROOT', 'Path') for consumer in ('cwd', 'chdir'))
-_ROOT_PROVENANCE_MUTATIONS += tuple(
-    (f'permitted transitions retain refusing twins through {consumer}',
-     'scopes', (("    if any(isinstance(part, ast.Name) "
-                 "and part.id in shadowed_names\n"
-                 "           for part in ast.walk(node)):\n"
-                 "        return False\n", ''),),
-     _INVOKE + f'root_suite._assert_permitted_transitions('
-     f"'ROOT', {consumer!r})")
-    for consumer in ('cwd', 'chdir'))
 
 
 if __name__ == '__main__':
