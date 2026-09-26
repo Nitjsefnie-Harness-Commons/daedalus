@@ -117,46 +117,32 @@ def _origin(node, function, handler_globals):
         node, function, handler_globals, resolver.UNPROVEN, _scope_binds)
 
 
-def _is_getattr(node, function, handler_globals):
-    """Whether a callee is the builtin ``getattr`` the audit can prove."""
-    return resolver.is_builtin_reference(
-        node, 'getattr', function, handler_globals, _scope_binds,
-        _comprehension_shadows)
-
-
-def _frame_receiver(node, function, handler_globals):
-    """The receiver of a frame read the audit cannot account for, or None.
+def _frame_escapes(node, function, handler_globals, key, label, found):
+    """Report every frame read in a callable, helpers and methods included.
 
     The one place the rule is applied, so the package walk and the per-handler
-    walk cannot drift into two different rules.
-    """
-    read = resolver.frame_read(
-        node, lambda callee: _is_getattr(callee, function, handler_globals))
-    if read is None:
-        return None
-    return resolver.reads_frame_namespace(
-        read, _origin(read[1], function, handler_globals))
-
-
-def _frame_escapes(node, function, handler_globals, label, found):
-    """Report every frame read in a callable, helpers and methods included.
+    walk cannot drift into two different rules. ``key`` is the name the audited
+    namespace is stored under: the handler's own parameter here, and for the
+    package walk the same name read off the dispatch table.
 
     One read reports once: the walk stops descending as soon as a node is
     refused, so a line that both selects a member and subscripts it is not
     counted twice.
     """
-    receiver = _frame_receiver(node, function, handler_globals)
+    receiver = resolver.frame_read(node, key)
     if receiver is not None:
-        found.append(f'{label}: {ast.unparse(receiver)}')
-        return
+        origin = _origin(receiver, function, handler_globals)
+        if resolver.reads_frame_namespace(receiver, origin) is not None:
+            found.append(f'{label}: {ast.unparse(receiver)}')
+            return
     for child in ast.iter_child_nodes(node):
-        _frame_escapes(child, function, handler_globals, label, found)
+        _frame_escapes(child, function, handler_globals, key, label, found)
 
 
-def frame_namespace_escapes(function, handler_globals, label):
+def frame_namespace_escapes(function, handler_globals, label, key):
     _attach_parents(function)
     found = []
-    _frame_escapes(function, function, handler_globals, label, found)
+    _frame_escapes(function, function, handler_globals, key, label, found)
     return found
 
 
@@ -195,8 +181,10 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
                 _comprehension_shadows):
             violations.append(f'namespace escape: {ast.unparse(node)}')
             return
-        receiver = _frame_receiver(node, function, handler_globals)
-        if receiver is not None:
+        receiver = resolver.frame_read(node, args_name)
+        if (receiver is not None and resolver.reads_frame_namespace(
+                receiver, _origin(receiver, function, handler_globals))
+                is not None):
             violations.append(f'namespace escape: {ast.unparse(receiver)}')
             return
         if isinstance(node, ast.Name) and node.id == args_name:
@@ -224,14 +212,15 @@ def _handler_arg_violations(function, args_name, declared, guaranteed,
     return reads, violations
 
 
-def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None):
+def _audit_fake_handler(body, dests=('cmd', 'json'), present=None, scope=None,
+                        parameter='args'):
     present = dests if present is None else present
     if scope is None:
         scope = {**globals(), 'builtins': sys.modules['builtins']}
     function = ast.parse(
-        'def fake(args):\n' + textwrap.indent(body, '    ')).body[0]
+        f'def fake({parameter}):\n' + textwrap.indent(body, '    ')).body[0]
     _, violations = _handler_arg_violations(
-        function, 'args', set(dests), set(present), scope)
+        function, parameter, set(dests), set(present), scope)
     return violations
 
 
@@ -239,41 +228,62 @@ CLI_PACKAGE = _util.ROOT / 'daedalus_cli'
 
 
 def _package_callables(tree):
-    """Yield every callable the package defines, outermost first.
+    """Yield every callable the module defines, outermost first.
 
-    Outermost first because a callable's own walk descends into the ones it
-    contains; a module-level function and the method of a module-level class
-    are the two places the package defines one.
+    A callable is in the domain when no callable encloses it, so a
+    module-level lambda, a method of a class nested in the module, and a def
+    under a module-level if are all yielded; one defined inside another
+    callable is not, because that callable's own walk descends into it. The
+    test is the grammar's callable node types, not the module body's shape, so
+    a new binding form does not need a new arm here.
     """
     callables = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-    for node in tree.body:
-        if isinstance(node, callables):
-            yield node
-        elif isinstance(node, ast.ClassDef):
-            for member in node.body:
-                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    yield member
+    pending = [tree]
+    while pending:
+        for child in ast.iter_child_nodes(pending.pop()):
+            if isinstance(child, callables):
+                yield child
+            else:
+                pending.append(child)
 
 
-def package_frame_escapes(overrides=None):
+def audited_namespace_key():
+    """The name the audited namespace is stored under, read off the handlers.
+
+    The handler walk takes it from each handler's own AST. The package walk has
+    no handler in hand, so it reads the same name from the dispatch table and
+    asserts the table agrees with itself rather than naming a parameter here.
+    """
+    from daedalus_cli.cli import DISPATCH
+    names = {next(iter(inspect.signature(handler).parameters))
+             for handler in DISPATCH.values()}
+    assert len(names) == 1, f'handlers disagree on the namespace name: {names}'
+    return names.pop()
+
+
+def package_frame_escapes(overrides=None, extra_globals=None):
     """Refuse a frame read anywhere in the CLI package, helper included.
 
     The domain is every module of the package rather than one handler's body,
-    so a read inside a helper a handler calls is refused even when the
-    handler names no frame itself. ``overrides`` substitutes a module's
-    source, which is how the plant control runs the rule over real code it
-    has altered; names the altered source adds stay unproven, and an
-    unproven receiver is what the rule refuses.
+    so a read inside a helper a handler calls is refused even when the handler
+    names no frame itself. ``overrides`` substitutes a module's source, which
+    is how the plant control runs the rule over real code it has altered;
+    names the altered source adds stay unproven, and an unproven receiver is
+    what the rule refuses. ``extra_globals`` adds bindings a real module would
+    hold and an altered source cannot, which drives a resolved receiver.
     """
+    key = audited_namespace_key()
     escapes = []
     for path in sorted(CLI_PACKAGE.glob('*.py')):
         name = path.stem
         source = (overrides or {}).get(name) or path.read_text(
             encoding='utf-8')
-        module_globals = vars(importlib.import_module(f'daedalus_cli.{name}'))
+        imported = vars(importlib.import_module(f'daedalus_cli.{name}'))
+        module_globals = {**imported, **(extra_globals or {}).get(name, {})}
         for function in _package_callables(ast.parse(source)):
+            label = f'{name}.{getattr(function, "name", "<lambda>")}'
             escapes.extend(frame_namespace_escapes(
-                function, module_globals, f'{name}.{function.name}'))
+                function, module_globals, label, key))
     return escapes
 
 
@@ -495,7 +505,7 @@ def test_cli_audit_refuses_reflective_namespace_access(tmp):
 
 
 def test_cli_audit_resolver_only_resolves_exact_module_vars(tmp):
-    resolver.assert_exact_class_vars()
+    resolver.assert_exact_module_vars()
 
 
 def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
@@ -507,11 +517,30 @@ def test_cli_audit_refuses_a_frame_read_on_a_proven_receiver(tmp):
     """
     scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler("ROUTES['f_locals']", scope=scope) == []
-    scope = {'ROUTES': {'f_locals': 1}, **globals()}
     assert _audit_fake_handler('ROUTES.f_locals', scope=scope) == []
-    # The call carrier is gated on a proven builtin getattr, so the same
-    # member-name shape on any other callee stays correct code.
+    # A call's second argument names a member, not a mapping key, so the
+    # shape that reads a path is not a namespace read.
     assert _audit_fake_handler("api('GET', 'args')", scope=scope) == []
+
+
+def test_cli_audit_reads_the_namespace_key_from_the_handler(tmp):
+    """The mapping key the frame rule uses is the handler's parameter.
+
+    The frame rule takes the key as a parameter rather than naming it, so a
+    handler whose parameter is called something else is judged by that name.
+    If the rule ever hard-codes ``args`` again, the first pair below fails.
+    """
+    for parameter in ('args', 'namespace'):
+        read = f"holder = helper()\n_ = holder['{parameter}'].undeclared_probe"
+        assert _audit_fake_handler(
+            read, parameter=parameter) == ['namespace escape: holder'], (
+                parameter, read)
+        other = ("holder = helper()\n_ = holder['args']"
+                 ".undeclared_probe")
+        assert _audit_fake_handler(
+            other, parameter=parameter) == (
+            [] if parameter != 'args' else ['namespace escape: holder']), (
+                parameter, other)
 
 
 def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):
@@ -520,25 +549,22 @@ def test_cli_audit_refuses_frame_namespaces_in_the_real_package(tmp):
 
 
 def test_cli_audit_refuses_every_frame_namespace_plant(tmp):
-    """Each plant, spliced into the real handler module, is refused once.
-
-    The plants are run against the real ``commands_eval.py`` with the real
-    package walk, not against a synthetic tree, so a rule that only fires on
-    a fixture's shape cannot pass this.
-    """
+    """Each plant, spliced into the real handler module, is refused once."""
     base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
-    for name, prelude, anchor, replacement, receiver in \
-            audit_support.FRAME_NAMESPACE_PLANTS:
-        source = base
-        if prelude:
-            assert source.count('import json\n') == 1, name
-            source = source.replace(
-                'import json\n', 'import json\n' + prelude, 1)
-        assert source.count(anchor) == 1, name
-        escapes = package_frame_escapes(
-            {'commands_eval': source.replace(anchor, replacement, 1)})
-        assert len(escapes) == 1, (name, escapes)
-        assert escapes[0].endswith(f': {receiver}'), (name, escapes)
+    audit_support.assert_every_frame_namespace_plant_refused(
+        package_frame_escapes, base)
+
+
+def test_cli_audit_refuses_every_frame_member_the_interpreter_carries(tmp):
+    base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
+    audit_support.assert_every_frame_member_refused(
+        package_frame_escapes, base)
+
+
+def test_cli_audit_refuses_a_resolved_frame_receiver(tmp):
+    base = (CLI_PACKAGE / 'commands_eval.py').read_text(encoding='utf-8')
+    audit_support.assert_resolved_frame_receiver_refused(
+        package_frame_escapes, base, sys._getframe())
 
 
 def test_cli_audit_respects_comprehension_shadowing(tmp):

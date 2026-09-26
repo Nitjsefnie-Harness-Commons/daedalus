@@ -17,6 +17,7 @@ import contextlib
 import io
 import os
 import sys
+import types
 from unittest import mock
 import _cli_arg_audit_resolver as resolver
 
@@ -311,7 +312,97 @@ FRAME_NAMESPACE_PLANTS = (
      'def do_reload(args):\n'
      '    _ = _Reach().namespace().undeclared_probe\n',
      'sys._getframe(2).f_locals'),
+    ('module-level lambda',
+     "_namespace = lambda: sys._getframe(1).f_locals['args']\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    _ = _namespace().undeclared_probe\n',
+     'sys._getframe(1).f_locals'),
+    ('method of a class nested in the module',
+     'class _Outer:\n    class _Inner:\n        def ns(self):\n'
+     "            return sys._getframe(2).f_locals['args']\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n'
+     '    _ = _Outer._Inner().ns().undeclared_probe\n',
+     'sys._getframe(2).f_locals'),
+    ('def under a module-level if',
+     'if True:\n    def _helper():\n'
+     "        return sys._getframe(1).f_locals['args']\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    return _helper().undeclared_probe\n',
+     'sys._getframe(1).f_locals'),
+    ('callee the audit cannot prove', '', 'def do_reload(args):\n',
+     'def do_reload(args):\n'
+     '    getattr = object.__getattribute__\n'
+     "    _ = getattr(sys._getframe(), 'f_locals').get('undeclared_probe')\n",
+     'sys._getframe()'),
+    ('mapping key, no member selected', '', 'def do_reload(args):\n',
+     'def do_reload(args):\n    holder = helper()\n'
+     "    _ = holder['args'].undeclared_probe\n", 'holder'),
 )
+
+
+CLI_ANCHOR = 'def do_reload(args):\n'
+_FRAME_DESCRIPTORS = (types.GetSetDescriptorType, types.MemberDescriptorType)
+# Computed from the interpreter, never read out of the resolver: a hand-written
+# set that dropped members has to fail the loop below, not pass it quietly.
+FRAME_MEMBERS = tuple(sorted(
+    name for name, member in vars(types.FrameType).items()
+    if isinstance(member, _FRAME_DESCRIPTORS)))
+
+
+def plant_in_reload(base, replacement, prelude=''):
+    """Splice a replacement for the real do_reload into the real module."""
+    source = base
+    if prelude:
+        assert source.count('import json\n') == 1, prelude
+        source = source.replace('import json\n', 'import json\n' + prelude, 1)
+    assert source.count(CLI_ANCHOR) == 1, replacement
+    return source.replace(CLI_ANCHOR, replacement, 1)
+
+
+def assert_every_frame_namespace_plant_refused(read_module, base):
+    """Each plant, spliced into the real handler module, is refused once.
+
+    The plants run against the real ``commands_eval.py`` through the real
+    package walk, not against a synthetic tree, so a rule that only fires on a
+    fixture's shape cannot pass this.
+    """
+    for name, prelude, _anchor, replacement, receiver in \
+            FRAME_NAMESPACE_PLANTS:
+        escapes = read_module(
+            {'commands_eval': plant_in_reload(base, replacement, prelude)})
+        assert len(escapes) == 1, (name, escapes)
+        assert escapes[0].endswith(f': {receiver}'), (name, escapes)
+
+
+def assert_every_frame_member_refused(read_module, base):
+    """Each member types.FrameType carries, planted, is refused once.
+
+    The member list is this module's own reading of the interpreter, so
+    replacing the resolver's derivation with a short literal drops the members
+    it lost and fails here — which is the control the closed-domain claim
+    needs and a hand run of the same loop is not.
+    """
+    for member in FRAME_MEMBERS:
+        body = (f'def do_reload(args):\n    _ = sys._getframe(1).{member}'
+                "['undeclared_probe']\n")
+        escapes = read_module({'commands_eval': plant_in_reload(base, body)})
+        assert escapes == ['commands_eval.do_reload: sys._getframe(1)'], (
+            member, escapes)
+
+
+def assert_resolved_frame_receiver_refused(read_module, base, frame):
+    """A receiver the audit resolves to a live frame is refused on that count.
+
+    The only case in which a name the audit CAN see still has to be refused,
+    and the one that keeps the frame-type test load-bearing.
+    """
+    body = ("def do_reload(args):\n"
+            "    _ = HELD.f_locals.get('args').undeclared_probe\n")
+    escapes = read_module(
+        {'commands_eval': plant_in_reload(base, body)},
+        extra_globals={'commands_eval': {'HELD': frame}})
+    assert escapes == ['commands_eval.do_reload: HELD'], escapes
 
 
 def assert_inner_scope_bindings(audit_handler):
