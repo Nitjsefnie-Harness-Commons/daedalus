@@ -23,6 +23,7 @@ those are on disk -- which is the half of it that a data file alone
 cannot settle.
 """
 import difflib
+import json
 import re
 import sys
 from pathlib import Path
@@ -119,37 +120,92 @@ def assert_the_generator_wrote_the_basis(tmp, data):
 
 
 def verify_recorded_count(data, runs_root):
-    """Re-derive the recorded cell count from the downloaded runs.
+    """Re-derive the recorded cell count from the run the FILE names.
 
     The count is the one clause the byte compare reads out of the file
-    rather than out of the runs, so this is the half that closes. It
-    uses the refresher's OWN `discover_runs` and `select` -- the same
-    two calls `refresh()` makes before it attaches a basis -- rather
-    than a second implementation of the selection, and it never writes.
+    rather than out of the runs, so this is the half that closes. The
+    run it asks about is the one `data['measured_from']` names FIRST,
+    which is exactly the `selected[0]` the refresher attached the basis
+    from (`refresh_timings.py:388-389` writes the run ids and counts the
+    same entry) -- and NOT whatever the runs root selects today.
 
-    Returns a one-line report of what it did, including when it could
-    do nothing, so the caller can print it and a skip is visible rather
-    than silent. Raises AssertionError only where it had both numbers
-    and they disagree.
+    Asking about a re-selection instead compares the file with a run it
+    was never written from, and there is a reachable shape of that: a
+    newer run carrying a cell with head rounds and a reference reading
+    but no suite summaries changes no weight and adds no suite, so the
+    refresher correctly writes nothing, the file stays byte-identical
+    and correct for its own provenance, and a re-selection counts the
+    newer run's larger cell set and disagrees with a file it never
+    wrote. That is a false red in the one job this runs in. Resolving
+    the run the file names removes the class, not the instance.
+
+    Discovery and the per-run parse are the refresher's own
+    (`discover_runs`, `read_run`), and nothing here writes.
+
+    Returns a one-line report of what it did, including every way it
+    could do nothing, so the caller can print it and a skip is visible
+    rather than silent. Raises AssertionError only where it had both
+    numbers and they disagree.
     """
     if not runs_root.is_dir():
         return (f'no runs root at {runs_root}: the recorded cell count went '
                 f'UNCHECKED here')
+    named = data['measured_from'].split(',')[0].strip()
     refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
                          'refresh_timings')
-    selected, report = refresh.select(refresh.discover_runs(runs_root),
-                                      refresh.SAMPLE_RUNS)
-    if not selected:
-        return (f'{runs_root} holds no complete run set ({report["empty"]} '
-                f'with no cell artifacts, {len(report["incomplete"])} '
-                f'with a different cell set): the recorded cell count went '
-                f'UNCHECKED here')
-    run_id, _weights, references = selected[0]
+    found = [(run_id, path)
+             for run_id, path in refresh.discover_runs(runs_root)
+             if str(run_id) == named]
+    if not found:
+        return (f'{runs_root} does not carry run {named}, the one the file '
+                f'names: the recorded cell count went UNCHECKED here')
+    run_id, path = found[0]
+    try:
+        _weights, references = refresh.read_run(path, run_id)
+    except refresh.RefreshError as error:
+        return (f'run {run_id} under {runs_root} cannot be read ({error}): '
+                f'the recorded cell count went UNCHECKED here')
     measured = len(references)
     recorded = recorded_cell_count(data['basis'])
     assert recorded == measured, (
         f'the committed basis records the measured run ran {recorded} cells, '
         f'and run {run_id} under {runs_root} measured {measured}: the file '
-        f'and the runs it was written from disagree')
+        f'and the run it was written from disagree')
     return (f'{runs_root}: run {run_id} measured {measured} cells, which is '
             f'what the committed basis records')
+
+
+def suite_file(path, seconds):
+    """One `time_tests.py` summary: a tests map and no outcomes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'tests': {'test_a': seconds},
+                                'outcomes': {}}), encoding='utf-8')
+
+
+def write_run(root, run_id, cells, reference: float | None = 2.0, decoys=()):
+    """One run's artifact tree; `cells` maps a cell name to suite seconds.
+
+    Each suite gets the given seconds in `head-1` and `head-2`, the two
+    measured rounds. `reference=None` writes no reference reading at
+    all. `decoys` names extra round directories (`base-1`, `warmup`)
+    that carry the same suites at ten times the seconds, so a parser
+    that counted them would not agree with one that did not.
+    """
+    run = Path(root) / str(run_id)
+    for cell, suites in cells.items():
+        for suite, seconds in suites.items():
+            # time_tests.py names each file after the suite's STEM, so
+            # the file is `test_a.json` for `test_a.py`.
+            name = f'{Path(suite).stem}.json'
+            for round_name in ('head-1', 'head-2'):
+                suite_file(run / cell / round_name / name, seconds)
+        for decoy in decoys:
+            for suite, seconds in suites.items():
+                name = f'{Path(suite).stem}.json'
+                suite_file(run / cell / decoy / name, seconds * 10)
+        if reference is not None:
+            (run / cell).mkdir(parents=True, exist_ok=True)
+            (run / cell / 'reference.json').write_text(
+                json.dumps({'seconds': reference, 'iterations': 16}),
+                encoding='utf-8')
+    return run
