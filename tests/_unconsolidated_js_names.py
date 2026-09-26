@@ -5,21 +5,25 @@ by (repo-relative path, name) for the same reason and on the same terms
 as `_unconsolidated_names`: a row cannot be widened by a prefix or a
 substring match, and every row says why its site is not a copy.
 
-The boundary on this table is the same principle the Python one states —
-the table may not excuse a line the branch wrote — in the form that
-principle can take for a rule this branch introduces. A row may name any
-site that already existed at the merge base, and may NOT name a site
-this branch added. The file-scoped form, which is what the Python
-table's boundary is, cannot be used here: this branch edits twelve of the
-eighteen files this residue lives in, for the unrelated `eventTarget`
-migration, so a file-scoped boundary would forbid recording rows for
-sites that predate it. The site-scoped form absorbs what `main` lands
-underneath the branch the same way, and still cannot excuse a
-declaration the branch itself added.
+The boundary on this table is the same one the Python table's is, and
+the same comparison: a row may name any declaration the merge base
+already carried, and may NOT name one this branch added. It is keyed on
+the DECLARATION rather than on the (path, name) pair, so a second, new
+declaration of an already-tabled name in the same file is refused — a
+pair-keyed rule covers it for free, because the first declaration's row
+already matches the pair.
+
+It reads the base tree's own declarations rather than a list of the
+files the branch touched. That form is not a preference: 66 files carry
+a row in the Python table and 27 in this one, this branch edits fifteen
+of those twenty-seven, and a path list cannot tell a site the branch
+wrote from one it did not. It cost this branch five renames in test
+files it was not asked to touch, every one of them honest and every one
+of them undone when the boundary changed.
 
 Like every row in the Python table, each of these is a site the rule
 finds and consolidation has not reached. The `response` factory is the
-largest of them — thirteen harnesses carry the same nine lines, which is
+largest of them — sixteen harnesses carry the same nine lines, which is
 the same mechanism this issue is about and under the same fifteen-line
 duplicate threshold — and it is the second wave of that consolidation,
 not this one.
@@ -56,14 +60,16 @@ UNCONSOLIDATED_JS_NAMES = {
         'where the boundary wait throws on exhaustion and the overlap one '
         'takes a deadline',
     ('tests/_boundary_env.py', 'copy'):
-        'the structural-clone helper each harness writes for itself, one of '
-        'five copies of the same expression',
+        'the structural-clone helper each harness writes for itself, one '
+        'of five carrying the same expression; a sixth names its '
+        'parameter v where these name it value',
     ('tests/_boundary_env.py', 'delay'):
-        'the next-turn delay each harness writes for itself, one of seven '
+        'the next-turn delay each harness writes for itself, one of '
+        'eight '
         'copies of the same three lines',
     ('tests/_boundary_env.py', 'response'):
         'the fetch-response factory each harness writes for itself, one of '
-        'thirteen copies of the same nine lines',
+        'sixteen copies of the same nine lines',
     ('tests/_boundary_env.py', 'waitFor'):
         'the boundary fake polls a predicate a thousand times, where the '
         'overlap wait takes a deadline and the stream wait polls two '
@@ -76,7 +82,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the oracle harness own entry, which starts the upstream server a '
         'plan forwards to, where the GM harness runs storage cases',
     ('tests/_bridge_fake_oracle_harness.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_bridge_fake_oracle_harness.py', 'run'):
         'the oracle harness own entry, which serves a plan against a real '
@@ -90,9 +96,10 @@ UNCONSOLIDATED_JS_NAMES = {
         'Runtime.evaluate is the other side of this pair rather than a '
         'copy of it',
     ('tests/_cdpharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/_cdpharness.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_dashnode.py', 'bounded'):
         'the dashboard harness own deadline, which samples wall time and '
@@ -122,9 +129,10 @@ UNCONSOLIDATED_JS_NAMES = {
         'the GM harness store reader, one of two copies of the same eight '
         'lines',
     ('tests/_mainworldharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/_mainworldharness.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_mainworldharness.py', 'run'):
         'the MAIN-world harness own entry, 190 lines of step machine over '
@@ -137,15 +145,16 @@ UNCONSOLIDATED_JS_NAMES = {
         'the overlap delay takes a millisecond count the shared shape has '
         'no parameter for, so the signatures do not meet',
     ('tests/_overlap.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_overlap.py', 'waitFor'):
         'the overlap wait takes a deadline and can be disabled outright, '
         'which neither of the two polled forms has',
     ('tests/_relayharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/_relayharness.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_relayharness.py', 'run'):
         'the eval-relay harness own entry, 236 lines driving the three '
@@ -168,7 +177,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the tabs harness runs the next queued command in the VM, where the '
         'GM harness delivers a page message',
     ('tests/_tabs_harness.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/_tabs_harness.py', 'run'):
         'the tabs harness own entry, which applies a plan over chrome.tabs',
@@ -180,9 +189,10 @@ UNCONSOLIDATED_JS_NAMES = {
         'other copies name it value, so the same expression with a '
         'different local',
     ('tests/test_config_boot_generation.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/test_config_boot_generation.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_config_boot_generation.py', 'run'):
         'the boot-generation harness own entry, 120 lines over the config '
@@ -199,7 +209,8 @@ UNCONSOLIDATED_JS_NAMES = {
         'the boundary fake marks a timer and the throttle harness drops a '
         'pending flag',
     ('tests/test_dashboard_behaviour.py', 'response'):
-        'this one carries a headers map the other twelve do not, because '
+        'this one carries a headers map the other fifteen do not, '
+        'because '
         'the dashboard reads a content type off the answer',
     ('tests/test_gate_extensions.py', 'response'):
         'the gate extension suite writes two response factories into its '
@@ -222,7 +233,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'three harnesses, and two of them bound it with a guard the owner '
         'has no counter for',
     ('tests/test_relay_example_placeholders.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_relay_example_placeholders.py', 'streamResponse'):
         'the placeholder harness answers only the disabled error, where the '
@@ -232,16 +243,17 @@ UNCONSOLIDATED_JS_NAMES = {
         'copies',
     ('tests/test_segment_mint.py', 'response'):
         'this one throws SyntaxError from json() on a null body, which the '
-        'mint harness needs and none of the other twelve models',
+        'mint harness needs and none of the other fifteen models',
     ('tests/test_segment_mint.py', 'run'):
         'the mint harness own entry, 42 lines over one job capability',
     ('tests/test_segment_mint.py', 'streamResponse'):
         'the mint harness answers only the disabled error, where the shared '
         'factory also answers a hang',
     ('tests/test_starvation_bounds.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/test_starvation_bounds.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_starvation_bounds.py', 'sendCommand'):
         'the starvation harness answers two CDP methods and never settles '
@@ -254,9 +266,10 @@ UNCONSOLIDATED_JS_NAMES = {
         'the structural-clone helper, the same expression as the other four '
         'copies',
     ('tests/test_stream_backoff.py', 'delay'):
-        'the next-turn delay, the same three lines as the other six copies',
+        'the next-turn delay, the same three lines as the other seven '
+        'copies',
     ('tests/test_stream_backoff.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_stream_backoff.py', 'run'):
         'the stream harness own entry, 137 lines over the reconnect ledger',
@@ -277,7 +290,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the structural-clone helper, the same expression as the other four '
         'copies',
     ('tests/test_worker_close_tab.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_worker_close_tab.py', 'run'):
         'the close-tab harness own entry, 30 lines over one closed tab',
@@ -291,7 +304,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the throttle harness records the clear and drops the pending flag, '
         'where the boundary fake only marks the timer and neither records',
     ('tests/test_worker_register_throttle.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_worker_register_throttle.py', 'run'):
         'the register harness own entry, 35 lines over the registration '
@@ -307,7 +320,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the throttle harness answers only the disabled error, where the '
         'shared factory also answers a hang',
     ('tests/test_worker_result_post.py', 'response'):
-        'the fetch-response factory, one of thirteen copies of the same '
+        'the fetch-response factory, one of sixteen copies of the same '
         'nine lines',
     ('tests/test_worker_result_post.py', 'run'):
         'the postResult harness own entry, 31 lines over one result post',

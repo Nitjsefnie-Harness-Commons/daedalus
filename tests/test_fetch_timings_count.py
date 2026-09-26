@@ -38,7 +38,7 @@ CANNED = {'timings': list(TIMINGS), 'count': len(TIMINGS),
           'hasNativeToBase64': False}
 
 
-def _dispatch_browser(argv, answers):
+def run_cli(argv, answers):
     """Parse argv with the real parser, dispatch, return (calls, stdout)."""
     recorded = RecordingExtCmd(answers)
     args = build_parser().parse_args(argv)
@@ -74,7 +74,7 @@ def test_fetch_timings_still_refuses_a_non_integer_count(tmp):
 
 def test_fetch_timings_one_selects_exactly_the_last_entry(tmp):
     del tmp
-    recorded, out = _dispatch_browser(['fetch-timings', '-n', '1'], [CANNED])
+    recorded, out = run_cli(['fetch-timings', '-n', '1'], [CANNED])
     assert recorded.calls == [
         ('_fetch_timings', 'fetch-timings', {})], recorded.calls
     assert TIMINGS[0]['url'] not in out, out
@@ -91,7 +91,7 @@ def test_fetch_timings_larger_counts_keep_the_selection(tmp):
         (['fetch-timings'], (True, True, True)),
     )
     for argv, shown in cases:
-        recorded, out = _dispatch_browser(argv, [CANNED])
+        recorded, out = run_cli(argv, [CANNED])
         assert recorded.calls == [
             ('_fetch_timings', 'fetch-timings', {})], (argv, recorded.calls)
         for entry, visible in zip(TIMINGS, shown):
