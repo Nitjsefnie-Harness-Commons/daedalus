@@ -359,6 +359,18 @@ def js_residue_histogram(sources=None):
     return dict(sorted(histogram.items()))
 
 
+def _is_the_planted_fixture(path, declaration):
+    """Whether this is the one-line plant this suite pins the floor with.
+
+    Named by its own body and its own file, not by the FILE: a
+    file-wide exemption would let a one-line copy added anywhere in
+    this suite be invisible to both properties, which is the form that
+    hides a regression the properties exist to catch.
+    """
+    return path.endswith('test_helper_reimplementation_js.py') \
+        and declaration.body_lines == 1
+
+
 def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
     """The floor's two load-bearing properties, asserted as properties.
 
@@ -385,17 +397,22 @@ def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
     del tmp
     histogram = js_residue_histogram()
     print(f'[js] residue body_lines histogram: {histogram}')
+    # Both properties below are ABSENCE assertions, and an absence
+    # assertion over an empty population is true of a recogniser that has
+    # stopped finding anything at all. This is their liveness pairing.
+    assert histogram, (
+        'the residue is empty, so neither property below can fail; a '
+        'recogniser that stopped reading the tree would satisfy both')
     assert 2 not in histogram, (
         'a residue declaration sits at exactly two body lines, so the '
         f'floor and a floor of two select different sets: {histogram}')
     sources = _live_sources()
-    here = Path(__file__).name
     below = sorted(
         f'{path}:{item.line} ({item.body_lines} body lines)'
         for path, items in js_declarations(sources).items()
         for item in items
         if item.name == 'eventTarget' and item.body_lines < JS_FLOOR
-        and path.split('/')[-1] != here)
+        and not _is_the_planted_fixture(path, item))
     assert not below, (
         'the floor excludes a copy of the shared class it is for: '
         f'{below}')
