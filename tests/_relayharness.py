@@ -54,6 +54,7 @@ const windowListeners = [];
 const windowMessages = [];
 const evalResolvers = {};
 let relaySequence = 0;
+let relayDocSequence = 0;
 
 function response(status, data) {
   return {
@@ -253,9 +254,21 @@ const relayChrome = {
   },
 };
 
+// The documentElement carries the replay token the shipped content script
+// plants in it, so the attribute methods are a real store rather than
+// no-ops: a double that swallowed the write would let a control pass against
+// a page that never planted anything.
+const rootAttributes = new Map();
 const documentObject = {
   head: { appendChild() {} },
-  documentElement: { appendChild() {} },
+  documentElement: {
+    appendChild() {},
+    setAttribute(name, value) { rootAttributes.set(name, String(value)); },
+    getAttribute(name) {
+      return rootAttributes.has(name) ? rootAttributes.get(name) : null;
+    },
+    removeAttribute(name) { rootAttributes.delete(name); },
+  },
   addEventListener() {},
   removeEventListener() {},
   createElement() {
@@ -271,6 +284,14 @@ const relayContext = vm.createContext({
   window: windowObject,
   chrome: relayChrome,
   document: documentObject,
+  // A content script on an http page has no [SecureContext] crypto, so the
+  // shipped mint falls back; the double carries both spellings. Its own
+  // counter, because the page's ids and the background's are separate
+  // sequences in the browser and sharing one here would move the relay ids
+  // a control pins.
+  crypto: {
+    randomUUID: () => 'relay-doc-' + (++relayDocSequence),
+  },
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
   location: { hostname: relayHostname },
   performance,
