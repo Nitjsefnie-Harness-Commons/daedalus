@@ -35,7 +35,10 @@ DEBUG_TIMING = debug_timing()
 # normalisation, so `Foo`/`foo` and a composed/decomposed pair meet the way a
 # case-insensitive or normalising filesystem would put them together. The
 # bookkeeping names a job spends are refused at mint, so no fourth kind of
-# name can reach a path — see `reserved_bookkeeping_name`. The one
+# name can reach a path — see `reserved_bookkeeping_name`. That the four
+# names ARE the whole set is argued from the operations rather than
+# enumerated by a control: nothing here writes or reads a fifth, and a
+# fifth would be a change to a function below. The one
 # filesystem equivalence the fold does not cover is an exclusion named in
 # `_job_chain_root`, not a promise.
 SEGMENT_LOCK_STRIPES = 64
@@ -64,6 +67,21 @@ def record_temp_path(seg_dir_root, job):
         seg_dir_root, f'.{job}{_RECORD_AFFIX}{_TEMP_AFFIX}')
 
 
+def _folded(name):
+    """The name as the stripe key compares it: decomposed and casefolded.
+
+    ONE fold, and both halves of the namespace derive from it — the chain
+    root the lock key is built from, and the shape the mint refuses on. A
+    second normalisation beside the first rebuilds #1167, which is what a
+    case-sensitive reservation beside a folded key is: the refused
+    `.a.json.dirty` and the accepted `.a.json.DIRTY` are one directory on a
+    case-insensitive filesystem, so the accepted spelling parks a directory
+    exactly where `mark_dirty` has to write and every later write for the
+    owner answers 500.
+    """
+    return unicodedata.normalize('NFKD', name).casefold()
+
+
 def reserved_bookkeeping_name(job):
     """Whether `job` is a name the segment layout already spends on a job.
 
@@ -85,9 +103,14 @@ def reserved_bookkeeping_name(job):
     `.json.dirty` and `.json.tmp` are not that shape: they carry no job
     name between the leading dot and the affix, so no job reserves them.
     """
-    if not job.startswith('.'):
+    # The same folded name the lock key compares, so the two halves cannot
+    # answer differently about one name. The length test runs on the folded
+    # form too: it is what keeps `.json.dirty` — and every case variant of
+    # it — mintable, because there is no owner between the dot and the affix.
+    folded = _folded(job)
+    if not folded.startswith('.'):
         return False
-    return any(job.endswith(suffix) and len(job) > len(suffix) + 1
+    return any(folded.endswith(suffix) and len(folded) > len(suffix) + 1
                for suffix in _BOOKKEEPING_SUFFIXES)
 
 
@@ -109,8 +132,18 @@ def _job_chain_root(job):
     quota check and the record write that `store_segment` holds as one.
     Normalising and casefolding before the strip also puts `Foo.JSON` and
     `foo.json` on one chain, which is where a case-insensitive parent would
-    have put them, and normalising again afterwards covers a sequence the
-    strip exposed.
+    have put them.
+
+    The second normalise afterwards is REDUNDANT, and the fold is ordered this
+    way anyway: proved inert, 0 non-fixpoints over all 1,114,112 code points
+    against four affix templates. The first pass leaves a string already
+    decomposed and lowercased and the strip only removes a trailing ASCII
+    affix from it, so no adjacency is left for a second pass to collapse. It
+    stays because a redundant fold in the superset direction costs nothing,
+    and removing it would change the key for no gain.
+    `test_the_chain_root_is_a_fixpoint` pins the property that makes it
+    redundant, so a strip that became prefix-removing, or a normalisation
+    that composed, would fail a control rather than leave this untrue.
 
     Every fold here is a superset of the equivalence a case-folding or
     normalising filesystem applies, and of NTFS's upcased comparison. It
@@ -130,10 +163,10 @@ def _job_chain_root(job):
     With that exclusion named, and with the bookkeeping names refused at
     mint, the chain is then the set of job names that can own one path.
     """
-    root = unicodedata.normalize('NFKD', job).casefold()
+    root = _folded(job)
     while root.endswith(_RECORD_AFFIX):
         root = root[:-len(_RECORD_AFFIX)]
-    return unicodedata.normalize('NFKD', root).casefold()
+    return _folded(root)
 
 
 def seg_lock_for(job):
@@ -152,6 +185,19 @@ def seg_lock_for(job):
     lock and two unrelated jobs generally do not. Every caller takes this
     one lock and nothing else, so there is no order to acquire in and no
     way to hold two of them.
+
+    The mapping is per-PROCESS — `delivery_stripes` seeds it from a secret
+    at import — so mutual exclusion holds only within one bridge. Two
+    bridges over one data root would map the same job to different locks
+    and silently lose it. `server.py`'s `data_root_lock` is what makes that
+    impossible: one bridge process per data root, refused at startup. This
+    module depends on that and does not enforce it.
+
+    The four acquisition sites agreeing on one lock is likewise a property
+    ARGUED, not one a control checks: it follows from each site passing the
+    `job` it was handed, and the control that would catch a site decorating
+    that name catches it through the record of what was asked for rather than
+    through anything that enumerates the sites.
     """
     index = delivery_stripes.stripe_index(
         _job_chain_root(job).encode('utf-8', 'surrogatepass'),
