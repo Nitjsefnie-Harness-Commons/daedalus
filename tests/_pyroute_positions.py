@@ -32,6 +32,23 @@ def at_position(container, index):
     return [items.get(index), items.get(DYNAMIC_KEY)]
 
 
+def position_key(container, index):
+    """The position an int key names on a sequence, or None for none.
+
+    A negative key counts from the end, so a sequence of length L names
+    L + index. A key past the start names a position the runtime refuses
+    and an unknown length names none; both answer None, and the caller
+    tells them apart by the length it already holds.
+    """
+    if container.kind == 'dict' or not isinstance(index, int) \
+            or index >= 0:
+        return index
+    if container.length is None:
+        return None
+    position = container.length + index
+    return position if position >= 0 else None
+
+
 def from_position(container, start):
     """The join of every value a container may hold at position start or
     later. A non-int key names no position: storing one raises."""
