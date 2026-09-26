@@ -64,7 +64,11 @@ LONG_URL = 'https://one.example.com/' + 'b' * 90 + '.js'
 CUT = LONG_URL[:99] + '…'
 LONG = (ENTRY + "const U = 'https://one.example.com/' + 'b'.repeat(90)"
         " + '.js';\n")
+# The 400 is the boundary `e.status >= 400` states, so a `> 400` comparison
+# would read its row green; the 404 beside it is the status an operator
+# meets most and the one the ring buffer records for any failed response.
 OK_AND_404 = LONG + ("const T = [E({ url: U }),\n"
+                     "  E({ url: U, status: 400 }),\n"
                      "  E({ url: U, status: 404 })];\n")
 LONG_ERROR = ("const U = 'https://one.example.com/' + 'b'.repeat(90)"
               " + '.js';\n"
@@ -116,7 +120,9 @@ def _run(body, *, setup='', answers=(), plan=shared.COMMAND):
 def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
     """`load()` is called with no argument at the end of `mount`, so the
     first body is the command's own four keys. A defaulted pair added on
-    the way in would be two members the worker does not read."""
+    the way in would be two members `extension/worker/tabs.js:32` does
+    not read: it answers from `_fetchTimings` and the two globals beside
+    it, and nothing else off the command."""
     report = _run('report({ sub: sub.textContent,\n'
                   '  head: headers(list()),\n'
                   '  rows: cells(list()) });\n',
@@ -156,8 +162,9 @@ def test_no_entries_and_two_entries_are_both_plural(_tmp):
 
 
 def test_rows_are_rendered_in_the_reverse_of_the_buffer_order(_tmp):
-    """`t.slice().reverse().map(row)` puts the newest entry first, which is
-    the opposite of the order the worker recorded them in. A panel that
+    """`t.slice().reverse().map(row)` puts the newest entry first, against
+    the order `extension/worker/util.js:88-91` recorded them in -- a
+    `push` and a `shift`, so the newest is last there. A panel that
     dropped the reverse would show the oldest first."""
     report = _run('report({ rows: cells(list()).slice(1) });\n',
                   setup=TWO, answers=(ANSWER,))
@@ -265,18 +272,20 @@ def test_entries_that_all_failed_get_no_stats_block(_tmp):
 
 def test_a_success_row_with_a_server_error_status_reads_red(_tmp):
     """`e.status >= 400` is the whole of the red branch, and a 4xx
-    response carries no `error` key, so this row takes the SUCCESS branch
-    and the status cell is the only thing that says the fetch failed. The
-    pairs either side of it are the absent status and the zero status,
-    which both read green above."""
+    response carries no `error` key, so these rows take the SUCCESS
+    branch and the status cell is the only thing that says the fetch
+    failed. The 400 is the comparison's own boundary, so a `> 400` would
+    read that row green; the pairs either side of the branch are the
+    absent status and the zero status, which both read green above."""
     report = _run('report({ rows: cells(list()).slice(1) });\n',
                   setup=OK_AND_404, answers=(ANSWER,))
     # The buffer is rendered reversed, so the 404 is the row on top.
     assert [row[1] for row in report['rows']] == [
-        ['mono red', '404'], ['mono green', '200']], report
-    # The red row is a success row: the timing cells are filled in, which
-    # is what tells it apart from the error row's four bare ones.
-    assert report['rows'][0][6] == ['num cyan', '14.25'], report
+        ['mono red', '404'], ['mono red', '400'], ['mono green', '200']], \
+        report
+    # A red row is still a success row: the timing cells are filled in,
+    # which is what tells it apart from the error row's four bare ones.
+    assert report['rows'][1][6] == ['num cyan', '14.25'], report
     assert len(LONG_URL) == 117, LONG_URL
 
 
@@ -287,8 +296,8 @@ def test_a_url_over_a_hundred_characters_is_cut_in_both_row_kinds(_tmp):
     the table is already too wide for."""
     report = _run('report({ rows: cells(list()).slice(1) });\n',
                   setup=OK_AND_404, answers=(ANSWER,))
-    assert report['rows'][0][7] == ['url', CUT], report
-    assert report['rows'][1][7] == ['url', CUT], report
+    assert [row[7] for row in report['rows']] == [
+        ['url', CUT], ['url', CUT], ['url', CUT]], report
     failed = _run('report({ rows: cells(list()).slice(1) });\n',
                   setup=LONG_ERROR, answers=(ANSWER,))
     assert failed['rows'][0][7] == [
@@ -399,8 +408,8 @@ def test_a_reset_that_worked_toasts_ok_and_leaves_no_pane(_tmp):
 
 
 def test_a_command_the_bridge_refused_answers_nothing_at_all(_tmp):
-    """`api.js:56` throws on a non-200, so `runCommand` never reaches the
-    result loop. What this case pins is that: the two `legs(...)`
+    """`api.js:56` tests `!r.ok` and `:58` throws, so a non-200 never
+    reaches the result loop. What this case pins is that: the two `legs(...)`
     assertions say no poll and no consume leg was opened, and the pane
     says what the operator is left reading. What the bridge does with a
     refused command is not something this tree can see."""
