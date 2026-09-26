@@ -57,13 +57,14 @@ DETAIL = ("const D = { status: 200, method: 'GET',\n"
           "  initiator: 'parser', ts: 1750000000000,\n"
           "  body: 'var a = 1;' };\n")
 
-# The body marker is counted by the two boundary cases below, so the host
-# carries no `x` of its own -- `example` has one.
+# The two boundary cases count this marker in the rendered pane, so it is
+# a letter no other part of the pane carries -- `example` has an `x`.
 BODY_2000 = ("const D = { status: 200, method: 'GET',\n"
-             "  url: 'https://one.test/a.js', body: 'x'.repeat(2000) };\n")
+             "  url: 'https://one.example.com/a.js',"
+             " body: 'q'.repeat(2000) };\n")
 BODY_2001 = BODY_2000.replace("2000) };", "2001) };")
 NO_BODY = ("const D = { status: 200, method: 'GET',\n"
-           "  url: 'https://one.test/a.js' };\n")
+           "  url: 'https://one.example.com/a.js' };\n")
 
 TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
         "  url: 'https://one.example.com/one' },\n"
@@ -464,7 +465,7 @@ def test_a_body_of_exactly_two_thousand_characters_is_not_truncated(_tmp):
                   'report({ text: detailText() });\n',
                   setup=TABS + BODY_2000, answers=(ANSWER_ONE,))
     assert 'truncated' not in report['text'], report
-    assert report['text'].count('x') == 2000, report
+    assert report['text'].count('q') == 2000, report
 
 
 def test_a_body_of_two_thousand_and_one_characters_is_truncated(_tmp):
@@ -475,7 +476,7 @@ def test_a_body_of_two_thousand_and_one_characters_is_truncated(_tmp):
                   'report({ text: detailText() });\n',
                   setup=TABS + BODY_2001, answers=(ANSWER_ONE,))
     assert '…(truncated 1 chars)' in report['text'], report
-    assert report['text'].count('x') == 2000, report
+    assert report['text'].count('q') == 2000, report
 
 
 def test_a_request_with_no_body_says_which_flag_fetches_one(_tmp):
