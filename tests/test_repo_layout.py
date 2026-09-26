@@ -133,21 +133,21 @@ BOUNDED_GIT_LAUNCHES = {
         'the reap that follows it, on the same process',
     ('tests/_util.py', 369, '_startup_observations'):
         'a thread join on a thread this helper started',
-    ('tests/_util.py', 500, 'bridge'):
+    ('tests/_util.py', 499, 'bridge'):
         'a helper waiting for a port line; the caller bounds it',
-    ('tests/_util.py', 560, 'get'):
+    ('tests/_util.py', 559, 'get'):
         'an HTTP helper opening a socket; no git '
         'process is behind it',
-    ('tests/_util.py', 564, 'get_json'):
+    ('tests/_util.py', 563, 'get_json'):
         'an HTTP helper opening a socket; no git '
         'process is behind it',
-    ('tests/_util.py', 578, 'header_stream'):
+    ('tests/_util.py', 577, 'header_stream'):
         'a connection constructor: it opens a socket and returns'
         ' a client, and no git process sits behind a socket',
-    ('tests/_util.py', 569, 'post_json'):
+    ('tests/_util.py', 568, 'post_json'):
         'an HTTP helper opening a socket; no git '
         'process is behind it',
-    ('tests/_util.py', 553, 'request'):
+    ('tests/_util.py', 552, 'request'):
         'an HTTP read: a socket, not a git process, and the'
         ' timeout is the bound itself',
     ('tests/test_aggregate_gate.py', 324,
