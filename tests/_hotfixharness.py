@@ -24,8 +24,8 @@ that exists for exactly that difference.
 
 A case asks for a fault by naming it — `attach`, `cdpRefused`,
 `injectedError`, `storageReadFails`, `recordVersion` — and each is refused
-shaped rather than ignored, so a double that answered a shape it does not
-model would read as a program that behaved.
+shaped rather than ignored. `commands` and `store` are the two spellings of
+the typed command list, and a case naming both is refused, not resolved.
 """
 import json
 import shutil
