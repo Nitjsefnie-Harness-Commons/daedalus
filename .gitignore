@@ -446,6 +446,7 @@
 !/tests/test_dashboard_drain_blocking.py
 !/tests/test_dashboard_eval.py
 !/tests/test_dashboard_fanout.py
+!/tests/test_dashboard_gate.py
 !/tests/test_dashboard_harness.py
 !/tests/test_dashboard_harness_metadata.py
 !/tests/test_dashboard_node_retry.py
