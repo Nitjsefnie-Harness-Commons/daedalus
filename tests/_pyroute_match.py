@@ -34,8 +34,8 @@ unresolvable-slot hole filed as issue 1010, not equivalent.
 import ast
 
 from _pyroute_mapping import (_UNRESOLVED_KEY, _literal_key,
-                              _selected_values, alias_target_pairs,
-                              apply_assignment_bindings)
+                              alias_target_pairs, apply_assignment_bindings)
+from _pyroute_reads import _selected_values
 from _pyroute_state import (UNPROVABLE_SENDER, FlowState, bind_alias_target,
                             clear_names, dedupe_states, rebound_names)
 from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
