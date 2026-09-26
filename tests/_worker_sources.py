@@ -192,6 +192,41 @@ const chrome = {
             .replace('__SEND_COMMAND__', send_command))
 
 
+# The two page globals a harness must supply before it can run the shipped
+# content script, because that script uses them at load: `crypto`, to mint the
+# document token its replay request carries, and `document.documentElement`,
+# to plant that token in the asking document's own DOM.
+#
+# The attribute store is real rather than a set of no-ops. A documentElement
+# that swallowed the write would let a control pass against a page that never
+# planted anything, which is the shape of a false green this suite family has
+# produced before. One copy, because a second would drift from the first and
+# the drift would be invisible.
+CONTENT_SCRIPT_PAGE = r"""
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+"""
+
+
 def event_target_stub():
     """The event-target stand-in, which RETAINS every listener added to it.
 

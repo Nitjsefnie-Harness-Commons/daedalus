@@ -135,7 +135,9 @@ const chrome = {
     },
   },
   scripting: {
-    executeScript: async () => { throw new Error('unmodelled executeScript'); },
+    executeScript: async () => {
+      throw new Error('unmodelled executeScript');
+    },
   },
   cookies: { getAll: async () => [], remove: async () => null },
   declarativeNetRequest: {
@@ -357,7 +359,8 @@ def test_a_failing_attach_fails_every_joiner_and_leaves_no_claim(tmp):
             {'drain': True},
         ]})
     assert later['attachCalls'] == [7, 7], later
-    third = [row for key, row in _by_id(later).items() if key.startswith('third')]
+    third = [row for key, row in _by_id(later).items()
+             if key.startswith('third')]
     assert len(third) == 1 and third[0]['error'] is None, later
 
 
@@ -480,8 +483,8 @@ def test_a_claim_arriving_mid_detach_waits_for_that_detach(tmp):
     # attach, detach, attach, detach: the second claim waited for the first
     # detach to settle, and the racing command is transient, so it gives its
     # own attachment back in turn.
-    assert outcome['order'] == ['attach:7', 'detach:7', 'attach:7', 'detach:7'], \
-        outcome
+    assert outcome['order'] == [
+        'attach:7', 'detach:7', 'attach:7', 'detach:7'], outcome
     assert outcome['attachCalls'] == [7, 7], outcome
     assert outcome['detachCalls'] == [7, 7], outcome
     posted = _by_id(outcome)

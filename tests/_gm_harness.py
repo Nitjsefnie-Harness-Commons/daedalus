@@ -79,8 +79,30 @@ function frameChrome(storage, background, origin) {
     storage: { local: storage },
   };
 }
-"""
 
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
+"""
 
 _STORAGE_RELAY_HARNESS = _PRELUDE + r"""
 // Single-origin relay: content.js + page.js in one frame over a synchronous
@@ -88,6 +110,7 @@ _STORAGE_RELAY_HARNESS = _PRELUDE + r"""
 // promise API for the reserved/invalid-key refusals and the ordinary round
 // trip, and through raw dispatch for the keyed-handler pins.
 const [contentPath, pagePath, utilPath, gmPath] = process.argv.slice(1);
+
 const NS = 'gm:' + encodeURIComponent(
   'https://storage-test.example.com') + ':';
 const listeners = {};
@@ -138,7 +161,7 @@ const windowObject = {
   },
 };
 
-const context = {
+const context = Object.assign({
   window: windowObject,
   chrome,
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
@@ -148,7 +171,7 @@ const context = {
   clearInterval() {},
   setTimeout: () => 1,
   console: { log() {}, error() {} },
-};
+}, contentScriptPage());
 function SINGLE() { return 'https://storage-test.example.com'; }
 vm.runInNewContext(
   fs.readFileSync(contentPath, 'utf8'), context,
@@ -324,7 +347,7 @@ const background = buildBackground(utilPath, gmPath, makeStorage);
 const chrome = frameChrome(background.chrome.storage.local, background,
   'https://storage-failure.example.com');
 
-const context = {
+const context = Object.assign({
   window: windowObject,
   chrome,
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
@@ -335,7 +358,7 @@ const context = {
   clearInterval() {},
   setTimeout: () => 1,
   console: { log() {}, error() {} },
-};
+}, contentScriptPage());
 vm.runInNewContext(
   fs.readFileSync(contentPath, 'utf8'), context,
   { filename: contentPath });

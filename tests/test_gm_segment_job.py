@@ -29,6 +29,29 @@ const vm = require('vm');
 // fake worker gives call i — `{resp}` (null for no response at all) or
 // `{lastError}` — and `order` is the sequence the answers arrive in.
 const [contentPath, pagePath, plan] = process.argv.slice(1);
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
 const listeners = { message: [] };
 const queued = [];
 const relayed = [];
@@ -78,6 +101,7 @@ const context = {
   clearInterval() {},
   performance,
   console: { log() {}, error() {} },
+  ...contentScriptPage(),
 };
 context.globalThis = context;
 for (const path of [contentPath, pagePath]) {

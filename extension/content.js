@@ -260,8 +260,43 @@ function connectKeepAlive() {
 // can do neither — posting the source into the page left the page's own
 // `eval` and a blob <script> as the only options, and a CSP that refuses both
 // refused every fix.
+//
+// The MAIN channel names this document in its `executeScript` target. The
+// CDP channel cannot: the protocol has no document identifier, so two
+// documents at one url in a tab — a prerender and the visible one — are
+// indistinguishable to it. So this document plants a token in its OWN DOM
+// and sends it with the request, and the CDP channel reads that token back
+// inside the evaluation that runs the fix. A page can read and rewrite the
+// token, and that is accepted: a document can only plant a token in its own
+// DOM, so a hostile one can suppress its own fix and can never make a fix
+// run in a document it does not hold. The direction is what the property is.
 (function replayHotfixes() {
-  chrome.runtime.sendMessage({ type: 'replayHotfixes' });
+  // `crypto.randomUUID` is [SecureContext] and this script is declared on
+  // `<all_urls>`, so it is absent on a plain-http page. A token minted
+  // there does not have to be unguessable — it is read by the page that
+  // planted it, and a document can only plant one in its own DOM — it only
+  // has to differ from every other document's.
+  const docToken = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+  // documentElement is null this early on a document with no root yet, and
+  // an attribute cannot be set on nothing. Deferring loses nothing: the
+  // background answers the request when it is answered either way.
+  if (!document.documentElement) {
+    document.addEventListener('DOMContentLoaded', replayHotfixes,
+                               { once: true });
+    return;
+  }
+  document.documentElement.setAttribute('data-daedalus-doc', docToken);
+  chrome.runtime.sendMessage({ type: 'replayHotfixes', docToken },
+                             () => {
+                               // The channel is held open until the replay
+                               // finishes, so this is the cleanup: the token
+                               // is a replay input, not something the page
+                               // is left holding.
+                               document.documentElement.removeAttribute(
+                                 'data-daedalus-doc');
+                             });
 })();
 
 // ─── Boot ───

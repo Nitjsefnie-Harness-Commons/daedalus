@@ -18,6 +18,29 @@ _TWO_ORIGIN_HARNESS = _PRELUDE + r"""
 // pages were ANSWERED in, so admission order is asserted from the record
 // rather than from a wall clock.
 const [contentPath, , utilPath, gmPath] = process.argv.slice(1);
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
 const ORIGIN_A = 'https://alpha.example.com';
 const ORIGIN_B = 'https://beta.example.com';
 const ORIGIN_C = 'https://gamma.example.com';
@@ -110,7 +133,10 @@ function createFrame(origin, hostname, target) {
     },
   };
   const chrome = frameChrome(realm.chrome.storage.local, realm, origin);
-  const context = {
+  // The frame's own uuid spelling is the one a relay id is minted from, so
+  // the page's token keeps the shared default and does not share a counter
+  // with it.
+  const context = Object.assign({
     window: windowObject,
     chrome,
     navigator: { clipboard: { writeText: () => Promise.resolve() } },
@@ -120,9 +146,8 @@ function createFrame(origin, hostname, target) {
     clearInterval() {},
     setTimeout: () => 1,
     clearTimeout() {},
-    crypto: { randomUUID: () => 'frame-uuid' },
     console: { log() {}, error() {} },
-  };
+  }, contentScriptPage());
   vm.runInNewContext(
     fs.readFileSync(contentPath, 'utf8'), context,
     { filename: contentPath });

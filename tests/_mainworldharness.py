@@ -413,7 +413,8 @@ async function run() {
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
     vm.runInContext(
-      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/',"
+      + " 'replay-doc-token')",
       context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
@@ -437,7 +438,8 @@ async function run() {
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
     vm.runInContext(
-      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/',"
+      + " 'replay-doc-token')",
       context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
@@ -461,7 +463,8 @@ async function run() {
       { id: 'fix2', code: 'await new Promise(() => {})' },
     ]);
     vm.runInContext(
-      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/',"
+      + " 'replay-doc-token')",
       context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
@@ -488,7 +491,8 @@ async function run() {
       { id: 'fix2', code: 'evalResolvers.fix2Ran = true' },
     ]);
     vm.runInContext(
-      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/')",
+      "handleHotfixReplay(7, 'doc-7', 'https://page.example.com/',"
+      + " 'replay-doc-token')",
       context);
     const armed = await waitForResult(
       () => clock.armed.size > 0);
