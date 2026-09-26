@@ -11,7 +11,18 @@ import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 
 
-def _wait_for_path(path):
+def _wait_for_path(process, booted, path):
+    """Wait for the client to boot, then for the path it publishes.
+
+    The boot is waited for unbounded -- what is waited for there is an
+    ordering -- so the bound below covers the publish and not a fresh
+    interpreter's startup. The boot marker is a file rather than the child's
+    printed line because every caller reads that line through client_states.
+    """
+    while not booted.exists():
+        assert process.poll() is None, (
+            f'the client exited with {process.returncode} before booting')
+        time.sleep(0.01)
     deadline = time.monotonic() + 5
     while not path.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -21,18 +32,20 @@ def _wait_for_path(path):
 def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
     """A client that misses its grace is diagnostic data, not an exception."""
     ready_path = Path(tmp) / 'client.ready'
+    booted_path = Path(tmp) / 'client.booted'
     client = (
         'import sys, time\n'
         'from pathlib import Path\n'
         'print("started", flush=True)\n'
+        'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
         'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
         'time.sleep(60)\n'
     )
     process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        _wait_for_path(ready_path)
+        _wait_for_path(process, booted_path, ready_path)
         states = _overlap_clients.client_states(
             {'slow-owner': process}, grace=0.1)
     finally:
@@ -92,6 +105,7 @@ def test_client_states_records_no_exit_status_for_a_client_it_killed(tmp):
 def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
     """A killed client keeps its output while inherited pipes close."""
     ready_path = Path(tmp) / 'slow-pipes.ready'
+    booted_path = Path(tmp) / 'slow-pipes.booted'
     client = (
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
@@ -100,16 +114,17 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
         'grandchild = subprocess.Popen('
         '[sys.executable, "-c", "import time; time.sleep(1)"])\n'
         'target = Path(sys.argv[1])\n'
+        'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text("ready", encoding="ascii")\n'
         'pending.replace(target)\n'
         'time.sleep(60)\n'
     )
     process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        _wait_for_path(ready_path)
+        _wait_for_path(process, booted_path, ready_path)
         states = _overlap_clients.client_states(
             {'slow-pipe-owner': process}, grace=0.1)
     finally:
@@ -130,6 +145,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
     not raced here.
     """
     ready_path = Path(tmp) / 'grandchild.ready'
+    booted_path = Path(tmp) / 'grandchild.booted'
     client = (
         'import subprocess, sys, time\n'
         'from pathlib import Path\n'
@@ -137,16 +153,17 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         'grandchild = subprocess.Popen('
         '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
         'target = Path(sys.argv[1])\n'
+        'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text("ready", encoding="ascii")\n'
         'pending.replace(target)\n'
         'time.sleep(60)\n'
     )
     process = subprocess.Popen(
-        [sys.executable, '-c', client, str(ready_path)],
+        [sys.executable, '-c', client, str(ready_path), str(booted_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        _wait_for_path(ready_path)
+        _wait_for_path(process, booted_path, ready_path)
         states = _overlap_clients.client_states(
             {'pipe-owner': process}, grace=0.1, killed_pipe_release=0.1)
     finally:
