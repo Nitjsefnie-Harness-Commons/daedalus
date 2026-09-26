@@ -12,8 +12,15 @@ the builder placed, whether the container is one a subscript reaches, and
 whether a projected one can be called at all — so none borrows the guard's
 own answer to the question it is checking, and none is a spelling proxy for
 a value property. The universe is the PROPERTY and not the builders that
-happen to exist: a class the grammar cannot name has no row, and a class its
-builders spell one way has one row a fold can get wrong without it showing.
+happen to exist, so a class the grammar cannot name has NO ROW and a class
+its builders spell one way has one row a fold can get wrong without it
+showing. The classes named in `PROPERTY_CLASSES` are the two that were
+members of the property and of no builder at all; six cells still have no
+row and are held by hand cases instead — the `getattr` spelling of the
+projection, a star over a literal tuple, a nested star, a `bool()` index, a
+walrus index, and a dict with a `**` unpack. Each is a spelling someone
+typed rather than a shape the grammar composes, and each is named beside the
+case that pins it.
 """
 import json
 import subprocess
@@ -113,46 +120,53 @@ _PROJECTIONS = ('', '.__call__')
 # debt is the ORACLE's class; an unsettled step needs a value the literal
 # does not carry, so its debt is the mention property instead.
 _STEPS = (
-    # (name, spelling, settled, the position it names). The position is what
-    # says whether a step SELECTS the element a one-element outer list holds
-    # or raises short of it, which is the only thing the depth axis needs to
-    # know about the element a builder produced. A name in the last field is
-    # one of the `_steps` fields it takes its value from; a number is the
-    # position outright, and None is a step that names none.
-    ('at the operation', '[{at}]', True, 'at'),
+    # (name, spelling, settled, the position it names, settles any base).
+    # The position is what says whether a step SELECTS the element a
+    # one-element outer list holds or raises short of it, which is the only
+    # thing the depth axis needs to know about the element a builder
+    # produced. A name in the position field is one of the `_steps` fields
+    # it takes its value from; a number is the position outright, and None
+    # is a step that names none. The last field is for a step whose OUTCOME
+    # does not depend on the base at all, so the fold settles it for a
+    # builder it cannot read as well as for one it can.
+    ('at the operation', '[{at}]', True, 'at', False),
     # The far end that is not the operation, so "present but never
     # selected" is covered at more than one position and the
     # discriminating near-miss is not a single spelling.
-    ('elsewhere', '[{far}]', True, 'far'),
-    ('out of range', '[{beyond}]', True, 'beyond'),
-    ('negative', '[-1]', True, -1),
+    ('elsewhere', '[{far}]', True, 'far', False),
+    ('out of range', '[{beyond}]', True, 'beyond', False),
+    ('negative', '[-1]', True, -1, False),
     # Both arithmetic spellings of the operation's own position. `+` and
     # `-` are generated as a pair so a fold that settled one and declined
     # the other leaves a row that reads the value beside a row that does
     # not, rather than one operator with nothing to fail it.
-    ('a sum', '[{at} + 0]', True, 'at'),
-    ('a difference', '[{at} - 0]', True, 'at'),
+    ('a sum', '[{at} + 0]', True, 'at', False),
+    ('a difference', '[{at} - 0]', True, 'at', False),
     # The same position by two spellings that are arithmetic rather than a
     # second operator: `+1` is `1`, and `True` is `1`. Both name position
     # ONE outright, so every container also gets the spelling that selects
     # something else — a step pinned on the operation's own position could
     # not fail on a fold that stopped reading it, because both halves would
     # move together.
-    ('a unary plus', '[+1]', True, 1),
-    ('a bool', '[True]', True, 1),
+    ('a unary plus', '[+1]', True, 1, False),
+    ('a bool', '[True]', True, 1, False),
     # A key the container is not indexed by: a sequence raises TypeError
     # and a mapping raises KeyError, so it is settled too — it names
     # nothing. On a dict literal the operation's own key IS `'a'` when it
     # sits at position zero, which is the discriminating near-miss in the
     # mapping's own spelling.
-    ('a string key', "['a']", True, None),
-    # A free name and a slice need a value the literal does not carry, so
-    # neither is a position this walk can settle.
-    ('a name', '[i]', False, None),
-    ('a slice', '[0:1]', False, None),
+    ('a string key', "['a']", True, None, False),
+    # A free name is a value the literal does not carry, so it is a
+    # position this walk cannot settle. A SLICE is not: it produces a new
+    # container, or raises on a mapping, and neither is callable — so the
+    # fold decides it whatever the base is, and the position it names is
+    # none.
+    ('a name', '[i]', False, None, False),
+    ('a slice', '[0:1]', True, None, True),
 )
 
-_SETTLED = frozenset(name for name, _, settled, _ in _STEPS if settled)
+_SETTLED = frozenset(name for name, _, settled, _, _ in _STEPS if settled)
+_ANY_BASE = frozenset(name for name, _, _, _, any_base in _STEPS if any_base)
 
 # The containers whose SUBSCRIPT outcome the fold decides whatever step
 # names one: a sequence and a mapping are read by a position or by a key, and
@@ -173,6 +187,111 @@ _DECIDED = _INDEXED + _UNINDEXED
 # subscript of one is a `TypeError`, which is the one place the two
 # wrappers part company.
 _FUNCTION = 'a subscript element'
+
+# The classes of the property the CONTAINERS grammar above cannot name, each
+# keyed on what the CONSTRUCTION places in the form rather than on a
+# spelling. A class the marker cannot express has no row at all, which is
+# how a bypass survived a sweep that reported nothing unpaid: a dict
+# DISPLAY carrying one key twice, and a LAMBDA in a position a fold selects.
+PROPERTY_CLASSES = ('a repeated dict key', 'a lambda behind a selection')
+_REPEATED, _LAMBDA = PROPERTY_CLASSES
+
+# The key classes Python's `==` makes equal, as (the earlier key, the later
+# key, the lookup that names both, the value the EARLIER entry carries). The
+# first two are separate SPELLINGS of one value and the third is a third,
+# because that is the spelling the display collapses: `{True: 0, 1: op}` is
+# `{True: op}` and `[1]` names it. The last value is a CONTAINER, which is
+# the near-miss a first-match reader decides clean rather than undecided.
+_EQUAL_KEYS = (
+    ('0', '0', '0', _FILLER),
+    ('0', '[0]', '0', '[0]'),
+    ('0', 'False', 'False', _FILLER),
+    ('1', 'True', '1', _FILLER),
+    ('1', '1.0', '1.0', _FILLER),
+    ("'a'", "'a'", "'a'", _FILLER),
+    ("b'a'", "b'a'", "b'a'", _FILLER),
+)
+
+# A lambda in each position a fold can select in, as (the selection that
+# reaches it, the arguments the signature accepts, the arguments it does
+# not). A nullary lambda CALLED with an argument raises, and a one-argument
+# lambda called with none does, so the same selection is generated on both
+# sides of the boundary.
+_LAMBDAS = (
+    ('[(lambda: {op})][0]', '()', '(1,)'),
+    ('[(lambda a: {op})][0]', '(1,)', '()'),
+    ('(lambda *a: {op})', '()', '(1,)'),
+    ('[[(lambda: {op})]][0][0]', '()', '(1,)'),
+    ('{{"a": (lambda: {op})}}["a"]', '()', '(1,)'),
+    ('(*[(lambda: {op})],)[0]', '()', '(1,)'),
+    ('[[(lambda: {op})][0]][0]', '()', '(1,)'),
+)
+
+
+def _form(kind, step, callee, container, mentions, carries, classes):
+    """One generated form, in the shape `duty` and the marker read.
+
+    `pinned` is True for every form these two builders produce, and the
+    construction says why: a dict display settles its own entries and a
+    lambda's return is settled by the arguments the caller supplies, so
+    every one of them is a value both the oracle and the fold can decide.
+    """
+    return {'kind': kind, 'step': step, 'depth': 1, 'callee': callee,
+            'container': container, 'mentions': mentions, 'pinned': True,
+            'carries': carries, 'classes': classes}
+
+
+def _repeats(operation):
+    """A dict DISPLAY carrying one key twice, with the operation in each
+    position, and the key classes Python's `==` makes equal.
+
+    A display keeps the LAST of two equal keys, so the builder places the
+    operation in both and the two are different forms: the kept one is
+    RESOLVED and the replaced one is silent, and a reader that stopped at
+    the first would resolve neither. The projection of each, and a starred
+    one, are here so the class is not held by a single spelling.
+    """
+    for earlier, later, lookup, replaced in _EQUAL_KEYS:
+        for index, (first, second) in enumerate(((earlier, later),
+                                                 (later, earlier))):
+            if index == 0:
+                literal = '{%s: %s, %s: %s}' % (
+                    first, replaced, second, operation)
+            else:
+                literal = '{%s: %s, %s: %s}' % (
+                    first, operation, second, replaced)
+            for step, tail in ((f'a lookup of {lookup!r}', f'[{lookup}]'),
+                               (f'a projection of {lookup!r}',
+                                f'[{lookup}].__call__'),
+                               (f'a starred {lookup!r}',
+                                f'(*[{literal}],)[0][{lookup}]')):
+                yield _form('a repeated-key dict', step, literal + tail,
+                            literal, True, index == 0, (_REPEATED,))
+            absent = {'0': '1', 'False': '1', '1': '2', '1.0': '2',
+                      "'a'": "'b'", "b'a'": "b'b'"}[lookup]
+            yield _form('a repeated-key dict', 'an absent key',
+                        f'{literal}[{absent}]', literal, True, False,
+                        (_REPEATED,))
+
+
+def _lambdas(operation):
+    """A lambda in every position a fold can select in, called with the
+    arguments its signature accepts and with ones it does not.
+
+    A lambda is a function and its value is its return, so every one of
+    these is a call the fold can decide, and the argument that does not fit
+    is the `TypeError` on the other side of the same boundary. The bare
+    selection is generated too: its value is a FUNCTION, which is neither
+    the operation nor a container, and it is silent for that reason alone.
+    """
+    for selection, filled, empty in _LAMBDAS:
+        selected = selection.format(op=operation)
+        for arguments, carries in ((filled, True), (empty, False)):
+            yield _form('a lambda selection', f'called with {arguments}',
+                        selected + arguments, selected, True, carries,
+                        (_LAMBDA,))
+        yield _form('a lambda selection', 'selected, not called', selected,
+                    selected, True, False, (_LAMBDA,))
 
 
 def _filled(template, at, far, beyond):
@@ -200,19 +319,20 @@ def _steps(kind, at, width):
     fields = {'at': at, 'far': far, 'beyond': beyond}
     spellings = [(name, _filled(spelling, at, far, beyond), settled,
                   fields[declared] if isinstance(declared, str)
-                  else declared)
-                 for name, spelling, settled, declared in _STEPS]
+                  else declared, any_base)
+                 for name, spelling, settled, declared, any_base in _STEPS]
     for depth in (1, 2, 3):
         if kind == _NESTED and depth == 1:
             continue
         # The nested literal's own element has to be descended through before
         # a settled step can name a position in the list inside it.
         descent = '[0]' * (depth - 1) if kind == _NESTED else ''
-        for name, spelling, settled, position in spellings:
+        for name, spelling, settled, position, any_base in spellings:
             prefix = descent if name in _SETTLED else ''
-            yield depth, name, prefix + spelling * depth, settled, position
+            yield (depth, name, prefix + spelling * depth, settled, position,
+                   any_base)
         if kind in _BRANCHING and depth == 1:
-            yield depth, 'bare', '', False, None
+            yield depth, 'bare', '', False, None, False
 
 
 def _nested(source, depth):
@@ -224,7 +344,7 @@ def _nested(source, depth):
     return source
 
 
-def _pinned(kind, depth, settled, named):
+def _pinned(kind, depth, settled, named, any_base=False):
     """What the CONSTRUCTION says the fold settles about this form.
 
     A function and a set are settled whatever the step names; a container
@@ -234,7 +354,8 @@ def _pinned(kind, depth, settled, named):
     position the one-element list does not have, or a key a sequence is not
     indexed by.
     """
-    if kind == _FUNCTION and depth == 1 or kind in _UNINDEXED and depth == 1:
+    if any_base or kind == _FUNCTION and depth == 1 \
+            or kind in _UNINDEXED and depth == 1:
         return True
     if kind in _DECIDED:
         return settled and (depth > 1 or kind in _INDEXED)
@@ -257,9 +378,10 @@ def _forms(kind, build, at, width, operation):
     function.
     """
     elements = [_FILLER] * at + [operation] + [_FILLER] * (width - at - 1)
-    for depth, step, spelling, settled, named in _steps(kind, at, width):
+    for depth, step, spelling, settled, named, any_base in _steps(
+            kind, at, width):
         source, placed = build(elements, at, operation)
-        pinned = _pinned(kind, depth, settled, named)
+        pinned = _pinned(kind, depth, settled, named, any_base)
         # A branching builder's value IS the operation and a projection of it
         # reaches; every other builder's is a container at the first level,
         # which has no `__call__` to project, and the one-element list past
@@ -272,6 +394,7 @@ def _forms(kind, build, at, width, operation):
                 'kind': kind, 'step': step, 'depth': depth,
                 'callee': container + spelling, 'container': container,
                 'imports': None, 'mentions': at in placed, 'pinned': pinned,
+                'classes': (),
                 'carries': at in placed and not (
                     (projection and not projectable)
                     or (kind == _FUNCTION and depth == 1 and not projection))}
@@ -300,6 +423,13 @@ def generated():
                     seen[form['callee']] = dict(
                         form, binding=binding, position=position,
                         imports=imports)
+        for build in (_repeats, _lambdas):
+            for form in build(operation):
+                if form['callee'] in seen:
+                    continue
+                seen[form['callee']] = dict(
+                    form, binding=binding, position='a class of its own',
+                    imports=imports)
     return list(seen.values())
 
 
