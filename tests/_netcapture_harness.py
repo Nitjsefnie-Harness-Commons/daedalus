@@ -12,12 +12,11 @@ shipped worker performs.
 
 A scenario is a list of `steps`, replayed in order, and each step is one
 input the worker observes: a command (through the real `dispatchCommand`),
-a CDP event, a tab closing, Chrome detaching us, or a mutation of the array
-the last answer returned. The harness answers with every posted
-`postResult` payload, every recorded `chrome.*` call, the worker's own
-`_netCaptures` / `_cdpSessions` state, and the strict fetch gate's own
-verdict. The suites supply the steps and assert all of it; this module
-decides nothing about what a handler should do.
+a CDP event, a tab closing, or Chrome detaching us. The harness answers
+with every posted `postResult` payload, every recorded `chrome.*` call,
+the worker's own `_netCaptures` / `_cdpSessions` state, and the strict
+fetch gate's own verdict. The suites supply the steps and assert all of
+it; this module decides nothing about what a handler should do.
 """
 import json
 import os
@@ -70,8 +69,7 @@ function record(api, args) {
 }
 
 // A plan can name a surface that must fail, so each handler's catch arm is
-// reachable. The call is recorded before the failure, so a reader can see
-// the call a refused arm still made.
+// reachable. The call is recorded before the failure, never after it.
 function maybeReject(table, key) {
   const reject = (table || {})[key];
   if (reject === undefined) return;
@@ -111,16 +109,14 @@ chrome.debugger.detach = async (target) => {
 // The answer to a protocol call is the plan's, never the argument's: the
 // body map is keyed on the requestId and its values are the scenario's
 // text, so a cross-wired entry cannot be satisfied by an echo. A method
-// the plan did not model is a loud failure rather than a quiet `{}` that
-// every assertion would read as a success.
+// the plan did not model fails loudly rather than answering a quiet `{}`.
 const bodyAnswers = plan.bodies || {};
 async function handleDebuggerCommand(_target, method, params) {
   record('debugger.sendCommand', [{ tabId: _target.tabId }, method, params]);
   maybeReject(plan.sendCommandReject, method);
   if (method === 'Network.enable') return {};
-  // A second modelled method, so a scenario that opens a kept CDP session
-  // and then a capture can tell the two protocol calls apart instead of
-  // driving the same method twice with one value.
+  // A second modelled method, so a kept session and a capture can tell
+  // their two protocol calls apart instead of driving one method twice.
   if (method === 'Runtime.enable') return { modelled: 'Runtime.enable' };
   if (method === 'Network.getResponseBody') {
     const answer = bodyAnswers[params.requestId];
@@ -258,14 +254,11 @@ run().then((result) => {
 
 
 def steps_plan(steps, *, plan, posts=None):
-    """The gate declaration a step list implies, beside the steps themselves.
+    """The gate declaration a step list implies.
 
-    `planned` is derived from the steps, not from what the worker did: every
-    command in this module's three handlers posts exactly one answer, the
-    boot syncs once, and a tab closing also drives the registry's own
-    unregister. Deriving it here keeps an UNDECLARED request — one the
-    worker made and the scenario never planned — a gate refusal, which is
-    what the gate is for.
+    Derived from the steps, not from what the worker did: every command in
+    this module's three handlers posts exactly one answer, the boot syncs
+    once, and a tab closing also drives the registry's own unregister.
     """
     commands = sum(1 for step in steps if 'command' in step)
     return dict(plan,
@@ -294,9 +287,7 @@ def run_capture(steps, *, root=None, **plan):
     """Run the worker VM over `steps`; return the full observable outcome.
 
     The strict fetch gate's verdict is asserted here, on every run, so a
-    bridge request the scenario never declared cannot pass unnoticed. `root`
-    points the load at another extension tree, which is how a mutation
-    proof exercises a mutated copy of the real module.
+    bridge request the scenario never declared cannot pass unnoticed.
     """
     node = require_node()
     background = Path(root or extension_root()) / 'background.js'
@@ -413,9 +404,9 @@ def errors(outcome):
 def channels(outcome):
     """The channel each answer was filed under, in post order.
 
-    postResult's fourth argument is the tabId a result is filed under, and
-    the repo routes a result by it. The `world` field beside it is a
-    separate extra the extension passes only for eval results.
+    postResult's fourth argument is the tabId a result is filed under. The
+    `world` field beside it is a separate extra, passed only for eval
+    results, so a module that never passes it posts the default.
     """
     return [post['tabId'] for post in outcome['posted']]
 

@@ -27,9 +27,8 @@ def test_a_capture_without_a_tab_id_resolves_the_active_tab(tmp):
 
 
 def test_an_explicit_null_tab_id_takes_the_active_tab_arm(tmp):
-    # `!cmd.tabId` treats a null the way it treats an absent key, and both
-    # clients can send one. The query call is the whole witness: without it
-    # the arm is skipped and a capture is opened under the key "null".
+    # The query call is the whole witness: without it the arm is skipped
+    # and a capture is opened under the key "null".
     outcome = run_capture([{'command': cmd('net-capture', tabId=None)}])
     assert apis(outcome, QUERY) == [
         [QUERY, [{'active': True, 'currentWindow': True}]]], outcome
@@ -93,6 +92,9 @@ def test_a_second_capture_on_the_same_tab_answers_already(tmp):
 
 
 def test_a_kept_cdp_session_skips_the_attach_and_enables_the_domain(tmp):
+    # The one attach on record is the kept session's own, from `keep(5)`.
+    # The capture reused that attachment and opened none; what it did do
+    # is send Network.enable, the second of the two calls below.
     outcome = run_capture([keep(5), start(5)])
     assert apis(outcome, ATTACH) == [attach_call(5)], outcome
     assert apis(outcome, SEND) == [
@@ -118,8 +120,7 @@ def test_enabling_the_domain_after_an_attach_detaches_and_publishes_nothing(
 
 
 def test_a_failed_rollback_detach_is_swallowed_too(tmp):
-    # The enable failed, so the rollback detaches; that detach failing as
-    # well is the second catch arm, and the call is on record either way.
+    # A rollback detach that fails as well is swallowed too.
     outcome = run_capture([start()], sendCommandReject={
         ENABLE: 'Network.enable failed'},
         chromeReject={'debugger.detach': 'target closed'})
@@ -160,7 +161,6 @@ def test_a_stop_with_no_active_tab_is_refused(tmp):
 
 
 def test_a_stop_reports_a_tab_lookup_that_failed(tmp):
-    # Inside the try, so the rejection reaches the handler's own catch.
     outcome = run_capture([{'command': cmd('net-capture-stop')}],
                           chromeReject={'tabs.query': 'no window for query'})
     assert errors(outcome) == ['no window for query'], outcome
@@ -183,7 +183,6 @@ def test_a_stop_without_bodies_sends_no_body_request(tmp):
 
 
 def test_a_stop_with_bodies_fetches_only_finished_entries(tmp):
-    # Two finished, one still in flight; the one left alone is pinned whole.
     outcome = run_capture([
         start(), request(5, 'r1', 'https://a.example.com/one'),
         request(5, 'r2', 'https://a.example.com/two'),
@@ -247,13 +246,9 @@ def test_a_stop_reports_the_buffered_count_and_clears_the_capture(tmp):
 
 
 def test_a_stop_returns_the_buffered_entries_and_frees_the_tab(tmp):
-    # The entries the stop answered with are the buffered ones, in order,
-    # and the tab is free afterwards: a later capture starts empty rather
-    # than continuing the one the stop ended. Whether the returned array is
-    # the buffer or a copy of it is NOT pinned here — the answer crosses a
-    # JSON boundary, so no assertion in this suite can reach the worker's
-    # own array, and the review ledger records `rep1_slice_live` surviving
-    # for exactly that reason.
+    # The stop returns the buffered entries in order and frees the tab. The
+    # returned array's identity is NOT pinned: the answer crosses a JSON
+    # boundary, so no assertion here can reach the worker's own array.
     outcome = run_capture([
         start(), request(5, 'r1', 'https://a.example.com/one'),
         request(5, 'r2', 'https://a.example.com/two'), stop(),
@@ -394,7 +389,8 @@ def test_a_tab_close_releases_both_maps_for_that_tab(tmp):
 
 
 def test_a_tab_close_with_neither_map_holding_it_does_not_detach(tmp):
-    # Tab 6 holds nothing, so tab 5's detach is the live oracle.
+    # Tab 6 holds neither map, so nothing detaches. The live oracle is
+    # test_a_tab_close_releases_both_maps_for_that_tab, where it does.
     outcome = run_capture([
         start(5), request(5, 'r1', 'https://a.example.com/one'),
         {'tabRemoved': 6},
@@ -412,10 +408,9 @@ def test_a_detach_clears_both_maps_for_its_own_tab(tmp):
 
 
 def test_a_detach_that_names_no_tab_changes_nothing(tmp):
-    # Three ways the source can fail to name a tab: a null source (which
-    # reaches the `source &&` conjunct), an absent key and a null one (both
-    # of which reach the `tabId != null` half). Chrome never delivers the
-    # first, so it is here to pin the guard, not to model the API.
+    # Three ways the source can fail to name a tab: a null one reaches the
+    # `source &&` conjunct, the other two the `tabId != null` half. Chrome
+    # never delivers a null source, so that one pins the guard only.
     outcome = run_capture([
         keep(5), start(5), start(6),
         {'debuggerDetached': None},
@@ -431,12 +426,7 @@ def test_a_detach_that_names_no_tab_changes_nothing(tmp):
 
 def test_every_answer_this_module_posts_to_the_extension_channel(tmp):
     # The channel an answer is filed under is a contract of every post the
-    # module makes, and it rides the fourth argument to postResult. The
-    # repo's `world` comes from `extra`, which this module never passes,
-    # so it is asserted too and is config.js's default. One run per world
-    # of plan, because the sites need an empty active-tab list, a
-    # rejecting surface or a healthy tab; each comment names the sites
-    # that run is the only route to.
+    # module makes. Each comment names the sites its run is the route to.
     no_active = run_capture(
         [{'command': cmd('net-capture')},
          {'command': cmd('net-capture-stop')},
@@ -465,10 +455,7 @@ def test_every_answer_this_module_posts_to_the_extension_channel(tmp):
 
 
 def test_stop_and_read_both_coerce_a_string_tab_id(tmp):
-    # The coercion start's own test pins is asymmetric without this. A tab
-    # key is a string either way, so the buffer lookup cannot tell an
-    # unparsed id from a parsed one; the answer's own tabId can, and it is
-    # the number 5 only when the handler parsed it.
+    # A tab key is a string either way, so only the answer's tabId can.
     outcome = run_capture([
         start(5), request(5, 'r1', 'https://a.example.com/one'),
         {'command': cmd('net-capture-stop', tabId='5')},
@@ -482,8 +469,7 @@ def test_stop_and_read_both_coerce_a_string_tab_id(tmp):
 
 
 def test_a_stop_swallows_a_detach_that_failed(tmp):
-    # The detach is on record, so the counter is live, and the stop still
-    # reports the entries it had buffered.
+    # The detach is on record, so the counter is live.
     outcome = run_capture([
         start(5), request(5, 'r1', 'https://a.example.com/one'), stop(5),
     ], chromeReject={'debugger.detach': 'target closed'})
