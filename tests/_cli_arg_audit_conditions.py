@@ -14,9 +14,18 @@ What no row here is worth reading as: ``frame_read``'s attribute arm and the
 member test inside it cannot be told apart by any control in the tree - two
 separate them from the rest; a refusal delegated to a function the walk's scope
 does not name, and a refusal nested in a statement inside an arm, are invisible
-to the control; and a key is the code's own text, so rewriting a guard in an
-equivalent spelling asks for a new key. The scope and the shapes it cannot
-see are named in the suite.
+to the control. The scope and the shapes it cannot see are named in the suite.
+
+The row key is the code's own text. A behaviour-preserving rewrite that
+changes a guard's boolean algebra - pushing a negation through, reordering
+operands - is a red that asks for a renamed row, because the text the key names
+has changed while the decision has not. This is deliberate. The key being the
+text is what stops a row drifting away from the structure it describes, and a
+normaliser that canonicalised the algebra would replace the code's text with a
+second derivation, whose disagreement with the first would be invisible. The
+cost is a rename on an equivalent rewrite; the alternative is a normaliser that
+can be wrong quietly. A false red costs a rename and a false green costs a hole
+in the guard, and only one of those is cheap to notice.
 
 Its reach, stated so it can be checked: over the domain of every row in this
 table against every other control the tree offers - 52 at this tree, 20 rows,
