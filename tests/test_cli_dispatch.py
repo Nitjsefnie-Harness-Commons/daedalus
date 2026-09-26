@@ -435,9 +435,8 @@ def test_the_seal_restores_a_connect_the_class_already_carried(tmp):
     """
     del tmp
 
-    def pre_existing(*args):
-        del args
-        return 'the value the class already carried'
+    def pre_existing(_self, _address):
+        return None
 
     socket.socket.connect = pre_existing
     try:
