@@ -19,7 +19,8 @@ import _util  # noqa: E402
 # pylint: disable-next=unused-import
 from _clientstate import _KILLED_CLIENT_PIPE_RELEASE_S  # noqa: E402,F401
 from _stream_fake import STRICT_FETCH, assert_gate_clean  # noqa: E402
-from _worker_sources import STREAM_RESPONSE  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    STREAM_RESPONSE, event_target_stub)
 
 _STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
 
@@ -32,7 +33,7 @@ SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
 
 
-_BACKGROUND_OVERLAP_HARNESS = r"""
+_BACKGROUND_OVERLAP_HARNESS = event_target_stub() + r"""
 const fs = require('fs');
 const vm = require('vm');
 const nodeCrypto = require('crypto');
@@ -128,10 +129,6 @@ async function workerFetch(target, init = {}) {
     return answer;
   }
   return bridgeFetch(url, init);
-}
-
-function eventTarget() {
-  return { addListener() {} };
 }
 
 function vmSetTimeout(callback, delay) {

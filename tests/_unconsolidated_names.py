@@ -144,9 +144,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
-    ('tests/test_config_boot_generation.py', '_run'):
-        'this drives the worker under node for one plan and reads back its '
-        'streams, where the shared _run boots a recorded scenario',
     ('tests/test_coverage_bindings.py', '_scope_violations'):
         'this renders the expected violation strings for a synthetic source, '
         'where the owner orders real calls within a scope',
@@ -220,9 +217,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_static_routes.py', '_load'):
         'this loads static_routes by path under a name of its own, where the '
         'owner is a JSON file reader',
-    ('tests/test_stream_backoff.py', '_run'):
-        'this runs one backoff plan against the shipped worker, where the '
-        'shared _run boots a recorded scenario',
     ('tests/test_tab_registry.py', '_load'):
         'this loads tab_registry by path under a name of its own, where the '
         'owner is a JSON file reader',
@@ -259,12 +253,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_watcher_budget.py', '_comment'):
         'this builds one review-comment node, where the owner asks whether a '
         'line is a YAML comment',
-    ('tests/test_worker_register_throttle.py', '_observe'):
-        'this drives the register-throttle harness under a plan with expected '
-        'streams, where the owner reads one relay mode answer',
-    ('tests/test_worker_result_post.py', '_post'):
-        'this drives one postResult call through the shipped worker source, '
-        'where the owner builds one MCP answer tuple',
     ('tests/test_worker_sources.py', '_run'):
         'this runs one shipped worker program and parses its JSON, where '
         'the shared _run boots the recorded boundary harness against a '
