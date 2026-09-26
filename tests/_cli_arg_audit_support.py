@@ -11,10 +11,11 @@ the member set the resolver reads off types.FrameType. Three rows are the
 sole catcher of one arm each — the callee that is itself a call, the
 starred expansion, and the getattr whose name is an expression — so
 dropping one of those three arms reds the row that names it. The
-unreadable-subscript arm has no such row. The real tree pins that arm's
-EXEMPTION — removing the range-and-tuple exemption refuses the eleven
-correct slices the CLI already has — and its refusal half is pinned by
-nothing, having no in-package escape of its own."""
+unreadable-subscript arm is pinned on both sides, by different
+controls: four rows below are the sole catchers of its refusal, and the
+real tree is the control for its exemption, since removing the
+range-and-tuple exemption refuses the eleven correct slices the CLI
+already has. CONDITIONS_PINNED rows C10 and C11 name the two."""
 import argparse
 import builtins
 import contextlib
@@ -285,6 +286,35 @@ REFLECTIVE_ESCAPE_CASES = (
 # Each row splices into the real daedalus_cli/commands_eval.py: the prelude
 # after its first import, the replacement for the anchor. The last field is
 # the receiver the refusal must name. These are plants, not the rule's inputs.
+# Every refusal condition the rule carries, the control that fails when the
+# condition is removed, and where that control lives. One row per condition,
+# and every row was verified by removing that condition and watching that
+# control go red. The test file is 675 of 700 and this file is 700 of 700, so
+# the ledger lives here where a reader of the rule meets it.
+CONDITIONS_PINNED = (
+    ('C1', 'the member set is read off types.FrameType',
+     'refuses_every_frame_member_the_interpreter_carries'),
+    ('C2', 'a receiver resolved to a live frame is refused on that account',
+     'refuses_a_resolved_frame_receiver'),
+    ('C3', 'a frame read is refused at all', 'five controls, C1-C11 aside'),
+    ('C4', 'the call arm: a callee that is itself a call',
+     'the plant row "callee the audit cannot see is a call"'),
+    ('C5', 'the call arm: a starred expansion',
+     'the plant row "starred expansion hides the argument list"'),
+    ('C6', 'the call arm: a proven getattr whose name is an expression',
+     'the plant row "getattr whose name is an expression"'),
+    ('C7', "resolve_origin sees a literal, which is the call arm's price",
+     'accepts_a_real_call_naming_the_namespace_key'),
+    ('C8', 'the walk starts at the module, not at a callable',
+     'covers_a_second_package_module'),
+    ('C9', 'a name a local scope binds is unproven',
+     'refuses_a_frame_read_on_a_proven_receiver'),
+    ('C10', 'the subscript arm REFUSES a key it cannot read',
+     'four plant rows, "computed key, ..."'),
+    ('C11', 'the subscript arm EXEMPTS a range or a tuple key',
+     'refuses_frame_namespaces_in_the_real_package, 11 slices'),
+)
+
 FRAME_NAMESPACE_PLANTS = (
     ('attribute getter', 'import operator\n', 'def do_reload(args):\n',
      "def do_reload(args):\n    _ = operator.attrgetter('_getframe')(sys)()"
@@ -360,6 +390,28 @@ FRAME_NAMESPACE_PLANTS = (
      "    _ = getattr(sys._getframe(), 'f_' + 'locals').get('args')"
      '.undeclared_probe\n',
      "getattr(sys._getframe(), 'f_' + 'locals')"),
+    # The unreadable-subscript arm's four escapes: a member name the audit
+    # cannot read, produced four ways, each a sole catcher for that arm.
+    ('computed key, concatenation', "member = 'f_locals'\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    frame = sys._getframe()\n'
+     "    _ = frame['f_' + 'locals'].get('args').undeclared_probe\n",
+     "frame['f_' + 'locals']"),
+    ('computed key, a bound name', "member = 'f_locals'\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    frame = sys._getframe()\n'
+     "    _ = frame[member].get('args').undeclared_probe\n",
+     'frame[member]'),
+    ('computed key, a call', "member = 'f_locals'\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    frame = sys._getframe()\n'
+     "    _ = frame[str(('f_locals',))].get('args').undeclared_probe\n",
+     "frame[str(('f_locals',))]"),
+    ('computed key, an f-string', "kind = 'locals'\n",
+     'def do_reload(args):\n',
+     'def do_reload(args):\n    frame = sys._getframe()\n'
+     "    _ = frame[f'f_{kind}'].get('args').undeclared_probe\n",
+     "frame[f'f_{kind}']"),
     ('class body', "class _Reach:\n    NS = sys._getframe()['f_locals']\n",
      'def do_reload(args):\n',
      'def do_reload(args):\n    _ = _Reach.NS.undeclared_probe\n',
