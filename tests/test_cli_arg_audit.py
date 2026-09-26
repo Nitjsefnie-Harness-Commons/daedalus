@@ -125,10 +125,11 @@ def _origin(node, function, handler_globals):
 def _frame_escapes(node, scope, handler_globals, key, label, found):
     """Report every frame read under a node, wherever the node sits.
 
-    The one place the rule is applied, so the two walks calling it cannot drift
-    into two rules. One read reports once: the walk stops descending as soon as
-    a node is refused, so a line that both selects and subscripts a member is
-    not counted twice.
+    Applied in two places, one per walk, and each is pinned: removing this copy
+    or the inline one in ``_handler_arg_violations`` reds four controls apiece,
+    which is what holds the two copies to one rule. One read reports once: the
+    walk stops descending as soon as a node is refused, so a line that both
+    selects and subscripts a member is not counted twice.
 
     ``scope`` is the innermost callable enclosing the node, or the module, and
     is what a name resolves against; entering a callable changes both it and
