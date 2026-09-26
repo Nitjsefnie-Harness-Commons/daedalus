@@ -31,8 +31,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from test_helper_reimplementation import (  # noqa: E402
-    JS_FLOOR, _text_in, js_declarations, js_reimplementations,
-    reimplementations)
+    JS_FLOOR, introduced_rows, js_declarations, js_digests,
+    js_reimplementations, reimplementations)
 
 # A three-statement body, which measures five lines from brace to brace
 # and so is above JS_FLOOR whatever the head around it says.
@@ -392,15 +392,17 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
         {'tests/prose.py': prose})['tests/prose.py']] == ['other']
 
 
-def test_a_javascript_row_may_not_name_a_site_the_branch_added(tmp):
-    """The boundary bites on a real repository, on both sides.
+def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
+    """The JavaScript side of the boundary is PINNED, not re-derived.
 
-    A row naming a declaration the branch added is refused; the same
-    table naming one the base already carried is not. The site is the
-    unit, not the file, because a branch that fixes one defect in a file
-    the residue already lives in is not adding a site — which is why
-    this form and the Python table's file-scoped one are the same
-    principle in the shape each can take.
+    This test used to rebuild the base's declaration set inline and take
+    its own set difference, which meant it exercised a set difference
+    rather than the function the recogniser calls: replacing that
+    function's whole body with `return None` left all twenty tests
+    green. It now calls `introduced_rows` itself, on a repository built
+    for it, in the same shape the Python table's boundary is pinned in —
+    so a mutant that stops the function deciding anything turns this
+    suite red rather than passing.
     """
     repo = Path(tmp) / 'branch'
     repo.mkdir()
@@ -419,28 +421,26 @@ def test_a_javascript_row_may_not_name_a_site_the_branch_added(tmp):
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'branch', 'main'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
+    # The branch MOVES nothing it inherited and ADDS one declaration of
+    # a name an older row already covers: the row for the older
+    # declaration stays, the new one has no row.
     (repo / 'tests' / 'test_base.py').write_text(_mod(
-        kept, 'HARNESS2 = r"""', 'function added(listener) {',
-        '  const seen = [];', '  return seen;', '}', '"""'), encoding='utf-8')
+        kept, '', 'HARNESS2 = r"""', 'function added(listener) {',
+        '  const other = [];', '  return other;', '}', '"""'),
+        encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
     subprocess.run(['git', 'commit', '-qm', 'branch'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
 
-    run = _text_in(repo)
-    merge_base = run(['git', 'merge-base', 'HEAD', 'main'])
-    assert merge_base is not None, 'the built repository has no merge base'
-    at_base = run(['git', 'show', f'{merge_base.strip()}:tests/test_base.py'])
-    assert at_base is not None, 'the base tree could not be read'
-    before = {(path, item.name)
-              for path, items in js_declarations(
-                  {'tests/test_base.py': at_base}).items()
-              for item in items}
-    assert before == {('tests/test_base.py', 'kept')}, sorted(before)
     table = {('tests/test_base.py', 'kept'): 'this one predates the branch',
              ('tests/test_base.py', 'added'): 'this one is the branch own'}
-    introduced = {key for key in table if key not in before}
-    assert introduced == {('tests/test_base.py', 'added')}, sorted(introduced)
+    introduced = introduced_rows(table, js_digests, repo, bases=('main',))
+    assert introduced == [('tests/test_base.py', 'added')], introduced
+    # A checkout carrying neither base cannot evaluate the property the
+    # rows rest on, and must say so rather than answer.
+    assert introduced_rows(table, js_digests, repo,
+                           bases=('origin/main',)) is None
 
 
 def main():
