@@ -97,26 +97,51 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         f'name = "{SWEEP_ENTRY}"\n'
         f'subprocess.run(f"{{name}}(tmp)", timeout=120)\n',
         f'p = ["-c", "{PROGRAM}"]; subprocess.run(p, timeout=120)\n',
+        f'match ["-c", "{PROGRAM}"]:\n    case ["-c", program]:\n'
+        '        subprocess.run([program], timeout=120)\n',
+        f'match ["-c", "{PROGRAM}"]:\n    case _ as program:\n'
+        '        subprocess.run([program], timeout=120)\n',
+        f'match ["-c", "{PROGRAM}"]:\n    case ["-c", *rest]:\n'
+        '        subprocess.run([rest], timeout=120)\n',
     )
     for index, body in enumerate(rows):
         _bounded(f'row {index}', body)
 
 
 def test_each_scope_kind_binds_its_own_program(tmp):
-    """Function, async function and class body each read their own."""
+    """Each member of `_SCOPE_NODES` reads its own and hides from outside.
+
+    The second half is the control: it holds only while that member is
+    really a scope. Deleting any one of them from `_SCOPE_NODES` lets
+    its bindings leak to the launch beside it and turns the row red,
+    which is the leak the reviewer's `class B` plant is.
+    """
     del tmp
     for header in ('def go():', 'async def go():', 'class C:'):
         _bounded(header, f'{header}\n    p = ["-c", "{PROGRAM}"]\n'
                          '    subprocess.run(p, timeout=120)\n')
+    for header, body in (
+            ('def go():', f'def go():\n    argv = ["-c", "{PROGRAM}"]\n'),
+            ('async def go():',
+             f'async def go():\n    argv = ["-c", "{PROGRAM}"]\n'),
+            ('class C:', f'class A: pass\n'
+                         f'class C: argv = ["-c", "{PROGRAM}"]\n'),
+            ('lambda',
+             f'go = lambda: ["-c", "{PROGRAM}"]\n')):
+        outside = ('subprocess.run(go(), timeout=5)\n' if header == 'lambda'
+                   else 'subprocess.run(argv, timeout=5)\n')
+        assert _scan(body + outside) == ([], []), (
+            f'{header} leaked', _scan(body + outside))
 
 
 def test_a_branch_shares_its_enclosing_scope(tmp):
     """`ast.If` is not a scope, so a binding inside one is still read.
 
-    This row discriminates. The first half stays green while
-    `_SCOPE_NODES` omits `ast.If`; the second goes red the moment it is
-    added, because a `def` nested in a branch is a scope of its own and
-    its bindings must not reach the launch beside it.
+    Both halves turn red together if `ast.If` is added to
+    `_SCOPE_NODES`, so the pair pins the membership rather than testing
+    opposite directions: adding it makes the branch its own scope, the
+    binding stops being visible to the launch beside it, and the `def`
+    nested in the branch stops being the thing that hides it.
     """
     del tmp
     _bounded('a binding inside a branch',
@@ -140,18 +165,30 @@ def test_a_clean_module_reports_nothing(tmp):
         assert _scan(body) == ([], []), (f'row {index}', _scan(body))
 
 
-def test_a_name_rebound_later_does_not_red_a_correct_launch(tmp):
-    """A launch is judged on the bindings that exist at its own line.
+def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
+    """The LAST binding at or before a launch, never the join of them all.
 
-    The scan reads each name up to the line of the launch, so a scope
-    that reuses a name for an unrelated program afterwards reds nothing.
+    Three directions, and the first two are the ones that used to red a
+    correct launch: a name the scope reused for an unrelated program
+    afterwards, and one it reused for an unrelated program in between.
+    A launch is judged on the binding in force at its own line.
     """
     del tmp
-    body = (f'program = "print(1)"\n'
-            'subprocess.run([program], timeout=5)\n'
-            f'program = ["-c", "{PROGRAM}"]\n'
-            'subprocess.run([program])\n')
-    assert _scan(body) == ([(HERE, 5)], []), _scan(body)
+    reused_after = (f'program = ["-c", "{PROGRAM}"]\n'
+                    'program = "print(1)"\n'
+                    'subprocess.run([program], timeout=5)\n'
+                    f'program = ["-c", "{PROGRAM}"]\n'
+                    'subprocess.run([program])\n')
+    assert _scan(reused_after) == ([(HERE, 6)], []), _scan(reused_after)
+    swept_after = (f'program = "print(1)"\n'
+                   'subprocess.run([program], timeout=5)\n'
+                   f'program = ["-c", "{PROGRAM}"]\n'
+                   'subprocess.run([program])\n')
+    assert _scan(swept_after) == ([(HERE, 5)], []), _scan(swept_after)
+    _bounded('rebound to the sweep last',
+             'program = ["-c", "print(1)"]\n'
+             f'program = ["-c", "{PROGRAM}"]\n'
+             'subprocess.run([program], timeout=5)\n')
 
 
 def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
@@ -188,6 +225,10 @@ def test_each_declared_blind_spot_is_really_missed(tmp):
          [], []),
         ('a program named by an except/as target',
          'try:\n    pass\nexcept ValueError as p:\n'
+         '    subprocess.run(p, timeout=120)\n',
+         [], []),
+        ('a program named by an except*/as target',
+         'try:\n    pass\nexcept* ValueError as p:\n'
          '    subprocess.run(p, timeout=120)\n',
          [], []),
         ('a comprehension target, which is its own scope',

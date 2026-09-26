@@ -468,18 +468,27 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child runs 127 mutation rows spawning 128 individually-bounded
-    grandchildren, so an outer bound on it decides a verdict its own work
-    does not own. On this 12-core host the aggregate takes 25-28s
-    unloaded and 105-145s under full CPU saturation (12 burners),
-    `returncode 0` every time: a starved run has been measured past the
-    120s bound this removes. Neither figure is a point measurement —
-    both vary with whatever else the host is running, which is the whole
-    argument. A wall bound is legitimate where the child always spends it
-    on real work — the freeze controls busy-wait on purpose, so a wedged
-    child is the only failure a ceiling names — and a runaway backstop
-    would have to cover 127 x 30s = 3810s, which 120s truncates about
-    thirty-two times over.
+    That child runs 127 mutation rows, one individually-bounded
+    grandchild each, so an outer bound on it decides a verdict its own
+    work does not own: 127 x 30s = 3810s is the work a runaway backstop
+    would have to cover, and 120s truncates it about thirty-two times
+    over. A wall bound is legitimate where the child always spends it on
+    real work — the freeze controls busy-wait on purpose, so a wedged
+    child is the only failure a ceiling names — but this child is real
+    work that runs long, and the aggregate is observed to take minutes
+    where a margin allows two.
+
+    That observation supports the argument rather than carrying it,
+    because it does not reproduce to a figure: the same child has been
+    measured from 16s to 145s, `returncode 0` every time. What moves the
+    number is the host's AMBIENT load, not the measurement — these boxes
+    run at loadavg 25 on 12 cores while a 127-child sweep wants all of
+    them — so a saturation figure says more about the neighbours than
+    about the bound. The arithmetic above is what the removal rests on;
+    the timing only shows the margin is not comfortably large. Re-derive
+    it by timing
+    `suite.test_each_new_binding_and_match_arm_is_mutation_sensitive`
+    under `nproc` burners while reading /proc/loadavg.
 
     What bounds a wedged child now: `run_tests.py:14`
     `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:95` by
@@ -503,10 +512,13 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     keys on is no function any tracked suite defines, which a rename
     that stranded the two program strings would have left green.
 
-    Each launch is judged on the bindings that exist AT ITS OWN LINE, so
-    a scope that reuses a name for an unrelated program after the launch
-    reds nothing, and a program the scope only defines afterwards is not
-    read into a call it did not run.
+    Each launch is judged on the binding in force AT ITS OWN LINE — the
+    LAST one at or before it, never the join of every binding that ever
+    existed by then. So a scope that reuses a name reds nothing in
+    either direction: not for the launch that ran before the reuse, and
+    not for one that ran after an unrelated binding replaced the program
+    it holds. The cost is a program the scope defines BELOW its launch,
+    which is not read into a call it did not run.
 
     Not enforced, and not claimed to be: (1) a `timeout` unpacked from
     a `**` mapping on the same call, which the scan does not read; (2) a
@@ -517,15 +529,17 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     `global` / `nonlocal` declaration, or imported from another module,
     because each scope reads only its own bindings; (4) a bare-name
     target bound by a form the scan does not read — `with ... as`,
-    `except ... as`, which name a context manager and an exception, and
-    a target that is not a bare name at all: a tuple unpacking, a
-    subscript, a class attribute. `=`, `+=`, an annotated `=`, a
-    walrus, a `for ... in` target and `append` / `extend` ARE read; a
-    `for` target binds the iterated expression, an over-approximation of
-    what one iteration holds, which fails toward finding a launch rather
-    than past one; (5) an argv grown by anything but `append` /
-    `extend` — an `insert`, say; (6) a launcher the import scan does not
-    type — `__import__`, `getattr`, `sys.modules`, or a
+    `except ... as` and `except* ... as`, which name a context manager
+    and an exception, and a target that is not a bare name at all: a
+    tuple unpacking, a subscript, a class attribute. `=`, `+=`, an
+    annotated `=`, a walrus, a `for ... in` target, a match capture and
+    `append` / `extend` ARE read; a `for` target binds the iterated
+    expression and a match capture binds the match subject, both
+    over-approximations of the value they will really hold, which fail
+    toward finding a launch rather than past one; (5) an argv grown by
+    anything but `append` / `extend` — an `insert`, say; (6) a launcher
+    the import scan does not type — `__import__`, `getattr`,
+    `sys.modules`, or a
     `subprocess.Popen` whose `wait` or `communicate` carries the
     deadline; (7) a deadline spelled without the word, a clock
     comparison plus a kill or a `signal.alarm`; (8) a `timeout`
