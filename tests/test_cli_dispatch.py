@@ -421,6 +421,42 @@ def test_the_socket_seal_is_lifted_when_the_block_ends(tmp):
         f'{socket.socket.connect}')
 
 
+def test_the_seal_restores_a_connect_the_class_already_carried(tmp):
+    """The restore's `else` arm, which no other control in this file reaches.
+
+    `connect` is inherited from `_socket.socket` and is NOT in
+    `socket.socket.__dict__`, so every other run of the seal takes the
+    `del` arm. This arms the other one by putting an attribute on the
+    class first. The seal must put back the value it found: a restore
+    that ran the `del` arm regardless would delete a suite's own patch
+    instead of returning it, and the evidence for that is only visible
+    here — the arm it takes is decided by the class, before any handler
+    runs.
+    """
+    del tmp
+
+    def pre_existing(*args):
+        del args
+        return 'the value the class already carried'
+
+    socket.socket.connect = pre_existing
+    try:
+        with _cli_dispatch.wired(types.SimpleNamespace(),
+                                 _cli_dispatch.RecordingExtCmd([])):
+            assert socket.socket.connect is not pre_existing, (
+                'the seal must be up while a module is wired')
+
+        assert socket.socket.connect is pre_existing, (
+            'the seal must put back the attribute it found, not delete it: '
+            f'{socket.socket.connect!r}')
+    finally:
+        if 'connect' in socket.socket.__dict__:
+            del socket.socket.connect
+
+    assert 'connect' not in socket.socket.__dict__, (
+        'this control must leave the class as it found it')
+
+
 def test_asking_for_more_answers_than_were_supplied_fails_cleanly(tmp):
     """An exhausted answer queue is an assertion, not an IndexError.
 
