@@ -134,35 +134,53 @@ def _parse(path, source):
 
 
 def _entry_points(tree):
-    """The names the module calls inside a `__main__` guard.
+    """The names a `__main__` guard CALLS, and nothing else it mentions.
 
     A script's own entry point is not a shared helper's name: every
     module that runs itself under that guard has one, and none of them
     is a copy of any other. Both operand orders of the comparison are
     the same guard.
+
+    The unit is a CALL, not a mention. Collecting every `ast.Name` the
+    guard touches dropped a name from the offender's definitions AND from
+    the owner set, so a module that merely printed, assigned or tested
+    the truthiness of a shared helper's name lost that name twice over —
+    a false green in both directions, and a false green that grows
+    silently as a helper's guard gains a line. What is excluded is a
+    name the guard never invokes.
     """
     names = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.If):
             continue
-        test = node.test
-        if (not isinstance(test, ast.Compare)
-                or not isinstance(test.ops[0], ast.Eq)
-                or len(test.comparators) != 1):
-            continue
-        left, right = test.left, test.comparators[0]
-        if isinstance(left, ast.Name) and left.id == '__name__':
-            guarded = right
-        elif isinstance(right, ast.Name) and right.id == '__name__':
-            guarded = left
-        else:
-            continue
-        if (not isinstance(guarded, ast.Constant)
-                or guarded.value != '__main__'):
+        if not _is_a_main_guard(node.test):
             continue
         for statement in node.body:
-            names.update(sub.id for sub in ast.walk(statement)
-                         if isinstance(sub, ast.Name))
+            names.update(_called_names(statement))
+    return names
+
+
+def _is_a_main_guard(test):
+    if (not isinstance(test, ast.Compare) or not test.ops
+            or not isinstance(test.ops[0], ast.Eq)
+            or len(test.comparators) != 1):
+        return False
+    left, right = test.left, test.comparators[0]
+    if isinstance(left, ast.Name) and left.id == '__name__':
+        guarded = right
+    elif isinstance(right, ast.Name) and right.id == '__name__':
+        guarded = left
+    else:
+        return False
+    return isinstance(guarded, ast.Constant) and guarded.value == '__main__'
+
+
+def _called_names(node):
+    """The names a statement INVOKES, at its own level or a nested one."""
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+            names.add(sub.func.id)
     return names
 
 
@@ -696,6 +714,45 @@ def test_a_script_entry_point_is_not_a_shared_helper_name(tmp):
     # itself and the guarded helper is doing the same, so the exclusion
     # is the guard on either side, not the spelling.
     assert found == {('tests/test_plain.py', 'main')}, sorted(found)
+
+
+def test_a_guard_excludes_a_name_it_CALLS_and_nothing_it_mentions(tmp):
+    """A `__main__` guard excludes the entry point it invokes.
+
+    A guard is a statement, not a scope, and this exclusion is the one
+    place a module's own code hides a name from BOTH sides of the
+    comparison. It used to collect every `ast.Name` the guard touched,
+    so a module that merely printed, assigned or tested the truthiness
+    of a shared helper's name lost that name from its own definitions
+    and from the owner set, and each of the two re-implementations
+    below went unreported. The unit is a CALL.
+    """
+    del tmp
+    sources = {
+        # The owner tests its own helper's name in the guard and never
+        # calls it, so it keeps ownership and the offender is reported.
+        'tests/_owner.py': _mod(
+            'def _trim(mask, left, right):', '    return 1', '', '',
+            "if __name__ == '__main__':",
+            '    import sys', '    sys.exit(0 if _trim else 1)'),
+        'tests/test_offender.py': _mod(
+            'def _trim(mask, left, right):', '    return 1'),
+        # The offender mentions the name in its guard and does not call
+        # it, so it is still a re-implementation.
+        'tests/test_mentions.py': _mod(
+            'def _trim(mask, left, right):', '    return 1', '', '',
+            "if __name__ == '__main__':",
+            '    import sys', '    sys.exit(0 if _trim else 1)'),
+        # A guard that DOES call the name is a script running itself.
+        'tests/test_calls.py': _mod(
+            'def _solver(value):', '    return 1', '', '',
+            "if __name__ == '__main__':", '    _solver(1)'),
+    }
+    for path, text in sources.items():
+        compile(text, path, 'exec')
+    found = {(item.path, item.name) for item in reimplementations(sources)}
+    assert found == {('tests/test_offender.py', '_trim'),
+                     ('tests/test_mentions.py', '_trim')}, sorted(found)
 
 
 def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
