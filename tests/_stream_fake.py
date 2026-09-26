@@ -283,9 +283,14 @@ def require_node():
     return node
 
 
-def run_gate(node, program, arguments, *, cwd, plan, timeout=30):
-    result = run_node_program(node, program, arguments, cwd,
-                              payload=plan, timeout=timeout)
+def run_gate(node, program, arguments, *, cwd, plan):
+    """Drive a `node <file>` harness against a plan and read its one answer.
+
+    Carries no bound of its own: the launcher's hang detector is the only
+    deadline on this path, and `run_inline_gate` below is its sibling for
+    harnesses that hand their program to `node -e`.
+    """
+    result = run_node_program(node, program, arguments, cwd, payload=plan)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -304,10 +309,11 @@ def run_inline_gate(node, program, arguments, *, cwd, plan):
     splices it in as an object literal, this one appends it as JSON text) and
     the harness parses it only when it arrived as text.
 
-    No wall bound of its own: these harness children are bounded by their own
-    attempt counts, and a slow correct run must not become an intermittent
-    failure — a genuine deadlock is better surfaced as a hung job under the
-    suite's ceiling than as a flaky timeout. The child runs with
+    No bound of its own, and that is a choice worth naming rather than
+    paper over: this is the sibling of the file gate above and it does NOT
+    route through `run_node_program`, so the hang detector in
+    `tests/_noderun.py` does not cover it. A wedged child here is a hung
+    job under the suite's ceiling and nothing more. The child runs with
     `child_coverage('scrub')` evaluated at launch, so a value set in
     `os.environ` per call reaches the child.
     """

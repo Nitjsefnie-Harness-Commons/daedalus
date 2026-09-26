@@ -324,6 +324,9 @@
 !/tests/_jsroute_tab.py
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
+!/tests/_launch_census.py
+!/tests/_launch_fixtures.py
+!/tests/_launch_path.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
 !/tests/_mcp_code_eval.py
@@ -338,6 +341,7 @@
 !/tests/_overlap.py
 !/tests/_overlap_clients.py
 !/tests/_owned_writes.py
+!/tests/_processtree.py
 !/tests/_pyroute.py
 !/tests/_pyroute_containers.py
 !/tests/_pyroute_indexing.py
@@ -517,6 +521,7 @@
 !/tests/test_gm_segment_job.py
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
+!/tests/test_harness_launch_bounds.py
 !/tests/test_helper_shadow_boundaries.py
 !/tests/test_hotfix_document_binding.py
 !/tests/test_hotfix_scope.py
@@ -527,6 +532,7 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_jsread_mask.py
+!/tests/test_launch_path.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
 !/tests/test_mcp_entry_point.py
@@ -545,6 +551,7 @@
 !/tests/test_mcp_transport.py
 !/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
+!/tests/test_noderun_deadline.py
 !/tests/test_overlap_bound.py
 !/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
@@ -662,6 +669,7 @@
 !/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
 !/tests/test_wfscalars.py
+!/tests/test_windows_unlink_door.py
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py

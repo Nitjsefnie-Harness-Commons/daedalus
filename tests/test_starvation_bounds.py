@@ -6,10 +6,8 @@ serviced or attempt-based bound would have waited (issue 925). Each control
 below was watched failing against the wall-clock code it replaces, for the
 defect's own reason.
 """
-import ast
 import sys
 from pathlib import Path
-from typing import TypeGuard
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,9 +20,7 @@ from _stream_fake import (  # noqa: E402
 from _worker_sources import (  # noqa: E402
     chrome_stub, import_scripts_stub)
 
-# The starvation scenarios run with the freeze/thaw budget of their own (see
-# _FREEZE_RUN_TIMEOUT_S); the harness children the wall-timeout guard names do
-# not.
+# The starvation scenarios run with the freeze/thaw budget of their own.
 _ENV = _util.child_coverage('scrub')
 
 
@@ -209,10 +205,14 @@ drive().catch((error) => {
 });
 """).replace('__BRIDGE__', BRIDGE)
 
-# An outer backstop, not a bound on awaited work: the freeze control's child
-# spends its budget in one deliberate busy-wait, so a wedged child is the
-# only failure this ceiling can name.
-_FREEZE_RUN_TIMEOUT_S = 60
+# The freeze control's child spends `_FREEZE_MS` in one deliberate busy-wait
+# and then ends on its own, so it needs no bound here of its own. It is a
+# CONTROL, though, and a control's double has to stay finite under mutation
+# as well as on correct code: a mutation that wedged the child must not
+# become a job timeout. The launcher's hang detector in `tests/_noderun.py`
+# is what ends it, and it names the scenario and the child's output rather
+# than a suite, which is why the number that used to sit here was not simply
+# put back.
 
 
 def _starve_run(mode):
@@ -220,8 +220,7 @@ def _starve_run(mode):
     outcome = run_gate(
         require_node(), _CDP_STARVE_HARNESS,
         [str(_repo.ROOT / 'extension' / 'background.js'), mode],
-        cwd=ROOT, plan={'planned': list(BOOT_PLAN)},
-        timeout=_FREEZE_RUN_TIMEOUT_S)
+        cwd=ROOT, plan={'planned': list(BOOT_PLAN)})
     assert_gate_clean(
         contract_faults=outcome['contractFaults'],
         records=outcome['records'], refused=outcome['refused'],
@@ -280,293 +279,6 @@ def test_a_cdp_guard_credits_a_frozen_stretch_one_doubled_interval(tmp):
     assert outcome['outcome'] == (
         f'promise settlement timed out after {_SETTLE_BUDGET_MS} ms'), (
         outcome)
-
-
-# The modules the two harness children are launched through. The guard
-# resolves the launcher each harness actually calls (by the callee at its own
-# call site) and follows that call graph, so the verdict is bound to the
-# operation, not to one function name.
-_LAUNCHER_MODULES = ('_stream_fake.py', '_noderun.py')
-# Sentinel for a callee that names a launcher-module entity but whose body the
-# walk cannot see. It is a refusal, not a skip: an unread body is a hole in
-# this audit, so the audit cannot certify it, and a bound hiding there would
-# be a real false green.
-_UNRESOLVED = 'unresolved'
-
-
-def _is_def(
-        node: ast.AST,
-) -> TypeGuard[ast.FunctionDef | ast.AsyncFunctionDef]:
-    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-
-
-def _class_of_call(node):
-    """The launcher class a call constructs, or None."""
-    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-        return node.func.id
-    return None
-
-
-def _class_methods(node):
-    """`(classname, methodname) -> node` for one ClassDef."""
-    return {(node.name, child.name): child for child in node.body
-            if _is_def(child)}
-
-
-def _module_class_aliases(tree, classes):
-    """Module-level `NAME = _Class()` bindings, as `{name: class}`."""
-    aliases = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        cls = _class_of_call(node.value)
-        if cls in classes:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    aliases[target.id] = cls
-    return aliases
-
-
-def _launcher_context(trees):
-    """Index every function and method the launcher modules define.
-
-    Bodies are keyed so a callee resolves by bare name, module-qualified
-    attribute, `self.<m>` or `<Class>.<m>` / `<Class>().<m>`; collecting
-    class methods is what stops that route being an unseen hole.
-    """
-    functions = {}
-    methods = {}
-    classes = set()
-    local_classes = {}
-    stems = set()
-    for name, tree in trees.items():
-        stems.add(name[:-len('.py')])
-        classes.update(node.name for node in ast.walk(tree)
-                       if isinstance(node, ast.ClassDef))
-        for node in ast.walk(tree):
-            if _is_def(node):
-                functions.setdefault(node.name, node)
-            elif isinstance(node, ast.ClassDef):
-                methods.update(_class_methods(node))
-        local_classes.update(_module_class_aliases(tree, classes))
-    return {'functions': functions, 'methods': methods, 'classes': classes,
-            'local_classes': local_classes, 'stems': stems}
-
-
-def _local_class_bindings(function, classes):
-    """Local names bound to a launcher-module class inside `function`."""
-    bound = {}
-    for node in ast.walk(function):
-        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
-                and isinstance(node.value.func, ast.Name)
-                and node.value.func.id in classes):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    bound[target.id] = node.value.func.id
-    return bound
-
-
-def _resolve_callee(call, current_class, ctx, locals_):
-    """The bodies a call reaches, or `_UNRESOLVED`, or None for external.
-
-    The line is *whose code is it*, not *does it look risky*: a launcher-module
-    receiver (module stem, class, `self`, local bound to a class) must resolve
-    to a body I can read, or it is `_UNRESOLVED` — an unread body is a hole
-    this audit cannot certify. Any other receiver is external (I cannot type it
-    as my own code, and refusing it would refuse `dumps.glob(...)`), so it is
-    skipped; a `timeout=` keyword on it is still caught by the caller's own
-    concept scan.
-    """
-    func = call.func
-    if isinstance(func, ast.Name):
-        if func.id in ctx['functions']:
-            return [('fn', func.id, None)]
-        if func.id in ctx['classes']:
-            return []
-        return None
-    if not isinstance(func, ast.Attribute):
-        return None
-    attr = func.attr
-    recv = func.value
-    if isinstance(recv, ast.Name):
-        if recv.id in ctx['stems']:
-            if attr in ctx['functions']:
-                return [('fn', attr, None)]
-            return _UNRESOLVED
-        if recv.id in ctx['classes']:
-            if (recv.id, attr) in ctx['methods']:
-                return [('method', recv.id, attr)]
-            return _UNRESOLVED
-        if recv.id == 'self' and current_class is not None:
-            if (current_class, attr) in ctx['methods']:
-                return [('method', current_class, attr)]
-            return _UNRESOLVED
-        local_class = locals_.get(recv.id) or ctx['local_classes'].get(recv.id)
-        if local_class is not None:
-            if (local_class, attr) in ctx['methods']:
-                return [('method', local_class, attr)]
-            return _UNRESOLVED
-        return None
-    if (isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name)
-            and recv.func.id in ctx['classes']):
-        if (recv.func.id, attr) in ctx['methods']:
-            return [('method', recv.func.id, attr)]
-        return _UNRESOLVED
-    return None
-
-
-def _bodies(trees, ctx):
-    """Index a resolved body key to its AST node."""
-    table = {}
-    for key in ctx['functions']:
-        table[('fn', key, None)] = ctx['functions'][key]
-    for (cls, meth) in ctx['methods']:
-        table[('method', cls, meth)] = ctx['methods'][(cls, meth)]
-    return table
-
-
-def _parameter_names(function):
-    """The names a function's signature exposes, star-args excluded."""
-    args = function.args
-    names = set()
-    for group in (args.posonlyargs, args.args, args.kwonlyargs):
-        for arg in group:
-            names.add(arg.arg)
-    return names
-
-
-def _const_str(node):
-    """The string a constant node holds, or None."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-def _timeout_faults(function):
-    """Every place the deadline concept `timeout` appears in `function`.
-
-    The concept, not the spelling of any one launch, is what keeps this from
-    moving when a route is missed. It enters a child three ways: a `timeout=`
-    keyword on any call, a `timeout` parameter, and a `'timeout'` key written
-    into a container a `**` spread forwards. A bare `**opts` with no `timeout`
-    anywhere is deliberately NOT a fault: a spread is not evidence of a bound.
-    """
-    faults = []
-    if 'timeout' in _parameter_names(function):
-        faults.append((function.lineno, 'timeout parameter'))
-    for node in ast.walk(function):
-        if isinstance(node, ast.keyword) and node.arg == 'timeout':
-            faults.append((node.lineno, 'timeout= keyword'))
-        elif (isinstance(node, ast.Subscript)
-              and not isinstance(node.ctx, ast.Load)
-              and _const_str(node.slice) == 'timeout'):
-            faults.append((node.lineno, "'timeout' key write"))
-        elif (isinstance(node, ast.Dict)
-              and any(_const_str(k) == 'timeout' for k in node.keys)):
-            faults.append((node.lineno, "'timeout' key in a dict"))
-    return faults
-
-
-def _census(entry_bodies, trees, ctx):
-    """Every timeout fault and every refusal reachable from the entries.
-
-    A callee that resolves to `_UNRESOLVED` is a refusal (this audit cannot
-    see it, so it cannot certify it); a body whose timeout concept the scan
-    finds is a fault.
-    """
-    table = _bodies(trees, ctx)
-    faults = []
-    seen = set()
-    work = list(entry_bodies)
-    while work:
-        key = work.pop()
-        if key in seen:
-            continue
-        seen.add(key)
-        body = table.get(key)
-        if body is None:
-            faults.append((key, _UNRESOLVED))
-            continue
-        current_class = key[1] if key[0] == 'method' else None
-        locals_ = _local_class_bindings(body, ctx['classes'])
-        for fault in _timeout_faults(body):
-            faults.append((key, fault))
-        for node in ast.walk(body):
-            if not isinstance(node, ast.Call):
-                continue
-            resolved = _resolve_callee(node, current_class, ctx, locals_)
-            if resolved is _UNRESOLVED:
-                faults.append((key, _UNRESOLVED))
-            elif resolved:
-                work.extend(resolved)
-    return faults
-
-
-def _harness_entries(harness_tree, ctx):
-    """The launcher bodies a harness reaches, resolved off its call sites.
-
-    Returns `(entries, refusals)`.
-    """
-    entries = []
-    refusals = []
-    for node in ast.walk(harness_tree):
-        if not isinstance(node, ast.Call):
-            continue
-        resolved = _resolve_callee(node, None, ctx, {})
-        if resolved is _UNRESOLVED:
-            refusals.append((node.lineno, _UNRESOLVED))
-        elif resolved:
-            entries.extend(resolved)
-    return entries, refusals
-
-
-def test_the_harness_children_run_without_a_wall_timeout(tmp):
-    """The Surface D runners launch their children with no wall bound.
-
-    A reintroduced wall backstop around an attempt-bounded child is the
-    starvation rejection this branch removes. The guard resolves the launcher
-    each harness's own call sites reach (see `_resolve_callee` and
-    `_timeout_faults` for the resolve-or-refuse census and the deadline
-    concept it refuses).
-
-    Enforced: no `timeout` concept, and no unread launcher-module body, on the
-    resolved call graph from each harness's launcher. Not enforced, and not
-    claimed to be, a deadline reached any other way: (1) the harness's own
-    JavaScript, which this guard's input language (Python `ast`) cannot see;
-    (2) a helper the launcher modules import from outside themselves;
-    (3) a `timeout` parameter defaulted inside a method reached through a
-    receiver the walk cannot type to a class; (4) a deadline
-    assembled without the word `timeout` — a clock comparison plus a kill, or
-    `signal.alarm`; (5) a launcher-module body the census does not put on the
-    graph by construction — a class constructor (a bare `C()` call resolves to
-    no body), a method reached through a subscript or other
-    non-Name/non-Attribute callee, or a decorator that replaces a body at
-    runtime; (6) a method inherited from a base class, which the census refuses
-    rather than follows, so a deadline-free launcher of that shape is a false
-    red.
-
-    (5) and (6) are parked: the property is currently true — none of those
-    forms is on the shipped launcher path — and the one-line remedy for (5)'s
-    constructor arm (in `_resolve_callee`, return the class's `__init__` key
-    for a bare class-name call instead of `[]`) is recorded here and
-    deliberately not applied, because it would not fix (6). Each mechanism is
-    named so the next maintainer can act on it, the way `_worker_sources.py`
-    names the duplicate check's blindness to string-literal JavaScript.
-    """
-    del tmp
-    tests_dir = Path(__file__).resolve().parent
-    trees = {name: ast.parse((tests_dir / name).read_text(encoding='utf-8'))
-             for name in _LAUNCHER_MODULES}
-    ctx = _launcher_context(trees)
-    for name in ('_relayharness.py', '_cdpharness.py'):
-        tree = ast.parse((tests_dir / name).read_text(encoding='utf-8'))
-        sites = [node.lineno for node in ast.walk(tree)
-                 if isinstance(node, ast.keyword) and node.arg == 'timeout']
-        assert not sites, (name, sites)
-        entries, refusals = _harness_entries(tree, ctx)
-        assert entries, (name, 'no launcher call resolved from the harness')
-        faults = _census(entries, trees, ctx) + refusals
-        assert not faults, (name, sorted(entries), faults)
 
 
 def test_a_cli_wait_for_survives_a_clock_jump_mid_wait(tmp):

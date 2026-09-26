@@ -10,13 +10,13 @@ projection of the record.
 """
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import (  # noqa: E402
     ENVIRONMENT, RESULT, SCENARIO_PLANS, run_node_program)
+from _noderun import ChildDeadlineExceeded  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _boundary_scenarios import SCENARIOS  # noqa: E402
 from _hotfix_quota_scenario import HOTFIX_SCENARIOS  # noqa: E402
@@ -81,13 +81,19 @@ def run_extension_hotfix_quota(plan):
             node, program,
             [str(EXTENSION_ROOT / 'background.js'), 'hotfix-quota'],
             cwd=ROOT, payload=json.dumps(plan))
-    except subprocess.TimeoutExpired:
-        # The worker never finished the plan. The command sequence the
-        # plan holds would have to have stopped answering, which is what a
-        # critical section that never released looks like from outside.
+    except ChildDeadlineExceeded as failure:
+        # The two ways a worker stops answering are different failures and
+        # are reported differently. A promise that never resolves drains
+        # node's event loop, so the child EXITS with an empty stdout and the
+        # assertion below names it. A worker in a loop that never returns
+        # never exits, and this is the branch that names it: the launcher's
+        # detector killed the child, the cleanup reaped it, and the evidence
+        # is the worker's own output plus what the cleanup did. Without this
+        # the suite ceiling would end the run instead — and it SIGTERMs the
+        # suite, leaving the child alive and reparented, naming no test.
         raise AssertionError(
-            'the hotfix-quota scenario timed out: the worker stopped '
-            'answering a command it had been given') from None
+            'the hotfix-quota scenario never finished: the worker stopped '
+            'answering a command it had been given') from failure
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     assert result.stdout.strip(), (

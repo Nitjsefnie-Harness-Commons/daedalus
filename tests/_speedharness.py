@@ -4,13 +4,13 @@ The readers lift one job's step out of a workflow; the runner executes it
 under `bash -e` with stubbed neighbours on PATH.
 """
 import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _processtree import cleanup_process_tree  # noqa: E402
 from _wfgraph import _job_section  # noqa: E402
 
 _CLEANUP_TIMEOUT = 5
@@ -109,87 +109,12 @@ def run_workflow_script(workdir, script, environment, timeout=120):
     try:
         returncode = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired as failure:
-        cleanup = _cleanup_process(process)
+        cleanup = cleanup_process_tree(process, _CLEANUP_TIMEOUT)
         _attach_timeout_output(failure, output_files, cleanup)
         raise
     return subprocess.CompletedProcess(
         command, returncode, _read_output(output_files['stdout']),
         _read_output(output_files['stderr']))
-
-
-def _kill_process_tree(process):
-    """Terminate a timed-out workflow shell and every child it started."""
-    if sys.platform == 'win32':
-        try:
-            result = subprocess.run(
-                ['taskkill', '/F', '/T', '/PID', str(process.pid)],
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, check=False,
-                timeout=_CLEANUP_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            return f'taskkill timed out after {_CLEANUP_TIMEOUT}s'
-        except OSError as error:
-            return f'taskkill failed to run: {error}'
-        if result.returncode == 0:
-            return 'taskkill completed successfully'
-        return f'taskkill failed with exit code {result.returncode}'
-    try:
-        process_group = os.getpgid(process.pid)
-    except ProcessLookupError:
-        return 'process group was already gone before cleanup'
-    except OSError as error:
-        return f'process-group lookup failed: {error}'
-    try:
-        if process_group == os.getpgrp():
-            process.kill()
-            return 'direct process kill requested for the current group'
-        else:
-            os.killpg(process_group, signal.SIGKILL)
-            return f'process group {process_group} killed'
-    except ProcessLookupError:
-        # The group can disappear between getpgid() and the signal.
-        return f'process group {process_group} was already gone'
-    except OSError as error:
-        return f'process-group kill failed: {error}'
-
-
-def _cleanup_process(process):
-    """Keep cleanup failures from masking the original timeout."""
-    try:
-        cleanup = _kill_process_tree(process)
-    except Exception as error:  # pylint: disable=broad-except
-        cleanup = f'process-tree kill raised {error!r}'
-    try:
-        return _reap_process(process, cleanup)
-    except Exception as error:  # pylint: disable=broad-except
-        return f'{cleanup}; cleanup reap raised {error!r}'
-
-
-def _reap_process(process, cleanup):
-    """Reap a timed-out shell without restoring an unbounded wait."""
-    try:
-        process.wait(timeout=_CLEANUP_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        cleanup += '; bounded reap timed out'
-    except OSError as error:
-        cleanup += f'; bounded reap failed: {error}'
-    else:
-        return cleanup + '; process reaped'
-    try:
-        process.kill()
-    except ProcessLookupError:
-        cleanup += '; fallback process was already gone'
-    except OSError as error:
-        cleanup += f'; fallback process kill failed: {error}'
-    else:
-        cleanup += '; fallback process kill requested'
-    try:
-        process.wait(timeout=_CLEANUP_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return cleanup + '; process reap still timed out'
-    except OSError as error:
-        return cleanup + f'; process reap failed: {error}'
-    return cleanup + '; process reaped after fallback'
 
 
 def _attach_timeout_output(failure, output_files, cleanup):
