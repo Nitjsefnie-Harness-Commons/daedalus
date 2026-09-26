@@ -422,6 +422,7 @@
 !/tests/test_cli.py
 !/tests/test_cli_arg_audit.py
 !/tests/test_cli_argument_types.py
+!/tests/test_cli_dispatch.py
 !/tests/test_cli_duplicate_admission.py
 !/tests/test_cli_error_reporting.py
 !/tests/test_cli_hotfixes.py
