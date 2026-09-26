@@ -31,6 +31,10 @@ import ast
 
 DEFN = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 COMPREHENSION = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+# `type X = ...` is 3.12 syntax, so a 3.11 parser can neither produce the
+# node nor contain the statement. Absent there, the empty tuple makes
+# `isinstance` false for every node instead of raising at import.
+TYPE_ALIAS = getattr(ast, 'TypeAlias', ())
 
 
 def _target_names(target):
@@ -138,7 +142,7 @@ def _module_execution(tree, nodes=None):
             for target in node.targets:
                 for name in _target_names(target):
                     bind(name, node.lineno)
-        elif isinstance(node, ast.TypeAlias):
+        elif isinstance(node, TYPE_ALIAS):
             # `type X = ...` binds X at module scope. It is a bind and
             # not one of the three DEFINING forms, so a `type X` beside
             # a `def X` is a rebind (the shadow control's) rather than a
