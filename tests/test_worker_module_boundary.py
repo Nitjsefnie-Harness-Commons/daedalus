@@ -31,6 +31,7 @@ _WORKER_NON_COMMAND_OWNERSHIP = (
     ('worker/evaluate.js', ('_canUseMainWorldEval', '_executeMainWorldEval',
                             '_raceMainWorldEval', '_takeEvalRelay'), ()),
     ('worker/gm_storage.js', ('handleGmStorage',), ()),
+    ('worker/hotfix_scope.js', ('_parseMatch', '_scopeRefusal'), ()),
     ('worker/hotfixes.js', ('handleHotfixReplay',), ()),
     ('worker/segment_mint.js', ('mintSegmentSig',), ()),
     ('worker/netcapture.js', ('_netCaptures',),
