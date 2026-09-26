@@ -8,6 +8,7 @@ which is what makes the before/after comparison one method rather than two.
 """
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -19,7 +20,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
-import _watcher_polls as polls  # noqa: E402
 import _watcher_waits as waits  # noqa: E402
 
 ROOT = _util.ROOT
@@ -32,6 +32,10 @@ SHA = 'a' * 40
 # The interval the measured watchers poll at, and what the hourly figure
 # divides by. Nothing in the measurement itself reads a clock.
 TICK = 2
+# What one idle poll of either watcher may spend, as an upper bound. Named
+# once so the doubled-poll control is checked against the bound the idle
+# controls actually enforce rather than a copy of it.
+IDLE_POLL_BOUND = 1
 STAMP = '%Y-%m-%dT%H:%M:%SZ'
 
 
@@ -213,16 +217,29 @@ def _pid_alive(pid):
     return text.rsplit(')', 1)[-1].split()[0] != 'Z'
 
 
-def _measure(tmp, name, args, fake):
-    """Calls per poll for one watcher, measured from what gh received."""
-    child = _watcher(name, args, fake)
-    try:
-        polls.await_polls(fake, child, f'{name} to run two whole polls')
-    finally:
-        child.stop()
-    seen = fake.calls()
-    per_poll = polls.per_poll(seen)
-    return per_poll, seen
+def _once(script, args, fake, limit=60):
+    """The calls one `--once` invocation made, read once it has exited.
+
+    A poll IS one invocation, so the log is complete by the time the process
+    is gone: no clock, no inferred boundary, no child to raise. Two
+    identical calls inside one invocation are two, which is the case a
+    figure read off a repeated sequence could not tell from two polls of
+    one call each. A nonzero exit is refused rather than counted, because a
+    trial that died part-way through a poll reports calls it never spent.
+    """
+    done = subprocess.run(
+        [sys.executable, '-u', str(script), *args, '--once'],
+        env=_util.child_coverage('scrub', environment=fake.env()),
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=limit)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    return fake.calls()
+
+
+def _measure(script, args, fake):
+    """Calls per poll for one watcher: what one `--once` run asked for."""
+    seen = _once(script, args, fake)
+    return len(seen), seen
 
 
 def _base_answers():
@@ -266,21 +283,77 @@ def _idle_answers():
 def test_an_idle_comment_watch_costs_one_query_per_tick(tmp):
     fake = _fake_gh.FakeGh(tmp, _idle_answers())
     per_poll, seen = _measure(
-        tmp, 'pr_comment_watch.py', [PR, '--interval', str(TICK)], fake)
+        SKILL / 'pr_comment_watch.py', [PR, '--interval', str(TICK)], fake)
     print(f'\n  comment watcher: {per_poll} call(s) per poll, '
           f'{_hourly(per_poll, TICK):.0f}/hour at a {TICK}s tick, '
           f'from {len(seen)} logged call(s)')
-    assert per_poll <= 1, (per_poll, [call['request'][:80] for call in seen])
+    assert per_poll <= IDLE_POLL_BOUND, (
+        per_poll, [call['request'][:80] for call in seen])
 
 
 def test_an_idle_ci_watch_costs_one_query_per_tick(tmp):
     fake = _fake_gh.FakeGh(tmp, _idle_answers())
     per_poll, seen = _measure(
-        tmp, 'ci_watch.py', [BRANCH, '--interval', str(TICK)], fake)
+        SKILL / 'ci_watch.py', [BRANCH, '--interval', str(TICK)], fake)
     print(f'\n  CI watcher: {per_poll} call(s) per poll, '
           f'{_hourly(per_poll, TICK):.0f}/hour at a {TICK}s tick, '
           f'from {len(seen)} logged call(s)')
-    assert per_poll <= 1, (per_poll, [call['request'][:80] for call in seen])
+    assert per_poll <= IDLE_POLL_BOUND, (
+        per_poll, [call['request'][:80] for call in seen])
+
+
+def _planted(directory, name, anchor, plant):
+    """A runnable copy of the tracked watcher, `plant` spliced above `anchor`.
+
+    A copy rather than an edit, so the defect sits in a real module and the
+    tracked script is never a control's subject. Removing the planted text
+    must give the tracked file back byte for byte, which is what says no
+    other line moved along with the plant. The copy carries `gh_client`
+    beside it, because the script puts its own directory on `sys.path` and
+    imports it from there.
+    """
+    tracked = (SKILL / name).read_text(encoding='utf-8')
+    assert tracked.count(anchor) == 1, (name, anchor)
+    here = Path(directory)
+    here.mkdir(parents=True, exist_ok=True)
+    script = here / name
+    script.write_text(tracked.replace(anchor, plant + anchor),
+                      encoding='utf-8')
+    written = script.read_text(encoding='utf-8')
+    assert written.replace(plant, '', 1) == tracked, name
+    shutil.copy(SKILL / 'gh_client.py', here / 'gh_client.py')
+    return script
+
+
+# One more of the very same call, immediately after the one already there.
+_IDENTICAL_POLL = """    gh_client.paginate(
+        PR_QUERY,
+        {'owner': owner, 'name': name, 'number': int(pr),
+         'reviewCursor': None, 'talkCursor': None},
+        CONNECTIONS)
+"""
+_PULL_PAGE = '    found = gh_client.at(pages[0], PULL)\n'
+
+
+def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
+    """The doubled query the base measure caught and this one could not.
+
+    One poll of two identical calls and two polls of one call each record
+    the same sequence, so a figure read off the sequence answers 1 for both.
+    The copy here is the tracked comment watcher with one more of the same
+    paginate spliced in, run through the same `_measure` the idle controls
+    use, so what the figure refuses is the figure every bound rests on.
+    """
+    here = Path(tmp) / 'doubled'
+    here.mkdir(parents=True, exist_ok=True)
+    script = _planted(here, 'pr_comment_watch.py', _PULL_PAGE,
+                      _IDENTICAL_POLL)
+    fake = _fake_gh.FakeGh(here, _idle_answers())
+    per_poll, seen = _measure(script, [PR, '--interval', str(TICK)], fake)
+    print(f'\n  a poll asking twice: {per_poll} call(s) per poll, from '
+          f'{len(seen)} logged call(s)')
+    assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
+    assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
 
 
 def _base_script(directory, name):
@@ -304,11 +377,11 @@ def test_the_hourly_cost_of_an_idle_watch_is_two_queries(tmp):
         here = Path(tmp) / 'after' / name
         here.parent.mkdir(parents=True, exist_ok=True)
         fake = _fake_gh.FakeGh(here.parent, _idle_answers())
-        per_poll, seen = _measure(here.parent, name,
+        per_poll, seen = _measure(SKILL / name,
                                   args + ['--interval', str(TICK)], fake)
         after[name] = per_poll
-        assert per_poll <= 1, (name, per_poll,
-                               [call['request'][:80] for call in seen])
+        assert per_poll <= IDLE_POLL_BOUND, (
+            name, per_poll, [call['request'][:80] for call in seen])
     total = sum(after.values())
     print(f'\n  AFTER an idle watched pull request costs {total:.0f} gh '
           f'call(s) per poll ({after}), '
@@ -338,14 +411,8 @@ def test_the_base_commit_cost_through_the_same_harness(tmp):
         script = before_dir / name
         script.write_bytes(source.read_bytes())
         fake = _fake_gh.FakeGh(before_dir, _base_answers())
-        child = _Child([sys.executable, '-u', str(script),
-                        *args, '--interval', str(TICK)], fake.env())
-        try:
-            polls.await_polls(fake, child,
-                              f'base {name} to run two whole polls')
-        finally:
-            child.stop()
-        before[name] = polls.per_poll(fake.calls())
+        before[name] = len(_once(script, args + ['--interval', str(TICK)],
+                                 fake))
     total = sum(before.values())
     assert total >= 6, before
     print(f'\n  BEFORE an idle watched pull request cost {total:.0f} gh '
