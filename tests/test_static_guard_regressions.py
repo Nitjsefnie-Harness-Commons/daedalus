@@ -20,7 +20,7 @@ from _coverage_scopes import (  # noqa: E402
     _evaluation_scopes, _scope_bindings)
 from _mutation_sweep import mutation_sweep  # noqa: E402
 from _owned_writes import copy_test_tree  # noqa: E402
-from _sweep_launch_scan import sweep_launches  # noqa: E402
+from _sweep_launch_scan import SWEEP_ENTRY, sweep_launches  # noqa: E402
 
 
 def _real_module_copy(tmp, relative):
@@ -625,50 +625,72 @@ def test_production_cache_steps_keep_restore_and_save_separate(tmp):
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child is 128 individually-bounded grandchildren, so an outer
-    bound on it decides a verdict its margin does not own: unloaded it
-    finishes near 30s, starved over 60s, and the 128 x 30s a runaway
-    backstop would have to cover is the work a bound of 120s truncates
-    thirty-two times over. A wall bound is legitimate where the child
-    always spends it on real work — the freeze controls busy-wait on
-    purpose, so a wedged child is the only failure a ceiling can name.
-    These children finish early instead, which makes the bound a margin.
+    That child runs 128 individually-bounded grandchildren, so an outer
+    bound on it decides a verdict its own work does not own: on a
+    12-core host the aggregate takes 52s unloaded and 145s under full
+    saturation, `returncode 0` every time, so a starved host ran it past
+    the 120s bound this removes. A wall bound is legitimate where the
+    child always spends it on real work — the freeze controls busy-wait
+    on purpose, so a wedged child is the only failure a ceiling names —
+    and a runaway backstop would have to cover 128 x 30s, which 120s
+    truncates thirty-two times over.
+
+    What bounds a wedged child now: `run_tests.py:14`
+    `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:96`, so a wedged sweep
+    child hangs the suite for 900s and reports `SUITE TIMED OUT` under
+    the `suites` job. `scripts/ci/coverage_suites.py:28-34` passes no
+    `timeout=` at all and `tests/_util.py:621` has no per-test bound, so
+    under `coverage-matrix` the only escape is the job's
+    `timeout-minutes: 30` (`.github/workflows/tests.yml:716`) — a
+    30-minute hang the runner kills. The removal trades a 120s red for
+    that; it does not remove the need for a bound, only this one.
 
     Enforced structurally over every `tests/test_*.py`, so a site added
     later is covered without a list to maintain: no `timeout` keyword on
-    a `subprocess.run` call — in the `import subprocess`,
-    `import subprocess as x` and `from subprocess import run [as x]`
-    spellings — carrying the sweep's entry test in one of its arguments.
-    The control fails when the scan reaches no such launch at all.
+    a `subprocess.run` / `call` / `check_call` / `check_output` call —
+    spelled by `import subprocess`, `import subprocess as x`,
+    `from subprocess import run [as x]` or `from subprocess import *` —
+    carrying the sweep's entry test in an argument, as a literal, an
+    f-string, a name, or a list those are elements of. It also fails
+    when the scan reaches no such launch, and when the entry name it
+    keys on is no function any tracked suite defines, which a rename
+    that stranded the two program strings would have left green.
 
-    Not enforced, and not claimed to be, a deadline reaching the child
-    another way: (1) a `timeout` unpacked from a `**` mapping on the
-    same call, which the scan does not read; (2) a program assembled at
-    runtime rather than from literals — a `str.join`, a template read
-    from disk, or an interpolated value the literal parts cannot
-    resolve; (3) a program bound in an ENCLOSING function and read in a
-    nested one, or bound in another module and imported, because each
-    scope reads only its own bindings and only this module's own
-    imports; (4) a launcher the import scan does not type —
-    `__import__`, `getattr`, `sys.modules`, or a `subprocess.Popen`
-    whose `wait` or `communicate` carries the deadline; (5) a deadline
-    spelled without the word, a clock comparison plus a kill or a
-    `signal.alarm`; (6) a `timeout` defaulted inside a helper the launch
-    is routed through; and (7) any file outside `tests/test_*.py` — the
-    sweep's own grandchildren are bounded at 30s each in
-    `tests/_mutation_sweep.py`, which this control deliberately leaves
-    alone, because a bound on one child is a backstop and only a bound
-    on the aggregate is the margin.
+    Not enforced, and not claimed to be: (1) a `timeout` unpacked from
+    a `**` mapping on the same call, which the scan does not read; (2) a
+    program no readable binding reaches — a `str.join`, a value read
+    from a mapping or off disk, or a template built at runtime; (3) a
+    program bound in an ENCLOSING
+    function and read in a nested one, or imported from another module,
+    because each scope reads only its own bindings; (4) a program built
+    by a mutating call other than `append` / `extend` — an `insert`, or
+    a subscript assignment — and a binding whose target is not a bare
+    name, such as a tuple unpacking; (5) a launcher the import scan does
+    not type — `__import__`, `getattr`, `sys.modules`, or a
+    `subprocess.Popen` whose `wait` or `communicate` carries the
+    deadline; (6) a deadline spelled without the word, a clock
+    comparison plus a kill or a `signal.alarm`; (7) a `timeout`
+    defaulted inside a helper the launch is routed through; (8) any file
+    outside `tests/test_*.py` — the sweep's own grandchildren are
+    bounded at 30s each in `tests/_mutation_sweep.py`, which this
+    control leaves alone: a bound on one child is a backstop, only a
+    bound on the aggregate a margin; and (9) the flip side of the key —
+    the scan reads the entry NAME, not the call it belongs to, so a
+    bounded launch whose program only mentions that name in a string is
+    refused. Separating them means parsing the child program itself, and
+    a false red on a correct suite is the worse failure here, so the arm
+    is declared, not closed.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
-    launches, timed = [], []
-    for path in sorted(tests_dir.glob('test_*.py')):
-        found, bounded = sweep_launches(
-            ast.parse(path.read_text(encoding='utf-8')),
-            f'tests/{path.name}')
-        launches += found
-        timed += bounded
+    trees = [(f'tests/{path.name}', ast.parse(path.read_text(
+        encoding='utf-8'))) for path in sorted(tests_dir.glob('test_*.py'))]
+    assert any(isinstance(node, ast.FunctionDef)
+               and node.name == SWEEP_ENTRY
+               for _, tree in trees for node in ast.walk(tree)), SWEEP_ENTRY
+    found = [sweep_launches(tree, relative) for relative, tree in trees]
+    launches = [site for pair in found for site in pair[0]]
+    timed = [site for pair in found for site in pair[1]]
     assert launches, 'no tracked suite launches the mutation sweep at all'
     assert not timed, timed
 
