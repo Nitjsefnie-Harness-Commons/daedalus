@@ -112,7 +112,7 @@ def legs(report):
 # number of result legs a give-up spends is that budget divided by the
 # cadence -- MINUS whatever real time the child itself burned getting
 # there. `_dashsection.py` makes the loop's clock `hostNow() + SPENT`,
-# `api.js:141-142` checks `while (Date.now() - t0 < timeout)` BEFORE each
+# `api.js:143-144` checks `while (Date.now() - t0 < timeout)` BEFORE each
 # sleep, and every leg adds at least 250 of `SPENT`, so at check k the
 # elapsed time is already `>= 250 * (k - 1)` whatever the host did. That
 # forces `k <= timeout // POLL_CADENCE_MS` for every host: host time can
@@ -126,7 +126,7 @@ def legs(report):
 # like enough and only afterwards justified.
 #
 # The BUDGET is pinned exactly and host-independently, by the give-up
-# message: `api.js:164` formats it from the `timeout` the loop was
+# message: `api.js:165` formats it from the `timeout` the loop was
 # handed, and nothing a loaded machine does reaches that string. Assert
 # the message first; the count is the corroboration it cannot distort.
 POLL_CADENCE_MS = 250

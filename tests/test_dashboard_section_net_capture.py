@@ -295,7 +295,7 @@ def test_a_chosen_tab_arrives_as_a_number_and_the_filter_is_trimmed(_tmp):
 
 def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
     """`bodies` is read by `fields()` on all three paths rather than only on
-    the stop, which `extension/worker/netcapture.js:130` and `:175` are
+    the stop, which `extension/worker/netcapture.js:128` and `:171` are
     the only two handlers that read at all. The start body is the odd one:
     `handleNetCapture` never reads the key, so this case pins that
     `fields()` sends it rather than that the worker wants it -- and a poll
@@ -313,7 +313,7 @@ def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
 
 def test_the_max_is_on_the_start_command_and_on_nothing_else(_tmp):
     """`fields(true)` is what the start passes and `fields(false)` is what
-    the other two pass, and `extension/worker/netcapture.js:80` is the
+    the other two pass, and `extension/worker/netcapture.js:82` is the
     only read of `cmd.maxRequests` in that file, inside
     `handleNetCapture` -- so the key on a poll is
     a member no handler would read, and a poll that could set the capture

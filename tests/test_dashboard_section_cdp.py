@@ -130,8 +130,9 @@ def test_the_mount_offers_the_tabs_and_leaves_the_pane_empty(_tmp):
     """The pane starts in the `empty` state and the mount sends nothing
     at all: the one request it makes is the tab list `bindTabSelector`
     issues, and a mount that sent a CDP command would reach
-    `extension/worker/cdp.js:30`, which attaches a debugger, before the
-    operator asked for anything."""
+    `extension/worker/cdp.js:25`, which takes the tab's one debugger
+    attachment, before the operator asked for anything. The attach
+    itself is `extension/worker/cdp_attach.js:75`, behind that claim."""
     report = _run('report({ pane: pane(), sent: sent(),'
                   ' options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent) });\n')
@@ -251,9 +252,10 @@ def test_a_chosen_tab_arrives_as_the_string_the_select_holds(_tmp):
     the same control in `Number()`. A test that asserted equality alone
     would pass against both, so the type is what this case states. The
     worker's own guard is about emptiness, not type --
-    `extension/worker/cdp.js:13` is `!chromeTabId` -- and it is
-    `extension/worker/cdp.js:20-21` that takes a string, so a tab id
-    this panel sends as one is a tab id the worker parses."""
+    `extension/worker/cdp.js:10` is `!chromeTabId || chromeTabId ===
+    'extension'` -- and it is `extension/worker/cdp.js:17-18` that
+    takes a string, so a tab id this panel sends as one is a tab id the
+    worker parses."""
     report = _run(_press(tab=TAB_CHOSEN) + SETTLED
                   + 'report({ sent: sent() });\n',
                   answers=(ANSWER_TEXT,))
