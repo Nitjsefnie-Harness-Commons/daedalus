@@ -668,6 +668,7 @@
 !/tests/test_tab_routing_js_sweep.py
 !/tests/test_tab_routing_js_templates.py
 !/tests/test_tab_routing_match.py
+!/tests/test_tab_routing_negative_stores.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_positions.py
 !/tests/test_tab_routing_sequence_reads.py
