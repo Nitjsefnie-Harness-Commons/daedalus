@@ -185,6 +185,21 @@ import subprocess
 os.chdir(tmp)
 (held := subprocess).run(['python3', 'child.py'])
 """, '(held := subprocess)'),
+        ('subscript index receiver', """import os
+import subprocess
+os.chdir(tmp)
+d[subprocess].run(['python3', 'child.py'])
+""", 'd[subprocess]'),
+        ('slice bound receiver', """import os
+import subprocess
+os.chdir(tmp)
+d[0:subprocess].run(['python3', 'child.py'])
+""", 'd[0:subprocess]'),
+        ('slice step receiver', """import os
+import subprocess
+os.chdir(tmp)
+d[::subprocess].run(['python3', 'child.py'])
+""", 'd[::subprocess]'),
     )
 
 
@@ -214,6 +229,21 @@ json.JSONDecoder().decode(text)
         ('module alias receiver', """import subprocess
 import other
 other.run(['python3', 'child.py'])
+"""),
+        ('subscript index that carries nothing', """import os
+import subprocess
+os.chdir(tmp)
+d[0].run(['python3', 'child.py'])
+"""),
+        ('subscript bounds that carry nothing', """import os
+import subprocess
+os.chdir(tmp)
+d[0:1].run(['python3', 'child.py'])
+"""),
+        ('subscript tuple that carries nothing', """import os
+import subprocess
+os.chdir(tmp)
+d[0, 1].run(['python3', 'child.py'])
 """),
     )
 

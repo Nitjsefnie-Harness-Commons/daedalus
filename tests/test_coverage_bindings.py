@@ -33,6 +33,9 @@ _SUBSCRIPT_INVOKE = (
 _FORM_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_value_preserving_form_is_refused(None)')
+_RECEIVER_CARRIER_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_receiver_that_carries_a_launcher_is_refused(None)')
 _RECEIVER_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_receiver_that_only_names_a_launcher_stays_clean(None)')
@@ -120,6 +123,12 @@ def _mutation_specs():
         "    if not isinstance(callee, _ATOMS):\n"
         "        yield from _carried_parts(callee)\n",
         "    if True:\n        yield from _carried_parts(callee)\n")
+    # The subscripts the descent consumes are sub-values in their own
+    # right; dropping them is what leaves a launcher in an index or a
+    # bound invisible to this arm.
+    receiver_slice = (
+        "        if isinstance(callee, ast.Subscript):\n"
+        "            yield from _carried_parts(callee.slice)\n", "")
     # The whole elif chain, so the arm is deleted rather than narrowed.
     # One arm at a time no longer shows: the refusal branch answers for
     # whatever the chain stops opening, so a single deleted arm reads as
@@ -255,6 +264,8 @@ def _mutation_specs():
         ('walk arms', 'bindings', (walk_arms,), _FORM_INVOKE),
         ('receiver opens atoms', 'bindings', (receiver_atoms,),
          _RECEIVER_INVOKE),
+        ('receiver drops the subscripts', 'bindings', (receiver_slice,),
+         _RECEIVER_CARRIER_INVOKE),
         ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),
