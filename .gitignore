@@ -425,6 +425,9 @@
 !/tests/test_cli_browser_commands.py
 !/tests/test_cli_browser_handlers.py
 !/tests/test_cli_browser_tabs.py
+!/tests/test_cli_content_block.py
+!/tests/test_cli_content_capture.py
+!/tests/test_cli_content_css.py
 !/tests/test_cli_content_hotfixes.py
 !/tests/test_cli_dispatch.py
 !/tests/test_cli_duplicate_admission.py
