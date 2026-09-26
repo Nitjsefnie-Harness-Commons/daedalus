@@ -40,10 +40,19 @@ def _prose():
 
 
 def _paragraph():
-    """The coverage paragraph alone, so a number elsewhere cannot pass it."""
+    """The coverage paragraph alone, bounded at BOTH ends.
+
+    The upper bound is what the docstring used to omit and what the code did
+    not have: the slice ran from the opening sentence to end of file, so a
+    correct unrelated sentence further down -- a percentage in House style,
+    say -- was read as a restatement and reded this suite with a message
+    blaming the paragraph. The next editor's move would be to delete correct
+    prose. Both markers are sentences, so a reword of either is a loud failure
+    here rather than a silent change of scope.
+    """
     text = _prose()
     start = text.index('Coverage is two numbers')
-    return text[start:]
+    return text[start:text.index('The matrix is not ceremony')]
 
 
 def test_the_unreached_module_line_count_is_the_trees(tmp):
@@ -85,26 +94,47 @@ def test_the_paragraph_still_claims_the_unreached_module(tmp):
         'the paragraph no longer claims the module is unreached')
 
 
-def test_no_run_only_figure_is_restated_in_prose(tmp):
-    """The covered count and the total need a full coverage run, so they
-    belong to that run's step summary rather than to this file.
+def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
+    """The property, not a token: a figure may appear only if the tree
+    proves it, so the test is the VALUE and never the wording around it.
 
-    The one percentage the paragraph may carry is the derivable one: `about
-    1%` is the unreached module's share of the denominator, and both are
-    checked above, so it cannot rot on its own. Any other percentage is a
-    measurement of a run this suite cannot check — which is how the total sat
-    wrong here twice without a gate noticing.
+    Two figures are provable here and are pinned by the cases above: the
+    unreached module's own code-line count, and the denominator. The
+    paragraph's one percentage must be computed FROM those two, which is why
+    it is recomputed below and compared rather than matched against a
+    phrasing -- `about 1%` is a rounding of 51/4943, and a rotated `about
+    99%` is the same sentence with a different number in it.
+
+    Every other figure in the paragraph is a measurement of a coverage run,
+    which nothing in this repository can check without making that run. The
+    covered count and the total are therefore banned as VALUES, so rewording
+    around them does not slip past, and inserting one is caught however it is
+    phrased. The bare `0` is permitted because it is not a measurement: it is
+    the claim that the module is unreached, which is what the paragraph is
+    for. The scan is bounded by identifier characters, so the `8` in `V8` and
+    the one in `NODE_V8_COVERAGE` are read as part of a name rather than as
+    figures the paragraph states.
     """
     del tmp
     text = _paragraph()
-    for said in re.finditer(r'\d+(?:\.\d+)?%', text):
-        lead = text[max(0, said.start() - 6):said.start()]
-        assert lead.endswith('about '), (
-            f'the paragraph restates {said.group(0)!r}, which only a coverage '
-            'run can measure and nothing here can check')
-    assert 'the total is' not in text, (
-        'the coverage total is a measurement of a run, not a fact about the '
-        'tree, and it must not be restated here')
+    said_count = re.search(r'at 0 of (\d+) code\s+lines', text)
+    said_total = re.search(r'the (\d+) the number is measured over', text)
+    assert said_count, 'the paragraph no longer states the module count'
+    assert said_total, 'the paragraph no longer states the denominator'
+    count = int(said_count.group(1))
+    total = int(said_total.group(1))
+    share = 100.0 * count / total
+
+    for said in re.findall(r'(\d+(?:\.\d+)?)\s*%', text):
+        assert abs(float(said) - share) < 1, (
+            f'the paragraph states {said}%, which is not the '
+            f'{share:.2f}% the two figures above give')
+    prose = re.sub(r'\d+(?:\.\d+)?\s*%', '', text)
+    for said in re.findall(r'(?<![A-Za-z0-9_])(\d+)(?![A-Za-z0-9_])', prose):
+        assert int(said) in (0, count, total), (
+            f'the paragraph states {said}, which is a measurement of a '
+            'coverage run rather than a figure the tree proves; it belongs '
+            'in the coverage step summary')
     assert 'coverage step summary' in text, (
         'the run-only figures must point at the coverage step summary')
 

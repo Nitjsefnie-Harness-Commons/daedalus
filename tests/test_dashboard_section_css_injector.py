@@ -219,10 +219,11 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
     The residue is not free, and this case says so rather than claiming the
     row is removable. It is not: the row's remove asks the worker to take
     off a rule that was never applied, the worker refuses, and the record
-    stays. Enough of those reach the cap, where the next injection is
-    refused too, and clearing the store key by hand is the only way out.
-    That bounded annoyance is the price of the direction, and the direction
-    is the one worth paying it for.
+    stays. That is the whole of what this case pins. Enough of them reach
+    the cap, and clearing the store key by hand is then the only way out,
+    but that composition is not driven here -- its two halves are
+    `test_a_full_session_list_refuses_the_next_injection` and
+    `test_a_refused_injection_leaves_a_record_the_panel_cannot_clear`.
     """
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
@@ -573,13 +574,10 @@ def test_an_internal_bus_event_repopulates_nothing(_tmp):
 
 
 # Nineteen: one more fits under `STORE_MAX`, a second would not.
-NINETEEN = ("const NINETEEN = [];\n"
-            "for (let i = 0; i < 19; i += 1) {\n"
-            "  NINETEEN.push({ css: 'a{--n:' + i + '}', tabId: '',\n"
-            "    allFrames: false, ts: 1750000000000 + i });\n"
-            "}\n"
-            "localStorage.setItem('daedalus-dash-css-sessions',\n"
-            "  JSON.stringify(NINETEEN));\n")
+NINETEEN = ("localStorage.setItem('daedalus-dash-css-sessions',\n"
+            "  JSON.stringify(Array.from({ length: 19 }, (_, i) =>\n"
+            "    ({ css: 'a{--n:' + i + '}', tabId: '', allFrames: false,\n"
+            "       ts: 1750000000000 + i }))));\n")
 
 
 def _store_after(js, *, setup, answers=()):
@@ -595,9 +593,9 @@ def test_two_overlapping_injections_cannot_both_pass_the_cap_check(_tmp):
     so it would pass under either order and pin nothing. `click()` does not
     await the handler, so two INJECTs fired without settling leave the first
     suspended at its `await` while the second runs the cap check. The write
-    is before that `await`, so the second sees nineteen plus one and is
-    refused. Move the write back after it and the second sees nineteen again
-    and its `save` slices the oldest away saying nothing.
+    precedes that `await`, so the second sees twenty and is refused; move the
+    write after it and the second sees nineteen and its `save` slices the
+    oldest away saying nothing.
     """
     report = _store_after(
         'const css = container.find("[data-role=css]");\n'
@@ -623,12 +621,14 @@ def test_a_row_remove_finds_its_record_after_the_store_moves(_tmp):
 
     The store is re-read at click time and the session stream fans out to
     every open window, so a second window can remove this record between this
-    one's render and its click; the scenario does exactly that, which a
-    sequential test never does. A missing `findIndex` returns -1, and -1 is a
-    valid `splice` index meaning the LAST element, so an unguarded splice
-    takes the one record it did not come for. Two mutations die here and one
-    case holds both: dropping the `at < 0` guard, and restoring the index --
-    both caught on the store, the only place they differ visibly.
+    one's render and its click; the scenario does exactly that. A missing
+    `findIndex` returns -1, and -1 is a valid `splice` index meaning the
+    LAST element, so an unguarded splice takes the record it did not come
+    for. Two mutations die here: dropping the `at < 0` guard, and restoring
+    the index. They CONVERGE on this store, because for the row clicked `i`
+    is 0 and `length - 1 - 0` IS `-1`, so the two splices are the same call;
+    distinguishability is at suite level, and the position path is pinned
+    apart by the two remove cases beside it.
     """
     report = _store_after(
         'const KEY = "daedalus-dash-css-sessions";\n'
@@ -646,9 +646,9 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     """`{}` is valid JSON, so it passes the `catch` the corrupt-store guard
     is built on. What reaches it first is not the cap check but the MOUNT:
     `renderSessions` runs before any click and its row map calls `.slice`, so
-    the panel dies at the table before an operator could press anything. The
-    cap check would have waved the same `undefined` through -- against 20 is
-    false -- so neither guard catches it and the check belongs in `load()`.
+    the panel dies at the table. The cap check would have waved the same
+    `undefined` through -- against 20 is false -- so the check belongs in
+    `load()`.
     """
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'
@@ -669,11 +669,9 @@ def test_a_refused_injection_leaves_a_record_the_panel_cannot_clear(_tmp):
     the row's own remove cannot take away, because the row asks the worker
     for a rule that is not there, the worker answers `no such css`, and the
     handler returns before the splice. That is what the module's corrected
-    comment rests on.
-
-    The composition -- enough reaching the cap to refuse the next -- is NOT
-    pinned here and is not claimed: the per-slot residue is pinned by
-    `test_a_failed_inject_keeps_the_record_it_reserved` and the cap by
+    comment rests on. The composition -- enough reaching the cap to refuse
+    the next -- is NOT driven here; its halves are
+    `test_a_failed_inject_keeps_the_record_it_reserved` and
     `test_a_full_session_list_refuses_the_next_injection`.
     """
     report = _store_after(
