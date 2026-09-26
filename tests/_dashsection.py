@@ -56,13 +56,13 @@ recorded, a duplicate plan refused, an envelope that names another
 command, the poll retrying until the result is its own, the
 `localStorage` round trip, the fan-out bus and its live dispatch, the
 pump's selectivity, a `Headers` bag, a poll with no command behind it, a
-duplicate selector, and the `console.error` recorder. What is not held
-and is a refusal by inspection only: `removeChild` of a non-child,
-`remove()` outside the tree, an `insertBefore` reference outside its
-parent, an `innerHTML` read, a non-string body and a body that will not
-parse, a response header other than `content-type`. A refusal nothing
-exercises is still better than an answer, but it is not a control and
-should not be counted as one.
+duplicate selector, a response header other than `content-type`, and the
+`console.error` recorder. What is not held and is a refusal by
+inspection only: `removeChild` of a non-child, `remove()` outside the
+tree, an `insertBefore` reference outside its parent, an `innerHTML`
+read, a non-string body and a body that will not parse. A refusal
+nothing exercises is still better than an answer, but it is not a
+control and should not be counted as one.
 """
 import json
 
