@@ -557,6 +557,7 @@
 !/tests/test_secret_scan.py
 !/tests/test_segment_capability.py
 !/tests/test_segment_jobs.py
+!/tests/test_segment_lock_stripes.py
 !/tests/test_segment_mint.py
 !/tests/test_segment_routes.py
 !/tests/test_segment_storage.py

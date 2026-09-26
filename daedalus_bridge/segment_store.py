@@ -2,6 +2,7 @@
 import os, json, hmac, secrets, threading, time
 
 from daedalus_bridge import atomic_file
+from daedalus_bridge import delivery_stripes
 from daedalus_bridge.env_config import debug_timing
 from daedalus_bridge import path_safety
 
@@ -16,7 +17,53 @@ DEBUG_TIMING = debug_timing()
 # minted capability, and fixed index/count/byte quotas. The page-JavaScript
 # relay presents the capability (sig) rather than the bridge token, because
 # anything that script carries the visited page can read.
-seg_lock = threading.Lock()
+#
+# A job's own writes are held together, but two jobs are not held against
+# each other: a job name is caller-chosen and unbounded in number, so the
+# lock a job takes is a stripe of a fixed table rather than an entry keyed by
+# the name. Stripe membership is observable as one job's write waiting out
+# another job's on a shared stripe, and that is accepted for the reason
+# `result_store` accepts the same trade-off for delivery results: the keyed
+# mapping leaves whoever chooses job names nothing to compute offline, and a
+# per-job table would be unbounded over names an authenticated caller
+# controls.
+SEGMENT_LOCK_STRIPES = 64
+seg_locks = tuple(threading.Lock() for _ in range(SEGMENT_LOCK_STRIPES))
+
+_RECORD_AFFIX = '.json'
+
+
+def _job_chain_root(job):
+    """The name whose chain of `<job>.json` descendants `job` belongs to.
+
+    The namespace is flat, so the job named `a` keeps its record at
+    `a.json` — the very directory the job named `a.json` keeps its segments
+    in. Two names that differ only by trailing record affixes therefore own
+    one filesystem entry between them, and the write path joins the pair as
+    well as the mint does, because it writes that record too. Folding the
+    affix off names the chain, and every member of a chain then takes one
+    stripe: the two calls that touch one path cannot interleave. `normcase`
+    is the identity on POSIX and folds case on Windows, which is a
+    filesystem that answers two spellings with one entry.
+    """
+    root = job
+    while root.endswith(_RECORD_AFFIX):
+        root = root[:-len(_RECORD_AFFIX)]
+    return os.path.normcase(root)
+
+
+def seg_lock_for(job):
+    """Return the lock that serializes one segment job's storage.
+
+    Keyed on the job's chain root, so the `a` / `a.json` pair takes one
+    lock and two unrelated jobs generally do not. Every caller takes this
+    one lock and nothing else, so there is no order to acquire in and no
+    way to hold two of them.
+    """
+    index = delivery_stripes.stripe_index(
+        _job_chain_root(job).encode('utf-8', 'surrogatepass'),
+        SEGMENT_LOCK_STRIPES)
+    return seg_locks[index]
 
 
 def record_path(seg_dir_root, job):
@@ -28,7 +75,7 @@ def record_path(seg_dir_root, job):
     answered for a bad job name, so a containment failure joins that answer
     rather than becoming a storage error.
     """
-    return path_safety.under(seg_dir_root, f'{job}.json')
+    return path_safety.under(seg_dir_root, f'{job}{_RECORD_AFFIX}')
 
 
 class SegmentRecordError(Exception):
