@@ -127,7 +127,7 @@ def test_a_trailing_partial_poll_is_trimmed_rather_than_refused(tmp):
     to whole polls; refusing it trades this flake for a sharper one.
     """
     del tmp
-    for extra in (1, 3):
+    for extra in (1, 2, 3):
         trailing = BASE_POLL * 2 + BASE_POLL[:extra]
         assert per_poll(_logged(trailing)) == len(BASE_POLL), (
             extra, trailing)
