@@ -668,6 +668,7 @@
 !/tests/test_wfcheckout.py
 !/tests/test_wfjobs.py
 !/tests/test_wfscalars.py
+!/tests/test_windows_unlink_door.py
 !/tests/test_worker_close_tab.py
 !/tests/test_worker_command_types.py
 !/tests/test_worker_module_boundary.py
