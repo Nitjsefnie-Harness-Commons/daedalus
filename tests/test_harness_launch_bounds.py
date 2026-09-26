@@ -91,12 +91,19 @@ def test_the_timeout_concept_is_read_whatever_the_receiver(tmp):
             'def launch(argv):',
             'def launch(argv, *, timeout=None):')
         + '\n    del timeout\n',
+        # A `**` mapping handed to the wait: no keyword at the call, and the
+        # key is in the mapping the spread forwards. Caught by the dict arm,
+        # which is why it is here and not filed as a gap.
+        'a-spread-mapping-into-the-wait': _DETECTOR.replace(
+            'process.wait(timeout=DEADLINE_S)',
+            "process.wait(**{'timeout': 30})"),
     }
     expected = {
         'a-child-wait': 'timeout= keyword',
         'a-queue-read': 'timeout= keyword',
         'a-thread-join': 'timeout= keyword',
         'a-defaulted-parameter': 'timeout parameter',
+        'a-spread-mapping-into-the-wait': "'timeout' key in a dict",
     }
     for label, body in plants.items():
         routes = _codes(body)

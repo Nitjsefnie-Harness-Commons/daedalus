@@ -660,10 +660,14 @@ def launch_refusals(source, here, bound_sink=None):
 def bound_sites(source, here):
     """The analyser's own (lineno, head, kind) for every bounded launch.
 
-    `kind` is 'timeout' (a readable `timeout=`) or 'unpack' (a
-    `**`-unpacked keyword mapping, which could hide a timeout). A caller
-    consumes this instead of re-parsing the human-readable refusal, so a
-    message-format change cannot move a guard that keys on the head.
+    `kind` is one of four: 'timeout' (a readable `timeout=` at a launch),
+    'unpack' (a `**`-unpacked keyword mapping, which could hide a timeout),
+    'unplaced' (a bounded call this analyser refused to place, reported at an
+    unreadable head), and 'keyword' (an argument the `subprocess` does not
+    take). A caller consumes this instead of re-parsing the human-readable
+    refusal, so a message-format change cannot move a guard that keys on
+    the head — and the gate keys on `kind == 'unplaced'` in particular, so
+    this list is what a reader of the gate is trusting.
     """
     sink = []
     launch_refusals(source, here, bound_sink=sink)
