@@ -467,6 +467,7 @@
 !/tests/test_dashboard_hotfixes.py
 !/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_sections.py
+!/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
 !/tests/test_dashshell_harness.py
 !/tests/test_delivery_matching.py
