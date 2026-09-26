@@ -11,6 +11,8 @@ disjoint: the namespace is flat, so the job named `a` and the job named
 here, and neither is pinned with a clock: the injected patch records which
 lock object each caller was given, so a claim about who blocked whom is
 settled by the record and not by how fast the machine was.
+
+
 """
 import json
 import sys
@@ -23,15 +25,6 @@ import _util  # noqa: E402
 from _seg_lock_seam import SITE_CUSTOMIZE  # noqa: E402
 from _segments import (BRIDGE_ENV, TOK, mint_job,  # noqa: E402
                        post_segment, seg_job)
-
-
-# The stripe is selected inside the bridge process, whose per-process seed
-# this test process does not share, so the unrelated job's name is chosen
-# THERE: the holder walks candidates until one lands on a different lock and
-# publishes the winner. A skip on "these two happened to collide" would be a
-# 1-in-64 hole in the control, and a control that sometimes does not run is
-# not a control.
-
 
 
 def _recording_setup(tmp, held_job='', park_job=''):

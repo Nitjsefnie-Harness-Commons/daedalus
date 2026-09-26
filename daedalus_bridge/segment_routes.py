@@ -33,9 +33,9 @@ class Admission(NamedTuple):
     seg_dir_root: pathlib.Path
     # The lock this job's storage is serialized on, chosen once by the
     # admission that read the record. The write path takes this rather than
-    # asking again: the two sites must hold one lock across the usage read,
+    # asking again: the two sites must hold ONE lock across the usage read,
     # the quota check and the record write, and a second lookup is a second
-    # chance to name a different job's stripe.
+    # chance to name a different stripe.
     lock: threading.Lock
 
 
@@ -89,10 +89,9 @@ def admit_segment(seg_dir_root, params, sig):
         return 403, {'error': 'bad sig'}
     if segment_index > quota[0]:
         return 400, {'error': 'seg out of range'}
-    # The directory and the lock travel with the admission so the namespace
-    # and the stripe are decided once, here, where the refusal is a 400
-    # about the request rather than a storage error raised under the write
-    # lock.
+    # The directory and the stripe are decided once, here, where a refusal is
+    # a 400 about the request rather than a storage error raised later under
+    # the write lock.
     return Admission(job, segment_index, quota, seg_dir, seg_dir_root, lock)
 
 

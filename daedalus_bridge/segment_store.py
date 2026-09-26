@@ -36,8 +36,8 @@ DEBUG_TIMING = debug_timing()
 # case-insensitive or normalising filesystem would put them together. The
 # bookkeeping names a job spends are refused at mint, so no fourth kind of
 # name can reach a path — see `reserved_bookkeeping_name`. The one
-# filesystem equivalence the fold does not cover is named as an exclusion in
-# `_job_chain_root` rather than left as an implied promise.
+# filesystem equivalence the fold does not cover is an exclusion named in
+# `_job_chain_root`, not a promise.
 SEGMENT_LOCK_STRIPES = 64
 seg_locks = tuple(threading.Lock() for _ in range(SEGMENT_LOCK_STRIPES))
 
