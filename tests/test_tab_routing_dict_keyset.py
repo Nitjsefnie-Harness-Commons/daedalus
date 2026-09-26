@@ -29,11 +29,8 @@ The two outcomes differ in what the read costs once nothing is routed. A
 refused read resolves to a tracked callable, so the guard reads that
 callable's body and the shape stays clean. A declared read joins to an
 unprovable sender, and a `tab` through a name holding one is reported
-whatever that callable would have done. Which read forms pay that is the
-MEMBER's own split, not the domain's: the freshness stores pay it on the
-subscript and read clean on the container reads, the starred and
-name-source stores the other way round, and `_SILENT` carries that split per
-member beside the issue each is parked against.
+whatever that callable would have done. WHICH read forms pay that is the
+member's own split, not the domain's, and `_SILENT` carries it per member.
 
 **Not this suite's bucket.** A store path that folds an unreadable source
 into a `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`, `update(...)`,
@@ -74,9 +71,7 @@ _CALL = '(1, tab=args.flag)'
 # A source the model cannot read as pairs.
 _UNREADABLE = 'def mk():\n    return dict(zip(["k"], [relay()]))\n'
 
-# A source the model cannot read as pairs, reached through a NAME -- the same
-# unaccountable dict a store consumes without resolving it, so a store that
-# folds the name inherits the emptiness rather than the unreadable mark.
+# A source the model cannot read as pairs, reached through a NAME.
 _UNACCOUNTABLE = 'o = {}\no.update(zip(["k"], [relay()]))'
 
 _AXES = {
@@ -98,12 +93,10 @@ _AXES = {
     # `update`, a positional source it reads and a `**` source it does
     # not. The readable pair is folded, then the unreadable mark keeps
     # the OWNER's items and discards the local fold, so a read of the
-    # readable pair's own key joins. This is the order that over-reports.
-    # Both orders are spellable and neither is reachable as a KEEP: a
-    # readable source second is dropped either way, because
-    # `_apply_mapping_store` returns on the first `None` source, so the
-    # over-report is identical in every order of the two. The orderings
-    # that are not spellable at all are the mixed positional forms --
+    # readable pair's own key joins. Both orders of the two are spellable
+    # and neither is a KEEP: a readable source second is dropped either
+    # way, because `_apply_mapping_store` returns on the first `None`
+    # source. What is not spellable is the mixed POSITIONAL form --
     # `d.update(mk(), [("a", 1)])` is a runtime TypeError and
     # `d.update(**o, [("a", 1)])` a SyntaxError.
     'update-star-mixed-unreadable': (
@@ -199,9 +192,8 @@ _SUBSCRIPT = ('subscript',)
 # `relay()` the runtime really does call is reported nothing. Each names the
 # issue it is parked against, because the census's value is that its
 # unconsidered bucket is empty BY NAME. The fourth field is the clean cost of
-# the read forms the member does NOT name: the member's own shape already
-# marks a name unprovable, so those reads report whatever the callable in
-# that name would have done, and the clean counterpart pays for it.
+# the read forms the member does NOT name, which its own shape already
+# reports through.
 _SILENT = {
     'stale-recorded-zip': (
         'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154,
@@ -218,14 +210,13 @@ _SILENT = {
         'd = {}\nd.update(*[zip(["k"], [relay()])])', 1162, _SUBSCRIPT,
         (0, 1)),
     # A source reached through a NAME the model already holds as
-    # unaccountable. It takes `_source_items`' `(items, False)` branch, so
-    # the store never reaches `_mark_unprovable` on the OWNER: the container
-    # lands at `items=[]`, `length=None`, no unknown-key slot, and every read
-    # of it answers a clean absence. The two container reads join anyway --
-    # the name is marked, and that costs the clean row its `(0, 1)` -- while
-    # the subscript binds the callable itself, which is #1010's invoke arm
-    # on a bare source and #1162's on a starred one. `dict(<name>)` is the
-    # same defect silent on all three forms, and is filed as 1163.
+    # unaccountable. It takes `_source_items`' `(items, False)` branch, so the
+    # store never reaches `_mark_unprovable` on the OWNER: the container lands
+    # at `items=[]`, `length=None`, no unknown-key slot, and every read of it
+    # answers a clean absence. The container reads join anyway, off the marked
+    # SOURCE name; the subscript binds the callable itself, which is #1010's
+    # invoke arm on a bare source and #1162's on a starred one. `dict(<name>)`
+    # is the same defect silent on all three forms, filed as 1163.
     'update-unaccountable-name': (
         _UNACCOUNTABLE + '\nd = {}\nd.update(o)', 1010, _SUBSCRIPT, (0, 1)),
     'update-unaccountable-name-star': (
@@ -337,7 +328,7 @@ def test_every_silent_member_is_listed_and_not_refused(tmp):
     is pinned beside it, on EVERY read form rather than only the silent one,
     because a fix that made every read of that key join would be a new false
     positive rather than a repair -- and which form that would be is the
-    member's own split, so neither form's cost can be assumed."""
+    member's own split, so neither can be assumed."""
     assert not {store for store, _, _, _ in _SILENT.values()} \
         & set(_AXES.values())
     assert all(isinstance(issue, int) and issue > 0
