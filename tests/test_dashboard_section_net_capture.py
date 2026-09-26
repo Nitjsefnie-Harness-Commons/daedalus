@@ -106,8 +106,6 @@ ANSWER_ALREADY = answer('net-capture',
                         '{ already: true, tabId: 22, buffered: 40 }')
 ANSWER_POLL = answer('net-capture-get',
                      '{ count: 3, tabId: 11, requests: REQS }')
-ANSWER_POLL_ONE = answer('net-capture-get',
-                         '{ count: 1, tabId: 11, requests: REQS_ONE }')
 ANSWER_POLL_BARE = answer('net-capture-get', '{ tabId: 11, requests: REQS }')
 ANSWER_POLL_NONE = answer('net-capture-get',
                           '{ count: 0, tabId: 11, requests: [] }')
