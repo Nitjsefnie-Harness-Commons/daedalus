@@ -45,6 +45,11 @@ const contentPath = process.argv[2];
 const spec = JSON.parse(process.argv[process.argv.length - 1]);
 
 const HOTFIX_KEY = 'daedalus-hotfixes';
+// The version a seeded record carries. No shipped `VERSION` can equal it, so
+// "the key is gone" and "a record the worker wrote is still there" are told
+// apart by the version `list-hotfixes` answers, on every case rather than
+// only the ones that think about it.
+const RECORD_VERSION = '0.00.0-fixture';
 const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
 const TAB_ID = 7;
 const posted = [];
@@ -428,13 +433,7 @@ const chrome = {
     onDetach: eventTarget(),
     attach: async (target) => {
       attachCalls.push(target.tabId);
-      // Chrome reports a refused attach by REJECTING the promise it
-      // returned. The synchronous throw below is a shape it does not
-      // produce, and the two reach different arms of a claim.
       if (spec.attach === 'fail') throw new Error('debugger refused');
-      if (spec.attach === 'reject') {
-        return Promise.reject(new Error('debugger refused the attach'));
-      }
     },
     detach: async (target) => { detachCalls.push(target.tabId); },
     sendCommand,
@@ -525,7 +524,14 @@ async function waitFor(predicate) {
     }
   }
   storageStore[HOTFIX_KEY] = {
-    version: '0.18.0', fixes: (spec.fixes || []).map((fix) =>
+    // A version the worker cannot produce: it stamps `VERSION` on every
+    // record it writes. A case reads the seed's version to tell a record
+    // the worker left behind from a key that is gone, and that difference
+    // has to be stated rather than inherited from two constants happening
+    // to differ. `RECORD_VERSION` is that value; a case overrides it.
+    version: spec.recordVersion === undefined ? RECORD_VERSION
+                                              : spec.recordVersion,
+    fixes: (spec.fixes || []).map((fix) =>
       Object.assign({ permanent: true }, fix)),
   };
 
@@ -536,8 +542,16 @@ async function waitFor(predicate) {
 
   // `commands` is the general spelling: a case names each command's own
   // `type` and the worker dispatches it as the bridge does. `store` is the
-  // older key, the same loop with `store-hotfix` defaulted.
-  for (const command of (spec.commands || spec.store || [])) {
+  // older key, the same loop with `store-hotfix` defaulted. Naming both is
+  // a case this double cannot resolve, and dropping one without a word is
+  // the failure mode the module's own record default would paper over.
+  if (spec.commands !== undefined && spec.store !== undefined) {
+    throw new Error('the case names both `commands` and `store`; '
+                    + 'one spelling of the command list is required');
+  }
+  const commands = spec.commands === undefined ? (spec.store || [])
+                                                 : spec.commands;
+  for (const command of commands) {
     context.storeCommand = Object.assign(
       { type: 'store-hotfix', _did: 'did-' + command.fixId }, command);
     await vm.runInContext('dispatchCommand(storeCommand)', context);

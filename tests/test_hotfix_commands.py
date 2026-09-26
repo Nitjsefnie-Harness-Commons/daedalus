@@ -36,12 +36,22 @@ from _hotfixharness import run_hotfix_case  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 
 SITE = 'https://shop.example.com/cart'
-# The key the record lives under, named here because a case plants a fault on
-# it and the fault has to name the same key the worker reads.
-HOTFIX_KEY = 'daedalus-hotfixes'
 # A fix whose code a real page can act on, so a control that reads the record
 # and a control that watches the delivery are reading the same stored value.
 CODE = "daedalusHits.push('fix1')"
+# The version the seeded record carries in every case here. A value no shipped
+# `VERSION` can equal, so "the key is gone" and "a record is still there" are
+# told apart by what `list-hotfixes` answers — stated, not inherited from two
+# constants that happen to differ.
+FIXTURE_VERSION = '0.00.0-fixture'
+
+
+def _declared(source_path, name):
+    """The value a `const NAME = 'literal';` in a shipped source declares."""
+    source = source_path.read_text(encoding='utf-8')
+    match = re.search(rf"const {name} = '([^']+)';", source)
+    assert match, f'{source_path.name} declares no {name}'
+    return match.group(1)
 
 
 def _version():
@@ -51,10 +61,17 @@ def _version():
     posting the version it was told at build time fails here instead of
     agreeing with a constant the test also carries.
     """
-    source = (EXTENSION_ROOT / 'background.js').read_text(encoding='utf-8')
-    match = re.search(r"const VERSION = '([^']+)'", source)
-    assert match, 'background.js declares no VERSION'
-    return match.group(1)
+    return _declared(EXTENSION_ROOT / 'background.js', 'VERSION')
+
+
+def _key():
+    """The key the record lives under, read out of the module that reads it.
+
+    A case plants a storage fault on this key and asserts the reason the
+    browser gave, so a literal chosen here would let the test and the double
+    agree with each other while the worker's own key went unnamed.
+    """
+    return _declared(EXTENSION_ROOT / 'worker' / 'hotfixes.js', 'HOTFIX_KEY')
 
 
 def _run(commands, fixes=(), **case):
@@ -157,6 +174,13 @@ def test_a_clear_of_an_id_the_record_does_not_hold_says_so(tmp):
     The count is asserted as well as the flag, because `remaining` is what an
     operator reads to find out whether anything went: a clear that found
     nothing left the record's length exactly where it was.
+
+    The second half is the state #1185's Expected Behavior names explicitly —
+    no record at all. The clear answers that on its own early return, which
+    is a different line from the one the fix changed, and a control that
+    reached only the filter would leave it unheld. The record is taken away
+    by the worker's own `includePermanent` clear, so the state is one the
+    worker produced rather than one this case built.
     """
     del tmp
     outcome = _run([{'id': 'clear-misspelled', 'type': 'clear-hotfix',
@@ -168,6 +192,20 @@ def test_a_clear_of_an_id_the_record_does_not_hold_says_so(tmp):
     assert _flags(outcome) == [('kept', True), ('dropped', False)], outcome
     assert row['result'] == {'cleared': 'keptt', 'found': False,
                              'remaining': 2}, outcome
+    no_record = _run([DROP_RECORD,
+                      {'id': 'clear-no-record', 'type': 'clear-hotfix',
+                       'fixId': 'kept'}], MIXED)
+    row = _rows(no_record)['clear-no-record']
+    assert row['error'] is None, no_record
+    assert row['result'] == {'cleared': 'kept', 'found': False}, no_record
+    assert no_record['record'] == [], no_record
+    # The anti-vacuity half on the same state: the id IS in a record that
+    # exists, so a handler that answered `found: false` for everything would
+    # be caught by the first half rather than passing both.
+    with_record = _run([{'id': 'clear-present', 'type': 'clear-hotfix',
+                         'fixId': 'kept'}], MIXED)
+    assert _rows(with_record)['clear-present']['result'] == {
+        'cleared': 'kept', 'found': True, 'remaining': 1}, with_record
 
 
 def test_a_clear_removes_the_fix_it_names_and_leaves_the_others(tmp):
@@ -200,9 +238,9 @@ def test_a_read_the_store_refuses_answers_with_the_reason(tmp):
     del tmp
     refused = _run([{'id': 'clear', 'type': 'clear-hotfix',
                      'fixId': 'dropped'}], MIXED,
-                   storageReadFails=HOTFIX_KEY)
+                   storageReadFails=_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + HOTFIX_KEY), refused
+        'storage read refused for ' + _key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
     # The anti-vacuity half: the same clear, the same record, no fault.
@@ -271,15 +309,24 @@ def test_clear_all_of_a_record_with_nothing_to_keep_removes_the_key(tmp):
     An empty record and an absent one are indistinguishable through the
     stored fixes, so the key going is read from what `list-hotfixes` answers
     afterwards: an absent record is answered with the worker's own version,
-    while a record left behind carries whatever version wrote it. That
+    while a record left behind carries the version that wrote it. That
     version is what `_eligibleHotfixes` compares to decide whether a
     non-permanent fix runs at all, so a leftover empty record keeps an old
     one gating replay for no reason.
+
+    The seeded record is stamped with a version no shipped `VERSION` can
+    equal, and the difference is asserted rather than left to two constants
+    happening to diverge — the first assertion below is what makes the rest
+    of this control mean anything.
     """
     del tmp
+    assert FIXTURE_VERSION != _version(), (
+        'the seeded version must differ from the worker\'s, or this control '
+        'reads a record left behind as a key that is gone')
     ordinary = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'},
                      {'id': 'list', 'type': 'list-hotfixes'}],
-                    [MIXED[1], dict(MIXED[1], id='also-ordinary')])
+                    [MIXED[1], dict(MIXED[1], id='also-ordinary')],
+                    recordVersion=FIXTURE_VERSION)
     row = _rows(ordinary)['clear-all']
     assert row['error'] is None, ordinary
     assert row['result'] == {
@@ -303,9 +350,9 @@ def test_clear_all_whose_record_read_is_refused_answers_with_the_reason(tmp):
     """
     del tmp
     refused = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'}],
-                   MIXED, storageReadFails=HOTFIX_KEY)
+                   MIXED, storageReadFails=_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + HOTFIX_KEY), refused
+        'storage read refused for ' + _key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
 
@@ -399,9 +446,9 @@ def test_set_permanent_whose_record_read_is_refused_answers_the_reason(tmp):
     del tmp
     refused = _run([{'id': 'promote', 'type': 'set-permanent',
                      'fixId': 'dropped', 'permanent': True}], MIXED,
-                   storageReadFails=HOTFIX_KEY)
+                   storageReadFails=_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + HOTFIX_KEY), refused
+        'storage read refused for ' + _key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
 
@@ -441,6 +488,12 @@ def test_list_hotfixes_answers_an_empty_record_when_there_is_none(tmp):
     still tell whether what it is reading was written by this build. Asserted
     against the version read out of the shipped source, which is the only
     thing that makes the row a test rather than a restatement.
+
+    The mirror half is a record the worker did NOT write, answering with the
+    version that wrote it rather than with its own. That row is what makes
+    the pair a discriminator instead of two spellings of one fact: without
+    it, "the version is the worker's" is satisfied by a handler that always
+    answers `_version()` and never read the record at all.
     """
     del tmp
     outcome = _run([DROP_RECORD,
@@ -448,6 +501,14 @@ def test_list_hotfixes_answers_an_empty_record_when_there_is_none(tmp):
     row = _rows(outcome)['list']
     assert row['error'] is None, outcome
     assert row['result'] == {'version': _version(), 'fixes': []}, outcome
+    leftover = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
+                    recordVersion=FIXTURE_VERSION)
+    row = _rows(leftover)['list']
+    assert row['error'] is None, leftover
+    assert row['result']['version'] == FIXTURE_VERSION, leftover
+    assert row['result']['version'] != _version(), leftover
+    assert [fix['id'] for fix in row['result']['fixes']] == [
+        'kept', 'dropped'], leftover
 
 
 def test_list_hotfixes_whose_record_read_is_refused_answers_the_reason(tmp):
@@ -458,10 +519,31 @@ def test_list_hotfixes_whose_record_read_is_refused_answers_the_reason(tmp):
     """
     del tmp
     refused = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
-                   storageReadFails=HOTFIX_KEY)
+                   storageReadFails=_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + HOTFIX_KEY), refused
+        'storage read refused for ' + _key()), refused
     assert refused['posted'][0]['result'] is None, refused
+
+
+def test_a_case_naming_both_command_spellings_is_refused(tmp):
+    """Two spellings of one thing is a case the double cannot resolve.
+
+    `commands` and `store` drive the same loop, and an empty `commands` is
+    truthy in JavaScript — so picking the first that reads as present drops
+    a populated `store` without a word, and the worker's own
+    `data[HOTFIX_KEY] || {version, fixes: []}` default papers over the
+    result. A case that would run neither list looks exactly like a case
+    whose commands all did nothing.
+    """
+    del tmp
+    try:
+        _run([{'id': 'via-commands', 'fixId': 'first', 'code': CODE}],
+             store=[{'id': 'via-store', 'fixId': 'second', 'code': CODE}])
+    except AssertionError:
+        return
+    raise AssertionError(
+        'a case naming both `commands` and `store` was accepted; the double '
+        'has to refuse the shape rather than pick one of the two lists')
 
 
 def main():
