@@ -287,7 +287,9 @@
 !/tests/_coverage_scopes.py
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
+!/tests/_dashdom.py
 !/tests/_dashnode.py
+!/tests/_dashshell.py
 !/tests/_debugger_attachment_harness.py
 !/tests/_deliveries.py
 !/tests/_drain.py
@@ -367,6 +369,7 @@
 !/tests/_segments.py
 !/tests/_service_loader.py
 !/tests/_speedharness.py
+!/tests/_step_ceiling.py
 !/tests/_stream_fake.py
 !/tests/_tabroute_selections.py
 !/tests/_tabs_harness.py
@@ -458,6 +461,7 @@
 !/tests/test_coverage_suites.py
 !/tests/test_coverage_unfollowable_forms.py
 !/tests/test_dashboard_accessibility.py
+!/tests/test_dashboard_app_shell.py
 !/tests/test_dashboard_behaviour.py
 !/tests/test_dashboard_drain_blocking.py
 !/tests/test_dashboard_eval.py
@@ -468,7 +472,10 @@
 !/tests/test_dashboard_hotfixes.py
 !/tests/test_dashboard_node_retry.py
 !/tests/test_dashboard_sections.py
+!/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
+!/tests/test_dashshell_harness.py
+!/tests/test_dashshell_selectors.py
 !/tests/test_debugger_attachment.py
 !/tests/test_debugger_teardown.py
 !/tests/test_delivery_matching.py
