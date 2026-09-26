@@ -51,6 +51,15 @@ let activeRoute = 'eval';
 // bookkeeping lives in the chrome stub. This handles the rest.
 async function sendCommand(_target, method, params) {
   if (method === 'Runtime.evaluate') {
+    // The expression is pattern-matched here rather than evaluated, so a fix
+    // body of `undefined` would drive every control in this file
+    // identically and an argument that shifted into the wrong slot would be
+    // silent. The compile probe below is the one expression that is meant
+    // to contain the word, and it is checked first.
+    if (!params.expression.startsWith('typeof (function')
+        && params.expression.includes('undefined')) {
+      throw new Error('the submitted fix body is undefined');
+    }
     if (params.expression.startsWith('typeof (function')) {
       return {
         result: { objectId: 'compile-result' },
@@ -198,7 +207,8 @@ async function runEval(id, code) {
   await runEval('reject', 'reject-case');
   activeRoute = 'hotfix';
   await vm.runInContext(
-    "_replayViaCdp(7, 'https://page.example.com/', 'hotfix-case')", context);
+    "_replayViaCdp(7, 'https://page.example.com/', 'replay-doc-token',"
+    + " 'daedalusHits.push(\"hotfix-case\")')", context);
   activeRoute = 'eval';
 
   context.pendingRemote = {

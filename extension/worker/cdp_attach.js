@@ -27,10 +27,14 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
   const held = _cdpClaims.get(tabId);
   if (held) {
     held.refs += 1;
-    // A kept claim outranks a transient one joining it: the session outlives
-    // this caller, so the record must not be dropped when they leave.
+    // Redundant at every shipped call site, and kept deliberately: no
+    // claimant releases a kept claim today (`cdp.js` never releases one it
+    // asked to keep), so `refs` cannot reach 0 on a kept entry and the
+    // `keep` arm in `_cdpRelease` is unreachable. A caller that did release
+    // its kept share would find the record still standing, which is the
+    // right answer, and this is what makes it so.
     if (keep) held.keep = true;
-    return { ready: held.ready, release: () => _cdpRelease(held) };
+    return _cdpClaimHandle(held);
   }
   const entry = {
     tabId, refs: 1, keep: keep === true, ready: null, live: false,
@@ -47,7 +51,22 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
       if (_cdpClaims.get(tabId) === entry) _cdpClaims.delete(tabId);
     });
   _cdpClaims.set(tabId, entry);
-  return { ready: entry.ready, release: () => _cdpRelease(entry) };
+  return _cdpClaimHandle(entry);
+}
+
+// The release belongs to the HANDLE, not to the entry: two joiners share one
+// entry and each owns one share of it, so the "released once" guard has to
+// be per-handle or the second joiner's release is swallowed by the first.
+function _cdpClaimHandle(entry) {
+  let released = false;
+  return {
+    ready: entry.ready,
+    release() {
+      if (released) return null;
+      released = true;
+      return _cdpRelease(entry);
+    },
+  };
 }
 
 function _cdpAttach(tabId) {
@@ -63,9 +82,12 @@ function _cdpAttach(tabId) {
 function _cdpRelease(entry) {
   entry.refs -= 1;
   if (entry.refs > 0 || entry.keep) return null;
-  if (_cdpClaims.get(entry.tabId) === entry) {
-    _cdpClaims.delete(entry.tabId);
-  }
+  // The entry identity guards the ATTACHMENT as well as the map slot. A
+  // release arriving after `cdpForgetAttachment` dropped this entry and a
+  // NEWER claim re-attached the tab must not detach that newer attachment:
+  // the stale release owns nothing that is still installed.
+  if (_cdpClaims.get(entry.tabId) !== entry) return null;
+  _cdpClaims.delete(entry.tabId);
   // An attach Chrome refused never took, so there is nothing to give back.
   // Detaching a tab nothing is attached to is a refusal from Chrome that
   // would land on whichever command ran next.
@@ -75,11 +97,18 @@ function _cdpRelease(entry) {
   // is on the stack is already inside the window, and it has to find this.
   const settling = new Promise((resolve) => { settle = resolve; });
   _cdpDetaching.set(entry.tabId, settling);
-  // A failed detach is nobody's error to report: the attachment is gone
-  // either way, and the next claim re-attaches on its own.
+  // A failed detach is nobody's error to REPORT to a caller: the attachment
+  // is gone either way, and the next claim re-attaches on its own. It is
+  // still recorded, because a caught refusal that leaves no trace is a
+  // refused detach and a successful one wearing the same face, and the next
+  // question — why did that tab need re-attaching — has no answer without it.
+  // Settling is unconditional on purpose: a joining claim chains onto this
+  // promise, and one that never settles is worse than a swallowed refusal.
   try {
-    chrome.debugger.detach({ tabId: entry.tabId }).then(settle, settle);
-  } catch (_) {
+    chrome.debugger.detach({ tabId: entry.tabId })
+      .then(settle, (error) => { _cdpRefused(entry.tabId, error); settle(); });
+  } catch (error) {
+    _cdpRefused(entry.tabId, error);
     settle();
   }
   settling.then(() => {
@@ -92,13 +121,31 @@ function _cdpRelease(entry) {
 
 // `detach` is false where Chrome has already detached us — it will not
 // detach twice, and asking is what the DevTools banner reports.
+// The `_cdpDetaching` marker is dropped here, and a claim arriving after
+// that attaches into a window Chrome may still be holding. Whether that
+// window exists is open: it needs `chrome.debugger.onDetach` to fire while
+// one of OUR detaches is in flight, and its documented reasons —
+// `canceled_by_user`, `target_closed`, `replaced_with_chrome_devtools` —
+// name none of them. Unreachable on the documented reasons, unguarded in the
+// code, and one line from guarded. Settling the Chrome behaviour settles it.
 function cdpForgetAttachment(tabId, { detach } = {}) {
   const held = _cdpClaims.get(tabId);
   _cdpClaims.delete(tabId);
   _cdpDetaching.delete(tabId);
   if (!detach || !held) return;
   try {
-    const detaching = chrome.debugger.detach({ tabId });
-    if (detaching) detaching.catch(() => {});
-  } catch (_) {}
+    chrome.debugger.detach({ tabId })
+      .catch((error) => { _cdpRefused(tabId, error); });
+  } catch (error) {
+    _cdpRefused(tabId, error);
+  }
+}
+
+// The one place a refused detach becomes visible. Both sites above reach it,
+// so the trace says which tab lost its attachment and what Chrome said, and
+// nothing downstream has to guess whether the detach happened. The message
+// is Chrome's, not a caller's, so it carries no bridge data to redact.
+function _cdpRefused(tabId, error) {
+  console.warn('[Daedalus] debugger detach refused on tab ' + tabId + ': '
+               + ((error && error.message) || String(error)));
 }

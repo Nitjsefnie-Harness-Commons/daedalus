@@ -40,16 +40,19 @@ const repl = require('repl');
 const { PassThrough } = require('stream');
 
 const backgroundPath = process.argv[1];
+const contentPath = process.argv[2];
 // The case rides last on the command line, as JSON text.
 const spec = JSON.parse(process.argv[process.argv.length - 1]);
 
 const HOTFIX_KEY = 'daedalus-hotfixes';
+const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
 const TAB_ID = 7;
 const posted = [];
 const bgConsole = [];
 const messageListeners = [];
 const injections = [];
 const submitted = [];
+const attachCalls = [];
 const timers = [];
 const storageStore = {
   'daedalus-token': 'hotfix-token',
@@ -101,14 +104,77 @@ function fillLocation(target, url) {
   return target;
 }
 
-// The attribute a document plants its own replay token in, and the token
-// text for a document that planted one. A document carries its token the
-// way Chrome's would: as a value in its OWN documentElement, which is the
-// only place a document can put one.
-const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
-
+// The token text a document mints. Every document runs the SHIPPED content
+// script against its own DOM, so this is what that script draws from
+// `crypto.randomUUID` — the harness supplies the uuid, the script decides
+// what to do with it, and the request carries whatever it planted.
 function docTokenFor(index) {
   return 'doc-token-' + index;
+}
+
+// The content-script frame for one document: the real extension/content.js,
+// run against that document's OWN documentElement, in its own realm. The
+// token in the replay request is therefore the one the shipped producer
+// minted and planted, and a producer that stopped planting, or minted one
+// value for every document, is visible here rather than hidden behind a
+// fixture that plants the token itself.
+function openContentFrame(doc) {
+  const messages = [];
+  const answers = [];
+  const listeners = [];
+  let frameLastError = null;
+  doc.frame = { get lastError() { return frameLastError; } };
+  const context = vm.createContext({
+    window: { addEventListener() {}, postMessage() {} },
+    document: {
+      documentElement: doc.documentElement,
+      addEventListener(type, listener) {
+        if (type === 'DOMContentLoaded') doc.onReady = listener;
+      },
+      removeEventListener() {},
+    },
+    // `cryptoFrame: 'http'` is a plain-http page, where randomUUID is
+    // [SecureContext] and therefore absent. The shipped mint has a fallback
+    // for exactly that, and no other double in the tree exercises it.
+    crypto: spec.cryptoFrame === 'http' ? {} : {
+      randomUUID: () => docTokenFor(documents.indexOf(doc)),
+    },
+    chrome: {
+      runtime: {
+        get lastError() { return frameLastError; },
+        sendMessage(message, callback) {
+          messages.push(message);
+          // The port is held open until the worker answers, exactly as
+          // Chrome holds it while a listener returned true.
+          if (callback) answers.push(callback);
+        },
+        onMessage: {
+          addListener(listener) { listeners.push(listener); },
+        },
+        connect: () => ({
+          postMessage() {}, disconnect() {},
+          onDisconnect: { addListener() {} },
+        }),
+      },
+    },
+    location: { hostname: new URL(doc.url).hostname },
+    setInterval: () => 1,
+    clearInterval() {},
+    setTimeout: () => 1,
+    clearTimeout() {},
+    console: { log() {}, warn() {}, error() {} },
+  });
+  vm.runInContext(
+    fs.readFileSync(contentPath, 'utf8'), context,
+    { filename: contentPath });
+  // A document that found no documentElement at document_start defers its
+  // whole replay to DOMContentLoaded, so the harness fires that too rather
+  // than leaving the case with no request at all.
+  if (doc.onReady) doc.onReady();
+  doc.messages = messages;
+  doc.answers = answers;
+  doc.frameListeners = listeners;
+  return doc;
 }
 
 // One document is one REPL context: the same global the MAIN-world
@@ -162,6 +228,10 @@ function openDocument(url) {
   doc.server = server;
   doc.page = page;
   documents.push(doc);
+  // Opened after the document joins the tab: the frame's uuid double draws on
+  // the document's own index, and Chrome injects into a document that is
+  // already open.
+  openContentFrame(doc);
   return doc;
 }
 
@@ -237,7 +307,14 @@ async function executeScript(injection) {
   // vm-load-exempt: runs the function the extension injected
   const result = await vm.runInContext(source, doc.page);
   delete doc.page.__args;
-  return [{ documentId: doc.id, result }];
+  // `answerDocumentId` models the browser answering about a DIFFERENT
+  // document than the target named — Chrome resolved the named document to
+  // the one that replaced it. Without it the injected result is always
+  // reported for the document the request already named, and a worker that
+  // never compared the two is indistinguishable from one that does.
+  const answered = spec.answerDocumentId === undefined
+    ? doc.id : spec.answerDocumentId;
+  return [{ documentId: answered, result }];
 }
 
 function evaluateIn(doc, expression) {
@@ -330,7 +407,8 @@ const chrome = {
   debugger: {
     onEvent: eventTarget(),
     onDetach: eventTarget(),
-    attach: async () => {
+    attach: async (target) => {
+      attachCalls.push(target.tabId);
       if (spec.attach === 'fail') throw new Error('debugger refused');
     },
     detach: async () => {},
@@ -405,16 +483,21 @@ async function waitFor(predicate) {
     }
   });
   const asker = documents[spec.asker === undefined ? 0 : spec.asker];
-  // The shipped content script plants a token in its OWN documentElement
-  // before it asks, so the asking document has one unless the case says
-  // otherwise; `planted` names any OTHER document holding THE SAME token,
-  // which is how a case sets up two documents the token cannot tell apart.
-  const planted = spec.planted === undefined
-    ? [documents.indexOf(asker)]
-    : spec.planted;
-  for (const index of planted) {
-    documents[index].documentElement.setAttribute(
-      DOC_TOKEN_ATTRIBUTE, docTokenFor(documents.indexOf(asker)));
+  const mintedAtLoad = Object.fromEntries(documents.map((doc) => [doc.id,
+    doc.documentElement.getAttribute(DOC_TOKEN_ATTRIBUTE)]));
+  // Every document minted and planted its OWN token, because every document
+  // runs the shipped content script. `copiedToken` is the one state the
+  // browser does not produce and the guard must still decide on: a live
+  // document holding the asker's token, as two documents would after a
+  // prerender's content script and the visible one's were handed the same
+  // value. It exists so a guard that compares VALUES is distinguishable from
+  // one that only asks whether an attribute is there.
+  if (spec.copiedToken !== false) {
+    for (const index of spec.copiedToken || []) {
+      documents[index].documentElement.setAttribute(
+        DOC_TOKEN_ATTRIBUTE,
+        asker.documentElement.getAttribute(DOC_TOKEN_ATTRIBUTE));
+    }
   }
   storageStore[HOTFIX_KEY] = {
     version: '0.18.0', fixes: (spec.fixes || []).map((fix) =>
@@ -452,20 +535,48 @@ async function waitFor(predicate) {
     // produce — the point is to pin what the worker does with a request it
     // cannot bind rather than to model a page.
     for (const field of spec.senderOmits || []) delete sender[field];
-    // The token the asking document planted and travels with the request.
-    // A case that omits it models a request the content script never made.
-    const message = { type: 'replayHotfixes' };
-    if (!spec.docTokenOmitted) {
-      message.docToken = docTokenFor(documents.indexOf(asker));
-    }
+    // The message is the one the SHIPPED content script sent: whatever token
+    // it minted, in whatever shape. A case that strips `docToken` models a
+    // request the shipped producer never makes, which is what the worker's
+    // fail-closed arm is for.
+    const message = Object.assign({}, asker.messages.find(
+      (entry) => entry.type === 'replayHotfixes') || {});
+    if (spec.docTokenOmitted) delete message.docToken;
+    // Whether the WORKER answered, which Chrome reports back to the content
+    // script as the difference between a normal callback and one carrying
+    // `lastError`. A worker that holds the channel open and never answers
+    // still gets its callback, but with the error set — so the two are
+    // distinguished here rather than collapsed into "the callback ran".
+    let answered = false;
+    const sendResponse = () => { answered = true; };
+    asker.answered = false;
+    Object.defineProperty(asker, 'answered', {
+      get() { return answered; }, configurable: true,
+    });
     for (const listener of messageListeners) {
-      listener(message, sender, () => {});
+      listener(message, sender, sendResponse);
     }
     // The listener does not await the replay, and the replay's last act is
     // its report, so the report is the signal that it finished.
     await waitFor(() => bgConsole.length > marked);
     for (let turn = 0; turn < 5; turn++) await delay();
     bgConsole.splice(0, marked);
+    // The worker answers once the replay is done, which is what runs the
+    // content script's cleanup. A worker that never answers leaves the
+    // planted token in the page, and the report reads the attribute AFTER
+    // the answer so the cleanup is observable either way.
+    for (const answer of asker.answers) {
+      if (!answered) {
+        // Chrome delivers the port-closed error the same way, and the
+        // content script's cleanup runs either way. Modelling it is what
+        // makes "the worker answered" observable at all.
+        for (const doc of documents) {
+          doc.frame.lastError = { message: 'The message port closed' };
+        }
+      }
+      try { answer(); } catch (_) {}
+    }
+    for (let turn = 0; turn < 3; turn++) await delay();
   }
 
   const globals = {};
@@ -476,13 +587,24 @@ async function waitFor(predicate) {
     }
   }
   process.stdout.write(JSON.stringify({
+    attachCalls,
+    // False means the worker held the channel open and never answered, so
+    // Chrome delivered the content script's callback with `lastError` set.
+    answered: spec.ask === false ? null : asker.answered,
     asker: { id: asker.id, url: asker.url },
     current: currentDocument ? currentDocument.id : null,
     documentUrls: Object.fromEntries(
       documents.map((doc) => [doc.id, doc.url])),
-    planted: Object.fromEntries(
-      documents.map((doc) => [doc.id, doc.documentElement.getAttribute(
-        DOC_TOKEN_ATTRIBUTE)])),
+    // What each document's own content script planted AT LOAD, read before
+    // the worker answered anything. Two documents planting two values is the
+    // property the guard leans on; a producer that planted one value for
+    // every document, or planted nothing, is visible here. Read at report
+    // time it would already show the cleanup.
+    minted: mintedAtLoad,
+    // The same attributes AFTER the worker answered, which is when the
+    // shipped content script takes its token back out of the DOM.
+    afterAnswer: Object.fromEntries(documents.map((doc) => [doc.id,
+      doc.documentElement.getAttribute(DOC_TOKEN_ATTRIBUTE)])),
     delivered: Object.fromEntries(
       documents.map((doc) => [doc.id, doc.hits])),
     globals,
@@ -518,7 +640,9 @@ def run_hotfix_case(case):
     node = shutil.which('node')
     assert node, 'node is required to execute the hotfix replay harness'
     result = run_node_program(
-        node, _HOTFIX_HARNESS, [str(EXTENSION_ROOT / 'background.js')],
+        node, _HOTFIX_HARNESS,
+        [str(EXTENSION_ROOT / 'background.js'),
+         str(EXTENSION_ROOT / 'content.js')],
         cwd=ROOT, payload=json.dumps(case))
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
