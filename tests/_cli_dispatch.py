@@ -308,13 +308,48 @@ def drive(call, answers, plan=None, **options):
     return recorded
 
 
-def run_cli(argv, answers, module=commands_content, plan=None, **options):
-    """Parse argv with the real parser, dispatch, return (calls, stdout)."""
+def _dispatch(argv, answers, module, plan, **options):
+    """(recorder, stdout, exit code) for one dispatch, however it ended.
+
+    The exit code is `None` for a handler that returned, and the plan is
+    deliberately left unchecked on the arm that did not: a handler that
+    exits is reporting a refusal, and the test asserts that message.
+    """
     args = _cli_parse.accepted(argv)
     recorded = RecordingExtCmd(answers, plan=plan, **options)
     out = io.StringIO()
-    with wired(module, recorded):
-        with contextlib.redirect_stdout(out):
-            DISPATCH[args.cmd](args)
+    try:
+        with wired(module, recorded):
+            with contextlib.redirect_stdout(out):
+                DISPATCH[args.cmd](args)
+    except SystemExit as exit_request:
+        return recorded, out.getvalue(), exit_request.code
+    return recorded, out.getvalue(), None
+
+
+def run_cli(argv, answers, module=commands_content, plan=None, **options):
+    """Parse argv with the real parser, dispatch, return (calls, stdout)."""
+    recorded, out, code = _dispatch(argv, answers, module, plan, **options)
+    if code is not None:
+        raise SystemExit(code)
     recorded.assert_plan_consumed()
-    return recorded, out.getvalue()
+    return recorded, out
+
+
+def run_cli_exit(argv, answers, module=commands_content, plan=None,
+                 **options):
+    """`run_cli` for an arm that ends in `sys.exit`: returns (code, stdout).
+
+    An exit message reaches an operator on stderr, so a handler that
+    printed a row and THEN exited would look exactly like one that printed
+    nothing — the exit code alone cannot tell the two apart. Handing back
+    the rendered half as well is what lets a test pin an exit arm's whole
+    output, which is what such a test's docstring claims. A plan is still
+    checked request by request as they arrive; only "every planned request
+    was issued" belongs to the arm that returned.
+    """
+    _recorded, out, code = _dispatch(argv, answers, module, plan, **options)
+    if code is None:
+        raise AssertionError(
+            f'{argv} returned instead of exiting; it printed {out!r}')
+    return code, out
