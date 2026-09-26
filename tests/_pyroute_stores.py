@@ -13,9 +13,7 @@ from _pyroute_storage import (container_copy, fold_dynamic,
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredContainer,
                              DeferredInstance, is_deferred_value, sync_cells)
 
-# The kinds whose instances take `x[k] = v`. A kind outside this set has
-# no item assignment at all, so a subscript store into one is a store the
-# runtime refuses rather than one that lands anywhere.
+# Kinds whose instances take `x[k] = v`; any other kind refuses the store.
 _ASSIGNS_BY_INDEX = ('list', 'dict')
 
 
@@ -61,28 +59,23 @@ def store_deferred_target(
         elif not isinstance(owner, DeferredContainer):
             return
         elif owner.kind not in _ASSIGNS_BY_INDEX:
-            # A tuple and a set have no item assignment, so a subscript
-            # store into one never happens - in either sign, and not only
-            # where the key is out of range. Leaving the container as it
-            # is is the same answer a list store past the end gets.
+            # No item assignment, so the store never happens in either
+            # sign - the same answer a list store past the end gets.
             return
         items = dict(owner.items)
         mapping = owner.kind == 'dict'
         if not mapping and not dynamic:
             # A negative key counts from the end, so it names a position
-            # rather than the key it is spelled as. Resolving it here is
-            # what keeps the stored value where a read will look for it.
-            # The `not mapping` gate is the whole dict exemption: a key
-            # on a mapping is a key, and `position_key` takes a sequence.
+            # rather than the key it is spelled as. The `not mapping` gate
+            # is the whole dict exemption: a key on a mapping is a key.
             placed = position_key(owner, literal)
             if placed is None:
                 # The runtime raises on a key past the start, so the
                 # store never happens and the container stays as it is.
                 if owner.length is not None:
                     return
-                # An unknown length names no position at all: the value
-                # joins the unknown-key slot every positional read
-                # consults, rather than a key no read can reach.
+                # An unknown length names no position, so the value joins
+                # the unknown-key slot every positional read consults.
                 dynamic, literal = True, _UNRESOLVED_KEY
             else:
                 literal = placed
