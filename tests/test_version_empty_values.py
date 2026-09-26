@@ -18,8 +18,8 @@ from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _duplicate_the_package_version,
     _duplicate_the_page_js_version,
+    _run_checker,
 )
-from test_version_contract import _run_checker  # noqa: E402
 
 
 def _duplicate_the_status_line_version(copy_root, second_value='9.9.9'):

@@ -14,8 +14,8 @@ import _util  # noqa: E402
 from _version_contract import (  # noqa: E402
     _copy_versioned_tree,
     _duplicate_the_page_js_version,
+    _run_checker,
 )
-from test_version_contract import _run_checker  # noqa: E402
 
 
 def test_check_versions_set_writes_every_site_or_none(tmp):

@@ -20,8 +20,8 @@ from _version_contract import (  # noqa: E402
     _break_one_site,
     _copy_versioned_tree,
     _duplicate_the_package_version,
+    _run_checker,
 )
-from test_version_contract import _run_checker  # noqa: E402
 
 
 # Duplicate `__version__` spellings the three mirror tests must all refuse:
