@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import _util
-from _version_contract import _copy_versioned_tree
+from _version_contract import _copy_versioned_tree, _run_checker
 from _version_contract_scanners import (
     _checker,
     _DASHBOARD,
@@ -11,7 +11,6 @@ from _version_contract_scanners import (
     _SITE,
     _surviving,
 )
-from test_version_contract import _run_checker
 
 
 _HTML_TEXT_MODE_TAGS = ('script', 'style', 'title', 'textarea')

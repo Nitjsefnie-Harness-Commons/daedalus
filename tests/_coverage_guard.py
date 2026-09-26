@@ -76,8 +76,10 @@ _KEEP_ALLOWLIST = frozenset({
     'tests/test_suite_runner.py::_runner_tree',
     # The runner-bound suite runs the copied runner so its lines are recorded.
     'tests/test_run_tests.py::_run_sandbox',
-    # The copied checker runs from the mapped copy so its lines count.
-    'tests/test_version_contract.py::_run_checker',
+    # The copied checker runs from the mapped copy so its lines count. The
+    # launcher moved into the shared version-contract helpers; the two tests
+    # below kept their own inline launches and stay in the suite.
+    'tests/_version_contract.py::_run_checker',
     'tests/test_version_contract.py::test_check_versions_detects_drift',
     'tests/test_version_contract.py::'
     'test_check_versions_sites_all_present_in_copy',

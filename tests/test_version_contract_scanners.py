@@ -9,7 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _version_contract import _copy_versioned_tree  # noqa: E402
+from _version_contract import (  # noqa: E402
+    _copy_versioned_tree,
+    _run_checker,
+)
 from _version_contract_scanners import (  # noqa: E402
     _append_to,
     _checker,
@@ -31,7 +34,6 @@ from _version_contract_scanners import (  # noqa: E402
     _SPACED_DUP,
     _surviving,
 )
-from test_version_contract import _run_checker  # noqa: E402
 
 
 def test_javascript_regions_classify_adversarial_cases(tmp):
