@@ -142,6 +142,18 @@ await bounded(settle(), 'event frame', _dashnodeStepTimeoutMs);
 report({ seen, afterBroadcast, read: drive.lastScript().settlements });
 """
 
+# A subscriber that throws, and what the module owes the ones behind it.
+_THROWING_LISTENER = _UP + _SUBSCRIBE + r"""
+sse.subscribe(() => { throw new Error('listener blew up'); });
+const heard = [];
+sse.subscribe((e) => heard.push(e.id));
+push({ kind: 'event', id: 'e1', type: 'result' });
+await bounded(settle(), 'first frame', _dashnodeStepTimeoutMs);
+push({ kind: 'event', id: 'e2', type: 'result' });
+await bounded(settle(), 'second frame', _dashnodeStepTimeoutMs);
+report({ heard, seen, read: drive.lastScript().settlements });
+"""
+
 # The three directions of the conjunction: the negative first, then a
 # changed-token event whose restart is the oracle that the log sees one.
 _CHANGED = r"""
@@ -242,6 +254,26 @@ def test_a_frame_the_module_never_dispatched_does_not_move_the_clock(_tmp):
     assert report['lastEventAt'] == report['afterEvent'], report
     assert report['seen'] == statuses + [[False, 'result', 'event', 'e1']], \
         report
+
+
+def test_a_throwing_listener_neither_silences_the_rest_nor_escapes(_tmp):
+    """`sse.js:40`'s try/catch around each listener, which nothing else on
+    the branch holds. Both halves are asserted because either alone is
+    satisfied by a dispatch that drops every listener on the first
+    throw: the recorder behind the thrower has to have run, and the
+    reader loop that fed the frame has to still be reading afterwards --
+    an escaping throw is caught by `run` and ends the stream, which the
+    second frame and the absence of a stream error both show."""
+    report = _run(_THROWING_LISTENER)
+    assert report['heard'] == ['e1', 'e2'], report
+    assert report['seen'] == [[False, 'result', 'event', 'e1'],
+                              [False, 'result', 'event', 'e2']], report
+    assert [chunk['kind'] for chunk in report['read']] == ['chunk', 'chunk'], \
+        report['read']
+    assert report['errors'] == [
+        '[sse] listener error listener blew up [object Object]',
+        '[sse] listener error listener blew up [object Object]',
+    ], report['errors']
 
 
 def test_a_frame_without_its_own_kind_never_reaches_a_subscriber(_tmp):
