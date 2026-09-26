@@ -45,6 +45,29 @@ function clearScheduled(collection, id) {
 function eventTarget(listeners) {
   return { addListener(listener) { listeners.push(listener); } };
 }
+
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
 const windowObject = {
   addEventListener() {},
   postMessage() {},
@@ -76,7 +99,7 @@ const chrome = {
     },
   },
 };
-const context = vm.createContext({
+const context = vm.createContext(Object.assign({
   window: windowObject,
   chrome,
   navigator: { clipboard: { writeText: () => Promise.resolve() } },
@@ -86,7 +109,7 @@ const context = vm.createContext({
   setInterval: (callback, delay) => scheduled(intervals, callback, delay),
   clearInterval: (id) => clearScheduled(intervals, id),
   console: { log() {}, error() {} },
-});
+}, contentScriptPage()));
 phase('dashboard module import started');
 vm.runInContext(
   fs.readFileSync(process.argv[1], 'utf8'), context,

@@ -73,16 +73,36 @@ function _scopedIdentity(parsed) {
 
 // A tab id names a tab, not a document. Both MAIN-channel calls therefore name
 // the document the request carried, and the answer's own documentId is
-// checked against it. CDP is tab-bound and cannot name one, so its check lives
-// inside the evaluation that runs the fix: `location` is [LegacyUnforgeable],
-// so the page cannot spoof it, and one evaluation leaves no window between the
-// check and the run.
+// checked against it. CDP is tab-bound and cannot name one — the protocol
+// has no document identifier at all — so both of its checks live inside the
+// evaluation that runs the fix, and one evaluation leaves no window between
+// a check and the run.
+//
+// `location` is the coarse one: unforgeable, so the page cannot spoof it, but
+// a prerender and the document it will replace carry the SAME location. The
+// token is the fine one, and it can only be planted by the document that
+// asked. A page can read the token and rewrite it — the value is in its own
+// DOM by construction — and that buys it exactly one thing: suppressing its
+// own fix. It cannot make a fix run in a document it does not hold, because
+// planting a token there is not something it can do. The direction is the
+// property, not the secrecy.
 const DOCUMENT_GONE = 'the document that asked for this fix is no longer'
   + ' the tab\'s live document';
 const PAGE_IDENTITY = 'location.protocol + \'//\' + location.host'
   + ' + location.pathname + location.search';
+const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
+const DOC_TOKEN_IDENTITY = 'document.documentElement.getAttribute('
+  + JSON.stringify(DOC_TOKEN_ATTRIBUTE) + ')';
 
-async function _replayViaCdp(chromeTabId, identity, code) {
+async function _replayViaCdp(chromeTabId, identity, docToken, code) {
+  // A request with no token cannot be bound to any document, and there is
+  // no evaluation worth submitting to find that out. Refusing here means the
+  // refusal costs no debugger attachment and no banner; comparing an absent
+  // token instead would pass every document whose attribute happens to be
+  // absent, which is the widening this check exists to close.
+  if (typeof docToken !== 'string' || docToken === '') {
+    return DOCUMENT_GONE + ': the request carried no document token';
+  }
   // A capture or a kept session already owns the attachment; the claim
   // joins it rather than attaching over it, and the release below gives back
   // only this replay's share.
@@ -93,14 +113,15 @@ async function _replayViaCdp(chromeTabId, identity, code) {
     return 'cdp attach failed: ' + (error && (error.message || String(error)));
   }
   try {
-    // A leading statement, not a wrapper: an IIFE would move the fix's own
+    // Leading statements, not a wrapper: an IIFE would move the fix's own
     // `var` and function declarations out of global scope and turn its
     // top-level `await` into a syntax error, so every stored fix written that
     // way breaks.
-    const expression = 'if (' + PAGE_IDENTITY + ' !== '
-      + JSON.stringify(identity) + ') throw new Error('
-      + JSON.stringify(DOCUMENT_GONE) + ');\n'
-      + code;
+    const refuse = (read, expected) => 'if (' + read + ' !== '
+      + JSON.stringify(expected) + ') throw new Error('
+      + JSON.stringify(DOCUMENT_GONE) + ');\n';
+    const expression = refuse(DOC_TOKEN_IDENTITY, docToken)
+      + refuse(PAGE_IDENTITY, identity) + code;
     const evaluated = await chrome.debugger.sendCommand(
       { tabId: chromeTabId }, 'Runtime.evaluate',
       { expression, replMode: true, awaitPromise: false });
@@ -114,7 +135,7 @@ async function _replayViaCdp(chromeTabId, identity, code) {
   }
 }
 
-async function _replayHotfix(chromeTabId, documentId, identity, code,
+async function _replayHotfix(chromeTabId, documentId, identity, docToken, code,
                              reportChannel) {
   let useMainWorld;
   try {
@@ -161,10 +182,11 @@ async function _replayHotfix(chromeTabId, documentId, identity, code,
     return null;
   }
   reportChannel('CDP');
-  return _replayViaCdp(chromeTabId, identity, code);
+  return _replayViaCdp(chromeTabId, identity, docToken, code);
 }
 
-async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
+async function handleHotfixReplay(chromeTabId, documentId, senderUrl,
+                                   docToken) {
   let fixes;
   try {
     fixes = await _eligibleHotfixes();
@@ -203,8 +225,8 @@ async function handleHotfixReplay(chromeTabId, documentId, senderUrl) {
       // that wedges anywhere in its own replay cannot stop the fixes after
       // it on this or any later load of the page.
       failure = await _raceMainWorldEval(
-        _replayHotfix(chromeTabId, documentId, identity, hf.code,
-                      (c) => { channel = c; }),
+        _replayHotfix(chromeTabId, documentId, identity, docToken,
+                      hf.code, (c) => { channel = c; }),
         'hotfix fix');
     } catch (error) {
       const detail = error && (error.message || String(error));

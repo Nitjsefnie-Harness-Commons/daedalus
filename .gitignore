@@ -508,6 +508,7 @@
 !/tests/test_gm_storage.py
 !/tests/test_gm_transfers.py
 !/tests/test_helper_shadow_boundaries.py
+!/tests/test_hotfix_document_binding.py
 !/tests/test_hotfix_scope.py
 !/tests/test_hotfix_scope_clear.py
 !/tests/test_hotfix_store.py

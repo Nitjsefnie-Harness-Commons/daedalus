@@ -24,6 +24,30 @@ const fs = require('fs');
 const vm = require('vm');
 
 const [contentPath, pagePath, responseText] = process.argv.slice(1);
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
+
 const backgroundResponse = JSON.parse(responseText);
 const listeners = {};
 const messages = [];
@@ -75,6 +99,7 @@ const context = {
   setTimeout, clearTimeout, setInterval, clearInterval,
   performance,
   console: { log() {}, error() {} },
+  ...contentScriptPage(),
 };
 context.globalThis = context;
 vm.runInNewContext(
@@ -206,6 +231,29 @@ const fs = require('fs');
 const vm = require('vm');
 
 const [contentPath, pagePath, mode] = process.argv.slice(1);
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
 const listeners = {};
 const messages = [];
 const posted = [];
@@ -261,6 +309,7 @@ const context = {
   setTimeout, clearTimeout, setInterval, clearInterval,
   performance,
   console: { log() {}, error() {} },
+  ...contentScriptPage(),
 };
 context.globalThis = context;
 vm.runInNewContext(
@@ -359,6 +408,29 @@ const vm = require('vm');
 // never answered), "empty" (answered without a downloadId), "error" (answered
 // with one), or "ok".
 const [contentPath, pagePath, mode] = process.argv.slice(1);
+
+function contentScriptPage() {
+  const attributes = new Map();
+  return {
+    crypto: { randomUUID: () => 'content-doc-token' },
+    document: {
+      documentElement: {
+        setAttribute(name, value) { attributes.set(name, String(value)); },
+        getAttribute(name) {
+          return attributes.has(name) ? attributes.get(name) : null;
+        },
+        removeAttribute(name) { attributes.delete(name); },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      head: { appendChild() {} },
+      createElement: () => ({
+        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
+      }),
+    },
+  };
+}
+
 const listeners = {};
 const messages = [];
 
@@ -410,6 +482,7 @@ const context = {
   clearInterval() {},
   setTimeout: () => 1,
   console: { log() {}, error() {} },
+  ...contentScriptPage(),
 };
 vm.runInNewContext(
   fs.readFileSync(contentPath, 'utf8'), context,

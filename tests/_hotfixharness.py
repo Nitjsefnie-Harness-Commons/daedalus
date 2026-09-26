@@ -101,12 +101,30 @@ function fillLocation(target, url) {
   return target;
 }
 
+// The attribute a document plants its own replay token in, and the token
+// text for a document that planted one. A document carries its token the
+// way Chrome's would: as a value in its OWN documentElement, which is the
+// only place a document can put one.
+const DOC_TOKEN_ATTRIBUTE = 'data-daedalus-doc';
+
+function docTokenFor(index) {
+  return 'doc-token-' + index;
+}
+
 // One document is one REPL context: the same global the MAIN-world
 // injection compiles into and the same global a CDP expression runs in, so
 // a fix that reached the wrong document is visible in the wrong array.
 function openDocument(url) {
   const doc = {
     id: 'doc-' + (++documentSeq), url, live: true, hits: [], pending: null,
+  };
+  const attributes = new Map();
+  doc.documentElement = {
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) {
+      return attributes.has(name) ? attributes.get(name) : null;
+    },
+    removeAttribute(name) { attributes.delete(name); },
   };
   const output = new PassThrough();
   const server = repl.start({
@@ -127,6 +145,7 @@ function openDocument(url) {
     value: doc.location, writable: false,
   });
   page.daedalusHits = doc.hits;
+  page.document = { documentElement: doc.documentElement };
   page.performance = performance;
   // An evaluation that throws never reaches the REPL's callback; it is
   // written to the output stream instead, so that is what settles it.
@@ -386,6 +405,17 @@ async function waitFor(predicate) {
     }
   });
   const asker = documents[spec.asker === undefined ? 0 : spec.asker];
+  // The shipped content script plants a token in its OWN documentElement
+  // before it asks, so the asking document has one unless the case says
+  // otherwise; `planted` names any OTHER document holding THE SAME token,
+  // which is how a case sets up two documents the token cannot tell apart.
+  const planted = spec.planted === undefined
+    ? [documents.indexOf(asker)]
+    : spec.planted;
+  for (const index of planted) {
+    documents[index].documentElement.setAttribute(
+      DOC_TOKEN_ATTRIBUTE, docTokenFor(documents.indexOf(asker)));
+  }
   storageStore[HOTFIX_KEY] = {
     version: '0.18.0', fixes: (spec.fixes || []).map((fix) =>
       Object.assign({ permanent: true }, fix)),
@@ -422,8 +452,14 @@ async function waitFor(predicate) {
     // produce — the point is to pin what the worker does with a request it
     // cannot bind rather than to model a page.
     for (const field of spec.senderOmits || []) delete sender[field];
+    // The token the asking document planted and travels with the request.
+    // A case that omits it models a request the content script never made.
+    const message = { type: 'replayHotfixes' };
+    if (!spec.docTokenOmitted) {
+      message.docToken = docTokenFor(documents.indexOf(asker));
+    }
     for (const listener of messageListeners) {
-      listener({ type: 'replayHotfixes' }, sender, () => {});
+      listener(message, sender, () => {});
     }
     // The listener does not await the replay, and the replay's last act is
     // its report, so the report is the signal that it finished.
@@ -444,6 +480,9 @@ async function waitFor(predicate) {
     current: currentDocument ? currentDocument.id : null,
     documentUrls: Object.fromEntries(
       documents.map((doc) => [doc.id, doc.url])),
+    planted: Object.fromEntries(
+      documents.map((doc) => [doc.id, doc.documentElement.getAttribute(
+        DOC_TOKEN_ATTRIBUTE)])),
     delivered: Object.fromEntries(
       documents.map((doc) => [doc.id, doc.hits])),
     globals,
