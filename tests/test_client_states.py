@@ -10,18 +10,28 @@ import _drain  # noqa: E402
 import _overlap_clients  # noqa: E402
 import _util  # noqa: E402
 
+# Sized so it cannot be spent on a real boot, which is what makes it a
+# liveness escape rather than a wall-clock assertion: measured Popen -> ready
+# peaks on this box are 7.4s (mine, n=30 per site, load 68) and 19.2s (the
+# task review's, load 124-134), so 120s is ~16x and ~6x. It fires only on a
+# client that is alive and wedged, and then only to name what never arrived.
+BOOT_DEADLINE = 120
+
 
 def _wait_for_path(process, booted, path):
     """Wait for the client to boot, then for the path it publishes.
 
-    The boot is waited for unbounded -- what is waited for there is an
-    ordering -- so the bound below covers the publish and not a fresh
-    interpreter's startup. The boot marker is a file rather than the child's
-    printed line because every caller reads that line through client_states.
+    The bound above governs the boot so the one below covers the publish and
+    not a fresh interpreter's startup. The boot marker is a file rather than
+    the child's printed line because every caller reads that line through
+    client_states, which reads the stdout pipe itself.
     """
+    deadline = time.monotonic() + BOOT_DEADLINE
     while not booted.exists():
         assert process.poll() is None, (
             f'the client exited with {process.returncode} before booting')
+        assert time.monotonic() < deadline, (
+            f'the client is alive and never published {booted.name}')
         time.sleep(0.01)
     deadline = time.monotonic() + 5
     while not path.exists() and time.monotonic() < deadline:
@@ -38,6 +48,7 @@ def test_client_states_kills_and_reports_a_client_past_its_grace(tmp):
         'from pathlib import Path\n'
         'print("started", flush=True)\n'
         'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
+        'assert Path(sys.argv[2]).exists(), "published before boot"\n'
         'Path(sys.argv[1]).write_text("ready", encoding="ascii")\n'
         'time.sleep(60)\n'
     )
@@ -115,6 +126,7 @@ def test_client_states_waits_out_a_slow_pipe_release_after_a_kill(tmp):
         '[sys.executable, "-c", "import time; time.sleep(1)"])\n'
         'target = Path(sys.argv[1])\n'
         'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
+        'assert Path(sys.argv[2]).exists(), "published before boot"\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text("ready", encoding="ascii")\n'
         'pending.replace(target)\n'
@@ -154,6 +166,7 @@ def test_client_states_records_a_killed_clients_held_pipes(tmp):
         '[sys.executable, "-c", "import time; time.sleep(10)"])\n'
         'target = Path(sys.argv[1])\n'
         'Path(sys.argv[2]).write_text("booted", encoding="ascii")\n'
+        'assert Path(sys.argv[2]).exists(), "published before boot"\n'
         'pending = target.with_suffix(".tmp")\n'
         'pending.write_text("ready", encoding="ascii")\n'
         'pending.replace(target)\n'
