@@ -229,9 +229,11 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         # A PEP 695 `type X = ...` binds X, so over an import it is a
         # shadow like any other rebind. It is a bind and not a
         # definition, which is why the re-implementation control's three
-        # defining forms do not list it.
-        ('test_type_alias.py', suite('type _load_queue = int'),
-         '_load_queue'),
+        # defining forms do not list it. The statement is 3.12 syntax, so
+        # the row contributes nothing on a 3.11 parser and is left out
+        # there rather than parsed and failed on.
+        *([('test_type_alias.py', suite('type _load_queue = int'),
+            '_load_queue')] if hasattr(ast, 'TypeAlias') else []),
         ('test_assign_attr.py', suite('x._load_queue = 1'), None),
         ('test_annassign_attr.py', suite('x._load_queue: int = 1'), None),
     ]
