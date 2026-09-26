@@ -61,13 +61,20 @@ def _require_a_distinct_chain_root(store, name):
 
 
 def test_a_dotted_name_and_its_own_name_take_one_stripe(tmp):
-    """`a` and `a.json` own one filesystem entry, so they take one lock.
+    """What each assertion here proves, and what would fail without it.
 
-    The flat namespace is what makes this true: the job named `a` keeps its
-    record at `<job>.json`, which is the very directory the job named
-    `a.json` keeps its segments in. Stripping every trailing `.json` names
-    the chain those names belong to, and the whole chain then shares a
-    stripe — the two writes that touch one path cannot interleave.
+    - the chain equality — `a`, `a.json` and `a.json.json` are ONE lock.
+      The flat namespace is why: `a` keeps its record at `a.json`, which is
+      the directory `a.json` keeps its segments in, so the pair owns one
+      path and the two calls that touch it cannot interleave. A mutant that
+      stopped stripping the affix fails this.
+    - the `a.b` case — the strip is on the RECORD affix and not on any dot,
+      so a dotted name keeps its own. A mutant stripping at every dot fails
+      this.
+    - the unrelated-name assertion is this control's own PREMISE, not
+      another property: two names that always landed on one stripe would
+      make the equality assertions above vacuous. It is a searched pair, so
+      it cannot pass by a collision.
     """
     store = _load_store()
     for base in ('a', 'relay-1', 'x.y', '.hidden', '.json', 'seg'):
@@ -107,13 +114,27 @@ def test_job_stripes_come_from_a_table_that_never_grows(tmp):
 
 
 def test_case_spellings_take_one_stripe(tmp):
-    """`Foo` and `foo` are one directory on a case-insensitive parent.
+    """What each assertion here proves, and which mutant fails it.
 
-    The single lock this branch replaced held them together whatever the
-    filesystem did with case. A key that folded only the record affix
-    would split them, and two writes to one directory would interleave the
-    usage read, the quota check and the record write that `store_segment`
-    holds as one.
+    Four assertions, and they are not interchangeable:
+
+    - the STRIPE equality (`Foo` vs `foo`) proves the fold reaches the
+      lock. M9 — the casefold removed — fails it, but only about once in
+      sixty-four: the two names land on different roots and then happen to
+      share a stripe. That is why the root assertion below exists.
+    - the ROOT equality proves the fold exactly, with nothing between the
+      record and the claim. M9 fails this every run.
+    - the same pair again, on `Foo.json` and `foo.JSON`, covers the CHAIN:
+      a key that casefolds but strips the affix case-sensitively sends
+      `foo.JSON` down a different root. Its own premise, its own pair.
+    - the per-assertion `_require_a_discriminating_pair` calls are the
+      premises, not properties: each says the assertion after it CAN fail.
+      Without one the assertion is green whenever the hash collides.
+
+    Two names on one stripe is also not the whole claim. A single lock —
+    M1, which this control is indifferent to — holds every pair together
+    too; what makes this worth pinning is that the FOLD, not the table,
+    is what puts them together on a case-insensitive parent.
     """
     store = _load_store()
     # The stripe is hashed from a per-process secret, so two unrelated names
@@ -151,15 +172,19 @@ def test_case_spellings_take_one_stripe(tmp):
 
 
 def test_normalisation_spellings_take_one_stripe(tmp):
-    """A composed and a decomposed spelling of one name take one stripe.
+    """The same four assertions as the case control, over normalisation.
 
-    Both spellings are written out rather than derived from one another: a
-    control that built the second from the first would be testing the
-    construction, and would pass against a key that folds nothing. They are
-    spelled as escapes so the two stay two spellings in the file — an editor
-    or a checkout that normalises source to NFC merges two raw literals into
-    one, which is how this control silently stops testing anything. The
-    first two assertions are the backstop for that.
+    Composed and decomposed spellings of one name are one name on a
+    normalising filesystem, so the fold has to cover them; M10 — the
+    normalisation removed — is the mutant. The mapping of which assertion
+    proves what is identical to the case control's, and for the same reason:
+    a hashed stripe can collide once in sixty-four and a chain root cannot,
+    and each assertion carries its own premise.
+
+    Both spellings are escapes, not raw literals, and both equality
+    assertions below come first: an editor or a checkout that normalises
+    source to NFC merges two raw literals into one, and the control then
+    tests its own construction instead of the fold.
     """
     composed = 'caf\u00e9'
     decomposed = 'cafe\u0301'
