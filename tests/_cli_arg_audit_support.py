@@ -11,9 +11,10 @@ the member set the resolver reads off types.FrameType. Three rows are the
 sole catcher of one arm each — the callee that is itself a call, the
 starred expansion, and the getattr whose name is an expression — so
 dropping one of those three arms reds the row that names it. The
-unreadable-subscript arm has no such row: what it refuses is a computed key
-on an unproven receiver, and the control that pins it is the real tree,
-where removing it refuses eleven correct slices."""
+unreadable-subscript arm has no such row. The real tree pins that arm's
+EXEMPTION — removing the range-and-tuple exemption refuses the eleven
+correct slices the CLI already has — and its refusal half is pinned by
+nothing, having no in-package escape of its own."""
 import argparse
 import builtins
 import contextlib
