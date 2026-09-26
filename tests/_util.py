@@ -437,7 +437,7 @@ def await_listening_line(proc, drained, timeout=WARM_START_TIMEOUT):
                 + _startup_observations(
                     proc, drained, time.time() - started))
         if time.time() > deadline:
-            # Both bounds: a short one reports a timeout it never had.
+            # Both bounds, equal here, so nothing can tell them apart.
             applied = round(deadline - started, 6)
             raise RuntimeError(
                 f'bridge did not announce its port in {timeout}s '
