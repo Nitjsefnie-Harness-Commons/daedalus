@@ -30,17 +30,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   } else if (msg.type === 'replayHotfixes') {
     // The documentId and url travel with the request: a tab id names the tab,
     // and the tab's live document is not the one that asked by replay time.
-    // `docToken` is the asking document's own claim on its identity, and the
-    // CDP channel has nothing else to bind by — the protocol names no
-    // document.
+    // `docToken` is the asking document's claim on its identity, and the CDP
+    // channel has nothing else to bind by — the protocol names no document.
     if (sender.tab) {
-      // The channel stays open until the replay reports, because the content
-      // script takes its token back out of the DOM when the answer lands.
+      // Held open until the replay reports. The content script's callback
+      // runs either way — Chrome delivers a closed port too, with
+      // `lastError` — so what the answer buys is the absence of a spurious
+      // port-closed warning in the page, not the token cleanup.
       handleHotfixReplay(
         sender.tab.id, sender.documentId, sender.url, msg.docToken
       ).finally(() => {
-        // The port is already gone if the asking document unloaded mid
-        // replay, and that is the ordinary case it navigated away.
         try { sendResponse(); } catch (_) {}
       });
       return true;

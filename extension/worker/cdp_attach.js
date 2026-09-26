@@ -3,36 +3,31 @@
 // ─── Debugger attachment ───
 //
 // Chrome allows one debugger per tab, and a second `attach` while one is
-// live is refused with `Another debugger is already attached`. That refusal
-// reaches the caller as a failed command, so four features wanting the
-// attachment — a cdp command, the eval fallback, a hotfix replay through
-// CDP, and a network capture — each attaching on its own meant two commands
-// dispatched in the same turn both attached and one of the two came back an
-// error. Nothing was misrouted; a call simply failed.
+// live is refused with `Another debugger is already attached` — a refusal
+// that reaches the caller as a failed command. Four features want the
+// attachment, so two dispatched in the same turn both attached and one of
+// the two came back an error.
 //
-// The record is written and `ready` is set from the attach call all before
-// this returns. That synchronous stretch is the whole of the fix: the second
-// caller in the same turn finds the first caller's `ready` instead of
-// racing a second attach, and a refused attach fails every joiner with the
-// one error rather than each retrying an attachment Chrome already refused.
+// The record and `ready` are written before this returns, and that
+// synchronous stretch is the whole of the fix: the second caller finds the
+// first caller's `ready` instead of racing a second attach, and a refused
+// attach fails every joiner with the one error rather than each retrying.
 const _cdpClaims = new Map();
 
-// A detach that has been issued but has not settled yet. A tab stays held
-// until the promise settles, not until the call is made, so a claim arriving
-// in that window must chain its attach BEHIND the detach — attaching now
-// would be refused by the very detach that is about to make room for it.
+// A detach issued but not yet settled. A tab stays held until the PROMISE
+// settles, not until the call is made, so a claim arriving in that window
+// must chain behind the detach rather than be refused by it.
 const _cdpDetaching = new Map();
 
 function cdpClaimAttachment(tabId, { keep } = {}) {
   const held = _cdpClaims.get(tabId);
   if (held) {
     held.refs += 1;
-    // Redundant at every shipped call site, and kept deliberately: no
-    // claimant releases a kept claim today (`cdp.js` never releases one it
-    // asked to keep), so `refs` cannot reach 0 on a kept entry and the
-    // `keep` arm in `_cdpRelease` is unreachable. A caller that did release
-    // its kept share would find the record still standing, which is the
-    // right answer, and this is what makes it so.
+    // Unreachable at every shipped call site, and kept on purpose: no
+    // claimant releases a kept claim today, so `refs` cannot reach 0 on a
+    // kept entry and the `keep` arm in `_cdpRelease` never fires. A caller
+    // that did release its kept share would find the record standing, which
+    // is the right answer, and this is what makes it so.
     if (keep) held.keep = true;
     return _cdpClaimHandle(held);
   }
@@ -40,11 +35,10 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
     tabId, refs: 1, keep: keep === true, ready: null, live: false,
   };
   entry.ready = _cdpAttach(tabId);
-  // Registered before the caller can await, so `live` is already true by the
-  // time any release runs. A refused attach leaves no claim — the next
-  // command has to be free to try again rather than inherit a promise that
-  // has already been rejected — and the joiners holding this same `ready`
-  // still get the one failure.
+  // Registered before the caller can await, so `live` is true by the time
+  // any release runs. A refused attach drops the record, so the next command
+  // is free to try again rather than inherit a rejected promise; the joiners
+  // holding this same `ready` still get the one failure.
   entry.ready.then(
     () => { entry.live = true; },
     () => {
@@ -54,19 +48,14 @@ function cdpClaimAttachment(tabId, { keep } = {}) {
   return _cdpClaimHandle(entry);
 }
 
-// Two joiners share one entry and each owns one share of it, so a release
-// has to be counted per-HANDLE: on the entry it would be the first joiner's
-// release that spoke for the second one's.
+// Two joiners share one entry and each owns one share of it, so the count is
+// per-HANDLE: on the entry, the first joiner's release would speak for the
+// second one's.
 //
-// The "released once" guard here is defence in depth, and the entry guard in
-// `_cdpRelease` is what currently carries the property. Removing this guard
-// alone is green across every suite; the entry guard is what turns a second
-// release on one handle from a second detach into a no-op, because the first
-// release already took the entry out of the map. This one is there for a
-// caller that releases twice, which no shipped call site does — the four
-// claim once and release once, and the net-capture stop is guarded by its
-// own early return. It is kept, and named, rather than left reading as the
-// thing doing the work.
+// This guard is defence in depth. The ENTRY guard in `_cdpRelease` is what
+// carries the property — removing this one alone is green across every suite —
+// because the first release already took the entry out of the map. This one
+// is for a caller that releases twice, which no shipped call site does.
 function _cdpClaimHandle(entry) {
   let released = false;
   return {
@@ -87,8 +76,8 @@ function _cdpAttach(tabId) {
   return settling.then(attach, attach);
 }
 
-// Returns the detach it issued, or null when the attachment is somebody
-// else's to keep: a second claim on the same tab, or a kept session.
+// Returns the detach it issued, or null when the attachment is not this
+// release's to give back.
 function _cdpRelease(entry) {
   entry.refs -= 1;
   if (entry.refs > 0 || entry.keep) return null;
@@ -98,22 +87,19 @@ function _cdpRelease(entry) {
   // the stale release owns nothing that is still installed.
   if (_cdpClaims.get(entry.tabId) !== entry) return null;
   _cdpClaims.delete(entry.tabId);
-  // An attach Chrome refused never took, so there is nothing to give back.
-  // Detaching a tab nothing is attached to is a refusal from Chrome that
-  // would land on whichever command ran next.
+  // A refused attach never took, so there is nothing to give back — and
+  // detaching an unattached tab is a refusal that lands on whatever runs
+  // next.
   if (!entry.live) return null;
   let settle;
   // Recorded BEFORE the call, not after: a claim that arrives while `detach`
   // is on the stack is already inside the window, and it has to find this.
   const settling = new Promise((resolve) => { settle = resolve; });
   _cdpDetaching.set(entry.tabId, settling);
-  // A failed detach is nobody's error to REPORT to a caller: the attachment
-  // is gone either way, and the next claim re-attaches on its own. It is
-  // still recorded, because a caught refusal that leaves no trace is a
-  // refused detach and a successful one wearing the same face, and the next
-  // question — why did that tab need re-attaching — has no answer without it.
-  // Settling is unconditional on purpose: a joining claim chains onto this
-  // promise, and one that never settles is worse than a swallowed refusal.
+  // Recorded rather than swallowed: a caught refusal that leaves no trace is
+  // a refused detach and a successful one wearing the same face. Settling
+  // is unconditional on purpose — a joining claim chains onto this promise,
+  // and one that never settles is worse than the refusal it hid.
   try {
     chrome.debugger.detach({ tabId: entry.tabId })
       .then(settle, (error) => { _cdpRefused(entry.tabId, error); settle(); });
@@ -129,15 +115,16 @@ function _cdpRelease(entry) {
   return settling;
 }
 
-// `detach` is false where Chrome has already detached us — it will not
-// detach twice, and asking is what the DevTools banner reports.
-// The `_cdpDetaching` marker is dropped here, and a claim arriving after
-// that attaches into a window Chrome may still be holding. Whether that
-// window exists is open: it needs `chrome.debugger.onDetach` to fire while
-// one of OUR detaches is in flight, and its documented reasons —
-// `canceled_by_user`, `target_closed`, `replaced_with_chrome_devtools` —
-// name none of them. Unreachable on the documented reasons, unguarded in the
-// code, and one line from guarded. Settling the Chrome behaviour settles it.
+// `detach` is false where Chrome has already detached us — asking again is a
+// refusal, and it is what the DevTools banner reports.
+//
+// Dropping `_cdpDetaching` here is an OPEN QUESTION, not a decision: a claim
+// arriving afterwards attaches into a window Chrome may still be holding,
+// which needs `chrome.debugger.onDetach` to fire while one of OUR detaches is
+// in flight. Its documented reasons — `canceled_by_user`, `target_closed`,
+// `replaced_with_chrome_devtools` — name none of them, so the window is
+// unreachable on the documented reasons, unguarded in the code, and one line
+// from guarded.
 function cdpForgetAttachment(tabId, { detach } = {}) {
   const held = _cdpClaims.get(tabId);
   _cdpClaims.delete(tabId);
@@ -151,10 +138,9 @@ function cdpForgetAttachment(tabId, { detach } = {}) {
   }
 }
 
-// The one place a refused detach becomes visible. Both sites above reach it,
-// so the trace says which tab lost its attachment and what Chrome said, and
-// nothing downstream has to guess whether the detach happened. The message
-// is Chrome's, not a caller's, so it carries no bridge data to redact.
+// The one place a refused detach becomes visible, reached from both sites
+// above. The message is Chrome's, not a caller's, so it carries no bridge
+// data to redact.
 function _cdpRefused(tabId, error) {
   console.warn('[Daedalus] debugger detach refused on tab ' + tabId + ': '
                + ((error && error.message) || String(error)));
