@@ -24,6 +24,12 @@ run somewhere it does not hold. The binding is directional, not secret.
 `D1` below rests on exactly one layer for that reason — the two documents
 share a url, so the `location` guard passes for both and only the token
 guard can fire — which is why removing the token guard alone turns it red.
+
+The four rows below are the replay's own failure arms, and each is read the
+same way: nothing ran in any document, and what the worker says names the
+failure that stopped it. They belong here because that is where a refusal that
+runs nothing is already pinned (D3, F2, D4) — and because a refusal nobody has
+seen is a line nobody has read.
 """
 import sys
 from pathlib import Path
@@ -368,6 +374,147 @@ def test_the_main_channel_still_binds_by_document_not_by_token(tmp):
     assert refused['submitted'] == [], refused
     assert _delivered(refused) == {}, refused
     assert len(_errors(refused)) == 1, refused
+
+
+def test_a_refused_attach_runs_nothing_and_is_not_detached_afterwards(tmp):
+    """An attach Chrome refuses is the failure, and it costs no evaluation.
+
+    D3 refuses before the debugger, because there was no document to bind.
+    This is the other order: the claim was taken, the attach failed, and the
+    fix is not submitted. What distinguishes it from the attach that took is
+    the release — a claim whose attach never landed owns nothing to give back,
+    and detaching a tab this extension does not hold is itself a refusal that
+    lands on whatever runs next.
+    """
+    del tmp
+    case = {
+        'documents': [SITE, SITE],
+        'current': 1,
+        'asker': 1,
+        'probe': False,
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    }
+    outcome = run_hotfix_case(dict(case, attach='reject'))
+    # The attachment was asked for, unlike D3 — the refusal is the browser's,
+    # and it is what stopped the evaluation.
+    assert outcome['attachCalls'] == [7], outcome
+    assert outcome['submitted'] == [], outcome
+    assert _delivered(outcome) == {}, outcome
+    assert len(_errors(outcome)) == 1, outcome
+    assert 'cdp attach failed' in _errors(outcome)[0], outcome
+    assert 'debugger refused the attach' in _errors(outcome)[0], outcome
+    assert outcome['detachCalls'] == [], outcome
+    # The anti-vacuity half: the same case, the same channel, no refusal. The
+    # fix runs, the evaluation is submitted in the mode the module always
+    # uses, and the share this replay took is handed back.
+    ran = run_hotfix_case(case)
+    assert _delivered(ran) == {'doc-2': ['fix1']}, ran
+    assert ran['submitted'] == [{'replMode': True, 'awaitPromise': False}], ran
+    assert ran['detachCalls'] == [7], ran
+    assert not _errors(ran), ran
+
+
+def test_a_cdp_command_the_debugger_refuses_is_reported_and_released(tmp):
+    """A refused `Runtime.evaluate` is the browser's message, and is released.
+
+    The attach took, so unlike the row above there is a real attachment to
+    give back — and a leaked one would leave every later CDP feature in this
+    tab finding the debugger already held. The message is the browser's own
+    rather than a prefix the worker adds: an attach failure is prefixed, and
+    one log line can carry both.
+    """
+    del tmp
+    outcome = run_hotfix_case({
+        'documents': [SITE, SITE],
+        'current': 1,
+        'asker': 1,
+        'probe': False,
+        'cdpRefused': 'The debugger is not attached to this tab',
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    })
+    assert outcome['attachCalls'] == [7], outcome
+    # The command WAS issued, in the mode the module always uses: a control
+    # that only counted submissions would read this as a fix that ran.
+    assert outcome['submitted'] == [
+        {'replMode': True, 'awaitPromise': False}], outcome
+    assert _delivered(outcome) == {}, outcome
+    assert len(_errors(outcome)) == 1, outcome
+    message = 'The debugger is not attached to this tab'
+    assert message in _errors(outcome)[0], outcome
+    assert 'cdp attach failed' not in _errors(outcome)[0], outcome
+    assert outcome['detachCalls'] == [7], outcome
+
+
+def test_a_main_channel_frame_carrying_an_error_reports_that_value(tmp):
+    """An answer carrying `error` is rendered, in all three of its shapes.
+
+    The frame the MAIN channel reads carries `documentId` and `result`; a
+    browser that answers with an `error` instead gives the worker a value
+    nothing else in the pipeline produced. A string is already the sentence
+    to report, an object is read for its `message`, and anything else is
+    stringified rather than dropped — the arm exists so a failure the worker
+    cannot parse is still a failure it names.
+    """
+    del tmp
+    case = {
+        'documents': [SITE],
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    }
+    for value, expected in (
+            ('the fix was refused', 'the fix was refused'),
+            ({'message': 'the fix was refused'}, 'the fix was refused'),
+            ({'code': 7}, '[object Object]')):
+        outcome = run_hotfix_case(dict(case, injectedError=value))
+        # The injection reached the document the request named, and the
+        # answer was about that document: this is the answer's own shape,
+        # not a binding failure and not a missing probe.
+        assert outcome['injections'] == [
+            {'documentId': 'doc-1', 'world': 'MAIN', 'probe': True},
+            {'documentId': 'doc-1', 'world': 'MAIN', 'probe': False}], outcome
+        assert outcome['submitted'] == [], outcome
+        assert _delivered(outcome) == {}, outcome
+        assert len(_errors(outcome)) == 1, (value, outcome)
+        assert 'fix1: ' + expected in _errors(outcome)[0], (value, outcome)
+    # The anti-vacuity half: the same case, the same page, a frame carrying
+    # the result it always carries.
+    ran = run_hotfix_case(case)
+    assert _delivered(ran) == {'doc-1': ['fix1']}, ran
+    assert not _errors(ran), ran
+
+
+def test_a_replay_that_cannot_read_the_store_runs_nothing_and_answers(tmp):
+    """A store read Chrome refuses stops the replay before the first fix.
+
+    The store is read once, before the loop, so a refusal there costs no
+    probe, no injection and no attachment — and it is reported as the store
+    failing rather than as the fixes failing, which is the difference an
+    operator reads the log for. The worker still answers the request: the
+    shipped content script takes its token back out of the DOM when it does,
+    and a page left holding a claim is the state D1 and D3 exist to avoid.
+    """
+    del tmp
+    case = {
+        'documents': [SITE, SITE],
+        'current': 1,
+        'asker': 1,
+        'fixes': [{'id': 'fix1', 'code': FIX}],
+    }
+    outcome = run_hotfix_case(
+        dict(case, storageReadFails='daedalus-hotfixes'))
+    assert outcome['injections'] == [], outcome
+    assert outcome['submitted'] == [], outcome
+    assert outcome['attachCalls'] == [], outcome
+    assert _delivered(outcome) == {}, outcome
+    assert len(_errors(outcome)) == 1, outcome
+    assert 'could not read the store' in _errors(outcome)[0], outcome
+    assert outcome['answered'] is True, outcome
+    assert outcome['minted']['doc-2'] is not None, outcome
+    assert outcome['afterAnswer']['doc-2'] is None, outcome
+    # The anti-vacuity half: the same record, the same page, a read that
+    # lands. Nothing about the documents refused this request.
+    ran = run_hotfix_case(case)
+    assert _delivered(ran) == {'doc-2': ['fix1']}, ran
+    assert not _errors(ran), ran
 
 
 def main():

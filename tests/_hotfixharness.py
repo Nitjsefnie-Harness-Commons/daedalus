@@ -53,6 +53,7 @@ const messageListeners = [];
 const injections = [];
 const submitted = [];
 const attachCalls = [];
+const detachCalls = [];
 const timers = [];
 const storageStore = {
   'daedalus-token': 'hotfix-token',
@@ -302,6 +303,13 @@ async function executeScript(injection) {
     navigateAt('after-probe');
     return [{ documentId: doc.id, result: spec.probe !== false }];
   }
+  // The other answer shape a MAIN-world injection can come back in: a frame
+  // carrying `error` where every other frame carries `result`. Nothing ran
+  // in the document it names, so the code that would have run there was
+  // never compiled into it.
+  if (spec.injectedError !== undefined) {
+    return [{ documentId: doc.id, error: spec.injectedError }];
+  }
   doc.page.__args = injection.args || [];
   const source = '(' + injection.func.toString() + ')(...__args)';
   // vm-load-exempt: runs the function the extension injected
@@ -348,6 +356,10 @@ async function sendCommand(_target, method, params) {
     replMode: params.replMode === true,
     awaitPromise: params.awaitPromise === true,
   });
+  // The call reached the debugger and the debugger refused it. The
+  // submission is recorded first, because it WAS made — that is what tells a
+  // refused command apart from one the worker never issued.
+  if (spec.cdpRefused) throw new Error(spec.cdpRefused);
   navigateAt('before-cdp-evaluate');
   relocateAt('before-cdp-evaluate');
   const answer = await evaluateIn(currentDocument, params.expression);
@@ -370,6 +382,13 @@ const chrome = {
   storage: {
     local: {
       get: async (keys) => {
+        // A read Chrome refuses for one NAMED key. The name is matched so a
+        // fault planted on the hotfix key leaves the boot read of the token
+        // alone, and an unnamed key is not a fault this double models.
+        if (spec.storageReadFails
+            && [].concat(keys).includes(spec.storageReadFails)) {
+          throw new Error('storage read refused for ' + spec.storageReadFails);
+        }
         const out = {};
         for (const key of [].concat(keys)) {
           if (key in storageStore) {
@@ -409,9 +428,15 @@ const chrome = {
     onDetach: eventTarget(),
     attach: async (target) => {
       attachCalls.push(target.tabId);
+      // Chrome reports a refused attach by REJECTING the promise it
+      // returned. The synchronous throw below is a shape it does not
+      // produce, and the two reach different arms of a claim.
       if (spec.attach === 'fail') throw new Error('debugger refused');
+      if (spec.attach === 'reject') {
+        return Promise.reject(new Error('debugger refused the attach'));
+      }
     },
-    detach: async () => {},
+    detach: async (target) => { detachCalls.push(target.tabId); },
     sendCommand,
   },
   cookies: { getAll: async () => [], remove: async () => null },
@@ -509,7 +534,10 @@ async function waitFor(predicate) {
     { filename: backgroundPath });
   await vm.runInContext('loadConfig()', context);
 
-  for (const command of spec.store || []) {
+  // `commands` is the general spelling: a case names each command's own
+  // `type` and the worker dispatches it as the bridge does. `store` is the
+  // older key, the same loop with `store-hotfix` defaulted.
+  for (const command of (spec.commands || spec.store || [])) {
     context.storeCommand = Object.assign(
       { type: 'store-hotfix', _did: 'did-' + command.fixId }, command);
     await vm.runInContext('dispatchCommand(storeCommand)', context);
@@ -588,6 +616,7 @@ async function waitFor(predicate) {
   }
   process.stdout.write(JSON.stringify({
     attachCalls,
+    detachCalls,
     // False means the worker held the channel open and never answered, so
     // Chrome delivered the content script's callback with `lastError` set.
     answered: spec.ask === false ? null : asker.answered,
