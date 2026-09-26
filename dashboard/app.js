@@ -1,7 +1,6 @@
 // Daedalus dashboard — entry point. Loads sections, boots SSE, wires meta bars.
 
-import { getToken, getServer } from './api.js';
-import { h, clear } from './sections/_util.js';
+import { h, clear, wireMetaBar } from './sections/_util.js';
 import { start as startSse, subscribe, lastEventAt } from './sse.js';
 
 import { mount as mountOverview } from './sections/overview.js';
@@ -33,21 +32,6 @@ const MOUNTS = {
   uploads: mountUploads,
   settings: mountSettings,
 };
-
-function maskToken(t) {
-  if (!t) return '(none)';
-  if (t.length <= 12) return t;
-  return t.slice(0, 8) + '…' + t.slice(-4);
-}
-
-function shortToken(t) {
-  if (!t) return '—';
-  return t.slice(0, 8) + '…';
-}
-
-function setAll(selector, text) {
-  for (const el of document.querySelectorAll(selector)) el.textContent = text;
-}
 
 function relTime(ms) {
   if (!ms) return '—';
@@ -87,16 +71,6 @@ function mountSections() {
   }
 }
 
-// Exported because the settings panel writes the same three cells after a
-// save, and a second copy of the mask is how a twelve-character token came
-// to read verbatim at boot and masked a moment later.
-export function wireMetaBar() {
-  const token = getToken();
-  const server = getServer();
-  setAll('[data-meta="token"]', maskToken(token));
-  setAll('[data-meta="token-short"]', shortToken(token));
-  setAll('[data-meta="server"]', server || '(same origin)');
-}
 
 function wireStatusLine() {
   const dots = document.querySelectorAll('[data-meta="sse-dot"]');

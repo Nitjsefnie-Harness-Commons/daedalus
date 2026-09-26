@@ -26,16 +26,6 @@ from _repo import ROOT  # noqa: E402
 
 _DOM = _dashnode.DOM
 
-# `sections/settings.js` imports `app.js` for the meta-bar writer, so
-# importing the section evaluates the entry point too -- and its boot wants
-# a rail, an observer and a stream that this harness does not model. These
-# two mount one section, so the document is held in the loading state the
-# entry point defers on, with the listener a sink for the same reason the
-# `window` one below it is.
-_LOADING_DOCUMENT = """document.readyState = 'loading';
-document.addEventListener = () => {};
-"""
-
 
 _EVAL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
 (async () => {
@@ -230,8 +220,7 @@ def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
     assert seen['lowTimeout'].endswith('  timeout=1000ms'), seen
 
 
-_SETTINGS_HARNESS = _dashnode.DashboardNodeHarness(
-    _DOM + _LOADING_DOCUMENT + r"""
+_SETTINGS_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
 (async () => {
 globalThis.window = { addEventListener() {} };
 phase('dashboard module import started');
@@ -251,7 +240,7 @@ process.stdout.write(JSON.stringify({ caveat: caveat.textContent }));
 phase('dashboard harness finished');
 })().catch(leave);
 """, bounded_steps=1, module=True, arguments=(
-        ROOT / 'dashboard' / 'sections' / 'settings.js',))
+    ROOT / 'dashboard' / 'sections' / 'settings.js',))
 
 
 def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
@@ -270,8 +259,7 @@ def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
     assert 'every tab' not in lowered, seen
 
 
-_SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(
-    _DOM + _LOADING_DOCUMENT + r"""
+_SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
 (async () => {
 const storage = new Map();
 globalThis.localStorage = {
@@ -359,8 +347,8 @@ process.stdout.write(JSON.stringify({ initial, failed, recovered,
 phase('dashboard harness finished');
 })().catch(leave);
 """, bounded_steps=5, module=True, arguments=(
-        ROOT / 'dashboard' / 'sections' / 'settings.js',
-        ROOT / 'dashboard' / 'sse.js'))
+    ROOT / 'dashboard' / 'sections' / 'settings.js',
+    ROOT / 'dashboard' / 'sse.js'))
 
 
 def test_saving_token_restarts_stream_independently_of_probe(_tmp):
