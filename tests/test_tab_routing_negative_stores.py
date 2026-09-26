@@ -12,15 +12,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_tab_routing_dict_stores import (  # noqa: E402
-    _PRE, _PRE_CLEAN, _verdict)
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
+_CALL = 'send("_focus", "focus-tab", tab=args.chrome_tab)'
+_PRE = ('send = ordinary\n'
+        'args = _args\n'
+        'def maker():\n'
+        f'    return lambda: {_CALL}\n'
+        'def relay(): return maker()\n')
+_PRE_CLEAN = ('send = ordinary\n'
+              'args = _args\n'
+              'def maker():\n'
+              '    return lambda: ordinary()\n'
+              'def relay(): return maker()\n')
 _SL = '\nsend = ext_cmd\nreturn '
 _QUIET = 'def quiet(): return lambda *a, **k: ordinary()\n'
 
 
 def _run(tmp, shape, clean=False):
-    return _verdict(tmp, (_PRE_CLEAN if clean else _PRE) + shape)
+    return _tracked_focus_verdict(
+        tmp, (_PRE_CLEAN if clean else _PRE) + shape, counts=True)
 
 
 # A negative key names a position counted from the end, so a store at `-1`
@@ -50,10 +61,17 @@ def _bind(k, spelling):
     return f'i = {k}\n' if spelling == 'name' else ''
 
 
+def _elements(length, relay_at):
+    return ', '.join('relay()' if index == relay_at else 'quiet()'
+                     for index in range(length))
+
+
 def _pair(length, relay_at):
-    return 'x = [%s]\n' % ', '.join(
-        'relay()' if index == relay_at else 'quiet()'
-        for index in range(length))
+    return f'x = [{_elements(length, relay_at)}]\n'
+
+
+def _clean(length):
+    return f'x = [{", ".join(["quiet()"] * length)}]\n'
 
 
 def _store_shape(k, spelling, list_shape, value, read):
@@ -69,8 +87,7 @@ def _negative_store_verdicts(tmp, row):
     k, length, position = row
     for spelling in _SPELLINGS:
         carried = _run(tmp, _store_shape(
-            k, spelling, 'x = [%s]\n' % ', '.join(['quiet()'] * length),
-            'relay()', f'x[{position}]()'))
+            k, spelling, _clean(length), 'relay()', f'x[{position}]()'))
         overwritten = _run(tmp, _store_shape(
             k, spelling, _pair(length, position), 'quiet()',
             f'x[{position}]()'))
@@ -139,6 +156,7 @@ def test_a_read_at_a_negative_index_reports_its_own_position(tmp):
     body = _QUIET + 'x = [quiet(), relay()]' + _SL + 'x[-1]()'
     assert _run(tmp, body) == (1, 1)
     assert _run(tmp, body, clean=True) == (0, 0)
+
 
 def main():
     return _util.runner(_util.collect(globals()),
