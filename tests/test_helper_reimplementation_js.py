@@ -359,16 +359,18 @@ def js_residue_histogram(sources=None):
     return dict(sorted(histogram.items()))
 
 
-def _is_the_planted_fixture(path, declaration):
-    """Whether this is the one-line plant this suite pins the floor with.
+def _is_the_planted_fixture(below_floor):
+    """Whether this is the one-line plant, and the ONLY one.
 
-    Named by its own body and its own file, not by the FILE: a
-    file-wide exemption would let a one-line copy added anywhere in
-    this suite be invisible to both properties, which is the form that
-    hides a regression the properties exist to catch.
+    The exemption is a function of the SET, not of the file: a one-line
+    `eventTarget` in this suite is the fixture exactly while it is the
+    only one below the floor. A second one-line copy in the same file
+    makes the count two, the exemption lapses for both, and the property
+    fires — which is the form that cannot hide a regression the way a
+    file-wide exemption could.
     """
-    return path.endswith('test_helper_reimplementation_js.py') \
-        and declaration.body_lines == 1
+    return len(below_floor) == 1 and below_floor[0][0].endswith(
+        'test_helper_reimplementation_js.py')
 
 
 def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
@@ -391,8 +393,10 @@ def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
     The second has one stated exception, and it is this file: the
     size-floor test below plants a one-line `eventTarget` on purpose,
     to pin what the floor drops. A blanket form of the claim is
-    therefore false of the controls that measure it, which is the
-    reason the exception is named here rather than folded in.
+    therefore false of the controls that measure it, which is why the
+    exception is named here rather than folded in — and it is a function
+    of the SET below the floor, so a SECOND one-line copy here lapses the
+    exemption for both and the property fires.
     """
     del tmp
     histogram = js_residue_histogram()
@@ -407,12 +411,13 @@ def test_the_size_floor_excludes_no_copy_of_the_class(tmp):
         'a residue declaration sits at exactly two body lines, so the '
         f'floor and a floor of two select different sets: {histogram}')
     sources = _live_sources()
+    copies = [(path, item) for path, items in js_declarations(sources).items()
+              for item in items
+              if item.name == 'eventTarget' and item.body_lines < JS_FLOOR]
     below = sorted(
         f'{path}:{item.line} ({item.body_lines} body lines)'
-        for path, items in js_declarations(sources).items()
-        for item in items
-        if item.name == 'eventTarget' and item.body_lines < JS_FLOOR
-        and not _is_the_planted_fixture(path, item))
+        for path, item in copies
+        if not _is_the_planted_fixture(copies))
     assert not below, (
         'the floor excludes a copy of the shared class it is for: '
         f'{below}')
