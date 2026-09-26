@@ -129,13 +129,14 @@ def test_do_block_requests_names_the_tab_chrome_numbered_zero(tmp):
     del tmp
     body = {'id': '_block', 'type': 'block-requests', 'token': TOK,
             'tab': 'extension', 'pattern': PATTERN, 'tabId': 0}
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['block-requests', PATTERN, '--chrome-tab', '0'],
         [{'did': 'd1'}, _envelope(result={'pattern': PATTERN, 'ruleId': 1})],
         plan=[_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
+    assert out == f'Blocked: {PATTERN}  ruleId=1  tabs=[]\n', repr(out)
 
 
 def test_do_block_requests_renders_a_result_echoing_nothing(tmp):
@@ -278,7 +279,7 @@ def test_do_list_block_rules_names_every_rule_the_bridge_reported(tmp):
     del tmp
     body = {'id': '_list_rules', 'type': 'list-block-rules', 'token': TOK,
             'tab': 'extension'}
-    recorded, _out = run_cli(
+    recorded, out = run_cli(
         ['list-block-rules'],
         [{'did': 'd3'},
          _envelope(result=[{'id': 1, 'condition': {'urlFilter': '*'}}])],
@@ -287,6 +288,7 @@ def test_do_list_block_rules_names_every_rule_the_bridge_reported(tmp):
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
     assert recorded.timeouts == [10], recorded.timeouts
+    assert out == '  id=1  pattern=*  tabs=all\n1 rule(s)\n', repr(out)
 
 
 def test_do_list_block_rules_renders_a_rule_carrying_no_condition(tmp):
