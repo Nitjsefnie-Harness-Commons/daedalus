@@ -4,6 +4,13 @@ import { h, field, clear, truncate, errMsg, toast, bindTabSelector } from './_ut
 import { api, extCmd, getToken } from '../api.js';
 
 const STORE_KEY = 'daedalus-dash-css-sessions';
+// The store is the panel's only record of what it injected, and
+// `chrome.scripting.removeCSS` needs an exact match: a record the cap
+// drops is a rule the operator can no longer take off. So the cap holds
+// at 20 and the twenty-first injection is refused rather than applied and
+// left unrecorded. The number in the refusal message is this constant, not
+// a copy of it.
+const STORE_MAX = 20;
 
 export function mount(container, bus) {
   const root = h('div', {},
@@ -38,7 +45,7 @@ export function mount(container, bus) {
   function load() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }
   }
-  function save(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-20))); }
+  function save(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr.slice(-STORE_MAX))); }
 
   function renderSessions() {
     clear(sessionsEl);
@@ -65,8 +72,11 @@ export function mount(container, bus) {
               const f = { css: s.css };
               if (s.tabId) f.tabId = Number(s.tabId);
               if (s.allFrames) f.allFrames = true;
-              try { await extCmd('remove-css', f); toast('removed', 'ok'); }
-              catch (e) { toast(errMsg(e), 'err'); }
+              // The record is the only way back to an exact removeCSS
+              // match, so a refused removal leaves it in place.
+              try { await extCmd('remove-css', f); }
+              catch (e) { toast(errMsg(e), 'err'); return; }
+              toast('removed', 'ok');
               const all = load();
               all.splice(all.length - 1 - i, 1);
               save(all); renderSessions();
@@ -89,6 +99,13 @@ export function mount(container, bus) {
   root.querySelector('[data-role=inject]').addEventListener('click', async () => {
     const f = buildFields();
     if (!f.css.trim()) { toast('css is empty', 'warn'); return; }
+    // Before the command, not after it: applying the rule and then
+    // declining to record it is the same defect the cap is here to stop.
+    if (load().length >= STORE_MAX) {
+      toast('session list full (' + STORE_MAX + ') — remove one first',
+            'warn');
+      return;
+    }
     try {
       const r = await extCmd('inject-css', f);
       toast(`injected ${r && r.injected} chars → tab ${r && r.tabId}`, 'ok');
