@@ -75,41 +75,44 @@ def _mutation_specs():
     )
     comprehension = (
         "    if isinstance(node, ast.comprehension):\n"
-        "        return [(node.target.lineno, node.iter),\n"
-        "                (node.target.lineno, node.target)]\n",
+        "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.target, _TARGET)]\n",
         "",
     )
-    # The three arms that bind a name read one value and assign another,
-    # and a target carrying a launcher is a bypass the read side cannot
-    # see. Each row drops the assignment and leaves the read in place, so
-    # the row that dies is the target's own and not the iterable's.
-    # #1114 names both arms and neither had a row: removing either
-    # removed no control, so the census read them as uncovered.
+    # Five specs, two kinds. `walrus_binding` and `augassign` delete a
+    # whole arm: #1114 names both, and neither had a row, so removing
+    # either removed no control and the census read them as uncovered.
+    # The three target specs — `for_target`, `with_target` and
+    # `comprehension_target` — each drop only the assignment and leave
+    # the read in place, so the row that dies is the target's own and
+    # not the iterable-side row beside it.
     walrus_binding = (
         "    if isinstance(node, ast.NamedExpr):\n"
-        "        return [(node.lineno, node.value)]\n",
+        "        return [(node.lineno, node.value, _BIND)]\n",
         "")
     augassign = (
         "    if isinstance(node, ast.AugAssign):\n"
-        "        return [(node.lineno, node.value)]\n",
+        "        return [(node.lineno, node.value, _BIND)]\n",
         "")
     for_target = (
-        "        return [(node.lineno, node.iter), "
-        "(node.lineno, node.target)]",
-        "        return [(node.lineno, node.iter)]")
+        "        return [(node.lineno, node.iter, _BIND),\n"
+        "                (node.lineno, node.target, _TARGET)]",
+        "        return [(node.lineno, node.iter, _BIND)]")
     with_target = (
-        "                for part in (item.context_expr, item.optional_vars)]",
-        "                for part in (item.context_expr,)]")
+        "                for part, position in ((item.context_expr, _BIND),\n"
+        "                                       (item.optional_vars,\n"
+        "                                        _TARGET))]",
+        "                for part, position in ((item.context_expr, _BIND),)]")
     comprehension_target = (
-        "        return [(node.target.lineno, node.iter),\n"
-        "                (node.target.lineno, node.target)]",
-        "        return [(node.target.lineno, node.iter)]")
+        "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.target, _TARGET)]",
+        "        return [(node.target.lineno, node.iter, _BIND)]")
     defaults = (
         "    if isinstance(node, _SIGNED_FORMS):\n", "    if False:\n")
     match = (
         "    if isinstance(node, ast.Match) and any(\n"
         "            _pattern_binds(case.pattern) for case in node.cases):\n"
-        "        return [(node.lineno, node.subject)]\n",
+        "        return [(node.lineno, node.subject, _BIND)]\n",
         "",
     )
     callee = (
