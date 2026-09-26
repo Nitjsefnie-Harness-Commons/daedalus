@@ -396,11 +396,13 @@ def launch_refusals(source, here, bound_sink=None):
             launches.append(node)
         elif isinstance(func, ast.Name) and func.id in bound:
             launches.append(node)
-        # LOAD-BEARING and deliberately UNPINNED, so the state is here:
-        # `(x := subprocess)(...)` with `x` bound is the shape that
-        # reaches this arm, and with the arm gone it is reported
-        # `unplaced` instead of placed. No row drives it and this wave
-        # added none, which is a choice and not an oversight.
+        # LIVE and driven by no row: `(x := alias)(...)` with `x` bound
+        # and `alias` the subprocess module is a placed launch here and
+        # an `unplaced` report without the arm, so this clause decides a
+        # real verdict. It is deliberately outside the classified set in
+        # tests/_bound_site_rows.py, because "live and unpinned" is not a
+        # state that set admits, and tracked at issue #1144 with the
+        # other unpinned arms. Not an oversight and not a licence.
         elif isinstance(func, ast.NamedExpr) and func.target.id in bound:
             launches.append(node)
         elif isinstance(func, ast.Attribute) \
