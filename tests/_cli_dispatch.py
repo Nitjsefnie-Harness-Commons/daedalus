@@ -13,9 +13,21 @@ module globals those names resolve to — in the module under test, and in
 `invoke`, whose real `send_and_wait` is what puts that payload on the wire.
 `module=` says whose globals are rebound, so one harness reaches every
 `commands_*` module rather than only the one it was written for.
+
+Faking a namespace is not the same as containing the process, and a handler
+can open a socket by a path its own globals never name — `commands_media`
+once did, while every faked name reported a run it had contained. So while a
+module is wired the harness seals the layer below the namespace: no socket
+connection can be opened at all, from any name. An unmodelled path therefore
+raises a harness refusal naming the line it came from, rather than reaching a
+service, and that refusal is the boundary. The name list below is a
+convenience inside it, not the closure.
 """
 import contextlib
 import io
+import os
+import socket
+import sys
 import time
 import types
 
@@ -25,15 +37,78 @@ from daedalus_cli import commands_content, invoke
 from daedalus_cli.cli import DISPATCH
 
 # The transport-level names a CLI handler module resolves out of its own
-# namespace. `invoke` carries the same set, so a handler that delegates to
-# the real `send_and_wait` reaches the same double the handler's own `api`
-# would have. The list is the whole of what `commands_media` resolves out of
-# `transport` that opens a socket, so naming a module whose handlers use a
-# sixth one is a gap in this tuple rather than a gap in the harness.
+# namespace, faked so a call through one is recorded instead of sent.
+# `invoke` carries the same set, so a handler that delegates to the real
+# `send_and_wait` reaches the same double the handler's own `api` would have.
+#
+# This tuple is a census, not a boundary, and nothing here treats it as one:
+# a module can open a socket without naming anything on it, which is what
+# `commands_media`'s direct `urllib.request` call did while every name below
+# reported containment. Adding a name here only makes a path convenient to
+# test — the refusal that closes the rest is `_no_socket`, which fails a
+# connection from ANY path while a module is wired. A name missing from this
+# list is a gap in what the harness can record, never permission to dial.
 WIRE_NAMES = ('api', 'api_delete', 'api_raw', 'ext_cmd', 'tab', 'token',
               'wait_for_result')
 
 _ABSENT = object()
+
+_HERE = os.path.abspath(__file__)
+_STDLIB = os.path.dirname(os.path.abspath(os.__file__))
+
+
+def _escapee():
+    """Where a refused call was made: `file:line in function`.
+
+    Everything between the refusal and the handler is the standard library —
+    `http.client` to `socket`, several frames deep — so the first frame that
+    is not the standard library is the line a reader needs. This file's own
+    frames are skipped by path rather than by count, so the walk does not
+    depend on how many helpers the refusal happens to be built from.
+    """
+    frame = sys._getframe(1)
+    while frame is not None:
+        path = os.path.abspath(frame.f_code.co_filename)
+        if path != _HERE and not path.startswith(_STDLIB):
+            return f'{path}:{frame.f_lineno} in {frame.f_code.co_name}'
+        frame = frame.f_back
+    return 'the standard library alone'
+
+
+@contextlib.contextmanager
+def _no_socket():
+    """Refuse every outbound connection for as long as a module is wired.
+
+    The boundary is `socket.socket.connect` rather than a socket object's
+    construction, because a name bound before this ran — `from socket import
+    socket` at some module's import — outlives a rebinding of `socket.socket`
+    while every instance it produces still dials through the class. Connect
+    is where the bytes would go, so that is where the refusal goes.
+
+    The seal is process-wide and it is restored unconditionally, so a
+    handler that raises leaves the next test in this process free to connect.
+    """
+    inherited = socket.socket.__dict__.get('connect', _ABSENT)
+
+    def refuse(*args):
+        del args
+        covered = ', '.join(WIRE_NAMES)
+        raise AssertionError(
+            f'unmodelled socket call: this harness sealed '
+            f'socket.socket.connect, and none of the faked transport names\n'
+            f'  covered the path from {_escapee()}\n'
+            f'  faked: {covered}\n'
+            f'  the call is refused rather than sent, so route the handler '
+            f'through a name on WIRE_NAMES or add one to it')
+
+    socket.socket.connect = refuse
+    try:
+        yield
+    finally:
+        if inherited is _ABSENT:
+            del socket.socket.connect
+        else:
+            socket.socket.connect = inherited
 
 
 class VirtualTime:
@@ -191,11 +266,12 @@ def _fake(name, recorded):
 
 @contextlib.contextmanager
 def wired(module, recorded):
-    """Install the wire fakes `module` and `invoke` resolve, and restore.
+    """Install the wire fakes `module` and `invoke` resolve, and seal the rest.
 
     Restoration is unconditional: a handler that raises still puts every
     global back, or the next test in the same process would run against
-    this one's doubles.
+    this one's doubles. The socket seal is undone with them, and it is what
+    makes the fakes sufficient rather than hopeful.
     """
     targets = [module] if module is invoke else [module, invoke]
     saved = [(module, 'time', getattr(module, 'time', _ABSENT))]
@@ -207,7 +283,8 @@ def wired(module, recorded):
         for target in targets:
             for name in WIRE_NAMES:
                 setattr(target, name, _fake(name, recorded))
-        yield module
+        with _no_socket():
+            yield module
     finally:
         for target, name, original in reversed(saved):
             if original is _ABSENT:
