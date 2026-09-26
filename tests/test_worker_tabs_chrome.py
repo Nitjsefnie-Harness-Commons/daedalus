@@ -9,7 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _tabs_harness import apis, command, run_tabs  # noqa: E402
+from _netcapture_harness import apis  # noqa: E402
+from _tabs_harness import command, run_tabs  # noqa: E402
 
 CSS = 'body{color:red}'
 
