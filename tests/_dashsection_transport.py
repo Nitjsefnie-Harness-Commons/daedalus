@@ -89,8 +89,9 @@ function jsonAnswer(data, status) {
   // `api.js:53` reads `content-type` and it is the only header a shipped
   // fetch path reads, so a `get` that answered for every name would hide
   // a section reaching for a header this transport does not model. The
-  // base's own header bag refuses one by name; so does this. No case
-  // drives it: it is a refusal by inspection.
+  // base's own header bag refuses one by name; so does this, held by
+  // `test_a_response_header_the_transport_does_not_model_is_refused`, which
+  // reads a modelled name and an unmodelled one in the same child.
   return { ok: status >= 200 && status < 300, status,
            headers: { get: (name) => {
              if (String(name).toLowerCase() !== 'content-type') {
