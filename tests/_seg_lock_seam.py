@@ -2,12 +2,15 @@
 
 A `sitecustomize.py` the test writes into a directory on the child's
 `PYTHONPATH` wraps the segment lock so the controls can see holds rather
-than infer them. It lives here as a module rather than as a string
-constant inside the suite for two reasons: its comments are then real
-comments, so the end-of-branch conciseness pass can cut them and the
-comments-only commit's docstring-stripped AST proof can see that it did;
-and they are linted like everything else instead of hiding inside a
+than infer them. It lives here as a module rather than as a string inside
+the suite so its comments are real comments — the conciseness pass can cut
+them, and they are linted like everything else instead of hiding in a
 literal.
+
+The comments-only commit that cut prose here is established by tokenising
+this constant's own source and comparing the two versions without their
+comments, NOT by the docstring-stripped AST: this body is one STRING
+constant, and `ast.dump` reads a constant as a single opaque value.
 
 The constant is the file's body, injected verbatim, and it keeps the
 child's own import line — the child resolves `daedalus_bridge` from its
@@ -26,7 +29,6 @@ park_job = os.environ.get("SEG_PARK_JOB", "")
 call_lock = threading.Lock()
 _ACQUIRE_GRACE = 0.25
 held = [0]
-last_acquirer = [None]
 dirty_calls = [0]
 
 def note(name, text):
@@ -51,7 +53,6 @@ class Signalled:
         self._real = real
         self._job = job
     def __enter__(self):
-        note("lock-waits", "wait")
         # Bounded, so "this request could not get the lock while the hold
         # was in place" is an event a control waits for rather than a sample
         # it takes. A site on another stripe succeeds inside the window and
@@ -66,7 +67,6 @@ class Signalled:
             # The acquiring half of the hand-off, and the reason the name
             # check is exact: the record carries what was ASKED FOR.
             note("settled", f"{mine} {self._job} acquired")
-        last_acquirer[0] = mine
         # Read BEFORE this acquire joins the count: the question is whether
         # some OTHER lock was already held, and a lock counts itself the
         # moment it is taken.
@@ -105,12 +105,6 @@ def _blocked():
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
-def _waits():
-    path = gate / "lock-waits"
-    if not path.is_file():
-        return 0
-    return len(path.read_text(encoding="utf-8").splitlines())
-
 def install():
     try:
         while not hasattr(segment_store, "seg_lock_for"):
@@ -141,7 +135,6 @@ def install():
                 parked.append(job)
                 # Counted from here, not from process start: this thread
                 # and the mint before it have both been through a lock.
-                (gate / "lock-waits").unlink(missing_ok=True)
                 (gate / "parked").write_text("y", encoding="utf-8")
                 # Two ways out, both recorded events and never arrivals: a
                 # request that merely REACHED a lock has not shown it was
@@ -190,7 +183,6 @@ def install():
             # Counted from inside the hold, so the line is the requests'
             # own and the holder's acquisition is not one of them. No
             # request is in flight yet: the test starts them after `held`.
-            (gate / "lock-waits").unlink(missing_ok=True)
             try:
                 (gate / "held").write_text("held", encoding="utf-8")
                 while not (gate / "release").exists():
