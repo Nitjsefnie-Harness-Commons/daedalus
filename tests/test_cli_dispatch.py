@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 """What the shared CLI harness promises, one control per strictness limb.
 
-These are tests OF tests/_cli_dispatch.py, so each drives a small local
+These are tests OF tests/_cli_dispatch.py, so most drive a small local
 callable rather than a handler: a control parked in a consumer's suite
 welds that consumer to every future change here, and the red then arrives
-for a reason that has nothing to do with what the consumer tests. The two
-whose NAMES mention a handler are the exceptions, and each says in its
-docstring why it needs a real one. That is the boundary a reader can act
-on: a new control here that grows a second consumer announces itself by
-its name, because which module a traceback names tells you nothing — a
-failure inside either of those two names `daedalus_cli/commands_eval.py`
+for a reason that has nothing to do with what the consumer tests. The
+controls whose NAMES mention a handler are the exceptions, and each says
+in its docstring why it needs a real one. That is the boundary a reader
+can act on: a new control here that grows a second consumer announces
+itself by its name, because which module a traceback names tells you
+nothing — a failure inside one of those names `daedalus_cli/commands_media.py`
 for the most ordinary reason there is.
+
+The three media controls below share one stand-in: a real HTTP listener on
+the loopback address, pointed at by the handler under test and consulted
+afterwards. That is the only shape of evidence that separates "the harness
+recorded this" from "nothing left the process", and loopback is the whole
+of its reach — no control in this file names a service.
 """
+import contextlib
+import http.server
+import json
+import socket
 import sys
+import threading
 import time
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,7 +34,8 @@ import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
 
-from daedalus_cli import SEGMENT_SIG_HEADER, commands_eval  # noqa: E402
+from daedalus_cli import (SEGMENT_SIG_HEADER, commands_eval,  # noqa: E402
+                          commands_media)
 
 drive = _cli_dispatch.drive
 run_cli = _cli_dispatch.run_cli
@@ -60,6 +73,64 @@ def _store(space):
     # 30, not the 10 the signature defaults to: a recorder reporting a
     # hardcoded 10 would agree with a control that never chooses a deadline.
     space.ext_cmd('_store_hf', 'store-hotfix', 30, fixId='fx')
+
+
+@contextlib.contextmanager
+def _stand_in(payload=None):
+    """A real listener on 127.0.0.1: its URL, and what reached it.
+
+    The answer is a well-formed one, so a control can only pass by never
+    arriving: a refusal that came from a malformed response would prove
+    nothing about the request. It is bound before any handler runs, which
+    is also why the harness's own seal never stops it — a listener dials
+    nothing, it accepts.
+    """
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _answer(self):
+            received.append((self.command, self.path))
+            body = json.dumps(payload if payload is not None else {}) \
+                .encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = _answer
+        do_POST = _answer
+        do_PUT = _answer
+        do_DELETE = _answer
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_address[1]}', received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@contextlib.contextmanager
+def _aimed_at(module, url):
+    """Point a handler module's own `URL` at a stand-in, and put it back.
+
+    The unmodelled call reads the module global rather than the
+    environment, so this is the one fake a test has to bind by hand, and
+    it is undone whatever the handler does with it.
+    """
+    original = module.URL
+    module.URL = url
+    try:
+        yield
+    finally:
+        module.URL = original
 
 
 def test_a_planned_request_that_arrives_is_accepted(tmp):
@@ -145,20 +216,25 @@ def test_a_planned_request_carrying_headers_is_accepted(tmp):
     assert recorded.issued == [SEGMENT_STATUS], recorded.issued
 
 
-def test_a_planned_request_that_omits_a_planned_header_is_refused(tmp):
-    """The same request without the header is a different request.
+def test_a_planned_request_carrying_another_header_value_is_refused(tmp):
+    """A header's VALUE is part of the request, not only its presence.
 
-    A recorder that dropped `headers` from what it recorded would pass
-    both plans, and the plan would then say nothing about the capability
-    at all.
+    The sibling control proves a plan may name a header and a request
+    carrying it passes. This is the half that one cannot see: a recorder
+    comparing the header's presence but never its value accepts the
+    request below, and a plan's capability then stops being pinned at
+    all. The control this replaces asked for a request carrying NO header
+    against a plan naming one, which every recorder refuses identically —
+    one that dropped `headers` and one that kept it — so it discriminated
+    nothing this suite did not already pin.
     """
     del tmp
 
     def asks_status(space):
-        space.api('GET', SEGMENT_STATUS_PATH, None, 30)
+        space.api('GET', SEGMENT_STATUS_PATH, None, 30,
+                  headers={SEGMENT_SIG_HEADER: 'another-sig'})
 
-    _refused('request 1 is not the one planned', asks_status, [{}],
-             [SEGMENT_STATUS])
+    _refused("'another-sig'", asks_status, [{}], [SEGMENT_STATUS])
 
 
 def test_a_planned_api_raw_request_that_arrives_is_accepted(tmp):
@@ -166,7 +242,9 @@ def test_a_planned_api_raw_request_that_arrives_is_accepted(tmp):
 
     `do_screenshot`'s download is the only `api_raw` call in the CLI, and a
     harness that did not fake it would write a real file from a real
-    socket.
+    socket. What this control pins is the recorder's handling of the name
+    on a namespace this file built; the handler that reaches it is
+    `test_do_screenshot_downloads_through_the_recorder_and_no_socket`.
     """
     del tmp
 
@@ -190,7 +268,12 @@ def test_a_planned_api_raw_request_that_differs_is_refused(tmp):
 
 
 def test_a_planned_api_delete_request_that_arrives_is_accepted(tmp):
-    """The body-carrying DELETE is a third shape, and it is planned too."""
+    """The body-carrying DELETE is a third shape, and it is planned too.
+
+    As with `api_raw` above, this is the recorder's limb on a namespace
+    this file built; `test_do_uploads_delete_reaches_no_socket` is the
+    same name arriving from a real handler.
+    """
     del tmp
 
     def removes(space):
@@ -269,6 +352,30 @@ def test_the_fakes_are_put_back_when_the_callable_raises(tmp):
 
     assert {name: getattr(invoke, name, None)
             for name in _cli_dispatch.WIRE_NAMES} == snapshot
+
+
+def test_wiring_restores_a_name_the_namespace_never_had(tmp):
+    """A name the module lacked is REMOVED again, not left behind as a value.
+
+    The snapshot control above can only see a name that was there before:
+    `invoke` resolves all of them, so restoring it by writing the old
+    value back and restoring it by deleting it look identical. Every
+    handler module does not — `commands_eval` has no `ext_cmd` global of
+    its own — and a restore that wrote a sentinel there instead of
+    deleting it left `hasattr(module, 'ext_cmd')` true for every test
+    after it, pointing at an object nothing can call. A namespace that
+    starts out missing the names is what makes that branch reachable.
+    """
+    del tmp
+    space = types.SimpleNamespace()
+    recorded = _cli_dispatch.RecordingExtCmd([{}])
+
+    with _cli_dispatch.wired(space, recorded):
+        assert space.ext_cmd is recorded, 'the fakes must be installed'
+
+    for name in _cli_dispatch.WIRE_NAMES:
+        assert not hasattr(space, name), (
+            f'{name} was left on a namespace that never had it')
 
 
 def test_asking_for_more_answers_than_were_supplied_fails_cleanly(tmp):
@@ -386,6 +493,123 @@ def test_run_cli_rebinds_the_module_it_is_given(tmp):
 
     assert recorded.api_calls == [('PUT', '/command', plan[0]['body'])], \
         recorded.api_calls
+
+
+def test_a_socket_the_harness_does_not_model_is_refused(tmp):
+    """The boundary is the process, not the list of names it fakes.
+
+    This callable holds no faked name and reaches the network by a path
+    `WIRE_NAMES` never mentions, so the refusal below is the seal's alone
+    and not an artifact of the fixture. A harness that only faked names
+    would have connected: that is exactly what a real handler's own
+    `urllib.request` call did while every faked name reported a contained
+    run. The stand-in is on the loopback address and answers whatever
+    arrives, so the assertion below is about bytes that never came.
+    """
+    del tmp
+    with _stand_in({'sig': 'sigvalue'}) as (url, received):
+        address = url.partition('://')[2]
+        try:
+            drive(lambda space: socket.create_connection(
+                (address.partition(':')[0], int(address.partition(':')[2]))),
+                [])
+        except AssertionError as error:
+            assert 'unmodelled socket call' in str(error), str(error)
+        else:
+            raise AssertionError('the harness let a connection through')
+
+    assert received == [], received
+
+
+def test_do_uploads_delete_reaches_no_socket(tmp):
+    """A real media handler's own request, and a stand-in that heard none.
+
+    The `api_delete` control above drives a namespace this file built, so
+    it proves the recorder records the name and nothing about whether a
+    handler's call arrives here. This drives `commands_media.do_uploads`
+    through the real parser and the real dispatch, and the plan is the
+    request that handler builds — same path, same body — so dropping
+    either `api_delete` or `api` from `WIRE_NAMES` now dies against a
+    handler rather than against a fixture.
+    """
+    del tmp
+    with _stand_in() as (url, received):
+        with _aimed_at(commands_media, url):
+            recorded, out = run_cli(
+                ['uploads', '--delete', '--id', 'job0'], [{}],
+                module=commands_media, plan=[REMOVAL], token='clitok')
+
+    assert recorded.issued == [REMOVAL], recorded.issued
+    assert out == 'Deleted\n', repr(out)
+    assert received == [], received
+
+
+def test_do_screenshot_downloads_through_the_recorder_and_no_socket(tmp):
+    """The same for `api_raw`, on the handler whose download writes a file.
+
+    Three requests in the plan and the bytes come back through the
+    recorder, so the file on disk is the recorder's answer and not a
+    socket's — a harness that let this one through would write whatever
+    the stand-in returned, and `stand-in received []` is what says it did
+    not.
+    """
+    path = Path(tmp) / 'shot.png'
+    # The selector is percent-encoded on its way into the request target,
+    # which the synthetic `DOWNLOAD` entry above does not model.
+    download = dict(DOWNLOAD, path='/screenshot?path=job0%2Fshot.png')
+    plan = [
+        {'via': 'api', 'method': 'PUT', 'path': '/command',
+         'body': {'id': '_ss', 'type': 'screenshot', 'token': 'clitok',
+                  'tab': 'extension'}},
+        {'via': 'wait_for_result', 'id': '_ss', 'tab': 'extension',
+         'delivery': 'd1', 'timeout': 15, 'interval': 0.5},
+        download,
+    ]
+    with _stand_in() as (url, received):
+        with _aimed_at(commands_media, url):
+            recorded, _out = run_cli(
+                ['screenshot', '-o', str(path)],
+                [{'target': 'tab7', 'did': 'd1'},
+                 {'result': {'path': 'job0/shot.png', 'size': 9}},
+                 b'png-bytes'],
+                module=commands_media, plan=plan, token='clitok')
+
+    assert recorded.issued == plan, recorded.issued
+    assert path.read_bytes() == b'png-bytes'
+    assert received == [], received
+
+
+def test_do_segment_status_is_refused_before_it_dials(tmp):
+    """The unmodelled path, driven by the handler that owns it.
+
+    `commands_media.do_segment_status` mints its capability with a direct
+    `urllib.request.urlopen` and then reads the status back through the
+    faked `api`. Before the seal, the first request went to a listener
+    while the recorder reported one request and a fully consumed plan, so
+    the harness claimed a containment it had not achieved. Here the
+    stand-in answers a well-formed capability at the URL the handler is
+    aimed at, so the control can only pass by the call never arriving —
+    and the refusal names the handler line that made it.
+    """
+    del tmp
+    with _stand_in({'sig': 'sigvalue'}) as (url, received):
+        with _aimed_at(commands_media, url):
+            try:
+                # The one answer is the status the faked `api` would have
+                # returned; the refused path never reaches it, so a harness
+                # that DID reach the stand-in runs to the end of the
+                # handler and the refusal below is the only failure.
+                run_cli(['segment-status', 'j0'],
+                        [{'count': 2, 'done': [0, 1]}],
+                        module=commands_media)
+            except AssertionError as error:
+                assert 'unmodelled socket call' in str(error), str(error)
+                assert 'commands_media.py' in str(error), str(error)
+            else:
+                raise AssertionError(
+                    f'the handler reached the network: {received}')
+
+    assert received == [], received
 
 
 if __name__ == '__main__':
