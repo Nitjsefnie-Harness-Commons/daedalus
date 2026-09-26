@@ -24,7 +24,7 @@ FRAME_SURFACE = frozenset(
     name for name, member in vars(types.FrameType).items()
     if isinstance(member, _FRAME_DESCRIPTORS))
 ARGS_KEY = 'args'
-UNPROVEN = object()   # the resolver's verdict for a value it cannot trace
+UNPROVEN = object()  # the verdict for a value whose origin is untraceable
 _UNKNOWN_MODULE_BINDING = object()
 
 
@@ -432,31 +432,36 @@ def permitted_namespace_read(name, function, handler_globals, scope_binds,
     return attribute, parent, needs_presence
 
 
-def frame_read(node):
+def frame_read(node, is_getattr=None):
     """Return the ``(member, receiver)`` a frame read names, or ``None``.
 
-    An attribute and a constant-string subscript are the two carriers the
-    grammar gives a member name, and the receiver is the base each selects
-    from. A member reached as a call's constant-string argument is NOT a
-    carrier here: ``api('GET', 'args')`` would name one too, and refusing it
+    An attribute, a constant-string subscript, and the constant-string
+    selection argument of a proven builtin ``getattr`` are the carriers the
+    grammar gives a member name, and the receiver is what each selects from.
+    The call carrier is gated on ``is_getattr`` proving the callee, because
+    ``api('GET', 'args')`` names a member in the same shape and refusing it
     would be refusing correct code.
     """
     if isinstance(node, ast.Attribute):
         return node.attr, node.value
     if isinstance(node, ast.Subscript):
         return constant_string(node.slice), node.value
+    if (is_getattr is not None and isinstance(node, ast.Call)
+            and len(node.args) in (2, 3) and not node.keywords
+            and is_getattr(node.func)):
+        return constant_string(node.args[1]), node.args[0]
     return None
 
 
-def reads_frame_namespace(node, origin):
+def reads_frame_namespace(read, origin):
     """Refuse a frame read whose receiver the audit cannot account for.
 
+    ``read`` is what ``frame_read`` already returned for this node and
     ``origin`` is what the audit can see the receiver to be, or ``UNPROVEN``
     when it cannot. A member this file has never heard of is refused like a
     known one, because the member set is read from ``types.FrameType`` rather
     than written out here.
     """
-    read = frame_read(node)
     if read is None:
         return None
     member, receiver = read

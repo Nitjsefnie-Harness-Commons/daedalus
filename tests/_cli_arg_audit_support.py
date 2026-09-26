@@ -300,6 +300,10 @@ FRAME_NAMESPACE_PLANTS = (
      "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
      "['args'].undeclared_probe\n",
      "getattr(sys._getframe(), 'f_locals')"),
+    ('constant-string carrier, no args subscript', '',
+     'def do_reload(args):\n',
+     "def do_reload(args):\n    _ = getattr(sys._getframe(), 'f_locals')"
+     ".get('undeclared_probe')\n", 'sys._getframe()'),
 )
 
 
