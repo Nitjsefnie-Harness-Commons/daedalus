@@ -207,9 +207,9 @@ def test_the_median_of_an_even_count_is_the_upper_middle(_tmp):
     report = _run('report({ text: meta().textContent });\n',
                   setup=FOUR, answers=(ANSWER_FOUR,))
     assert report['text'] == ('nativeToBase64 = true'
-                             '  ·  median 30ms'
-                             '  ·  mean 25ms'
-                             '  ·  4/4 ok'), report
+                              '  ·  median 30ms'
+                              '  ·  mean 25ms'
+                              '  ·  4/4 ok'), report
 
 
 def test_a_status_cell_reads_green_when_the_status_is_missing_or_zero(_tmp):
@@ -257,9 +257,9 @@ def test_the_stats_block_counts_the_entries_that_worked(_tmp):
                   '  rows: cells(list()).slice(1) });\n',
                   setup=MIXED, answers=(ANSWER_MIXED,))
     assert report['text'] == ('nativeToBase64 = true'
-                             '  ·  median 14ms'
-                             '  ·  mean 14ms'
-                             '  ·  2/3 ok'), report
+                              '  ·  median 14ms'
+                              '  ·  mean 14ms'
+                              '  ·  2/3 ok'), report
     assert report['rows'][0][7] == [
         'url red',
         'https://one.example.com/x.m3u8  (aborted)'], report

@@ -66,6 +66,26 @@ BODY_2001 = BODY_2000.replace("2000) };", "2001) };")
 NO_BODY = ("const D = { status: 200, method: 'GET',\n"
            "  url: 'https://one.example.com/a.js' };\n")
 
+EXPECTED_DETAIL = (
+    '{\n'
+    '  "url": "https://one.example.com/a.js",\n'
+    '  "method": "GET",\n'
+    '  "status": 200,\n'
+    '  "statusText": "OK",\n'
+    '  "mimeType": "text/javascript",\n'
+    '  "requestHeaders": {\n'
+    '    "accept": "text/html"\n'
+    '  },\n'
+    '  "responseHeaders": {\n'
+    '    "content-type": "text/javascript"\n'
+    '  },\n'
+    '  "initiator": "parser",\n'
+    '  "ts": 1750000000000,\n'
+    '  "bodyBase64": false,\n'
+    '  "body": "var a = 1;"\n'
+    '}')
+
+
 TABS = ("const TABS = [{ tabId: 11, title: 'first tab',\n"
         "  url: 'https://one.example.com/one' },\n"
         "  { tabId: 22, title: '', url: 'https://two.example.com/two' }];\n"
@@ -76,7 +96,7 @@ DEFAULT = TABS + REQS
 
 
 def answer(kind, expr):
-    return ("answer('" + kind + "', { result: " + expr + " });\n")
+    return "answer('" + kind + "', { result: " + expr + " });\n"
 
 
 ANSWER_START = answer('net-capture', '{ tabId: 11 }')
@@ -99,7 +119,7 @@ ANSWER_NOT_CAPTURING = answer('net-capture-stop',
                               " reason: 'no capture running' }")
 ANSWER_NOT_CAPTURING_BARE = answer('net-capture-stop', '{ stopped: false }')
 
-REFUSED = ("answer('%s', { error: '%s' });\n")
+REFUSED = "answer('%s', { error: '%s' });\n"
 
 
 def refusal(kind, message):
@@ -115,8 +135,7 @@ SETTLED = ('await bounded(settle(), "after the click",'
            ' _dashnodeStepTimeoutMs);\n')
 
 
-def scenario(body, *, setup=DEFAULT, answers=(),
-               plan=shared.COMMAND):
+def scenario(body, *, setup=DEFAULT, answers=(), plan=shared.COMMAND):
     """One child: seed the token, plan every answer, mount, then drive.
 
     `setup` lands first because the answer table is written in the scope
@@ -417,26 +436,6 @@ def test_clicking_a_row_opens_the_detail_in_this_key_order(_tmp):
     assert report['open'] == 1, report
     assert report['cursor'] == 'pointer', report
     assert report['text'] == EXPECTED_DETAIL, report
-
-
-EXPECTED_DETAIL = (
-    '{\n'
-    '  "url": "https://one.example.com/a.js",\n'
-    '  "method": "GET",\n'
-    '  "status": 200,\n'
-    '  "statusText": "OK",\n'
-    '  "mimeType": "text/javascript",\n'
-    '  "requestHeaders": {\n'
-    '    "accept": "text/html"\n'
-    '  },\n'
-    '  "responseHeaders": {\n'
-    '    "content-type": "text/javascript"\n'
-    '  },\n'
-    '  "initiator": "parser",\n'
-    '  "ts": 1750000000000,\n'
-    '  "bodyBase64": false,\n'
-    '  "body": "var a = 1;"\n'
-    '}')
 
 
 def test_clicking_the_same_row_again_closes_the_detail(_tmp):
