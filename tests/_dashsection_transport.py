@@ -92,6 +92,17 @@ function jsonAnswer(data, status) {
 // The delivery id is the one number the poll legs have to agree on, so a
 // command answer that carries none is answered without one and lets the
 // shipped `runCommand` throw its own "no delivery id".
+// A request the scenario never planned is recorded and then refused, and
+// the throw is the refusal: no section wraps its fetch in a catch that
+// turns one into a stream error, so a thrown refusal is readable and a
+// swallowed one is not. `byType` refuses through this same door rather
+// than a second one, so there is one strictness here and one control on
+// it.
+function refuse(target) {
+  REFUSALS.push({ n: REQUESTS.length, target: String(target) });
+  throw new Error('unexpected request ' + String(target));
+}
+
 function commandAnswer(spec, body) {
   if (spec.status !== undefined && spec.status !== 200) {
     const failure = spec.json === undefined
@@ -100,7 +111,7 @@ function commandAnswer(spec, body) {
     return jsonAnswer(failure, spec.status);
   }
   LEDGER.command = { id: body.id, did: spec.did === undefined
-    ? null : String(spec.did) };
+    ? null : String(spec.did), type: body.type };
   LEDGER.generation += 1;
   openPump();
   return jsonAnswer(spec.did === undefined ? { ok: true }
@@ -144,6 +155,17 @@ function resultAnswer(target, spec) {
   if (!anchored) {
     throw unmodelled('a result poll before any command for', target);
   }
+  // `byType` is how one `/result` plan answers a different result for a
+  // different command TYPE: the type is read off the command the
+  // transport received, and the patch is applied to the envelope it
+  // anchored, so the delivery id and generation the loop matched on stay
+  // the real ones. A type the scenario did not name is refused like an
+  // unplanned target -- a double that answered it would be answering
+  // something the scenario never declared.
+  if (spec.byType !== undefined) {
+    if (!(command.type in spec.byType)) refuse(target);
+    return jsonAnswer(Object.assign({}, anchored, spec.byType[command.type]));
+  }
   // A plan may declare how many leading polls carry an envelope the
   // shipped loop has to skip, which is what the two shared-slot states
   // look like before the result is the caller's: `wrong` is a result left
@@ -181,10 +203,7 @@ globalThis.fetch = async (target, init) => {
   });
   const key = pollTarget(whole);
   const spec = ROUTES.get(key);
-  if (!spec) {
-    REFUSALS.push({ n: REQUESTS.length, target: whole });
-    throw new Error('unexpected request ' + whole);
-  }
+  if (!spec) refuse(whole);
   const role = routeRole(key);
   if (role === 'command') return commandAnswer(spec, body);
   if (role === 'result') return resultAnswer(whole, spec);

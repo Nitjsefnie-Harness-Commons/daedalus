@@ -186,6 +186,26 @@ def test_an_unplanned_request_is_refused_and_recorded(_tmp):
     assert report['refusal'] == 'unexpected request /command', report
 
 
+def test_a_result_plan_naming_one_command_type_refuses_the_rest(_tmp):
+    """`byType` is how one `/result` plan answers a different result for a
+    different command, so the plan is the scenario's own list of what it
+    expects to send. A type it never named is refused and recorded exactly
+    as an unplanned target is -- the same door, the same control -- because
+    a double that answered it would be handing the section a result the
+    scenario never declared, which is the half of #1083 a route-shaped
+    match lets through.
+
+    The declared half is the anti-vacuity: a transport that refused every
+    poll would satisfy the refusal half alone.
+    """
+    report = run_scenario(scenarios.BY_TYPE, sections=('api.js',))
+    assert report['declared'] == ['declared'], report
+    assert report['refusal'] == (
+        'unexpected request /result?tab=extension'), report
+    assert report['unplanned'] == [
+        {'n': 5, 'target': '/result?tab=extension'}], report
+
+
 def test_a_duplicate_route_is_refused(_tmp):
     """A second plan for a target is a scenario bug, and answering it
     silently lets the second plan decide the answer to the first."""
