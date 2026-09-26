@@ -62,8 +62,9 @@ def _launch_keywords():
     false red once already. `_argv_read` owns the argv; this owns the
     keywords, and the two are read from the same place for the same reason.
     """
-    popen = inspect.signature(subprocess.Popen.__init__).parameters
-    run = inspect.signature(subprocess.run).parameters
+    popen = inspect.signature(
+        subprocess.__dict__['Popen'].__init__).parameters
+    run = inspect.signature(subprocess.__dict__['run']).parameters
     return frozenset(popen) | frozenset(run)
 
 

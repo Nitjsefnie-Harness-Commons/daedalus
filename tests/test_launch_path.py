@@ -14,11 +14,13 @@ modules are named, the ones that must be out are named, and a module that
 reaches the gate only by reaching another launcher of its own is pinned as
 OUT so the audit cannot swallow the mechanism issue #1121 lists.
 """
+import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _launch_census as census  # noqa: E402
+import _launch_path as path  # noqa: E402
 from _launch_fixtures import (  # noqa: E402
     HANG_DETECTOR_PROGRAM as _DETECTOR, write_source_tree as _tree)
 import _util  # noqa: E402
@@ -122,22 +124,60 @@ def test_an_aliased_import_still_reaches_the_gate(tmp):
     assert 'caller.py' in paths, sorted(paths)
 
 
-def test_the_launcher_member_set_is_a_fixed_point_not_a_list(tmp):
-    """The launcher set is derived from the stdlib's own source.
+def _live_launcher_members():
+    """The launcher members, by closure, from the live `subprocess`.
 
-    Membership alone would not say so: a hand list containing the same names
-    passes it. This measures the closure — a member that CALLS a launcher is
-    a launcher — by seeding the walk at a set that does not yet contain
-    `check_call` and reading what it reaches.
+    The fixed point the census used to compute: seeded at `Popen`, and a
+    member that CALLS one is one, so `check_call` is in and `CompletedProcess`
+    is out. Read through the module's own namespace so this control does not
+    itself bind a launcher the shared guard would have to refuse.
+    """
+    import inspect
+    import re
+    import subprocess
+
+    members = {'Popen'}
+    growing = True
+    while growing:
+        growing = False
+        for name, member in subprocess.__dict__.items():
+            if name.startswith('_') or name in members:
+                continue
+            if inspect.isclass(member) or not callable(member):
+                continue
+            try:
+                source = inspect.getsource(member)
+            except (OSError, TypeError):
+                continue
+            for reached in sorted(members):
+                if re.search(rf'\b{re.escape(reached)}\s*\(', source):
+                    members.add(name)
+                    growing = True
+                    break
+    return frozenset(members)
+
+
+def test_the_launcher_member_names_match_the_live_module(tmp):
+    """The names the census carries are the ones the live module agrees to.
+
+    The census holds these as a literal, because a launcher reached through a
+    computed name is a binding the shared coverage guard refuses to follow.
+    So the closure that used to establish the list is established HERE,
+    against the live module, and the two are compared: a member a future
+    stdlib adds fails a test that names the difference, rather than passing
+    unnoticed as a hand list would.
     """
     del tmp
-    # The closure, not the result: `check_call` reaches a child by calling
-    # `run`, and its own text never says `Popen`, so a hand list that
-    # happened to hold the right names would have to be written deliberately.
-    derived = census._launch_members()
-    assert 'check_call' in derived, sorted(derived)
-    assert 'check_output' in derived, sorted(derived)
-    assert 'CompletedProcess' not in derived, sorted(derived)
+    live = _live_launcher_members()
+    carried = census._LAUNCH_MEMBERS
+    assert carried == live, (
+        'the carried member set has drifted from the live module: '
+        f'only carried {sorted(carried - live)}, '
+        f'only live {sorted(live - carried)}')
+    # The closure and not just the set: `check_call` reaches a child by
+    # calling `run`, and its own text never says `Popen`.
+    assert 'check_call' in live, sorted(live)
+    assert 'CompletedProcess' not in live, sorted(live)
 
 
 def test_the_wait_slots_follow_the_signature(tmp):
@@ -150,8 +190,6 @@ def test_the_wait_slots_follow_the_signature(tmp):
     move.
     """
     del tmp
-    import subprocess as sp
-    real = sp.Popen
     assert census._CHILD_WAIT_SLOTS == {'wait': 0, 'communicate': 1}
 
     class Reordered:
@@ -163,14 +201,66 @@ def test_the_wait_slots_follow_the_signature(tmp):
         def communicate(self, marker, timeout=None):
             """A communicate whose first positional is not the timeout."""
 
-    sp.Popen = Reordered
+    real = path._popen_class
+    path._popen_class = lambda: Reordered
     try:
         moved = census._child_wait_slots()
     finally:
-        sp.Popen = real
+        path._popen_class = real
     assert moved['wait'] == 1, moved
     assert census._CHILD_WAIT_SLOTS == {'wait': 0, 'communicate': 1}, (
         'the set was captured rather than recomputed')
+
+
+def _reads_the_module(node, receivers):
+    """Whether `node` reads a member off the `subprocess` module."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+        return False
+    if node.func.id != 'getattr' or not node.args:
+        return False
+    first = node.args[0]
+    return isinstance(first, ast.Name) and first.id in receivers
+
+
+def _assigns_onto_the_module(node, receivers):
+    """Whether `node` assigns an attribute onto the module."""
+    if not isinstance(node, ast.Assign):
+        return False
+    return any(isinstance(target, ast.Attribute)
+               and isinstance(target.value, ast.Name)
+               and target.value.id in receivers
+               for target in node.targets)
+
+
+def _unfollowable_binding(node, receivers):
+    """Why `node` binds a launcher the guard cannot follow, or ''."""
+    if _reads_the_module(node, receivers):
+        return 'a getattr off the subprocess module'
+    if _assigns_onto_the_module(node, receivers):
+        return 'an assignment onto the subprocess module'
+    return ''
+
+
+def test_no_census_module_binds_a_launcher_off_the_subprocess_module(tmp):
+    """Neither refused shape is back in a module the census reads.
+
+    A `getattr` off the `subprocess` module and an assignment onto it are
+    both silent: the census read a launcher the shared guard could not
+    follow, and the guard named the census's own modules without saying
+    why. Naming the two shapes here makes a reintroduction a failure that
+    says which one and where.
+    """
+    del tmp
+    offenders = []
+    for module in ('_launch_path.py', '_launch_audit.py', '_launch_census.py'):
+        tree = ast.parse((TESTS / module).read_text(encoding='utf-8'))
+        receivers = census._subprocess_receivers(tree)
+        for node in ast.walk(tree):
+            shape = _unfollowable_binding(node, receivers)
+            if shape:
+                offenders.append(
+                    f'{module}:{getattr(node, "lineno", 0)}: {shape}')
+    assert not offenders, '\n'.join(offenders)
 
 
 def main():
