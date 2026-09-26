@@ -46,9 +46,12 @@ export function mount(container, bus) {
     try {
       const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
       // Valid JSON is not necessarily a list. Without this a `{}` store
-      // reads as a length of `undefined`, so the cap check compares
-      // `undefined >= 20` -- false -- and the guard passes; the failure
-      // then surfaces at the first `.slice`, blaming the wrong line.
+      // reads as a length of `undefined`, and the first thing to touch it is
+      // `renderSessions` at MOUNT, where the row map calls `.slice` on it --
+      // so the panel dies before a click is possible, at the table, blaming
+      // the table. The cap check would have been no better: it compares the
+      // same `undefined` against 20, which is false, and waves the store
+      // through.
       return Array.isArray(stored) ? stored : [];
     } catch { return []; }
   }
