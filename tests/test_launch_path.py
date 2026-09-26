@@ -19,47 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _launch_census as census  # noqa: E402
+from _launch_fixtures import (  # noqa: E402
+    HANG_DETECTOR_PROGRAM as _DETECTOR, write_source_tree as _tree)
 import _util  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
-DETECTOR = """
-import subprocess
-import sys
-
-from _processtree import cleanup_process_tree
-
-SAMPLES = (1.0, 1.5, 2.0)
-SLOWEST_S = max(SAMPLES)
-MULTIPLE = 10
-DEADLINE_S = round(SLOWEST_S * MULTIPLE)
-CLEANUP_S = 5
-
-
-class ChildDeadlineExceeded(Exception):
-    pass
-
-
-def launch(argv):
-    process = subprocess.Popen(
-        argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=sys.platform != 'win32')
-    try:
-        returncode = process.wait(timeout=DEADLINE_S)
-    except subprocess.TimeoutExpired:
-        cleanup_process_tree(process, CLEANUP_S)
-        raise ChildDeadlineExceeded(argv, DEADLINE_S) from None
-    return returncode
-"""
-
-
-def _tree(root, files):
-    """Write a tree of planted sources and return the directory."""
-    root = Path(root)
-    for relative, text in files.items():
-        target = root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding='utf-8')
-    return root
 
 
 def test_the_shipped_tree_carries_no_undeclared_wall_bound(tmp):
@@ -123,7 +87,7 @@ def test_a_caller_in_a_subdirectory_is_on_the_path(tmp):
     a control rather than a note.
     """
     root = _tree(tmp, {
-        '_noderun.py': DETECTOR.replace(
+        '_noderun.py': _DETECTOR.replace(
             'def launch(argv):', 'def run_node_program(argv):'),
         '_stream_fake.py': (
             'def run_gate(*a, **k):\n    return run_node_program(*a, **k)\n'),
@@ -146,7 +110,7 @@ def test_an_aliased_import_still_reaches_the_gate(tmp):
     cannot see the call.
     """
     root = _tree(tmp, {
-        '_noderun.py': DETECTOR.replace(
+        '_noderun.py': _DETECTOR.replace(
             'def launch(argv):', 'def run_node_program(argv):'),
         '_stream_fake.py': (
             'from _noderun import run_node_program as rn\n'

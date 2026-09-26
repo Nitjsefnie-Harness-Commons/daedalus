@@ -29,50 +29,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _launch_census as census  # noqa: E402
+from _launch_fixtures import (  # noqa: E402
+    HANG_DETECTOR_PROGRAM as _DETECTOR, write_source_tree as _tree)
 import _util  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
-
-# A detector, whole: the permitted shape. Each rule's near miss is this file
-# with one thing changed, so a rule and its near miss cannot drift apart.
-_DETECTOR = """
-import subprocess
-import sys
-
-from _processtree import cleanup_process_tree
-
-SAMPLES = (1.0, 1.5, 2.0)
-SLOWEST_S = max(SAMPLES)
-MULTIPLE = 10
-DEADLINE_S = round(SLOWEST_S * MULTIPLE)
-CLEANUP_S = 5
-
-
-class ChildDeadlineExceeded(Exception):
-    pass
-
-
-def launch(argv):
-    process = subprocess.Popen(
-        argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=sys.platform != 'win32')
-    try:
-        returncode = process.wait(timeout=DEADLINE_S)
-    except subprocess.TimeoutExpired:
-        cleanup_process_tree(process, CLEANUP_S)
-        raise ChildDeadlineExceeded(argv, DEADLINE_S) from None
-    return returncode
-"""
-
-
-def _tree(root, files):
-    """Write a tree of planted sources and return the directory."""
-    root = Path(root)
-    for relative, text in files.items():
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding='utf-8')
-    return root
 
 
 def _routes(body, in_path=('launch',)):

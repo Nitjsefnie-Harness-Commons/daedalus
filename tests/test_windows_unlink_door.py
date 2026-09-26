@@ -33,7 +33,6 @@ and none of them is stubbed. The deadline is lowered at runtime and
 restored, which is the pattern `tests/test_noderun_deadline.py` already
 uses, so the detector fires in seconds rather than in 107.
 """
-import os
 import shutil
 import subprocess
 import sys

@@ -325,6 +325,7 @@
 !/tests/_jsroute_timeline.py
 !/tests/_launch_audit.py
 !/tests/_launch_census.py
+!/tests/_launch_fixtures.py
 !/tests/_launch_path.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
