@@ -340,16 +340,21 @@ json.dumps({x for x in text if wanted})
         ('condition yields from a call', """import json
 json.loads([x for x in text.split(',') if x.strip() != ''])
 """),
+        ('generator expression', """import json
+json.loads(list(x for x in text.split(',') if x.strip()))
+"""),
     )
 
 
 def _opened_form_free_cases():
-    """A launcher-free spelling of every class the walk now opens.
+    """A launcher-free spelling of the single-position opened classes.
 
-    A matcher that widens has to widen its negative table, so each
-    opened class gets a spelling that carries nothing. They differ from
-    one another on purpose: two rows sharing a spelling prove only that
-    one of them does.
+    A matcher that widens has to widen its negative table, so each class
+    gets a spelling that carries nothing. They differ from one another
+    on purpose: two rows sharing a spelling prove only that one of them
+    does. The comprehension forms are the exception and are not here —
+    they have a position of their own, and all four of them are pinned
+    by `_comprehension_free_cases`.
     """
     return (
         ('conditional', """import operator
@@ -378,6 +383,110 @@ def go():
 """),
         ('walrus', """import operator
 operator.call((held := 2), 1)
+"""),
+    )
+
+
+def _target_carrier_cases():
+    """Launcher-carrying targets, the side a loop binds rather than reads.
+
+    Every row puts the launcher in the target alone: the iterable, the
+    context expression and the comprehension's element carry nothing, so
+    a row that passed whether or not the target arm exists would be a
+    decoy and would be caught by the mutation rows that drop it.
+    """
+    return (
+        ('with target', """import subprocess
+with open(handle) as d[subprocess]:
+    pass
+""", 'as d[subprocess]'),
+        ('for target', """import subprocess
+for d[subprocess] in items:
+    pass
+""", 'd[subprocess] in items'),
+        ('comprehension target', """import subprocess
+go = [y for d[subprocess] in items]
+""", 'd[subprocess] in items'),
+        ('async for target', """import subprocess
+async def go():
+    async for d[subprocess] in items:
+        pass
+""", 'd[subprocess] in items'),
+        ('tuple target', """import subprocess
+for head, d[subprocess] in items:
+    pass
+""", 'd[subprocess] in items'),
+        ('starred target', """import subprocess
+for head, *d[subprocess] in items:
+    pass
+""", '*d[subprocess]'),
+    )
+
+
+def _target_free_cases():
+    """Targets and values that carry nothing stay clean.
+
+    A subscript whose index is a plain key is the shape the new arm has
+    to leave alone, since it is an ordinary subscript and not a carrier.
+    """
+    return (
+        ('with a keyed target', """import os
+with open(handle) as d[key]:
+    pass
+"""),
+        ('for a keyed target', """import os
+for d[key] in items:
+    pass
+"""),
+        ('for a plain target', """import os
+for d[key] in registry.items():
+    pass
+"""),
+        ('comprehension target', """import os
+go = [y for d[key] in items]
+"""),
+        ('async for a keyed target', """import os
+async def go():
+    async for d[key] in items:
+        pass
+"""),
+        ('starred target over a tuple', """import os
+for head, *rest in items:
+    pass
+"""),
+    )
+
+
+def _binding_arm_cases():
+    """The two of #1114's eight arms that no case pinned by name.
+
+    Both refuse, and both were invisible to the census for the same
+    reason: removing either arm removed no control, so the row that
+    would have caught it did not exist. The launcher sits in the value
+    each arm yields, so neither row is reachable by any other arm.
+    """
+    return (
+        ('walrus', """import subprocess
+if (go := subprocess.run):
+    pass
+""", 'go := '),
+        ('augmented assignment', """import subprocess
+go = 0
+go += subprocess.run
+""", 'go += '),
+    )
+
+
+def _binding_arm_free_cases():
+    """The same two arms carrying nothing, which stay clean."""
+    return (
+        ('walrus', """import subprocess
+if (go := 2):
+    pass
+"""),
+        ('augmented assignment', """import subprocess
+go = 0
+go += 2
 """),
     )
 
