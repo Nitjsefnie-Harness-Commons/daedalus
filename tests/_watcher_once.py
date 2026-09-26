@@ -7,10 +7,11 @@ one poll because the process exited. Nothing is inferred and no clock is
 read: the marker is in the log, so the log is complete by the time it is
 read, and two identical calls inside one poll are two.
 
-`measure` still reads the FIRST of the polls it observes, so a loop that
-grows from its third poll on is measured at the width it started at.
-`test_a_loop_that_grows_from_its_third_poll_costs_two` is red for exactly
-that, and reading the whole window is what turns it green.
+The figure is the largest call count in any one of the polls observed. Not
+the first poll's: a bound that reads one poll bounds one poll, and a loop
+that starts spending an extra request from its third poll on is then
+measured at the width it began at - a number half the real cost, reported
+as a measurement.
 
 The module binds no fixture: a caller hands in the answers and the fake, so
 the same harness measures this tree's watchers and the base commit's. It is
@@ -135,6 +136,13 @@ def measure(script, args, fake, interval, polls=POLLS):
     process exiting IS the boundary, so its whole log is one poll, and
     `once` is where the base commit's scripts are measured, whose watchers
     predate the marker and cannot carry one.
+
+    The figure is the LARGEST call count in any one of the polls observed,
+    and the window is every one of them, not the first. A bound that reads
+    a single poll bounds a single poll: a loop that starts spending an
+    extra request from its third poll on is then measured at the width it
+    began at and reported at half its real cost, which is a measurement
+    the idle bound is meant to refuse.
     """
     child = Child(script, args + ['--interval', str(interval)], fake)
     try:
@@ -143,6 +151,8 @@ def measure(script, args, fake, interval, polls=POLLS):
         await_polls(fake, polls + 1, child, f'{polls} poll(s)')
     finally:
         child.stop()
-    first = polls_in(fake.calls())[0][0]
-    return sum(1 for call in fake.calls() if call.get('poll') == first), [
-        call for call in fake.calls() if call.get('poll') == first]
+    windows = polls_in(fake.calls())
+    in_flight = windows[-1][0]
+    per_poll = max(width for _, width in windows[:-1])
+    return per_poll, [call for call in fake.calls()
+                      if call.get('poll') != in_flight]
