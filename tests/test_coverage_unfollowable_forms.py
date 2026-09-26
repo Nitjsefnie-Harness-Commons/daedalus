@@ -454,12 +454,21 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
 
     The lists come from the table rather than from the prose, so a form
     swapped across the line or left out of a docstring fails here. The
-    two claims a reader cannot check by eye — the comprehension's
-    conditions and the receiver's subscript carry — are each held twice:
-    the sentence is pinned whole, and the behaviour behind it is driven
-    and required. The prose leg catches a claim that drifts while the
-    code stands still; the behaviour leg catches the code that stops
-    backing a claim the prose still makes.
+    three claims a reader cannot check by eye — the comprehension's
+    conditions, the comprehension's refusal to open its iterable, and
+    the receiver's subscript carry — are each held twice: the sentence
+    is pinned whole, and the behaviour behind it is driven and required.
+    The prose leg catches a claim that drifts while the code stands
+    still; the behaviour leg catches the code that stops backing a claim
+    the prose still makes.
+
+    What the prose leg cannot catch, and this is the whole of what it
+    cannot catch: a false sentence added *outside* the pinned span, and
+    a polarity residual — a fluent rewrite that keeps the pinned words
+    as a substring of a longer sentence that denies them. Pinning the
+    whole sentence closes the second for this claim; the first is
+    inherent to matching prose, and it is stated here rather than left
+    to be discovered.
     """
     from _coverage_bindings import _carried_parts
 
@@ -482,6 +491,7 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
     assert _receiver_carries_a_subscript(), _BINDING_MESSAGE
     assert _the_walk_reaches_a_conditions_launcher(), (
         'a condition carries no launcher back: ' + CONDITIONS_CLAIM)
+    assert _the_walk_leaves_the_iterable_alone(), ITERABLE_CLAIM
     assert _an_unrecognised_form_is_refused(), 'the fail-closed branch'
 
 
@@ -500,6 +510,23 @@ def _the_walk_reaches_a_conditions_launcher():
     facts = _ModuleFacts(ast.parse('import subprocess'))
     return any(_is_launch_value(part, facts)
                for part in _carried_parts(statement.value))
+
+
+def _the_walk_leaves_the_iterable_alone():
+    """Whether the comprehension node still declines to open its `iter`.
+
+    The guard's second clause says the iterable is not reached through
+    the conditions node, and that is a claim about the code: this
+    comprehension's only module name is in the iterable, so a part that
+    names it can only have come through a node that opened `iter` and
+    should not have.
+    """
+    from _coverage_bindings import _carried_parts
+
+    statement = ast.parse('[x for x in [subprocess]]').body[0]
+    assert isinstance(statement, ast.Expr)
+    return not any(isinstance(part, ast.Name) and part.id == 'subprocess'
+                   for part in _carried_parts(statement.value))
 
 
 def _an_unrecognised_form_is_refused():
@@ -559,7 +586,11 @@ def _receiver_carries_a_subscript():
 _GUARD_PROSE = _coverage_guard.__doc__ or ''
 FAIL_CLOSED = 'a form in neither class is refused rather than read as clean'
 RECEIVER_CARRY = 'every subscript the descent consumes'
-CONDITIONS_CLAIM = 'reach their conditions through the statement-level node'
+CONDITIONS_CLAIM = (
+    'The four comprehension forms reach their conditions through the '
+    'statement-level node their `generators` hold, and not through their '
+    'own iterable')
+ITERABLE_CLAIM = 'the comprehension node opens its own iterable'
 
 
 if __name__ == '__main__':

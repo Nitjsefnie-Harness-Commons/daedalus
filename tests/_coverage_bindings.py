@@ -57,6 +57,10 @@ _LEAVES = _ATOMS + _TRANSFORMED
 # What a form in neither class yields, so every arm refuses it.
 _UNRECOGNISED = object()
 
+# The two positions a bound value can sit in, which read differently.
+_BIND = 'bind'
+_TARGET = 'target'
+
 
 def _is_launch_value(value, facts):
     if isinstance(value, ast.Name):
@@ -87,13 +91,20 @@ def _header_values(node):
 
 
 def _bound_values(node, facts):
-    """Every (statement line, value) the statement binds unreadably."""
+    """Every (statement line, value, position) the statement binds unreadably.
+
+    `position` says what the statement does with the value. `bind` is a
+    value it carries somewhere — a default, a decorator, a match subject
+    — and `target` is a name it binds, which reads differently: a target
+    may shadow a name that already spells a module rather than carry a
+    launcher, and the Assign arm exempts exactly that shape.
+    """
     if isinstance(node, ast.Assign):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
                 and (_names_one_of(node.value, facts.subprocess_modules)
                      or _is_launch_value(node.value, facts))):
             return []
-        return [(node.lineno, node.value)]
+        return [(node.lineno, node.value, _BIND)]
     if isinstance(node, ast.AnnAssign):
         if node.value is None:
             return []
@@ -101,26 +112,51 @@ def _bound_values(node, facts):
                 and (_names_one_of(node.value, facts.subprocess_modules)
                      or _is_launch_value(node.value, facts))):
             return []
-        return [(node.lineno, node.value)]
+        return [(node.lineno, node.value, _BIND)]
     if isinstance(node, ast.AugAssign):
-        return [(node.lineno, node.value)]
+        return [(node.lineno, node.value, _BIND)]
     if isinstance(node, (ast.For, ast.AsyncFor)):
-        return [(node.lineno, node.iter), (node.lineno, node.target)]
+        return [(node.lineno, node.iter, _BIND),
+                (node.lineno, node.target, _TARGET)]
     if isinstance(node, ast.comprehension):
-        return [(node.target.lineno, node.iter),
-                (node.target.lineno, node.target)]
+        return [(node.target.lineno, node.iter, _BIND),
+                (node.target.lineno, node.target, _TARGET)]
     if isinstance(node, (ast.With, ast.AsyncWith)):
-        return [(node.lineno, part) for item in node.items
-                if item.optional_vars is not None
-                for part in (item.context_expr, item.optional_vars)]
+        return [(node.lineno, part, position)
+                for item in node.items if item.optional_vars is not None
+                for part, position in ((item.context_expr, _BIND),
+                                       (item.optional_vars,
+                                        _TARGET))]
     if isinstance(node, ast.NamedExpr):
-        return [(node.lineno, node.value)]
+        return [(node.lineno, node.value, _BIND)]
     if isinstance(node, _HEADER_FORMS):
-        return [(value.lineno, value) for value in _header_values(node)]
+        return [(value.lineno, value, _BIND)
+                for value in _header_values(node)]
     if isinstance(node, ast.Match) and any(
             _pattern_binds(case.pattern) for case in node.cases):
-        return [(node.lineno, node.subject)]
+        return [(node.lineno, node.subject, _BIND)]
     return []
+
+
+def _target_parts(target):
+    """What a binding target carries, with the names it binds left out.
+
+    A target is an assignment target, so its own `Name` — and every name
+    inside a starred or tuple form of it — is a name being bound, and
+    one that already spells a module shadows the name rather than
+    carrying a launcher. That is the exemption the Assign arm makes for
+    the same shape, and it is why the two positions are not the same
+    test. What the target reaches *through* is carrying: a subscript's
+    index and a container's elements are judged as the walk finds them.
+    """
+    if isinstance(target, ast.Name):
+        return []
+    if isinstance(target, ast.Starred):
+        return _target_parts(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [part for item in target.elts
+                for part in _target_parts(item)]
+    return list(_carried_parts(target))
 
 
 def _pattern_binds(pattern):
@@ -152,13 +188,14 @@ def _carried_parts(value):
     carried.
 
     Two entries carry a reason the rule does not give them. A dict
-    comprehension opens its key as well as its value, and the four
-    comprehension forms reach their conditions through the statement-
-    level node their `generators` hold, never through their own iterable,
-    which `_bound_values` judges as the comprehension arm's business. And
-    FormattedValue is opened on requirement rather than on the argument
-    above, because `f"{launcher}"` binds a string and not the launcher,
-    and the issue asks for the interpolation to be judged all the same.
+    comprehension opens its key as well as its value.
+    The four comprehension forms reach their conditions through the
+    statement-level node their `generators` hold, and not through their
+    own iterable, which `_bound_values` judges as the comprehension arm's
+    own business. And FormattedValue is opened on requirement rather
+    than on the argument above, because `f"{launcher}"` binds a string
+    and not the launcher, and the issue asks for the interpolation to
+    be judged all the same.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,
@@ -278,8 +315,10 @@ def _unfollowable_launcher_bindings(tree, facts):
     """Lines binding or calling a launcher the alias walk cannot follow."""
     lines = []
     for node in memo_nodes(tree):
-        for line, value in _bound_values(node, facts):
-            if _carries_launcher(_carried_parts(value), facts):
+        for line, value, position in _bound_values(node, facts):
+            parts = (_target_parts(value) if position == _TARGET
+                     else _carried_parts(value))
+            if _carries_launcher(parts, facts):
                 lines.append(line)
         if (isinstance(node, ast.Call)
                 and not _has_cwd_control(node)

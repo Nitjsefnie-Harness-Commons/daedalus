@@ -347,14 +347,16 @@ json.loads(list(x for x in text.split(',') if x.strip()))
 
 
 def _opened_form_free_cases():
-    """A launcher-free spelling of the single-position opened classes.
+    """A launcher-free spelling of each single-position opened class.
 
     A matcher that widens has to widen its negative table, so each class
     gets a spelling that carries nothing. They differ from one another
     on purpose: two rows sharing a spelling prove only that one of them
-    does. The comprehension forms are the exception and are not here —
-    they have a position of their own, and all four of them are pinned
-    by `_comprehension_free_cases`.
+    does. The classes this table holds, one row each: Await, BoolOp,
+    FormattedValue, IfExp, JoinedStr, Lambda, NamedExpr, Slice, Yield,
+    YieldFrom. The comprehension forms are not here — they have a
+    position of their own, and all four of them are pinned by
+    `_comprehension_free_cases`.
     """
     return (
         ('conditional', """import operator
@@ -384,6 +386,10 @@ def go():
         ('walrus', """import operator
 operator.call((held := 2), 1)
 """),
+        ('yielded from', """import operator
+def go():
+    operator.call((yield from plain()), 1)
+"""),
     )
 
 
@@ -393,7 +399,16 @@ def _target_carrier_cases():
     Every row puts the launcher in the target alone: the iterable, the
     context expression and the comprehension's element carry nothing, so
     a row that passed whether or not the target arm exists would be a
-    decoy and would be caught by the mutation rows that drop it.
+    decoy, and the mutation rows that drop each arm catch that.
+
+    Two of the rows are not load-bearing for the walk and should not be
+    read as pinning it. A `Tuple` or `Starred` target that the walk
+    stopped opening would fall to the refusal branch and still be
+    refused, so the tuple and starred rows here prove the arm reads a
+    target, not that the walk opens those two forms; their counterparts
+    in `_target_free_cases` are what catch the over-refusal, and
+    `test_every_grammar_expression_form_is_classified` is what catches
+    the walk losing them.
     """
     return (
         ('with target', """import subprocess
@@ -420,6 +435,11 @@ for head, d[subprocess] in items:
 for head, *d[subprocess] in items:
     pass
 """, '*d[subprocess]'),
+        ('async with target', """import subprocess
+async def go():
+    async with open(handle) as d[subprocess]:
+        pass
+""", 'as d[subprocess]'),
     )
 
 
@@ -453,6 +473,20 @@ async def go():
         ('starred target over a tuple', """import os
 for head, *rest in items:
     pass
+"""),
+        # A target that shadows a name the walk would otherwise count as
+        # a module. The Assign arm exempts the same shape, and a loop
+        # variable that shadows one carries nothing.
+        ('for target shadowing a module', """import subprocess
+for subprocess in items:
+    pass
+"""),
+        ('with target shadowing a module', """import subprocess
+with open(handle) as subprocess:
+    pass
+"""),
+        ('comprehension target shadowing a module', """import subprocess
+go = [y for subprocess in items]
 """),
     )
 
