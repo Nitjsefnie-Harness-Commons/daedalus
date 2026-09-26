@@ -19,28 +19,6 @@ _TWO_ORIGIN_HARNESS = _PRELUDE + r"""
 // rather than from a wall clock.
 const [contentPath, , utilPath, gmPath] = process.argv.slice(1);
 
-function contentScriptPage() {
-  const attributes = new Map();
-  return {
-    crypto: { randomUUID: () => 'content-doc-token' },
-    document: {
-      documentElement: {
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) {
-          return attributes.has(name) ? attributes.get(name) : null;
-        },
-        removeAttribute(name) { attributes.delete(name); },
-      },
-      addEventListener() {},
-      removeEventListener() {},
-      head: { appendChild() {} },
-      createElement: () => ({
-        remove() {}, set onload(_listener) {}, set onerror(_listener) {},
-      }),
-    },
-  };
-}
-
 const ORIGIN_A = 'https://alpha.example.com';
 const ORIGIN_B = 'https://beta.example.com';
 const ORIGIN_C = 'https://gamma.example.com';
