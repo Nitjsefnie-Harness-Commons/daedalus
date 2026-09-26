@@ -11,9 +11,6 @@ from _workflowrun import recorded_writes  # noqa: E402
 from _ghexpr import evaluate, evaluate_if  # noqa: E402
 from _workflows import _workflow_triggers  # noqa: E402
 from _coverage_comment_publication import publication_contract  # noqa: E402
-from _coverage_comment_steps import (  # noqa: E402
-    GH_COMMENT_STUB as _GH_COMMENT_STUB,
-)
 from _coverage_comment_workflow import (  # noqa: E402
     run_artifact_check as _run_artifact_check,
     run_block as _run_block,
