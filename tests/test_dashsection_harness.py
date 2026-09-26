@@ -205,9 +205,13 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
     loop accepted. The `> 1` on the poll leg is what keeps that exact
     enough to be worth anything -- a loop that polled once and gave up, or
     a recorder that logged nothing, both satisfy `consumed == []` for the
-    wrong reason. THIS case still runs the loop to a 700 ms budget on
-    purpose, because "gave up" is the behaviour under test; the retry case
-    below is the one whose budget had to grow."""
+    wrong reason.
+
+    The budget is 5 s, not the 700 ms it was, and the subject of the case
+    did not change: "gave up" names what is asserted, not what the budget
+    is worth. At 5 s the loop swallows twenty wrong envelopes before it
+    does, and the pin still bites under the shipped `api.js:150 continue`
+    turned into a `break`."""
     report = run_scenario(scenarios.ENVELOPE, sections=('api.js',))
     _command, polls, consumed = _legs(report)
     assert len(polls) > 1, (
@@ -215,7 +219,8 @@ def test_an_envelope_naming_another_command_is_not_a_match(_tmp):
         report)
     assert report['outcome'] is not None, (
         'the mismatched envelope was delivered as a match', report)
-    assert report['outcome'].startswith('Timeout (700ms) waiting for '), report
+    assert report['outcome'].startswith(
+        'Timeout (5000ms) waiting for '), report
     assert consumed == [], report
     assert report['unplanned'] == [], report
 
@@ -227,17 +232,20 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
     answer on the first poll and time out, which is the shape this pins.
 
     Three polls is the PLAN's number, not the host's, and the scenario
-    runs a 5 s budget so the loop's own clock check -- host time plus the
-    750 ms the pump spent -- has seconds of margin rather than 200 ms. The
-    sleeps are virtual, so the margin costs no wall time.
+    runs a 5 s budget so the loop's own clock check -- host time plus
+    what the pump spent -- has seconds of margin rather than tens of
+    milliseconds. The deciding check reads ~500 virtual against 5000, so
+    the host margin is ~4500 ms; the sleeps are virtual, so spending it
+    costs no wall time.
 
     The wrong envelopes are read back off the responses and pinned
     member by member, because "the loop retried past somebody else's
-    envelope" is a property of what the fake handed over. An envelope
-    missing its `deliveryId`, or carrying its own `result`, would be
-    rejected at a different check in `api.js` and leave the poll count
-    identical, so the count alone cannot say the id mismatch was what
-    the loop saw."""
+    envelope" is a property of what the fake handed over. All three of
+    the shapes below are rejected by the same `if` in `api.js:150` --
+    the id and the delivery id are read in one condition -- and a carried
+    `result` is not read at all until after a match, so none of them
+    changes the poll count. The count says how many times the loop
+    looked; only the envelope says what it found."""
     report = run_scenario(scenarios.LATE_ENVELOPE, sections=('api.js',))
     _command, polls, consumed = _legs(report)
     # A result that is `undefined` vanishes from the report rather than
@@ -254,11 +262,39 @@ def test_the_poll_retries_until_the_result_is_the_commands_own(_tmp):
         {'id': 'a command this is not', 'deliveryId': 'd1',
          'resultGeneration': 1},
     ], report
+    # The third envelope's id is the command the transport received, read
+    # off the recorded request rather than off the envelope itself: a
+    # member that expected itself is a member that cannot fail.
     assert report['seen'][2] == {
-        'id': report['seen'][2]['id'], 'deliveryId': 'd1',
+        'id': _legs(report)[0][0]['body']['id'], 'deliveryId': 'd1',
         'resultGeneration': 1, 'result': 'the right result',
         'error': None,
     }, report
+    assert report['unplanned'] == [], report
+
+
+def test_the_poll_retries_past_an_envelope_with_no_generation(_tmp):
+    """The other skip in the shipped match sequence. An envelope that
+    names the command and its delivery correctly but carries no
+    generation is one the loop has to look past too, and `api.js:152` is
+    the only branch of `api.js:148-157` nothing else here reaches.
+
+    Two leading polls are unstamped and the third is stamped, so the case
+    pins the same shape as the wrong-id case above with a different member
+    of the same `if` sequence.
+
+    Deleting the shipped branch does not merely return the wrong result:
+    the loop then asks to consume against a generation that is falsy, the
+    consume leg answers `consumed: false`, and nothing ever settles, so
+    the child runs to the step's bound and the failure names the step
+    rather than an assertion. The control still reds on this case alone,
+    but the red is a bound, not a verdict."""
+    report = run_scenario(scenarios.UNSTAMPED, sections=('api.js',))
+    _command, polls, consumed = _legs(report)
+    assert 'result' in report, ('the command returned no result', report)
+    assert report['result'] == 'the right result', report
+    assert len(polls) == 3, report
+    assert len(consumed) == 1, report
     assert report['unplanned'] == [], report
 
 

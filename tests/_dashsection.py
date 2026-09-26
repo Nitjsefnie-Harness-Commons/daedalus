@@ -331,13 +331,16 @@ function openPump() {
 // have, and a control pinning the copy would be pinning the fake.
 //
 // The collection here is an Array where `app.js` uses a `Set`, and that
-// is a gap rather than a fourth claim. What it hides is duplicate
-// registration: the same function registered twice fires twice here and
-// once there, and `unsubscribe` removes every copy rather than one. No
-// dashboard code can reach it -- `bus.on` has three call sites, all of
-// them fresh arrow functions registered once at mount -- so changing the
-// collection would be a restructuring for a difference nothing can
-// observe.
+// is a gap rather than a fourth claim. `unsubscribe` behaves the same
+// either way -- it drops one registration, the way `Set.delete` does.
+// What the Array differs on is a re-registration of a function already
+// listening: a `Set` keeps it in place, and a `push` moves it to the end,
+// so the two dispatch it at different points. The other difference is
+// that the same function registered twice fires twice here and once
+// there. No dashboard code reaches either: `bus.on` has three call
+// sites, all of them fresh arrow functions registered once at mount. So
+// this is recorded rather than restructured, because the difference is
+// one nothing can observe.
 const bus = {
   on(fn) {
     LISTENERS.push(fn);
