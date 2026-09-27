@@ -20,9 +20,11 @@ the callee: does what this position carries name a launcher? Whether the
 callee would invoke it is not answerable from syntax, so the rule does
 not pretend to know, and a launcher handed to a callee that only
 compares it or looks it up is refused along with one handed to a callee
-that runs it. That costs nothing today: of the call sites in this tree, none
-carries a launcher in an argument or a container receiver, and exactly one
-carries a bare module name.
+that runs it. That costs nothing today: of the call sites in this tree,
+none carries a launcher in an argument or a container receiver, and
+exactly one carries a bare module name — the module-versus-launcher split
+below, the one distinction here that is about the value rather than a
+name.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`), an owner or chdir
@@ -32,8 +34,7 @@ bare rather than a launcher read off it (`patch.object(subprocess, 'run',
 
 A launcher reached through an opened form is inside however it is reached, and
 the argument, decorator and assignment arms all judge what comes back. So
-`f(subprocess).run` and `[subprocess][0].run` are refused, and what keeps that
-from refusing every attribute is the condition below.
+`f(subprocess).run` and `[subprocess][0].run` are refused.
 
 Every form the running grammar has is in one of three classes.
 
@@ -44,9 +45,8 @@ Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
 It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
 One form in that second list is opened on a condition, stated beside the walk
-it qualifies in `tests/_coverage_bindings.py`, which names every form on both
-sides of that line and whose prose a control holds to its own table: an
-attribute that names a launch method is a launcher read, not a constant read.
+it qualifies in `tests/_coverage_bindings.py`: an attribute naming a launch
+method is a launcher read, not a constant read.
 
 A form in neither class is refused rather than read as clean, so a Python that
 adds one fails closed instead.
@@ -56,8 +56,9 @@ node their `generators` hold, and not through their own iterable, which
 `_bound_values` judges as the comprehension arm's own business.
 
 The descent that walks a callee hands the walk every subscript the descent
-consumes, index and bounds included. It hands over every attribute that names
-a launch method, bar the call's own outermost callee.
+consumes, index and bounds included. It hands over an attribute naming a
+launch method only while everything the descent has consumed above it names
+one too, and never the call's own outermost callee.
 
 A target binds names rather than carrying them. A subscript's index is not
 exempt, so `d[subprocess]` binds a launcher and `d[key]` does not.
