@@ -19,6 +19,7 @@ not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls live
 in tests/test_watcher_budget.py, which judges the idle bounds, and in
 tests/test_watcher_loop_budget.py, which judges the figure over a loop.
 """
+import itertools
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,10 @@ SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 # poll that starts growing later can be seen in: the second mutating a run
 # is judged on is its third.
 POLLS = 3
+
+# One fresh log path per measurement, so two measurements on one fake
+# never hand the same next subject the same log.
+_LOGS = itertools.count()
 
 
 class Child(ChildProcess):
@@ -122,7 +127,15 @@ def polls_in(calls):
 
 
 def measure(script, args, fake, interval, polls=POLLS):
-    """`(calls per poll, those polls' calls)`, read from the running loop."""
+    """`(calls per poll, those polls' calls)`, read from the running loop.
+
+    The figure is read before the log is re-pointed, and re-pointing is
+    what the next subject is owed: the tree cancelled above still holds
+    this log, so anything in it that outlived the cancellation keeps
+    appending for as long as it runs, and the caller reads the next
+    subject's calls from the same place. A path that did not exist until
+    this moment is one no process of that tree has been given.
+    """
     child = Child(script, args + ['--interval', str(interval)], fake)
     try:
         # One marker more than the window needs, because a poll is only
@@ -133,5 +146,10 @@ def measure(script, args, fake, interval, polls=POLLS):
     windows = polls_in(fake.calls())
     in_flight = windows[-1][0]
     per_poll = max(width for _, width in windows[:-1])
-    return per_poll, [call for call in fake.calls()
-                      if call.get('poll') != in_flight]
+    seen = [call for call in fake.calls() if call.get('poll') != in_flight]
+    # The one attribute assigned from outside the class in this tree:
+    # `_fake_gh.py` is another branch's, and handing out a log is its
+    # whole contract. `env()` and `calls()` both read this at call time,
+    # so the next subject writes and reads where it now points.
+    fake.log = fake.dir / f'next-{next(_LOGS)}'
+    return per_poll, seen
