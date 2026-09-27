@@ -24,21 +24,23 @@ SYNC = 'POST /sync-tabs'
 # The outer alarm this module owns. A control that provokes an expiry sets
 # its budget inside `tests/_noderun.py` — the code a reversion removes — so
 # without a bound of its own it hangs instead of failing. The census
-# requires the figure to be composed from a named chain rather than typed,
-# and refuses a constant carried in from a sibling, so the chain is
-# repeated here rather than imported; the measurement rides with it,
-# because a copy of a chain that is only a chain is not a copy of a bound.
+# requires the figure composed from a named chain and refuses a constant
+# carried in from a sibling, so the chain is repeated here rather than
+# imported.
 #
-#   OUTER_ALARM_SAMPLES  the slowest correct runs of the armed control
-#   OUTER_ALARM_SLOWEST  max of those samples
-#   OUTER_ALARM_S        the alarm, with no multiple: it is already five
-#                        times the healthy budget below
+#   OUTER_ALARM_SAMPLES    measured in tests/test_noderun_deadline.py,
+#                          which is the file these samples come from and
+#                          the only one they are a measurement OF. This
+#                          file's armed control finishes in about 12s
+#                          against an 11s deadline, so a 52/55/57s sample
+#                          cannot be one of its runs.
+#   OUTER_ALARM_SLOWEST_S  max of those samples
+#   OUTER_ALARM_S          the alarm, with no multiple — 57s is already
+#                          about five times this file's 11s healthy budget
 #
-# The healthy budget is `round(CHILD_DEADLINE_S * 0.1)` = 11s, so the
-# slowest correct run of this arm has to clear it with room to spare and
-# the alarm has to fire well inside any external bound. 57s is about five
-# times the healthy budget: turning a wedge into a named failure costs a
-# minute, where the alternative costs whatever the runner's ceiling costs.
+# The margin over THIS file's healthy path is what the number has to keep,
+# and the samples are borrowed rather than re-derived, so the two facts are
+# stated separately on purpose. Re-measuring them is a different task.
 OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
 OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
 OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
