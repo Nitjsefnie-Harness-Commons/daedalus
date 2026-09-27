@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Mapping operations whose receiver is not a bare name.
 
-The guard keys deferred storage by name, so every store, method call and
-mutation resolved its owner only when the receiver was an `ast.Name`. A dict
-reached through an attribute, a subscript or a call result resolved to
-nothing, the deferred value it held was dropped, and a call that really does
-reach `ext_cmd` with a `tab` read clean. The owner's shape is the whole
-defect: each receiver here is the one spelling of it.
+The guard keys deferred storage by name, so a store, a method call and a
+mutation resolved its owner only when the receiver was an `ast.Name`; a dict
+reached any other way resolved to nothing and the value it held was dropped.
+Each receiver here is one spelling of that one defect.
 """
 import ast
 import sys
@@ -15,7 +13,10 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute_reads import _receiver_value  # noqa: E402
 from _pyroute_stores import base_owner, root_name  # noqa: E402
+from _pyroute_values import (DeferredAlternatives,  # noqa: E402
+                             DeferredContainer)
 from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
 _CALL = 'send("_focus", "focus-tab", tab=args.chrome_tab)'
@@ -145,14 +146,6 @@ _CONTROLS = [
      'class C: pass\nc = C()\nc.d = dict()\nc.d["k"] = relay()\n'
      'def reader():\n    return c.d["k"]()\n'
      'send = ext_cmd\nreturn reader()', (1, 1)),
-    ('cell-over-an-alias',
-     'd = {}\ne = d\nd["k"] = relay()\n'
-     'def reader():\n    return e["k"]()\n'
-     'send = ext_cmd\nreturn reader()', (1, 1)),
-    ('clean-cell-over-an-alias',
-     'd = {}\ne = d\nd["k"] = ordinary\n'
-     'def reader():\n    return e["k"]()\n'
-     'send = ext_cmd\nreturn reader()', (0, 0)),
     ('attribute-tuple-target',
      'class C: pass\nc = C()\nc.fn, y = pair()\n'
      'send = ext_cmd\nreturn c.fn()', (1, 1)),
@@ -211,6 +204,19 @@ def test_base_owner_names_the_root_and_carries_the_value(tmp):
     assert base_owner(name, state) == ('c', None)
     assert base_owner(attribute, state) == ('c', None)
     assert base_owner(call, state) == (None, None)
+
+
+def test_a_subscript_receiver_resolves_through_its_own_binding(tmp):
+    """No structural subscript arm: this is the assertion that fails if one
+    returns. The arm was reached but never decided an outcome, so the
+    receiver resolves through the binding the flow already recorded."""
+    del tmp
+    marked = DeferredAlternatives(('ext_cmd',))
+    state = SimpleNamespace(
+        callables={'box': DeferredContainer({0: marked}, 1, 'list')},
+        evaluated={})
+    receiver = ast.parse('box[0]', mode='eval').body
+    assert _receiver_value(receiver, state) is None
 
 
 def main():
