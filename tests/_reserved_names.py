@@ -56,8 +56,9 @@ def _parsed_modules(sources):
     """(imports, binds, definitions) per path, the entry point excluded.
 
     The entry point is excluded the way `_helper_reimplementation`
-    excludes it, so the hundred and seventy suites that each call a
-    `main` are not copies of the one helper module that also has one.
+    excludes it, so the suites that each call a `main` under a
+    `__main__` guard are not copies of the one helper module that also
+    has one.
     """
     parsed = {}
     for path in sorted(sources):
