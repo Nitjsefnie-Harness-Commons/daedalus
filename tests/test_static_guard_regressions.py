@@ -469,20 +469,18 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child runs at least 122 mutation rows, one individually-bounded
+    That child runs at least 132 mutation rows, one individually-bounded
     grandchild each, so an outer bound on it decides a verdict its own
     work does not own: 134 x 30s = 4020s is the work a runaway backstop
     would have to cover, and 120s truncates it about thirty-three times
-    over. That is a FLOOR, and the floor is the figure the removal
-    rests on, since the worst case is the one that has to be safe on
-    every interpreter. 3.12 and later run more — 137 rows where they
-    run 132 on 3.11 — and the larger count grows as main adds coverage
-    rows, so it is deliberately not pinned here. The rows that separate
-    the two versions are never in the table below 3.12 at all:
-    tests/_coverage_mutation_specs.py contributes them from two chunks
-    each closed by `if hasattr(ast, 'TypeVar') else ()`, which is 3.12+
-    because PEP 695 type-parameter nodes arrived in it, so on 3.11 both
-    chunks evaluate to `()` and those rows are not added.
+    over. The worst case is the one that has to be safe on every
+    interpreter, and the larger count 3.12 and later run grows as main
+    adds coverage rows, so it is deliberately not pinned here. The rows
+    that separate the two versions come from two chunks of
+    tests/_coverage_mutation_specs.py's spec table, each closed by
+    `if hasattr(ast, 'TypeVar') else ()` — 3.12+ because PEP 695
+    type-parameter nodes arrived in it — so on 3.11 both are `()` and
+    their rows are never added.
 
     A wall bound is legitimate where the child always spends it on real
     work — the freeze controls busy-wait on purpose, so a wedged child
@@ -524,22 +522,11 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     the entry name it keys on is no function any tracked suite defines,
     which a rename that stranded the program strings would leave green.
 
-    Each launch is judged on the binding in force AT ITS OWN LINE — the
-    last one at or before it by SOURCE position, not the last one
-    appended, so a name bound inside a compound statement does not
-    shadow a later flat binding. A scope that reuses a name reds nothing
-    in either direction. The cost is a program the scope defines BELOW
-    its launch, which is not read into a call it did not run — except a
+    The cost of that rule is a program the scope defines BELOW its
+    launch, which is not read into a call it did not run — except a
     MULTI-LINE call, where `ast.Call.lineno` is the line the call opens
     on, so a binding written between the parentheses is below that line
     and is still what the call runs.
-
-    Binding forms the scan READS: `=`, `+=`, an annotated `=`, a
-    walrus, a `for`/`in` target, a match capture, `append` and
-    `extend`. A `for` target binds the iterated expression and a match
-    capture binds the whole match subject, both over-approximations of
-    the value they will really hold, and both fail toward finding a
-    launch rather than past one.
 
     Binding forms it does NOT read: `with ... as`, `except ... as`,
     `except* ... as`, an `import` binding, a comprehension target, a
@@ -579,18 +566,12 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     assert not timed, timed
 
 
-# The sweep's row count is version-dependent: tests/_coverage_mutation_
-# specs.py builds two chunks of the spec table each closed by
-# `if hasattr(ast, 'TypeVar') else ()`, and `ast.TypeVar` is 3.12+ (PEP
-# 695). Below 3.12 both chunks are `()` and their rows are never added.
-#
-# Only the FLOOR is pinned — the smallest count any version runs, and
-# the one the removal rests on. It is pinned exactly on 3.11, which is
-# the version it describes, and as an inequality on 3.12+, where the
-# count GROWS: main added coverage rows twice in one session, moving
-# 122 to 132 here. A hard-pinned ceiling is red again on the next such
-# batch. `derived >= floor` is the claim the disclosure makes, so the
-# inequality is not the weaker check.
+# Only the FLOOR is pinned — the smallest count any version runs, and the
+# one the removal rests on. A hard-pinned ceiling is red again on the next
+# batch of coverage rows, and `derived >= floor` is the claim the disclosure
+# makes, so the inequality is not the weaker check. Which version is checked
+# how is stated once, in the sweep-bound test's docstring, which is the text
+# the disclosure assertion below is keyed on.
 _SWEEP_FLOOR_3_11 = 134
 _CHILD_BOUND_S = 30
 _TRUNCATED_BY_S = 120
