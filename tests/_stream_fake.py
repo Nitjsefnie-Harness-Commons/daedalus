@@ -17,10 +17,8 @@ recorded traffic against the plan it declared.
 """
 import json
 import shutil
-import subprocess
 
-from _noderun import run_node_program
-from _util import child_coverage
+from _noderun import run_node_argv, run_node_program
 
 STRICT_FETCH = r"""
 // A missing contract name must be loud, not swallowed by the worker. This
@@ -309,18 +307,19 @@ def run_inline_gate(node, program, arguments, *, cwd, plan):
     splices it in as an object literal, this one appends it as JSON text) and
     the harness parses it only when it arrived as text.
 
-    No bound of its own, and that is a choice worth naming rather than
-    paper over: this is the sibling of the file gate above and it does NOT
-    route through `run_node_program`, so the hang detector in
-    `tests/_noderun.py` does not cover it. A wedged child here is a hung
-    job under the suite's ceiling and nothing more. The child runs with
-    `child_coverage('scrub')` evaluated at launch, so a value set in
-    `os.environ` per call reaches the child.
+    Bounded like its sibling: this routes through `run_node_argv`, so the
+    hang detector in `tests/_noderun.py` covers it and a wedged child is
+    the classified `ChildDeadlineExceeded` — carrying the child's own
+    stdout, stderr and the cleanup's outcome — rather than a hung job under
+    the suite's ceiling and nothing more. Routing it also makes its output
+    lossy rather than fatal on bytes that are not valid UTF-8, which is
+    what the shared read does for every other child on this path.
+
+    The child still runs with `child_coverage('scrub')` evaluated at
+    launch, so a value set in `os.environ` per call reaches the child.
     """
-    result = subprocess.run(
-        [node, '-e', program, *arguments, json.dumps(plan)], cwd=cwd,
-        env=child_coverage('scrub'), capture_output=True, text=True,
-        encoding='utf-8')
+    result = run_node_argv(
+        node, ['-e', program, *arguments, json.dumps(plan)], cwd)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

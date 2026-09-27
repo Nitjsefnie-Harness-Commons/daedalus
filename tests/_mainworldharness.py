@@ -17,11 +17,11 @@ a verdict, and not a broken harness.
 """
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
@@ -496,18 +496,19 @@ run().then((result) => {
 def _run_bound_child(mode):
     """Run one MAIN-world bound control and parse its one JSON answer.
 
-    No wall bound: the mode bounds itself by attempt count, so a genuine
-    deadlock surfaces as a hung job under the runner's own suite ceiling.
+    The mode still bounds itself by attempt count; the wall bound is the
+    shared hang detector, so a genuine deadlock is the classified
+    `ChildDeadlineExceeded` carrying the child's own output rather than a
+    hung job under the runner's suite ceiling.
     """
     node = shutil.which('node')
     assert node, 'node is required to execute the MAIN-world bound harness'
-    proc = subprocess.Popen(
-        [node, '-e', _MAINWORLD_HARNESS,
-         str(EXTENSION_ROOT / 'background.js'), mode],
-        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    out, err = proc.communicate()
-    assert proc.returncode == 0, (proc.returncode, out, err)
-    return json.loads(out)
+    result = run_node_argv(
+        node, ['-e', _MAINWORLD_HARNESS,
+               str(EXTENSION_ROOT / 'background.js'), mode], ROOT)
+    assert result.returncode == 0, (
+        result.returncode, result.stdout, result.stderr)
+    return json.loads(result.stdout)
 
 
 def run_main_world_eval_timeout():

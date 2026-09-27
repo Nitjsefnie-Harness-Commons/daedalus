@@ -202,7 +202,7 @@ def run_node_program(node, program, arguments, cwd, payload=None):
             (directory_scratch,))
 
 
-def run_node_argv(node, arguments, cwd, stdin_data=None):
+def run_node_argv(node, arguments, cwd, stdin_data=None, environment=None):
     """Run a Node child from an EXACT argv, with no program file of ours.
 
     `arguments` is the argv tail as a list of strings, so a caller can
@@ -215,12 +215,21 @@ def run_node_argv(node, arguments, cwd, stdin_data=None):
     `stdin_data=None` means stdin is DEVNULL exactly as it is for the
     program launch, so a child that reads stdin to end of file reaches it
     at once rather than waiting on a pipe nobody writes.
+
+    `environment` is the environment to scrub, for the caller whose child
+    needs a value this process does not carry: `test_js_coverage.py` points
+    `NODE_V8_COVERAGE` at a dumps directory of its own per test, and a
+    launcher that read `os.environ` would send the child to the wrong one.
+    It is the second argument `child_coverage` already took, passed through
+    rather than re-implemented, so `None` keeps the launch it always was.
     """
     return _launch_child(
-        [node, *arguments], cwd, [], stdin_data=stdin_data)
+        [node, *arguments], cwd, [], stdin_data=stdin_data,
+        environment=environment)
 
 
-def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None):
+def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None,
+                  environment=None):
     """Launch `argv`, bound by the detector, and read back what it produced.
 
     The one launch path, for both entry points. Two copies would mean a fix
@@ -249,11 +258,12 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None):
     see `_Scratch` for the Windows shape that makes that matter.
 
     The child runs with `child_coverage('scrub')` evaluated **here, at
-    launch**, not snapshotted at import. A module-level snapshot cannot be
-    correct for a value chosen per call: `test_js_coverage.py` sets
-    `os.environ['NODE_V8_COVERAGE']` per test to point at its own dumps
-    directory, and an import-time snapshot would send the child to the wrong
-    directory.
+    launch**, not snapshotted at import, and over the caller's `environment`
+    when it supplied one. A module-level snapshot cannot be correct for a
+    value chosen per call: `test_js_coverage.py` builds an environment per
+    test pointing `NODE_V8_COVERAGE` at its own dumps directory, and an
+    import-time snapshot — or a launch that read `os.environ` where the
+    caller passed a dict — would send the child to the wrong directory.
 
     `before_report` is the caller's own scratch trees, and `unlinked` the
     list their removal failures are appended to: both are closed after the
@@ -278,7 +288,7 @@ def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None):
             stderr = opened.enter_context(stderr_path.open('wb'))
             process = subprocess.Popen(
                 argv, cwd=cwd,
-                env=_util.child_coverage('scrub'),
+                env=_util.child_coverage('scrub', environment),
                 stdin=(subprocess.DEVNULL if stdin_path is None
                        else opened.enter_context(stdin_path.open('rb'))),
                 stdout=stdout, stderr=stderr,
