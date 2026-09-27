@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fault controls for test-side command queue readers."""
+import ast
 import asyncio
 import contextlib
 import json
 import math
-import re
 import subprocess
 import sys
 import threading
@@ -38,15 +38,17 @@ import _mcp_load as test_mcp_server  # noqa: E402
 def test_a_transient_read_refusal_returns_the_queued_command(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'open', 1):
-        command = _cmdqueue.wait_for_command(queue, timeout=1)
+        with _bounded_polls(_poll_budget(1)):
+            command = _cmdqueue.wait_for_command(queue, timeout=1)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
 def test_a_present_queue_file_outlives_its_finished_producer(tmp):
     queue, queued = _queued_file(tmp)
     with _refuse_path_operation(queued, 'open', 1):
-        command = _cmdqueue.wait_for_command(
-            queue, timeout=1, producer_alive=lambda: False)
+        with _bounded_polls(_poll_budget(1)):
+            command = _cmdqueue.wait_for_command(
+                queue, timeout=1, producer_alive=lambda: False)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
@@ -92,8 +94,9 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
     queue = Path(tmp) / 'empty-queue'
     queue.mkdir()
     with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _events, origin):
-        command = _cmdqueue.wait_for_command(
-            queue, timeout=timeout, producer_alive=lambda: False)
+        with _bounded_polls(_poll_budget(timeout)):
+            command = _cmdqueue.wait_for_command(
+                queue, timeout=timeout, producer_alive=lambda: False)
     end = clock.monotonic()
     assert command is None, 'genuinely empty queue returned a command'
     assert end < origin + timeout, (
@@ -105,9 +108,10 @@ def test_an_ignored_only_queue_lets_a_dead_producer_end_the_wait(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, ignored = _queued_file(tmp)
     with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _events, origin):
-        command = _cmdqueue.wait_for_command(
-            queue, timeout=timeout, producer_alive=lambda: False,
-            ignored_names={ignored.name})
+        with _bounded_polls(_poll_budget(timeout)):
+            command = _cmdqueue.wait_for_command(
+                queue, timeout=timeout, producer_alive=lambda: False,
+                ignored_names={ignored.name})
     end = clock.monotonic()
     assert command is None, 'ignored-only queue returned a command'
     assert end < origin + timeout, (
@@ -120,9 +124,10 @@ def test_eligible_file_wins_over_ignored_stale_with_dead_producer(tmp):
     current = queue / '1700000000000_000001.json'
     current.write_text(json.dumps({'id': 'current', 'type': 'reload'}),
                        encoding='utf-8')
-    command = _cmdqueue.wait_for_command(
-        queue, timeout=1, producer_alive=lambda: False,
-        ignored_names={stale.name})
+    with _bounded_polls(_poll_budget(1)):
+        command = _cmdqueue.wait_for_command(
+            queue, timeout=1, producer_alive=lambda: False,
+            ignored_names={stale.name})
     assert command == {'id': 'current', 'type': 'reload'}, (
         'eligible command was hidden by stale-ignore/dead-producer state',
         command)
@@ -131,7 +136,8 @@ def test_eligible_file_wins_over_ignored_stale_with_dead_producer(tmp):
 def test_a_queue_file_that_disappears_during_read_is_retried(tmp):
     queue, queued = _queued_file(tmp)
     with _disappear_on_first_open(queued):
-        command = _cmdqueue.wait_for_command(queue, timeout=1)
+        with _bounded_polls(_poll_budget(1)):
+            command = _cmdqueue.wait_for_command(queue, timeout=1)
     assert command == {'id': 'queued', 'type': 'reload'}, command
 
 
@@ -140,8 +146,9 @@ def test_wait_ignores_a_surviving_leftover_by_filename(tmp):
     current = queue / '1700000000000_000001.json'
     current.write_text(json.dumps({'id': 'current', 'type': 'reload'}),
                        encoding='utf-8')
-    command = _cmdqueue.wait_for_command(
-        queue, timeout=1, ignored_names={stale.name})
+    with _bounded_polls(_poll_budget(1)):
+        command = _cmdqueue.wait_for_command(
+            queue, timeout=1, ignored_names={stale.name})
     assert command == {'id': 'current', 'type': 'reload'}, command
 
 
@@ -167,8 +174,9 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     queue, queued = _queued_file(tmp)
     with _virtual_cmdqueue_clock(wall_budget=None) as (clock, events, _origin):
         with _refuse_path_operation(queued, 'open', 1000, clock=clock):
-            command = _cmdqueue.wait_for_command(
-                queue, timeout=timeout)
+            with _bounded_polls(_poll_budget(timeout)):
+                command = _cmdqueue.wait_for_command(
+                    queue, timeout=timeout)
     kinds = [kind for kind, _ in events]
     assert kinds and kinds[0] == 'read', ('no leading read', events)
     assert all(a != 'read' or b != 'read'
@@ -220,8 +228,9 @@ def test_wait_ends_early_when_the_producer_is_gone(tmp):
         return False
 
     with _virtual_cmdqueue_clock(0) as (_clock, events, _origin):
-        command = _cmdqueue.wait_for_command(
-            queue, timeout=10, producer_alive=producer_alive)
+        with _bounded_polls(_poll_budget(10)):
+            command = _cmdqueue.wait_for_command(
+                queue, timeout=10, producer_alive=producer_alive)
     assert command is None, command
     assert producer_calls, producer_calls
     assert events == [], events
@@ -370,7 +379,8 @@ def test_a_transient_read_refusal_returns_every_queued_command(tmp):
     for refused_file in (first, second):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
-            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+            with _bounded_polls(_poll_budget(1)):
+                commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
         # Refusals are counted before any read succeeds, so a count past
         # them proves the refused path was read again after its refusals;
         # the freshness controls are the whole-set witness.
@@ -422,84 +432,109 @@ def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
                       encoding='utf-8')
     for refused_file in (first, second):
         with _refuse_path_operation(refused_file, 'read_text', 1000):
-            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
+            with _bounded_polls(_poll_budget(0.1)):
+                commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
         assert commands is None, commands
 
 
-def _polls_named_in(message):
-    """The numbers the message carries, so '100' never answers for '10'."""
-    return re.findall(r'\d+', message)
+_READER_CALLS = ('wait_for_command', 'wait_for_commands',
+                 'queued_command', 'queued_commands')
 
 
-def _polls_under_a_ceiling(tmp, max_polls, globs):
-    """Glob `globs` times under a `max_polls` ceiling; report the refusal."""
-    queue = Path(tmp) / f'ceiling-{max_polls}-{globs}'
-    queue.mkdir()
-    failure = None
-    spent = 0
-    with _bounded_polls(max_polls):
-        for _ in range(globs):
-            spent += 1
-            try:
-                list(queue.glob('*.json'))
-            except AssertionError as caught:
-                failure = caught
-                break
-    return failure, spent
+def _unbounded_reader_calls(source):
+    """Reader call sites in `source` that no `_bounded_polls` block covers."""
+    tree = ast.parse(source)
+    funcs = [node for node in ast.walk(tree)
+             if isinstance(node, ast.FunctionDef)]
+    loose = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        name = getattr(callee, 'attr', None) or getattr(callee, 'id', None)
+        if name not in _READER_CALLS:
+            continue
+        owner = min(
+            (f for f in funcs
+             if f.lineno <= node.lineno <= (f.end_lineno or 0)),
+            key=lambda f: (f.end_lineno or f.lineno) - f.lineno)
+        covered = any(
+            isinstance(item, ast.With) and item.lineno <= node.lineno
+            <= (item.end_lineno or 0)
+            and any((ast.get_source_segment(source, entry.context_expr) or '')
+                    .startswith('_bounded_polls') for entry in item.items)
+            for item in ast.walk(
+                ast.Module(body=owner.body, type_ignores=[])))
+        if not covered:
+            loose.append((node.lineno, owner.name))
+    return loose
 
 
-def test_the_poll_bound_refuses_a_reader_that_polls_past_it(tmp):
-    """The bound counts the polls, so a reader that never sleeps is charged.
+def test_every_reader_call_site_is_inside_a_poll_bound(tmp):
+    """Each read is bounded, and the bound is the only thing charging it.
 
-    It needs no clock, and every other bound a reader is given is
-    consulted from inside one, so a reader that stops consulting the
-    clock is charged by none of them. The `under` case is the direction
-    that matters most: a ceiling that also refuses a bounded reader is a
-    red the correct reader causes.
+    Without this the property holds by construction: drop a wrapper and
+    nothing reds until a runaway probe, which hangs — the one failure
+    mode the bound exists to remove.
     """
-    for max_polls, over, under in ((0, 1, 0), (10, 11, 10)):
-        failure, spent = _polls_under_a_ceiling(tmp, max_polls, over)
-        assert isinstance(failure, AssertionError), (max_polls, over, failure)
-        assert spent == max_polls + 1, (max_polls, over, spent)
-        assert str(max_polls) in _polls_named_in(str(failure)), failure
-        assert 'poll' in str(failure), failure
-        assert _polls_under_a_ceiling(tmp, max_polls, under)[0] is None, (
-            max_polls, under)
+    del tmp
+    tests_dir = Path(__file__).resolve().parent
+    for suite in ('test_cmdqueue.py', 'test_queued_command.py'):
+        loose = _unbounded_reader_calls((tests_dir / suite).read_text())
+        assert not loose, (
+            f'{suite}: reader call sites no _bounded_polls block covers, so a '
+            f'runaway read is uncharged and hangs: {loose}')
 
 
-def test_the_poll_bound_restores_every_probe_it_patched(tmp):
-    """A refusal propagating out of a control leaves no patch installed."""
-    real_probes = {name: getattr(Path, name) for name in _QUEUE_PROBES}
-    failure = None
-    try:
-        with _bounded_polls(0):
-            Path(tmp).is_dir()
-    except AssertionError as caught:
-        failure = caught
-    assert isinstance(failure, AssertionError), failure
-    for name, real in real_probes.items():
-        assert getattr(Path, name) is real, f'Path.{name} left patched'
+def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
+    """A reader's bound holds the read and nothing of the control's own.
 
-
-def test_the_poll_bound_reaches_a_queue_that_does_not_exist(tmp):
-    """A reader spinning on a missing queue spends the count and is bounded.
-
-    The reader probes `is_dir` and only globs when the queue is there, so
-    a ceiling counting globs alone would never see this one spend.
+    A control's `is_dir` or `write_text` inside the block spends the
+    reader's budget, so a control that probes a queue it just built
+    would spend the ceiling on its own bookkeeping. Only the read call
+    itself may sit inside; the guard's own controls probe deliberately
+    and are not reader-driving blocks.
     """
-    queue = Path(tmp) / 'never-created'
-    spent = 0
-    failure = None
-    try:
-        with _bounded_polls(2):
-            for _ in range(3):
-                spent += 1
-                assert not queue.is_dir(), 'the queue was created'
-    except AssertionError as caught:
-        failure = caught
-    assert spent == 3, spent
-    assert isinstance(failure, AssertionError), failure
-    assert '2' in _polls_named_in(str(failure)), failure
+    del tmp
+    tests_dir = Path(__file__).resolve().parent
+    charged_to_the_control = []
+    own_work = _QUEUE_PROBES + ('exists', 'mkdir', 'rmdir', 'write_text',
+                                'unlink', 'read_text')
+    for suite in ('test_cmdqueue.py', 'test_queued_command.py'):
+        source = (tests_dir / suite).read_text()
+        tree = ast.parse(source)
+        for block in ast.walk(tree):
+            if not isinstance(block, ast.With):
+                continue
+            if not any((ast.get_source_segment(source, entry.context_expr)
+                        or '').startswith('_bounded_polls')
+                       for entry in block.items):
+                continue
+            reads = [node for node in ast.walk(block)
+                     if isinstance(node, ast.Call)
+                     and (getattr(node.func, 'attr', None)
+                          or getattr(node.func, 'id', None)) in _READER_CALLS]
+            if not reads:
+                continue
+            spans = [(node.lineno, node.end_lineno or node.lineno)
+                     for node in reads]
+            for node in ast.walk(block):
+                if not isinstance(node, ast.Call):
+                    continue
+                callee = node.func
+                if not isinstance(callee, ast.Attribute):
+                    continue
+                if callee.attr not in own_work:
+                    continue
+                if any(first <= node.lineno <= last
+                       for first, last in spans):
+                    continue
+                charged_to_the_control.append(
+                    (suite, node.lineno, callee.attr))
+    assert not charged_to_the_control, (
+        'a control does its own filesystem work inside a reader\'s poll '
+        'bound, so the reader is charged for the control: '
+        f'{sorted(charged_to_the_control)}')
 
 
 def _whole_set_retry_returns_the_rewrite(tmp, error):
@@ -519,7 +554,8 @@ def _whole_set_retry_returns_the_rewrite(tmp, error):
             queued.write_text(json.dumps(command), encoding='utf-8')
         with _rewrite_on_first_read(
                 refused_file, error(refused_file), list(zip(files, fresh))):
-            commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
+            with _bounded_polls(_poll_budget(1)):
+                commands = _cmdqueue.wait_for_commands(queue, 2, timeout=1)
         assert commands == fresh, (refused_file.name, commands)
 
 
@@ -537,7 +573,8 @@ def test_a_transient_read_refusal_retries_the_whole_set(tmp):
 
 def test_the_multi_command_wait_honors_a_count_other_than_two(tmp):
     queue, _queued = _queued_file(tmp)
-    commands = _cmdqueue.wait_for_commands(queue, 1, timeout=1)
+    with _bounded_polls(_poll_budget(1)):
+        commands = _cmdqueue.wait_for_commands(queue, 1, timeout=1)
     assert commands == [{'id': 'queued', 'type': 'reload'}], commands
 
 
