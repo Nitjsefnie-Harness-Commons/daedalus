@@ -35,19 +35,19 @@ HERE = 'tests/synthetic.py'
 PROGRAM = f'suite.{SWEEP_ENTRY}(tmp)'
 
 
-def _scan(body, head='import subprocess\n'):
+def _sweep_scan_result(body, head='import subprocess\n'):
     return sweep_launches(ast.parse(head + body), HERE)
 
 
-def _line_of(body):
+def _sweep_deadline_line(body):
     """The 1-based line the deadline keyword sits on, base included."""
     return 1 + body[:body.index('timeout')].count('\n') + 1
 
 
 def _bounded(label, body):
-    line = _line_of(body)
-    assert _scan(body) == ([(HERE, line)], [(HERE, line)]), (
-        label, _scan(body), line)
+    line = _sweep_deadline_line(body)
+    assert _sweep_scan_result(body) == ([(HERE, line)], [(HERE, line)]), (
+        label, _sweep_scan_result(body), line)
 
 
 def test_every_launcher_spelling_names_a_deadline_keyword(tmp):
@@ -146,8 +146,10 @@ def test_a_false_red_the_name_only_reaches_is_pinned(tmp):
     del tmp
     body = (f'subprocess.run(["ping", host], env={{"NOTE": "{PROGRAM}"}},\n'
             '                timeout=5)\n')
-    assert _scan(body) == ([(HERE, 2)], [(HERE, 2)]), _scan(body)
-    assert _line_of(body) == 3, 'the deadline sits on the second line'
+    assert _sweep_scan_result(body) == ([(HERE, 2)], [(HERE, 2)]), (
+        _sweep_scan_result(body))
+    assert _sweep_deadline_line(body) == 3, (
+        'the deadline sits on the second line')
 
 
 def test_each_scope_kind_binds_its_own_program(tmp):
@@ -172,8 +174,8 @@ def test_each_scope_kind_binds_its_own_program(tmp):
              f'go = lambda: ["-c", "{PROGRAM}"]\n')):
         outside = ('subprocess.run(go(), timeout=5)\n' if header == 'lambda'
                    else 'subprocess.run(argv, timeout=5)\n')
-        assert _scan(body + outside) == ([], []), (
-            f'{header} leaked', _scan(body + outside))
+        assert _sweep_scan_result(body + outside) == ([], []), (
+            f'{header} leaked', _sweep_scan_result(body + outside))
 
 
 def test_a_branch_shares_its_enclosing_scope(tmp):
@@ -191,7 +193,7 @@ def test_a_branch_shares_its_enclosing_scope(tmp):
              'subprocess.run(p, timeout=120)\n')
     body = (f'if True:\n    def inner():\n        p = ["-c", "{PROGRAM}"]\n'
             'subprocess.run(p, timeout=120)\n')
-    assert _scan(body) == ([], []), _scan(body)
+    assert _sweep_scan_result(body) == ([], []), _sweep_scan_result(body)
 
 
 def test_a_clean_module_reports_nothing(tmp):
@@ -203,7 +205,8 @@ def test_a_clean_module_reports_nothing(tmp):
             'p = p\nsubprocess.run(p, timeout=120)\n',
             f'subprocess.run(["-c", "suite.{SWEEP_ENTRY[:-1]}q(tmp)"],\n'
             '                timeout=120)\n')):
-        assert _scan(body) == ([], []), (f'row {index}', _scan(body))
+        assert _sweep_scan_result(body) == ([], []), (
+            f'row {index}', _sweep_scan_result(body))
 
 
 def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
@@ -219,12 +222,14 @@ def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
                     'subprocess.run([program], timeout=5)\n'
                     f'program = ["-c", "{PROGRAM}"]\n'
                     'subprocess.run([program])\n')
-    assert _scan(reused_after) == ([(HERE, 6)], []), _scan(reused_after)
+    assert _sweep_scan_result(reused_after) == ([(HERE, 6)], []), (
+        _sweep_scan_result(reused_after))
     swept_after = (f'program = "print(1)"\n'
                    'subprocess.run([program], timeout=5)\n'
                    f'program = ["-c", "{PROGRAM}"]\n'
                    'subprocess.run([program])\n')
-    assert _scan(swept_after) == ([(HERE, 5)], []), _scan(swept_after)
+    assert _sweep_scan_result(swept_after) == ([(HERE, 5)], []), (
+        _sweep_scan_result(swept_after))
     _bounded('rebound to the sweep last',
              'program = ["-c", "print(1)"]\n'
              f'program = ["-c", "{PROGRAM}"]\n'
@@ -251,13 +256,15 @@ def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
              '    program = ["-c", "print(1)"]\n'
              '    subprocess.run([program], timeout=5)\n'
              'except OSError:\n    pass\n')):
-        assert _scan(body) == ([], []), (label, _scan(body))
+        assert _sweep_scan_result(body) == ([], []), (
+            label, _sweep_scan_result(body))
 
 
 def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
     del tmp
     body = f'subprocess.run(["-c", "{PROGRAM}"])\n'
-    assert _scan(body) == ([(HERE, 2)], []), _scan(body)
+    assert _sweep_scan_result(body) == ([(HERE, 2)], []), (
+        _sweep_scan_result(body))
 
 
 # The declared miss set, frozen. A row in the table below is a claim
@@ -384,7 +391,8 @@ def test_each_declared_blind_spot_is_really_missed(tmp):
     )
     assert {label for label, _, _, _ in rows} == _DECLARED_MISSES
     for label, body, launches, timed in rows:
-        assert _scan(body) == (launches, timed), (label, _scan(body))
+        assert _sweep_scan_result(body) == (launches, timed), (
+            label, _sweep_scan_result(body))
 
 
 def _guard_docstring():

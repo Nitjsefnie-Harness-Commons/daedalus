@@ -171,7 +171,7 @@ def _carries_sweep(call, bound):
     return False
 
 
-def _own_nodes(scope):
+def _sweep_scope_nodes(scope):
     """Every node of one scope's own body, nested scopes left unopened."""
     pending = [scope]
     while pending:
@@ -194,7 +194,7 @@ def sweep_launches(tree, relative):
     pending = [(tree, {})]
     while pending:
         scope, bound = pending.pop()
-        own = list(_own_nodes(scope))
+        own = list(_sweep_scope_nodes(scope))
         # TWO PASSES, AND THE ORDER IS LOAD-BEARING: every binding in this
         # scope is recorded before any call in it is judged, so a program
         # written inside a branch is read. Collapsing the two loops is a
