@@ -41,6 +41,9 @@ BOUNDED_GIT_LAUNCHES = {
          'a standalone generator an operator runs by hand; no suite'
          'or CI bound sits above it, so a wedged git hangs an'
          'operator',
+    ('tests/_dashnode_retry_control.py', 'popen', '_ControlledProcess()', 1):
+         'a test double constructed with a keyword mapping; it'
+         'records, it does not launch',
     ('tests/_drain.py', 'kill_and_drain', 'process.communicate(timeout)', 1):
          'a drain of an already-killed process: it can only return',
     ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1):
@@ -96,9 +99,6 @@ BOUNDED_GIT_LAUNCHES = {
      'urllib.request.urlopen(timeout)', 1):
          'an HTTP read: a socket, not a git process, and the'
          ' timeout is the bound itself',
-    ('tests/test_dashboard_behaviour.py', 'popen', '_ControlledProcess()', 1):
-         'a test double constructed with a keyword mapping; it'
-         'records, it does not launch',
     ('tests/test_dashboard_gate.py',
      'test_gate_is_released_by_the_os_when_the_holder_is_killed',
      'holder.wait(timeout)', 1):
