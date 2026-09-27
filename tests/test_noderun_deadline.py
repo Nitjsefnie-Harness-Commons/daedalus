@@ -465,6 +465,51 @@ def _child_is_gone(stdout):
     return False
 
 
+def test_a_real_call_site_reports_its_own_stalled_child(tmp):
+    """The same property, reached through a caller rather than the launcher.
+
+    Everything above drives the launcher itself. This drives
+    `tests/_jsroute_harness.py`'s real `runtime_and_guard`, which is a
+    call site in the tree like any other, and that is the half a launcher
+    control cannot see: a site that kept its own `subprocess.run` with its
+    own `timeout=` would satisfy every control in this file and still
+    report a bare `TimeoutExpired` naming the whole command.
+
+    The source reaches Node, writes a line and then never settles, so the
+    child stalls having produced something — which is precisely the case
+    where its partial output is the only evidence there is. The budget is
+    derived from the launcher's own deadline and deliberately SMALLER: this
+    control provokes an expiry, so a tighter budget can only make it
+    arrive sooner. That Node wrote its line before the budget ran out is
+    asserted rather than assumed, so a host too slow to start Node fails
+    the control instead of passing it.
+    """
+    import _noderun  # noqa: E402
+    from _jsroute_harness import runtime_and_guard  # noqa: E402
+
+    path = Path(tmp) / 'stalled.js'
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
+    caught = None
+    try:
+        runtime_and_guard(
+            "process.stdout.write('the child spoke before it wedged\\n');\n"
+            'setInterval(() => {}, 1000);\n', path)
+    except _noderun.ChildDeadlineExceeded as failure:
+        caught = failure
+    except BaseException as unexpected:  # noqa: BLE001
+        # A bare `TimeoutExpired` is the failure this entry point exists to
+        # replace, so it is named rather than merely re-raised.
+        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+            'a bare TimeoutExpired reached the caller', unexpected)
+        raise
+    finally:
+        _noderun.CHILD_DEADLINE_S = real_deadline
+    assert caught is not None, 'the child that never settles finished'
+    assert 'the child spoke before it wedged' in caught.stdout, caught.stdout
+    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
+
+
 def _raise_permission_error(directory):
     del directory
     raise PermissionError(32, 'The process cannot access the file')

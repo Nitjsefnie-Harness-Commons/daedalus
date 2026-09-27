@@ -222,6 +222,49 @@ def test_an_inline_plan_left_unparsed_is_a_contract_fault(tmp):
     assert outcome['contractFaults'] == ['plan.planned'], outcome
 
 
+def test_a_stalled_inline_child_is_reported_with_its_own_output(tmp):
+    """The inline launcher's stall is classified, where it used to hang.
+
+    `run_inline_gate` carried no bound at all, and its own docstring said so
+    and named the consequence: a wedged child was a hung job under the
+    suite's ceiling and nothing more. That is the reporting gap this
+    routing closes, and this is the call site it closes it at.
+
+    The program below reaches Node, writes a line and then never settles,
+    so the child stalls having produced something — which is precisely the
+    case where its partial output is the only evidence there is. A bare
+    `subprocess.run` here would have returned nothing at all.
+
+    The budget is derived from the launcher's own deadline and deliberately
+    smaller: this provokes an expiry, so a tighter budget only makes it
+    arrive sooner. That Node wrote its line before the budget ran out is
+    asserted, not assumed.
+    """
+    import subprocess  # noqa: E402
+
+    import _noderun  # noqa: E402
+
+    program = ("process.stdout.write('the inline child spoke\\n');"
+               'setInterval(() => {}, 1000);')
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
+    caught = None
+    try:
+        run_inline_gate(require_node(), program, [], cwd=ROOT,
+                        plan={'planned': []})
+    except _noderun.ChildDeadlineExceeded as failure:
+        caught = failure
+    except BaseException as unexpected:  # noqa: BLE001
+        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+            'a bare TimeoutExpired reached the caller', unexpected)
+        raise
+    finally:
+        _noderun.CHILD_DEADLINE_S = real_deadline
+    assert caught is not None, 'the inline child that never settles finished'
+    assert 'the inline child spoke' in caught.stdout, caught.stdout
+    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='gateext_')
