@@ -18,7 +18,9 @@ The scaffold is a JavaScript string, so it obeys the bound-count rules
 template expression, which is why every selector is parsed by hand.
 """
 
-DOM = r"""
+from _worker_sources import TEXT_NODE_STUB
+
+DOM = TEXT_NODE_STUB + r"""
 // A document whose queries walk the live tree, a class set, a parked
 // clock, and an observer that refuses a member it does not model.
 phase('dashboard shell DOM ready');
@@ -30,12 +32,6 @@ const OBSERVERS = [];
 const DOC_LISTENERS = {};
 const WINDOW_LISTENERS = {};
 const NAME_STOP = '#.[ ';
-
-function textNode(value) {
-  const node = new El('#text');
-  node.text = String(value);
-  return node;
-}
 
 function camelCase(name) {
   return String(name).split('-').map((part, i) => (

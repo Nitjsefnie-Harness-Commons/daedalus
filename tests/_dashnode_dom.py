@@ -11,9 +11,11 @@ for a surface a shipped section reads. The scaffold moved here verbatim and
 Which half owns which name, because the modules that follow compose this one
 and a reader has to tell them apart: `phase`, `bounded`, `leave` and
 `clicks` come from the PRELUDE in `_dashnode`. `pathToFileURL`, `El`,
-`dataSelector`, `textNode`, `Node`, `document`, `jsonResponse`, `token`,
+`dataSelector`, `Node`, `document`, `jsonResponse`, `token`,
 `localStorage`, `setTimeout`, `clearTimeout`, `setInterval` and `settle`
-are defined here.
+are defined here. `textNode` is not: it is spliced in from
+`_worker_sources.TEXT_NODE_STUB`, which the other dashboard document
+splices too, so the two share one copy of it.
 
 `El` is permissive about a member it does not have -- an absent one answers
 `undefined` where a browser answers a node -- so a section that reads one
@@ -22,7 +24,9 @@ gets a wrong answer rather than a refusal. The section shell in
 scaffold, and `tests/test_dashsection_harness.py` holds the refusals.
 """
 
-DOM = r"""
+from _worker_sources import TEXT_NODE_STUB
+
+DOM = TEXT_NODE_STUB + r"""
 import { pathToFileURL } from 'node:url';
 phase('dashboard harness started');
 const clicks = [];
@@ -140,11 +144,6 @@ class El {
     return this.all().find(
       (el) => el.tag !== '#text' && el.textContent === text) || null;
   }
-}
-function textNode(value) {
-  const node = new El('#text');
-  node.text = String(value);
-  return node;
 }
 globalThis.Node = El;
 globalThis.document = {
