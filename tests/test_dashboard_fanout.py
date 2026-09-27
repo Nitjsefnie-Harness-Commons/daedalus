@@ -17,6 +17,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -558,7 +559,8 @@ def test_two_events_across_the_counter_overflow_are_both_delivered(tmp):
         f'{first_id!r} !< {second_id!r}')
 
 
-_DEDUP_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
+_DEDUP_HARNESS = _dashnode.DashboardNodeHarness(
+    _dashnode.DOM + _dashfetch.DOOR + r"""
 (async () => {
 globalThis.window = { addEventListener() {} };
 const enc = new TextEncoder();
@@ -567,14 +569,23 @@ const frame = (id) => enc.encode(
   + JSON.stringify({ kind: 'event', id, type: 'result' }) + '\n\n');
 const chunks = [frame('e1'), frame('e1'), frame('e2')];
 let next = 0;
-globalThis.fetch = async (target) => ({
-  ok: true, body: { getReader: () => ({ read: () => {
-    if (next < chunks.length) {
-      return Promise.resolve({ done: false, value: chunks[next++] });
-    }
-    return new Promise(() => {});
-  } }) },
-});
+// The one target `sse.js` subscribes to, and the only one this scenario
+// plans. The fake used to answer every request with a stream reader
+// without reading the target at all, so a request the module invented
+// was neither refused nor recorded (#1231). `sse.js` reads `ok` and
+// `status` before `body`, so the door's refusal is enough here.
+const STREAM = '/stream?tab=dashboard';
+globalThis.fetch = async (target) => {
+  if (String(target) !== STREAM) return refuse(String(target));
+  return {
+    ok: true, body: { getReader: () => ({ read: () => {
+      if (next < chunks.length) {
+        return Promise.resolve({ done: false, value: chunks[next++] });
+      }
+      return new Promise(() => {});
+    } }) },
+  };
+};
 const sse = await bounded(
   import(pathToFileURL(process.argv[1]).href),
   'sse module import', _dashnodeStepTimeoutMs,
@@ -585,10 +596,10 @@ sse.start();
 await bounded(settle(), 'first frame', _dashnodeStepTimeoutMs);
 await bounded(settle(), 'duplicate frame', _dashnodeStepTimeoutMs);
 await bounded(settle(), 'new frame', _dashnodeStepTimeoutMs);
-process.stdout.write(JSON.stringify({ seen }));
+process.stdout.write(JSON.stringify({ seen, unplanned: UNPLANNED }));
 })().catch(leave);
-""", bounded_steps=4, module=True, arguments=(
-    ROOT / 'dashboard' / 'sse.js',))
+    """, bounded_steps=4, module=True, arguments=(
+        ROOT / 'dashboard' / 'sse.js',))
 
 
 def test_the_client_drops_a_replayed_event_id(_tmp):
@@ -600,6 +611,9 @@ def test_the_client_drops_a_replayed_event_id(_tmp):
     seen list [e1, e1, e2]."""
     result = _dashnode.run_dashboard_node(_DEDUP_HARNESS)
     seen = json.loads(result.stdout)
+    # The fake's only route is the one target above, named exactly, so an
+    # empty record is a claim that `sse.js` asked for nothing else.
+    assert seen['unplanned'] == [], seen
     assert seen['seen'] == ['e1', 'e2'], seen
 
 
