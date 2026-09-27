@@ -23,11 +23,17 @@ shape the grammar composes, and each is named beside the case that pins it.
 A `bool()` index was the sixth until the builtin builder took it: an index
 that is a call of the builtin is that builder's own construction, so it is
 generated in every container the fold reads an element out of, under both
-spellings a module binds the builtin and with the name replaced in each. A
-dict KEY that is an unhashable literal is not one of the five: the dict
-builder emits string keys, but `_repeats` carries a list literal in key
-position, so that class has sixteen generated rows of its own, pinned,
-decided and paid for.
+spellings a module binds the builtin, with the name replaced, and under a
+condition the module may not take. Three carriers rather than one, because a
+builder whose rows differ only in whether ONE line was replaced cannot tell
+a rule that reads the binding from a rule that reads the line. Two carriers
+of the class are NOT expressible here — a name bound by a comprehension's
+own target, and a use in a scope the walk cannot line up with the resolver's
+— because the oracle evaluates a callee in a flat namespace, and those two
+are held by hand in `test_mcp_builtin_names.py`. A dict KEY that is an
+unhashable literal is not one of the five: the dict builder emits string
+keys, but `_repeats` carries a list literal in key position, so that class
+has sixteen generated rows of its own, pinned, decided and paid for.
 """
 import json
 import subprocess
@@ -221,14 +227,30 @@ _BUILTIN_ROUTES = (
     ('starred unpack', lambda e: '(*[' + ', '.join(e) + '],)'),
 )
 
+# The carriers a `bool` index can carry its value by, as (the step suffix,
+# the source the module is given, whether the name is replaced, and whether
+# the module is left to reach the store at all). Whether the module has RUN
+# the binding by the time the name is read is the second field: a statement
+# it may skip leaves the name unbound, so the alias is evidence of a builtin
+# and not a fact of one, and the row is decided the other way. `g` is false
+# in the oracle's own globals for exactly that — the condition is one the
+# runtime does not take, and the guard cannot read its value either. A name
+# the module REPLACED and a binding it may never have made do not compose:
+# a name that is never bound is not something a store can replace.
+_BUILTIN_CARRIERS = (('', '', False), (' and replaced', '', True),
+                     (' under a condition', 'if g:\n    ', False))
+
 # How a module can NAME the builtin, and the store that takes the name back.
 # The second is a lambda rather than `print` because it RETURNS and says
 # nothing: `lambda v: None` makes the index a value no container is indexed
 # by, so the call raises before it imports anything, and it writes to the
 # oracle's own output pipe as `print` would not be permitted to.
+# The third field is whether the name IS the builtin's own, and it is what
+# makes a CONDITIONAL binding decidable for one spelling and not the other:
+# a name bound to itself is the builtin whether or not the statement ran.
 _BUILTIN_SPELLINGS = (
-    ('under an alias', 'from builtins import bool as b', 'b'),
-    ('under its own name', 'from builtins import bool', 'bool'),
+    ('under an alias', 'from builtins import bool as b', 'b', False),
+    ('under its own name', 'from builtins import bool', 'bool', True),
 )
 
 # The key classes Python's `==` makes equal, as (the earlier key, the later
@@ -270,12 +292,11 @@ def _form(kind, step, callee, container, mentions, carries, classes,
     `pinned` is True for every form the repeated-key and lambda builders
     produce, and the construction says why: a dict display settles its own
     entries and a lambda's return is settled by the arguments the caller
-    supplies, so every one of them is a value both the oracle and the fold
-    can decide. The builtin builder does not claim that for its REPLACED
-    rows — a call of a name this walk cannot follow produces no value at
-    all — and says so on each rather than only on the half that holds.
-    `setup` is what the oracle runs before the form, and is empty for every
-    builder that needs no binding of its own.
+    supplies. The builtin builder claims it only for a row whose binding the
+    module RUNS and leaves the name alone, since a replaced name produces no
+    value for either side to agree on. `setup` is what the oracle runs
+    before the form, and is empty for every builder with no binding of its
+    own.
     """
     return {'kind': kind, 'step': step, 'depth': 1, 'callee': callee,
             'container': container, 'mentions': mentions, 'pinned': pinned,
@@ -340,9 +361,8 @@ def _identity(form):
     """What makes a generated form a form of its own.
 
     The spelling, for every builder whose rows differ only in it — and a
-    builder that brings BINDINGS of its own is identified by those as well,
-    because a row whose only difference from another is the module's own
-    source is a different row, not a duplicate of it.
+    builder that brings BINDINGS of its own is identified by those too,
+    because a row differing only in the module's source is a different row.
     """
     setup = form.get('setup', '')
     return (form['imports'], form['callee']) if setup else form['callee']
@@ -353,14 +373,17 @@ def _builtins(imports, operation):
     element out of, under both spellings a module binds it, and with the
     name REPLACED in each.
 
-    The property is one name and two answers, and a builder that only ever
-    emitted the unshadowed half would measure a rule that reads any `b` as
-    the builtin just as happily as one that reads none of them. So the two
-    halves are generated from the same construction with one line of the
-    module's own source between them, and they DISAGREE: a `bool` call
-    settles — `b(0)` is `False` and names position zero, `b(2)` is `True`
-    and names position one — so the untouched rows are decided on both
-    sides and the replaced one is a call whose result nothing can settle.
+    The property is one name and TWO answers, and a builder that emitted one
+    carrier would measure a rule that reads any `b` as the builtin just as
+    happily as one that reads none of them. So every row is generated from
+    the same construction with the module's own source between the twins, and
+    the twins DISAGREE: a name REPLACED, and a binding the module may not
+    have RUN. A `bool` call settles — `b(0)` is `False` and names position
+    zero, `b(2)` is `True` and names position one — so the first carrier
+    decides, and the second does not, because `symtable` is a static grammar
+    and says nothing about when a statement ran. Each row carries its own
+    `pinned` for that reason, and the one carrier that settles on both is
+    the name the module bound to ITSELF.
     """
     for kind, route in _BUILTIN_ROUTES:
         # Both the position the call NAMES and the one it misses: the
@@ -371,16 +394,19 @@ def _builtins(imports, operation):
             elements = [_FILLER, _FILLER]
             elements[at] = operation
             container = route(elements)
-            for spelling, binding, name in _BUILTIN_SPELLINGS:
-                for replaced in (False, True):
-                    source = imports + binding + (
-                        f'\n{name} = lambda v: None\n' if replaced else '\n')
+            for spelling, binding, name, own in _BUILTIN_SPELLINGS:
+                for suffix, carrier, replaced in _BUILTIN_CARRIERS:
+                    # The store comes AFTER the binding it takes back, and
+                    # inside the condition when there is one, so the row says
+                    # what it means whichever of the two is composed.
+                    source = (imports + carrier + binding
+                              + (f'\n{name} = lambda v: None\n' if replaced
+                                 else '') + '\n')
                     yield _form(
-                        f'a {kind} index',
-                        f'bound {spelling}'
-                        + (' and replaced' if replaced else ''),
+                        f'a {kind} index', f'bound {spelling}{suffix}',
                         f'{container}[{name}({argument})]', container,
-                        True, True, (_BUILTIN,), pinned=not replaced,
+                        True, True, (_BUILTIN,),
+                        pinned=not replaced and (own or not carrier),
                         imports=source, setup=source)
 
 
@@ -553,7 +579,7 @@ def runs_the_operation(value):
 
 for line in sys.stdin:
     setup, assignment, source = json.loads(line)
-    env = {"c": True, "i": 0, "importlib": importlib,
+    env = {"c": True, "i": 0, "g": False, "importlib": importlib,
            "im": importlib.import_module}
     try:
         if setup:
@@ -639,8 +665,7 @@ def duty(form):
     Every other form's reach depends on something outside the literal, so it
     is the walk's UNDETERMINED class and its debt is the mention property:
     refused when the expression carries the operation, silent when it does
-    not. `carries` and not `mentions` is the projected container, which
-    mentions the operation in its text and produces nothing to call.
+    not.
     """
     if not form['pinned']:
         return ('refused',) if form['carries'] else ('silent',)

@@ -18,6 +18,16 @@ import X` binds the builtin ITSELF and is not a shadow either.
 in the module rather than over the one the use resolves to: a false
 positive there costs a refusal, and a false negative would cost a closure
 entry. The two directions are not the same, so they are not the same answer.
+
+`denotes_builtin` asks the alias question at full strength, and a `from
+builtins` binding is EVIDENCE of a builtin rather than a fact of one. Which
+scope binds the name is half the question; the other half is whether that
+binding has been ESTABLISHED at the use, and `symtable` is a static grammar
+and cannot answer it, so the walk reads it off the source: a binding the
+module may not have executed yet — one ordered after the use, or one inside a
+statement that runs only sometimes — is not one, and the name is not the
+builtin there. A scope the walk cannot line up with the resolver's is not one
+either. Both are refusals, which is the direction a false negative is cheap in.
 """
 import ast
 import symtable
@@ -27,16 +37,36 @@ from typing import TypeGuard
 # The builtins that evaluate a program; one set reads every direct reach.
 CODE_EVAL_BUILTINS = ('eval', 'exec', 'compile')
 
+# The scope kinds a name can be local to, INCLUDING the comprehensions: a
+# generator's body is its own scope, and a list or dict comprehension is one
+# on every interpreter that has not inlined it. Which of them the running
+# interpreter actually gives a scope of its own is the resolver's answer and
+# not this table's, so a comprehension with no scope is simply not matched.
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                ast.Lambda) + _COMPREHENSIONS
+_COMP_NAMES = {ast.ListComp: 'listcomp', ast.SetComp: 'setcomp',
+               ast.DictComp: 'dictcomp', ast.GeneratorExp: 'genexpr'}
+
+# The statement kinds whose body runs only SOMETIMES. A `from builtins`
+# inside one is not a binding at the next statement, so nothing there can be
+# decided from it. A comprehension's own `if` clauses cannot bind a name and
+# are not here.
+_GUARDED = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
+            ast.With, ast.AsyncWith, ast.Match)
+
 
 class _Scopes:
     """Which names one reference resolves to, so a builtin is told apart from
-    a same-named local. A scope the walk cannot line up with the resolver's is
-    read in its enclosing scope; for a module-level reference that errs
-    toward the builtin and refuses, so a correlation miss does not accept a
-    reachable builtin."""
+    a same-named local.
 
-    _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
-                    ast.Lambda)
+    A scope the walk cannot line up with the resolver's is read in its
+    enclosing scope, and every node inside it is marked UNCERTAIN: for a
+    module-level reference the enclosing scope errs toward the builtin and
+    refuses, but a name that is local to the scope the walk lost is not the
+    builtin, and `denotes_builtin` reads the mark and declines instead of
+    answering for a scope it does not have.
+    """
 
     def __init__(self, tree, source, filename):
         self._root = symtable.symtable(source, filename, 'exec')
@@ -48,29 +78,51 @@ class _Scopes:
         self._from_builtins = set()
         self._module_bind_line = {}
         # The scope model the alias question is read off: which table
-        # encloses which, which names each binds of its own, and what each
-        # one bound from `builtins` and under which name.
+        # encloses which, which names each binds of its own, what each one
+        # bound from `builtins` and under which name, and whether that
+        # statement runs every time the scope does.
         self._enclosing = {}
         self._local = {}
         self._alias = {}
+        self._uncertain = {}
+        # How far into each table's children the walk has read. The resolver
+        # builds them in source order and so does this walk, so the cursor is
+        # what tells two sibling scopes that share a name AND a line apart.
+        self._cursor = {}
         self._walk(tree, self._root)
 
     @staticmethod
     def _symbols(table):
         return {symbol.get_name(): symbol for symbol in table.get_symbols()}
 
-    @staticmethod
-    def _match(table, name, line):
-        """The resolver's scope for a named scope node, or None when there
-        is no match OR the match is ambiguous. Two sibling scopes on ONE
-        line (two lambdas separated by `;`) share name and line, so an
-        ambiguous match returns None and the node is read in its ENCLOSING
-        scope — for a module-level reference, the module, where an unbound
-        code-evaluating name is the builtin, so the miss errs toward the
-        builtin and refuses."""
-        matches = [child for child in table.get_children()
-                   if child.get_name() == name and child.get_lineno() == line]
-        return matches[0] if len(matches) == 1 else None
+    def _match(self, table, name, line):
+        """The resolver's scope for a named scope node, and whether one was
+        there and not taken.
+
+        Children arrive in SOURCE order and so do the nodes that name them,
+        so a cursor over the children lines the two up. A name and a line are
+        not enough on their own: two sibling scopes can share both — two
+        lambdas separated by `;` — and telling them apart by which is next is
+        what a cursor is for.
+
+        The second answer is the walk's own miss. No scope of that kind here
+        is a real answer (a comprehension the running interpreter has
+        inlined has no scope), and is not one; a scope that IS there and was
+        not taken is a miss, and every node inside it is marked uncertain.
+        """
+        children = table.get_children()
+        index = self._cursor.get(id(table), 0)
+        while index < len(children) and children[index].get_lineno() < line:
+            index += 1
+        for later in range(index, len(children)):
+            child = children[later]
+            if child.get_lineno() > line:
+                return None, False
+            if child.get_name() == name:
+                self._cursor[id(table)] = later + 1
+                return child, False
+        return None, (index < len(children)
+                      and children[index].get_lineno() == line)
 
     def _note(self, name, lineno):
         prior = self._module_bind_line.get(name)
@@ -88,38 +140,58 @@ class _Scopes:
                 self._note(alias.asname or alias.name.partition('.')[0],
                            node.lineno)
 
-    def _walk(self, node, table):
+    def _walk(self, node, table, guarded=False, uncertain=False):
         self._scope_of[id(node)] = table
+        if uncertain:
+            self._uncertain[id(node)] = True
         if table is self._root:
             # Only module-scope forms count; a nested function or
             # comprehension body is its own scope and is not walked as root.
             self._record_module_binding(node)
         if isinstance(node, ast.ImportFrom) and node.module == 'builtins' \
                 and not node.level:
-            self._record_builtin_alias(node, table)
-        if isinstance(node, self._SCOPE_NODES):
-            name = 'lambda' if isinstance(node, ast.Lambda) else node.name
-            child = self._match(table, name, node.lineno)
+            self._record_builtin_alias(node, table, guarded)
+        enclosing = table
+        if isinstance(node, _SCOPE_NODES):
+            name = 'lambda' if isinstance(node, ast.Lambda) else (
+                _COMP_NAMES[type(node)] if isinstance(node, _COMPREHENSIONS)
+                else node.name)
+            child, missed = self._match(table, name, node.lineno)
             if child is not None:
                 self._enclosing[id(child)] = table
                 self._local[id(child)] = {symbol.get_name() for symbol
                                           in child.get_symbols()
                                           if symbol.is_local()}
-                table = child
+                # A scope's own statements are its own: a `def` under a
+                # conditional binds inside it whenever the function is
+                # called, whatever ran before it.
+                table, guarded = child, False
+            else:
+                uncertain = uncertain or missed
+        inside = guarded or isinstance(node, _GUARDED)
+        # Python evaluates a comprehension's FIRST iterable in the scope that
+        # ENCLOSES it and every other part inside its own, so the iterable is
+        # walked where the runtime reads it.
+        iterable = node.generators[0].iter \
+            if isinstance(node, _COMPREHENSIONS) else None
         for child in ast.iter_child_nodes(node):
-            self._walk(child, table)
+            self._walk(child, enclosing if child is iterable else table,
+                       inside, uncertain)
 
-    def _record_builtin_alias(self, node, table):
+    def _record_builtin_alias(self, node, table, guarded):
         """A `from builtins import X [as y]` binds the builtin ITSELF, so `y`
-        is the builtin and not a shadow of it.
+        is the builtin and not a shadow of it — once the statement has RUN.
 
         Recorded against the scope the statement is in rather than against
         the module, because a nearer binding is what takes it back, and a
         name this walk resolves to a nearer scope's alias is that alias.
+        `guarded` says the statement sits inside a body that runs only
+        sometimes, so the binding is possible at a use and not established.
         """
         aliases = self._alias.setdefault(id(table), {})
         for alias in node.names:
-            aliases[alias.asname or alias.name] = (alias.name, node.lineno)
+            aliases[alias.asname or alias.name] = (alias.name, node.lineno,
+                                                   guarded)
             if alias.name in CODE_EVAL_BUILTINS:
                 self._from_builtins.add(alias.asname or alias.name)
 
@@ -152,10 +224,12 @@ class _Scopes:
         scope that binds it imports the builtin itself. `symtable` says which
         of the two a binding is — imported and not assigned is the import, a
         store or a parameter over the same name is a shadow of it — so one
-        rule answers every scope, and a name bound at the module is read in
-        the order the module runs: before its own import there is no binding
-        at all.
+        rule answers every scope, and the ORDER the module runs in says the
+        rest: an alias is the builtin only where its own import has already
+        run by the time the name is read.
         """
+        if self._uncertain.get(id(node)):
+            return False
         if node.id == name and self.is_builtin(node):
             return True
         table = self._scope_of.get(id(node))
@@ -166,11 +240,30 @@ class _Scopes:
         if symbol is None or not symbol.is_imported() or symbol.is_assigned() \
                 or symbol.is_parameter() or symbol.is_namespace():
             return False
-        imported, lineno = self._alias.get(id(owner), {}).get(
-            node.id, (None, 0))
-        if imported != name:
+        bound = self._alias.get(id(owner), {}).get(node.id)
+        if bound is None or bound[0] != name:
             return False
-        return owner is not self._root or node.lineno >= lineno
+        # The binding has to have RUN by the time the name is read: a
+        # statement the module may skip leaves the name unbound, and one
+        # ordered after the use has not run either. Neither is a builtin.
+        return not bound[2] and node.lineno >= bound[1]
+
+    def _binds_itself(self, name):
+        """Whether the module binds `name` to the builtin `name` IS.
+
+        A `from builtins import bool` under its own name binds the builtin
+        to itself, so it is not a shadow of the name whichever way the
+        statement goes: whether it runs or not, and whether it runs before
+        the use or after, the name is the builtin. Only a store over the
+        same name takes it back, and `is_assigned` is what says so.
+        """
+        bound = self._alias.get(id(self._root), {}).get(name)
+        if bound is None or bound[0] != name:
+            return False
+        symbol = self._symbols(self._root).get(name)
+        return (symbol is not None and symbol.is_imported()
+                and not symbol.is_assigned() and not symbol.is_parameter()
+                and not symbol.is_namespace())
 
     def is_builtin(self, node):
         """The name is an unshadowed builtin at `node`'s own scope. A module
@@ -179,7 +272,8 @@ class _Scopes:
         a use PRECEDING its own later module-level binding still reads the
         real builtin, while one after it sees the bound name. A reference
         inside a function runs after the module has loaded, so any module
-        binding shadows it and order is irrelevant there."""
+        binding shadows it and order is irrelevant there. A binding that is
+        the name bound to ITSELF is not a binding at all."""
         table = self._scope_of.get(id(node))
         symbol = self._symbols(table).get(node.id) if table else None
         if symbol is None:
@@ -187,11 +281,18 @@ class _Scopes:
         if table is self._root:
             if node.id not in self._root_binds:
                 return True
+            if self._binds_itself(node.id):
+                return True
             return node.lineno < self._module_bind_line.get(
                 node.id, float('inf'))
         if symbol.is_local() or symbol.is_free():
             return False
-        return node.id not in self._root_binds
+        # A reference inside a function runs after the module has loaded, so
+        # any module binding shadows it and order is irrelevant there — with
+        # the one exception, which is a binding that is not a shadow at all.
+        if node.id not in self._root_binds:
+            return True
+        return self._binds_itself(node.id)
 
 
 def scopes_for(tree, source, filename):

@@ -17,8 +17,9 @@ and each was a live bypass through a sweep that reported nothing unpaid.
 The first two keep their hand boundary pins beside their generated ones, so
 that a row which stops discriminating and a case which stops agreeing are
 read in the same place; the third's hand cases are in
-`test_mcp_builtin_names.py`, and what this file adds for it is the twin that
-differs only in the module's own source.
+`test_mcp_builtin_names.py`, which also holds the two shapes the oracle
+cannot run, and what this file adds for it is the twin that differs only in
+the module's own source.
 """
 import sys
 from pathlib import Path
@@ -159,32 +160,70 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
 
 
 def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
-    """The class's two sides, in the guard's OWN verdicts.
+    """The class's sides, in the guard's OWN verdicts.
 
     `test_every_class_of_the_property_has_a_discriminating_row` checks that
     a class's rows disagree by ORACLE class; this checks the other half, and
     it checks it the only way that can fail: a row and its twin differ by
-    one line of the module's own source and by nothing in the callee, so
-    every pair has to come back with two different verdicts. A rule that
-    read a replaced name as the builtin resolves a call that raises, and
-    one that read an unreplaced alias as anything else declines a position
-    the runtime settles; neither is visible in a count.
+    lines of the module's own source and by nothing in the callee, so every
+    pair has to come back with two different verdicts. A rule that read a
+    replaced name as the builtin resolves a call that raises, and one that
+    read an unreplaced alias as anything else declines a position the runtime
+    settles; neither is visible in a count.
+
+    There are three carriers and TWO of them are twins of the first — the
+    name replaced, and the binding under a condition the module may not take
+    — because a name the module has not bound is a different question from
+    one it has bound to something else, and a builder that generated only
+    the straight-line one could not tell a rule that reads when a statement
+    ran from a rule that does not.
+
+    The conditional rows split once more, and that is the point of them: a
+    name the module bound to ITSELF is the builtin whether or not the
+    statement ran, so those rows are still decided, while an ALIAS the module
+    may never have bound is a name this walk cannot account for and is
+    refused. A rule that asked only the spelling would resolve both.
     """
     forms = _swept(_tmp)
     rows = [form for form in forms
             if 'a builtin behind a binding' in form['classes']]
-    assert len(rows) == 160, len(rows)
-    pairs = {}
-    for form in rows:
-        pairs.setdefault(form['callee'], set()).add(form['inline'])
-    assert all(len(verdicts) == 2 for verdicts in pairs.values()), [
-        (callee, sorted(verdicts)) for callee, verdicts in pairs.items()
-        if len(verdicts) != 2][:5]
+    assert len(rows) == 240, len(rows)
+    by_step = {(form['callee'], form['step']): form['inline'] for form in rows}
+    conditional = [(callee, step) for callee, step in by_step
+                   if step.endswith(' under a condition')]
+    assert len(conditional) == 80, len(conditional)
+
+    def _twin(callee, step):
+        return by_step[(callee, step[:-len(' under a condition')])]
+
+    alias = [(callee, step) for callee, step in conditional
+             if step.startswith('bound under an alias ')]
+    own = [(callee, step) for callee, step in conditional
+           if step.startswith('bound under its own name ')]
+    assert len(alias) == 40 and len(own) == 40, (len(alias), len(own))
+    # An ALIAS the module may never have bound is a name this walk cannot
+    # account for, and the row is the undecided class: refused, where its
+    # straight-line twin is decided. That disagreement is the whole axis.
+    for callee, step in alias:
+        assert by_step[(callee, step)] == 'refused', (callee, step)
+        assert _twin(callee, step) != 'refused', (callee, step)
+    # A name the module bound to ITSELF is the builtin either way, so those
+    # rows stay decided and agree with their twin — the case that says the
+    # axis is about the NAME and not about the statement.
+    for callee, step in own:
+        assert by_step[(callee, step)] == _twin(callee, step), (callee, step)
+    # A name the module has NOT bound to the builtin itself is never resolved.
+    undecided = [form for form in rows
+                 if form['step'].endswith(' and replaced')
+                 or form['step'].startswith('bound under an alias under a')]
+    assert len(undecided) == 120, len(undecided)
+    assert not [form['callee'] for form in undecided
+                if form['inline'] == 'resolved']
+    undecided_steps = {form['step'] for form in undecided}
+    assert all(form['pinned'] for form in rows
+               if form['step'] not in undecided_steps)
     assert {form['oracle'] for form in rows} == {
         'reaches', 'does not reach', 'raises'}
-    reached = [form for form in rows
-               if form['oracle'] == 'reaches' and not form['pinned']]
-    assert not reached, reached[:2]
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
@@ -305,10 +344,10 @@ def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
     Every one of them is a position the fold DECLINES to read — a free
     name, and that is the only one the grammar now has — on a container
     that carries the operation, so the value it selects is unknown to this
-    walk even where the oracle settles it. A negative, a computed, an
-    out-of-range, a float, a slice and a key position are not in that set
-    and are not here: the fold reads each of them, and one it reads either
-    selects an element or names nothing at all.
+    walk even where the oracle settles it. A negative, a
+    computed, an out-of-range, a float, a slice and a key position are not
+    in that set and are not here: the fold reads each of them, and one it
+    reads either selects an element or names nothing at all.
 
     Both the count and the SET are asserted, so a fold that widened, a step
     that stopped being settled, or a marker that drifted shows here as a

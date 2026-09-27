@@ -22,6 +22,12 @@ the walk has no target and says so. The ideal is silence, because the
 runtime raises on the index before it imports anything — that is the cost
 side filed as #1213, and these cases hold what the walk does rather than
 freeze the defect as the contract.
+
+These are also the hand half of what the sweep cannot generate: a name bound
+by a comprehension's own target, and a use in one of two scopes that share a
+name and a line, have no row there because the oracle evaluates a callee in a
+flat namespace. The sweep's class carries the two carriers it CAN run — a
+name replaced, and a binding under a condition — and the pair between them.
 """
 import sys
 from pathlib import Path
@@ -153,13 +159,17 @@ def test_a_shadow_nearer_the_use_is_a_shadow_too(_tmp):
     shape it takes, and the same name brought in inside the function IS the
     builtin there because nothing nearer replaces it.
 
-    A rule that reads only the module's own stores fails every row of the
-    first loop; a rule that reads any `from builtins` in the module fails the
-    second, which is the direction this class is named for.
+    A rule that reads only the module's own STORES fails every row of the
+    first loop — hence an import of a different builtin, which the resolver
+    reports as imported and not assigned, as the two stores are not the only
+    shapes a name can be shadowed by. A rule that reads any `from builtins` in
+    the module fails the second, which is the direction this class is named
+    for.
     """
     for bindings, name in _REBINDS:
         for shadow in ('    {0} = print\n',
-                       '    for {0} in [print]:\n        pass\n'):
+                       '    for {0} in [print]:\n        pass\n',
+                       '    from builtins import len as {0}\n'):
             assert _verdict(_tmp, _composition(
                 f'{bindings}\n', f'[{_OPERATION}, 0][{name}(0)]',
                 shadow.format(name))) == 'refused', (bindings, shadow)
@@ -183,6 +193,75 @@ def test_a_use_before_its_own_binding_is_not_the_binding_yet(_tmp):
     assert _verdict(_tmp,
                     f'\nimport importlib\nEARLY = [{_OPERATION}, 0][b(0)]'
                     f'("pkg.leaf")\n{_ALIASED}\n') == 'refused'
+
+
+def test_a_binding_the_module_may_not_have_run_is_not_a_builtin(_tmp):
+    """A `from builtins` binds the builtin ONCE THE STATEMENT HAS RUN, and
+    the resolver cannot say when that is — so the walk reads it off the
+    source and declines wherever it cannot.
+
+    Three ways the module gets there without the binding being there: the
+    import is written after the use, it sits under a conditional the runtime
+    does not take, and it sits under a conditional at the module itself. All
+    three raise before the import is ever called, so resolving any of them
+    puts a module in the closure that nothing reaches.
+    """
+    for source in (
+            # ordered after the use, in the same scope
+            f'\nimport importlib\n\n\ndef load():\n'
+            f'    v = [{_OPERATION}, 0][b(0)]("pkg.leaf")\n'
+            f'    from builtins import bool as b\n    return v\n',
+            # under a conditional the runtime does not take, in a function
+            f'\nimport importlib\nc = False\n\n\ndef load():\n'
+            f'    if c:\n        from builtins import bool as b\n'
+            f'    return [{_OPERATION}, 0][b(0)]("pkg.leaf")\n',
+            # the same, at the module itself
+            f'\nimport importlib\nc = False\nif c:\n'
+            f'    from builtins import bool as b\n\n\ndef load():\n'
+            f'    return [{_OPERATION}, 0][b(0)]("pkg.leaf")\n'):
+        assert _verdict(_tmp, source) == 'refused', source
+
+
+def test_a_comprehension_binds_its_own_name(_tmp):
+    """A comprehension is a scope, and a name it binds is not the module's.
+
+    A generator whose target IS the name binds it in its own body, so a
+    `b(0)` there is a call of the target and not of the builtin — while a
+    generator that binds something else leaves the module's name alone, and
+    that row is what says the rule is about the name and not about being in
+    a comprehension. The ITERABLE is the half Python evaluates in the
+    enclosing scope, so the same name there IS the module's.
+    """
+    def _generator(target):
+        return (f'\nimport importlib\nfrom builtins import bool as b\n\n\n'
+                f'def load():\n    g = ({target} for {target} in [0] if '
+                f'([{_OPERATION}, 0][b(0)]("pkg.leaf"), 1)[1])\n'
+                '    return list(g)\n')
+    assert _verdict(_tmp, _generator('x')) == 'resolved'
+    assert _verdict(_tmp, _generator('b')) == 'refused'
+    iterable = (f'\nimport importlib\nfrom builtins import bool as b\n\n\n'
+                'def load():\n    return [x for x in '
+                f'[{_OPERATION}, 0][b(0)]("pkg.leaf")]\n')
+    assert _verdict(_tmp, iterable) == 'resolved'
+
+
+def test_two_scopes_on_one_line_are_told_apart(_tmp):
+    """Two sibling scopes can share a name AND a line, and a rule that
+    matches on those two alone cannot say which one a use is inside.
+
+    The first lambda is `lambda: 1` and the second takes a default, so a use
+    in the second is inside a scope that binds the name and a use in the
+    first is inside one that does not. Both are generated, both are walked,
+    and the two answers differ.
+    """
+    index = f'[{_OPERATION}, 0][b(0)]'
+    for tail, expected in ((f'lambda b=print: {index}', 'refused'),
+                           (f'lambda: {index}', 'resolved')):
+        source = ('\nimport importlib\nfrom builtins import bool as b\n\n\n'
+                  'def load():\n'
+                  f'    f = (lambda: 1), ({tail}("pkg.leaf"))\n'
+                  '    return f[1]()\n')
+        assert _verdict(_tmp, source) == expected, tail
 
 
 if __name__ == '__main__':
