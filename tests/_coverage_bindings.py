@@ -169,35 +169,36 @@ def _pattern_binds(pattern):
 
 
 def _carried_parts(value):
-    """Carried elements and arguments, including a call-based callee.
+    """
+    Carried elements and arguments, including a call-based callee.
 
-    The walk is total over `ast.expr`. A form is opened when one of its
-    values reaches the binding unchanged, a leaf when the form builds a
-    new value out of what it is handed, and a form in neither class is
-    refused rather than read as clean: the branch exists so a Python that
-    adds one fails closed instead.
+    The walk is total over `ast.expr`, and it puts every form of it in one of
+    three classes.
 
-    Opened, because a sub-value arrives as it was written: Await, BoolOp,
-    Call, Dict, DictComp, FormattedValue, GeneratorExp, IfExp, JoinedStr,
-    Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice, Starred,
-    Subscript, Tuple, Yield, YieldFrom, comprehension.
+    It opens Await, BoolOp, Call, Dict, DictComp, FormattedValue, GeneratorExp,
+    IfExp, JoinedStr, Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice,
+    Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
 
-    Leaves, and that is every form the walk declines to open: Attribute,
-    BinOp, Compare, Constant, Name, UnaryOp. The first three are atoms
-    the predicates judge and the last three build a new value out of
-    their operands, so a launcher inside one is transformed rather than
-    carried.
+    It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
+
+    A form in neither class is refused rather than read as clean, so a Python
+    that adds one fails closed instead.
+
+    A form is opened because a sub-value arrives as it was written, and left
+    alone because the form builds a new value out of what it is handed, so a
+    launcher inside one is transformed rather than carried.
 
     Two entries carry a reason the rule does not give them. A dict
     comprehension opens its key as well as its value.
+
     The four comprehension forms reach their conditions through the
-    statement-level node their `generators` hold, and not through their
-    own iterable, which `_bound_values` judges as the comprehension
-    arm's own business.
-    And FormattedValue is opened on requirement rather than on the
-    argument above, because `f"{launcher}"` binds a string and not the
-    launcher, and the issue asks for the interpolation to be judged all
-    the same.
+    statement-level node their `generators` hold, and not through their own
+    iterable, which `_bound_values` judges as the comprehension arm's own
+    business.
+
+    And FormattedValue is opened on requirement rather than on that argument,
+    because `f"{launcher}"` binds a string and not the launcher, and the issue
+    asks for the interpolation to be judged all the same.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,
