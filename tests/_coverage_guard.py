@@ -33,8 +33,7 @@ module bare rather than a launcher read off it
 (`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
 on an unrecognised callee.
 
-The carrier walk is total over `ast.expr`, and it puts every form of it in one
-of three classes.
+Every form the running grammar has is in one of three classes.
 
 It opens Await, BoolOp, Call, Dict, DictComp, FormattedValue, GeneratorExp,
 IfExp, JoinedStr, Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice,
@@ -55,21 +54,22 @@ The four comprehension forms reach their conditions through the statement-level
 node their `generators` hold, and not through their own iterable, which
 `_bound_values` judges as the comprehension arm's own business. FormattedValue
 is the exception, opened on the issue's requirement rather than on that
-argument, since `f"{launcher}"` binds a string and not the launcher, and
-TemplateStr and Interpolation are opened on the same ground, as its successors.
+argument, since `f"{launcher}"` binds a string and not the launcher, and a form
+that succeeds it is opened on the same ground. A form a later grammar adds is
+registered only where that grammar has it, and nothing is registered without
+it.
 
-Two positions read differently from the rest. The descent that walks a callee
-hands the walk every subscript the descent consumes, index and bounds included.
-It hands the base over only when the base is not an atom, because the receiver
-position reads a launch method off what it carries and a direct launch bottoms
-out at one.
+Two positions read differently. The descent that walks a callee hands the walk
+every subscript the descent consumes, index and bounds included. The base is
+handed over only when it is not an atom: the receiver reads a launch method off
+what it carries, and a direct launch bottoms out at one.
 
-The binding arms are read the same way, and one position among them is not. A
-target binds a name, so the names a target declares are not carriers and what
-it reaches through are. A Name target is exempt, and so is every Name inside a
-Starred, Tuple or List of one, because a name that already spells a module is
-being shadowed rather than carried. A subscript's index is not exempt, so
-`d[subprocess]` binds a launcher and `d[key]` does not.
+The binding arms read the same way, and one position does not. A target binds a
+name, so the names it declares are not carriers and what it reaches through
+are. A Name target is exempt, and so is every Name inside a Starred, Tuple or
+List of one: a name that already spells a module is shadowed rather than
+carried. A subscript's index is not exempt, so `d[subprocess]` binds a launcher
+and `d[key]` does not.
 
 `tests/_coverage_bindings.py` names every form on both sides of that line, and
 a control fails when its prose and its table stop agreeing.

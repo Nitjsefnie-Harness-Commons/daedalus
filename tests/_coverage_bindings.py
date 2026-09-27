@@ -44,18 +44,26 @@ _CARRIED_FIELDS = {
     ast.comprehension: ('ifs',),
 }
 
-# PEP 750's template-string forms are a 3.14 addition, so a literal naming
-# them raises at import on 3.11-3.13 and takes every suite with it. Read
-# each the way tests/_helper_binds.py reads `ast.TypeAlias`: absent, the
-# form is not registered, and that is correct rather than merely quiet --
-# an older parser can neither produce the node nor parse the `t"..."`
-# that makes one. Only the value-bearing fields are named, because
-# `_field_parts` hands back whatever is not None and `str` and
+# The forms a later grammar adds, and the value-bearing fields each one
+# carries. PEP 750's template strings are a 3.14 addition, so a literal
+# naming them raises at import on 3.11-3.13 and takes every suite with it.
+# Read each the way tests/_helper_binds.py reads `ast.TypeAlias`: absent,
+# the form is not registered, and that is correct rather than merely
+# quiet -- an older parser can neither produce the node nor parse the
+# `t"..."` that makes one. Only the value-bearing fields are named,
+# because `_field_parts` hands back whatever is not None and `str` and
 # `conversion` are a str and an int, which the walk would refuse.
-_TEMPLATE_FIELDS = {
-    getattr(ast, 'TemplateStr', None): ('values',),
-    getattr(ast, 'Interpolation', None): ('value', 'format_spec'),
-}
+#
+# The names are the split a reader needs: a form named here cannot appear
+# in a sentence that has to be true on every supported version, so
+# `tests/test_coverage_unfollowable_forms.py` reads this list to keep the
+# two groups apart rather than listing either of them itself.
+_CONDITIONAL_FIELDS = (
+    ('TemplateStr', ('values',)),
+    ('Interpolation', ('value', 'format_spec')),
+)
+_TEMPLATE_FIELDS = {getattr(ast, name, None): fields
+                    for name, fields in _CONDITIONAL_FIELDS}
 _CARRIED_FIELDS.update({form: fields for form, fields
                         in _TEMPLATE_FIELDS.items() if form is not None})
 
@@ -184,24 +192,29 @@ def _pattern_binds(pattern):
 
 
 def _carried_parts(value):
-    """
-    Carried elements and arguments, including a call-based callee.
+    """Carried elements and arguments, including a call-based callee.
 
-    The walk is total over `ast.expr`, and it puts every form of it in one of
-    three classes.
+    Every form the running grammar has is in one of three classes.
 
-    It opens Await, BoolOp, Call, Dict, DictComp, FormattedValue, GeneratorExp,
-    IfExp, JoinedStr, Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice,
-    Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
+    It opens Await, BoolOp, Call, Dict, DictComp, FormattedValue,
+    GeneratorExp, IfExp, JoinedStr, Lambda, List, ListComp, NamedExpr, Set,
+    SetComp, Slice, Starred, Subscript, Tuple, Yield, YieldFrom,
+    comprehension.
 
     It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
-    A form in neither class is refused rather than read as clean, so a Python
-    that adds one fails closed instead.
+    A form in neither class is refused rather than read as clean, so a
+    Python that adds one fails closed instead.
 
-    A form is opened because a sub-value arrives as it was written, and left
-    alone because the form builds a new value out of what it is handed, so a
-    launcher inside one is transformed rather than carried.
+    A form is opened because a sub-value arrives as it was written, and
+    left alone because the form builds a new value out of what it is
+    handed, so a launcher inside one is transformed rather than carried.
+    FormattedValue is the exception, opened on the issue's requirement
+    rather than on that argument, because `f"{launcher}"` binds a string
+    and not the launcher, and a form that succeeds it is opened on the same
+    ground. A form a later grammar adds is registered only where that
+    grammar has it, and an interpreter without that form registers nothing
+    and produces none of it.
 
     Two entries carry a reason the rule does not give them. A dict
     comprehension opens its key as well as its value.
@@ -210,17 +223,6 @@ def _carried_parts(value):
     statement-level node their `generators` hold, and not through their own
     iterable, which `_bound_values` judges as the comprehension arm's own
     business.
-
-    And FormattedValue is opened on requirement rather than on that argument,
-    because `f"{launcher}"` binds a string and not the launcher, and the issue
-    asks for the interpolation to be judged all the same.
-
-    Its successors carry the same ground. TemplateStr and Interpolation are
-    the 3.14 template-string forms, opened because the issue asks for an
-    f-string's successor judged too, and registered only where the
-    interpreter has them: an older parser can neither produce the node nor
-    parse the `t"..."` that makes one, so there is nothing there for the
-    walk to open.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,

@@ -450,8 +450,8 @@ def test_every_grammar_expression_form_is_classified(tmp):
         assert _UNRECOGNISED not in parts, form.__name__
 
 
-# PEP 750's two forms, and the value-bearing fields each carries. A real
-# 3.14 instance has exactly these fields among the ones the walk reads.
+# PEP 750's two forms, and the value-bearing fields each carries; a real
+# 3.14 instance has exactly these among the fields the walk reads.
 TEMPLATE_SHAPES = (
     ('TemplateStr', ('values',)),
     ('Interpolation', ('value', 'format_spec')),
@@ -479,12 +479,10 @@ def _install_stand_ins():
 def test_a_newer_grammar_form_is_registered_when_the_grammar_has_it(tmp):
     """Totality is over the grammar the interpreter actually has.
 
-    The control that failed on 3.14 is the one above: it enumerates the
-    interpreter's own expression forms and found two the table did not
-    name. This is the other half, and it is the half that can be
-    exercised on every version: where the grammar has the template
-    forms the table must carry them, and where it does not the table
-    must not claim them.
+    The control above is the half that failed on 3.14, enumerating the
+    interpreter's own forms. This is the half every version can run:
+    where the grammar has the template forms the table must carry them,
+    and where it does not the table must not claim them.
     """
     import importlib
 
@@ -647,16 +645,25 @@ def _sentences(prose):
 
 
 def _classification():
-    """The opened and leaf form names, read from the walk's own table.
+    """The opened and leaf form names, read from the walk's table.
 
-    Joined and sorted because a docstring states each list as prose, and
-    the control matches it on whitespace alone: a claim that survives a
-    rewrap is the claim a reader reads.
+    Opened is the UNCONDITIONAL set, and the two are kept apart
+    here rather than in the prose: a form registered only where a
+    later grammar has it cannot appear in a sentence that has to
+    read true on 3.11 through 3.14, so the sentence the docstring
+    carries names the forms every supported parser produces, and the
+    version-conditional rule is a sentence of its own. The gated names
+    come from the walk's own `_CONDITIONAL_FIELDS`, so adding one
+    moves it here too rather than listing it twice. Joined and sorted
+    because a docstring states each list as prose and the control
+    matches it on whitespace alone.
     """
-    from _coverage_bindings import _CARRIED_FIELDS, _LEAVES
+    from _coverage_bindings import (
+        _CARRIED_FIELDS, _CONDITIONAL_FIELDS, _LEAVES)
 
-    return (", ".join(sorted(form.__name__
-                             for form in {*_BESPOKE, *_CARRIED_FIELDS})),
+    gated = {getattr(ast, name, None) for name, _ in _CONDITIONAL_FIELDS}
+    stable = ({*_BESPOKE, *_CARRIED_FIELDS} - gated) - {None}
+    return (", ".join(sorted(form.__name__ for form in stable)),
             ", ".join(sorted(form.__name__ for form in _LEAVES)))
 
 
