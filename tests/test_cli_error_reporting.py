@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
-from _cli_helpers import cli_env  # noqa: E402
+from _cli_helpers import CLI, cli_env, run_cli  # noqa: E402
 from _frontend import html_front_end  # noqa: E402
 from _queueread import queued_command  # noqa: E402
 
@@ -22,14 +22,7 @@ sys.path.insert(0, str(_util.ROOT))
 
 from daedalus_cli.output import print_result  # noqa: E402
 
-CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 TOK = 'clitok'
-
-
-def run_cli(args, env):
-    return subprocess.run(CLI + args, cwd=str(_util.ROOT), env=env,
-                          capture_output=True, text=True, encoding='utf-8',
-                          timeout=60)
 
 
 # One malformed argument per handler module, in the shapes issue 673
