@@ -369,17 +369,44 @@ python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha>
 ```
 
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
-run on the SHA concluded `success`, `neutral` or `skipped`; 1 every run
-concluded and one concluded otherwise, offenders named with URLs; 2 the
-`--timeout` bound expired first; 3 the invocation was rejected or a query
-failed - loud and at once, never retried behind a message that reads like
-waiting. A rate-limit refusal is the one exception: it is a known wait, so
-it pauses until the reset and polls again, bounded by the same `--timeout`.
+run on the SHA concluded `success`, `neutral` or `skipped` **and the
+`tests` matrix has a run on that SHA**; 1 every run concluded and one
+concluded otherwise, offenders named with URLs; 2 the `--timeout` bound
+expired first; 3 the invocation was rejected or a query failed - loud and at
+once, never retried behind a message that reads like waiting; 4 every run
+concluded acceptably and none of them is a `tests` run, so the workflow
+that gates the merge was never dispatched. A rate-limit refusal is the one
+exception to exit 3: it is a known wait, so it pauses until the reset and
+polls again, bounded by the same `--timeout`.
+
+**Exit 4 exists because "every run that happened to exist passed" is not
+"every run that should exist did"** (issue #1217, PR #1122 head
+`cb67badf`). That head conflicts with its base, so the merge ref cannot be
+built, no `pull_request` workflow is dispatched, and the twelve-cell `tests`
+matrix has no run at all. `gate freshness` and CodeQL do run and both
+conclude `success`; the tool reported `all 2 run(s) acceptable` and exited
+0, and every seat on this fleet reads that exit code as its green read. The
+same false green appears on a mergeable head in the first minutes of a
+push, while the short workflows have concluded and the matrix is still being
+created. So an absent required workflow is `REQUIRED_WORKFLOWS`
+(`ci_wait.py`'s constant, not a flag - a caller who may switch the
+expectation off is the reader this tool exists to protect), and it is
+answered rather than waited on forever: a conflicting pull request for the
+head refuses at once, and anything else is given `--grace` seconds
+(default 300) from the first observation before it refuses, naming the
+missing workflow, the grace and the runs that do exist. The pull-request
+lookup is a disambiguation, not this tool's subject, so its failure is said
+once on stderr and the wait continues to the grace - a slower correct
+answer, never a green. A present-but-red `tests` run is exit 1, not exit 4:
+the conclusion is judged before the set is.
+
 Unlike `ci_watch.py` it
 PINS the SHA it is given instead of re-resolving the branch head each poll:
 a push landing mid-wait must not turn the answer into one about a commit the
 caller never asked about. Zero runs on the SHA is waiting, not success. Run
-`--once` before a long wait.
+`--once` before a long wait - it prints `state: incomplete` for a head whose
+gate is not dispatched yet, and still exits 0, because a trial call is not a
+verdict.
 
 **A pull request has three comment surfaces, and a review is not a comment:**
 `pulls/<N>/reviews`, `pulls/<N>/comments` (inline) and `issues/<N>/comments`
