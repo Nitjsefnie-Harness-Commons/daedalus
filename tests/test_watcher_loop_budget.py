@@ -132,6 +132,7 @@ def _requests_at(log):
     the cancellation is still writing to that path and the fake is no
     longer the thing naming it.
     """
+    # `_entries` is private to another branch's file, and skips a KeyError.
     if not log.exists():
         return []
     found = []
@@ -152,8 +153,9 @@ def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
     trial reads - the window in which a shared log let a survivor into
     the figure the trial reports. The stand-in is a real process, joined
     before the trial starts, so the append is ordered rather than timed.
-    The last line states the property the figure rests on: the trial
-    read a log the stand-in had no path to.
+    `len(ran) == 1` is the line that carries the property, given the
+    stand-in's entry is on the old log; the last line states that the
+    two paths differ.
     """
     here = Path(tmp) / 'late'
     here.mkdir(parents=True, exist_ok=True)
@@ -170,6 +172,30 @@ def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
           f'beside the {len(late)} the cancelled log already held')
     assert len(ran) == 1, [call['request'][:80] for call in ran]
     assert fake.log != measured_log, (fake.log, measured_log)
+
+
+def test_two_measurements_on_one_fake_hand_out_different_logs(tmp):
+    """Two measurements on one fake hand out two different logs.
+
+    Two measurements on one fake that handed out the same path would put
+    the first measurement's calls in the second subject's log, which is
+    the defect this suite exists to keep out. The case measures twice on
+    one fake, because one measurement is satisfied by any path at all,
+    including the one `itertools.repeat(0)` hands out.
+    """
+    here = Path(tmp) / 'twice'
+    here.mkdir(parents=True, exist_ok=True)
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    script = once_run.SKILL / 'pr_comment_watch.py'
+    first = fake.log
+    once_run.measure(script, [PR], fake, TICK)
+    second = fake.log
+    once_run.measure(script, [PR], fake, TICK)
+    third = fake.log
+    print(f'\n  two measurements on one fake: {first.name}, {second.name}, '
+          f'{third.name}')
+    assert second != first, (first, second)
+    assert third != second, (second, third)
 
 
 def test_a_trial_of_a_watcher_that_names_its_boundary_is_refused(tmp):

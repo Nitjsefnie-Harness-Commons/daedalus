@@ -18,6 +18,11 @@ the same harness measures this tree's watchers and the base commit's. It is
 not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls live
 in tests/test_watcher_budget.py, which judges the idle bounds, and in
 tests/test_watcher_loop_budget.py, which judges the figure over a loop.
+
+`trial` leaves one path unprotected and no caller reaches it: a trial that
+hits its own timeout kills the watcher but not the `gh` children that watcher
+had already spawned, and those keep the log path `fake.env()` handed them,
+while every caller either hands `trial` a fresh fake or reads that log once.
 """
 import itertools
 import shutil
@@ -129,12 +134,12 @@ def polls_in(calls):
 def measure(script, args, fake, interval, polls=POLLS):
     """`(calls per poll, those polls' calls)`, read from the running loop.
 
-    The figure is read before the log is re-pointed, and re-pointing is
-    what the next subject is owed: the tree cancelled above still holds
-    this log, so anything in it that outlived the cancellation keeps
-    appending for as long as it runs, and the caller reads the next
-    subject's calls from the same place. A path that did not exist until
-    this moment is one no process of that tree has been given.
+    It also hands the next subject a call log of its own, so the figure
+    is read before the log is re-pointed: the tree cancelled above still
+    holds this log, so anything in it that outlived the cancellation
+    keeps appending for as long as it runs, and the caller reads the
+    next subject's calls from the same place. A path that did not exist
+    until this moment is one no process of that tree has been given.
     """
     child = Child(script, args + ['--interval', str(interval)], fake)
     try:
@@ -147,7 +152,6 @@ def measure(script, args, fake, interval, polls=POLLS):
     in_flight = windows[-1][0]
     per_poll = max(width for _, width in windows[:-1])
     seen = [call for call in fake.calls() if call.get('poll') != in_flight]
-    # The one attribute assigned from outside the class in this tree:
     # `_fake_gh.py` is another branch's, and handing out a log is its
     # whole contract. `env()` and `calls()` both read this at call time,
     # so the next subject writes and reads where it now points.
