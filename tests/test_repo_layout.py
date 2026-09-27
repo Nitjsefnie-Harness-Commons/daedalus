@@ -148,17 +148,17 @@ def _call_signature(node):
 def _site_signature(tree, line):
     """The call's own shape: its callee and the keywords it carries.
 
-    A line number is a position and this is the property — the control
-    keys an allowance on what the call IS, so an edit above it cannot
-    move a row onto a different launch. The keyword names ride along
-    because `process.wait(timeout=10)` and `process.wait()` are
-    different sites, and a positional timeout is not the same call
-    either.
+    The keyword names ride along because `process.wait(timeout=10)` and
+    `process.wait()` are different sites, and a positional timeout is not
+    the same call either. The tightest call whose own span holds the
+    line wins, and among those the RIGHTMOST, so a two-line launch
+    sharing its first line with a nested call is ordered the same way on
+    every run rather than by whichever node the traversal reached first.
 
-    The tightest call whose own span holds the line wins, then the
-    deepest one of those, so a two-line launch sharing its first line
-    with a nested call is ordered the same way on every run rather than
-    by whichever node the traversal reached first.
+    The line is the analyser's, and it reports the `ast.Call` it
+    examined, so some call always spans it: `_launch_audit.py` appends
+    `node.lineno` and no other. If that ever stops holding, this raises
+    rather than inventing a key for a site it did not find.
     """
     tightest = None
     tightest_rank = None
@@ -223,6 +223,39 @@ def _read_spelled(root, path, cache):
 def _row_text(key):
     """The key as the source that spells it, so a repair is a paste."""
     return '(' + ', '.join(repr(part) for part in key) + ')'
+
+
+def _row_defect(key, spelled):
+    """What a row the analyser did not compute gets wrong, or ''.
+
+    Every shape the table can be mistyped into is a sentence rather
+    than a raise, so a fixer who shortens a key, mistypes a path or
+    approximates a signature gets the answer used everywhere else.
+    """
+    if len(key) != 4:
+        return f'names {len(key)} components, not one site'
+    if not isinstance(key[0], str) or not (ROOT / key[0]).is_file():
+        return f'names {key[0]!r}, which is not a file in this tree'
+    named = _read_spelled(ROOT, key[0], spelled)
+    if key[2] not in named.get(key[1], set()):
+        return (f'{key[0]} spells no {key[2]!r} inside a {key[1]!r}, or '
+                'binds no such function')
+    return ''
+
+
+def _shifted_note(key, keyed):
+    """The rows a new call of this shape pushed onto a different site.
+
+    A bounded call inserted above baselined ones of the same shape
+    keeps every later ordinal where it was, so the rows below the new
+    ordinal now name the shifted sites — said here rather than left for
+    a fixer to infer.
+    """
+    moved = [row for row in keyed if row[:3] == key[:3] and row[3] < key[3]]
+    if not moved:
+        return ''
+    return ('; these rows now name a different site: '
+            + ', '.join(_row_text(row) for row in moved))
 
 
 def _bound_sites(source, here):
@@ -480,8 +513,15 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         for site in _bound_sites(source, path):
             live.setdefault(site[:4], []).append(site[4])
 
+    # Ordered by the rendered key rather than by the tuple, so a row of
+    # the wrong shape — a fixer's first draft is the old (path, line,
+    # function) — sorts beside the rest instead of raising where an int
+    # meets a str. A malformed row is reported below, not here.
+    rows = sorted(BOUNDED_GIT_LAUNCHES, key=_row_text)
+    keyed = [row for row in rows
+             if len(row) == 4 and isinstance(row[3], int)]
     unallowed = sorted(
-        f'{_row_text(key)} {sites}'
+        f'{_row_text(key)} {sites}{_shifted_note(key, keyed)}'
         for key, sites in live.items()
         if key not in BOUNDED_GIT_LAUNCHES)
     assert not unallowed, (
@@ -491,24 +531,24 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     # checked rather than asserted in prose: a (path,) key alone, the
     # loosest prefix the sentence forbids, would let one row stand for
     # every site in a module. The test for that is that a row's function
-    # and signature are the ones the file it names spells — a literal a
-    # fixer chose matches nothing, and the same check names the function
-    # the analyser read when the row's function is not one the file binds
-    # at all. The file is read here rather than in the walk above, so a
-    # row in a file the prefilter skips is still judged on what it says.
+    # and signature are the ones the file it names spells, that it names
+    # four of them, and that the file it names is one this tree has — a
+    # literal a fixer chose, a short key and a mistyped path all match
+    # nothing, and each is said in the same words. The file is read here
+    # rather than in the walk above, so a row in a file the prefilter
+    # skips is still judged on what it says.
     spelled = {}
-    for key in sorted(BOUNDED_GIT_LAUNCHES):
-        named = _read_spelled(ROOT, key[0], spelled)
-        assert key[2] in named.get(key[1], set()), (
-            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} names no call: '
-            f'{key[0]} spells no {key[2]!r} inside a {key[1]!r}, or binds no '
-            'such function; the analyser computes both, so the key printed '
-            'in the failure above is the one to paste')
-    for key in sorted(BOUNDED_GIT_LAUNCHES):
+    for key in rows:
+        defect = _row_defect(key, spelled)
+        assert not defect, (
+            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} {defect}; the '
+            'analyser computes every component, so the key printed in the '
+            'failure above is the one to paste')
+    for key in rows:
         assert live.get(key), (
             f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live bounded '
             'git launch; a stale allowance is a refusal')
-    for key in sorted(BOUNDED_GIT_LAUNCHES):
+    for key in rows:
         count = len(live.get(key, ()))
         assert count == 1, (
             f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} matches {count} live '
@@ -686,6 +726,39 @@ def test_a_launch_key_separates_keywords_unpacks_and_repeats(tmp):
         '    process.wait(timeout=10)\n'
         '    process.wait(timeout=10)\n', 'probe/repeat.py')
     assert [row[3] for row in repeated] == [1, 2], repeated
+
+
+def test_a_mistyped_or_moved_allowance_row_is_named_not_raised(tmp):
+    """A row the analyser never computed is a sentence, never a raise.
+
+    A fixer's first draft after this rekey is the old (path, line,
+    function) row, so a short key, a path that does not resolve and a
+    guessed signature are shapes this control must answer in its own
+    words rather than with a traceback — and ordering the table by the
+    tuple raises on that first draft, an int meeting a str. A new call
+    of a shape that already has rows also leaves those rows naming other
+    sites, which the unplaced message now says.
+    """
+    del tmp
+    real = ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1)
+    spelled = {}
+    assert _row_defect(real, spelled) == '', real
+    for key, expected in (
+            (('tests/_drain.py',), 'names 1 components'),
+            (('tests/_drain.py', 'kill_and_drain'), 'names 2 components'),
+            (('tests/_drin.py', 'kill_and_drain', 'process.wait', 1),
+             "'tests/_drin.py', which is not a file"),
+            (('tests/_drain.py', 'reap', 'process.wait(timeout)', 1),
+             'spells no'),
+            (('tests/_drain.py', 'kill_and_drain', 'process.wait(t=5)', 1),
+             'spells no')):
+        defect = _row_defect(key, spelled)
+        assert expected in defect, (key, defect)
+    old = ('run_tests.py', 52, '_terminate_and_reap')
+    assert [len(k) for k in sorted([old, real], key=_row_text)] == [3, 4]
+    moved = '; these rows now name a different site: ' + _row_text(real)
+    assert _shifted_note(real[:3] + (3,), [real]) == moved, real
+    assert _shifted_note(real, [real]) == '', real
 
 
 if __name__ == '__main__':
