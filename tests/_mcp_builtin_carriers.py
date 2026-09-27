@@ -33,23 +33,17 @@ _REBIND = '\n{name} = lambda v: None\n'
 # nothing, so a row that only declared it would measure a module still
 # holding the builtin.
 #
-# Four spellings, four literals, joined by concatenation rather than by a
-# substitution rule: a rule about the text of a binding is the same trick as
-# the enumeration these carriers replaced.
+# The four `after` sources below are TEST CASES, not a rule: the walk reads
+# none of them, and the spellings are the four of the nine CPython spells for
+# a binding that a `global` declaration hands to the module. A spelling
+# missing from this table costs a generated ROW, never a verdict — the walk
+# asks the resolver, which knows the rest.
+#
+# They are joined by concatenation rather than by a substitution rule over
+# the statement's text, because a rule about the text of a binding is the same
+# trick as the node-type enumeration the carriers replaced.
 _GLOBAL_HEAD = '\n\ndef _rebind():\n    global {name}\n    '
 _GLOBAL_TAIL = '\n\n_rebind()\n'
-
-_GLOBAL_STORES = (
-    ('a name rebound under a global declaration',
-     ' and rebound under a global', '{name} = lambda v: None'),
-    ('a name deleted under a global declaration',
-     ' and deleted under a global', 'del {name}'),
-    ('a name caught by an except clause under a global declaration',
-     ' and caught by an except under a global',
-     'try:\n        1 / 0\n    except Exception as {name}:\n        pass'),
-    ('a name imported under a global declaration',
-     ' and imported under a global', 'import os as {name}'),
-)
 
 # (the carrier's name, the step suffix, the source before the binding, the
 # source after it, and whether the name is REPLACED by the time it is read).
@@ -66,9 +60,20 @@ CARRIERS = (
      True),
     ('a binding under a condition the module may not take',
      ' under a condition', 'if g:\n    ', '', False),
-) + tuple((name, suffix, '',
-          _GLOBAL_HEAD + statement + _GLOBAL_TAIL, True)
-          for name, suffix, statement in _GLOBAL_STORES)
+    ('a name rebound under a global declaration',
+     ' and rebound under a global', '',
+     _GLOBAL_HEAD + '{name} = lambda v: None' + _GLOBAL_TAIL, True),
+    ('a name deleted under a global declaration',
+     ' and deleted under a global', '',
+     _GLOBAL_HEAD + 'del {name}' + _GLOBAL_TAIL, True),
+    ('a name caught by an except clause under a global declaration',
+     ' and caught by an except under a global', '',
+     _GLOBAL_HEAD + 'try:\n        1 / 0\n    except Exception as {name}:'
+     '\n        pass' + _GLOBAL_TAIL, True),
+    ('a name imported under a global declaration',
+     ' and imported under a global', '',
+     _GLOBAL_HEAD + 'import os as {name}' + _GLOBAL_TAIL, True),
+)
 
 # What the builder cannot emit, and why. Every one is held by a hand case in
 # `test_mcp_builtin_names.py`, which runs them.
