@@ -246,10 +246,9 @@ def _remove_temp(path):
 def publish(path, payload):
     """Atomically replace ``path`` with ``payload``, a bytes object.
 
-    The destination's own mode is carried across, a new one keeps
-    mkstemp's restrictive default, and a publication that raises leaves
-    the destination and the directory as they were: the temporary file is
-    removed and the committed document is never truncated in place.
+    A publication that raises leaves the destination and the directory as
+    they were: the temporary is removed and the committed document is
+    never truncated in place.
     """
     target = Path(path)
     mode = None

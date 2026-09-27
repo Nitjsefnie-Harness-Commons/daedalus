@@ -377,13 +377,11 @@ def test_a_noop_tighten_writes_nothing(tmp):
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
     """The artifact is replaced or left whole, never truncated in place.
 
-    The three sibling ratchets publish through `thresholds.py`'s
-    temp-plus-`os.replace`; this generator used `write_bytes`, so a
+    The sibling ratchets publish through `thresholds.py`'s
+    temp-plus-`os.replace` and this generator used `write_bytes`, so a
     `--tighten` killed between the open and the close left a committed
     document cut in half. The plant is a real destination and a real
-    `main` call with the publish step refusing, so a pass is the shape
-    agreeing with the runtime rather than a fixture agreeing with
-    itself, and the temporary it would have left is checked for too.
+    `main` call, not a fixture agreeing with itself.
     """
     policy = _contract()
     import thresholds  # the contract put scripts/ci on the path

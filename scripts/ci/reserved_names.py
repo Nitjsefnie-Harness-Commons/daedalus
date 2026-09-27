@@ -193,8 +193,7 @@ def main(argv=None):
                 return 0
             args.artifact.parent.mkdir(parents=True, exist_ok=True)
             # The sibling ratchets publish through `thresholds`, so a
-            # `--tighten` killed part way through cannot truncate a
-            # committed document: the reader already knows the shape.
+            # `--tighten` killed part way through truncates nothing.
             import thresholds
             thresholds.publish(args.artifact, payload)
             print(f'tightened the reserved set: {len(derived["names"])} names')
