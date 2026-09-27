@@ -117,8 +117,9 @@ def test_a_failure_nobody_re_ran_is_still_unacceptable(tmp):
     """The other limb, and the one a filter that dropped unconditionally
     would empty: supersession is what takes a run out of the judged set, so
     a failure with no newer run of its own workflow is still an offender.
-    With the newest-run filter replaced by `runs[:1]` or by an empty set,
-    every red head reads as a wait."""
+    A filter replaced by `runs[:1]` would pass this fixture too - it is one
+    run, which `runs[:1]` keeps - so what is pinned here is the single-run
+    verdict, and the filters it rules out are the ones that return nothing."""
     del tmp
     state, offenders = _verdict(
         [_run(1, 'failure', '2026-09-07T10:00:00Z', name='tests')])
@@ -167,7 +168,12 @@ def test_a_start_time_beats_a_creation_time_that_disagrees(tmp):
     `run_started_at` does and the whole suite stays green - the preference
     could be deleted and nothing here would notice. Here the two runs are
     ordered one way by the instant each began and the other way by the
-    instant each was created, so only the preference says which is newest."""
+    instant each was created, so only the preference says which is newest.
+
+    A shape no run can carry: `_run_from_suites` sets `run_started_at` and
+    `created_at` to the same `createdAt`, so the preference and the `or`
+    fallback are unreachable from the producer. It is kept as a guard on
+    the code that reads the two keys, not as a description of a run."""
     del tmp
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
@@ -275,11 +281,9 @@ def test_the_zero_and_green_contracts_are_unchanged(tmp):
 
 
 def test_the_acceptable_line_names_the_failure_it_discarded(tmp):
-    """The cost the rule pays, and what pays it back. A superseded failure
-    is real evidence - an intermittent failure on the very merge ref the
-    newer run cleared - so a caller handed a green it cannot audit is
-    exactly what the naming refuses. Every run the filter dropped is named
-    with its workflow, its run id, its conclusion and its URL."""
+    """Every run the filter dropped is named with its workflow, its run id,
+    its conclusion and its URL. The rationale for naming them is ci_wait's
+    module docstring; what is pinned here is the four fields."""
     del tmp
     mod = _ci_wait()
     runs = [
