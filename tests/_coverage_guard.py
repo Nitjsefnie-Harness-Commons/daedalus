@@ -21,10 +21,9 @@ callee would invoke it is not answerable from syntax, so the rule does
 not pretend to know, and a launcher handed to a callee that only
 compares it or looks it up is refused along with one handed to a callee
 that runs it. That costs nothing today: of the call sites in this tree,
-none carries a launcher in an argument or a container receiver, and
-exactly one carries a bare module name — the module-versus-launcher split
-below, the one distinction here that is about the value rather than a
-name.
+none carries a launcher in an argument or a container receiver, and exactly
+one carries a bare module name — the module-versus-launcher split in the list
+below, the one distinction here about the value rather than a name.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`), an owner or chdir
@@ -44,9 +43,8 @@ Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
 
 It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
-One form in that second list is opened on a condition, stated beside the walk
-it qualifies in `tests/_coverage_bindings.py`: an attribute naming a launch
-method is a launcher read, not a constant read.
+One form in that second list is opened on a condition, stated once in
+`_carried_parts.__doc__` beside the walk it qualifies, and nowhere else.
 
 A form in neither class is refused rather than read as clean, so a Python that
 adds one fails closed instead.
@@ -56,9 +54,9 @@ node their `generators` hold, and not through their own iterable, which
 `_bound_values` judges as the comprehension arm's own business.
 
 The descent that walks a callee hands the walk every subscript the descent
-consumes, index and bounds included. It hands over an attribute naming a
-launch method only while everything the descent has consumed above it names
-one too, and never the call's own outermost callee.
+consumes, index and bounds included. It hands over an attribute the walk opens
+only while everything the descent has consumed above it is one too, and never
+the call's own outermost callee.
 
 A target binds names rather than carrying them. A subscript's index is not
 exempt, so `d[subprocess]` binds a launcher and `d[key]` does not.

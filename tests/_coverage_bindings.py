@@ -213,13 +213,17 @@ def _carried_parts(value):
 
     It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
-    One form in that second list is opened on a condition. An `Attribute`
-    whose `attr` names a launch method is a launcher read rather than a
-    constant read, so the walk yields it and descends into the receiver it
-    is read off; every other attribute is a constant read and stays the
-    atom it is. Without that descent `d[subprocess].run` and
-    `subprocess.run.__call__` are two names the predicates judge and find
-    nothing, and the launcher behind either is invisible.
+    One form in that second list is opened on a condition, and this
+    paragraph is the only place that condition is written down. An
+    `Attribute` whose `attr` is in `_LAUNCH_READS` is a launcher read
+    rather than a constant read, so the walk yields it and descends into
+    the receiver it is read off, and an attribute outside that set is a
+    constant read and stays the atom it is. Naming the set rather than
+    the attributes in it is what keeps the sentence true when the set
+    changes, and every other site refers here instead of restating it.
+    Without the descent `d[subprocess].run` and `subprocess.run.__call__`
+    are two names the predicates judge and find nothing, and the launcher
+    behind either is invisible.
 
     A form in neither class is refused rather than read as clean, so a
     Python that adds one fails closed instead.
@@ -317,18 +321,19 @@ def _call_receiver_parts(value):
     and refuse a direct launch.
 
     An attribute the descent consumes is handed over on the same rule as
-    a subscript and for the same reason: naming a launch method is a read
-    off what the chain has already reached, and that read is invisible
-    while the chain swallows it. Two conditions hold it back. The call's
-    own outermost callee, because that one is a direct launch, already
-    resolved, and the arm above judges it; and any item above it that does
-    not itself name a launch method, because the method below that is
-    bound to whatever the item evaluates to — a string, a mapping, a type
-    or a tuple — and nothing here tells those apart. So `subprocess.run`
-    and `subprocess.run.__call__(...)` are handed over, and
+    a subscript and for the same reason: one the walk opens is a read off
+    what the chain has already reached, and that read is invisible while
+    the chain swallows it. Two conditions hold it back. The call's own
+    outermost callee, because that one is a direct launch, already
+    resolved, and the arm above judges it; and any item above it that the
+    walk does not open, because the method below that is bound to whatever
+    the item evaluates to — a string, a mapping, a type or a tuple — and
+    nothing here tells those apart. So `subprocess.run` and
+    `subprocess.run.__call__(...)` are handed over, and
     `subprocess.run.__name__.upper()` and `subprocess.run[k].run(...)`
     are not, and the subscript is in the second pair for the same reason
-    the constant is.
+    the constant is. Which attributes the walk opens is stated once, in
+    `_carried_parts.__doc__`.
     """
     callee = value.func
     # A launch method is read off the launcher only while everything above
