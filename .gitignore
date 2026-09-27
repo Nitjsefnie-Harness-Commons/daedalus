@@ -708,6 +708,7 @@
 !/tests/test_tab_routing_negative_stores.py
 !/tests/test_tab_routing_performance.py
 !/tests/test_tab_routing_positions.py
+!/tests/test_tab_routing_receivers.py
 !/tests/test_tab_routing_sequence_reads.py
 !/tests/test_tab_routing_set_operations.py
 !/tests/test_tab_routing_setdefault.py

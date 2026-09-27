@@ -211,6 +211,8 @@ class DeferredClass:
     """Methods belonging to one statically known class object."""
 
     methods: dict
+    identity: object = field(default_factory=object, compare=False,
+                             repr=False)
 
 
 @dataclass(frozen=True)
@@ -610,6 +612,11 @@ def expression_callables(node, state):
 
 def follow_callable_call(candidates, arguments, states, call, analyze,
                          copy_states, dedupe_states):
+    # A mapping method runs on the container its receiver names, so a
+    # deferred callable the callee merely mentions is not what is called.
+    if states and all(mapping_lookup_owner(call, state) is not None
+                      for state in states):
+        return states, None
     returned = []
     if candidates:
         invoked = []
@@ -619,9 +626,6 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
             if value is not None:
                 returned.append(value)
         return dedupe_states(invoked), merge_yielded(returned)
-    if states and all(mapping_lookup_owner(call, state) is not None
-                      for state in states):
-        return states, None
     callbacks = {id(candidate): candidate
                  for argument in arguments for state in states
                  for candidate in expression_callables(argument, state)}

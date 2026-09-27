@@ -158,7 +158,8 @@ def _dict_call_value(node, state):
 
 def _setdefault_value(node, state):
     """The stored-or-existing item one setdefault call evaluates to."""
-    owner = _known_value(node.func.value, state)
+    owner = _known_value(node.func.value, state) \
+        or _receiver_value(node.func.value, state)
     key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     if (not isinstance(owner, DeferredContainer)
@@ -255,7 +256,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if is_deferred_value(value) or sender_value(value) is not None:
             return SpreadContainer({DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
-        owner = _known_value(node.value, state)
+        owner = _known_value(node.value, state) \
+            or _receiver_value(node.value, state)
         value = static_slice_read(node, owner)
         if value is not None:
             return value
@@ -278,7 +280,8 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if isinstance(node.op, ast.BitOr):
             return _merge_or_value(node, state)
     if isinstance(node, ast.Attribute):
-        owner = _known_value(node.value, state)
+        owner = _known_value(node.value, state) \
+            or _receiver_value(node.value, state)
         value = merge_yielded(
             _selected_values(owner, node.attr, attribute=True))
         if value is not None:
@@ -296,8 +299,7 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if value is not None:
             return value
         if (isinstance(node.func, ast.Attribute)
-                and node.func.attr == 'setdefault'
-                and isinstance(node.func.value, ast.Name)):
+                and node.func.attr == 'setdefault'):
             return _setdefault_value(node, state)
         owner = mapping_lookup_owner(node, state)
         if owner is not None:
