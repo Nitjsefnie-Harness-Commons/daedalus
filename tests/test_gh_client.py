@@ -542,10 +542,17 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     del tmp
     mod = _client()
     out = io.StringIO()
-    reset = int(time.time()) + 5
+    # One reading of the real clock supplies both the instant the client
+    # sees and the reset it is asked to name, so the delay the pause
+    # computes is a value this test chose. A reset stamped from a reading
+    # of its own would be nameable only while the wall clock stayed inside
+    # a window opened a moment earlier.
+    now = float(int(time.time()))
+    reset = now + 5
     clock = _Clock([mod.RateLimited('rate limited', reset)])
     watcher = mod.Watcher('PR 1 watcher', out=out)
-    assert watcher.poll(clock) == 'answered'
+    with _frozen_client_clock(mod, now):
+        assert watcher.poll(clock) == 'answered'
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
     assert 'rate limit' in lines[0]
