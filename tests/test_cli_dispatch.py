@@ -72,7 +72,7 @@ def _ask(space):
     space.api('GET', '/tabs')
 
 
-def _store(space):
+def _store_hotfix(space):
     # 30, not the 10 the signature defaults to: a recorder reporting a
     # hardcoded 10 would agree with a control that never chooses a deadline.
     space.ext_cmd('_store_hf', 'store-hotfix', 30, fixId='fx')
@@ -148,7 +148,7 @@ def test_a_planned_request_that_arrives_is_accepted(tmp):
 def test_a_planned_ext_cmd_that_arrives_is_accepted(tmp):
     """The plan speaks the ext_cmd shape too, fields and timeout included."""
     del tmp
-    recorded = drive(_store, [{}], [STORE])
+    recorded = drive(_store_hotfix, [{}], [STORE])
 
     assert recorded.calls == [
         ('_store_hf', 'store-hotfix', {'fixId': 'fx'})], recorded.calls
