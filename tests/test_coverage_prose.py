@@ -36,15 +36,31 @@ shipped module the coverage report never sees.
 The scan reads DIGIT FORM, and its exemptions are by SHAPE rather than by
 example, so the shapes are what is written down here: a figure written in
 words, a run that touches a letter or an underscore, a run carrying its own
-dot, and a run a hyphen runs into either side. Only the first of those four
-is outside what it sees. The other three it reads and then lets past, which
-is a weaker promise than invisibility and the honest one to make -- so
+dot, and a run joined to a word by a hyphen in EITHER direction -- `SHA-256`
+before the run, `N-line` after it. Only the first of those four never reaches
+the scan as a run at all; the other three it reads and then lets past, which
+is a weaker promise than invisibility and the honest one to make. So
 `3.5 seconds` is as unchecked as `SHA-256`, and a maintainer must not read
-the familiar-looking second one as the boundary. The case docstring repeats
-this rather than claiming completeness the scan does not have. This is
-deliberate: the alternative is a natural-language parser, and a prose gate is
-worth more when its own limits are written down than when it pretends to have
-none.
+the familiar-looking one as the boundary.
+
+The hyphen exemption is load-bearing rather than tidiness. An un-exempted
+`V8` or `NODE_V8_COVERAGE` would be read as a figure at a position this
+paragraph does not claim, and refused, which is a false positive on prose
+the repository ships. The price is that a figure joined to a word by a
+hyphen is admitted WHATEVER it is, in either direction, and the position
+rule cannot catch it, because the scan never gets that far. The concrete
+residual is a spelling: the tree-wide total written `4945-line` is the one
+spelling of the figure this branch exists to refuse that this suite passes,
+and every other spelling of it is refused. Naming it is the point -- "some
+figures are not read" is a limit nobody can act on, and `4945-line` is one a
+future editor can avoid. The shipped paragraph contains no hyphen-joined
+figure at all, so nothing anyone reads today rests on which of the two
+readings applies.
+
+The case docstring repeats this rather than claiming completeness the scan
+does not have. This is deliberate: the alternative is a natural-language
+parser, and a prose gate is worth more when its own limits are written down
+than when it pretends to have none.
 
 The population is `js_coverage.tracked_sources` rather than a second copy of
 its rule, so this suite cannot drift from the definition it checks against:
