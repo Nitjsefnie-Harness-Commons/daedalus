@@ -528,6 +528,16 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     on, so a binding written between the parentheses is below that line
     and is still what the call runs.
 
+    Binding forms the scan READS: `=`, `+=`, an annotated `=`, a
+    walrus, a `for`/`in` target, a match capture, `append` and
+    `extend`. A `for` target binds the iterated expression and a match
+    capture binds the whole match subject, both over-approximations of
+    the value they will really hold, and both fail toward finding a
+    launch rather than past one. The list is read off this docstring by
+    `tests/test_sweep_launch_scan.py`, which slices the two lists apart
+    on these two headings and fails if they overlap, so the heading is
+    part of the contract and not only the words under it.
+
     Binding forms it does NOT read: `with ... as`, `except ... as`,
     `except* ... as`, an `import` binding, a comprehension target, a
     parameter default, and any target that is not a bare name — a tuple
