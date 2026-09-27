@@ -26,12 +26,21 @@ const UNPLANNED = [];
 
 // 599 rather than a throw: see the module docstring. `api.js` reads
 // `statusText` only on the objectUrl path and `error` off the body on
-// the rest, so both spellings name the refusal to the caller.
+// the rest, so both spellings name the refusal to the caller. The header
+// bag is keyed, so a module reaching for a name this transport does not
+// model fails by name rather than reading `application/json` off it --
+// the same rule `_dashshell` follows and the same one it was corrected
+// on for answering `text/event-stream` to anything (2026-08-26).
 function refuse(target) {
   UNPLANNED.push(String(target));
   return {
     ok: false, status: 599, statusText: 'unplanned request',
-    headers: { get: () => 'application/json' },
+    headers: { get: (name) => {
+      if (String(name).toLowerCase() !== 'content-type') {
+        throw new Error('response header not modelled: ' + String(name));
+      }
+      return 'application/json';
+    } },
     json: async () => ({ error: 'unplanned request' }),
     text: async () => 'unplanned request',
     blob: async () => ({}),

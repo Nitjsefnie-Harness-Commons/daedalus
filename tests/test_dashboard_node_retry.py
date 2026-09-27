@@ -11,8 +11,8 @@ from unittest.mock import Mock, call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
-from test_dashboard_behaviour import (  # noqa: E402
-    _controlled_run, _result, _timeout)
+from _dashnode_retry_control import (  # noqa: E402
+    _controlled_run, _outcome, _timeout)
 
 
 # A child idling behind a bound spends milliseconds on timer wakeups, while
@@ -224,7 +224,7 @@ def test_non_windows_declines_even_when_close_and_reap_settle(tmp):
     failure, events, _ = _controlled_run(
         'linux', (2201, [_timeout(), _timeout('partial', 'error')],
                   {'wait_succeeds': True}),
-        (2202, [_result(0, 'wrong retry')]))
+        (2202, [_outcome(0, 'wrong retry')]))
     launches = [event[0] for event in events].count('popen')
     assert launches == 1, (failure, events)
     assert failure.startswith(
@@ -238,7 +238,7 @@ def test_windows_declined_retry_is_named_in_the_verdict(tmp):
     failure, events, _ = _controlled_run(
         'win32', (1101, [_timeout(),
                          _timeout('partial', 'error')]),
-        (1102, [_result(0, 'wrong retry')]))
+        (1102, [_outcome(0, 'wrong retry')]))
     assert failure.startswith(
         'dashboard node outer timeout after 1 attempt\n'
         "retry declined: the first child's reader cleanup did not finish "
@@ -255,7 +255,7 @@ def test_windows_declined_retry_names_a_drain_that_raised(tmp):
 
     failure, events, _ = _controlled_run(
         'win32', (1201, [_timeout(), raise_drain]),
-        (1202, [_result(0, 'wrong retry')]))
+        (1202, [_outcome(0, 'wrong retry')]))
     expected = (
         "retry declined: the first child's reader cleanup did not finish "
         '(drain outcome: raised RuntimeError: drain reader gone)\n')
@@ -273,7 +273,7 @@ def test_windows_retries_when_drain_raised_but_cleanup_settled(tmp):
 
     result, events, _ = _controlled_run(
         'win32', (2301, [_timeout(), raise_drain], {'wait_succeeds': True}),
-        (2302, [_result(0, 'recovered')]))
+        (2302, [_outcome(0, 'recovered')]))
     launches = [event[0] for event in events].count('popen')
     assert launches == 2, (result, events)
     assert result.stdout == 'recovered', result
@@ -282,8 +282,8 @@ def test_windows_retries_when_drain_raised_but_cleanup_settled(tmp):
 def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
     del tmp
     failure, events, _ = _controlled_run(
-        'linux', (1301, [_timeout(), _result(-9)]),
-        (1302, [_timeout(), _result(-9)]))
+        'linux', (1301, [_timeout(), _outcome(-9)]),
+        (1302, [_timeout(), _outcome(-9)]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'attempt 1:' in failure and 'pid: 1301' in failure, failure
@@ -294,8 +294,8 @@ def test_non_windows_verdict_does_not_name_a_declined_retry(tmp):
 def test_both_attempts_verdict_does_not_name_a_declined_retry(tmp):
     del tmp
     failure, events, _ = _controlled_run(
-        'win32', (1401, [_timeout(), _result(-9, 'one')]),
-        (1402, [_timeout(), _result(-9, 'two')]))
+        'win32', (1401, [_timeout(), _outcome(-9, 'one')]),
+        (1402, [_timeout(), _outcome(-9, 'two')]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
     assert 'retry declined' not in failure, failure
@@ -306,8 +306,8 @@ def test_non_windows_retries_one_silent_stall_then_returns_success(tmp):
     del tmp
     result, events, diagnostic = _controlled_run(
         'linux', (1501, [_timeout(),
-                         _result(-9, 'first', 'error')]),
-        (1502, [_result(0, 'second success', 'second stderr')]))
+                         _outcome(-9, 'first', 'error')]),
+        (1502, [_outcome(0, 'second success', 'second stderr')]))
     assert [event[:2] for event in events] == [
         ('popen', 1501), ('communicate', 1501), ('kill', 1501),
         ('communicate', 1501), ('popen', 1502), ('communicate', 1502)], events
@@ -322,7 +322,7 @@ def test_clean_run_writes_no_recovery_diagnostic(tmp):
     """A first-attempt success never announces that a retry recovered."""
     del tmp
     result, events, diagnostic = _controlled_run(
-        'linux', (1701, [_result(0, 'ok')]))
+        'linux', (1701, [_outcome(0, 'ok')]))
     assert diagnostic == '', diagnostic
     assert result.stdout == 'ok', result
     assert [event[:2] for event in events] == [
@@ -334,7 +334,7 @@ def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
     failure, events, _ = _controlled_run(
         'linux', (1601, [_timeout(), _timeout(
             'partial', 'error')]),
-        (1602, [_result(0, 'wrong retry')]))
+        (1602, [_outcome(0, 'wrong retry')]))
     assert failure.startswith(
         'dashboard node outer timeout after 1 attempt\n'
         'retry declined: the post-kill drain did not complete '
@@ -346,7 +346,7 @@ def test_non_windows_declined_retry_is_named_in_the_verdict(tmp):
 def test_last_attempt_decline_does_not_name_a_retry_left_to_decline(tmp):
     del tmp
     failure, events, _ = _controlled_run(
-        'linux', (2101, [_timeout(), _result(-9)]),
+        'linux', (2101, [_timeout(), _outcome(-9)]),
         (2102, [_timeout(), _timeout('partial', 'err')]))
     assert failure.startswith(
         'dashboard node outer timeout after 2 attempts\n'), failure
@@ -361,11 +361,11 @@ def test_windows_preserves_only_completed_cpython_reader_buffers(tmp):
     failure, events, _ = _controlled_run(
         'win32', (1001, [
             _timeout(None, b'early error\n'), _timeout(None, None)], {
-                'wait_succeeds': True,
-                'reader_buffers': {
+                'wait_succeeds': True, 'reader_buffers': {
                     'stdout': 'prefix middle end',
                     'stderr': '[phase] buffered phase\nbuffered error',
-                }}), (1009, [_timeout(), _result(-9, 'second attempt')]))
+                }}),
+        (1009, [_timeout(), _outcome(-9, 'second attempt')]))
     launches = [event[0] for event in events].count('popen')
     assert launches == 2, (failure, events)
     assert "stdout: 'prefix middle end'" in failure, failure
@@ -426,7 +426,7 @@ def test_independent_output_sources_keep_repeated_boundary(tmp):
         _timeout(b'leftX'), _timeout(None, None)], {
             'wait_succeeds': True,
             'reader_buffers': {'stdout': 'Xright', 'stderr': ''}}), (1009, [
-                _timeout(), _result(-9, 'second attempt')]))
+                _timeout(), _outcome(-9, 'second attempt')]))
     launches = [event[0] for event in events].count('popen')
     assert launches == 2, (failure, events)
     assert "stdout: 'leftXXright'; stderr: ''" in failure, failure

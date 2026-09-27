@@ -14,10 +14,12 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
+import _dashpager  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
@@ -34,14 +36,18 @@ const listing = { total: 2, items: [
   { id: 'up1', filename: 'shot.png', size: 4, mtime: 2,
     path: token + '/up1/shot.png' },
 ] };
+// The two targets this scenario can name, built the way the module
+// builds them: the listing is the one page it asks for, and each file
+// selector is the listed row's own id and filename.
+const LISTING = '/upload?limit=50&offset=0';
+const FILES = new Set(listing.items.map(
+  (f) => '/upload?path=' + encodeURIComponent(f.id + '/' + f.filename)));
 globalThis.fetch = async (target, init) => {
   const headers = (init && init.headers) || {};
   const where = String(target);
   fetched.push({ target: where, auth: headers.Authorization || '' });
-  if (where.startsWith('/upload?limit=')) {
-    return jsonResponse(listing);
-  }
-  if (where.startsWith('/upload?path=')) {
+  if (where === LISTING) return jsonResponse(listing);
+  if (FILES.has(where)) {
     return {
       ok: true, status: 200,
       headers: { get: () => 'application/octet-stream' },
@@ -102,6 +108,10 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
     each of them to carry that object URL rather than a web URL."""
     result = _dashnode.run_dashboard_node(_UPLOADS_HARNESS)
     seen = json.loads(result.stdout)
+    # Every faked route below is an EXACT target the scenario names --
+    # a listing page, a listed row's own selector, a minted capture path
+    # -- never a prefix, so an empty record is a claim that the module
+    # asked for nothing outside them.
     assert seen['unplanned'] == [], seen
     token = 'dashboard-token'
     hrefs = seen['rendered'] + [
@@ -142,16 +152,17 @@ const listing = { total: 1, items: [
   { id: 'up1', filename: 'a.txt', size: 1, mtime: 1,
     path: token + '/up1/a.txt' },
 ] };
+// One listing page and one file selector: both are named by the
+// scenario, and the file selector is the listed row's own id and
+// filename the way the module builds it.
+const LISTING = '/upload?limit=50&offset=0';
+const FILE = '/upload?path=' + encodeURIComponent('up1/a.txt');
 globalThis.fetch = (target, init) => {
   const headers = (init && init.headers) || {};
   const where = String(target);
   fetched.push({ target: where, auth: headers.Authorization || '' });
-  if (where.startsWith('/upload?limit=')) {
-    return Promise.resolve(jsonResponse(listing));
-  }
-  if (!where.startsWith('/upload?path=')) {
-    return Promise.resolve(refuse(where));
-  }
+  if (where === LISTING) return Promise.resolve(jsonResponse(listing));
+  if (where !== FILE) return Promise.resolve(refuse(where));
   return new Promise((resolve, reject) => {
     deferred.push({ target: where, resolve, reject });
   });
@@ -240,9 +251,11 @@ const listing = { total: 1, items: [
     path: token + '/up1/a.txt' },
 ] };
 let listingFails = false;
+const LISTING = '/upload?limit=50&offset=0';
+const FILE = '/upload?path=' + encodeURIComponent('up1/a.txt');
 globalThis.fetch = async (target) => {
   const where = String(target);
-  if (where.startsWith('/upload?limit=')) {
+  if (where === LISTING) {
     if (listingFails) {
       return {
         ok: false, status: 500,
@@ -253,7 +266,7 @@ globalThis.fetch = async (target) => {
     }
     return jsonResponse(listing);
   }
-  if (where.startsWith('/upload?path=')) {
+  if (where === FILE) {
     return {
       ok: true, status: 200,
       headers: { get: () => 'application/octet-stream' },
@@ -312,86 +325,8 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
     assert seen['revoked'] == ['blob:held-1', 'blob:held-2'], seen
 
 
-# An armed delete fires on its second click only while its confirm timer is
-# still pending, and the DOM above runs setTimeout immediately, so the pager
-# harnesses park that timer in a queue the harness never runs.
-_PAGER_PREFIX = _DOM + r"""
-const timers = [];
-globalThis.setTimeout = (callback) => {
-  timers.push(callback);
-  return timers.length;
-};
-globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
-"""
-
-_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(
-    _PAGER_PREFIX + _dashfetch.DOOR + r"""
-(async () => {
-const fetched = [];
-const metaSnapshots = [];
-let total = 51;
-const file = (n) => ({ id: 'up' + n, filename: 'f' + n + '.txt', size: 1,
-  mtime: 1, path: token + '/up' + n + '/f' + n + '.txt' });
-globalThis.fetch = async (target, init) => {
-  const where = String(target);
-  if (where.startsWith('/upload?limit=')) {
-    fetched.push(where);
-    // Whatever the previous round-trip painted is on screen when the next
-    // request goes out, so each listing fetch records the frame it saw.
-    metaSnapshots.push(container.find('[data-role=meta]').textContent);
-    const query = new URLSearchParams(where.split('?')[1]);
-    const offset = Number(query.get('offset'));
-    const items = [];
-    for (let n = offset + 1; n <= offset + 50 && n <= total; n++) {
-      items.push(file(n));
-    }
-    return jsonResponse({ total, items });
-  }
-  if (where === '/upload' && init && init.method === 'DELETE') {
-    total = 50;
-    return jsonResponse({});
-  }
-  return refuse(where);
-};
-phase('dashboard module import started');
-const { mount } = await bounded(
-  import(pathToFileURL(process.argv[1]).href),
-  'dashboard module import', _dashnodeStepTimeoutMs,
-);
-phase('dashboard module imported');
-phase('dashboard call started');
-const container = new El('div');
-mount(container);
-await bounded(settle(), 'first listing render', _dashnodeStepTimeoutMs);
-const metaEl = container.find('[data-role=meta]');
-const prevBtn = container.find('[data-role=prev]');
-const nextBtn = container.find('[data-role=next]');
-const pagerState = () => ({
-  meta: metaEl.textContent,
-  prevDisabled: prevBtn.disabled,
-  nextDisabled: nextBtn.disabled,
-  rows: container.all().filter((el) => el.tag === 'tr').length - 1,
-});
-const firstPage = pagerState();
-nextBtn.click();
-await bounded(settle(), 'last page render', _dashnodeStepTimeoutMs);
-const lastPage = pagerState();
-const delBtn = container.byText('delete');
-delBtn.click();
-delBtn.click();
-await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
-const afterDelete = pagerState();
-phase('dashboard call settled');
-process.stdout.write(JSON.stringify({
-  firstPage, lastPage, afterDelete, listingTargets: fetched, metaSnapshots,
-  unplanned: UNPLANNED,
-}));
-phase('dashboard harness finished');
-})().catch(leave);
-    """, bounded_steps=4, module=True, arguments=(
-        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
-
-
+# The two pager cases live in `tests/_dashpager.py`; the ceiling this
+# file was pushed past by the refusal door put the harnesses there.
 def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     """The issue's reproduction: the last page shows 51–51 / 51, the
     last-page file is deleted, and the pager must land on the last valid
@@ -399,8 +334,9 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     from a page the listing no longer has. The mid-list page is pinned
     with its exact range end, and the over-range frame must not exist
     even transiently between the listing round-trips."""
-    result = _dashnode.run_dashboard_node(_PAGER_CLAMP_HARNESS)
+    result = _dashnode.run_dashboard_node(_dashpager._PAGER_CLAMP_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     assert seen['unplanned'] == [], seen
     assert seen['firstPage'] == {
         'meta': '1–50 / 51', 'prevDisabled': True, 'nextDisabled': False,
@@ -418,63 +354,14 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
         '', '1–50 / 51', '51–51 / 51', '51–51 / 51'], seen['metaSnapshots']
 
 
-_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(
-    _PAGER_PREFIX + _dashfetch.DOOR + r"""
-(async () => {
-const fetched = [];
-let total = 1;
-globalThis.fetch = async (target, init) => {
-  const where = String(target);
-  if (where.startsWith('/upload?limit=')) {
-    fetched.push(where);
-    return jsonResponse({ total,
-      items: total ? [{ id: 'up1', filename: 'a.txt', size: 1, mtime: 1,
-        path: token + '/up1/a.txt' }] : [] });
-  }
-  if (where === '/upload' && init && init.method === 'DELETE') {
-    total = 0;
-    return jsonResponse({});
-  }
-  return refuse(where);
-};
-phase('dashboard module import started');
-const { mount } = await bounded(
-  import(pathToFileURL(process.argv[1]).href),
-  'dashboard module import', _dashnodeStepTimeoutMs,
-);
-phase('dashboard module imported');
-phase('dashboard call started');
-const container = new El('div');
-mount(container);
-await bounded(settle(), 'listing with one row render', _dashnodeStepTimeoutMs);
-const metaEl = container.find('[data-role=meta]');
-const listEl = container.find('[data-role=list]');
-const prevBtn = container.find('[data-role=prev]');
-const nextBtn = container.find('[data-role=next]');
-const oneRow = { meta: metaEl.textContent, list: listEl.textContent,
-  prevDisabled: prevBtn.disabled, nextDisabled: nextBtn.disabled };
-const delBtn = container.byText('delete');
-delBtn.click();
-delBtn.click();
-await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
-const afterEmpty = { meta: metaEl.textContent, list: listEl.textContent,
-  prevDisabled: prevBtn.disabled, nextDisabled: nextBtn.disabled };
-phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ oneRow, afterEmpty,
-  unplanned: UNPLANNED }));
-phase('dashboard harness finished');
-})().catch(leave);
-    """, bounded_steps=3, module=True, arguments=(
-        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
-
-
 def test_an_emptied_list_reads_zero_slash_zero(_tmp):
     """A list with no rows cannot start at row 1: the header reads 0 / 0,
     the list says there are no uploads rather than no matches, and both
     pager buttons are out of the picture — a clamped-away offset that
     went negative would leave prev enabled over an impossible page."""
-    result = _dashnode.run_dashboard_node(_PAGER_EMPTY_HARNESS)
+    result = _dashnode.run_dashboard_node(_dashpager._PAGER_EMPTY_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     assert seen['unplanned'] == [], seen
     assert seen['oneRow']['meta'] == '1–1 / 1', seen
     assert seen['oneRow']['prevDisabled'] is True, seen
@@ -487,24 +374,35 @@ def test_an_emptied_list_reads_zero_slash_zero(_tmp):
 _CAPTURE_HARNESS = _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const commands = [];
-const imageTargets = [];
 const uploads = [];
+// Every target this scenario can name, and none of them a shape. The
+// section asks for one listing page (its pager is never clicked), the
+// command and both result legs carry the id and generation this fake
+// itself just handed out, and a thumbnail selector is the capture path
+// this fake minted. A target built any other way is one no scenario
+// planned.
+const LISTING = '/upload?limit=200&offset=0';
+const imageSelector = (path) => '/screenshot?path=' + encodeURIComponent(path);
+const PEEK = '/result?tab=extension';
 let envelope;
+// Every capture this fake minted is a thumbnail the scenario can name;
+// the section fetches the whole recent grid, not only the newest.
+const imageTargets = new Set();
+const thumbnailTargets = [];
+let consumeTarget = '';
 globalThis.fetch = async (target, init = {}) => {
-  if (target === '/tabs') {
+  const method = init.method || 'GET';
+  if (target === '/tabs' && method === 'GET') {
     return jsonResponse([
       { tabId: '11', title: 'first', url: '', age: 0 },
       { tabId: '22', title: 'second', url: '', age: 0 },
     ]);
   }
-  if (target.startsWith('/upload?')) {
-    const query = new URLSearchParams(target.split('?')[1]);
-    const limit = Number(query.get('limit'));
-    const offset = Number(query.get('offset'));
-    return jsonResponse({ items: uploads.slice(offset, offset + limit),
-      total: uploads.length, limit, offset });
+  if (target === LISTING && method === 'GET') {
+    return jsonResponse({ items: uploads.slice(), total: uploads.length,
+      limit: 200, offset: 0 });
   }
-  if (target === '/command') {
+  if (target === '/command' && method === 'PUT') {
     const command = JSON.parse(init.body);
     commands.push(command);
     envelope = {
@@ -514,16 +412,19 @@ globalThis.fetch = async (target, init = {}) => {
         + commands.length + '.png', size: 3, format: 'png', tabUrl: '' },
       error: null, world: 'extension',
     };
+    consumeTarget = PEEK + '&consume=1&expected='
+      + encodeURIComponent(envelope.resultGeneration);
+    imageTargets.add(imageSelector(envelope.result.path));
     uploads.push({ id: command.id,
       filename: 'capture-' + commands.length + '.png', size: 3,
       mtime: commands.length, path: envelope.result.path });
     return jsonResponse({ ok: true, did: envelope.deliveryId });
   }
-  if (target.startsWith('/result?')) {
+  if ((target === PEEK || target === consumeTarget) && method === 'GET') {
     return jsonResponse({ ...envelope, consumed: true });
   }
-  if (target.startsWith('/screenshot?')) {
-    imageTargets.push(target);
+  if (imageTargets.has(target) && method === 'GET') {
+    thumbnailTargets.push(target);
     return { ok: true, blob: async () => ({}) };
   }
   return refuse(target);
@@ -564,8 +465,8 @@ await bounded(settle(), 'remount', _dashnodeStepTimeoutMs);
 capture('11');
 await bounded(settle(), 'remounted capture', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ commands, imageTargets,
-  unplanned: UNPLANNED }));
+process.stdout.write(JSON.stringify({ commands,
+  imageTargets: thumbnailTargets, unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
 """
@@ -601,16 +502,20 @@ def test_tab_row_captures_reuse_one_upload_id(_tmp):
 _RECENT_HARNESS = _DOM + _dashfetch.DOOR + r"""
 import { readFileSync } from 'node:fs';
 (async () => {
-const pages = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const fixture = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+// The thumbnail selectors the listing itself names, handed over by the
+// side that produced the listing, so the fake holds exact targets rather
+// than a shape. A capture the listing does not name is a request no
+// scenario planned, whatever it looks like.
+const previews = new Set(fixture.previews);
 globalThis.fetch = async (target) => {
   if (target === '/tabs') return jsonResponse([]);
-  if (target.startsWith('/upload?limit=')) {
-    if (!(target in pages)) return refuse(target);
-    return jsonResponse(pages[target]);
+  if (target in fixture.pages) return jsonResponse(fixture.pages[target]);
+  if (previews.has(target)) {
+    const path = new URLSearchParams(target.split('?')[1]).get('path');
+    return { ok: true, blob: async () => ({ path }) };
   }
-  if (!target.startsWith('/screenshot?path=')) return refuse(target);
-  const path = new URLSearchParams(target.split('?')[1]).get('path');
-  return { ok: true, blob: async () => ({ path }) };
+  return refuse(target);
 };
 URL.createObjectURL = (blob) => 'blob:' + blob.path;
 URL.revokeObjectURL = () => {};
@@ -651,13 +556,20 @@ def _recent_captures(tmp, count, ids):
             captures.append(
                 path.relative_to(upload_dir / 'dashboard-token').as_posix())
     pages = {}
+    previews = set()
     for offset in range(0, count + 3, 200):
         status, page = routes.list_uploads(upload_dir, 'dashboard-token', {
             'limit': ['200'], 'offset': [str(offset)]})
         assert status == 200, page
         pages[f'/upload?limit=200&offset={offset}'] = page
+        for item in page['items']:
+            if item['filename'].lower().endswith(('.png', '.jpg', '.jpeg')):
+                previews.add('/screenshot?path='
+                             + quote(item['path'], safe=''))
     fixture = Path(tmp) / 'listing.json'
-    fixture.write_text(json.dumps(pages), encoding='utf-8')
+    fixture.write_text(
+        json.dumps({'pages': pages, 'previews': sorted(previews)}),
+        encoding='utf-8')
     harness = _dashnode.DashboardNodeHarness(
         _RECENT_HARNESS, bounded_steps=2, module=True, arguments=(
             ROOT / 'dashboard' / 'sections' / 'screenshot.js', fixture))

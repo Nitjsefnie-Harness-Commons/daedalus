@@ -100,8 +100,6 @@ ALLOWED = (
     Allowance('tests/test_dashboard_harness_metadata.py',
               'test_dashboard_behaviour',
               '#1160: deferred from this change to keep it reviewable'),
-    Allowance('tests/test_dashboard_node_retry.py', 'test_dashboard_behaviour',
-              '#1160: deferred from this change to keep it reviewable'),
     Allowance('tests/test_generator_second_consumption.py',
               'test_tab_routing',
               '#1160: deferred from this change to keep it reviewable'),
