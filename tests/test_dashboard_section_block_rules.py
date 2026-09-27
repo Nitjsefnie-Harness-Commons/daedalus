@@ -58,7 +58,7 @@ def test_the_mount_lists_rules_and_carries_no_field_of_its_own(_tmp):
     """`extCmd` is called with no fields argument, so the body is the
     command's own four keys and nothing else. A `tabId` defaulted onto it
     would scope the list itself to one tab."""
-    report = _run('report({ sub: sub.textContent,\n'
+    report = _run('sectionReport({ sub: sub.textContent,\n'
                   '  head: headers(container.find("[data-role=list]")),\n'
                   '  rows: rowTexts(container.find("[data-role=list]")) });\n',
                   setup=RULES, answers=(ANSWER_RULES,))
@@ -81,7 +81,7 @@ def test_the_counter_is_written_before_the_empty_check(_tmp):
     """The `data-sub` write sits above the `arr.length === 0` return, so a
     panel with nothing on it reports `0 active` rather than leaving the
     section's own count at whatever the last non-empty listing said."""
-    report = _run('report({ sub: sub.textContent,\n'
+    report = _run('sectionReport({ sub: sub.textContent,\n'
                   '  list: container.find("[data-role=list]")'
                   '.textContent });\n',
                   answers=(ANSWER_EMPTY,))
@@ -96,7 +96,7 @@ def test_the_refresh_button_re_sends_the_same_bare_command(_tmp):
     report = _run('button("refresh").click();\n'
                   'await bounded(settle(), "after the refresh",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ sub: sub.textContent });\n',
+                  'sectionReport({ sub: sub.textContent });\n',
                   setup=RULES, answers=(ANSWER_RULES,))
     assert shared.types(report) == ['list-block-rules', 'list-block-rules'], \
         report
@@ -109,7 +109,7 @@ def test_a_result_that_is_not_an_array_renders_the_empty_state(_tmp):
     """`Array.isArray(rules) ? rules : []` is the defence, so a bridge that
     answers with an object renders the empty state instead of throwing
     inside the `arr.length` read."""
-    report = _run('report({ sub: sub.textContent,\n'
+    report = _run('sectionReport({ sub: sub.textContent,\n'
                   '  list: container.find("[data-role=list]")'
                   '.textContent });\n',
                   answers=("answer('list-block-rules',"
@@ -128,7 +128,8 @@ def test_adding_a_rule_sends_the_trimmed_pattern_and_the_typed_tab_id(
                   'button("ADD").click();\n'
                   'await bounded(settle(), "after the add",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ toasts: toasts(), sub: sub.textContent });\n',
+                  'sectionReport({ toasts: toasts(),\n'
+                  '  sub: sub.textContent });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_BLOCK))
     assert shared.types(report) == ['list-block-rules', 'block-requests',
@@ -154,7 +155,7 @@ def test_adding_with_the_tab_id_input_blank_omits_the_field(_tmp):
                   'button("ADD").click();\n'
                   'await bounded(settle(), "after the add",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ toasts: toasts() });\n',
+                  'sectionReport({ toasts: toasts() });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_NO_RULE))
     added = shared.commands(report)[1]
@@ -173,7 +174,8 @@ def test_an_empty_pattern_toasts_and_sends_nothing(_tmp):
                   'button("ADD").click();\n'
                   'await bounded(settle(), "after the refused add",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ toasts: toasts(), sub: sub.textContent });\n',
+                  'sectionReport({ toasts: toasts(),\n'
+                  '  sub: sub.textContent });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_NO_RULE))
     assert shared.types(report) == ['list-block-rules'], report
@@ -185,12 +187,12 @@ def test_an_empty_pattern_toasts_and_sends_nothing(_tmp):
 
 
 def test_a_failed_bridge_renders_the_error_pane(_tmp):
-    """One `catch` wraps the whole of `load()`, so a refused command
+    """One `catch` wraps the whole of `sectionLoad()`, so a refused command
     clears the host and renders the message the bridge sent -- and the
     rows the panel was showing are gone with it. The counter never moved,
     because its write sits below the command, inside the same try."""
     report = _run('const list = container.find("[data-role=list]");\n'
-                  'report({ sub: sub.textContent,\n'
+                  'sectionReport({ sub: sub.textContent,\n'
                   + '  list: list.textContent,\n'
                   + '  pane: list.all().some((el) => '
                     'hasClass(el, "pane err")) });\n',
@@ -204,17 +206,17 @@ def test_a_failed_bridge_renders_the_error_pane(_tmp):
 
 
 def test_a_failed_add_toasts_and_does_not_reload(_tmp):
-    """The three mutation paths toast on failure and do NOT call `load()`
-    again, so a bridge that rejected the rule leaves the listing exactly
-    as it was -- a reload would either erase the rules or blank the host
-    behind a second command nothing asked for."""
+    """The three mutation paths toast on failure and do NOT call
+    `sectionLoad()` again, so a bridge that rejected the rule leaves the
+    listing exactly as it was -- a reload would either erase the rules or
+    blank the host behind a second command nothing asked for."""
     report = _run('const list = container.find("[data-role=list]");\n'
                   'const before = list.textContent;\n'
                   'container.find("[data-role=pat]").value = "*/ads/*";\n'
                   'button("ADD").click();\n'
                   'await bounded(settle(), "after the failed add",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ toasts: toasts(), before,\n'
+                  'sectionReport({ toasts: toasts(), before,\n'
                   '  after: list.textContent, sub: sub.textContent });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_REJECTED))
@@ -237,7 +239,8 @@ def test_a_rows_remove_names_the_rule_it_is_on(_tmp):
                   'del.click();\n'
                   'await bounded(settle(), "after the row remove",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ toasts: toasts(), sub: sub.textContent });\n',
+                  'sectionReport({ toasts: toasts(),\n'
+                  '  sub: sub.textContent });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_UNBLOCK))
     assert shared.types(report) == ['list-block-rules', 'unblock-requests',
@@ -266,7 +269,7 @@ def test_remove_all_arms_before_it_sends_and_omits_the_rule_id(_tmp):
                   'clear.click();\n'
                   'await bounded(settle(), "after the confirmed click",'
                   ' _dashnodeStepTimeoutMs);\n'
-                  'report({ armed, toasts: toasts() });\n',
+                  'sectionReport({ armed, toasts: toasts() });\n',
                   setup=RULES,
                   answers=(ANSWER_RULES, ANSWER_UNBLOCK))
     assert report['armed']['text'] == 'confirm remove all', report
