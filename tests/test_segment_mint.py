@@ -16,7 +16,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    RELAY_CONTEXT, event_target_stub)
+    COPY_STUB, RELAY_CONTEXT, event_target_stub)
 
 ORIGINS_KEY = 'daedalus-segment-origins'
 ALLOWED = 'https://allowed.example.com'
@@ -48,11 +48,7 @@ const storageStore = Object.assign({
   'daedalus-token': '__TOKEN__',
   'daedalus-server': '__SERVER__',
 }, plan.store || {});
-
-function copy(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
+""" + COPY_STUB + r"""
 function response(status, data) {
   return {
     ok: status >= 200 && status < 300,

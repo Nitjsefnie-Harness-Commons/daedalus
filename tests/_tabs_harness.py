@@ -26,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _boundary_env import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    chrome_stub, event_target_stub, import_scripts_stub)
+    COPY_STUB, RESPONSE_STUB, chrome_stub, event_target_stub,
+    import_scripts_stub)
 
 TOKEN = 'tabs-token'
 SERVER = 'https://bridge.example.com'
@@ -41,22 +42,7 @@ const resultPayloads = [];
 const calls = [];
 let createdCount = 0;
 
-function copy(value) {
-  return value === undefined
-    ? undefined
-    : JSON.parse(JSON.stringify(value));
-}
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + COPY_STUB + RESPONSE_STUB + r"""
 function record(api, args) {
   calls.push({ api, args: copy(args) });
 }

@@ -16,7 +16,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
 from _worker_sources import (  # noqa: E402
-    STREAM_RESPONSE, event_target_stub, import_scripts_stub)
+    DELAY_STUB, RESPONSE_STUB, STREAM_RESPONSE, event_target_stub,
+    import_scripts_stub)
 
 _BRIDGE = (
     str(EXTENSION_ROOT / 'background.js'),
@@ -57,16 +58,7 @@ const evalResolvers = {};
 let relaySequence = 0;
 let relayDocSequence = 0;
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 const BRIDGE_URL = 'https://bridge.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -301,11 +293,7 @@ const relayContext = vm.createContext({
   clearInterval() {},
   console: { log() {}, error() {} },
 });
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function waitFor(predicate, label) {
   for (let attempt = 0; attempt < 1000; attempt++) {
     if (predicate()) return;

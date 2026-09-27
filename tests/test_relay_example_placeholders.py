@@ -21,6 +21,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
+from _worker_sources import RESPONSE_STUB  # noqa: E402
 
 EXAMPLE = ROOT / 'examples' / 'hls-segment-relay.js'
 SIG_HEADER = 'X-Daedalus-Segment-Sig'
@@ -57,15 +58,7 @@ const resultPosts = [];
 const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
+""" + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
