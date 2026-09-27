@@ -8,11 +8,19 @@ caller. A caller can only be as right as the thing it asks, and both of them
 would be wrong together if this were a copy.
 """
 import ast
+import contextlib
+import io
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+# Aliased to the names the ci_wait suites call them by, so the shared
+# builder is the only thing this suite's call sites see.
+from _ci_wait_fixtures import (  # noqa: E402
+    _ci_wait_run as _run,
+    _ci_wait_clock as _Clock,
+    _frozen_ci_wait_clock as _frozen_wait_clock)
 
 SOURCE = (_util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
           / 'ci_gate.py')
@@ -253,6 +261,74 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
         hold, lambda m: m._settled([_gate_run('tests')]))
     assert asked, 'watch_all never asked ci_gate'
     assert answer is True, answer
+
+
+def test_each_caller_passes_the_set_it_wants_judged(tmp):
+    """Which SET reaches the predicate, which the control above cannot see:
+    it answers only whether the call happened, and both readings of
+    `missing_required` make it.
+
+    The property is a call shape rather than an answer, because on the data
+    the producer emits the two shapes are the same fact: it names every run
+    of a workflow alike, so a `tests` run existing and the newest `tests`
+    run existing are one fact, and a filtered read of the set agrees with an
+    unfiltered one. That is also why the fixture the removed control used is
+    unproducible and cannot be restored - it gave one workflow two different
+    run names. The recorder sees the set itself, so it needs no such
+    fixture.
+
+    Two runs of ONE workflow, so the filtered set is the newer alone. Both
+    of ci_wait's calls must carry it - the verdict's own check, and the
+    `_missing` the refusal names the gate from - or a superseded run's name
+    can satisfy the gate on its own. watch_all's is asserted as it stands,
+    so the divergence the two callers carry over the same question is
+    visible rather than incidental; on the producer's data their answers
+    agree, and whether they should is not settled here.
+    """
+    del tmp
+    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_gate_set')
+    hold = _util.load(skill / 'watch_all.py', 'watch_all_gate_set')
+    runs = [
+        _run(1, 'failure', '2026-09-20T10:00:00Z', name='tests'),
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
+    ]
+
+    def _record(caller, call):
+        seen = []
+
+        def _recorder(runs, *args, **kwargs):
+            seen.append([run['id'] for run in runs])
+            return ['tests']
+
+        real = caller.ci_gate.missing_required
+        setattr(caller.ci_gate, 'missing_required', _recorder)
+        try:
+            call(caller)
+        finally:
+            setattr(caller.ci_gate, 'missing_required', real)
+        return seen
+
+    def _incomplete_wait(caller):
+        """A wait that reaches the refusal, so `_missing` is called too."""
+        clock = _Clock()
+        setattr(caller, 'runs_on', lambda repo, sha: runs)
+        setattr(caller, 'prs_on', lambda repo, sha: [
+            {'number': 1, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
+             'mergeStateStatus': 'DIRTY', 'headRefOid': sha}])
+        out, err = io.StringIO(), io.StringIO()
+        with _frozen_wait_clock(caller, clock), contextlib.redirect_stderr(err):
+            return caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300)
+
+    # The verdict's own check first, then the refusal's: a caller that
+    # filtered in one and not the other is the hole this names, and the two
+    # recorded calls are what says the wait reached the refusal at all.
+    seen = _record(wait, lambda m: m.verdict(runs))
+    assert seen == [[2]], seen
+    seen = _record(wait, _incomplete_wait)
+    assert seen == [[2], [2]], seen
+    seen = _record(hold, lambda m: m._settled(runs))
+    assert seen == [[1, 2]], seen
 
 
 def test_both_waiters_read_this_one_predicate(tmp):
