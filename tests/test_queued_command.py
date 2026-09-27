@@ -8,6 +8,7 @@ set requires its full count, and a vanished entry is not retried.
 """
 import ast
 import json
+import math
 import sys
 from pathlib import Path
 from unittest import mock
@@ -15,7 +16,11 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _queueread  # noqa: E402
 import _util  # noqa: E402
-from _cmdqueue_faults import _virtual_cmdqueue_clock  # noqa: E402
+from _cmdqueue_faults import (  # noqa: E402
+    _bounded_polls,
+    _poll_budget,
+    _virtual_cmdqueue_clock,
+)
 
 
 def _denying_read(entry, times):
@@ -153,8 +158,14 @@ def test_a_multi_queue_read_retries_a_refusal_and_reads_all(tmp):
 
 
 def test_a_multi_queue_read_requires_exact_count(tmp):
-    """Under-filled and over-filled queues return no partial command set."""
+    """Under-filled and over-filled queues return no partial command set.
+
+    The sleep train is pinned as well as the message: a reader that stops
+    sleeping still rejects at its attempt budget, so the message alone
+    passes a reader that never waited between its polls.
+    """
     timeout = 2.5 * _queueread.POLL_DELAY
+    attempts = math.ceil(timeout / _queueread.POLL_DELAY)
     for available in (1, 3):
         qdir = Path(tmp) / f'commands-{available}'
         qdir.mkdir()
@@ -162,14 +173,19 @@ def test_a_multi_queue_read_requires_exact_count(tmp):
             entry = qdir / f'170000000000{index}_00000{index}.json'
             entry.write_text(json.dumps({'id': str(index)}), encoding='utf-8')
         failure = None
-        with _virtual_cmdqueue_clock(wall_budget=None):
-            try:
-                _queueread.queued_commands(
-                    qdir, 'exactly two commands', 2, timeout=timeout)
-            except AssertionError as timeout_error:
-                failure = timeout_error
+        with _bounded_polls(_poll_budget(timeout)):
+            with _virtual_cmdqueue_clock(
+                    wall_budget=None) as (_clock, events, _origin):
+                try:
+                    _queueread.queued_commands(
+                        qdir, 'exactly two commands', 2, timeout=timeout)
+                except AssertionError as timeout_error:
+                    failure = timeout_error
         assert str(failure) == 'timed out waiting for exactly two commands', (
             available, failure)
+        assert events == [
+            ('sleep', _queueread.POLL_DELAY)] * (attempts - 1), (
+            available, events)
 
 
 def test_a_multi_queue_read_does_not_retry_a_vanished_entry(tmp):
@@ -294,13 +310,14 @@ def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
     for timeout, attempts in ((0.2, 4),
                               (2.5 * _queueread.POLL_DELAY, 3)):
         failure = None
-        with _virtual_cmdqueue_clock(
-                wall_budget=None) as (_clock, events, _origin):
-            try:
-                _queueread.queued_command(
-                    qdir, 'the never-filled queue', timeout=timeout)
-            except AssertionError as timeout_error:
-                failure = timeout_error
+        with _bounded_polls(_poll_budget(timeout)):
+            with _virtual_cmdqueue_clock(
+                    wall_budget=None) as (_clock, events, _origin):
+                try:
+                    _queueread.queued_command(
+                        qdir, 'the never-filled queue', timeout=timeout)
+                except AssertionError as timeout_error:
+                    failure = timeout_error
         if failure is None:
             raise AssertionError('the empty queue was not reported')
         assert str(failure) == (
@@ -319,12 +336,14 @@ def test_a_queue_read_times_out_on_a_queue_that_never_fills(tmp):
     """
     qdir = Path(tmp) / 'commands' / 'tok_extension'
     qdir.mkdir(parents=True)
+    timeout = 0.2
     failure = None
-    try:
-        _queueread.queued_command(qdir, 'the never-filled queue',
-                                  timeout=0.2)
-    except AssertionError as timeout:
-        failure = timeout
+    with _bounded_polls(_poll_budget(timeout)):
+        try:
+            _queueread.queued_command(qdir, 'the never-filled queue',
+                                      timeout=timeout)
+        except AssertionError as timed_out:
+            failure = timed_out
     if failure is None:
         raise AssertionError('the empty queue was not reported')
     assert str(failure) == 'timed out waiting for the never-filled queue', (
