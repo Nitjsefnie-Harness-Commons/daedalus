@@ -543,6 +543,32 @@ def test_the_wait_reads_runs_for_the_pinned_sha_in_one_query(tmp):
     assert 'check-runs' not in calls[0]['request']
 
 
+def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
+    """The incomplete path's per-tick price, measured rather than argued.
+
+    While the set is incomplete the wait re-reads the head's pull request
+    every tick, because `mergeable` is UNKNOWN while GitHub computes it and
+    can still come back CONFLICTING minutes later. So this path costs TWO
+    calls per tick where the acceptable path costs one, and at the defaults
+    (a 60s tick, a 300s grace) that is five extra calls for one wait. The
+    equality is the measurement: one pull-request read for every runs read,
+    and the bound is deliberately shorter than the grace so the wait ends
+    on the timeout rather than on the refusal.
+    """
+    answers = dict(_idle_answers())
+    answers['checkSuites'] = runs_page([_suite(1, name='gate freshness')])
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = _ci_wait(fake, bound=5, limit=40)
+    assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
+    assert 'not certified' in done.stdout, done.stdout
+    run_calls = fake.calls('checkSuites')
+    # The fake logs a call it has no fixture for with a null fragment, so
+    # the pull-request reads are the remainder rather than their own key.
+    head_calls = len(fake.calls()) - len(run_calls)
+    assert len(run_calls) >= 2, [c['request'][:60] for c in fake.calls()]
+    assert head_calls == len(run_calls), (head_calls, len(run_calls))
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='watchbudget_')
 

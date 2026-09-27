@@ -12,7 +12,8 @@ hand-rolled loops this replaces conflate:
      REQUIRED_WORKFLOWS has at least one run of its own on the SHA
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
-  2  the wait exceeded --timeout without every run concluding
+  2  the wait exceeded --timeout without every run concluding, or with
+     every run concluded and a required workflow still absent
   3  the invocation was rejected, or a query failed - a malformed SHA, a
      refused argument, or the first failed query, with the reason on stderr.
      Never wrap this tool in a retry: retrying a failed query behind a
@@ -214,8 +215,8 @@ def _timeout_report(runs, timeout, sha, out, missing=None, grace=None):
         return
     if missing is not None:
         print(f'wait exceeded {timeout}s on {sha[:12]}: no {missing} run and '
-              f'the {grace}s grace has not elapsed, so the gate that decides '
-              'this merge was never dispatched', file=out, flush=True)
+              f'the {grace}s grace has not elapsed, so this head is not '
+              'certified', file=out, flush=True)
         return
     open_runs = ', '.join(
         f'{run.get("name")} ({run.get("status")})'
@@ -242,11 +243,17 @@ def _conflict_report(missing, pull, sha, out):
 
 
 def _grace_report(missing, runs, grace, sha, out):
-    """The exit-4 line about a gate that has not been dispatched in time."""
+    """The exit-4 line about a gate that has not been dispatched in time.
+
+    Nothing here says "merge": this path is reached with an open pull
+    request, without one, and on a branch of its own, and the only claim
+    the data supports on all three is that a required workflow has no run
+    for this SHA.
+    """
     present = ', '.join(str(run.get('name')) for run in runs)
-    print(f'no {missing} run on {sha[:12]} after the {grace}s grace: the '
-          f'{len(runs)} run(s) on this SHA are {present}',
-          file=out, flush=True)
+    print(f'no {missing} run on {sha[:12]} after the {grace}s grace, so this '
+          f'head is not certified: the {len(runs)} run(s) on this SHA are '
+          f'{present}', file=out, flush=True)
 
 
 def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
