@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import math
+import re
 import subprocess
 import sys
 import threading
@@ -16,7 +17,10 @@ import _util  # noqa: E402
 import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
+    _QUEUE_PROBES,
+    _bounded_polls,
     _disappear_on_first_open,
+    _poll_budget,
     _queued_file,
     _refuse_first_queue_read,
     _refuse_path_operation,
@@ -51,20 +55,22 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 
     def observed_wait(remove_queue):
         queue, queued = _queued_file(tmp)
-        with _virtual_cmdqueue_clock(
-                wall_budget=None) as (clock, events, _origin):
-            with _vanish_during_read(queued, clock, remove_queue):
-                command = _cmdqueue.wait_for_command(
-                    queue, timeout=timeout, producer_alive=lambda: False)
+        with _bounded_polls(_poll_budget(timeout)):
+            with _virtual_cmdqueue_clock(
+                    wall_budget=None) as (clock, events, _origin):
+                with _vanish_during_read(queued, clock, remove_queue):
+                    command = _cmdqueue.wait_for_command(
+                        queue, timeout=timeout, producer_alive=lambda: False)
         assert command is None, command
         assert not remove_queue or not queue.exists(), queue
         return events, queue
 
     vanish_events, vanish_queue = observed_wait(False)
-    with _virtual_cmdqueue_clock(
-            wall_budget=None) as (_clock, baseline_events, _base):
-        baseline = _cmdqueue.wait_for_command(
-            vanish_queue, timeout=timeout)
+    with _bounded_polls(_poll_budget(timeout)):
+        with _virtual_cmdqueue_clock(
+                wall_budget=None) as (_clock, baseline_events, _base):
+            baseline = _cmdqueue.wait_for_command(
+                vanish_queue, timeout=timeout)
     assert baseline is None, baseline
     queue_events, _queue = observed_wait(True)
     # The wait's budget is poll attempts: all three waits spend the same
@@ -200,7 +206,9 @@ def test_a_permanent_removal_refusal_returns_the_survivor(tmp):
 
 def test_wait_returns_none_when_the_timeout_expires(tmp):
     queue = Path(tmp) / 'missing-queue'
-    assert _cmdqueue.wait_for_command(queue, timeout=0.01) is None
+    timeout = 0.01
+    with _bounded_polls(_poll_budget(timeout)):
+        assert _cmdqueue.wait_for_command(queue, timeout=timeout) is None
 
 
 def test_wait_ends_early_when_the_producer_is_gone(tmp):
@@ -377,7 +385,8 @@ def test_the_overlap_command_wait_times_out_with_a_diagnostic(tmp):
     try:
         message = None
         try:
-            _overlap_clients._wait_for_client_commands(queue, 2)
+            with _bounded_polls(_poll_budget(0.1)):
+                _overlap_clients._wait_for_client_commands(queue, 2)
         except AssertionError as failure:
             message = str(failure)
     finally:
@@ -397,7 +406,10 @@ def test_the_overlap_command_wait_survives_a_transient_read_refusal(tmp):
     for refused_file in (first, second):
         with _refuse_path_operation(
                 refused_file, 'read_text', refusals) as calls:
-            commands = _overlap_clients._wait_for_client_commands(queue, 2)
+            wait = _overlap_clients._CLIENT_COMMAND_WAIT_S
+            with _bounded_polls(_poll_budget(wait)):
+                commands = _overlap_clients._wait_for_client_commands(
+                    queue, 2)
         # Same bound as the multi-command control above.
         assert calls[0] > refusals, (refusals, calls)
         assert commands == expected, commands
@@ -412,6 +424,82 @@ def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
         with _refuse_path_operation(refused_file, 'read_text', 1000):
             commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
         assert commands is None, commands
+
+
+def _polls_named_in(message):
+    """The numbers the message carries, so '100' never answers for '10'."""
+    return re.findall(r'\d+', message)
+
+
+def _polls_under_a_ceiling(tmp, max_polls, globs):
+    """Glob `globs` times under a `max_polls` ceiling; report the refusal."""
+    queue = Path(tmp) / f'ceiling-{max_polls}-{globs}'
+    queue.mkdir()
+    failure = None
+    spent = 0
+    with _bounded_polls(max_polls):
+        for _ in range(globs):
+            spent += 1
+            try:
+                list(queue.glob('*.json'))
+            except AssertionError as caught:
+                failure = caught
+                break
+    return failure, spent
+
+
+def test_the_poll_bound_refuses_a_reader_that_polls_past_it(tmp):
+    """The bound counts the polls, so a reader that never sleeps is charged.
+
+    It needs no clock, and every other bound a reader is given is
+    consulted from inside one, so a reader that stops consulting the
+    clock is charged by none of them. The `under` case is the direction
+    that matters most: a ceiling that also refuses a bounded reader is a
+    red the correct reader causes.
+    """
+    for max_polls, over, under in ((0, 1, 0), (10, 11, 10)):
+        failure, spent = _polls_under_a_ceiling(tmp, max_polls, over)
+        assert isinstance(failure, AssertionError), (max_polls, over, failure)
+        assert spent == max_polls + 1, (max_polls, over, spent)
+        assert str(max_polls) in _polls_named_in(str(failure)), failure
+        assert 'poll' in str(failure), failure
+        assert _polls_under_a_ceiling(tmp, max_polls, under)[0] is None, (
+            max_polls, under)
+
+
+def test_the_poll_bound_restores_every_probe_it_patched(tmp):
+    """A refusal propagating out of a control leaves no patch installed."""
+    real_probes = {name: getattr(Path, name) for name in _QUEUE_PROBES}
+    failure = None
+    try:
+        with _bounded_polls(0):
+            Path(tmp).is_dir()
+    except AssertionError as caught:
+        failure = caught
+    assert isinstance(failure, AssertionError), failure
+    for name, real in real_probes.items():
+        assert getattr(Path, name) is real, f'Path.{name} left patched'
+
+
+def test_the_poll_bound_reaches_a_queue_that_does_not_exist(tmp):
+    """A reader spinning on a missing queue spends the count and is bounded.
+
+    The reader probes `is_dir` and only globs when the queue is there, so
+    a ceiling counting globs alone would never see this one spend.
+    """
+    queue = Path(tmp) / 'never-created'
+    spent = 0
+    failure = None
+    try:
+        with _bounded_polls(2):
+            for _ in range(3):
+                spent += 1
+                assert not queue.is_dir(), 'the queue was created'
+    except AssertionError as caught:
+        failure = caught
+    assert spent == 3, spent
+    assert isinstance(failure, AssertionError), failure
+    assert '2' in _polls_named_in(str(failure)), failure
 
 
 def _whole_set_retry_returns_the_rewrite(tmp, error):
@@ -458,7 +546,9 @@ def test_the_multi_command_wait_refuses_a_superset(tmp):
     for name in ('1700000000001_000002.json', '1700000000002_000003.json'):
         (queue / name).write_text(
             json.dumps({'id': name, 'type': 'reload'}), encoding='utf-8')
-    commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
+    timeout = 0.1
+    with _bounded_polls(_poll_budget(timeout)):
+        commands = _cmdqueue.wait_for_commands(queue, 2, timeout=timeout)
     assert commands is None, commands
 
 
@@ -491,7 +581,8 @@ def test_the_overlap_caller_reads_no_queue_file_after_the_wait(tmp):
 
     def wait_then_arm(directory, count, timeout):
         waits[0] += 1
-        commands = original_wait(directory, count, timeout)
+        with _bounded_polls(_poll_budget(timeout)):
+            commands = original_wait(directory, count, timeout)
         # From here the caller must hold the parsed commands; any later
         # queue read is the untolerated read this branch removed.
         Path.open = refused
