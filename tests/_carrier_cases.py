@@ -156,9 +156,9 @@ def go(cb=lambda: subprocess.run):
     pass
 """, 'def go(cb='),
         # The leaf the walk never descends into, read in its binding
-        # position: an attribute naming a launch method carries whatever
-        # it is read off, and the receiver here is a subscript and then a
-        # further attribute.
+        # position: an attribute the walk opens carries whatever it is
+        # read off, per `_carried_parts.__doc__`, and the receiver here
+        # is a subscript and then a further attribute.
         ('subscript receiver bound', """import os
 import subprocess
 os.chdir(tmp)
@@ -607,9 +607,9 @@ go += 2
 def _transforming_cases():
     """Forms that build a new value, so a launcher in one is not carried.
 
-    The last three rows are the other side of the attribute arm: an
-    attribute naming a constant is a constant read, and the receiver it
-    is read off is not a launcher reaching the walk.
+    The last three rows are the other side of the attribute arm, whose
+    condition is stated once in `_carried_parts.__doc__`: the receiver is
+    read off, and reading it carries nothing.
     """
     return (
         ('sum of a launcher', """import operator

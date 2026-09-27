@@ -167,11 +167,12 @@ def _mutation_specs():
     receiver_slice = (
         "        if isinstance(callee, ast.Subscript):\n"
         "            yield from _carried_parts(callee.slice)\n", "")
-    # The launch-method reads the descent consumes. Dropping the arm
-    # leaves the issue's second spelling clean, and the constant-read row
-    # beside it still passing, so only the callee-chain row is left to
-    # notice. Dropping the flag alone keeps the two refusals and reinstates
-    # the false positive the flag exists to stop.
+    # The reads the descent consumes, of the set `_carried_parts.__doc__`
+    # names. Dropping the arm leaves the issue's second spelling clean,
+    # and the constant-read row beside it still passing, so only the
+    # callee-chain row is left to notice. Dropping the flag alone keeps
+    # the two refusals and reinstates the false positive the flag exists
+    # to stop.
     receiver_launch = (
         "        names_launch = (isinstance(callee, ast.Attribute)\n"
         "                        and callee.attr in _LAUNCH_READS)\n"
@@ -598,6 +599,83 @@ subprocess.run(['python3', 'child.py'])
 
 def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     mutation_sweep(tmp, _mutation_specs())
+
+
+# The two halves of the authority sentence, as literals the scan below
+# looks for. Holding them here is what lets the scan run at all, and it is
+# not a second statement of the rule: this file checks, it does not claim.
+_AUTHORITY_HALF = 'whose `attr` is in `_LAUNCH_READS`'
+_AUTHORITY_REST = 'attribute outside that set is a'
+# The wave-3 wording. `__call__` is an "other attribute" and is not
+# treated as a constant read, so that sentence was a false universal and
+# every claim resting on it was false with it.
+_STALE_UNIVERSAL = 'every other attribute is a constant read'
+_AUTHORITY_FILE = '_coverage_bindings.py'
+
+
+def test_the_opened_set_is_stated_exactly_once(tmp):
+    """One authority for which attributes the walk opens, not a copy per site.
+
+    **This control checks DUPLICATION, not truth.** Whether the authority
+    says the right thing about the code is a reviewer's question, and no
+    scan over source text can answer it — that is the shape the corpus
+    entry `guards/2026-08-28-a-lexical-check-standing-in-for-a-semantic-
+    property.md` records as this repository's recurring defect, five times
+    over, `tests/_coverage_guard.py` among them. What this refuses is a
+    SECOND site restating the set, which is a different and answerable
+    property: when the set changes, a copy per site leaves one copy stale
+    and one copy true, and nothing on the face of either says which.
+
+    The scan reads source text rather than the AST, so a restatement
+    counts wherever it sits — a docstring, a comment, a string inside a
+    function nothing calls. Whitespace is squeezed out first, because a
+    rewrap is not a new statement and a scan a rewrap defeats has a false
+    negative on the very property it exists to hold; that is how the first
+    version of this control missed its own mutant. The squeeze uses
+    `str.replace` because that is one of the pure methods the
+    control-write policy already models, and widening that policy so my
+    own control passes would be the same mistake this wave is about.
+    A restatement in entirely different words is not detectable here and
+    is a reviewer's job, not a scan's.
+
+    This file is excluded from its own scan because it holds the phrases
+    as search keys; a checker is not a second authority.
+    """
+    from _coverage_bindings import _carried_parts
+    from _repo import ROOT
+
+    del tmp
+    paths = [path for path in sorted((ROOT / 'tests').glob('*.py'))
+             if path.name != Path(__file__).name]
+
+    def squeezed(text):
+        """The text with its whitespace gone, so a rewrap cannot hide it."""
+        return text.replace('\n', '').replace(' ', '').replace('\t', '')
+
+    def holders(phrase):
+        """(the files stating `phrase`, how many times between them).
+
+        Both halves are returned because counting files alone is not
+        enough: a second copy in the same module is the likeliest one of
+        all, and a file-name count cannot see it.
+        """
+        key = squeezed(phrase)
+        stated, total = [], 0
+        for path in paths:
+            count = squeezed(path.read_text(encoding='utf-8')).count(key)
+            if count:
+                stated.append(path.name)
+            total += count
+        return stated, total
+
+    for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
+        stated, total = holders(phrase)
+        assert stated == [_AUTHORITY_FILE], (phrase, stated)
+        assert total == 1, (phrase, stated, total)
+    authority = _carried_parts.__doc__ or ''
+    for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
+        assert phrase in authority, (phrase, authority)
+    assert not holders(_STALE_UNIVERSAL)[0], holders(_STALE_UNIVERSAL)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
