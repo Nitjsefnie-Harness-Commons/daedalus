@@ -25,6 +25,9 @@ ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 SCRIPT = ROOT / 'scripts' / 'ci' / 'type_error_baseline.py'
 THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
+# A second binding of the same path that _ratchet_fixture holds, and kept
+# rather than imported: the reserved set's python limb is definitions-only,
+# so this Assign is invisible to the control that would settle it.
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 WORKFLOW_DIR = ROOT / '.github' / 'workflows'
 CONFIG_NAME = 'pyrightconfig.tests.json'

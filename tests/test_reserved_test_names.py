@@ -23,6 +23,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _reserved_names  # noqa: E402
@@ -371,6 +372,40 @@ def test_a_noop_tighten_writes_nothing(tmp):
     assert checked.stderr == '', checked.stderr
     assert len(policy.violations(policy.load(artifact),
                                  policy.document(_live_sources_of(tree)))) == 3
+
+
+def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
+    """The artifact is replaced or left whole, never truncated in place.
+
+    The three sibling ratchets publish through `thresholds.py`'s
+    temp-plus-`os.replace`; this generator used `write_bytes`, so a
+    `--tighten` killed between the open and the close left a committed
+    document cut in half. The plant is a real destination and a real
+    `main` call with the publish step refusing, so a pass is the shape
+    agreeing with the runtime rather than a fixture agreeing with
+    itself, and the temporary it would have left is checked for too.
+    """
+    policy = _contract()
+    import thresholds  # the contract put scripts/ci on the path
+    tree = _fixture_checkout(tmp, {
+        'tests/_owner.py': _OWNER,
+        'tests/_wffixtures.py': _FIXTURES,
+    }, 'atomic')
+    target = Path(tmp) / 'reserved.json'
+    modes = ['--tree', str(tree), '--artifact', str(target)]
+    # Drifted, so `--tighten` takes the write path rather than reporting
+    # the set already current and returning before any of this.
+    target.write_text('{"schema_version": 1, "names": {"made_up": {}}}\n',
+                      encoding='utf-8')
+    stale = target.read_bytes()
+    with mock.patch.object(thresholds.os, 'replace',
+                           side_effect=OSError('publish refused')):
+        status, stdout, stderr = _generator(policy, ['--tighten', *modes])
+    assert status == 1, (stdout, stderr)
+    assert stderr.strip() == 'publish refused', stderr
+    assert target.read_bytes() == stale
+    assert not list(target.parent.glob(f'.{target.name}.*')), sorted(
+        target.parent.iterdir())
 
 
 def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):

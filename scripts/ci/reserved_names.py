@@ -9,7 +9,10 @@ recognisers the two name-bound controls already use, so an entry is added
 or dropped by tightening, and a name that is stale is a rule nobody
 enforces. ``tests/test_reserved_test_names.py`` fails when the committed
 document and a fresh derivation disagree, and prints the remedy a
-refusal carries:
+refusal carries. That suite is also this script's CI coverage: no
+workflow step names it, so the staleness check runs as
+``test_reserved_test_names.py``
+``::test_the_committed_set_is_what_the_rules_derive``:
 
   The committed set is generated and never edited by hand:
   python3 scripts/ci/reserved_names.py --tighten
@@ -25,6 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tests'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ARTIFACT = ROOT / '.github' / 'reserved-test-names.json'
 _SCHEMA_VERSION = 1
@@ -46,13 +50,14 @@ def _derivation():
     also the only one that can fail here.
 
     Kept after the first success because `_validated` asks for the limb
-    names once per name it reads -- 1394 lookups for a whole-tree check,
-    each a function call over a module `sys.modules` has already
-    memoised. Timed over seven rounds, the two shapes differ by less
-    than the run-to-run spread of the validation itself, so this is a
-    tidiness fix and not a speed claim, and the number is left out for
-    the reason `test_helper_reimplementation.py` leaves its population
-    out: a count in prose is a claim somebody has to reproduce.
+    names once per (name, limb) PAIR it reads -- the call sits in the
+    inner limb loop -- each a function call over a module `sys.modules`
+    has already memoised. Timed over seven rounds, the two shapes differ
+    by less than the run-to-run spread of the validation itself, so this
+    is a tidiness fix and not a speed claim, and no count is given here
+    for the reason `test_helper_reimplementation.py` leaves its
+    population out: a count in prose is a claim somebody has to
+    reproduce.
     """
     global _DERIVATION
     if _DERIVATION is None:
@@ -187,7 +192,11 @@ def main(argv=None):
                 print('the reserved set is already current')
                 return 0
             args.artifact.parent.mkdir(parents=True, exist_ok=True)
-            args.artifact.write_bytes(payload)
+            # The sibling ratchets publish through `thresholds`, so a
+            # `--tighten` killed part way through cannot truncate a
+            # committed document: the reader already knows the shape.
+            import thresholds
+            thresholds.publish(args.artifact, payload)
             print(f'tightened the reserved set: {len(derived["names"])} names')
             return 0
         found = violations(load(args.artifact), derived)
