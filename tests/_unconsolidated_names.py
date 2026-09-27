@@ -363,9 +363,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_watch_all.py', '_run'):
         'this builds one shared-client workflow run against a SHA, where the '
         'shared _run boots a node scenario',
-    ('tests/test_watcher_budget.py', '_comment'):
-        'this builds one review-comment node, where the owner asks whether a '
-        'line is a YAML comment',
     ('tests/test_yamlread_anchor_edges.py', '_refused'):
         'this calls workflow_step_items and asserts the YAMLReadError carries '
         'a detail and is not the unknown-alias refusal, where the owner takes '
