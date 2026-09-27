@@ -34,7 +34,6 @@ def replace_container(state, owner_name, owner,
 
 
 def replace_slots(state, owner_name, owner, slots):
-    """Rewrite the named slots an instance or a class object carries."""
     _rebuilt(state, owner, DeferredInstance(slots, owner.identity)
              if isinstance(owner, DeferredInstance)
              else DeferredClass(slots), owner_name)
@@ -42,10 +41,8 @@ def replace_slots(state, owner_name, owner, slots):
 
 def clear_owner(state, owner_name, owner):
     """Empty a tracked container, wherever the model reaches it from."""
-    replace_deferred_storage(state, owner, DeferredContainer(
-        {}, 0, owner.kind, owner.identity))
-    if owner_name:
-        sync_cells(state, {owner_name})
+    _rebuilt(state, owner, DeferredContainer(
+        {}, 0, owner.kind, owner.identity), owner_name)
 
 
 def root_name(node):
@@ -61,9 +58,8 @@ def root_name(node):
 def base_owner(base, state):
     """The name an expression writes through and the value it holds.
 
-    A base spelled as a name is its own handle. Any other receiver resolves
-    to the value the model recorded for it and writes through the name at its
-    root, because that is the only name the model's storage offers."""
+    A base spelled as a name is its own handle; any other writes through the
+    name at its root, the only name the model's storage offers."""
     if isinstance(base, ast.Name):
         return base.id, state.callables.get(base.id)
     return root_name(base), _receiver_value(base, state)
@@ -103,9 +99,12 @@ def _store_attribute(state, target, value, owner, owner_name):
         slots = owner.methods
     else:
         return False
-    kept = {key: item for key, item in slots.items() if key != target.attr}
-    replace_slots(state, owner_name, owner,
-                  kept if value is None else {**slots, target.attr: value})
+    if value is None:
+        slots = {key: item for key, item in slots.items()
+                 if key != target.attr}
+    else:
+        slots = {**slots, target.attr: value}
+    replace_slots(state, owner_name, owner, slots)
     return True
 
 
