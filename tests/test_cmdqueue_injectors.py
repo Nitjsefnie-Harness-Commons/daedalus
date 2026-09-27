@@ -58,7 +58,8 @@ def test_captured_path_open_reference_hits_each_read_injector(tmp):
             return type(caught)
         return None
 
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         for label, injector, injector_args, expected in injectors:
             if not queued.exists():
                 queued.write_text(
@@ -188,7 +189,7 @@ def test_injectors_preserve_target_failures_and_untargeted_create(tmp):
     assert unlink_calls == [1], (
         'unlink signature refusal changed target call count', unlink_calls)
     assert queued.exists(), 'unlink control removed the target path'
-    with _virtual_cmdqueue_clock() as (clock, _, _):
+    with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _, _):
         injectors = (
             ('generic refusal', _refuse_path_operation,
              (queued, 'open', 1), PermissionError),
@@ -295,7 +296,8 @@ def test_vanish_fault_stays_armed_until_open_observes_disappearance(tmp):
     modes = ('r', 'rt', 'rb', 'r+', 'w', 'a', 'x', 'x+', 'w+', 'a+')
     for mode in modes:
         queued.write_text('seed', encoding='utf-8')
-        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+        with _virtual_cmdqueue_clock(
+                wall_budget=None) as (clock, events, _origin):
             with _vanish_during_read(queued, clock):
                 first_error = open_error(mode)
                 if mode in immediate_faults:
@@ -315,7 +317,7 @@ def test_exhausted_refusal_accounts_only_for_completed_operations(tmp):
     _queue, queued = _queued_file(tmp)
     invalid = {'mode': 'rb', 'encoding': 'utf-8'}
     expected = _path_open_failure(queued, **invalid)
-    with _virtual_cmdqueue_clock() as (clock, events, _origin):
+    with _virtual_cmdqueue_clock(wall_budget=None) as (clock, events, _origin):
         with _refuse_path_operation(
                 queued, 'open', 1, clock=clock) as calls:
             injected = _path_open_failure(queued, encoding='utf-8')
@@ -417,7 +419,8 @@ def test_untargeted_plain_reads_match_native_and_leave_fault_armed(tmp):
         with original(path, mode='r', encoding='utf-8') as opened:
             return opened.read()
 
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         injectors = (
             ('generic refusal', _refuse_path_operation,
              (queued, 'open', 1), 'r', PermissionError),
@@ -480,7 +483,8 @@ def test_target_readable_creates_match_native_and_leave_fault_armed(tmp):
         with original(path, mode='r', encoding='utf-8') as opened:
             return opened.read()
 
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         injectors = (
             ('generic refusal', _refuse_path_operation,
              (queued, 'open', 1), PermissionError),
@@ -549,7 +553,8 @@ def test_mode_search_does_not_trust_the_mode_contains_protocol(tmp):
 
     read_mode = ReadClaimsCreate('r')
     create_mode = CreateClaimsRead('w+')
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         injectors = (
             ('generic refusal', _refuse_path_operation,
              (queued, 'open', 1), PermissionError),
@@ -601,7 +606,8 @@ def test_bound_and_unbound_receivers_receive_each_one_shot_fault(tmp):
         except OSError as caught:
             return 'raised', type(caught)
 
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         injectors = (
             ('generic refusal', _refuse_path_operation,
              (queued, 'open', 1), PermissionError),
@@ -650,7 +656,8 @@ def test_vanish_reopen_preserves_bytes_receiver_error(tmp):
     queued.unlink()
     expected = missing_outcome()
     queued.write_text('seed', encoding='utf-8')
-    with _virtual_cmdqueue_clock() as (clock, _events, _origin):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (clock, _events, _origin):
         with _vanish_during_read(queued, clock):
             actual = missing_outcome()
     assert actual == expected, (actual, expected)
