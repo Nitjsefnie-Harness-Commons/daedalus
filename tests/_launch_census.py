@@ -107,7 +107,7 @@ _from_import_launches = path._from_import_launches
 _member_aliases = path._member_aliases
 _is_launch = path._is_launch
 _launch_bound_names = path._launch_bound_names
-_dotted = path._dotted
+_dotted_key = path._dotted_key
 _is_def = path._is_def
 _is_call = path._is_call
 _callee_name = path._callee_name
@@ -282,7 +282,7 @@ def _timeout_slots(tree, in_path, receivers, direct, aliases=(),
                                        aliases))):
                 receiver, method = '<launch>', getattr(func, 'attr', '')
             elif isinstance(func, ast.Attribute):
-                receiver, method = _dotted(func.value), func.attr
+                receiver, method = _dotted_key(func.value), func.attr
             else:
                 continue
             slots_read = _child_wait_slots()
@@ -308,7 +308,7 @@ def _is_argv_wrapper(call, callees, receivers, direct, scope, tree=None):
     constant naming the wrapper is read too.
     """
     if not (_is_launch(call, receivers, direct)
-            or _callee_name(call) in callees):
+            or _callee_name(call.func) in callees):
         return False
     # A module-level constant is resolvable from inside a function body, so
     # the scope resolved against is the body AND the module's statements.
@@ -425,7 +425,7 @@ def _positional_deadline_faults(relative, function, scope, constants,
     for node in ast.walk(function):
         if not _is_call(node):
             continue
-        callee = _callee_name(node)
+        callee = _callee_name(node.func)
         if callee is None or callee in handed:
             continue
         target = _path_body(callee)
@@ -561,11 +561,6 @@ def _parameters_for(relative):
     """The parameters this module's functions receive a CHILD through."""
     return {name for name, entries in _CHILD_PARAMETERS.get(
         relative, {}).items() if any(entry[5] for entry in entries)}
-
-
-def tree(relative):
-    """One module's parse, kept by the closure that produced the path."""
-    return path.tree(relative)
 
 
 def census(tests_dir, launcher_modules=path.LAZY_MODULES):

@@ -15,6 +15,7 @@ import inspect
 import subprocess
 from typing import TypeGuard
 
+from _command_type_readers import _callee_name
 from _coverage_memo import analysed
 from _repo import iter_tree_files
 
@@ -160,22 +161,12 @@ def _const_str(node):
     return None
 
 
-def _callee_name(call):
-    """The name a call reaches, bare or attribute, or None."""
-    func = call.func
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return None
-
-
-def _dotted(node):
+def _dotted_key(node):
     """`self.child` as the spelling a binding table can key."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
-        return f'{_dotted(node.value)}.{node.attr}'
+        return f'{_dotted_key(node.value)}.{node.attr}'
     return ''
 
 
@@ -302,7 +293,7 @@ def _launch_bound_names(body, receivers, direct, aliases=()):
                 continue
             for target in node.targets:
                 if isinstance(target, (ast.Name, ast.Attribute)):
-                    bound.add(_dotted(target))
+                    bound.add(_dotted_key(target))
     return bound
 
 
@@ -345,7 +336,7 @@ def _binding_analysis(relative, source, keeps):
         bound[name] = frozenset(
             _launch_bound_names(body, receivers, direct, aliases))
         calls[name] = tuple(
-            (_callee_name(call),
+            (_callee_name(call.func),
              frozenset(argument.id for argument in call.args
                        if isinstance(argument, ast.Name)))
             for call in ast.walk(body) if _is_call(call))
@@ -365,7 +356,7 @@ def _memoised(analysis, relative, source):
     return keeps[0]
 
 
-def _bindings(relative):
+def _path_bindings(relative):
     """`(function -> launch-bound names, function -> its calls)`, memoised."""
     return _memoised(_binding_analysis, relative, _SOURCES[relative])
 
@@ -415,7 +406,7 @@ def _calls_any(body, names):
     """Whether this body calls any of `names`, by bare or attribute name."""
     if not names:
         return False
-    return any(_callee_name(call) in names
+    return any(_callee_name(call.func) in names
                for call in ast.walk(body) if _is_call(call))
 
 
@@ -478,7 +469,7 @@ def _handed_a_child(relative):
     if not names:
         return False
     for other in _KNOWN:
-        bound, calls = _bindings(other)
+        bound, calls = _path_bindings(other)
         for name, held in bound.items():
             if not held:
                 continue
@@ -501,17 +492,17 @@ def _child_parameters():
     filled = {}
     for other, in_path in _KNOWN.items():
         constants = _module_constants(_TREES[other])
-        held_by_function, _ = _bindings(other)
+        held_by_function, _ = _path_bindings(other)
         for name in in_path:
             body = _BODIES[other][name]
             bound = held_by_function[name]
             for call in ast.walk(body):
                 if not _is_call(call):
                     continue
-                owner = _module_owner(_callee_name(call) or '')
+                owner = _module_owner(_callee_name(call.func) or '')
                 if owner is None or owner == other:
                     continue
-                signature = _BODIES[owner].get(_callee_name(call))
+                signature = _BODIES[owner].get(_callee_name(call.func))
                 if signature is None:
                     continue
                 positional = list(signature.args.posonlyargs)
@@ -558,7 +549,7 @@ def seed_functions(tests_dir, launcher_modules=LAZY_MODULES):
             entries[body.name] = (
                 any(_is_launch(call, receivers, direct, aliases)
                     for call in calls),
-                {(_callee_name(call) or '') for call in calls})
+                {(_callee_name(call.func) or '') for call in calls})
         computed.append(entries)
     seeds = {name for entries in computed for name, (launches, _) in
              entries.items() if launches}
