@@ -26,15 +26,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tests'))
 
-import _reserved_names  # noqa: E402
-
 ARTIFACT = ROOT / '.github' / 'reserved-test-names.json'
 _SCHEMA_VERSION = 1
-_LIMBS = set(_reserved_names.LIMBS)
 
 STALE_REMEDY = (
     'The committed set is generated and never edited by hand: '
     'python3 scripts/ci/reserved_names.py --tighten')
+
+
+def _derivation():
+    """The tests-side derivation, imported on demand.
+
+    Imported inside the function rather than at module scope, so a tree
+    that does not carry `tests/_reserved_names.py` -- the shape a bare
+    copy of this script is run in -- is the one-line refusal `main`
+    prints rather than a traceback before it starts. That is the only
+    direction this script reaches out of its own directory, so it is
+    also the only one that can fail here.
+    """
+    import _reserved_names
+    return _reserved_names
+
+
+def _limbs():
+    return set(_derivation().LIMBS)
 
 
 def _validated(value, label='reserved names'):
@@ -57,7 +72,7 @@ def _validated(value, label='reserved names'):
         if not isinstance(entry, dict) or not entry:
             raise ValueError(f'a name must map to an object of limbs: {name}')
         for limb, owners in sorted(entry.items()):
-            if limb not in _LIMBS:
+            if limb not in _limbs():
                 raise ValueError(f'unknown limb: {limb}')
             if (not isinstance(owners, list)
                     or not all(isinstance(one, str) for one in owners)):
@@ -81,7 +96,7 @@ def load(path=ARTIFACT):
 def _line(name, entry):
     limbs = ', '.join(
         f'{json.dumps(limb)}: {json.dumps(list(entry[limb]))}'
-        for limb in _reserved_names.LIMBS if limb in entry)
+        for limb in _derivation().LIMBS if limb in entry)
     return f'    {json.dumps(name)}: {{{limbs}}}'
 
 
@@ -100,7 +115,7 @@ def render(document):
 
 def document(sources=None):
     """The document a fresh derivation of `sources` gives."""
-    derived = _reserved_names.reserved(sources)
+    derived = _derivation().reserved(sources)
     return {
         'schema_version': _SCHEMA_VERSION,
         'names': {name: {limb: list(owners) for limb, owners in entry.items()}
@@ -172,7 +187,7 @@ def main(argv=None):
                 print(f'{kind}: {rows}', file=sys.stderr)
         print(STALE_REMEDY, file=sys.stderr)
         return 1
-    except (AssertionError, OSError, ValueError,
+    except (AssertionError, ImportError, OSError, ValueError,
             subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
         return 1
