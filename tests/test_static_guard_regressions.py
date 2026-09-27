@@ -471,7 +471,7 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
 
     That child runs at least 122 mutation rows, one individually-bounded
     grandchild each, so an outer bound on it decides a verdict its own
-    work does not own: 132 x 30s = 3960s is the work a runaway backstop
+    work does not own: 134 x 30s = 4020s is the work a runaway backstop
     would have to cover, and 120s truncates it about thirty-three times
     over. That is a FLOOR, and the floor is the figure the removal
     rests on, since the worst case is the one that has to be safe on
@@ -591,7 +591,7 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
 # 122 to 132 here. A hard-pinned ceiling is red again on the next such
 # batch. `derived >= floor` is the claim the disclosure makes, so the
 # inequality is not the weaker check.
-_SWEEP_FLOOR_3_11 = 132
+_SWEEP_FLOOR_3_11 = 134
 _CHILD_BOUND_S = 30
 _TRUNCATED_BY_S = 120
 
@@ -642,16 +642,17 @@ def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
     docstring is prose and prose does not fail.
 
     The count is version-dependent, so this derives it on the RUNNING
-    interpreter and requires the figure `_SWEEP_ROWS` holds for that
-    interpreter — 122 on 3.11, 127 from 3.12. Requiring 127 everywhere is
-    the defect this replaced: it can only ever be right on one version,
-    and it went red on the other three CI legs. The two figures live in
-    that table, and the last two assertions require the disclosure to
-    state both of them and both products, so the table and the prose
-    cannot drift from each other either. That last link is a check on
-    prose, not on behaviour: it fails on a reworded sentence, which is
-    loud rather than silent, and it is the price of keeping the numbers
-    in the sentence a reader of the control actually reads.
+    interpreter against one floor, `_SWEEP_FLOOR_3_11`, which 3.11 is
+    checked against exactly and every later version is checked against as
+    a floor. Requiring one figure everywhere is the defect that replaced
+    an even earlier pin: it can only ever be right on one version, and it
+    went red on the other three CI legs. The last two assertions require
+    the disclosure to state the floor, the product and the gate the
+    runner really uses, so the constant and the prose cannot drift from
+    each other. That last link is a check on prose, not on behaviour: it
+    fails on a reworded sentence, which is loud rather than silent, and
+    it is the price of keeping the numbers in the sentence a reader of
+    the control actually reads.
     """
     del tmp
     child = subprocess.run(
