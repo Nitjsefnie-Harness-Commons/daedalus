@@ -167,7 +167,7 @@ def _signatures():
             'kwarg': bool(kwarg)})
 
 
-def _bindings(signature):
+def _binding_shapes(signature):
     """Every binding shape this signature admits, as (the shape, the
     arguments), generated from the signature's own structure.
 
@@ -265,7 +265,8 @@ def signatures(imports, operation):
     resolves the callee as the operation without binding the call at all.
     """
     for text, signature in _signatures():
-        for index, (shape, arguments) in enumerate(_bindings(signature)):
+        for index, (shape, arguments) in enumerate(
+                _binding_shapes(signature)):
             # The filler body on ONE form per signature: it is the class's
             # `does not reach` side and it is the same side for every
             # binding, so one per signature carries it.
