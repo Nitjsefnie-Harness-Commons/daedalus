@@ -243,6 +243,10 @@ BOUNDED_GIT_LAUNCHES = {
         'the final reap, on the same process',
     ('tests/_watcher_waits.py', 99, 'stop'):
         'a reap that follows a group kill, on a process already signalled',
+    ('tests/test_watcher_waits.py', 319,
+     'test_a_cancel_ends_the_whole_tree_and_not_only_the_child'):
+        'a cleanup reap on a real child the control started itself, in the'
+        ' finally of the tree-kill control',
     ('tests/test_watcher_budget.py', 494,
      'test_a_graceful_exit_leaves_no_children_behind'):
         'a parent handle reaping a child it signalled itself, in the'

@@ -24,13 +24,17 @@ own limit ends the run nameless. It is the trade this module already takes
 for `await_lines` and `await_calls`, taken deliberately, and a bound here
 would buy an early failure with a flaky leg on a loaded runner.
 """
+import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+import _watcher_waits  # noqa: E402
 from _watcher_waits import (  # noqa: E402
+    ChildProcess,
     Stream,
     await_calls,
     await_gone,
@@ -266,6 +270,116 @@ def test_the_death_wait_names_the_survivors_when_the_backstop_passes(tmp):
     assert 'pids still alive [7, 8]' not in message, message
     assert 'parent exit -9' in message, message
     assert 'started ci watcher pid 9' in message, message
+
+
+def test_a_cancel_ends_the_whole_tree_and_not_only_the_child(tmp):
+    """The pin #1255's fix otherwise lacked: the tree kill had no assertion
+    that could fail.
+
+    `stop()` is reached only in `finally` blocks, and the two controls that
+    assert on a child's death assert BEFORE `stop()` and use the process's
+    own `kill()` - so replacing the whole delegation with a bare
+    `proc.kill()` left that suite green. This one drives the property and
+    not the plumbing: a real `ChildProcess` that has spawned a grandchild,
+    stopped, and the grandchild must be gone. A direct kill would leave it
+    running, which is the orphan the first paragraph of `_cancel`'s
+    docstring is about.
+    """
+    del tmp
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1',
+               PYTHONUNBUFFERED='1')
+    # The child backgrounds a grandchild, names it, and stays up. On POSIX
+    # only: Windows has no process group to signal and the tree is named by
+    # pid, which is the other half of the owner's delegation.
+    if sys.platform.startswith('win'):
+        _util.skip('the tree kill under test is the POSIX group kill')
+    program = (
+        'import subprocess, sys, time;'
+        'kid = subprocess.Popen([sys.executable, "-c",'
+        ' "import time; time.sleep(120)"]);'
+        'print(kid.pid, flush=True); time.sleep(120)')
+    child = ChildProcess([sys.executable, '-c', program], env)
+    grandchild = None
+    try:
+        deadline = time.time() + 30
+        while not child.out.lines and time.time() < deadline:
+            time.sleep(0.05)
+        assert child.out.lines, child.captured()
+        grandchild = int(child.out.lines[0].strip())
+        assert _alive(grandchild), grandchild
+        child.stop()
+        deadline = time.time() + 30
+        while _alive(grandchild) and time.time() < deadline:
+            time.sleep(0.05)
+        assert not _alive(grandchild), (
+            f'grandchild {grandchild} outlived the child it belonged to')
+    finally:
+        if child.proc.poll() is None:
+            child.proc.kill()
+            child.proc.wait(timeout=10)
+        if grandchild is not None and _alive(grandchild):
+            try:
+                os.kill(grandchild, 9)
+            except OSError:
+                pass
+
+
+class _Unkillable:
+    """A child the owner could not end: alive, and refusing a direct kill.
+
+    The one state `_cancel`'s own fallback fires on, with a `kill()` that
+    raises - the reviewer's E6, as a double rather than as a real EPERM.
+    """
+
+    pid = 4242
+
+    def __init__(self):
+        self.kills = 0
+
+    def poll(self):
+        return None
+
+    def kill(self):
+        self.kills += 1
+        raise PermissionError(1, 'Operation not permitted')
+
+    def wait(self, timeout=None):
+        return -9
+
+
+def test_a_failing_direct_kill_is_reported_and_never_raised(tmp):
+    """The owner's steps are wrapped for a stated reason - a cleanup failure
+    must not replace the expiry the caller is about to report - and the
+    local fallback has to be wrapped the same way. It sits on exactly the
+    state the owner has just described as failed, so an uncontained
+    `OSError` there escapes `_cancel`, and so `ChildProcess.stop`, taking
+    the classified error with it.
+    """
+    del tmp
+    proc = _Unkillable()
+    real = _watcher_waits.cleanup_process_tree
+    _watcher_waits.cleanup_process_tree = (
+        lambda process, bound: 'process group 4242 was already gone')
+    try:
+        # The call itself must not raise: that is the whole assertion.
+        answer = _watcher_waits._cancel(proc)
+    finally:
+        _watcher_waits.cleanup_process_tree = real
+    assert proc.kills == 1, proc.kills
+    assert 'process group 4242 was already gone' in answer, answer
+    assert 'direct fallback kill raised' in answer, answer
+    assert 'PermissionError' in answer, answer
+
+
+def _alive(pid):
+    """Whether a pid is still a process this runner can see."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def main():

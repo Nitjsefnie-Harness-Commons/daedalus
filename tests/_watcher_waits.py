@@ -109,7 +109,7 @@ def _cancel(proc):
     The tree has to go, on both platforms, and `tests/_processtree.py` is
     where that lives.
 
-    **This is deduplication, not a repair.** `Child` launches with
+    **This is deduplication, not a repair.** `ChildProcess` launches with
     `start_new_session=True`, so the child is its own session and group
     leader from `Popen` returning, and the local spelling that passed
     `proc.pid` AS the group id resolved to the same group the owner's
@@ -125,11 +125,26 @@ def _cancel(proc):
     owner returns a description when a group is already gone and does not
     fall back to a direct kill, so a bare delegation would drop it; here
     it fires on the one state where a direct kill is wanted, the child
-    still running, rather than on the owner's wording.
+    still running, rather than on the owner's wording. It is contained
+    for the reason the owner contains its own steps: an uncontained
+    cleanup failure is one more thing that can replace the expiry the
+    caller is about to report, and this one would replace it with an
+    `OSError` from the very call meant to be the last resort.
+
+    **What delegating cost, in time.** `ChildProcess.stop` used to wait
+    once, for `CANCEL_BOUND`, and that was the whole bound. The owner
+    waits for its own reap, and then `stop` waits again, so the worst
+    case is now `2 x CANCEL_BOUND` inside the owner plus `stop`'s own
+    `CANCEL_BOUND` - three waits, not one, on a child that will not die.
+    The owner returns no description to report, and `stop` returns the
+    process's own return code, so nothing reads a reason.
     """
     killed = cleanup_process_tree(proc, CANCEL_BOUND)
     if proc.poll() is None:
-        proc.kill()
+        try:
+            proc.kill()
+        except Exception as error:  # pylint: disable=broad-except
+            killed += f'; direct fallback kill raised {error!r}'
     return killed
 
 
