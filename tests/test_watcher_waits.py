@@ -15,6 +15,14 @@ the defect it was written to catch, so there is none. The claim is carried
 by the ledger below: a control per arm of each wait, every arm killed by
 name against a planted defect, and the mutation proofs on the teardown
 tests.
+
+What no arm of any wait can end on is the shape none of these controls
+drive: a child that stays up, healthy, and never publishes. A marker
+assignment no-opped in both watchers produces exactly that, and the three
+budget controls waiting on a real loop child would spin until the job's
+own limit ends the run nameless. It is the trade this module already takes
+for `await_lines` and `await_calls`, taken deliberately, and a bound here
+would buy an early failure with a flaky leg on a loaded runner.
 """
 import sys
 import threading
@@ -27,6 +35,7 @@ from _watcher_waits import (  # noqa: E402
     await_calls,
     await_gone,
     await_lines,
+    await_polls,
 )
 
 # A double that never terminates turns an assertion mutation into a job
@@ -180,6 +189,31 @@ def test_the_call_wait_gives_up_by_name_when_the_child_exits(tmp):
     assert message is not None
     assert '2 gh call(s)' in message, message
     assert 'gh: no fixture carries the query' in message, message
+
+
+def test_the_poll_wait_ends_on_the_nth_distinct_marker(tmp):
+    del tmp
+    log = _GrowingLog([{'poll': '1', 'request': 'query one'},
+                       {'poll': '2', 'request': 'query two'}])
+    child = _ScriptedChild(alive=True)
+    calls = await_polls(log, 2, child, '2 poll(s)')
+    assert [call['poll'] for call in calls] == ['1', '2'], calls
+
+
+def test_the_poll_wait_gives_up_by_name_when_the_child_exits(tmp):
+    del tmp
+    log = _GrowingLog([])
+    child = _ScriptedChild(output='poll failed (1): no fixture carries it')
+    message = None
+    try:
+        await_polls(log, 2, child, '2 poll(s)')
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError('a poll that never arrived did not fail')
+    assert message is not None
+    assert '2 poll(s)' in message, message
+    assert 'poll failed (1): no fixture carries it' in message, message
 
 
 def test_the_death_wait_ends_when_the_pids_are_gone(tmp):
