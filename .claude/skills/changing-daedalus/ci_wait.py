@@ -181,9 +181,17 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     a required workflow that is present and red is a failure (1), never an
     incomplete set (4), so the refusal a missing gate earns can never
     swallow a real failure. Only a set whose every conclusion is acceptable
-    can be incomplete, and a run satisfies the requirement by its `name`
-    alone, because its conclusion was already judged. The set question
-    itself is ci_gate's, which watch_all.py asks the same way.
+    can be incomplete, and the set question is ci_gate's, which
+    watch_all.py asks the same way.
+
+    That question is ALL-OF, and the base's was any-of: a set satisfied the
+    requirement when ONE of the required workflows was present, and is now
+    incomplete unless EVERY one of them is. The default is unchanged, since
+    the default names one workflow; the multi-name reading got stricter, and
+    stricter is the correct one - being satisfied by one of two required
+    workflows is not being satisfied. A run's conclusion is not part of the
+    question either way, which is why the check sits after the conclusion
+    has already been judged above.
     """
     runs = _judged(runs)
     if not runs:

@@ -261,8 +261,15 @@ def test_a_red_gating_run_is_present_and_not_absent(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_hold_run(1, 'completed', 'success', name='tests'),
-            _hold_run(2, 'completed', 'failure', name='speed')]
+    # The RED CONCLUSION IS ON THE GATE. An earlier version of this control
+    # put `tests` green and the `failure` on `speed`, so under a
+    # conclusion-aware predicate the gate read as absent and the suite
+    # stayed green: the fixture never put the subject in the state the
+    # docstring forbids. The green run beside it is the control's other
+    # half - a concluded set with nothing open - and it is green on
+    # purpose, so a red conclusion is the only thing under test.
+    runs = [_hold_run(1, 'completed', 'failure', name='tests'),
+            _hold_run(2, 'completed', 'success', name='gate freshness')]
     assert mod._settled(runs) is True
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True

@@ -33,14 +33,13 @@ partial, so it never reads as settled.
 
 "Every run that exists has concluded" is not "every run that should exist
 did". A pull-request head that conflicts with its base dispatches no
-`pull_request` workflow at all, so the `tests` matrix that gates the merge is
-never created while `gate freshness` and CodeQL run and conclude - and the
-hold used to release that batch, reading exactly like a settled green matrix
-with the gating matrix silently absent from the tally (issue #1223). The
-hold now reads the run set through `ci_gate.missing_required`, the same
-predicate `ci_wait.py` refuses with, and treats an absent gating workflow as
-its own answer: keep holding, and if the cap releases the batch anyway, name
-the workflow that is missing rather than "unknown".
+`pull_request` workflow at all, so the `tests` matrix is never created while
+`gate freshness` and CodeQL run and conclude - and the hold used to release
+that batch, reading like a settled green matrix with the gating matrix
+silently absent from the tally (issue #1223). It now reads the run set
+through `ci_gate.missing_required`, the same predicate `ci_wait.py` refuses
+with; `_settled` carries what an absent gate means and what the cap line
+says about it.
 
 This is a true debounce: the window restarts on every arrival, so nothing is
 emitted while either watcher is still producing. `ci_watch.py` chose a fixed
@@ -211,11 +210,11 @@ class _GateAbsent:
     """A run set that concluded and never carried the gating workflow.
 
     A fourth answer beside True (settled), False (runs still open) and None
-    (nothing to judge). It is its own type rather than a falsy value so it
-    can never be read as one of the other three by `is` comparison, and it
-    carries the names so the cap line can name the workflow rather than
-    fall back on "unknown" - which is the shape issue #839 was filed
-    about, on a different route to the same place.
+    (nothing to judge). Its own type rather than a falsy value, so it can
+    never be read as one of the other three by `is` comparison, and it
+    carries the names so the cap line can name the workflow instead of
+    falling back on "unknown" - the shape issue #839 was filed about,
+    reached here by the other route.
     """
 
     def __init__(self, missing):
@@ -233,9 +232,8 @@ def _settled(runs):
 
     A run set with no run of the gating workflow is a fourth answer, and
     not settled: every run it has concluded, and the one that decides the
-    merge was never dispatched, which is a wait that may never end rather
-    than a run still filling. The predicate is ci_gate's, the one
-    `ci_wait.py` refuses with.
+    merge was never dispatched - a wait that may never end rather than a
+    run still filling. The predicate is ci_gate's, `ci_wait.py`'s too.
     """
     if not runs:
         return None
@@ -246,7 +244,10 @@ def _settled(runs):
 
 
 def _all_concluded(sha, watcher=None):
-    """Whether every workflow run on `sha` has finished, or None.
+    """`_settled`'s answer, passed through: True, False, None for nothing
+    to judge, or `_GateAbsent` for a run set that concluded without the
+    gating workflow. None and `_GateAbsent` both keep the batch held, and
+    are separate because the cap line says a different thing for each.
 
     None keeps the batch held: a failed query must never look settled.
     Runs rather than check runs for the reason in the module docstring. A
