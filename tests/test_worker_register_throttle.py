@@ -10,7 +10,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub)
+    event_target_stub, import_scripts_stub, STREAM_RESPONSE)
 
 REGISTER = 'POST /register'
 SYNC = 'POST /sync-tabs'
@@ -79,9 +79,7 @@ function response(status, data) {
     json: async () => data, text: async () => JSON.stringify(data),
   };
 }
-function streamResponse(answer) {
-  return response(answer, { error: 'disabled' });
-}
+""" + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
 
 const context = vm.createContext({

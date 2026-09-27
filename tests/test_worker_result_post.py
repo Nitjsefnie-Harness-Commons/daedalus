@@ -11,7 +11,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    RESPONSE_STUB, event_target_stub, import_scripts_stub)
+    RESPONSE_STUB, event_target_stub, import_scripts_stub, STREAM_RESPONSE)
 
 RESULT = 'POST /result'
 
@@ -66,9 +66,7 @@ const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
 """ + RESPONSE_STUB + r"""
-function streamResponse(answer) {
-  return response(answer, { error: 'disabled' });
-}
+""" + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + r"""
 
 // A thin wrapper that DELEGATES to the gate: the answer, the accounting, the
