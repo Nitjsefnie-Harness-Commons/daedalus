@@ -15,6 +15,7 @@ controls that close that.
 import ast
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
+
+# --- the outer alarm, which is not the subject's own defence ----------------
+#
+# A control that provokes an expiry sets its budget inside
+# `tests/_noderun.py` — which is precisely the code a reversion removes. So
+# against a launch reverted to an UNBOUNDED one, the control's only defence
+# is the machinery it is testing, and it hangs until something external
+# kills it: a silent 150 s rather than a named failure. This alarm is armed
+# by the control, on the call, and raises whatever the subject does.
+#
+# It must clear the healthy path with room to spare and still fire well
+# inside any external bound. The healthy budget is
+# `round(CHILD_DEADLINE_S * 0.1)` = 11s, so the slowest observed correct
+# run of the whole arm is well under a minute; 60s is roughly five times
+# the healthy budget, and turning it into a failure costs a minute where
+# the alternative costs whatever the runner's ceiling costs.
+OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
+OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
+# Cancelling a timer IS a zero-second deadline, and the census requires the
+# figure to be composed from a named chain rather than typed at the call.
+OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
+
+
+def _raise_outer_deadline(_signum, _frame):
+    """What the outer alarm raises. `TimeoutError` so it is a named expiry."""
+    raise TimeoutError('the outer alarm on this control fired')
 
 
 # --- the expiry message, which is the whole value of the class ------------
@@ -471,18 +499,13 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
     Everything above drives the launcher itself. This drives
     `tests/_jsroute_harness.py`'s real `runtime_and_guard`, which is a
     call site in the tree like any other, and that is the half a launcher
-    control cannot see: a site that kept its own `subprocess.run` with its
-    own `timeout=` would satisfy every control in this file and still
-    report a bare `TimeoutExpired` naming the whole command.
+    control cannot see: a site that kept its own `subprocess.run` would
+    satisfy every control in this file and still report a bare
+    `TimeoutExpired` naming the whole command.
 
     The source reaches Node, writes a line and then never settles, so the
     child stalls having produced something — which is precisely the case
-    where its partial output is the only evidence there is. The budget is
-    derived from the launcher's own deadline and deliberately SMALLER: this
-    control provokes an expiry, so a tighter budget can only make it
-    arrive sooner. That Node wrote its line before the budget ran out is
-    asserted rather than assumed, so a host too slow to start Node fails
-    the control instead of passing it.
+    where its partial output is the only evidence there is.
     """
     import _noderun  # noqa: E402
     from _jsroute_harness import runtime_and_guard  # noqa: E402
@@ -491,23 +514,84 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
     real_deadline = _noderun.CHILD_DEADLINE_S
     _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
     caught = None
+    # The alarm is armed and disarmed HERE rather than in a context
+    # manager, because the census judges a process-level deadline against
+    # the scope that reports it, and a helper would put the two in
+    # different functions. `TimeoutError` is what the handler raises, and
+    # the handler re-raises as an assertion, so the alarm is a reported
+    # failure rather than a swallowed one.
+    signal.signal(signal.SIGALRM, _raise_outer_deadline)
+    signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_S)
     try:
-        runtime_and_guard(
-            "process.stdout.write('the child spoke before it wedged\\n');\n"
-            'setInterval(() => {}, 1000);\n', path)
-    except _noderun.ChildDeadlineExceeded as failure:
-        caught = failure
-    except BaseException as unexpected:  # noqa: BLE001
-        # A bare `TimeoutExpired` is the failure this entry point exists to
-        # replace, so it is named rather than merely re-raised.
-        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-            'a bare TimeoutExpired reached the caller', unexpected)
-        raise
+        try:
+            runtime_and_guard(
+                "process.stdout.write("
+                "'the child spoke before it wedged\\n');\n"
+                'setInterval(() => {}, 1000);\n', path)
+        except _noderun.ChildDeadlineExceeded as failure:
+            caught = failure
+        except BaseException as unexpected:  # noqa: BLE001
+            # A bare `TimeoutExpired` is the failure this entry point
+            # exists to replace, so it is named rather than re-raised.
+            assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+                'a bare TimeoutExpired reached the caller', unexpected)
+            raise
+    except TimeoutError as alarm:
+        raise AssertionError(
+            'the outer alarm fired: the child wedged and nothing in the '
+            'suite ended it, which is what this control exists to prevent'
+        ) from alarm
     finally:
+        signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_CLEAR_S)
         _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the child that never settles finished'
     assert 'the child spoke before it wedged' in caught.stdout, caught.stdout
     assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
+
+
+def test_an_environment_the_caller_built_reaches_the_child(tmp):
+    """`environment` is threaded, and a value only the caller holds arrives.
+
+    `test_js_coverage.py` points `NODE_V8_COVERAGE` at a dumps directory it
+    builds per test, so the child must be handed THAT environment rather
+    than this process's. A launcher that accepted the parameter and then
+    read `os.environ` would satisfy every signature-shaped check here and
+    send the child to the wrong directory, so the assertion is on what the
+    child actually saw.
+
+    The negative half is the same property from the other side: with no
+    environment passed, the child gets this process's, and a value planted
+    only in the caller's dict does not reach it.
+    """
+    import _noderun  # noqa: E402
+
+    source = "process.stdout.write(process.env.NODE_V8_COVERAGE || 'none');"
+    caller_only = str(Path(tmp) / 'caller-only-dumps')
+    environment = dict(os.environ)
+    environment['NODE_V8_COVERAGE'] = caller_only
+    result = _noderun.run_node_argv(
+        _node(), ['-e', source], tmp,
+        environment=_util.child_coverage('scrub', environment))
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert result.stdout == caller_only, result.stdout
+    # And the same child launched without one does not see it, so the
+    # assertion above is the parameter doing the work.
+    os.environ['NODE_V8_COVERAGE'] = caller_only
+    try:
+        without = _noderun.run_node_argv(_node(), ['-e', source], tmp)
+    finally:
+        del os.environ['NODE_V8_COVERAGE']
+    assert without.returncode == 0, (without.returncode, without.stderr)
+    assert without.stdout == caller_only, (
+        'the launcher read os.environ rather than the caller\'s dict')
+    # A different value entirely, so the two halves cannot agree by luck.
+    other = str(Path(tmp) / 'other-dumps')
+    second = dict(os.environ)
+    second['NODE_V8_COVERAGE'] = other
+    third = _noderun.run_node_argv(
+        _node(), ['-e', source], tmp,
+        environment=_util.child_coverage('scrub', second))
+    assert third.stdout == other, third.stdout
 
 
 def _raise_permission_error(directory):
