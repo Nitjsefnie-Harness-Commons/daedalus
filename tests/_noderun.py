@@ -6,6 +6,7 @@ gate import — which is what stops `tests/_boundary_env.py` (which splices the
 gate) and `tests/_stream_fake.py` (the gate belongs to it) from importing
 each other, a cycle pylint reads as R0401 and CI treats as fatal.
 """
+import contextlib
 import json
 import shutil
 import subprocess
@@ -130,11 +131,42 @@ class ChildDeadlineExceeded(Exception):
             f'a Node child did not finish within {deadline_s}s and was '
             f'killed; the suite ceiling is a weaker backstop because it '
             f'sends SIGTERM to the suite and leaves this child running.\n'
-            f'  child: {argv[0]} {Path(str(argv[1])).name}\n'
+            f'  child: {_child_label(argv)}\n'
             f'  deadline: {deadline_s}s\n'
             f'  cleanup: {cleanup}{unlinked}\n'
             f'  stdout: {stdout[:2000]!r}\n'
             f'  stderr: {stderr[:2000]!r}')
+
+
+# A bound on one element of the report's child line — a STRING this module
+# prints, not on anything. A source handed to `node -e` is arbitrarily long,
+# and that line is the one a reader reads first.
+_LABEL_WIDTH = 60
+
+
+def _child_label(argv):
+    """The child as the expiry report names it, from either argv shape.
+
+    A program launch hands `node <a written file> <arguments>`, and the
+    basename of that second element is the useful half: it keeps a
+    temporary path nobody can act on out of the report. An exact-argv
+    launch hands `node -e <source>` or `node --check <path>`, where that
+    element is a flag and the element after it is a SOURCE — so the
+    basename is taken at the program file and nowhere else. Applied
+    anywhere else it is the source sliced at its last `/`, naming a
+    fragment that exists nowhere, and a `require('/a/b/c.js')` source
+    loses its own name to `c.js'); …`.
+
+    Every element is bounded as well: a source pasted whole makes the one
+    line a reader scans first unreadable.
+    """
+    parts = []
+    for index, part in enumerate(argv):
+        text = str(part)
+        if index == 1 and not text.startswith('-'):
+            text = Path(text).name or text
+        parts.append(text[:_LABEL_WIDTH])
+    return ' '.join(parts)
 
 
 def run_node_program(node, program, arguments, cwd, payload=None):
@@ -144,10 +176,60 @@ def run_node_program(node, program, arguments, cwd, payload=None):
     gate's `run_gate`) neither names a `cwd=` keyword the coverage guard would
     read as an undeclared launch nor has to restate the environment.
 
+    The prologue written ahead of the program is load-bearing rather than
+    decoration: it splices the written file out of `process.argv`, so the
+    child sees its own arguments in the positions the caller wrote them,
+    and it pushes `payload` as an object literal LAST, which is where the
+    harnesses read their plan from.
+
+    The bound, the launch shape, the scratch trees and the classified
+    expiry all belong to `_launch_child`, which is shared with
+    `run_node_argv` — a second copy of a hang detector is a second copy a
+    fix has to reach.
+    """
+    unlinked = []
+    directory_scratch = _Scratch('daedalus-node-', unlinked)
+    with directory_scratch as directory:
+        program_path = Path(directory) / 'program.js'
+        prologue = 'process.argv.splice(1, 1);'
+        if payload is not None:
+            prologue += f' process.argv.push({json.dumps(payload)});'
+        prologue += '\n'
+        program_path.write_text(
+            prologue + program, encoding='utf-8')
+        return _launch_child(
+            [node, str(program_path), *arguments], cwd, unlinked,
+            (directory_scratch,))
+
+
+def run_node_argv(node, arguments, cwd, stdin_data=None):
+    """Run a Node child from an EXACT argv, with no program file of ours.
+
+    `arguments` is the argv tail as a list of strings, so a caller can
+    launch `['--check', path]`, `['-e', source, *args]` or `[script_path]`
+    — none of which is `node <written-file> <args>`, and every one of which
+    the program launch's prologue would rewrite.
+
+    `cwd` is positional for the reason it is there above, and `stdin_data`
+    is a keyword because it is the one input a caller supplies by name.
+    `stdin_data=None` means stdin is DEVNULL exactly as it is for the
+    program launch, so a child that reads stdin to end of file reaches it
+    at once rather than waiting on a pipe nobody writes.
+    """
+    return _launch_child(
+        [node, *arguments], cwd, [], stdin_data=stdin_data)
+
+
+def _launch_child(argv, cwd, unlinked, before_report=(), stdin_data=None):
+    """Launch `argv`, bound by the detector, and read back what it produced.
+
+    The one launch path, for both entry points. Two copies would mean a fix
+    to the detector reached one of them.
+
     The child is bounded by `CHILD_DEADLINE_S` — a hang detector whose basis
     is recorded above, not a health margin — and the bound spans the child's
     own execution and nothing else: the clock starts at the launch, and
-    nothing before it (writing the program file) or after it (reading the
+    nothing before it (writing a program file) or after it (reading the
     result) is inside it. A future serialisation gate placed before the
     launch must stay outside it, or its queueing time would count against
     the child.
@@ -172,60 +254,59 @@ def run_node_program(node, program, arguments, cwd, payload=None):
     `os.environ['NODE_V8_COVERAGE']` per test to point at its own dumps
     directory, and an import-time snapshot would send the child to the wrong
     directory.
+
+    `before_report` is the caller's own scratch trees, and `unlinked` the
+    list their removal failures are appended to: both are closed after the
+    cleanup and BEFORE the report is built, so a removal that fails is IN
+    the report rather than replacing it.
     """
-    unlinked = []
-    directory_scratch = _Scratch('daedalus-node-', unlinked)
-    with directory_scratch as directory:
-        program_path = Path(directory) / 'program.js'
-        prologue = 'process.argv.splice(1, 1);'
-        if payload is not None:
-            prologue += f' process.argv.push({json.dumps(payload)});'
-        prologue += '\n'
-        program_path.write_text(
-            prologue + program, encoding='utf-8')
-        argv = [node, str(program_path), *arguments]
+    output_scratch = _Scratch('daedalus-node-out-', unlinked)
+    with output_scratch as output:
+        stdout_path = Path(output) / 'stdout'
+        stderr_path = Path(output) / 'stderr'
         # stdout and stderr go to files rather than to pipes: a pipe buffer
         # the child fills and nobody drains would block the child itself and
-        # make this detector fire on a child that was only talking.
-        output_scratch = _Scratch('daedalus-node-out-', unlinked)
-        with output_scratch as output:
-            stdout_path = Path(output) / 'stdout'
-            stderr_path = Path(output) / 'stderr'
-            with (stdout_path.open('wb') as stdout,
-                  stderr_path.open('wb') as stderr):
-                process = subprocess.Popen(
-                    argv, cwd=cwd,
-                    env=_util.child_coverage('scrub'),
-                    stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                    start_new_session=sys.platform != 'win32')
-                try:
-                    returncode = process.wait(timeout=CHILD_DEADLINE_S)
-                except subprocess.TimeoutExpired:
-                    # Flush, then read, then kill — in that order. Flush
-                    # because the handles are buffered writers, so a read
-                    # before the close sees an empty file; read BEFORE the
-                    # kill because on Windows a file another process still
-                    # holds open is not reliably readable, and a read after
-                    # a failed tree kill can raise PermissionError and
-                    # replace the classified error with an unrelated one.
-                    stdout.flush()
-                    stderr.flush()
-                    stdout = _read_stream(stdout_path)
-                    stderr = _read_stream(stderr_path)
-                    cleanup = cleanup_process_tree(
-                        process, CLEANUP_DEADLINE_S)
-                    # The scratch trees come down HERE, before the report is
-                    # built, so a removal that fails is IN the report rather
-                    # than replacing it. Left to `__exit__` the outcome
-                    # would not exist yet when the message is made.
-                    output_scratch.close()
-                    directory_scratch.close()
-                    raise ChildDeadlineExceeded(
-                        argv, CHILD_DEADLINE_S, stdout, stderr, cleanup,
-                        ''.join(unlinked)) from None
-            return subprocess.CompletedProcess(
-                argv, returncode, _read_stream(stdout_path),
-                _read_stream(stderr_path))
+        # make this detector fire on a child that was only talking. stdin is
+        # a file for the same reason, and because a pipe fed after the
+        # launch blocks the launcher on a child that stopped reading.
+        stdin_path = None
+        if stdin_data is not None:
+            stdin_path = Path(output) / 'stdin'
+            stdin_path.write_text(stdin_data, encoding='utf-8')
+        with contextlib.ExitStack() as opened:
+            stdout = opened.enter_context(stdout_path.open('wb'))
+            stderr = opened.enter_context(stderr_path.open('wb'))
+            process = subprocess.Popen(
+                argv, cwd=cwd,
+                env=_util.child_coverage('scrub'),
+                stdin=(subprocess.DEVNULL if stdin_path is None
+                       else opened.enter_context(stdin_path.open('rb'))),
+                stdout=stdout, stderr=stderr,
+                start_new_session=sys.platform != 'win32')
+            try:
+                returncode = process.wait(timeout=CHILD_DEADLINE_S)
+            except subprocess.TimeoutExpired:
+                # Flush, then read, then kill — in that order. Flush
+                # because the handles are buffered writers, so a read
+                # before the close sees an empty file; read BEFORE the
+                # kill because on Windows a file another process still
+                # holds open is not reliably readable, and a read after
+                # a failed tree kill can raise PermissionError and
+                # replace the classified error with an unrelated one.
+                stdout.flush()
+                stderr.flush()
+                stdout = _read_stream(stdout_path)
+                stderr = _read_stream(stderr_path)
+                cleanup = cleanup_process_tree(
+                    process, CLEANUP_DEADLINE_S)
+                for scratch in (output_scratch, *before_report):
+                    scratch.close()
+                raise ChildDeadlineExceeded(
+                    argv, CHILD_DEADLINE_S, stdout, stderr, cleanup,
+                    ''.join(unlinked)) from None
+        return subprocess.CompletedProcess(
+            argv, returncode, _read_stream(stdout_path),
+            _read_stream(stderr_path))
 
 
 def _read_stream(path):
