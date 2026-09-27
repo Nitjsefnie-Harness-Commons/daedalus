@@ -16,7 +16,7 @@ already matches the pair.
 It reads the base tree's own declarations rather than a list of the
 files the branch touched. That form is not a preference: 89 files carry
 a row in the Python table and 31 in this one, this branch edits twelve
-of the eighty-nine and eighteen of the thirty-one, and a path list
+of the eighty-nine and nineteen of the thirty-one, and a path list
 cannot tell a site the branch wrote from one it did not.
 
 Like every row in the Python table, each of these is a site the rule
