@@ -17,6 +17,7 @@ from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _bounded_git_launches import BOUNDED_GIT_LAUNCHES  # noqa: E402
+from _launch_keep import control_keeps  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
 
@@ -213,12 +214,14 @@ def _bound_sites(source, here):
     a baselined launch leaves the row alone while a second call of the
     same shape in the same function becomes a site of its own. A launch
     whose head the analyser could not read is out of scope by its own
-    stated boundary, named on the refusal rather than dropped.
+    stated boundary, named on the refusal rather than dropped. Which
+    sites that boundary keeps is `tests/_launch_keep.py`'s to say, read
+    by the control over the kept-out ones as well.
     """
     tree = ast.parse(source)
     found = []
     for line, head, kind in bound_sites(source, here):
-        if head in ('git', 'ambiguous') or kind == 'unplaced':
+        if control_keeps(head, kind):
             found.append((line, _enclosing_function(tree, line),
                           _site_signature(tree, line), kind))
     found.sort()
