@@ -16,6 +16,7 @@ import _util  # noqa: E402
 from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
+from _bounded_git_launches import BOUNDED_GIT_LAUNCHES  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
 
@@ -79,183 +80,6 @@ MCP_OLD_NAMES = (
     'mcp_transport.py',
 )
 
-BOUNDED_GIT_LAUNCHES = {
-    # Every in-scope bound site in the tracked tree, keyed by
-    # (path, line, function) so an allowance is for THAT site: a second
-    # bounded call in an already-allowed function is a different site and
-    # needs a row of its own, and an edit above a site cannot move a row
-    # onto another launch. Each reason says what the call is and why it
-    # cannot hang a git launch; a receiver the analyser cannot prove is
-    # reported rather than passed, and this table is that report's
-    # disposition.
-    ('.claude/skills/changing-daedalus/watch_all.py', 401, '_aggregate'):
-        'a queue read with a deadline: the queue is drained,'
-        'nothing is launched',
-    ('.claude/skills/changing-daedalus/watch_all.py', 83, '_repo_root'):
-        'a standalone skill script an operator runs by hand; no'
-        'suite or CI bound sits above it, so a wedged git hangs an'
-        'operator',
-    ('.claude/skills/changing-daedalus/watch_all.py', 187, '_repo_slug'):
-        'a standalone skill script an operator runs by hand; no'
-        'enclosing bound sits above it, so a wedged git hangs an'
-        'operator',
-    ('run_tests.py', 52, '_terminate_and_reap'):
-        'a child wait while tearing the suite down; the runner is'
-        'the bound',
-    ('run_tests.py', 56, '_terminate_and_reap'):
-        'a second child wait in the same teardown, after a kill',
-    ('scripts/gen_gitignore.py', 101, '_check_ignore'):
-        'a standalone generator an operator runs by hand; no'
-        'enclosing bound sits above it, so a wedged git hangs an'
-        'operator',
-    ('scripts/gen_gitignore.py', 115, 'main'):
-        'a standalone generator an operator runs by hand; no suite'
-        'or CI bound sits above it, so a wedged git hangs an'
-        'operator',
-    ('tests/_drain.py', 25, 'kill_and_drain'):
-        'a drain of an already-killed process: it can only return',
-    ('tests/_drain.py', 33, 'kill_and_drain'):
-        'the reap that follows that drain, on the same dead process',
-    ('tests/_realbrowser_workers.py', 115, '_devtools_targets'):
-        'an HTTP read: a socket, not a git process, and the'
-        ' timeout is the bound itself',
-    ('tests/_realbrowser_workers.py', 89, '_retire_browser'):
-        'a browser-process wait while retiring it',
-    ('tests/_realbrowser_workers.py', 92, '_retire_browser'):
-        'the reap after that wait, on the same process',
-    ('tests/_repo.py', 45, 'git_index'):
-        'a generic git runner: the bound covers the index-writing'
-        'commands its callers pass, not only the reads',
-    ('tests/_processtree.py', 83, '_reap'):
-        'a bounded reap of a process that has already stopped'
-        ' answering, in the shared tree-kill cleanup',
-    ('tests/_processtree.py', 99, '_reap'):
-        'the fallback reap that follows the direct kill, on the'
-        ' same process',
-    ('tests/_util.py', 369, '_startup_observations'):
-        'a thread join on a thread this helper started',
-    ('tests/_util.py', 499, 'bridge'):
-        'a helper waiting for a port line; the caller bounds it',
-    ('tests/_util.py', 559, 'get'):
-        'an HTTP helper opening a socket; no git '
-        'process is behind it',
-    ('tests/_util.py', 563, 'get_json'):
-        'an HTTP helper opening a socket; no git '
-        'process is behind it',
-    ('tests/_util.py', 577, 'header_stream'):
-        'a connection constructor: it opens a socket and returns'
-        ' a client, and no git process sits behind a socket',
-    ('tests/_util.py', 568, 'post_json'):
-        'an HTTP helper opening a socket; no git '
-        'process is behind it',
-    ('tests/_util.py', 552, 'request'):
-        'an HTTP read: a socket, not a git process, and the'
-        ' timeout is the bound itself',
-    ('tests/test_aggregate_gate.py', 324,
-     'test_every_single_dependency_result_is_tabled'):
-        'a table builder called with a keyword mapping; it builds a'
-        'table, it launches nothing',
-    ('tests/test_aggregate_gate.py', 392,
-     'test_two_dependencies_are_decided_jointly'):
-        'the same table builder, keyed from a zipped mapping',
-    ('tests/test_bridge_startup.py', 616,
-     'test_dashboard_responses_refuse_cross_origin_framing'):
-        'an HTTP read: a socket, not a git process, and the'
-        ' timeout is the bound itself',
-    ('tests/_dashnode_retry_control.py', 133, 'popen'):
-        'a test double constructed with a keyword mapping; it'
-        'records, it does not launch',
-    ('tests/test_dashboard_gate.py', 102,
-     'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
-        'a wait on a holder this test started, in a teardown that'
-        ' kills it only while it is still running; the timeout is'
-        ' the bound itself',
-    ('tests/test_dashboard_gate.py', 104,
-     'test_gate_is_released_by_the_os_when_the_holder_is_killed'):
-        'the gate child this test started; the timeout is the'
-        ' bound itself',
-    ('tests/test_dashboard_node_retry.py', 681,
-     'test_two_dashboard_children_cannot_be_inside_the_gate_together'):
-        'a wait on the two gate children this test started;'
-        ' the timeout is the bound itself',
-    ('tests/test_mcp_entry_point.py', 37, '_cleanup_mcp'):
-        'an MCP process wait while the test tears it down',
-    ('tests/test_mcp_entry_point.py', 40, '_cleanup_mcp'):
-        'the reap after that wait, on the same process',
-    ('tests/test_mcp_server.py', 110, '_surface_responder_errors'):
-        'a thread join on a thread the fixture started',
-    ('tests/test_mcp_server.py', 913, 'callers'):
-        "an MCP tool call whose timeout is the tool's, not a bound"
-        'on a process',
-    ('tests/test_mcp_server.py', 527,
-     'test_a_nonpositive_mcp_timeout_admits_no_command'):
-        "the test's subject: an MCP call the server must reject for"
-        'its timeout',
-    ('tests/test_mcp_server.py', 1122,
-     'test_bearer_middleware_rejects_duplicate_authorization_headers'):
-        'a connection constructor: it opens a socket and returns'
-        ' a client, and no git process sits behind a socket',
-    ('tests/test_mcp_server.py', 1402,
-     'test_mcp_port_zero_announces_the_actual_bound_port'):
-        'an assertion on a bound event the module sets; the wait IS'
-        'the assertion',
-    ('tests/test_parent_watch.py', 369,
-     'test_bounded_wait_reports_live_child_port_and_watch_state'):
-        'a helper waiting for a child to exit; the test bounds it',
-    ('tests/test_real_browser_classification.py', 266,
-     'test_answering_control_worker_twice_marks_worker_absence_our_failure'):
-        'a mock assertion on a wait call: it asserts, it does not'
-        'wait',
-    ('tests/test_real_browser_classification.py', 311,
-     'test_control_browser_exit_ends_the_diagnosis_without_a_verdict'):
-        'the same mock assertion, on the exit control',
-    ('tests/test_real_browser_classification.py', 275,
-     'test_control_diagnosis_launches_both_extensions_twice_before_guilt'):
-        'the same mock assertion, in the twice-launched control',
-    ('tests/test_real_browser_classification.py', 61,
-     'test_indeterminate_e2big_diagnostics_are_harness_failures'):
-        'a mock patch whose keyword mapping substitutes the launch'
-        'the test is asserting on',
-    ('tests/test_real_browser_classification.py', 298,
-     'test_unanswered_control_worker_leaves_the_skip_with_the_machine'):
-        'the same mock assertion, on the unanswered control',
-    ('tests/test_real_browser_classification.py', 323,
-     'test_unreadable_control_answer_polls_again_instead_of_settling'):
-        'the same mock assertion, on the unreadable control',
-    ('tests/test_real_browser_harness.py', 574, 'exercise'):
-        "the same navigation, on the harness's own page",
-    ('tests/test_real_browser_harness.py', 567, 'first_navigation'):
-        'a browser navigation whose timeout is the bound itself',
-    ('tests/test_segment_routes.py', 101, 'refusing'):
-        'a test double delegating with its arguments; it launches'
-        'nothing of its own',
-    ('tests/test_stream_lifecycle.py', 38, '_open_stream'):
-        'a connection constructor: it opens a socket and returns'
-        ' a client, and no git process sits behind a socket',
-    ('tests/test_suite_runner.py', 399,
-     'test_output_close_failure_reaps_the_spawned_suite'):
-        'a suite-process wait inside the reaping the test asserts',
-    ('tests/test_suite_runner.py', 405,
-     'test_output_close_failure_reaps_the_spawned_suite'):
-        'the reap that follows, on the same process',
-    ('tests/test_suite_runner.py', 408,
-     'test_output_close_failure_reaps_the_spawned_suite'):
-        'the final reap, on the same process',
-    ('tests/_watcher_waits.py', 99, 'stop'):
-        'a reap that follows a group kill, on a process already signalled',
-    ('tests/test_watcher_waits.py', 319,
-     'test_a_cancel_ends_the_whole_tree_and_not_only_the_child'):
-        'a cleanup reap on a real child the control started itself, in the'
-        ' finally of the tree-kill control',
-    ('tests/test_watcher_budget.py', 494,
-     'test_a_graceful_exit_leaves_no_children_behind'):
-        'a parent handle reaping a child it signalled itself, in the'
-        ' graceful-exit control',
-    ('tests/test_watcher_budget.py', 310,
-     'test_the_children_die_with_their_parent'):
-        'a parent handle stopping a child the test started',
-}
-
 
 def _clone(root, target):
     """The one clone invocation every fixture tree comes from.
@@ -310,24 +134,122 @@ def _enclosing_function(tree, line):
     return best_name
 
 
+def _call_signature(node):
+    """The callee as it is spelled, then its keyword names in order.
+
+    A `**` unpack carries no keyword name, so it contributes nothing
+    here: a row never has to be rewritten when one is introduced.
+    """
+    callee = ' '.join(ast.unparse(node.func).split())
+    keywords = sorted(kw.arg for kw in node.keywords if kw.arg)
+    return f'{callee}({", ".join(keywords)})'
+
+
+def _site_signature(tree, line):
+    """The call's own shape: its callee and the keywords it carries.
+
+    A line number is a position and this is the property — the control
+    keys an allowance on what the call IS, so an edit above it cannot
+    move a row onto a different launch. The keyword names ride along
+    because `process.wait(timeout=10)` and `process.wait()` are
+    different sites, and a positional timeout is not the same call
+    either.
+
+    The tightest call whose own span holds the line wins, then the
+    deepest one of those, so a two-line launch sharing its first line
+    with a nested call is ordered the same way on every run rather than
+    by whichever node the traversal reached first.
+    """
+    tightest = None
+    tightest_rank = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        end = getattr(node, 'end_lineno', node.lineno)
+        if not node.lineno <= line <= end:
+            continue
+        rank = (end - node.lineno, -node.lineno, -node.col_offset,
+                -getattr(node, 'end_col_offset', 0))
+        if tightest_rank is None or rank < tightest_rank:
+            tightest, tightest_rank = node, rank
+    return _call_signature(tightest)
+
+
+def _spelled_signatures(source):
+    """Each function the file binds, mapped to the calls it spells.
+
+    Read from the parse rather than from the allowance table, so a row's
+    function and signature are checked against what the file it names can
+    actually say, and not against the table's own agreement with itself.
+    The enclosing function is resolved against one precomputed span list:
+    walking the tree per call is quadratic and this control runs on twelve
+    CI legs.
+    """
+    tree = ast.parse(source)
+    spans = sorted(
+        ((node.lineno, getattr(node, 'end_lineno', node.lineno), node.name)
+         for node in ast.walk(tree)
+         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))),
+        reverse=True)
+    spelled = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = '<module>'
+        for start, end, name in spans:
+            if start > node.lineno:
+                continue
+            if end >= node.lineno:
+                function = name
+                break
+        spelled.setdefault(function, set()).add(_call_signature(node))
+    return spelled
+
+
+def _read_spelled(root, path, cache):
+    """`_spelled_signatures` for one path, read once per control run.
+
+    `ast.unparse` on every call in every tracked module costs more than
+    the whole rest of this suite, and only the paths a row names are ever
+    asked about.
+    """
+    if path not in cache:
+        text = (root / path).read_text(encoding='utf-8',
+                                       errors='surrogateescape')
+        cache[path] = _spelled_signatures(text)
+    return cache[path]
+
+
+def _row_text(key):
+    """The key as the source that spells it, so a repair is a paste."""
+    return '(' + ', '.join(repr(part) for part in key) + ')'
+
+
 def _bound_sites(source, here):
-    """Every in-scope bound site as (path, function, line, note).
+    """Every in-scope bound site as its key, then the refusal text.
 
     The analyser computes each launch's head, so this consumes its
     structured classification rather than re-parsing the human-readable
-    refusal; a message-format change cannot move the rule. The LINE is in
-    the key, so an allowance is for that site: a second bounded call in an
-    already-allowed function is a different site and needs a row of its
-    own. A launch whose head the analyser could not read is out of scope
-    by its own stated boundary, named on the refusal rather than dropped.
+    refusal; a message-format change cannot move the rule. The key names
+    the site by shape and position within its function, so an edit above
+    a baselined launch leaves the row alone while a second call of the
+    same shape in the same function becomes a site of its own. A launch
+    whose head the analyser could not read is out of scope by its own
+    stated boundary, named on the refusal rather than dropped.
     """
     tree = ast.parse(source)
-    sites = []
+    found = []
     for line, head, kind in bound_sites(source, here):
         if head in ('git', 'ambiguous') or kind == 'unplaced':
-            function = _enclosing_function(tree, line)
-            sites.append((here, function, line,
-                          f'{here}:{line} {kind} bound launch'))
+            found.append((line, _enclosing_function(tree, line),
+                          _site_signature(tree, line), kind))
+    found.sort()
+    seen = {}
+    sites = []
+    for line, function, signature, kind in found:
+        seen[(function, signature)] = seen.get((function, signature), 0) + 1
+        sites.append((here, function, signature, seen[(function, signature)],
+                      f'{here}:{line} {kind} bound launch'))
     return sites
 
 
@@ -536,12 +458,17 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     table only, so the summary sentence is true of it; a future one with
     no row is the filed boundary issue, not enforced here.
 
-    The allowance is pinned from both sides: a live site with no row, a
-    row matching zero or more than one live site, and a row whose function
-    no longer holds a site all fail. Matching is on the exact (path, line,
-    function) key, so a launch in a different function of an allowed
-    module, or a second launch in an allowed function, is a refusal — the
-    exemption cannot be widened by a prefix or substring match.
+    The allowance is pinned from both sides, and a key is the site's own
+    shape rather than a position, so an edit above a baselined launch is
+    not a change to its row. A live site with no row fails; a row whose
+    function does not bind a call spelling that signature fails; a row
+    matching zero live sites fails, because a stale allowance is a
+    refusal; and a row matching more than one fails. Matching is on the
+    exact (path, function, signature, ordinal) key, so a launch in a
+    different function of an allowed module, a second launch of the same
+    shape in an allowed function, and a launch that has changed shape are
+    each a refusal — the exemption cannot be widened by a prefix or
+    substring match, and every failure names the key to paste.
     """
     del tmp
     live = {}
@@ -550,32 +477,43 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
                                          errors='surrogateescape')
         if 'subprocess' not in source:
             continue
-        for site_path, function, line, refusal in _bound_sites(source, path):
-            live.setdefault((site_path, line, function), []).append(refusal)
+        for site in _bound_sites(source, path):
+            live.setdefault(site[:4], []).append(site[4])
 
     unallowed = sorted(
-        f'{key[0]}::{key[1]}:{key[2]} {sites}'
+        f'{_row_text(key)} {sites}'
         for key, sites in live.items()
         if key not in BOUNDED_GIT_LAUNCHES)
     assert not unallowed, (
         'bounded git launches with no BOUNDED_GIT_LAUNCHES row:\n'
         + '\n'.join(unallowed))
-    for key in sorted(BOUNDED_GIT_LAUNCHES):
-        assert live.get(key), (
-            f'BOUNDED_GIT_LAUNCHES row {key} has no live bounded git '
-            'launch; a stale allowance is a refusal')
     # The keying is what carries the anti-prefix promise, so it is
     # checked rather than asserted in prose: a (path,) key alone, the
     # loosest prefix the sentence forbids, would let one row stand for
-    # every site in a module.
-    assert all(len(key) == 3 for key in BOUNDED_GIT_LAUNCHES), (
-        'every BOUNDED_GIT_LAUNCHES key names a site, not a module')
+    # every site in a module. The test for that is that a row's function
+    # and signature are the ones the file it names spells — a literal a
+    # fixer chose matches nothing, and the same check names the function
+    # the analyser read when the row's function is not one the file binds
+    # at all. The file is read here rather than in the walk above, so a
+    # row in a file the prefilter skips is still judged on what it says.
+    spelled = {}
+    for key in sorted(BOUNDED_GIT_LAUNCHES):
+        named = _read_spelled(ROOT, key[0], spelled)
+        assert key[2] in named.get(key[1], set()), (
+            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} names no call: '
+            f'{key[0]} spells no {key[2]!r} inside a {key[1]!r}, or binds no '
+            'such function; the analyser computes both, so the key printed '
+            'in the failure above is the one to paste')
+    for key in sorted(BOUNDED_GIT_LAUNCHES):
+        assert live.get(key), (
+            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live bounded '
+            'git launch; a stale allowance is a refusal')
     for key in sorted(BOUNDED_GIT_LAUNCHES):
         count = len(live.get(key, ()))
         assert count == 1, (
-            f'BOUNDED_GIT_LAUNCHES row {key} matches {count} live bounded '
-            'sites; exactly one is required, so a site in a function that '
-            'already has a row must be given its own')
+            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} matches {count} live '
+            'bounded sites; exactly one is required, so a site in a function '
+            'that already has a row must be given its own')
 
 
 def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):
@@ -688,6 +626,66 @@ def test_a_cyclic_machinery_base_terminates_within_a_step_ceiling(tmp):
     assert sites == []
     assert child != os.getpid()
     assert sys.gettrace() is tracer
+
+
+def test_a_bounded_launch_key_survives_an_edit_above_the_site(tmp):
+    """The key an allowance is written on does not move when a launch does.
+
+    A line number is a position, so a table keyed on one reports a
+    launch it already accounts for the moment an unrelated edit lands
+    above the baselined call — the same class of red this branch
+    exists to clear, planted here at forty lines rather than one so
+    the shape is the one a real relocation produces.
+
+    The key is the row minus its refusal, because the refusal names
+    the line by design: it is the failure text, not the identity. The
+    fixture is pinned to exactly one site so an analyser that stopped
+    reporting cannot make the comparison pass on two empty lists.
+    """
+    del tmp
+    head = ('import subprocess\n'
+            'def reap(process):\n')
+    launch = '    process.wait(timeout=10)\n'
+    before = _bound_sites(head + launch, 'probe/reap.py')
+    after = _bound_sites(
+        head + '    # an unrelated edit above the launch\n' * 40 + launch,
+        'probe/reap.py')
+    assert len(before) == 1, before
+    assert [row[:-1] for row in before] == [row[:-1] for row in after], (
+        f'the key moved with the line: {before} then {after}')
+
+
+def test_a_launch_key_separates_keywords_unpacks_and_repeats(tmp):
+    """The three components of a key that a line number used to carry.
+
+    Two calls that differ only in their keywords are two sites, so the
+    keyword names are in the key; a `**` unpack names no keyword, so it
+    adds nothing to the key and a row survives its introduction; and two
+    identical calls in one function are two sites, which is what the
+    ordinal is for. Each is driven through the real analyser, so a
+    signature that stopped reading its keywords, or an ordinal that
+    stopped counting, cannot leave the table's rows passing.
+    """
+    del tmp
+    keyed = _bound_sites(
+        'import subprocess\n'
+        'def reap(process):\n'
+        '    process.wait(timeout=10)\n'
+        "    process.wait(**{'timeout': 10, 'shell': True})\n",
+        'probe/keywords.py')
+    assert [row[2] for row in keyed] == [
+        'process.wait(timeout)', 'process.wait()'], keyed
+    unpacked = _bound_sites(
+        'import subprocess\n'
+        'def reap(process):\n'
+        "    process.wait(**{'timeout': 10})\n", 'probe/unpack.py')
+    assert [row[2] for row in unpacked] == ['process.wait()'], unpacked
+    repeated = _bound_sites(
+        'import subprocess\n'
+        'def reap(process):\n'
+        '    process.wait(timeout=10)\n'
+        '    process.wait(timeout=10)\n', 'probe/repeat.py')
+    assert [row[3] for row in repeated] == [1, 2], repeated
 
 
 if __name__ == '__main__':
