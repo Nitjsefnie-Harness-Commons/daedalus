@@ -372,6 +372,7 @@
 !/tests/_overlap.py
 !/tests/_overlap_clients.py
 !/tests/_owned_writes.py
+!/tests/_package_layout.py
 !/tests/_pip_cache.py
 !/tests/_processtree.py
 !/tests/_pyroute.py
