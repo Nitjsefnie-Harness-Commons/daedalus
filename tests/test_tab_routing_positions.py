@@ -7,6 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _pyroute_positions import at_position, position_key  # noqa: E402
+from _pyroute_values import DeferredContainer  # noqa: E402
 from test_tab_routing_dict_stores import (  # noqa: E402
     _PRE, _PRE_CLEAN, _verdict)
 
@@ -626,6 +628,18 @@ def test_pair_with_an_unread_key_leaves_the_count_unknown(tmp):
 def test_pair_with_an_unread_key_stays_clean(tmp):
     assert [_unread_pair(tmp, name, True) for name in _UNREAD_PAIRS] \
         == [(0, 0)] * len(_UNREAD_PAIRS)
+
+
+def test_the_read_consults_both_spellings_and_the_store_picks_one(tmp):
+    # The two halves of the same arithmetic, pinned apart. A read consults
+    # both spellings of a negative key, so a value stored under the key as
+    # written is still found; a store picks exactly one, so a value is
+    # never written where no read looks. Merging the two into one helper
+    # collapses the read's union and loses the `RELAY` half, which no other
+    # row holds: the read rows all use a seed with no key-shaped entry.
+    container = DeferredContainer({-1: 'RELAY', 1: 'QUIET'}, 2, 'list')
+    assert at_position(container, -1) == ['RELAY', 'QUIET', None]
+    assert position_key(container, -1) == 1
 
 
 def main():
