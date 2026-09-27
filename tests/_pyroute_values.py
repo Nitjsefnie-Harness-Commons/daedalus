@@ -10,6 +10,9 @@ EAGER_ITERABLE_CALLS = frozenset({
     'dict', 'frozenset', 'list', 'max', 'min', 'set', 'sorted', 'sum', 'tuple',
 })
 PARTIAL_ITERABLE_CALLS = frozenset({'all', 'any', 'next'})
+# A call answered from the mapping its receiver names is that mapping's own
+# method, not a call through a deferred callable the callee mentions.
+_RECEIVER_METHODS = ('get', 'pop', 'setdefault')
 UNPROVABLE_SENDER = '?ext_cmd'
 DYNAMIC_KEY = object()
 _IDENTITY_TOKENS = {}
@@ -593,9 +596,9 @@ def iterable_deferred(value):
     return None
 
 
-def mapping_lookup_owner(node, state):
+def mapping_lookup_owner(node, state, methods=('get', 'pop')):
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-            and node.func.attr in ('get', 'pop'):
+            and node.func.attr in methods:
         owner = _known_value(node.func.value, state)
         if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
             return owner
@@ -614,8 +617,8 @@ def follow_callable_call(candidates, arguments, states, call, analyze,
                          copy_states, dedupe_states):
     # A mapping method runs on the container its receiver names, so a
     # deferred callable the callee merely mentions is not what is called.
-    if states and all(mapping_lookup_owner(call, state) is not None
-                      for state in states):
+    if states and all(mapping_lookup_owner(call, state, _RECEIVER_METHODS)
+                      is not None for state in states):
         return states, None
     returned = []
     if candidates:
