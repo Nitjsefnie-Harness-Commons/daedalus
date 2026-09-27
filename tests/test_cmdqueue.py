@@ -51,7 +51,8 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
 
     def observed_wait(remove_queue):
         queue, queued = _queued_file(tmp)
-        with _virtual_cmdqueue_clock() as (clock, events, _origin):
+        with _virtual_cmdqueue_clock(
+                wall_budget=None) as (clock, events, _origin):
             with _vanish_during_read(queued, clock, remove_queue):
                 command = _cmdqueue.wait_for_command(
                     queue, timeout=timeout, producer_alive=lambda: False)
@@ -60,7 +61,8 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
         return events, queue
 
     vanish_events, vanish_queue = observed_wait(False)
-    with _virtual_cmdqueue_clock() as (_clock, baseline_events, _base):
+    with _virtual_cmdqueue_clock(
+            wall_budget=None) as (_clock, baseline_events, _base):
         baseline = _cmdqueue.wait_for_command(
             vanish_queue, timeout=timeout)
     assert baseline is None, baseline
@@ -83,7 +85,7 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue = Path(tmp) / 'empty-queue'
     queue.mkdir()
-    with _virtual_cmdqueue_clock() as (clock, _events, origin):
+    with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _events, origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=timeout, producer_alive=lambda: False)
     end = clock.monotonic()
@@ -96,7 +98,7 @@ def test_an_existing_empty_queue_lets_a_dead_producer_end_the_wait(tmp):
 def test_an_ignored_only_queue_lets_a_dead_producer_end_the_wait(tmp):
     timeout = 2.5 * _cmdqueue.POLL_DELAY
     queue, ignored = _queued_file(tmp)
-    with _virtual_cmdqueue_clock() as (clock, _events, origin):
+    with _virtual_cmdqueue_clock(wall_budget=None) as (clock, _events, origin):
         command = _cmdqueue.wait_for_command(
             queue, timeout=timeout, producer_alive=lambda: False,
             ignored_names={ignored.name})
@@ -157,7 +159,7 @@ def test_a_permanent_read_refusal_is_bounded(tmp):
     # A whole-multiple timeout keeps a second read per pass inside the bound.
     timeout = 2 * _cmdqueue.POLL_DELAY
     queue, queued = _queued_file(tmp)
-    with _virtual_cmdqueue_clock() as (clock, events, _origin):
+    with _virtual_cmdqueue_clock(wall_budget=None) as (clock, events, _origin):
         with _refuse_path_operation(queued, 'open', 1000, clock=clock):
             command = _cmdqueue.wait_for_command(
                 queue, timeout=timeout)

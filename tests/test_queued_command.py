@@ -85,7 +85,7 @@ def test_a_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
     entry.write_text(json.dumps({'id': '_ss'}), encoding='utf-8')
     wrapper, refusals = _denying_read(entry, times=100)
     failure = None
-    with _virtual_cmdqueue_clock():
+    with _virtual_cmdqueue_clock(wall_budget=None):
         with mock.patch.object(Path, 'read_text', wrapper):
             try:
                 _queueread.queued_command(
@@ -162,7 +162,7 @@ def test_a_multi_queue_read_requires_exact_count(tmp):
             entry = qdir / f'170000000000{index}_00000{index}.json'
             entry.write_text(json.dumps({'id': str(index)}), encoding='utf-8')
         failure = None
-        with _virtual_cmdqueue_clock():
+        with _virtual_cmdqueue_clock(wall_budget=None):
             try:
                 _queueread.queued_commands(
                     qdir, 'exactly two commands', 2, timeout=timeout)
@@ -201,7 +201,7 @@ def test_a_multi_queue_read_denied_for_good_fails_as_the_denial_it_is(tmp):
     entry.write_text(json.dumps({'id': 'only'}), encoding='utf-8')
     wrapper, refusals = _denying_read(entry, times=100)
     failure = None
-    with _virtual_cmdqueue_clock():
+    with _virtual_cmdqueue_clock(wall_budget=None):
         with mock.patch.object(Path, 'read_text', wrapper):
             try:
                 _queueread.queued_commands(
@@ -294,7 +294,8 @@ def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
     for timeout, attempts in ((0.2, 4),
                               (2.5 * _queueread.POLL_DELAY, 3)):
         failure = None
-        with _virtual_cmdqueue_clock() as (_clock, events, _origin):
+        with _virtual_cmdqueue_clock(
+                wall_budget=None) as (_clock, events, _origin):
             try:
                 _queueread.queued_command(
                     qdir, 'the never-filled queue', timeout=timeout)
