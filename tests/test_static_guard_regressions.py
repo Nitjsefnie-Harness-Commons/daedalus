@@ -2,6 +2,7 @@
 """Focused real-tree regressions for the static guard suites."""
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -473,11 +474,14 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     work does not own: 122 x 30s = 3660s is the work a runaway backstop
     would have to cover, and 120s truncates it about thirty times over.
     The count is a floor because it is version-dependent — 3.12 and later
-    run 127 rows, 127 x 30s = 3810s, about thirty-two times over,
-    because PEP 695 type-parameter nodes exist only from 3.12 and the
-    rows mutating that arm in tests/_coverage_scopes.py find no needle
-    before it. The floor is the figure the removal rests on, since the
-    worst case is the one that has to be safe on every interpreter.
+    run 127 rows, 127 x 30s = 3810s, about thirty-two times over. The
+    five rows that separate them are never in the table below 3.12:
+    tests/_coverage_mutation_specs.py contributes them from two chunks
+    each closed by `if hasattr(ast, 'TypeVar') else ()`, which is 3.12+
+    because PEP 695 type-parameter nodes arrived in it, so on 3.11 both
+    chunks evaluate to `()` and those rows are not added at all. The
+    floor is the figure the removal rests on, since the worst case is
+    the one that has to be safe on every interpreter.
 
     A wall bound is legitimate where the child always spends it on real
     work — the freeze controls busy-wait on purpose, so a wedged child
@@ -574,11 +578,13 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     assert not timed, timed
 
 
-# The sweep's row count is VERSION-DEPENDENT, and the gate is
-# tests/_coverage_scopes.py's `_TYPE_PARAMETERS`: PEP 695 type-parameter
-# nodes exist only from 3.12, so on 3.11 that tuple is empty, the shared
-# shadow census reads a different arm, and the rows mutating it find no
-# needle. The count is therefore a floor and a ceiling, and the removal
+# The sweep's row count is VERSION-DEPENDENT, and the gate is in
+# tests/_coverage_mutation_specs.py: two chunks of the spec table are each
+# closed by `if hasattr(ast, 'TypeVar') else ()`, and `ast.TypeVar` is 3.12+
+# because PEP 695 type-parameter nodes arrived in it. Below 3.12 both
+# chunks are `()` and the five rows between them are never added — not
+# rows that run and fail to find a needle, rows that are not in the
+# table. The count is therefore a floor and a ceiling, and the removal
 # rests on the FLOOR — the smallest count any supported version runs, so
 # the worst case is the one quoted. Keyed by the oldest `(major, minor)`
 # that carries each figure; `_rows_for` reads the newest key at or below
@@ -592,6 +598,19 @@ def _rows_for(version):
     """The figure for an interpreter: the newest key at or below it."""
     eligible = [key for key in _SWEEP_ROWS if version[:2] >= key]
     return _SWEEP_ROWS[max(eligible)]
+
+
+def _specs_gate():
+    """The module and expression that gate the version-dependent rows.
+
+    Read out of the specs module rather than copied here, so a renamed
+    guard makes the disclosure assertion demand the new spelling instead
+    of pinning a stale one.
+    """
+    module = Path(__file__).parent / '_coverage_mutation_specs.py'
+    source = module.read_text(encoding='utf-8')
+    found = re.search(r"\) (if hasattr\(ast, '\w+'\) else \(\))", source)
+    return module.name, found.group(1) if found else ''
 
 
 def _guard_disclosure():
@@ -662,6 +681,15 @@ def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
     assert (f'{ceiling} x {child_bound}s = {ceiling * child_bound}s'
             in disclosure)
     assert 30 <= worst / _TRUNCATED_BY_S < 31, worst
+    # The REASON, not only the number: a disclosure that got the count
+    # right for the wrong reason would pass everything above, and a
+    # reader would go looking for a missing needle in the wrong module.
+    # This couples the control to a spelling — a reworded sentence goes
+    # red — and that is the intended kind of failure.
+    gate_module, gate_expression = _specs_gate()
+    assert gate_expression, 'the specs module no longer carries a guard'
+    assert gate_module in disclosure, gate_module
+    assert gate_expression in disclosure, gate_expression
 
 
 if __name__ == '__main__':
