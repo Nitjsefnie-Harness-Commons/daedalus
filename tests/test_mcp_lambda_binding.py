@@ -116,6 +116,10 @@ RAISES = (
     ('*, k', ''),
     ('*, k, j', 'k=1'),
     ('', '1'),
+    # A display carrying NO name supplies no name, and a signature that
+    # requires something is a raise for it.
+    ('x, *, k', '**{}'),
+    ('x', '**{}'),
     # The three cells a `*args` beside a required parameter crosses.
     ('x, *a, k', 'k=1'),
     ('x, *a, k', 'k=2'),
