@@ -335,8 +335,8 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{note}', file=out, flush=True)
             # The count above is this loop's length, so the two cannot
-            # disagree; a dropped run was judged acceptable, so exit 1 has
-            # none to disclose, and the run id rides on these lines alone.
+            # disagree; a dropped run never enters `_judged`, so exit 1 has
+            # no offender to disclose, and the run id rides on these lines.
             for run in discarded:
                 print(f'  {run.get("name")} (run {run.get("id")}): '
                       f'{run.get("conclusion")} {run.get("html_url") or ""}',
