@@ -124,14 +124,24 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     """No reserved name is re-implemented without a row in its own table.
 
     WHAT THIS ADDS, MEASURED AND STATED. Against this tree its sites are
-    set-equal to `reimplementations` union `js_reimplementations` -- 196
-    of them, and each difference in both directions empty -- and the
-    reason is structural rather than incidental. `tests/_wffixtures.py`
-    IS a `tests/_*.py` module, so the three fixture names that are
-    definitions are already in the python limb, and the two that are not
-    (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are `Assign` binds, which
-    `definitions` never reports. While the fixture module remains a
-    shared helper, the union therefore adds nothing HERE.
+    set-equal to `reimplementations` union `js_reimplementations` -- a
+    set of 192, and each difference in both directions empty -- and the
+    reason is structural rather than incidental.
+    `tests/_wffixtures.py` IS a `tests/_*.py` module, so the three
+    fixture names that are definitions are already in the python limb,
+    and the two that are not (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are
+    `Assign` binds, which `definitions` never reports. While the fixture
+    module remains a shared helper, the union therefore adds nothing
+    HERE.
+
+    `len(residue_sites())` is 196, not 192, and both are worth knowing. The
+    residue tables are keyed `(path, name)`, and three modules declare a
+    reserved JavaScript name more than once, so the list carries four rows
+    the set does not: `tests/_gm_harness.py::makeStorage` twice,
+    `tests/test_gm_transfers.py::flushMessages` three times and
+    `tests/test_tab_routing_js_operations.py::run` twice. The equality is
+    about the set, because that is what the tables key on; the count is
+    about the list, because that is what a refusal prints.
 
     It is kept rather than deleted for the day that stops being true: a
     fixture module that is not a shared helper puts its names in the
@@ -463,7 +473,32 @@ def test_a_tree_carrying_the_script_alone_refuses_by_name(tmp):
     assert result.stdout == '', result.stdout
     assert result.stderr.strip() == (
         "No module named '_reserved_names'"), result.stderr
-    assert 'Traceback' not in result.stderr
+
+
+def test_a_derivation_that_raises_on_import_refuses_by_name(tmp):
+    """Which `ImportError` the refusal tuple means, stated rather than left.
+
+    The tuple catches `ImportError`, not only the absence of the module,
+    so a `tests/_reserved_names.py` that raises on its own import is a
+    one-line refusal naming the error rather than a traceback. That is
+    the wider reading this pins as intended; a narrower one would be
+    `ModuleNotFoundError`, and the two are told apart by whether the
+    file is there at all.
+    """
+    broken = _fixture_checkout(tmp, {
+        'scripts/ci/reserved_names.py': POLICY_SOURCE.read_text(
+            encoding='utf-8'),
+        'tests/_reserved_names.py': "raise ImportError('inner fault')\n",
+        'tests/_owner.py': _OWNER,
+        'tests/_wffixtures.py': _FIXTURES,
+    }, 'broken')
+    result = subprocess.run(
+        [sys.executable, 'scripts/ci/reserved_names.py'], cwd=broken,
+        env=_util.child_coverage('scrub'), capture_output=True, text=True,
+        timeout=180)
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert result.stdout == '', result.stdout
+    assert result.stderr.strip() == 'inner fault', result.stderr
     assert 'Traceback' not in result.stderr
 
 

@@ -60,6 +60,26 @@ def test_importing_a_workflow_suite_loads_no_other_suite_module(tmp):
         f'{failures}')
 
 
+def _module_imports(tree):
+    """(line, bound name) for every `import X as Y` in the tree.
+
+    `scan` records an `ast.Import` and an `ast.ImportFrom` from one
+    source identically, so the node kind is the only thing that tells
+    them apart, and it is readable at the line `scan` already reported
+    without a second scope walk. Keyed on the bound name as well as the
+    line, because the line alone is not enough: `import b as y; from b
+    import _refuses` is one line and two import statements, and only the
+    second one brings the fixture.
+
+    `ast.walk` reaches function-local imports too, and they cannot
+    matter: a name pair is only consulted for a line `scan` reported, and
+    `scan` reports no import that module execution does not perform.
+    """
+    return {(node.lineno, alias.asname or alias.name.split('.')[0])
+            for node in ast.walk(tree) if isinstance(node, ast.Import)
+            for alias in node.names}
+
+
 def _fixture_binds(tree, shared):
     """The shared names `tree` binds during module execution.
 
@@ -70,11 +90,13 @@ def _fixture_binds(tree, shared):
     count is a function-local binding, which is a namespace of its own and
     reaches no import.
 
-    An import is the one carrier counted conditionally: bringing one of
-    these names from the shared module is the pattern this rule exists to
-    protect, and refusing it would turn the tree's right answer into a
-    false positive. Bringing one from anywhere ELSE is a redefinition
-    under another spelling, so it is refused.
+    An import is the one carrier counted conditionally, and either half
+    of its spelling can say no. Bringing one of these names from anywhere
+    but the shared module is a redefinition under another spelling. And
+    `import _wffixtures as _refuses` binds the MODULE under the fixture's
+    own name, which shadows that name whatever the source:
+    `from _wffixtures import _refuses` is the pattern this rule exists to
+    protect, and this is not it.
 
     So this rule and `test_helper_reimplementation.py` read the same scope
     and answer different questions, which is the distinction that keeps
@@ -82,23 +104,21 @@ def _fixture_binds(tree, shared):
     a second definition of it and needs an allowance row. This one owns a
     name at all, has no allowance table, and so refuses the bind itself.
 
-    WHAT IT STILL CANNOT SEE. A `from _wffixtures import *` brings names
-    no reader enumerates — the hole `test_helper_reimplementation.py`
-    names in its own docstring. And `import _wffixtures as _refuses` is
-    exempt, because its source is the shared module though it binds the
-    MODULE rather than the function: `scan` records an `Import` and an
-    `ImportFrom` from one source identically, so telling them apart needs
-    a second scope walk this rule does not own. It fails loudly rather
-    than silently — the name becomes a module object and the first call
-    raises TypeError — and the shape that IS dangerous, a fixture name
-    imported and then bound again, is `test_helper_shadow_boundaries.py`'s.
+    WHAT IT STILL CANNOT SEE, and it is the honest end state. A `from
+    _wffixtures import *` brings a module's EXPORTED names, which no
+    static reader enumerates without executing it; `_helper_binds.py`
+    skips `alias.name == '*'` for the same reason, and
+    `test_helper_reimplementation.py` names the same hole in its own
+    docstring. Nothing about this rule would change that.
     """
     imports, binds = scan(tree)
-    borrowed = {name for name in shared
-                if name in imports
-                and any(source != FIXTURE_SOURCE
-                        for lines in imports[name].values()
-                        for source in lines)}
+    spelled = _module_imports(tree)
+    borrowed = set()
+    for name in shared & set(imports):
+        for lineno, sources in imports[name].items():
+            if ((lineno, name) in spelled
+                    or any(source != FIXTURE_SOURCE for source in sources)):
+                borrowed.add(name)
     return sorted((set(binds) | borrowed) & shared)
 
 
