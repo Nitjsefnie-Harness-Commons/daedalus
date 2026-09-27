@@ -14,7 +14,7 @@ which it deliberately does not, and where the size floor sits.
 
 ONE CONSTRAINT ON HOW THE FIXTURES ARE WRITTEN, and it is the control's
 own reading of this file that forces it. Every fabricated document is
-assembled from pieces by `_document`, and no string constant here is a
+assembled from pieces by `_js_module`, and no string constant here is a
 complete JavaScript program: the head carries the opening brace and the
 body and the closing brace are separate pieces. A constant that held a
 whole `function eventTarget(...) { ... }` would be, to the live scan
@@ -65,7 +65,7 @@ def _mod(*lines):
     return ''.join(line + '\n' for line in lines)
 
 
-def _document(head, body=THREE_LINES, close='}'):
+def _js_module(head, body=THREE_LINES, close='}'):
     """A tests module carrying one fabricated JavaScript program.
 
     The pieces are concatenated, which is how a harness builds one, and
@@ -77,23 +77,23 @@ def _document(head, body=THREE_LINES, close='}'):
 
 
 CASES = [
-    ('tests/_declaration.py', 'function', _document(HEADS[0])),
-    ('tests/_async.py', 'async function', _document(HEADS[1])),
-    ('tests/_function_expr.py', 'const = function', _document(HEADS[2])),
+    ('tests/_declaration.py', 'function', _js_module(HEADS[0])),
+    ('tests/_async.py', 'async function', _js_module(HEADS[1])),
+    ('tests/_function_expr.py', 'const = function', _js_module(HEADS[2])),
     ('tests/_named_expr.py', 'const = function name',
-     _document(HEADS[3])),
-    ('tests/_arrow.py', 'let = arrow', _document(HEADS[4])),
-    ('tests/_async_arrow.py', 'var = async arrow', _document(HEADS[5])),
-    ('tests/_bare_arrow.py', 'const = bare arrow', _document(HEADS[6])),
+     _js_module(HEADS[3])),
+    ('tests/_arrow.py', 'let = arrow', _js_module(HEADS[4])),
+    ('tests/_async_arrow.py', 'var = async arrow', _js_module(HEADS[5])),
+    ('tests/_bare_arrow.py', 'const = bare arrow', _js_module(HEADS[6])),
 ]
 
 
 def _owner(body=THREE_LINES):
-    return _document(HEADS[0], body)
+    return _js_module(HEADS[0], body)
 
 
 def _reporter(body=THREE_LINES):
-    return _document(HEADS[0], body)
+    return _js_module(HEADS[0], body)
 
 
 def _found(sources, **kwargs):
@@ -323,7 +323,7 @@ def test_the_two_recognisers_do_not_read_each_other(tmp):
         'def eventTarget(listener):',
         '    """A Python binding of the same name."""',
         '    return [listener]')
-    js_only = _document(HEADS[0])
+    js_only = _js_module(HEADS[0])
     sources = {
         # The owner carries both languages' half of the name, so each
         # control has an owner to find and neither can borrow the other.
@@ -444,7 +444,7 @@ def test_the_size_floor_holds_the_class_and_lets_the_one_liners_through(tmp):
         # An empty body measures two: the opening brace's line and the
         # closing one. An expression-bodied arrow measures one.
         ('tests/test_two.py', 'a two-line block',
-         _document(HEADS[0], body='')),
+         _js_module(HEADS[0], body='')),
         ('tests/test_one.py', 'a one-line block',
          _mod('HARNESS = r"""', 'const eventTarget = () => 1;', '"""')),
     ])

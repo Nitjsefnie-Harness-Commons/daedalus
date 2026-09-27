@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ratchet_fixture import _git, _normalised  # noqa: E402
 from _wfgraph import _job_names  # noqa: E402
 from _yamlsteps import complete_job_mapping  # noqa: E402
 
@@ -54,17 +55,12 @@ def _config(include=('tests',), exclude=()):
     }, indent=2) + '\n'
 
 
-def _document(baseline=None):
+def _thresholds_document(baseline=None):
     data = _thresholds().load(THRESHOLDS_SOURCE)
     data['module_size_baseline'] = {}
     data['long_line_baseline'] = {}
     data['type_error_baseline'] = {} if baseline is None else dict(baseline)
     return data
-
-
-def _git(repo, *args):
-    subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                   capture_output=True, env=_util.child_coverage('scrub'))
 
 
 def _repo(tmp, name, files, document, config=None):
@@ -202,7 +198,7 @@ def test_the_key_format_is_forward_slash_on_every_host(tmp):
 
 def test_a_type_error_in_a_baselined_file_is_grown(tmp):
     repo, target = _repo(tmp, 'grown', {'tests/typed.py': _typed(1)},
-                         _document({'tests/typed.py': 1}))
+                         _thresholds_document({'tests/typed.py': 1}))
     green = _gate(repo, target)
     assert green.returncode == 0, (green.stdout, green.stderr)
     # The recorded operand is 1; the plant makes the real count 2.
@@ -219,7 +215,7 @@ def test_a_type_error_in_a_baselined_file_is_grown(tmp):
 
 def test_only_a_type_error_in_a_new_test_file_is_over(tmp):
     repo, target = _repo(tmp, 'over', {'tests/clean.py': _clean()},
-                         _document())
+                         _thresholds_document())
     _write(repo, 'tests/new.py', 'y = 2\n')
     _git(repo, 'add', 'tests/new.py')
     clean = _gate(repo, target)
@@ -233,8 +229,9 @@ def test_only_a_type_error_in_a_new_test_file_is_over(tmp):
 
 def test_a_run_analysing_no_file_is_unanalysed(tmp):
     """The exact shape of the original defect: the tree is excluded."""
-    repo, target = _repo(tmp, 'zero', {'tests/typed.py': _clean()},
-                         _document(), config=_config(exclude=('tests',)))
+    repo, target = _repo(
+        tmp, 'zero', {'tests/typed.py': _clean()}, _thresholds_document(),
+        config=_config(exclude=('tests',)))
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
     assert 'unanalysed' in red.stderr, red.stderr
@@ -246,7 +243,7 @@ def test_a_run_with_no_tracked_test_module_at_all_is_unanalysed(tmp):
     """The empty scope, not a mismatched one: nothing is tracked and
     nothing is analysed, so the counts agree and only ``expected == 0``
     can tell a clean run from a gate pointed at no test tree at all."""
-    repo, target = _repo(tmp, 'empty', {}, _document())
+    repo, target = _repo(tmp, 'empty', {}, _thresholds_document())
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
     assert 'unanalysed' in red.stderr, red.stderr
@@ -263,7 +260,7 @@ def test_an_unreadable_config_is_named_in_the_refusal(tmp):
     """
     repo, target = _repo(tmp, 'unreadable',
                          {'tests/typed.py': _clean(),
-                          'helper.py': _clean()}, _document())
+                          'helper.py': _clean()}, _thresholds_document())
     (repo / CONFIG_NAME).unlink()
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
@@ -294,7 +291,7 @@ def test_a_scope_missing_a_tracked_module_is_a_mismatch(tmp):
     repo, target = _repo(
         tmp, 'mismatch',
         {'tests/kept.py': _clean(), 'tests/skipped.py': _clean()},
-        _document(), config=_config(exclude=('tests/skipped.py',)))
+        _thresholds_document(), config=_config(exclude=('tests/skipped.py',)))
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
     assert 'unanalysed' in red.stderr, red.stderr
@@ -304,7 +301,7 @@ def test_a_scope_missing_a_tracked_module_is_a_mismatch(tmp):
 
 def test_a_baseline_entry_naming_a_gone_file_is_missing(tmp):
     repo, target = _repo(tmp, 'missing', {'tests/kept.py': _clean()},
-                         _document({'tests/gone.py': 3}))
+                         _thresholds_document({'tests/gone.py': 3}))
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
     assert 'missing' in red.stderr, red.stderr
@@ -313,7 +310,7 @@ def test_a_baseline_entry_naming_a_gone_file_is_missing(tmp):
 
 def test_a_baseline_entry_whose_file_is_clean_is_graduated(tmp):
     repo, target = _repo(tmp, 'graduated', {'tests/kept.py': _clean()},
-                         _document({'tests/kept.py': 1}))
+                         _thresholds_document({'tests/kept.py': 1}))
     red = _gate(repo, target)
     assert red.returncode != 0, (red.stdout, red.stderr)
     assert 'graduated' in red.stderr, red.stderr
@@ -323,7 +320,7 @@ def test_a_baseline_entry_whose_file_is_clean_is_graduated(tmp):
 def test_the_success_line_states_the_analysed_count(tmp):
     repo, target = _repo(tmp, 'count', {'tests/a.py': _clean(),
                                         'tests/b.py': _clean()},
-                         _document())
+                         _thresholds_document())
     green = _gate(repo, target)
     assert green.returncode == 0, (green.stdout, green.stderr)
     expected = '2 test modules analysed, within the type-error policy\n'
@@ -335,7 +332,8 @@ def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
         tmp, 'tighten',
         {'tests/a.py': _typed(2), 'tests/b.py': _clean(),
          'tests/c.py': _typed(4)},
-        _document({'tests/a.py': 5, 'tests/b.py': 3, 'tests/c.py': 1}))
+        _thresholds_document(
+            {'tests/a.py': 5, 'tests/b.py': 3, 'tests/c.py': 1}))
     done = _gate(repo, target, '--tighten')
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert 'tightened the type-error baseline' in done.stdout, done.stdout
@@ -345,7 +343,7 @@ def test_tighten_lowers_drops_zeroed_and_leaves_raised(tmp):
 
 def test_tighten_reports_nothing_moved(tmp):
     repo, target = _repo(tmp, 'steady', {'tests/a.py': _typed(2)},
-                         _document({'tests/a.py': 2}))
+                         _thresholds_document({'tests/a.py': 2}))
     done = _gate(repo, target, '--tighten')
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert 'no test module lost a type error' in done.stdout, done.stdout
@@ -355,7 +353,8 @@ def test_tighten_refuses_a_broken_scope_and_writes_nothing(tmp):
     """--tighten may not record a baseline measured by a broken scope."""
     repo, target = _repo(
         tmp, 'tighten-scope', {'tests/typed.py': _typed(2)},
-        _document({'tests/typed.py': 5}), config=_config(exclude=('tests',)))
+        _thresholds_document({'tests/typed.py': 5}),
+        config=_config(exclude=('tests',)))
     before = target.read_bytes()
     red = _gate(repo, target, '--tighten')
     assert red.returncode != 0, (red.stdout, red.stderr)
@@ -363,10 +362,6 @@ def test_tighten_refuses_a_broken_scope_and_writes_nothing(tmp):
     assert _normalised(_policy().SCOPE_REMEDY) in _normalised(red.stderr), \
         red.stderr
     assert target.read_bytes() == before
-
-
-def _normalised(text):
-    return ' '.join(text.lower().split())
 
 
 def test_each_kind_carries_its_own_remedy_in_the_mapping(tmp):

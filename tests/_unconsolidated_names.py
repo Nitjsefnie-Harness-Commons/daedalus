@@ -167,8 +167,8 @@ UNCONSOLIDATED_NAMES = {
         'this loads a bridge module by path under a name of its own, where '
         'the owner is a JSON file reader',
     ('tests/test_ci_ratchets.py', '_git'):
-        'this runs git with text output and a scrubbed child environment, '
-        'which the shared runner does not set',
+        'this returns the CompletedProcess, because the cases read a diff '
+        'back out of it, where the shared runner discards the result',
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
@@ -221,8 +221,8 @@ UNCONSOLIDATED_NAMES = {
         'this splits a file own text into lines, where the owner retains '
         'whether each physical line ended',
     ('tests/test_diff_coverage.py', '_git'):
-        'this runs one git command in a fixture repository with text output, '
-        'where the shared runner captures bytes only',
+        'this returns the CompletedProcess, because the case reads a diff '
+        'back out of it, where the shared runner discards the result',
     ('tests/test_diff_coverage_javascript.py', '_run'):
         'this runs the reporter script inside the fixture directory, where '
         'the shared _run boots a node scenario',
@@ -232,15 +232,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_extension_manifest.py', '_entry'):
         'this builds a manifest mutant from an index, key, subkey and value, '
         'so it is not a mapping-line reader at all',
-    ('tests/test_js_coverage.py', '_git'):
-        'this runs git with text output in a scratch index, where the shared '
-        'runner captures bytes',
-    ('tests/test_line_lengths.py', '_git'):
-        'byte-identical to the row for tests/test_type_errors.py, and '
-        'neither is a copy of the owner: this runs git under a scrubbed '
-        'child environment, which the shared runner does not set. The pair '
-        'is a real duplicate and consolidating it is deferred, not '
-        'dismissed',
     ('tests/test_line_lengths.py', '_lines'):
         'this joins texts and encodes them as the byte-length source, where '
         'the owner splits a workflow keeping line endings',
@@ -322,12 +313,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_timed_refresh.py', '_run'):
         'this runs the refresh main with both streams captured, where the '
         'shared _run boots a node scenario',
-    ('tests/test_type_errors.py', '_git'):
-        'byte-identical to the row for tests/test_line_lengths.py, and '
-        'neither is a copy of the owner: this runs git under a scrubbed '
-        'child environment, which the shared runner does not set. The pair '
-        'is a real duplicate and consolidating it is deferred, not '
-        'dismissed',
     ('tests/test_upload_races.py', '_load'):
         'byte-identical to the row for tests/test_upload_routes.py, and '
         'neither is a copy of the owner: this loads upload_routes by path '

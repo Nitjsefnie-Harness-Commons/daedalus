@@ -34,7 +34,7 @@ def _ratchet():
     return _util.load(RATCHET_PATH, 'ratchet_contract')
 
 
-def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
+def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
     return {
         'schema_version': 1,
         'coverage': {
@@ -54,7 +54,7 @@ def _document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
 def _copy_thresholds(tmp, data=None):
     thresholds = _thresholds()
     path = Path(tmp) / 'ci-thresholds.json'
-    thresholds.write(path, _document() if data is None else data)
+    thresholds.write(path, _ratchet_document() if data is None else data)
     return path
 
 
@@ -126,7 +126,7 @@ def test_main_reports_invalid_measurement_without_writing(tmp):
 
 def test_public_update_uses_recorded_measurement_high_water(tmp):
     ratchet = _ratchet()
-    data = _document()
+    data = _ratchet_document()
     for measured in (60.0, 78.5, 80.0, 80.1, 81.5):
         assert ratchet.update(data, Decimal(str(measured)), 'python') is None
     raised = ratchet.update(data, Decimal('81.6'), 'python')
@@ -142,7 +142,7 @@ def test_public_update_uses_recorded_measurement_high_water(tmp):
 
 def test_rerunning_a_raise_is_idempotent(tmp):
     ratchet = _ratchet()
-    data = _document()
+    data = _ratchet_document()
     candidate = ratchet.update(data, Decimal('81.6'), 'python')
     assert candidate is not None
     assert ratchet.update(candidate, Decimal('81.6'), 'python') is None
@@ -150,14 +150,14 @@ def test_rerunning_a_raise_is_idempotent(tmp):
 
 def test_measurement_above_recorded_value_raises(tmp):
     ratchet = _ratchet()
-    data = _document()
+    data = _ratchet_document()
     raised = ratchet.update(data, Decimal('81.6'), 'python')
     assert raised['coverage']['python']['measured'] == Decimal('81.6')
 
 
 def test_lower_measurements_never_lower_either_calibration(tmp):
     ratchet = _ratchet()
-    data = _document()
+    data = _ratchet_document()
     for language in ('python', 'javascript'):
         assert ratchet.update(data, Decimal('0.0'), language) is None
 
@@ -248,7 +248,8 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     shutil.copy2(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                  work / 'scripts' / 'ci' / 'thresholds.py')
     (work / '.github' / 'ci-thresholds.json').write_text(
-        json.dumps(_document(python=(80.0, 78.5), javascript=(50.0, 48.5))),
+        json.dumps(_ratchet_document(python=(80.0, 78.5),
+                                     javascript=(50.0, 48.5))),
         encoding='utf-8')
     (work / 'fixture.py').write_text(
         '\n'.join(f'line_{index} = {index}' for index in range(10)) + '\n',
@@ -269,7 +270,7 @@ def test_workflow_gate_steps_consume_the_threshold_floor(tmp):
     good = run_step(work, steps['Python coverage gate'], environment,
                     workflow={}, job={})
     assert good.returncode == 0, (good.stdout, good.stderr)
-    document = _document(python=(82.0, 80.5), javascript=(50.0, 48.5))
+    document = _ratchet_document(python=(82.0, 80.5), javascript=(50.0, 48.5))
     (work / '.github' / 'ci-thresholds.json').write_text(
         json.dumps(document), encoding='utf-8')
     checked = subprocess.run(
@@ -421,7 +422,7 @@ def test_publisher_python_carries_posix_and_windows_paths_without_embedding(
 
 
 def test_real_publisher_step_size_only_preserves_calibrations(tmp):
-    data = _document()
+    data = _ratchet_document()
     data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
     result = _run_publisher_case(
         tmp, 'publisher-size', data, '80.0', '35.5')
@@ -439,7 +440,7 @@ def test_real_publisher_step_size_only_preserves_calibrations(tmp):
 
 
 def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
-    data = _document()
+    data = _ratchet_document()
     data['module_size_baseline']['tests/test_mcp_server.py'] = 1707
     result = _run_publisher_case(
         tmp, 'publisher-combined', data, '81.6', '35.5')
@@ -459,7 +460,8 @@ def test_real_publisher_step_combines_coverage_and_size_changes(tmp):
 def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
     raw = b'{"schema_version": 1}\r\n'
     result = _run_publisher_case(
-        tmp, 'publisher-malformed', _document(), '81.6', '35.5', raw=raw)
+        tmp, 'publisher-malformed', _ratchet_document(), '81.6', '35.5',
+        raw=raw)
     repo, path, before, output, _summary, done = result
     assert done.returncode != 0
     assert 'changed=' not in output.read_text(encoding='utf-8')
@@ -470,7 +472,7 @@ def test_real_publisher_step_rejects_malformed_data_without_publishing(tmp):
 
 def test_real_publisher_step_writer_failure_is_fail_closed(tmp):
     result = _run_publisher_case(
-        tmp, 'publisher-writer-failure', _document(), '81.6', '35.5',
+        tmp, 'publisher-writer-failure', _ratchet_document(), '81.6', '35.5',
         writer_failure=True)
     repo, path, before, output, _summary, done = result
     assert done.returncode != 0
@@ -483,7 +485,7 @@ def test_real_publisher_step_writer_failure_is_fail_closed(tmp):
 
 def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     changed = _run_publisher_case(
-        tmp, 'publisher-coverage', _document(), '81.6', '35.5')
+        tmp, 'publisher-coverage', _ratchet_document(), '81.6', '35.5')
     _repo, _path, _before, changed_output, changed_summary, done = changed
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert changed_output.read_text(encoding='utf-8').splitlines() == [
@@ -491,7 +493,7 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     assert '### Recorded by this run' in changed_summary.read_text(
         encoding='utf-8')
     noop = _run_publisher_case(
-        tmp, 'publisher-noop-matrix', _document(), '80.0', '35.5')
+        tmp, 'publisher-noop-matrix', _ratchet_document(), '80.0', '35.5')
     _repo, _path, _before, noop_output, noop_summary, done = noop
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
@@ -626,7 +628,7 @@ def test_publisher_condition_mutations_are_rejected(tmp):
 def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
     repo = Path(tmp) / 'publisher'
     repo.mkdir()
-    _seed_publisher_tree(repo, _document())
+    _seed_publisher_tree(repo, _ratchet_document())
     shim, values = _publisher_python(Path(tmp) / 'shim', {
         'PYTHON_MEASURED': '81.6', 'JAVASCRIPT_MEASURED': '35.5'})
     env = dict(os.environ)
@@ -654,14 +656,14 @@ def test_real_publisher_step_writes_one_valid_file_and_reports_changed(tmp):
     after = _thresholds().load(repo / '.github' / 'ci-thresholds.json')
     assert after['coverage']['javascript'] == {
         'measured': Decimal('35.5'), 'floor': Decimal('34.0')}
-    assert after['module_size_baseline'] == _document()[
+    assert after['module_size_baseline'] == _ratchet_document()[
         'module_size_baseline']
 
 
 def test_real_publisher_step_noop_reports_unchanged(tmp):
     repo = Path(tmp) / 'publisher-noop'
     repo.mkdir()
-    _seed_publisher_tree(repo, _document())
+    _seed_publisher_tree(repo, _ratchet_document())
     shim, values = _publisher_python(Path(tmp) / 'shim-noop', {
         'PYTHON_MEASURED': '80.0', 'JAVASCRIPT_MEASURED': '35.5'})
     env = dict(os.environ)
