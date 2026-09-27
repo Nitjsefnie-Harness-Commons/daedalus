@@ -6,11 +6,13 @@ suite reaches carries one figure: that module's own code-line count, beside
 the `0` that is the claim of being unreached. The count is a function of
 that one file and is derived here, in one command, with no suite run and no
 coverage data. The `0` is PERMITTED, not derived: whether a suite executes
-the module is the claim itself, so the accept set admits it on the prose's
-word and no assertion here would fail if it were untrue. The figure scan
-is what holds the two apart, since the paragraph's own `0` is admitted
-only while 0 is in the set; the coverage report is what settles the claim,
-and #1245 tracks the gap between the two.
+the module is the claim itself, so the count phrase admits it on the
+prose's word and no assertion here would fail if it were untrue. The
+phrase's shape is what holds the two apart, naming the `0` and the code-line
+count as separate parts of one claim, so each is admitted for being part
+of that claim and not for being a number in a set: the same `0` is refused
+a sentence later. The coverage report is what settles the claim, and #1245
+tracks the gap between the two.
 
 The figures the paragraph used to carry and no longer does are refused
 rather than quietly forgotten, because a refused figure is what stops the
@@ -22,8 +24,11 @@ nothing to do with the module this paragraph is about, so two pull requests
 that each ship JavaScript leave it behind between them. The percentage
 derived from such a denominator is refused for the same reason -- a share
 whose base the paragraph does not state has nothing to prove it against.
-So the accept set is the two figures above, and every other figure is
-refused as a VALUE, so rewording around one does not slip past.
+Admissibility is therefore a POSITION and not a value: the figures the
+paragraph may state are the ones the count phrase itself carries, so an
+unrelated figure is refused wherever it appears, at every value, including
+one that happens to equal the count. The same `0` is admitted in the
+phrase and refused a sentence later, which is the whole of the rule.
 
 What the paragraph calls a shipped module is also checked against the
 population, so a file that is renamed, moved out of `extension/`, or stops
@@ -157,18 +162,33 @@ def _part_of_a_token(text, start, end, run):
     return '.' in run or before in '.-'
 
 
-def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
-    """The property, not a token: a figure may appear only if the tree
-    proves it, so the test is the VALUE and never the wording around it.
+def _claim_figures(phrase, offset):
+    """The digit runs one claim asserts, as absolute spans plus their text.
 
-    The accept set is what this paragraph is about: the module's own
-    code-line count, which the case above derives, and the bare `0`,
-    which is PERMITTED rather than derived -- it is not a measurement but
-    the claim that the module is unreached, so the set admits it on the
-    prose's word. Dropping the denominator narrowed the set rather than
-    dropping the property, so every other figure is still refused as a
-    VALUE -- rewording around one does not slip past, and neither does
-    inserting one into the sentence that disclaims it.
+    Admissibility is POSITIONAL, so the rule and the refusal message both
+    read this one list: the rule tests a scanned run's span against the
+    spans returned here, and the message prints the runs returned here. A
+    message that spelled the admissible figures out itself would be a second
+    copy of the rule, and the copy is what drifts -- this is the defect the
+    value-based form had, where a message naming "0 and the count" outlived
+    the set it described.
+    """
+    return [(offset + start, offset + end, run)
+            for run, start, end in _digit_runs(phrase)]
+
+
+def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
+    """The property, not a token: a figure may appear only if the claim it
+    sits in is one the tree proves. Admissibility is therefore a POSITION.
+
+    The claim the tree proves is the count phrase, and the figures it may
+    state are the ones that phrase itself carries: the bare `0`, which is
+    PERMITTED rather than derived -- it is not a measurement but the claim
+    that the module is unreached -- and the code-line count, which the case
+    above derives. Judging the figure rather than its value is what stops
+    an unrelated figure that happens to equal the count from being admitted
+    wherever it appears; rewriting around one does not slip past either, and
+    neither does inserting one into the sentence that disclaims it.
 
     A percentage is refused outright, and the paragraph is required to state
     none. A share is provable only against a base the paragraph states, and
@@ -189,6 +209,10 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     said_count = re.search(COUNT_PHRASE, text)
     assert said_count, 'the paragraph no longer states the module count'
     count = int(said_count.group(1))
+    figures = _claim_figures(said_count.group(0), said_count.start())
+    spans = {(start, end) for start, end, _ in figures}
+    admits = ' and '.join(run for _, _, run in figures)
+    claim = ' '.join(said_count.group(0).split())
 
     # Percentages are blanked first, so their digits are not also judged as
     # bare figures; they keep their offset either way, and whether one is
@@ -198,12 +222,15 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     for run, start, end in _digit_runs(blanked):
         if _part_of_a_token(blanked, start, end, run):
             continue
-        assert float(run) in (0, count), (
+        assert (start, end) in spans, (
             f'the paragraph states {run!r} in '
             f'...{blanked[max(0, start - 14):end + 14].strip()}... , which is '
-            f'not a figure this paragraph can prove: the only ones the tree '
-            f'proves here are 0 and the {count} code lines of {UNREACHED}. A '
-            f'count measured by a coverage run, and a denominator over every '
+            f'not a figure this paragraph can prove. A figure is admissible '
+            f'by the claim it sits in, and the only claim here the tree '
+            f'checks is `{claim}`, whose figures are {admits}; an unrelated '
+            f'figure is refused at every value, including one that happens '
+            f'to equal the {count} code lines of {UNREACHED}. A count '
+            f'measured by a coverage run, and a denominator over every '
             f'tracked shipped JavaScript file, both belong in the coverage '
             f'step summary that run prints')
 
