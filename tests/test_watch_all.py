@@ -29,9 +29,15 @@ def _watch_all():
     return mod
 
 
-def _run(rid, status, conclusion):
-    """One workflow run as the shared client reports it against a SHA."""
-    return {'id': rid, 'name': f'run {rid}', 'status': status,
+def _run(rid, status, conclusion, name=None):
+    """One workflow run as the shared client reports it against a SHA.
+
+    `name` overrides the workflow's own name, which is how a fixture
+    carries the gating workflow: a run set with no run of it is not a
+    settled matrix (issue 1223), so a fixture standing in for a head whose
+    matrix ran names that workflow.
+    """
+    return {'id': rid, 'name': name or f'run {rid}', 'status': status,
             'conclusion': conclusion}
 
 
@@ -60,7 +66,8 @@ def test_a_queued_run_holds_even_when_every_check_run_is_complete(tmp):
     del tmp
     mod = _watch_all()
     _fake_runs(mod, [_run(1, 'completed', 'success'),
-                     _run(2, 'queued', None)])
+                     _run(2, 'queued', None),
+                     _run(3, 'completed', 'success', name='tests')])
     assert mod._all_concluded(SHA) is False
 
 
@@ -78,7 +85,8 @@ def test_every_run_completed_is_settled(tmp):
     runs = [_run(1, 'completed', 'success'),
             _run(2, 'completed', 'skipped'),
             _run(3, 'completed', 'neutral'),
-            _run(4, 'completed', 'failure')]
+            _run(4, 'completed', 'failure'),
+            _run(5, 'completed', 'success', name='tests')]
     assert mod._settled(runs) is True
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
@@ -88,7 +96,8 @@ def test_an_in_progress_run_is_not_settled(tmp):
     del tmp
     mod = _watch_all()
     runs = [_run(1, 'completed', 'success'),
-            _run(2, 'in_progress', None)]
+            _run(2, 'in_progress', None),
+            _run(3, 'completed', 'success', name='tests')]
     assert mod._settled(runs) is False
 
 
@@ -118,9 +127,10 @@ def test_every_run_the_client_reports_is_considered(tmp):
     del tmp
     mod = _watch_all()
     runs = [_run(index, 'completed', 'success') for index in range(1, 6)]
+    runs.append(_run(6, 'completed', 'success', name='tests'))
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
-    _fake_runs(mod, [*runs, _run(6, 'queued', None)])
+    _fake_runs(mod, [*runs, _run(7, 'queued', None)])
     assert mod._all_concluded(SHA) is False
 
 
@@ -156,9 +166,9 @@ def test_a_rate_limited_completion_query_waits_rather_than_holding(tmp):
     _fake_runs_in_order(
         mod,
         [RateLimited('rate limited', time.time() + 2),
-         [_run(1, 'completed', 'success')]], seen)
+         [_run(1, 'completed', 'success', name='tests')]], seen)
     out = io.StringIO()
-    assert mod._all_concluded(SHA, Watcher('watch_all', out=out))
+    assert mod._all_concluded(SHA, Watcher('watch_all', out=out)) is True
     assert len(seen) == 2, seen
     assert len([line for line in out.getvalue().splitlines()
                 if 'rate limit' in line]) == 1, out.getvalue()
@@ -194,6 +204,92 @@ def test_under_the_cap_an_unsettled_batch_keeps_holding(tmp):
     mod = _watch_all()
     assert mod._hold_release(None, 0.0, 600.0, SHA) is None
     assert mod._hold_release(False, 599.0, 600.0, SHA) is None
+
+
+def test_a_head_with_no_gating_run_is_not_settled(tmp):
+    """Issue #1223, the cb67badf set: a head that conflicts with its base
+    dispatches no pull_request workflow, so the `tests` matrix is never
+    created, while gate freshness and CodeQL run and conclude. Every run
+    that exists has concluded, which is what the hold used to read as
+    settled - a batch looking exactly like a green matrix with the gating
+    matrix silently absent.
+
+    It reads as its own answer rather than as `False`: a run still open
+    resolves, and this may never. `False` would also be a lie the other
+    way, naming a run that is not open.
+    """
+    del tmp
+    mod = _watch_all()
+    runs = [_run(1, 'completed', 'success', name='gate freshness'),
+            _run(2, 'completed', 'success', name='CodeQL - Code Quality')]
+    verdict = mod._settled(runs)
+    assert verdict is not True
+    assert verdict is not False and verdict is not None
+    assert list(verdict.missing) == ['tests'], verdict
+    _fake_runs(mod, runs)
+    assert mod._all_concluded(SHA) is not True
+    assert mod._hold_release(verdict, 0.0, 600.0, SHA) is None
+
+
+def test_a_head_with_a_gating_run_still_settles(tmp):
+    """The one-limb counterpart: the same two green runs and nothing else
+    changed, so a check that varies the gating limb alone is what holds the
+    predicate in place. The two cases differ in that limb and in no other.
+    """
+    del tmp
+    mod = _watch_all()
+    runs = [_run(1, 'completed', 'success', name='gate freshness'),
+            _run(2, 'completed', 'success', name='CodeQL - Code Quality'),
+            _run(3, 'completed', 'success', name='tests')]
+    assert mod._settled(runs) is True
+    _fake_runs(mod, runs)
+    assert mod._all_concluded(SHA) is True
+    assert mod._hold_release(True, 0.0, 600.0, SHA) == []
+
+
+def test_a_red_gating_run_is_present_and_not_absent(tmp):
+    """A `tests` run that concluded `failure` is present. The hold is
+    conclusion-blind on purpose - a completed failure settles the matrix as
+    much as a completed success does, and the batch's business is to report
+    it - so a red gate must read as settled-and-reported, never as the
+    missing gate, which would hold a batch that will never improve.
+    """
+    del tmp
+    mod = _watch_all()
+    runs = [_run(1, 'completed', 'success', name='tests'),
+            _run(2, 'completed', 'failure', name='speed')]
+    assert mod._settled(runs) is True
+    _fake_runs(mod, runs)
+    assert mod._all_concluded(SHA) is True
+
+
+def test_the_cap_line_names_the_absent_gate(tmp):
+    """The cap releases the batch whatever the reason is, so the line is the
+    only thing that carries it. A cap release that said "unknown" for a
+    head whose gating matrix was never dispatched would read as a partial
+    tally of a matrix that exists - the shape issue #839 was filed about,
+    reached here by the other route.
+    """
+    del tmp
+    mod = _watch_all()
+    runs = [_run(1, 'completed', 'success', name='gate freshness')]
+    verdict = mod._settled(runs)
+    batch = [f'[ci] CI b {SHA} gate freshness: success '
+             'https://github.com/o/r/1']
+    batch.extend(mod._hold_release(verdict, 600.0, 600.0, SHA))
+    lines = mod._condense(batch, 1000, 'log').splitlines()
+    caps = [line for line in lines if 'hold cap' in line]
+    assert len(caps) == 1, lines
+    cap = caps[0]
+    assert cap.startswith('[watch_all] hold cap 600s reached on ' + SHA), cap
+    assert cap.endswith('tally is partial'), cap
+    assert 'tests' in cap, cap
+    assert 'runs still open or unknown' not in cap, cap
+    # The other reason keeps its own wording, so the two cannot drift.
+    other = mod._hold_release(False, 600.0, 600.0, SHA)[0]
+    assert 'runs still open or unknown' in other, other
+    assert 'tests' not in other, other
+    assert other.endswith('tally is partial'), other
 
 
 def main():

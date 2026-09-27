@@ -362,6 +362,19 @@ platform and not the other, and a kill runs no `finally`, so the teardown
 only makes a graceful exit immediate. A restart of the aggregator can
 therefore never leave the old pair polling beside the new one.
 
+**The hold reads the gating workflow, through the same predicate
+`ci_wait.py` refuses with** (`ci_gate.py`, imported by both - one
+mechanism, not one name over two). A pull-request head that conflicts with
+its base dispatches no `pull_request` workflow, so the `tests` matrix is
+never created while `gate freshness` and CodeQL run and conclude; the hold
+used to release that batch, reading exactly like a settled green matrix
+with the gating matrix silently absent from the tally (issue #1223). It now
+treats an absent gating workflow as its own answer - keep holding, and if
+`--max-hold` releases the batch anyway, name the workflow that is missing
+rather than "unknown", which is the shape #839 was filed about. A *red*
+`tests` run is present, and settles the matrix as a completed failure
+always did.
+
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
 ```
