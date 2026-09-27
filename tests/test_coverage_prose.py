@@ -182,6 +182,51 @@ def _claim_figures(phrase, offset):
             for run, start, end in _digit_runs(phrase)]
 
 
+def test_no_claim_the_pattern_can_spell_carries_a_figure_beyond_the_two(tmp):
+    """The pattern's own capacity, which no other control measures.
+
+    The rule and the refusal message read one match of one constant, so a
+    single widening re-admits a tree-wide figure in both at once -- and with
+    the prose restated to match, the suite is green with the very figure
+    this branch exists to refuse. Nothing else here would notice: every
+    other control reads the paragraph as shipped, and the shipped paragraph
+    states no denominator.
+
+    So this drives the PATTERN and asks what a claim carrying extra figures
+    would let it admit, and the answer has to stay the two figures the
+    claim makes -- the 0 and the count -- because every other digit in
+    those sentences is one the tree proves about a different subject. A
+    pattern that simply refuses them is passing: refusing is the point. The
+    fixture is a family of phrases, not a copy of the paragraph, because a
+    fixture that restated the pattern could not catch a change to the
+    pattern, which is the whole of what is being pinned.
+    """
+    del tmp
+    said = re.search(COUNT_PHRASE, _paragraph())
+    assert said, 'the paragraph no longer states the module count'
+    count = said.group(1)
+    total = sum(len(code_lines(text, rel))
+                for rel, text in tracked_sources(ROOT).items())
+    admits = {'0', count}
+    greedy = [
+        f'at 0 of {count} of {total} code lines',
+        f'at 0 of {count} and {total} code lines',
+        f'at 0 of {count} of {total} of {total} code lines',
+        f'at 0 of {count} code lines of {total}',
+    ]
+    for phrase in greedy:
+        matched = re.search(COUNT_PHRASE, phrase)
+        if matched is None:
+            continue
+        figures = {run for _, _, run in _claim_figures(matched.group(0),
+                                                       matched.start())}
+        assert figures <= admits, (
+            f'the count phrase admits {sorted(figures)} from a claim '
+            f'that also carries the tree-wide total {total}, where it may '
+            f'state only {sorted(admits)}. The paragraph can then restate '
+            f'the denominator and this suite calls it true')
+
+
 def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """The property, not a token: a figure may appear only if the claim it
     sits in is one the tree proves, so admissibility is a POSITION.
