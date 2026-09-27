@@ -176,33 +176,14 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
             status, body)
 
 
-def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
-    """The command TTL applies even when no SSE stream ever drains a queue."""
-    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '1'}
-    with _util.bridge(tmp, env=env) as (base, docroot):
-        for index in range(4):
-            status, body = put_command(
-                base, {'token': TOK, 'tab': f'abandoned{index}',
-                       'id': f'c{index}', 'code': '1'})
-            assert status == 200, (status, body)
+def _on_demand_command_gc(fault_dir):
+    """Install a collector the test sweeps on demand, and return its path.
 
-        command_root = Path(docroot) / 'commands'
-        assert len(list(command_root.iterdir())) == 4
-        expired = time.time() - 2
-        for queue_dir in command_root.iterdir():
-            for command_file in queue_dir.iterdir():
-                os.utime(command_file, (expired, expired))
-        deadline = time.time() + 3
-        while time.time() < deadline and list(command_root.iterdir()):
-            time.sleep(0.05)
-        assert list(command_root.iterdir()) == [], list(command_root.iterdir())
-        status, health = _util.get_json(base + '/health')
-        assert status == 200 and health['ok'] is True, (status, health)
-
-
-def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
-    """The collector keeps fresh work and expires work past the exact TTL."""
-    fault_dir = Path(tmp) / 'controlled-command-gc'
+    A collector on a wall clock spends the TTL while the test is still
+    setting itself up, so what an assertion finds removed is partly a
+    measure of how long setup took. This one sleeps until the test
+    triggers it; the TTL is untouched.
+    """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
         'import pathlib\n'
@@ -211,18 +192,88 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
         'from daedalus_bridge import command_queue\n'
         'def gc_loop(cmd_dir, ttl):\n'
-        '    trigger = pathlib.Path(cmd_dir) / ".gc-trigger"\n'
-        '    done = pathlib.Path(cmd_dir) / ".gc-done"\n'
-        '    while not trigger.exists():\n'
-        '        time.sleep(0.01)\n'
-        '    command_queue.collect_expired(cmd_dir, ttl)\n'
-        '    done.write_text("done", encoding="utf-8")\n'
+        '    root = pathlib.Path(cmd_dir)\n'
+        '    trigger = root / ".gc-trigger"\n'
+        '    done = root / ".gc-done"\n'
         '    while True:\n'
-        '        time.sleep(60)\n'
+        '        while not trigger.exists():\n'
+        '            time.sleep(0.01)\n'
+        '        trigger.unlink()\n'
+        '        command_queue.collect_expired(cmd_dir, ttl)\n'
+        '        done.write_text("done", encoding="utf-8")\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
+    return str(fault_dir)
+
+
+def _sweep(command_root, served):
+    """Run one sweep in the bridge and wait for it to report back."""
+    done = command_root / '.gc-done'
+    if done.exists():
+        done.unlink()
+    (command_root / '.gc-trigger').touch()
+    deadline = time.time() + 10
+    while not done.exists() and time.time() < deadline:
+        time.sleep(0.01)
+    assert done.exists(), (
+        'the controlled command sweep did not finish: ' + ''.join(served))
+
+
+def _queue_dirs(command_root):
+    """The queue namespaces in the root. The sweep markers live there too, so
+    counting every entry would count the fixture's own bookkeeping.
+    """
+    return sorted(p.name for p in command_root.iterdir() if p.is_dir())
+
+
+def _age(queues, seconds):
+    """Put every queued command's own mtime `seconds` in the past.
+
+    The collector ages on that mtime, so a sweep compares this age against
+    the TTL, never the time the setup took.
+    """
+    stamp = time.time() - seconds
+    for queue in queues:
+        for command_file in queue.iterdir():
+            os.utime(command_file, (stamp, stamp))
+
+
+def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
+    """The command TTL applies even when no SSE stream ever drains a queue."""
+    served = []
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '1',
+           'PYTHONPATH': _on_demand_command_gc(
+               Path(tmp) / 'on-demand-command-gc')}
+    with _util.bridge(tmp, env=env, output=served) as (base, docroot):
+        tabs = [f'abandoned{index}' for index in range(4)]
+        for index, tab in enumerate(tabs):
+            status, body = put_command(
+                base, {'token': TOK, 'tab': tab,
+                       'id': f'c{index}', 'code': '1'})
+            assert status == 200, (status, body)
+
+        command_root = Path(docroot) / 'commands'
+        queues = [command_root / f'{TOK}_{tab}' for tab in tabs]
+        assert _queue_dirs(command_root) == sorted(q.name for q in queues), (
+            _queue_dirs(command_root), ''.join(served))
+
+        _age(queues, 0)
+        _sweep(command_root, served)
+        assert _queue_dirs(command_root) == sorted(q.name for q in queues), (
+            _queue_dirs(command_root), ''.join(served))
+
+        _age(queues, 2)
+        _sweep(command_root, served)
+        assert _queue_dirs(command_root) == [], _queue_dirs(command_root)
+        status, health = _util.get_json(base + '/health')
+        assert status == 200 and health['ok'] is True, (status, health)
+
+
+def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
+    """The collector keeps fresh work and expires work past the exact TTL."""
+    fault_dir = Path(tmp) / 'controlled-command-gc'
     env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
-           'PYTHONPATH': str(fault_dir)}
+           'PYTHONPATH': _on_demand_command_gc(fault_dir)}
     served = []
     with _util.bridge(tmp, env=env, output=served) as (_base, docroot):
         command_root = Path(docroot) / 'commands'
@@ -235,14 +286,7 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         now = time.time()
         os.utime(fresh, (now - 1, now - 1))
         os.utime(expired, (now - 15, now - 15))
-        (command_root / '.gc-trigger').touch()
-        done = command_root / '.gc-done'
-        deadline = time.time() + 5
-        while not done.exists() and time.time() < deadline:
-            time.sleep(0.01)
-        assert done.exists(), (
-            'the controlled command sweep did not finish: '
-            + ''.join(served))
+        _sweep(command_root, served)
         assert fresh.exists(), 'configured TTL expired a fresh command'
         assert not expired.exists(), expired
 
