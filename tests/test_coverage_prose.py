@@ -54,6 +54,11 @@ from js_lines import code_lines  # noqa: E402
 
 CONTRIBUTING = ROOT / 'CONTRIBUTING.md'
 UNREACHED = 'extension/options.js'
+# Every token boundary takes whitespace, not one space: the paragraph is
+# hand-wrapped, and a rewrap of a correct figure is not a change to it. The
+# words and their order are what this pins; a break between any two of them
+# is where the sentence happened to end, not a claim about the figure.
+COUNT_PHRASE = r'at\s+0\s+of\s+(\d+)\s+code\s+lines'
 
 
 def _prose():
@@ -80,7 +85,7 @@ def test_the_unreached_module_line_count_is_the_trees(tmp):
     """`0 of 51 code lines` — the 51 is that file's own physical code lines,
     and it moves the moment the file does."""
     del tmp
-    said = re.search(r'at 0 of (\d+) code\s+lines', _paragraph())
+    said = re.search(COUNT_PHRASE, _paragraph())
     assert said, 'the paragraph no longer states the unreached module count'
     source = (ROOT / UNREACHED).read_text(encoding='utf-8')
     real = len(code_lines(source, UNREACHED))
@@ -173,7 +178,7 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """
     del tmp
     text = _paragraph()
-    said_count = re.search(r'at 0 of (\d+) code\s+lines', text)
+    said_count = re.search(COUNT_PHRASE, text)
     assert said_count, 'the paragraph no longer states the module count'
     count = int(said_count.group(1))
 
