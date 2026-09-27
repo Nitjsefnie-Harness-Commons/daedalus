@@ -313,17 +313,14 @@ def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
     attempt budget with the pinned message whatever the wall clock did
     in between.
 
-    What this pins is the TOTAL the attempt budget spends: it waits
-    (attempts - 1) polling intervals and no more. What it does NOT pin
-    is the cadence across passes — the reader makes no per-pass clock
-    call, so a reader banking the whole wait into one sleep and then
-    polling with no interval is indistinguishable here from one that
-    spreads it evenly, and per-attempt pacing is out of contract at this
-    layer. A reader that stops waiting altogether still dies here, and
-    one that waits twice as long still dies; a reader that waits the
-    right total in one burst does not, deliberately. The name is kept
-    from before that scope was drawn; `_assert_slept_its_attempt_budget`
-    carries the full statement.
+    What this pins is the TOTAL the attempt budget spends. What it does
+    NOT pin is the cadence across passes: the reader makes no per-pass
+    clock call, so a reader banking its whole wait into one sleep is
+    indistinguishable here from one that spreads it evenly. A reader
+    that stops waiting, or waits twice as long, still dies; one that
+    waits the right total in a single burst does not, deliberately. The
+    name predates that scope; `_assert_slept_its_attempt_budget` carries
+    the full statement.
     """
     qdir = Path(tmp) / 'commands' / 'tok_extension'
     qdir.mkdir(parents=True)
