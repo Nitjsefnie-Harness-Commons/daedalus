@@ -12,18 +12,18 @@
   },
   "module_size_baseline": {
     "tests/test_bridge_results.py": 976,
-    "tests/test_cli.py": 1166,
-    "tests/test_mcp_server.py": 1575,
+    "tests/test_cli.py": 1117,
+    "tests/test_mcp_server.py": 1506,
     "tests/test_tab_routing.py": 768
   },
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
     "tests/test_bridge_startup.py": 2,
     "tests/test_cli.py": 15,
-    "tests/test_mcp_server.py": 20,
+    "tests/test_mcp_server.py": 19,
     "tests/test_repo_layout.py": 5,
     "tests/test_segment_jobs.py": 14,
-    "tests/test_version_contract.py": 21
+    "tests/test_version_contract.py": 20
   },
   "type_error_baseline": {
     "tests/_bash_resolver_scan.py": 1,
