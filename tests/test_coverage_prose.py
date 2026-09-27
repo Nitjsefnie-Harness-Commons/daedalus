@@ -256,6 +256,8 @@ def test_no_claim_the_pattern_can_spell_carries_a_figure_beyond_the_two(tmp):
         f'at 0 of {count} and {total} code lines',
         f'at 0 of {count} of {total} of {total} code lines',
         f'at 0 of {count} code lines of {total}',
+        f'at 0 of {count} code lines, of {total} in the tree',
+        f'at 0 of {count} of the {total} code lines',
     ]
     for phrase in greedy:
         matched = re.search(COUNT_PHRASE, phrase)
