@@ -248,7 +248,7 @@ def test_a_parameter_supplied_by_name_is_supplied(_tmp):
             if 'a parameter supplied by name' in form['classes']]
     reached = [form for form in rows if form['step'] == 'bound reaches']
     raised = [form for form in rows if form['step'] == 'bound raises']
-    assert len(rows) == 880, len(rows)
+    assert len(rows) == 3792, len(rows)
     assert {form['inline'] for form in reached} == {'resolved', 'silent'}
     reached_oracles = {form['oracle'] for form in reached}
     assert reached_oracles == {'reaches', 'does not reach'}, reached_oracles
@@ -258,15 +258,32 @@ def test_a_parameter_supplied_by_name_is_supplied(_tmp):
         assert form['inline'] == (
             'resolved' if form['oracle'] == 'reaches' else 'silent'), form
     signatures = {form['kind'] for form in rows}
-    assert len(signatures) == 13, sorted(signatures)
+    assert len(signatures) == 144, len(signatures)
+    one_sided = []
     for kind in signatures:
         of = [form for form in rows if form['kind'] == kind]
-        assert {form['step'] for form in of} == {
-            'bound reaches', 'bound raises'}, kind
-        assert {form['inline'] for form in of
-                if form['step'] == 'bound raises'} == {'silent'}, kind
-        assert 'resolved' in {form['inline'] for form in of
-                              if form['step'] == 'bound reaches'}, kind
+        steps = {form['step'] for form in of}
+        assert steps <= {'bound reaches', 'bound raises'}, kind
+        resolves = 'resolved' in {form['inline'] for form in of
+                                  if form['step'] == 'bound reaches'}
+        if 'bound raises' in steps:
+            assert {form['inline'] for form in of
+                    if form['step'] == 'bound raises'} == {'silent'}, kind
+            # A signature the product can make raise carries BOTH sides: the
+            # boundary is inside it, and a rule that reads only one binding
+            # form has a row here that fails.
+            assert resolves, kind
+        else:
+            # A signature whose only feature is a `*args` is not one of
+            # these: it soaks up every positional, so no call can make its
+            # binding raise, and every parameter it declares is either a
+            # default or a keyword the `**w` beside it catches. They are
+            # named rather than papered over, so a signature that LOSES its
+            # other side shows here.
+            one_sided.append(kind)
+    assert sorted(one_sided) == [
+        'a *a lambda', 'a *a, **w lambda', 'a x=0, *a, **w lambda',
+        'a x=0, y=0, *a, **w lambda'], sorted(one_sided)
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
