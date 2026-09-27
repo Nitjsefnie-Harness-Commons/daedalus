@@ -15,16 +15,22 @@ import _cmdqueue  # noqa: E402
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
 _RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
-_POLL_HEADROOM = 4
+# One reader pass probes the queue once per name below, so a pass that
+# starts probing a third time moves this with it rather than quietly
+# becoming a sample of the reader as it stands today.
 _QUEUE_PROBES = ('is_dir', 'glob')
+_PROBES_PER_ATTEMPT = 2
+_POLL_HEADROOM = 4
 
 
 def _poll_budget(timeout):
     """The poll ceiling a correct reader spends on `timeout`, with headroom.
 
-    A correct reader spends one `is_dir` and one `glob` per attempt and
-    rejects at ceil(timeout / POLL_DELAY) attempts; the ceiling is a
-    multiple of that, so headroom is never a red a correct reader causes.
+    Derived from the domain: a pass costs `_PROBES_PER_ATTEMPT` probes and a
+    correct reader stops at `ceil(timeout / POLL_DELAY)` passes, so the
+    ceiling is the product of the two and `_POLL_HEADROOM` passes of slack.
+    `_queueread.POLL_DELAY` aliases this module's, so both suites budget
+    the same interval.
 
     A poll attempt costs no real time, so this decides nothing about
     machine speed. It is the backstop for the one shape the virtual
@@ -32,32 +38,42 @@ def _poll_budget(timeout):
     that clock, so a reader that stops calling it — or never entered it —
     is charged by none of them.
     """
-    return _POLL_HEADROOM * math.ceil(timeout / _cmdqueue.POLL_DELAY)
+    attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
+    return _PROBES_PER_ATTEMPT * _POLL_HEADROOM * attempts
 
 
 @contextlib.contextmanager
-def _bounded_polls(max_polls):
+def _bounded_polls(max_polls, what=None):
     """Refuse the queue probe that would pass `max_polls` polls.
 
-    One reader pass is one `Path.is_dir` and, when the queue exists, one
-    `Path.glob`, so both are counted: a queue that does not exist is
-    probed by `is_dir` alone, and a bound counting globs alone would
-    never see a reader spinning on it.
+    One reader pass probes each name in `_QUEUE_PROBES` once, so all of
+    them are counted: a queue that does not exist is probed by `is_dir`
+    alone, and a bound counting globs alone would never see a reader
+    spinning on it.
 
     The count needs no clock, so a control reading on the real time
     module enters it exactly as one under `_virtual_cmdqueue_clock` does.
+
+    The patch is process-wide, and that has a failure direction in each
+    way. A reader reaching the queue through any other API — `os.listdir`
+    behind `Path.exists`, say — calls nothing here, spends nothing, and
+    hangs. A probe from outside the reader, on this process or on a thread
+    it shares, spends the reader's budget and is itself the call that
+    raises. `what` names the wait for the first reader of a traceback;
+    it cannot name either direction, so the shape itself is pinned by
+    `test_the_reader_probes_the_queue_through_the_bounded_names`.
     """
     originals = {name: getattr(Path, name) for name in _QUEUE_PROBES}
     spent = [0]
+    where = '' if what is None else f' [{what}]'
 
     def counted(original):
         def probe(candidate, *args, **kwargs):
             if spent[0] >= max_polls:
                 raise AssertionError(
-                    'queue reader exceeded its poll ceiling of '
-                    f'{max_polls} queue probes: the reader polled '
-                    'without sleeping, so no clock guard on it is '
-                    'consulted')
+                    f'queue reader reached its poll ceiling of {max_polls} '
+                    f'probes, counting {" and ".join(_QUEUE_PROBES)} one '
+                    f'each, and was still polling{where}')
             spent[0] += 1
             return original(candidate, *args, **kwargs)
         return probe
@@ -65,7 +81,7 @@ def _bounded_polls(max_polls):
     for name, original in originals.items():
         setattr(Path, name, counted(original))
     try:
-        yield
+        yield spent
     finally:
         for name, original in originals.items():
             setattr(Path, name, original)
