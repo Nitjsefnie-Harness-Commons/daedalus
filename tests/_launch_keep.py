@@ -6,9 +6,10 @@ one drops to being refused rather than merely unpolled. So each is written
 once here: a copy in the second consumer narrows that control's population
 with nothing to report it, and a plant measured how far. Widening the keep
 rule — adding `non-git` to its heads — took the boundary control from 139
-checked sites to 55 with the whole tree green. Narrowing the prefilter the
-same way, with `and 'git' in source`, took it to 70. Both figures are this
-tree's, and each is reproducible by making that one edit.
+dropped sites to 55 with the whole tree green. Narrowing the prefilter the
+same way, with `and 'git' in source`, took it to 70. Both figures count
+sites the rule drops; both are this tree's, and each is reproducible by
+making that one edit.
 """
 
 
