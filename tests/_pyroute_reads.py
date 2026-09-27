@@ -415,17 +415,12 @@ def _apply_pop(state, call):
 def _receiver_value(receiver, state):
     """The deferred value a receiver expression names.
 
-    A named expression, a subscript and an instance attribute each resolve
-    through the storage the model records for them; a name resolves through
-    its own binding, so an alias reaches the one container it shares.
+    A named expression and a class or instance attribute resolve through the
+    storage the model records for them; a name resolves through its own
+    binding, so an alias reaches the one container it shares.
     """
     if isinstance(receiver, ast.NamedExpr):
         receiver = receiver.value
-    if isinstance(receiver, ast.Subscript):
-        owner = _receiver_value(receiver.value, state)
-        if isinstance(owner, DeferredContainer):
-            return merge_yielded(
-                at_position(owner, _literal_key(receiver.slice, state)))
     if isinstance(receiver, ast.Attribute):
         owner = _receiver_value(receiver.value, state)
         if isinstance(owner, DeferredClass):

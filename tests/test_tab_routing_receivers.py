@@ -139,8 +139,8 @@ _CONTROLS = [
                                'box["inner"].d["k"] = relay()\n'
                                'send = ext_cmd\nreturn box["inner"].d["k"]()',
      (1, 1)),
-    # The rewritten container is read inside a closure, so the cell that
-    # carries its name has to be snapshotted when the write lands.
+    # The same slot the plain form pins, read from a callee rather than
+    # from the flow that wrote it. The seed is what makes this row go red.
     ('cell-over-one-name',
      'class C: pass\nc = C()\nc.d = dict()\nc.d["k"] = relay()\n'
      'def reader():\n    return c.d["k"]()\n'
