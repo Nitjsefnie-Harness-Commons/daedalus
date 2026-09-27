@@ -298,26 +298,35 @@ def test_the_acceptable_line_names_the_failure_it_discarded(tmp):
 
 def test_the_discarded_count_agrees_with_the_runs_it_names(tmp):
     """A count the line does not add up to is a count nobody can audit, so
-    the two are pinned together: two runs of one workflow go by in front of
-    its newest, and the two the verdict dropped are the two it names."""
+    the two are pinned together - and both are derived from the set the
+    filter reports rather than from a restated literal, which is what a
+    literal lets them drift away from. One of the superseded runs concluded
+    ACCEPTABLY, so a count drawn from the non-acceptable conclusions alone
+    agrees with the number of lines here only by luck."""
     del tmp
     mod = _ci_wait()
     runs = [
-        _run(1, 'failure', '2026-09-07T10:00:00Z', name='tests'),
-        _run(2, 'cancelled', '2026-09-07T10:05:00Z', name='tests'),
-        _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
+        _run(1, 'success', '2026-09-07T10:00:00Z', name='tests'),
+        _run(2, 'failure', '2026-09-07T10:05:00Z', name='tests'),
+        _run(3, 'cancelled', '2026-09-07T10:10:00Z', name='tests'),
+        _run(4, 'success', '2026-09-07T10:15:00Z', name='tests'),
     ]
+    # One workflow in start order, so every run but the newest is the one
+    # the filter drops - stated from the fixture rather than asked of the
+    # function, which would make the expectation agree with a broken filter.
+    discarded = runs[:-1]
+    named = ''.join(
+        f'  {run["name"]} (run {run["id"]}): {run["conclusion"]} '
+        f'{run["html_url"]}\n' for run in discarded)
     setattr(mod, 'runs_on', lambda repo, sha: runs)
     out = io.StringIO()
     code = mod.wait('o/r', 'a' * 40, 60, 60, out)
     text = out.getvalue()
     assert code == 0, text
-    assert 'all 1 run(s) on aaaaaaaaaaaa acceptable ' \
-           '(2 superseded run(s) ignored)' in text, text
-    assert text.endswith(
-        '  tests (run 1): failure https://github.com/o/r/actions/runs/1\n'
-        '  tests (run 2): cancelled https://github.com/o/r/actions/runs/2\n'
-    ), text
+    counted = (f'all {len(runs) - len(discarded)} run(s) on aaaaaaaaaaaa '
+               f'acceptable ({len(discarded)} superseded run(s) ignored)')
+    assert counted in text, text
+    assert text.endswith(named), text
 
 
 def test_every_run_of_one_workflow_carries_the_workflow_name(tmp):
