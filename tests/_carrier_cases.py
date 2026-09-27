@@ -284,6 +284,18 @@ json.loads(text)
         ('ordinary attribute chain', """import json
 json.JSONDecoder().decode(text)
 """),
+        # `__call__` is in `_LAUNCH_READS` and not in `_LAUNCHERS`, and
+        # that difference is the whole of this row. The walk opens the
+        # receiver either way, so the name never reaches the launcher
+        # test and a call through it launches nothing. Fold `__call__`
+        # into `_LAUNCHERS` and the same call is classified a launcher,
+        # which a `chdir` above turns into a refusal — that is what pins
+        # the two sets apart rather than letting them quietly become one.
+        ('module call attribute is not a launch method', """import os
+import subprocess
+os.chdir(tmp)
+subprocess.__call__(['python3', 'child.py'])
+"""),
         ('module alias receiver', """import subprocess
 import other
 other.run(['python3', 'child.py'])
