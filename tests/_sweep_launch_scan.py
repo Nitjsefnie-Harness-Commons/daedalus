@@ -112,7 +112,7 @@ def _captures(statement):
     return names
 
 
-def _bind(node, bound):
+def _sweep_bind(node, bound):
     """Record what one statement binds in its scope, and on what line.
 
     Every bare-name target Python's own statement forms offer that names
@@ -203,7 +203,7 @@ def sweep_launches(tree, relative):
             if isinstance(node, _SCOPE_NODES):
                 pending.append((node, {}))
             else:
-                _bind(node, bound)
+                _sweep_bind(node, bound)
         for node in own:
             if (isinstance(node, ast.Call)
                     and _callee(node) in spellings
