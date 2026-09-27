@@ -418,12 +418,14 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     not a change to its row. A live site with no row fails; a row whose
     function does not bind a call spelling that signature fails; a row
     matching zero live sites fails, because a stale allowance is a
-    refusal; and a row matching more than one fails. Matching is on the
-    exact (path, function, signature, ordinal) key, so a launch in a
-    different function of an allowed module, a second launch of the same
-    shape in an allowed function, and a launch that has changed shape are
-    each a refusal — the exemption cannot be widened by a prefix or
-    substring match, and every failure names the key to paste.
+    refusal; and a row matching more than one fails. One assert reports
+    all four, so a run answers the whole question and not only the class
+    its first failure happened to name. Matching is on the (path,
+    function, signature, ordinal) key, so another function of an allowed
+    module, a second launch of the same shape in an allowed function, and
+    a launch that has changed shape are each a refusal — the exemption
+    cannot be widened by a prefix or substring match, and every failure
+    names the key to paste.
     """
     del tmp
     live = {}
@@ -442,13 +444,10 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     rows = sorted(BOUNDED_GIT_LAUNCHES, key=_row_text)
     keyed = [row for row in rows
              if len(row) == 4 and isinstance(row[3], int)]
-    unallowed = sorted(
+    findings = sorted(
         f'{_row_text(key)} {sites}{_shifted_note(key, keyed)}'
         for key, sites in live.items()
         if key not in BOUNDED_GIT_LAUNCHES)
-    assert not unallowed, (
-        'bounded git launches with no BOUNDED_GIT_LAUNCHES row:\n'
-        + '\n'.join(unallowed))
     # The keying is what carries the anti-prefix promise, so it is
     # checked rather than asserted in prose: a (path,) key alone, the
     # loosest prefix the sentence forbids, would let one row stand for
@@ -461,21 +460,23 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     # skips is still judged on what it says.
     spelled = {}
     for key in rows:
-        defect = _row_defect(key, spelled)
-        assert not defect, (
-            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} {defect}; the '
-            'analyser computes every component, so the key printed in the '
-            'failure above is the one to paste')
-    for key in rows:
-        assert live.get(key), (
-            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live bounded '
-            'git launch; a stale allowance is a refusal')
-    for key in rows:
         count = len(live.get(key, ()))
-        assert count == 1, (
-            f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} matches {count} live '
-            'bounded sites; exactly one is required, so a site in a function '
-            'that already has a row must be given its own')
+        if count == 0:
+            findings.append(
+                f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live '
+                'bounded git launch; a stale allowance is a refusal')
+        elif count > 1:
+            findings.append(
+                f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} matches {count} '
+                'live bounded sites; exactly one is required, so a site in '
+                'a function that already has a row must be given its own')
+        defect = _row_defect(key, spelled)
+        if defect:
+            findings.append(
+                f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} {defect}; the '
+                'analyser computes every component, so the key printed '
+                'here is the one to paste')
+    assert not findings, '\n'.join(findings)
 
 
 def test_the_clone_helper_modules_carry_the_git_launch_policy(tmp):

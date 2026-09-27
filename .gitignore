@@ -599,6 +599,7 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_jsread_mask.py
+!/tests/test_launch_control_boundary.py
 !/tests/test_launch_path.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
