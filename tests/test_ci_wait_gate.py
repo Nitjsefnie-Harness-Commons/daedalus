@@ -11,16 +11,17 @@ The controls live here rather than in test_ci_wait.py because that suite
 is within forty lines of its 700-line ceiling, and scripts/ci/
 size_baseline.py's own remedy for a file over it is to relocate the code
 into a new module. The verdict cases that already existed stay there: this
-is the state they had to be able to reach.
+is the state they had to be able to reach. The head-pull-request controls
+went further out, to tests/test_gh_head_prs.py, when this file reached the
+ceiling itself; the same remedy, applied the second time.
 """
 import contextlib
 import io
-import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _fake_gh  # noqa: E402
 import _util  # noqa: E402
 # Aliased to the names these suites have always called them, so the
 # extraction is the only thing the call sites see.
@@ -160,6 +161,40 @@ def test_a_conflicting_head_refuses_before_the_grace_elapses(tmp):
     assert 'grace' not in text, text
 
 
+def test_each_limb_of_the_conflict_test_alone_still_refuses(tmp):
+    """`_blocked` reads TWO fields, and every fixture reaching it with a
+    blocking state set both at once, so neither limb had a fixture
+    differing in it alone: either conjunct could be deleted and the suite
+    stayed green. `assert 'DIRTY' in text` never closed that - it is the
+    report echoing the fixture's own field, not the filter consulting it.
+
+    Two single-limb fixtures, each on its own SHA so the two refusals are
+    told apart in the output, and each asserted to refuse at once with the
+    clock unmoved: the grace is the other answer, and a set that reaches it
+    has waited `grace` seconds for nothing.
+    """
+    del tmp
+    mod = _ci_wait()
+    for sha, mergeable, merge_state, named in (
+            ('7' * 40, 'MERGEABLE', 'DIRTY', 'DIRTY'),
+            ('8' * 40, 'CONFLICTING', 'CLEAN', 'CONFLICTING')):
+        clock = _Clock()
+        setattr(mod, 'runs_on', lambda repo, s: [
+            _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+        setattr(mod, 'prs_on', lambda repo, s, m=mergeable, t=merge_state: [
+            {'number': 1122, 'state': 'OPEN', 'mergeable': m,
+             'mergeStateStatus': t, 'headRefOid': s}])
+        out, err = io.StringIO(), io.StringIO()
+        with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+            code = mod.wait('o/r', sha, 60, 600, out, grace=300)
+        text = out.getvalue()
+        assert code == 4, (mergeable, merge_state, text)
+        assert clock.now == 1000.0, (mergeable, merge_state, clock.now)
+        assert 'pull request #1122' in text, (mergeable, merge_state, text)
+        assert named in text, (mergeable, merge_state, text)
+        assert 'grace' not in text, (mergeable, merge_state, text)
+
+
 def test_a_still_computing_pull_request_is_not_a_refusal(tmp):
     """`UNKNOWN` is GitHub still working out mergeability, the opposite of
     CONFLICTING. The wait must not refuse on it, so the refusal arrives
@@ -182,6 +217,43 @@ def test_a_still_computing_pull_request_is_not_a_refusal(tmp):
     assert 'grace' in text, text
     assert '1122' not in text, text
     assert 'gate freshness' in text, text
+
+
+def test_a_pull_request_that_turns_conflicting_later_is_re_read(tmp):
+    """The re-read is the reason the wait asks on every observation rather
+    than once: `mergeable` is UNKNOWN while GitHub computes it, and can
+    still come back CONFLICTING minutes later on the same head.
+
+    A wait that re-read every tick but acted on the FIRST answer passes
+    every other control here and turns this refusal into a 300-second grace
+    refusal that names no pull request at all - so the control is the
+    UNKNOWN-then-CONFLICTING shape, and what it asserts is the conflict:
+    the exit is 4 at once, the line names the pull request, and the clock
+    has not moved off the first observation.
+    """
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    reads = []
+
+    def _asks(repo, sha):
+        reads.append(clock.now)
+        mergeable = 'UNKNOWN' if len(reads) < 3 else 'CONFLICTING'
+        return [{'number': 1122, 'state': 'OPEN', 'mergeable': mergeable,
+                 'mergeStateStatus': 'UNKNOWN', 'headRefOid': sha}]
+
+    setattr(mod, 'runs_on', lambda repo, s: [
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'prs_on', _asks)
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', '5' * 40, 10, 600, out, grace=300)
+    text = out.getvalue()
+    assert code == 4, text
+    assert 'pull request #1122' in text, text
+    assert len(reads) == 3, reads
+    assert clock.now == 1020.0, clock.now
+    assert 'grace' not in text, text
 
 
 def test_an_incomplete_set_inside_the_grace_keeps_polling(tmp):
@@ -290,6 +362,12 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
         _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
     # The transport, not the accessor: this control is about the REAL
     # head_pull_requests propagating a failed read into the wait's handler.
+    # ONE run, and its own output is what is asserted: the earlier version
+    # restored the real transport in a `finally` and then ran a SECOND wait
+    # whose output it asserted, so the verdict turned on a live
+    # `gh api graphql` failing against a repository that does not exist -
+    # and it still passed with gh off PATH, because a missing gh is an
+    # OSError and so a QueryError, and the same branch ran.
     real = mod.gh_client.graphql
     setattr(mod.gh_client, 'graphql', _refuse)
     try:
@@ -298,9 +376,6 @@ def test_a_failed_pull_request_lookup_still_refuses_on_the_grace(tmp):
             code = mod.wait('o/r', 'e' * 40, 7, 600, out, grace=30)
     finally:
         setattr(mod.gh_client, 'graphql', real)
-    out, err = io.StringIO(), io.StringIO()
-    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
-        code = mod.wait('o/r', 'e' * 40, 7, 600, out, grace=30)
     text = out.getvalue()
     assert code == 4, text
     assert 'tests' in text, text
@@ -351,6 +426,37 @@ def test_a_bound_shorter_than_the_grace_names_the_missing_gate(tmp):
     assert 'merge' not in text, text
 
 
+def test_the_refusal_names_the_gate_a_superseded_run_did_not_satisfy(tmp):
+    """`_missing` reads the run set through the superseded-cancelled filter,
+    and that read was documented and unpinned: drop the filter and the
+    refusal degrades to `no  run on <sha>` - a doubled space and no
+    workflow name, which is issue #839's shape on this same file, a line
+    that reads like a verdict while saying nothing useful.
+
+    The fixture is the only one that can separate the two: the sole
+    `tests` run is cancelled-and-superseded, so the filter leaves nothing
+    naming it, and the refusal has to fall back on the constant and NAME
+    the workflow. A run that merely happens to be absent is already
+    covered elsewhere and would pass either way.
+    """
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    setattr(mod, 'runs_on', lambda repo, s: [
+        # id 2 is newer and the same workflow, so id 1 is the remnant of a
+        # re-run: the filter drops it, and its name cannot satisfy the gate.
+        _run(1, 'cancelled', '2026-09-20T10:00:00Z', name='tests'),
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness')])
+    setattr(mod, 'prs_on', lambda repo, s: [])
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', '6' * 40, 7, 600, out, grace=30)
+    text = out.getvalue()
+    assert code == 4, text
+    assert 'no tests run on' in text, text
+    assert 'no  run on' not in text, text
+
+
 def test_a_non_positive_grace_is_refused(tmp):
     """A grace of zero would refuse the first observation, which is the
     second false green in a new coat. The CLI refuses it the way it refuses
@@ -374,12 +480,25 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
     read incomplete and no real head could satisfy it. Renaming the
     workflow has to fail the suite rather than pass it silently.
 
-    A `pull_request` trigger that FILTERS is the same rot in a form the
-    first version of this control could not see: a `paths-ignore` under it
-    leaves the trigger declared, so the gate is still waiting for a run that
-    the matching pull requests will never produce. The event's own option
-    keys are read with the shared reader, which is the one that knows a
-    deeper `paths-ignore:` belongs to something else.
+    And a `pull_request` trigger that FILTERS is the same rot in a form the
+    first version of this control could not see: the trigger stays declared,
+    so the gate is still waiting for a run the matching pull requests will
+    never produce.
+
+    **The admitted subset is the empty set, and that is the whole policy.**
+    Every option under `pull_request` narrows when the event fires, so every
+    one of them is a way to stop the gate running on a head that needs it:
+    `paths` and `paths-ignore` by file, `branches` and `branches-ignore` by
+    ref, `types` by which activity the event reports. An earlier version
+    admitted `('paths', 'paths-ignore')` by name and so was blind to the
+    other three, which the reviewer measured: `branches: [main]`,
+    `types: [opened, synchronize]` and `branches-ignore: [dependabot/**]`
+    each left the suite green. `types:` is not hypothetical - two
+    workflows in this repository already declare that exact form on another
+    trigger. The keys are read with the shared reader, which is the one that
+    knows a deeper `paths-ignore:` belongs to something else, and the
+    comparison is against no key at all rather than a list that would need
+    extending every time GitHub adds a narrowing option.
     """
     del tmp
     mod = _ci_wait()
@@ -406,13 +525,29 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
                 f'{sorted(triggers)} and never runs on a pull request, so a '
                 f'head of a pull request has no run of it to wait for')
             keys = _event_option_keys(triggers['pull_request'], wanted)
-            filters = ('paths', 'paths-ignore')
-            filtered = [key for key in filters if key in keys]
-            assert not filtered, (
-                f'the workflow named {wanted!r} filters its pull_request '
-                f'trigger by {filtered}, so a pull request whose changes are '
-                f'all filtered out gets no run of it and this wait would '
-                f'refuse a head the merge never had to gate')
+            assert not keys, (
+                f'the workflow named {wanted!r} narrows its pull_request '
+                f'trigger by {sorted(keys)}, so some head gets no run of the '
+                f'workflow this wait requires and the head is refused for a '
+                f'matrix that was never asked for')
+
+
+def _contract_of(text):
+    """The exit-code list of a contract surface, in whichever shape it is.
+
+    The docstring lists one exit per line, each starting with the code;
+    SKILL.md states the same list as a wrapped paragraph. Returning the
+    right span of each is what lets one completeness check cover both
+    without either surface being rewritten to suit the test.
+    """
+    entries = [row for row in text.splitlines()
+               if re.match(r'  [0-4]  ', row)]
+    if entries:
+        return ' '.join(entries)
+    for block in text.split('\n\n'):
+        if 'exit code is the verdict' in block:
+            return ' '.join(block.split())
+    raise AssertionError('no exit-code contract found in this surface')
 
 
 def test_both_contract_surfaces_agree_on_what_exit_four_means(tmp):
@@ -437,114 +572,21 @@ def test_both_contract_surfaces_agree_on_what_exit_four_means(tmp):
         assert 'so this head is not certified' in flat, name
         assert 'the merge was never dispatched' not in flat, name
         assert 'gates the merge was never dispatched' not in flat, name
+        # A COMPLETENESS check, not a phrase check: deleting a whole clause
+        # left the docstring listing 0, 2, 3, 4 with every suite green,
+        # which is how a contract drops a code and keeps a green suite
+        # saying it has not. Each surface carries the list in its own
+        # shape - one entry per line in the docstring, one wrapped
+        # paragraph in SKILL.md - so each is sliced the way it is written
+        # and then both are asked the same question.
+        contract = _contract_of(text or '')
+        for code in ('0', '1', '2', '3', '4'):
+            assert re.search(rf'(?<![0-9]){code}(?![0-9])', contract), (
+                name, code, 'the contract lists no clause for this exit')
     # The narrative about the cb67badf head is about a head that really was
     # merge-gated, and is the one place the word belongs.
     assert 'gates the merge' in ' '.join((mod.__doc__ or '').split()), (
         'the cb67badf narrative no longer says what gates it')
-
-
-# ---- the head's pull requests ----
-
-def _pr_page(pull_requests, null_object=False):
-    """One page of the associated-pull-requests query."""
-    obj = (None if null_object
-           else {'associatedPullRequests': {'nodes': list(pull_requests)}})
-    return {'data': {'repository': {'object': obj}}}
-
-
-def _pull(number, state='OPEN', mergeable='MERGEABLE',
-          merge_state='CLEAN', head='a' * 40):
-    return {'number': number, 'state': state, 'mergeable': mergeable,
-            'mergeStateStatus': merge_state, 'headRefOid': head}
-
-
-def test_a_merged_pull_request_of_another_head_is_not_this_heads(tmp):
-    """Issue 1217: the origin/main tip is an ancestor of a merged branch's
-    head, and the API answers that tip with that MERGED pull request. Both
-    filters are load-bearing - headRefOid for the ancestor, state for the
-    pull request that is already merged - and unfiltered every ancestor of
-    a merged branch would look like an open pull request of its own.
-
-    The third fixture is the one the other two could not hold: it is this
-    head's own pull request, already merged, and it differs from an accepted
-    one in the state limb alone. The first two vary state and headRefOid
-    together, so the headRefOid clause answers both and nothing would say
-    the state clause is there at all.
-    """
-    mod = _head_prs()
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
-        _pull(1139, state='MERGED', head='f' * 40)])})
-    with fake.activate():
-        assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
-        _pull(1139, state='OPEN', head='f' * 40)])})
-    with fake.activate():
-        assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
-        _pull(1122, state='MERGED')])})
-    with fake.activate():
-        assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
-
-
-def test_the_open_pull_request_of_the_head_is_answered(tmp):
-    mod = _head_prs()
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
-        _pull(1122), _pull(1139, state='MERGED', head='f' * 40)])})
-    with fake.activate():
-        found = mod.head_pull_requests('o', 'r', 'a' * 40)
-    assert [pull['number'] for pull in found] == [1122]
-    payload = json.loads(fake.calls()[0]['request'])
-    assert payload['variables']['sha'] == 'a' * 40, payload['variables']
-
-
-def test_a_commit_with_no_pull_request_reads_as_none(tmp):
-    mod = _head_prs()
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([])})
-    with fake.activate():
-        assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
-
-
-def test_an_unknown_sha_reads_as_no_pull_request(tmp):
-    """A SHA the repository does not have answers with a null object, which
-    is a head with no pull request rather than a failed query.
-
-    A non-zero OID on purpose. Measured against this repository, an
-    unresolvable OID of any shape answers `data.repository.object: null` -
-    which is the body pinned here - and the all-zero OID is the one input
-    that does not: it answers `data: null` with no errors array, which the
-    next control pins instead. Naming it here would have made this control
-    assert a shape its own input never produces.
-    """
-    mod = _head_prs()
-    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page(
-        [], null_object=True)})
-    with fake.activate():
-        assert mod.head_pull_requests(
-            'o', 'r', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef') == []
-
-
-def test_the_all_zero_oid_is_a_failed_query_rather_than_an_empty_answer(tmp):
-    """The one unknown SHA that does not come back as a null object.
-
-    GitHub answers the all-zero OID with `data: null` and no errors array,
-    and a body carrying no data is a failed read as far as `gh_client` is
-    concerned - the same answer a truncated or errored response gets. It is
-    a `QueryError` and not an empty list, because a caller that supplied
-    the all-zero OID is owed a refusal rather than a confident `[]`: the
-    wait reports it once and carries on to its grace, and a wrong answer
-    here would tell it the head has no pull request.
-    """
-    mod = _head_prs()
-    fake = _fake_gh.FakeGh(tmp, {
-        'associatedPullRequests': {'status': 200, 'body': {'data': None}}})
-    with fake.activate():
-        try:
-            mod.head_pull_requests('o', 'r', '0' * 40)
-        except mod.gh_client.QueryError as failure:
-            assert 'no data' in str(failure), failure
-        else:
-            raise AssertionError(
-                'a body carrying no data must fail the read, not answer []')
 
 
 def main():
