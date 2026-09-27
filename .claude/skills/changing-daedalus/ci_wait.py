@@ -82,6 +82,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_gate  # noqa: E402
 import gh_client  # noqa: E402
 import gh_head_prs  # noqa: E402
 
@@ -90,10 +91,12 @@ DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
-# The workflows whose absence is a refusal rather than a wait. A constant,
-# not a flag: this is the expectation, and a caller who may switch it off
-# is the reader this tool exists to protect.
-REQUIRED_WORKFLOWS = frozenset({'tests'})
+# The workflows whose absence is a refusal rather than a wait. The
+# expectation itself is ci_gate's, which watch_all.py reads too; the name is
+# bound here because it is this tool's public contract and a constant rather
+# than a flag, so a caller who may switch it off is the reader this tool
+# exists to protect.
+REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
 OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -156,8 +159,12 @@ def _judged(runs):
 
 
 def _missing(runs, required=REQUIRED_WORKFLOWS):
-    """The required workflow names no surviving run carries."""
-    return sorted(required - {run.get('name') for run in _judged(runs)})
+    """The required workflow names no surviving run carries.
+
+    Read through the shared predicate and over the set the filter left, so
+    a superseded cancelled run's name cannot satisfy the gate.
+    """
+    return ci_gate.missing_required(_judged(runs), required=required)
 
 
 def verdict(runs, *, required=REQUIRED_WORKFLOWS):
@@ -174,9 +181,8 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     incomplete set (4), so the refusal a missing gate earns can never
     swallow a real failure. Only a set whose every conclusion is acceptable
     can be incomplete, and a run satisfies the requirement by its `name`
-    alone, because its conclusion was already judged. An empty `required`
-    is satisfied by any set, which is what makes the argument a no-op
-    rather than a rule that refuses every head.
+    alone, because its conclusion was already judged. The set question
+    itself is ci_gate's, which watch_all.py asks the same way.
     """
     runs = _judged(runs)
     if not runs:
@@ -187,7 +193,7 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
                  if run.get('conclusion') not in ACCEPTABLE]
     if offenders:
         return 'unacceptable', offenders
-    if required and not any(run.get('name') in required for run in runs):
+    if ci_gate.missing_required(runs, required=required):
         return 'incomplete', []
     return 'acceptable', []
 

@@ -88,14 +88,14 @@ BOUNDED_GIT_LAUNCHES = {
     # cannot hang a git launch; a receiver the analyser cannot prove is
     # reported rather than passed, and this table is that report's
     # disposition.
-    ('.claude/skills/changing-daedalus/watch_all.py', 362, '_aggregate'):
+    ('.claude/skills/changing-daedalus/watch_all.py', 412, '_aggregate'):
         'a queue read with a deadline: the queue is drained,'
         'nothing is launched',
-    ('.claude/skills/changing-daedalus/watch_all.py', 66, '_repo_root'):
+    ('.claude/skills/changing-daedalus/watch_all.py', 78, '_repo_root'):
         'a standalone skill script an operator runs by hand; no'
         'suite or CI bound sits above it, so a wedged git hangs an'
         'operator',
-    ('.claude/skills/changing-daedalus/watch_all.py', 170, '_repo_slug'):
+    ('.claude/skills/changing-daedalus/watch_all.py', 182, '_repo_slug'):
         'a standalone skill script an operator runs by hand; no'
         'enclosing bound sits above it, so a wedged git hangs an'
         'operator',
