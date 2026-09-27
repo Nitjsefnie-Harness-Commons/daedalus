@@ -93,7 +93,8 @@ def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
                              'name': f'workflow {workflow}'}}}
 
 
-def refusal(status=403, headers=None, body='API rate limit exceeded.'):
+def refusal_response(status=403, headers=None,
+                     body='API rate limit exceeded.'):
     return {'status': status, 'headers': headers or {}, 'body': body}
 
 
