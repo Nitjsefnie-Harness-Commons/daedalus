@@ -64,6 +64,13 @@ _NO_ITEM_ASSIGNMENT = {
                   'w = [*v]\n', 'w[0]()'),
 }
 
+# The delete sign of the same property. `del` and `=` are different
+# statements, so the row names its own. A tuple, because a subscript
+# delete on a set is unreachable from a subscript context and a tuple is
+# where the sign is likeliest to be re-opened.
+_NO_ITEM_ASSIGNMENT_DELETE = (
+    't = (relay(), quiet())\n', 't', 0, '', 't[1]()', 'del t[0]')
+
 
 def _key(k, spelling):
     return {'literal': f'x[{k}]', 'name': 'x[i]',
@@ -102,11 +109,12 @@ def _refused_shape(k, spelling, list_shape, value, read):
         + 'except IndexError:\n    pass\n' + _SL + read
 
 
-def _no_assignment_shape(seed, name, k, prelude, read):
+def _no_assignment_shape(seed, name, k, prelude, read, statement=None):
     """A store into a kind with no item assignment. The store raises
     TypeError, so the `try` is the program's own: without it the read has
     nowhere to run from."""
-    return _QUIET + seed + f'try:\n    {name}[{k}] = relay()\n' \
+    store = statement or f'{name}[{k}] = relay()'
+    return _QUIET + seed + f'try:\n    {store}\n' \
         + 'except TypeError:\n    pass\n' + prelude + _SL + read
 
 
@@ -154,10 +162,17 @@ def test_the_last_reachable_key_is_not_the_first_refused_one(tmp):
     wrong = []
     for length, (reachable, refused) in _BOUNDARY.items():
         for spelling in _SPELLINGS:
-            dropped = _run(tmp, _refused_shape(
-                refused, spelling, _clean(length), 'relay()', 'x[-1]()'))
-            if dropped != (0, 0):
-                wrong.append((length, spelling, 'refused', dropped))
+            # Two reads, because the two ways a wrong resolution of a
+            # past-the-start key hides are different: a read at the key
+            # itself catches one that lands on the key it was spelled as,
+            # and a read at position 0 catches one that clamps the
+            # out-of-range position to 0 instead of declining it.
+            for read in ('x[-1]()', 'x[0]()'):
+                dropped = _run(tmp, _refused_shape(
+                    refused, spelling, _clean(length), 'relay()', read))
+                if dropped != (0, 0):
+                    wrong.append((length, spelling, 'refused', read,
+                                  dropped))
             named = _run(tmp, _store_shape(
                 reachable, spelling, _clean(length), 'relay()',
                 f'x[{length + reachable}]()'))
@@ -184,6 +199,16 @@ def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
         -1, 'literal', _clean(2), 'relay()', 'x[1]()'))
     if recorded != (1, 1):
         wrong.append(('list_negative', recorded))
+    # The gate's second sign. (0, 1) is a FALSE POSITIVE against a runtime
+    # of (0, 0) - a tuple delete always raises, so the container is
+    # provably unchanged - and it is one of the three named in the pull
+    # request. It is the pre-existing fail-closed answer for a subscript
+    # delete inside a branch, which fires on the statement rather than on
+    # the modelled effect; the same shape reads (0, 1) on a list on `main`
+    # today. Pinned because it is the verdict, not because it is right.
+    deleted = _run(tmp, _no_assignment_shape(*_NO_ITEM_ASSIGNMENT_DELETE))
+    if deleted != (0, 1):
+        wrong.append(('tuple_delete', deleted))
     assert not wrong, wrong
 
 
