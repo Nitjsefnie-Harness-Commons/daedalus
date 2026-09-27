@@ -210,7 +210,8 @@ def run_node_program(node, program, arguments, cwd, payload=None):
                     # replace the classified error with an unrelated one.
                     stdout.flush()
                     stderr.flush()
-                    stdout, stderr = _read(stdout_path), _read(stderr_path)
+                    stdout = _read_stream(stdout_path)
+                    stderr = _read_stream(stderr_path)
                     cleanup = cleanup_process_tree(
                         process, CLEANUP_DEADLINE_S)
                     # The scratch trees come down HERE, before the report is
@@ -223,10 +224,11 @@ def run_node_program(node, program, arguments, cwd, payload=None):
                         argv, CHILD_DEADLINE_S, stdout, stderr, cleanup,
                         ''.join(unlinked)) from None
             return subprocess.CompletedProcess(
-                argv, returncode, _read(stdout_path), _read(stderr_path))
+                argv, returncode, _read_stream(stdout_path),
+                _read_stream(stderr_path))
 
 
-def _read(path):
+def _read_stream(path):
     """Read a child's stream, replacing bytes that are not valid UTF-8.
 
     `errors='replace'` turns them into U+FFFD rather than raising, because
