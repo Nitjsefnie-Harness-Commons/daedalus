@@ -70,7 +70,7 @@ def _version():
     return _declared(EXTENSION_ROOT / 'background.js', 'VERSION')
 
 
-def _key():
+def _record_key():
     """The key the record lives under, read out of the module that reads it.
 
     A case plants a storage fault on this key and asserts the reason the
@@ -80,8 +80,8 @@ def _key():
     return _declared(EXTENSION_ROOT / 'worker' / 'hotfixes.js', 'HOTFIX_KEY')
 
 
-def _run(commands, fixes=(), **case):
-    """Drive the worker's command dispatch with no page asking for replay."""
+def _run_commands(commands, fixes=(), **case):
+    """Dispatch the commands through the worker, with no page asking."""
     return run_hotfix_case(dict(
         {'documents': [SITE], 'ask': False, 'fixes': list(fixes)},
         commands=commands, **case))
@@ -132,7 +132,7 @@ def test_a_store_naming_no_fix_id_or_no_code_is_refused(tmp):
         {'id': 'no-code', 'fixId': 'resident'},
         {'id': 'empty-code', 'fixId': 'resident', 'code': ''},
     ]
-    refused = _run(refusals, seed)
+    refused = _run_commands(refusals, seed)
     assert [row['id'] for row in refused['posted']] == [
         'no-fix-id', 'no-code', 'empty-code'], refused
     for row in refused['posted']:
@@ -142,7 +142,7 @@ def test_a_store_naming_no_fix_id_or_no_code_is_refused(tmp):
     # The anti-vacuity half: the same field, the same record, a command
     # naming both. A store that refused everything would leave this record
     # untouched too.
-    accepted = _run(refusals + [
+    accepted = _run_commands(refusals + [
         {'id': 'complete', 'fixId': 'resident', 'code': '2'}], seed)
     row = _rows(accepted)['complete']
     assert row['error'] is None, accepted
@@ -160,15 +160,16 @@ def test_a_clear_naming_no_fix_id_is_refused(tmp):
     """
     del tmp
     seed = [{'id': 'resident', 'code': CODE, 'permanent': False}]
-    refused = _run([{'id': 'no-fix-id', 'type': 'clear-hotfix'}], seed)
+    refused = _run_commands([{'id': 'no-fix-id', 'type': 'clear-hotfix'}],
+                            seed)
     assert refused['posted'][0]['error'] == 'Missing fixId', refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('resident', False)], refused
     # A named id the record does not hold is a different case, and it is
     # answered rather than refused — so the refusal above reads the absent
     # field and not the absent fix. What it answers is the next row.
-    absent = _run([{'id': 'unknown', 'type': 'clear-hotfix',
-                    'fixId': 'never-stored'}], seed)
+    absent = _run_commands([{'id': 'unknown', 'type': 'clear-hotfix',
+                             'fixId': 'never-stored'}], seed)
     assert absent['posted'][0]['error'] is None, absent
     assert _flags(absent) == [('resident', False)], absent
 
@@ -194,8 +195,8 @@ def test_a_clear_of_an_id_the_record_does_not_hold_says_so(tmp):
     worker produced rather than one this case built.
     """
     del tmp
-    outcome = _run([{'id': 'clear-misspelled', 'type': 'clear-hotfix',
-                     'fixId': 'keptt'}], MIXED)
+    outcome = _run_commands([{'id': 'clear-misspelled', 'type': 'clear-hotfix',
+                              'fixId': 'keptt'}], MIXED)
     row = _rows(outcome)['clear-misspelled']
     assert row['error'] is None, outcome
     # The record is what the operator would have to restore by hand, and it
@@ -203,9 +204,10 @@ def test_a_clear_of_an_id_the_record_does_not_hold_says_so(tmp):
     assert _flags(outcome) == [('kept', True), ('dropped', False)], outcome
     assert row['result'] == {'cleared': 'keptt', 'found': False,
                              'remaining': 2}, outcome
-    no_record = _run([DROP_RECORD,
-                      {'id': 'clear-no-record', 'type': 'clear-hotfix',
-                       'fixId': 'kept'}], MIXED)
+    no_record = _run_commands([DROP_RECORD,
+                               {'id': 'clear-no-record',
+                                'type': 'clear-hotfix',
+                                'fixId': 'kept'}], MIXED)
     row = _rows(no_record)['clear-no-record']
     assert row['error'] is None, no_record
     assert row['result'] == {'cleared': 'kept', 'found': False}, no_record
@@ -213,8 +215,9 @@ def test_a_clear_of_an_id_the_record_does_not_hold_says_so(tmp):
     # The anti-vacuity half on the same state: the id IS in a record that
     # exists, so a handler that answered `found: false` for everything would
     # be caught by the first half rather than passing both.
-    with_record = _run([{'id': 'clear-present', 'type': 'clear-hotfix',
-                         'fixId': 'kept'}], MIXED)
+    with_record = _run_commands([{'id': 'clear-present',
+                                  'type': 'clear-hotfix',
+                                  'fixId': 'kept'}], MIXED)
     assert _rows(with_record)['clear-present']['result'] == {
         'cleared': 'kept', 'found': True, 'remaining': 1}, with_record
 
@@ -228,8 +231,8 @@ def test_a_clear_removes_the_fix_it_names_and_leaves_the_others(tmp):
     so both the named removal and the survival of its neighbour are asserted.
     """
     del tmp
-    outcome = _run([{'id': 'clear-one', 'type': 'clear-hotfix',
-                     'fixId': 'dropped'}], MIXED)
+    outcome = _run_commands([{'id': 'clear-one', 'type': 'clear-hotfix',
+                              'fixId': 'dropped'}], MIXED)
     row = _rows(outcome)['clear-one']
     assert row['error'] is None, outcome
     assert row['result'] == {'cleared': 'dropped', 'found': True,
@@ -247,16 +250,16 @@ def test_a_read_the_store_refuses_answers_with_the_reason(tmp):
     the refusal never got to touch.
     """
     del tmp
-    refused = _run([{'id': 'clear', 'type': 'clear-hotfix',
-                     'fixId': 'dropped'}], MIXED,
-                   storageReadFails=_key())
+    refused = _run_commands([{'id': 'clear', 'type': 'clear-hotfix',
+                              'fixId': 'dropped'}], MIXED,
+                            storageReadFails=_record_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + _key()), refused
+        'storage read refused for ' + _record_key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
     # The anti-vacuity half: the same clear, the same record, no fault.
-    clear = _run([{'id': 'clear', 'type': 'clear-hotfix',
-                   'fixId': 'dropped'}], MIXED)
+    clear = _run_commands([{'id': 'clear', 'type': 'clear-hotfix',
+                            'fixId': 'dropped'}], MIXED)
     assert clear['posted'][0]['error'] is None, clear
     assert _flags(clear) == [('kept', True)], clear
 
@@ -272,8 +275,8 @@ def test_clear_all_keeps_the_permanent_fixes_and_drops_the_rest(tmp):
     fail.
     """
     del tmp
-    outcome = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'}],
-                   MIXED)
+    outcome = _run_commands([{'id': 'clear-all',
+                              'type': 'clear-all-hotfixes'}], MIXED)
     row = _rows(outcome)['clear-all']
     assert row['error'] is None, outcome
     assert row['result'] == {'cleared': True, 'removed': 1, 'kept': 1}, outcome
@@ -290,10 +293,11 @@ def test_clear_all_with_include_permanent_removes_the_whole_record(tmp):
     the handler's presence.
     """
     del tmp
-    kept = _run([{'id': 'without', 'type': 'clear-all-hotfixes'}], MIXED)
+    kept = _run_commands([{'id': 'without',
+                           'type': 'clear-all-hotfixes'}], MIXED)
     assert _flags(kept) == [('kept', True)], kept
-    cleared = _run([{'id': 'with', 'type': 'clear-all-hotfixes',
-                     'includePermanent': True}], MIXED)
+    cleared = _run_commands([{'id': 'with', 'type': 'clear-all-hotfixes',
+                              'includePermanent': True}], MIXED)
     row = _rows(cleared)['with']
     assert row['error'] is None, cleared
     assert row['result'] == {
@@ -301,8 +305,8 @@ def test_clear_all_with_include_permanent_removes_the_whole_record(tmp):
     assert cleared['record'] == [], cleared
     # The flag is read as `=== true`, so a value it cannot act on is an
     # ordinary clear rather than a silent clear of the permanent fixes.
-    truthy = _run([{'id': 'truthy', 'type': 'clear-all-hotfixes',
-                    'includePermanent': 'true'}], MIXED)
+    truthy = _run_commands([{'id': 'truthy', 'type': 'clear-all-hotfixes',
+                             'includePermanent': 'true'}], MIXED)
     assert truthy['posted'][0]['error'] is None, truthy
     assert truthy['record'] == [{'id': 'kept', 'code': CODE,
                                  'permanent': True}], truthy
@@ -334,10 +338,11 @@ def test_clear_all_of_a_record_with_nothing_to_keep_removes_the_key(tmp):
     assert FIXTURE_VERSION != _version(), (
         'the seeded version must differ from the worker\'s, or this control '
         'reads a record left behind as a key that is gone')
-    ordinary = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'},
-                     {'id': 'list', 'type': 'list-hotfixes'}],
-                    [MIXED[1], dict(MIXED[1], id='also-ordinary')],
-                    recordVersion=FIXTURE_VERSION)
+    ordinary = _run_commands(
+        [{'id': 'clear-all', 'type': 'clear-all-hotfixes'},
+         {'id': 'list', 'type': 'list-hotfixes'}],
+        [MIXED[1], dict(MIXED[1], id='also-ordinary')],
+        recordVersion=FIXTURE_VERSION)
     row = _rows(ordinary)['clear-all']
     assert row['error'] is None, ordinary
     assert row['result'] == {
@@ -345,8 +350,9 @@ def test_clear_all_of_a_record_with_nothing_to_keep_removes_the_key(tmp):
     assert ordinary['record'] == [], ordinary
     assert _rows(ordinary)['list']['result'] == {
         'version': _version(), 'fixes': []}, ordinary
-    absent = _run([DROP_RECORD,
-                   {'id': 'clear-all', 'type': 'clear-all-hotfixes'}], MIXED)
+    absent = _run_commands([DROP_RECORD,
+                            {'id': 'clear-all',
+                             'type': 'clear-all-hotfixes'}], MIXED)
     row = _rows(absent)['clear-all']
     assert row['error'] is None, absent
     assert row['result'] == {'cleared': True, 'kept': 0}, absent
@@ -360,10 +366,11 @@ def test_clear_all_whose_record_read_is_refused_answers_with_the_reason(tmp):
     — and the seeded fixes are still there, because the filter never ran.
     """
     del tmp
-    refused = _run([{'id': 'clear-all', 'type': 'clear-all-hotfixes'}],
-                   MIXED, storageReadFails=_key())
+    refused = _run_commands([{'id': 'clear-all',
+                              'type': 'clear-all-hotfixes'}],
+                            MIXED, storageReadFails=_record_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + _key()), refused
+        'storage read refused for ' + _record_key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
 
@@ -385,12 +392,12 @@ def test_set_permanent_requires_a_fix_id_and_a_boolean(tmp):
         {'id': 'string-flag', 'type': 'set-permanent', 'fixId': 'resident',
          'permanent': 'true'},
     ]
-    refused = _run(refusals, seed)
+    refused = _run_commands(refusals, seed)
     for row in refused['posted']:
         assert row['error'] == 'Missing fixId or permanent (bool)', refused
         assert row['result'] is None, refused
     assert _flags(refused) == [('resident', True)], refused
-    demoted = _run(refusals + [
+    demoted = _run_commands(refusals + [
         {'id': 'demote', 'type': 'set-permanent', 'fixId': 'resident',
          'permanent': False}], seed)
     row = _rows(demoted)['demote']
@@ -412,8 +419,8 @@ def test_set_permanent_flips_the_flag_and_never_removes_the_fix(tmp):
     del tmp
     scoped = [dict(MIXED[0], match='*://shop.example.com/*'),
               MIXED[1]]
-    outcome = _run([{'id': 'demote', 'type': 'set-permanent',
-                     'fixId': 'kept', 'permanent': False}], scoped)
+    outcome = _run_commands([{'id': 'demote', 'type': 'set-permanent',
+                              'fixId': 'kept', 'permanent': False}], scoped)
     row = _rows(outcome)['demote']
     assert row['error'] is None, outcome
     assert row['result'] == {'id': 'kept', 'permanent': False,
@@ -436,16 +443,17 @@ def test_set_permanent_reports_an_id_the_record_does_not_hold(tmp):
     this case built by other means.
     """
     del tmp
-    unknown = _run([{'id': 'unknown', 'type': 'set-permanent',
-                     'fixId': 'never-stored', 'permanent': True}], MIXED)
+    unknown = _run_commands([{'id': 'unknown', 'type': 'set-permanent',
+                              'fixId': 'never-stored',
+                              'permanent': True}], MIXED)
     row = _rows(unknown)['unknown']
     assert row['error'] is None, unknown
     assert row['result'] == {'id': 'never-stored', 'permanent': True,
                              'found': False}, unknown
     assert _flags(unknown) == [('kept', True), ('dropped', False)], unknown
-    absent = _run([DROP_RECORD,
-                   {'id': 'no-record', 'type': 'set-permanent',
-                    'fixId': 'kept', 'permanent': True}], MIXED)
+    absent = _run_commands([DROP_RECORD,
+                            {'id': 'no-record', 'type': 'set-permanent',
+                             'fixId': 'kept', 'permanent': True}], MIXED)
     row = _rows(absent)['no-record']
     assert row['error'] is None, absent
     assert row['result'] == {'id': 'kept', 'permanent': True,
@@ -455,11 +463,11 @@ def test_set_permanent_reports_an_id_the_record_does_not_hold(tmp):
 def test_set_permanent_whose_record_read_is_refused_answers_the_reason(tmp):
     """The flag's failure path, and the flag itself never moves."""
     del tmp
-    refused = _run([{'id': 'promote', 'type': 'set-permanent',
-                     'fixId': 'dropped', 'permanent': True}], MIXED,
-                   storageReadFails=_key())
+    refused = _run_commands([{'id': 'promote', 'type': 'set-permanent',
+                              'fixId': 'dropped', 'permanent': True}], MIXED,
+                            storageReadFails=_record_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + _key()), refused
+        'storage read refused for ' + _record_key()), refused
     assert refused['posted'][0]['result'] is None, refused
     assert _flags(refused) == [('kept', True), ('dropped', False)], refused
 
@@ -474,7 +482,7 @@ def test_list_hotfixes_answers_the_record_the_store_wrote(tmp):
     the fixes away, would pass a control that only counted them.
     """
     del tmp
-    outcome = _run([
+    outcome = _run_commands([
         {'id': 'store-one', 'fixId': 'first', 'code': CODE,
          'match': '*://shop.example.com/*'},
         {'id': 'store-two', 'fixId': 'second', 'code': CODE},
@@ -507,13 +515,13 @@ def test_list_hotfixes_answers_an_empty_record_when_there_is_none(tmp):
     answers `_version()` and never read the record at all.
     """
     del tmp
-    outcome = _run([DROP_RECORD,
-                    {'id': 'list', 'type': 'list-hotfixes'}], MIXED)
+    outcome = _run_commands([DROP_RECORD,
+                             {'id': 'list', 'type': 'list-hotfixes'}], MIXED)
     row = _rows(outcome)['list']
     assert row['error'] is None, outcome
     assert row['result'] == {'version': _version(), 'fixes': []}, outcome
-    leftover = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
-                    recordVersion=FIXTURE_VERSION)
+    leftover = _run_commands([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
+                             recordVersion=FIXTURE_VERSION)
     row = _rows(leftover)['list']
     assert row['error'] is None, leftover
     assert row['result']['version'] == FIXTURE_VERSION, leftover
@@ -529,10 +537,10 @@ def test_list_hotfixes_whose_record_read_is_refused_answers_the_reason(tmp):
     failed read would tell the operator their permanent fixes are gone.
     """
     del tmp
-    refused = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
-                   storageReadFails=_key())
+    refused = _run_commands([{'id': 'list', 'type': 'list-hotfixes'}], MIXED,
+                            storageReadFails=_record_key())
     assert refused['posted'][0]['error'] == (
-        'storage read refused for ' + _key()), refused
+        'storage read refused for ' + _record_key()), refused
     assert refused['posted'][0]['result'] is None, refused
 
 
@@ -554,7 +562,7 @@ def test_the_seeded_record_version_is_one_the_worker_cannot_stamp(tmp):
     over it must not do.
     """
     del tmp
-    outcome = _run([{'id': 'list', 'type': 'list-hotfixes'}], MIXED)
+    outcome = _run_commands([{'id': 'list', 'type': 'list-hotfixes'}], MIXED)
     row = _rows(outcome)['list']
     assert row['error'] is None, outcome
     assert row['result']['version'] == FIXTURE_VERSION, (
@@ -606,7 +614,7 @@ def test_a_case_naming_both_command_spellings_is_refused(tmp):
     for label, store in (('a populated store', [STORE_FIX]),
                          ('an empty store', [])):
         try:
-            _run([COMMAND_FIX], store=store)
+            _run_commands([COMMAND_FIX], store=store)
         except AssertionError as failure:
             # `(returncode, stdout, stderr)` is what the helper puts in the
             # assertion's message.
