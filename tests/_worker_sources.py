@@ -79,6 +79,41 @@ __CONTEXT__.importScripts = (...sourceNames) => {
         '__TRACE_REGISTRATION__', trace_registration)
 
 
+# The fetch-answer factory: a status range answered as ok, a null body, and
+# readers that hand back the caller's own data. One copy because the
+# cross-file duplicate check reads parsed Python, so a copy inside a string
+# literal is invisible to it and a second one would drift from this one
+# unremarked. A harness that answers more than this keeps its own.
+RESPONSE_STUB = r"""
+function response(status, data) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    body: null,
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
+}
+"""
+
+# The next-turn yield, which lets a harness await one settled turn of the
+# microtask queue with no wall-clock margin in it.
+DELAY_STUB = r"""
+function delay() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+"""
+
+# The structural clone, so a stored value reaches the next reader without the
+# writer's later mutation travelling with it.
+COPY_STUB = r"""
+function copy(value) {
+  return value === undefined
+    ? undefined
+    : JSON.parse(JSON.stringify(value));
+}
+"""
+
 # The stream answer factory the eval-relay, CDP, overlap and boundary
 # harnesses share. The cross-file duplicate check cannot see JavaScript inside
 # a Python string, so a copied factory would not be caught; one copy here is
