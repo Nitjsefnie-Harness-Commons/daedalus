@@ -8,7 +8,6 @@ whenever the runtime routed, the guard reported.
 import os
 import random
 import shutil
-import subprocess
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from itertools import product
@@ -20,6 +19,7 @@ import _jsroute_sweep as sweep  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _jsroute_sweep_grammar import (BODIES, CONTAINERS,  # noqa: E402
                                     MEMBERS, key_forms)
+from _noderun import run_node_argv  # noqa: E402
 
 # Two seeds: one alone re-confirms the sample the guard was tuned on.
 SEEDS = (20260902, 7)
@@ -68,8 +68,7 @@ def _sampled_points():
 def _verdicts(path):
     node = shutil.which('node')
     assert node, 'node is required to execute JavaScript routing controls'
-    ran = subprocess.run([node, str(path)], capture_output=True,
-                         text=True, timeout=60)
+    ran = run_node_argv(node, [str(path)], _util.ROOT)
     if ran.returncode != 0:
         return 'threw', ran.stderr.strip().split('\n')[0]
     return ran.stdout == '1', bool(js_tab_routing_violations(

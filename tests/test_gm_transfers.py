@@ -9,12 +9,12 @@ something that did not happen.
 """
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
     CONTENT_SCRIPT_PAGE, worker_source_paths)
@@ -125,12 +125,12 @@ def _run_fetch_relay_harness(background_response):
     """Drive GM.xmlhttpRequest through content.js and page.js under Node."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension fetch relay'
-    result = subprocess.run(
-        [node, '-e', _FETCH_RELAY_HARNESS,
-         str(ROOT / 'extension' / 'content.js'),
-         str(ROOT / 'extension' / 'page.js'),
-         json.dumps(background_response)],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_argv(
+        node, ['-e', _FETCH_RELAY_HARNESS,
+               str(ROOT / 'extension' / 'content.js'),
+               str(ROOT / 'extension' / 'page.js'),
+               json.dumps(background_response)],
+        ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -318,11 +318,11 @@ def _run_clipboard_relay_harness(mode):
     """Drive GM.setClipboard through content.js and page.js under Node."""
     node = shutil.which('node')
     assert node, 'node is required to execute the extension clipboard relay'
-    result = subprocess.run(
-        [node, '-e', _CLIPBOARD_RELAY_HARNESS,
-         str(ROOT / 'extension' / 'content.js'),
-         str(ROOT / 'extension' / 'page.js'), mode],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_argv(
+        node, ['-e', _CLIPBOARD_RELAY_HARNESS,
+               str(ROOT / 'extension' / 'content.js'),
+               str(ROOT / 'extension' / 'page.js'), mode],
+        ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
@@ -450,11 +450,11 @@ process.stdout.write(JSON.stringify({ events }), () => process.exit(0));
 def _run_download_relay_harness(mode):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension download boundary'
-    result = subprocess.run(
-        [node, '-e', _DOWNLOAD_RELAY_HARNESS,
-         str(ROOT / 'extension' / 'content.js'),
-         str(ROOT / 'extension' / 'page.js'), mode],
-        cwd=ROOT, capture_output=True, text=True, timeout=30)
+    result = run_node_argv(
+        node, ['-e', _DOWNLOAD_RELAY_HARNESS,
+               str(ROOT / 'extension' / 'content.js'),
+               str(ROOT / 'extension' / 'page.js'), mode],
+        ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

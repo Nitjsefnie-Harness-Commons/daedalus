@@ -7,7 +7,6 @@ freeze on the single node thread, and the crediting a bound spent is read
 back from the [bound] settlement record the bound writes on stderr.
 """
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -16,7 +15,9 @@ import _overlap  # noqa: E402
 import _util  # noqa: E402
 from _node_harness_fixtures import (  # noqa: E402
     _background_worker_file, _bound_record)
+from _noderun import run_node_argv  # noqa: E402
 from _overlap import _STEP_LINE  # noqa: E402
+from _repo import ROOT  # noqa: E402
 
 
 _SAMPLE_MS = 100
@@ -110,13 +111,26 @@ def _bound_source(work, call):
         _SETTLE_DRIVER % (call,))
 
 
-def _bound_run(source, timeout_s=30):
-    """Run one bound control in a node child, streams captured as text."""
+def _bound_run(source):
+    """Run one bound control in a node child, streams captured as text.
+
+    The `timeout_s` parameter this used to take is gone, and no caller ever
+    passed it: all five call sites below drove a source and nothing else,
+    so it was a wall-clock literal wearing a default, not a caller's choice.
+    Its removal does not leave a control unbounded — every one of these
+    children is bounded now by the shared hang detector in
+    `tests/_noderun.py`, which names the child and carries its output when
+    it fires. That matters more here than elsewhere: three of the five
+    sources are work that never settles, so a regression in the bound
+    machinery under test is exactly the case a wall bound was standing in
+    front of, and it is now reported inside the suite rather than hanging
+    the job.
+    """
     node = shutil.which('node')
     assert node, 'node is required to execute the extension worker'
-    result = subprocess.run(
-        [node, '-e', source, '', '[]', '[]', '', 'bound-token', '0', '1000'],
-        capture_output=True, text=True, timeout=timeout_s, check=False)
+    result = run_node_argv(
+        node, ['-e', source, '', '[]', '[]', '', 'bound-token', '0', '1000'],
+        ROOT)
     # The source is the bulk of a child's repr; naming the streams keeps a
     # failure one readable diagnostic instead of the whole harness text.
     assert result.returncode == 0, (result.returncode, result.stderr)

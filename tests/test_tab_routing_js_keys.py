@@ -2,7 +2,6 @@
 """Computed property keys in a typed command send, paired with node."""
 import json
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -10,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _jsroute import js_tab_routing_violations  # noqa: E402
 from _jsroute_keys import decode_string_literal  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
 from test_tab_routing_js import _runtime_and_guard  # noqa: E402
 
 
@@ -187,8 +187,7 @@ def test_legacy_octal_escapes_decode_as_the_runtime_does(tmp):
         'process.stdout.write(JSON.stringify(out));\n', encoding='utf-8')
     node = shutil.which('node')
     assert node, 'node is required to execute JavaScript routing controls'
-    ran = subprocess.run([node, str(script)], capture_output=True, text=True,
-                         timeout=30)
+    ran = run_node_argv(node, [str(script)], _util.ROOT)
     assert ran.returncode == 0, (ran.returncode, ran.stdout, ran.stderr)
     runtime = json.loads(ran.stdout)
     rejected = {'\\8', '\\9'}
