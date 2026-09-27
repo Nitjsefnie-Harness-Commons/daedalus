@@ -454,41 +454,57 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
     """A guard's prose is a claim about the code beside it, in both files.
 
     The lists come from the table rather than from the prose, so a form
-    swapped across the line or left out of a docstring fails here. The
-    three claims a reader cannot check by eye — the comprehension's
-    conditions, the comprehension's refusal to open its iterable, and
-    the receiver's subscript carry — are each held twice: the sentence
-    is pinned whole, and the behaviour behind it is driven and required.
-    The prose leg catches a claim that drifts while the code stands
-    still; the behaviour leg catches the code that stops backing a claim
-    the prose still makes.
+    swapped across the line or left out of a docstring fails here. Four
+    claims a reader cannot check by eye are pinned: that the walk opens
+    one list of forms and leaves another, that it fails closed on a form
+    in neither, the comprehension's conditions, the receiver's subscript
+    carry, and the target's shadowing exemption.
 
-    What the prose leg cannot catch, and this is the whole of what it
-    cannot catch: a false sentence added *outside* the pinned span, and
-    a polarity residual — a fluent rewrite that keeps the pinned words
-    as a substring of a longer sentence that denies them. Pinning the
-    whole sentence closes the second for this claim; the first is
-    inherent to matching prose, and it is stated here rather than left
-    to be discovered.
+    The comprehension's *refusal* to open its iterable is not among
+    them. It has a behaviour leg and no pin — it is named in an assert
+    message rather than in a docstring — so a reword of the prose
+    cannot reach it, and neither can a reword of the sentence it is
+    derived from. Saying otherwise is the error this paragraph
+    previously made.
+
+    The pin is structural, not lexical: a docstring has to contain the
+    claim as a sentence of its own rather than merely somewhere in its
+    text, so a span that grows a denial onto its end, a frame that
+    joins it to a longer sentence, a period injected inside it, and an
+    inserted subordinate clause are all different sentences and all
+    fail. Case and wrapping are folded, so `It is not the case that the
+    four...` is caught for saying something else rather than for a
+    capital letter, while a rewrap, a recase and a double space are not
+    caught at all.
+
+    What the pins cannot catch is what was measured, not what was
+    assumed. Eighteen prose plants were run against this control: four
+    denial plants and ten others that change an assertion are all
+    caught, and fourteen of the eighteen are red. Four survive, three
+    of them — a rewrap, a recase and a double space — change no
+    assertion at all. The fourth states the claim and then denies it in
+    a separate sentence, which no reading of one docstring can call
+    false without a reader. That shape was looked for directly and not
+    found by any other plant. Closing even that was weighed and not
+    taken: a pin tight enough to reject a sentence beside the claim
+    also rejects a reword that keeps the assertion true, which is a
+    real cost against prose a person has to maintain.
     """
     from _coverage_bindings import _carried_parts, _target_parts
 
     del tmp
     opened, leaves = _classification()
     for prose in _carried_parts.__doc__ or '', _GUARD_PROSE:
-        flat = _squash(prose)
-        # The lists, spelled out and in order: a form moved to the other
-        # clause, or left out of the prose, changes what the two sides
-        # have to say and fails here rather than passing on vocabulary.
-        assert _squash(opened) in flat, opened
-        assert _squash(leaves) in flat, leaves
-        # The claims, whole and not merely their opening words: a
-        # paragraph that keeps the word while inverting the sentence is
-        # the false green this replaces, and only the full claim
-        # catches it.
-        assert _squash(FAIL_CLOSED) in flat, prose
+        # Every claim is pinned as a whole sentence, so a span that
+        # grows a denial onto the end of it is a different sentence and
+        # fails. A form moved to the other list, or left out of the
+        # prose, changes what the two sides have to say and fails here
+        # too.
+        assert _fold('it opens ' + opened) in _sentences(prose), opened
+        assert _fold('it leaves ' + leaves) in _sentences(prose), leaves
+        assert _fold(FAIL_CLOSED) in _sentences(prose), prose
         assert _fold(CONDITIONS_CLAIM) in _sentences(prose), prose
-    assert _squash(RECEIVER_CARRY) in _squash(_GUARD_PROSE), _GUARD_PROSE
+    assert _fold(RECEIVER_CARRY) in _sentences(_GUARD_PROSE), _GUARD_PROSE
     for prose in _target_parts.__doc__ or '', _GUARD_PROSE:
         assert _fold(TARGET_EXEMPTION) in _sentences(prose), prose
     assert _receiver_carries_a_subscript(), _BINDING_MESSAGE
@@ -585,9 +601,9 @@ def _classification():
     """
     from _coverage_bindings import _CARRIED_FIELDS, _LEAVES
 
-    return (",".join(sorted(form.__name__
-                            for form in {*_BESPOKE, *_CARRIED_FIELDS})),
-            ",".join(sorted(form.__name__ for form in _LEAVES)))
+    return (", ".join(sorted(form.__name__
+                             for form in {*_BESPOKE, *_CARRIED_FIELDS})),
+            ", ".join(sorted(form.__name__ for form in _LEAVES)))
 
 
 def _receiver_carries_a_subscript():
@@ -601,8 +617,12 @@ def _receiver_carries_a_subscript():
 
 
 _GUARD_PROSE = _coverage_guard.__doc__ or ''
-FAIL_CLOSED = 'a form in neither class is refused rather than read as clean'
-RECEIVER_CARRY = 'every subscript the descent consumes'
+FAIL_CLOSED = (
+    'A form in neither class is refused rather than read as clean, so a '
+    'Python that adds one fails closed instead')
+RECEIVER_CARRY = (
+    'The descent that walks a callee hands the walk every subscript the '
+    'descent consumes, index and bounds included')
 CONDITIONS_CLAIM = (
     'The four comprehension forms reach their conditions through the '
     'statement-level node their `generators` hold, and not through '
