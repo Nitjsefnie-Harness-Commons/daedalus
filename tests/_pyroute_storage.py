@@ -48,6 +48,12 @@ def _replace_value(value, identity, replacement, memo):
         updated = value if all(attributes[key] is item
                                for key, item in value.attributes.items()) \
             else replace(value, attributes=attributes)
+    elif hasattr(value, 'methods') and hasattr(value, 'identity'):
+        methods = {key: _replace_value(item, identity, replacement, memo)
+                   for key, item in value.methods.items()}
+        updated = value if all(methods[key] is item
+                               for key, item in value.methods.items()) \
+            else replace(value, methods=methods)
     elif hasattr(value, 'yielded'):
         yielded = _replace_value(value.yielded, identity, replacement, memo)
         updated = value if yielded is value.yielded \
