@@ -173,14 +173,17 @@ content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
 `tests/test_gm_*.py` suites. The one shipped module no suite reaches is
 the extension options page, `extension/options.js`, at 0 of 51 code
-lines — about 1% of the 4945 the number is measured over. Both of those are
-read off the tree by `tests/test_coverage_prose.py`, so a shipped file that
-grows turns that suite red. The covered count and the total are deliberately
-not restated here: both are measurements of one run, and that run's own
-coverage step summary is where they belong. A number copied into this file
-is one nothing checks, which is how this paragraph sat stale across a rebase
-without anything noticing. That is the true state of the tests, not a
-shortfall in the measurement — the fix is tests, not tooling.
+lines. That figure is read off the tree by `tests/test_coverage_prose.py`,
+so a change to that module turns the suite red. The covered count and the
+total the number is measured over are deliberately not restated here: the
+first is a measurement of one run, the second is a function of every
+shipped JavaScript file in the tree, and that run's own coverage step
+summary is where both belong. The percentage the total would give is left
+out for the same reason, a denominator that wide going stale in the window
+between two pull requests that each ship JavaScript: a figure copied into
+this file is one nothing checks inside that window. That is the true state
+of the tests, not a shortfall in the measurement — the fix is tests, not
+tooling.
 
 The matrix is not ceremony. This code reads paths and decodes bytes, so Windows
 path spellings, the `/var` → `/private/var` aliasing macOS applies to temp
