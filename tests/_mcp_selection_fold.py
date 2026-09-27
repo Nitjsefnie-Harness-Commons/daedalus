@@ -228,15 +228,19 @@ def _carried_keys(node, bound, scopes):
     """
     if not isinstance(node, ast.Dict):
         return None
-    keys = []
+    keys = {}
     for key in node.keys:
         if key is None:
             return None
         value = _settled_position(key, bound, scopes)
         if not isinstance(value, str):
             return None
-        keys.append(value)
-    return keys
+        # A dict keeps the LAST of two equal keys, so a display carrying one
+        # name twice supplies that name ONCE — the two entries are one
+        # binding, and reading them as two would make a `**` that fills a
+        # parameter look like a call that supplies it twice.
+        keys[value] = None
+    return list(keys)
 
 
 def _supplied(call, bound, scopes):
@@ -277,6 +281,12 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
     params = args.posonlyargs + args.args
     at = {argument.arg: index for index, argument in enumerate(params)}
     only = {argument.arg for argument in args.posonlyargs}
+    # Every parameter the signature DECLARES, and separately the ones it
+    # REQUIRES: a default says a parameter may go unfilled, not that naming
+    # it is an error, so the two sets are not the same and conflating them
+    # reads a defaulted keyword-only parameter as a name the signature does
+    # not have.
+    keyword_only = {argument.arg for argument in args.kwonlyargs}
     wanted = {argument.arg for argument, default
               in zip(args.kwonlyargs, args.kw_defaults) if default is None}
     names = _supplied(call, bound, scopes)
@@ -298,15 +308,17 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
             if index in filled:
                 return False
             filled.add(index)
-        elif name in wanted:
+        elif name in keyword_only:
             wanted.discard(name)
         elif args.kwarg is None:
             return False
     # A default is on the TAIL of the parameters, so the required ones are
-    # the head — and `zip` rather than a count for the same reason the
-    # keyword-only arm reads its defaults one by one.
+    # the head. A `*args` is asked above, where the positionals it takes are
+    # counted; it is not a licence to leave a REQUIRED parameter unfilled,
+    # because the vararg soaks up what comes after it and not what came
+    # before.
     required = set(range(len(params) - len(args.defaults)))
-    if args.vararg is None and not filled >= required:
+    if not filled >= required:
         return False
     return not wanted
 

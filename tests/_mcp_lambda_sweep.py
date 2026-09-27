@@ -9,8 +9,9 @@ counted positionals and a rule that binds arguments both sat on the same side
 of every generated row and the instrument agreed with either.
 
 `_form` lives here because the two modules write the same record and the
-sweep's is the one that was already a moving target for the size ceiling.
+sweep's was the one that was already a moving target for the size ceiling.
 """
+from itertools import product
 
 
 # The class this module's rows belong to, named as a property rather than as
@@ -19,75 +20,10 @@ sweep's is the one that was already a moving target for the size ceiling.
 # raise.
 SIGNATURE_CLASS = 'a parameter supplied by name'
 
-# The routes a lambda is reached through, which is every route a fold
-# selects one in plus the bare one the guard meets directly. `{op}` is the
-# callee: the operation itself for the rows that must resolve, and a filler
-# for the rows whose value is a position the operation is not in.
-_SIGNATURE_ROUTES = (
-    '({op})',  # the bare one, the way the guard meets a callee directly
-    '[({op})][0]',
-    '({{"a": {op}}})["a"]',
-    '(*[{op}],)[0]',
-    '[[({op})]][0][0]',
-)
-
-# Every way a call meets a signature, as (the signature, what the call
-# passes, which side of the boundary the runtime puts it on). The domain is
-# the signatures a lambda can declare and the bindings a call can carry, not
-# a sample of them, so a rule that gets one binding form right and another
-# wrong fails a row rather than passing the class.
-#
-# `reaches` rows are the ones the issue names and the ones the issue did
-# not: a parameter supplied by keyword, by a `**` display the fold reads, and
-# a mixture. `raises` rows are what the same change must NOT capture — one
-# parameter supplied twice, a name the signature has no parameter for, a
-# name for a POSITIONAL-ONLY parameter, and a required one left out.
-_SIGNATURE_CASES = (
-    ('x', '1', 'reaches'),
-    ('x', 'x=1', 'reaches'),
-    ('x', "**{'x': 1}", 'reaches'),
-    ('x', '1, x=2', 'raises'),
-    ('x', '1, y=2', 'raises'),
-    ('x', '1, 2', 'raises'),
-    ('x', '', 'raises'),
-    ('x, y', '1, 2', 'reaches'),
-    ('x, y', '1, y=2', 'reaches'),
-    ('x, y', 'x=1, y=2', 'reaches'),
-    ('x, y', 'y=2, x=1', 'reaches'),
-    ('x, y', "**{'x': 1, 'y': 2}", 'reaches'),
-    ('x, y', '1', 'raises'),
-    ('x, y', '1, 2, 3', 'raises'),
-    ('x, y', '1, 2, x=3', 'raises'),
-    ('x, y', "**{'x': 1, 'z': 2}", 'raises'),
-    ('x, y', 'x=1, z=2', 'raises'),
-    ('x, y=1', '1', 'reaches'),
-    ('x, y=1', '1, 2', 'reaches'),
-    ('x, y=1', 'y=1', 'raises'),
-    ('x, y=1', '', 'raises'),
-    ('x=1', '', 'reaches'),
-    ('x=1', '1, 2', 'raises'),
-    ('x, /', '1', 'reaches'),
-    ('x, /', 'x=1', 'raises'),
-    ('x, /, y', '1, 2', 'reaches'),
-    ('x, /, y', 'y=2', 'raises'),
-    ('*, k', 'k=1', 'reaches'),
-    ('*, k', '', 'raises'),
-    ('*, k', '1', 'raises'),
-    ('*, k=1', '', 'reaches'),
-    ('*, k=1', '1', 'raises'),
-    ('x, y=1, *, k', '1, k=2', 'reaches'),
-    ('x, y=1, *, k', 'k=2', 'raises'),
-    ('*a', '1, 2', 'reaches'),
-    ('*a', '', 'reaches'),
-    ('*a', '1, z=2', 'raises'),
-    ('*a, k', 'k=1', 'reaches'),
-    ('*a, k', '', 'raises'),
-    ('**k', 'z=1', 'reaches'),
-    ('**k', '', 'reaches'),
-    ('**k', '1', 'raises'),
-    ('', '', 'reaches'),
-    ('', '1', 'raises'),
-)
+# The one filler the whole product uses for "a value that is not the
+# operation". It lives beside `_form` because both modules write rows, and it
+# is here rather than imported so there is one source for the literal.
+_FILLER = '0'
 
 
 def _form(kind, step, callee, container, mentions, carries, classes,
@@ -109,31 +45,151 @@ def _form(kind, step, callee, container, mentions, carries, classes,
             'setup': setup}
 
 
+# --- the signature axis, as a product of its own sub-axes -----------------
+#
+# A lambda's parameter list has five independent parts and the walk has to
+# answer for every combination of them, so the axis IS the product rather
+# than a list of signatures someone wrote down. The first commit on this
+# class listed thirteen signatures and asserted the list's length, and the
+# two defects the review found on it were both in cells the list did not
+# cross: a keyword-only parameter with a DEFAULT, and a `*args` beside a
+# required positional. A count over a hand list witnesses that the list has
+# not changed; a product witnesses that the domain has been crossed.
+_POSONLY = ((), ('p',))
+_POSITIONAL = ((), ('x',), ('x', 'y'))
+_DEFAULTED = (0, 1, 2)          # how many of the positional TAIL default
+_STAR = ('', '*, k', '*, k=1', '*, k, j', '*, k=1, j=2', '*a')
+# The catch-all's own name is one no other slot uses, because a `**w`
+# beside a `k` is a `SyntaxError` and the product would compose one.
+_KWARG = ('', '**w')
+
+# The routes a lambda is reached through: the bare one, the guard meets a
+# callee directly, and one selection, where the fold has read the lambda out
+# of a value. The selection AXIS is the lambda class's to sweep; this one is
+# about the call the lambda is given, and two routes is what says the fold
+# reads the same lambda either way.
+_SIGNATURE_ROUTES = ('({op})', '[({op})][0]')
+
+
+def _signatures():
+    """Every signature the product declares, as (the text, its structure).
+
+    The structure is what the binding forms are generated FROM, so a form is
+    never spelled for a signature it does not belong to.
+    """
+    seen = set()
+    for only, positional, defaulted, star, kwarg in product(
+            _POSONLY, _POSITIONAL, _DEFAULTED, _STAR, _KWARG):
+        tail = min(defaulted, len(positional))
+        named = [f'{name}=0' if index >= len(positional) - tail else name
+                 for index, name in enumerate(positional)]
+        # The `/` belongs after the positional-only parameters and before the
+        # rest, whatever the rest turns out to be.
+        parts = list(only) + (['/'] if only else []) + named
+        if star:
+            parts.append(star)
+        if kwarg:
+            parts.append(kwarg)
+        text = ', '.join(parts)
+        if text in seen:
+            # A sub-axis with nothing to vary — a default count over an empty
+            # positional list, say — composes the same signature twice, and
+            # the domain is the signatures a lambda can DECLARE.
+            continue
+        seen.add(text)
+        yield (text, {
+            'only': only,
+            'names': positional,
+            'required': len(positional) - tail,
+            'vararg': star == '*a',
+            'kwonly': tuple(part.split('=')[0]
+                            for part in star.split(', ')[1:] if part),
+            'kwarg': bool(kwarg)})
+
+
+def _bindings(signature):
+    """Every way a call binds arguments to `signature`, as (the arguments,
+    which side of the boundary the runtime puts it on).
+
+    Generated from the signature's own structure rather than written beside
+    it, so a signature added to the product brings its bindings with it and
+    a cell nobody thought of is crossed rather than missed. The side is a
+    PREDICTION and the oracle is the measurement: a form predicted to reach
+    and labelled `raises` is caught by the suite's own contract, which
+    requires every `bound raises` row to come back silent.
+    """
+    only, names, kwonly = (signature['only'], signature['names'],
+                           signature['kwonly'])
+    required = signature['required']
+    by_name, defaulted = names[:required], names[required:]
+    leading = ['0'] * len(only)
+    positional = ', '.join(leading + ['0'] * len(names))
+    named = [f'{name}=0' for name in list(by_name) + list(defaulted)
+             + list(kwonly)]
+    yields = ', '.join(leading + named)
+    if positional or not kwonly:
+        # The positional form supplies every parameter it may, and a
+        # keyword-only parameter may only be named — so a signature with one
+        # reaches by POSITION for its positional part and by NAME for the
+        # rest, and omitting the name makes it a raise.
+        yield ', '.join(leading + ['0'] * len(names)
+                        + [f'{name}=0' for name in kwonly]), 'reaches'
+    if named:
+        yield yields, 'reaches'
+        carried = '{%s}' % ', '.join(
+            f"'{name}': 0" for name in list(by_name) + list(defaulted)
+            + list(kwonly))
+        yield ', '.join(leading + [f'**{carried}']), 'reaches'
+    # The forms Python REFUSES, and a fix that reads names too eagerly must
+    # not capture them.
+    if by_name:
+        yield ', '.join(leading + ['0'] * len(names)
+                        + [f'{by_name[0]}=0']), 'raises'
+    if required:
+        yield ', '.join(leading + ['0'] * (required - 1)), 'raises'
+    if only:
+        yield f'{only[0]}=0', 'raises'
+    if named and not signature['kwarg']:
+        yield yields + ', z=0', 'raises'
+    # One positional too many, and a `*args` is what makes it one: it soaks
+    # up whatever comes after the parameters it follows, so a signature that
+    # has one cannot be made to raise this way.
+    if not signature['vararg']:
+        yield ', '.join(([positional] if positional else []) + [_FILLER]), \
+            'raises'
+
+
 def signatures(imports, operation):
-    """A lambda of every signature, called every way a call binds arguments.
+    """A lambda of every signature the product declares, called every way a
+    call binds arguments, over both a body that reaches and a filler.
 
     The property is the BINDING and not the keyword: position and name are
-    one supply, so a row is generated for each of them and for the two forms
+    one supply, so a row is generated for each of them and for the forms
     Python REFUSES, which are on the other side of the same boundary. Both
-    halves are generated from one construction, so a rule that reads only
-    the positional arguments and a rule that reads only the names are each
-    caught by rows the other passes.
+    halves come from one construction, so a rule that reads only the
+    positional arguments and a rule that reads only the names are each caught
+    by rows the other passes.
 
     The body is the operation on half the rows and a filler on the other:
     the filler's value is a position the operation is not in, which is the
     class's own `does not reach` side, and it is what stops a rule that
-    resolves the callee as the operation from passing the whole table.
+    resolves the callee as the operation without binding the call at all.
     """
-    for route in _SIGNATURE_ROUTES:
-        for callee_body in (operation, '0'):
-            for signature, arguments, side in _SIGNATURE_CASES:
-                head = f'lambda {signature}: {callee_body}'
-                yield _form(
-                    f'a {signature or "bare"} lambda', f'bound {side}',
-                    route.format(op=head) + f'({arguments})', '0', False,
-                    False, (SIGNATURE_CLASS,), imports=imports,
-                    # The binding is this class's own module source, and a
-                    # filler-body row names the operation nowhere, so a row
-                    # under one operation spelling and the same row under the
-                    # other are two rows and not one.
-                    setup=imports)
+    for text, signature in _signatures():
+        for index, (arguments, side) in enumerate(_bindings(signature)):
+            # The filler body on ONE form per signature: it is the class's
+            # `does not reach` side and it is the same side for every
+            # binding, so one per signature carries it.
+            bodies = (operation, _FILLER) if index == 0 else (operation,)
+            for body in bodies:
+                head = f'lambda {text}: {body}'
+                for route in _SIGNATURE_ROUTES:
+                    yield _form(
+                        f'a {text or "bare"} lambda', f'bound {side}',
+                        route.format(op=head) + f'({arguments})', _FILLER,
+                        False, False, (SIGNATURE_CLASS,), imports=imports,
+                        # The binding is this class's own module source, and
+                        # a filler-body row names the operation nowhere, so a
+                        # row under one operation spelling and the same row
+                        # under the other are two rows and not one.
+                        setup=imports)
