@@ -503,6 +503,7 @@
 !/tests/test_client_credentials.py
 !/tests/test_client_states.py
 !/tests/test_cmdqueue.py
+!/tests/test_cmdqueue_bounds.py
 !/tests/test_cmdqueue_clock.py
 !/tests/test_cmdqueue_injectors.py
 !/tests/test_command_admission.py
