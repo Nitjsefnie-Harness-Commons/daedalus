@@ -9,7 +9,8 @@ from _pyroute_reads import (_apply_pop, _fold_items, _literal_pair_items,
                             _source_items)
 from _pyroute_setops import fold_set_operation, set_operands
 from _pyroute_storage import container_copy, replace_deferred_storage
-from _pyroute_stores import replace_container, store_deferred_target
+from _pyroute_stores import (base_owner, clear_owner, replace_container,
+                             root_name, store_deferred_target)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredContainer, DeferredMethod, _known_value,
                              is_deferred_value, merge_yielded, sync_cells)
@@ -123,15 +124,21 @@ def literal_pair_keys(source, states, consumer):
     return keys
 
 
-def _mark_unprovable(state, owner_name):
-    state.aliases[owner_name] = UNPROVABLE_SENDER
-    owner = state.callables.get(owner_name)
+def _mark_unprovable(state, owner, owner_name):
+    """Drop every fact a later read of this receiver could have relied on.
+
+    `owner_name` is None for a receiver reached through an attribute or a
+    subscript, and the name-keyed storage has no entry to mark then; the
+    container's own facts go instead, so a read of it answers with everything
+    it could hold rather than with one key from before the operation."""
+    if owner_name:
+        state.aliases[owner_name] = UNPROVABLE_SENDER
     if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
         replace_container(state, owner_name, owner,
                           dict(owner.items), unknown_length=True)
 
 
-def _apply_mapping_store(state, owner_name, sources, keywords, node):
+def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
     """Merge provable items into the owner; unknown sources fail closed.
 
     A `**mapping` argument is a source like any other, and claiming the
@@ -143,7 +150,7 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
     for source in sources:
         merged = _source_items(source, state)
         if merged is None:
-            _mark_unprovable(state, owner_name)
+            _mark_unprovable(state, owner, owner_name)
             return
         _fold_items(items, merged[0])
         counted = counted and merged[1]
@@ -154,13 +161,15 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
         elif state.evaluated.get(id(value)) is not None:
             items[key] = None
         elif isinstance(value, ast.Call):
-            _mark_unprovable(state, owner_name)
+            _mark_unprovable(state, owner, owner_name)
             return
         else:
             items[key] = None
-    owner = state.callables.get(owner_name)
     if items or not counted:
         if owner is None:
+            if not owner_name:
+                _mark_unprovable(state, None, None)
+                return
             owner = DeferredContainer({}, None, 'dict', node)
             state.callables[owner_name] = owner
         elif not isinstance(owner, DeferredContainer):
@@ -171,19 +180,20 @@ def _apply_mapping_store(state, owner_name, sources, keywords, node):
                           unknown_length=not counted)
 
 
-def _apply_setdefault(state, call, owner_name):
-    owner = state.callables.get(owner_name)
+def _apply_setdefault(state, call, owner, owner_name):
     default = _known_value(call.args[1], state) if len(call.args) > 1 \
         else None
     if default is None and len(call.args) > 1 \
             and isinstance(call.args[1], ast.Call):
-        _mark_unprovable(state, owner_name)
+        _mark_unprovable(state, owner, owner_name)
         return
     literal = _literal_key(call.args[0], state) if call.args \
         else _UNRESOLVED_KEY
     if (literal is not _UNRESOLVED_KEY
             and (owner is None or isinstance(owner, DeferredContainer))):
         if owner is None:
+            if not owner_name:
+                return
             owner = DeferredContainer({}, None, 'dict', call)
             state.callables[owner_name] = owner
         if literal not in owner.items:
@@ -196,23 +206,26 @@ def _apply_setdefault(state, call, owner_name):
         replace_container(state, owner_name, owner,
                           {**owner.items, DYNAMIC_KEY: value})
         return
-    _mark_unprovable(state, owner_name)
+    _mark_unprovable(state, owner, owner_name)
 
 
-def _apply_set_store(state, name, operator, operands, node):
+def _apply_set_store(state, target, operator, operands, node):
     """Bind the name an augmented set operation rebinds.
 
     The rebinding already dropped the name. The fold replaces the
     pre-rebind container in place, so every other name bound to the same
-    object reads the new elements too.
+    object reads the new elements too. A target spelled any other way rebinds
+    nothing, so the in-place replacement is the whole of the answer.
     """
     folded = fold_set_operation(operator, operands, node)
     previous = operands[0]
     if isinstance(previous, DeferredContainer):
         folded = container_copy(previous, folded.items)
         replace_deferred_storage(state, previous, folded)
-    state.callables[name] = folded
-    sync_cells(state, {name})
+    if not isinstance(target, ast.Name):
+        return
+    state.callables[target.id] = folded
+    sync_cells(state, {target.id})
 
 
 def apply_deferred_store(statement, state):
@@ -234,10 +247,7 @@ def _apply_modelled_store(statement, state, claimed):
             if _apply_pop(state, call) is not None:
                 claimed.add(id(call))
             return
-        if not isinstance(call.func.value, ast.Name):
-            return
-        owner_name = call.func.value.id
-        owner = state.callables.get(owner_name)
+        owner_name, owner = base_owner(call.func.value, state)
         # `update` and `setdefault` are followed for a mapping and only for a
         # mapping: a set's shares the names but not the effect, and claiming
         # a name alone would drop a mutation the model never applied. `clear`
@@ -246,10 +256,7 @@ def _apply_modelled_store(statement, state, claimed):
         mapping = owner is None or (isinstance(owner, DeferredContainer)
                                     and owner.kind == 'dict')
         if call.func.attr == 'clear' and isinstance(owner, DeferredContainer):
-            replacement = DeferredContainer(
-                {}, 0, owner.kind, owner.identity)
-            replace_deferred_storage(state, owner, replacement)
-            sync_cells(state, {owner_name})
+            clear_owner(state, owner)
             claimed.add(id(call))
         elif call.func.attr == 'update' and mapping:
             # `update`'s two argument kinds partition `keywords` on `arg`:
@@ -260,35 +267,36 @@ def _apply_modelled_store(statement, state, claimed):
             pairs = {keyword.arg: keyword.value for keyword in call.keywords
                      if keyword.arg is not None}
             _apply_mapping_store(
-                state, owner_name, [*call.args, *starred], pairs, call)
+                state, owner, owner_name, [*call.args, *starred], pairs, call)
             claimed.add(id(call))
         elif call.func.attr == 'setdefault' and mapping:
-            _apply_setdefault(state, call, owner_name)
+            _apply_setdefault(state, call, owner, owner_name)
             claimed.add(id(call))
         return
     if isinstance(statement, ast.AugAssign):
-        if isinstance(statement.target, ast.Name):
-            operands = set_operands(statement.op, statement.target,
-                                    statement.value, state)
-            if operands is not None:
-                # The fold is this store path's own answer, so the claim keeps
-                # the general invalidation from joining a set it just folded.
-                _apply_set_store(state, statement.target.id, statement.op,
-                                 operands, statement)
-                claimed.add(id(statement))
-                return
+        operands = set_operands(statement.op, statement.target,
+                                statement.value, state)
+        if operands is not None:
+            # The fold is this store path's own answer, so the claim keeps
+            # the general invalidation from joining a set it just folded.
+            _apply_set_store(state, statement.target, statement.op,
+                             operands, statement)
+            claimed.add(id(statement))
+            return
+        name = root_name(statement.target)
         held = _known_value(statement.target, state)
         if isinstance(statement.op, ast.BitOr) \
-                and isinstance(statement.target, ast.Name) \
                 and isinstance(held, DeferredContainer) \
                 and held.kind == 'dict':
             # The rebinding already dropped the name; merge into its dict.
-            state.callables[statement.target.id] = held
-            sync_cells(state, {statement.target.id})
+            # A target spelled any other way rebinds nothing, so the merge is
+            # the whole of the answer.
+            if isinstance(statement.target, ast.Name):
+                state.callables[statement.target.id] = held
+                sync_cells(state, {statement.target.id})
             claimed.add(id(statement))
-            _apply_mapping_store(
-                state, statement.target.id, [statement.value], {},
-                statement)
+            _apply_mapping_store(state, held, name, [statement.value], {},
+                                 statement)
         return
     if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.Delete)):
         return
