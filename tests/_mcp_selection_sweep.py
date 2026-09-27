@@ -40,6 +40,7 @@ import subprocess
 import sys
 
 import _mcp_import_closure
+import _mcp_lambda_sweep
 
 
 _FILLER = '0'
@@ -208,8 +209,10 @@ _FUNCTION = 'a subscript element'
 # DISPLAY carrying one key twice, a LAMBDA in a position a fold selects, and
 # a BUILTIN behind a binding the module may or may not have made.
 PROPERTY_CLASSES = ('a repeated dict key', 'a lambda behind a selection',
-                    'a builtin behind a binding')
-_REPEATED, _LAMBDA, _BUILTIN = PROPERTY_CLASSES
+                    'a builtin behind a binding',
+                    _mcp_lambda_sweep.SIGNATURE_CLASS)
+_REPEATED, _LAMBDA, _BUILTIN = PROPERTY_CLASSES[:3]
+_form = _mcp_lambda_sweep._form
 
 # The containers a fold reads an element out of, as the route the index is
 # written at. The set and the comprehension are absent for the reason they
@@ -283,25 +286,6 @@ _LAMBDAS = (
     ('(*[(lambda: {op})],)[0]', '()', '(1,)'),
     ('[[(lambda: {op})][0]][0]', '()', '(1,)'),
 )
-
-
-def _form(kind, step, callee, container, mentions, carries, classes,
-          pinned=True, imports='', setup=''):
-    """One generated form, in the shape `duty` and the marker read.
-
-    `pinned` is True for every form the repeated-key and lambda builders
-    produce, and the construction says why: a dict display settles its own
-    entries and a lambda's return is settled by the arguments the caller
-    supplies. The builtin builder claims it only for a row whose binding the
-    module RUNS and leaves the name alone, since a replaced name produces no
-    value for either side to agree on. `setup` is what the oracle runs
-    before the form, and is empty for every builder with no binding of its
-    own.
-    """
-    return {'kind': kind, 'step': step, 'depth': 1, 'callee': callee,
-            'container': container, 'mentions': mentions, 'pinned': pinned,
-            'carries': carries, 'classes': classes, 'imports': imports,
-            'setup': setup}
 
 
 def _repeats(operation):
@@ -549,6 +533,13 @@ def generated():
                     form, binding=binding, position='a class of its own',
                     imports=form.get('imports') or imports)
         for form in _builtins(imports, operation):
+            key = _identity(form)
+            if key in seen:
+                continue
+            seen[key] = dict(
+                form, binding=binding, position='a class of its own',
+                imports=form['imports'])
+        for form in _mcp_lambda_sweep.signatures(imports, operation):
             key = _identity(form)
             if key in seen:
                 continue
