@@ -42,6 +42,9 @@ _RECEIVER_INVOKE = (
 _ARM_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_binding_arm_of_issue_1114_is_refused(None)')
+_ATOM_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_transforming_form_stays_an_atom(None)')
 _TARGET_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_target_that_carries_a_launcher_is_refused(None)')
@@ -164,6 +167,21 @@ def _mutation_specs():
     receiver_slice = (
         "        if isinstance(callee, ast.Subscript):\n"
         "            yield from _carried_parts(callee.slice)\n", "")
+    # The launch-method reads the descent consumes. Dropping the arm
+    # leaves the issue's second spelling clean, and the constant-read row
+    # beside it still passing, so only the callee-chain row is left to
+    # notice. Dropping the flag alone keeps the two refusals and reinstates
+    # the false positive the flag exists to stop.
+    receiver_launch = (
+        "        names_launch = (isinstance(callee, ast.Attribute)\n"
+        "                        and callee.attr in _LAUNCH_READS)\n"
+        "        if names_launch and launch_only and "
+        "callee is not value.func:\n"
+        "            yield callee\n"
+        "        launch_only = launch_only and names_launch\n", "")
+    receiver_flag = (
+        "        launch_only = launch_only and names_launch\n",
+        "        launch_only = True\n")
     # The whole elif chain, so the arm is deleted rather than narrowed.
     # Measured: deleting one arm at a time IS caught, by the
     # classification control and the over-refusal rows, so the comment
@@ -314,6 +332,10 @@ def _mutation_specs():
          _RECEIVER_INVOKE),
         ('receiver drops the subscripts', 'bindings', (receiver_slice,),
          _RECEIVER_CARRIER_INVOKE),
+        ('receiver drops the launch reads', 'bindings', (receiver_launch,),
+         _CHAIN_INVOKE),
+        ('receiver keeps a chain open past a constant', 'bindings',
+         (receiver_flag,), _ATOM_INVOKE),
         ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),

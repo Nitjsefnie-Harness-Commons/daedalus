@@ -20,17 +20,20 @@ the callee: does what this position carries name a launcher? Whether the
 callee would invoke it is not answerable from syntax, so the rule does
 not pretend to know, and a launcher handed to a callee that only
 compares it or looks it up is refused along with one handed to a callee
-that runs it. That costs nothing today: of the call sites in this
-tree, none carries a launcher in an argument or a container receiver, and
-exactly one carries a bare module name — the module-versus-launcher
-split below, which is the one distinction here that is about the value
-rather than a name.
+that runs it. That costs nothing today: of the call sites in this tree, none
+carries a launcher in an argument or a container receiver, and exactly one
+carries a bare module name.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
 chdir reached only by a string (`getattr(os, 'chdir')`), an owner or chdir
 reached by a call result, a call argument carrying the subprocess module
 bare rather than a launcher read off it (`patch.object(subprocess, 'run',
 ...)`), and an unreadable `**` spread on an unrecognised callee.
+
+A launcher reached through an opened form is inside however it is reached, and
+the argument, decorator and assignment arms all judge what comes back. So
+`f(subprocess).run` and `[subprocess][0].run` are refused, and what keeps that
+from refusing every attribute is the condition below.
 
 Every form the running grammar has is in one of three classes.
 
@@ -40,39 +43,24 @@ Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
 
 It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
+One form in that second list is opened on a condition, stated beside the walk
+it qualifies in `tests/_coverage_bindings.py`, which names every form on both
+sides of that line and whose prose a control holds to its own table: an
+attribute that names a launch method is a launcher read, not a constant read.
+
 A form in neither class is refused rather than read as clean, so a Python that
 adds one fails closed instead.
 
-A launcher behind an opened form is judged by every arm here, in the argument
-position and in the decorator and assignment binding positions alike.
-
 The four comprehension forms reach their conditions through the statement-level
 node their `generators` hold, and not through their own iterable, which
-`_bound_values` judges as the comprehension arm's own business. FormattedValue
-is the exception, opened on the issue's requirement rather than on that
-argument, since `f"{launcher}"` binds a string and not the launcher, and a form
-that succeeds it is opened on the same ground. A form a later grammar adds is
-registered only where that grammar has it.
+`_bound_values` judges as the comprehension arm's own business.
 
-Two positions read differently. The descent that walks a callee hands the walk
-every subscript the descent consumes, index and bounds included. The base is
-handed over only when it is not an atom: the receiver reads a launch method off
-what it carries, and a direct launch bottoms out at one.
+The descent that walks a callee hands the walk every subscript the descent
+consumes, index and bounds included. It hands over every attribute that names
+a launch method, bar the call's own outermost callee.
 
-An attribute is opened on one condition. An `Attribute` whose `attr` names a
-launch method is a launcher read rather than a constant read, so the walk
-yields it and descends into the receiver it is read off; every other
-attribute is a constant read and stays the atom it is.
-
-The binding arms read the same way, and one position does not. A target binds a
-name, so the names it declares are not carriers and what it reaches through
-are. A Name target is exempt, and so is every Name inside a Starred, Tuple or
-List of one: a name that already spells a module is shadowed rather than
-carried. A subscript's index is not exempt, so `d[subprocess]` binds a launcher
-and `d[key]` does not.
-
-`tests/_coverage_bindings.py` names every form on both sides of that line, and
-a control fails when its prose and its table stop agreeing.
+A target binds names rather than carrying them. A subscript's index is not
+exempt, so `d[subprocess]` binds a launcher and `d[key]` does not.
 """
 import ast
 

@@ -607,7 +607,7 @@ go += 2
 def _transforming_cases():
     """Forms that build a new value, so a launcher in one is not carried.
 
-    The last two rows are the other side of the attribute arm: an
+    The last three rows are the other side of the attribute arm: an
     attribute naming a constant is a constant read, and the receiver it
     is read off is not a launcher reaching the walk.
     """
@@ -636,6 +636,9 @@ go = subprocess.DEVNULL
 """),
         ('constant read off a launcher', """import subprocess
 go = subprocess.run.__name__
+"""),
+        ('constant read one link deeper off a launcher', """import subprocess
+go = subprocess.run.__name__.upper()
 """),
     )
 
