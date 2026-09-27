@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Controls for the poll-attempt bound on test-side command queue readers.
 
-`_bounded_polls` counts queue probes, not elapsed time, so it needs no
-clock. The controls that drive the reader live with it.
+`_bounded_polls` counts queue probes, not elapsed time. The controls
+that drive the reader live with it.
 """
 import ast
 import math
@@ -17,8 +17,15 @@ from _cmdqueue_faults import (  # noqa: E402
     _POLL_HEADROOM,
     _PROBES_PER_ATTEMPT,
     _QUEUE_PROBES,
+    _bound_blocks,
+    _bound_to,
     _bounded_polls,
+    _callee_name,
+    _enclosing_bound_blocks,
+    _enclosing_scopes,
     _poll_budget,
+    _reached_through,
+    _scope_map,
 )
 
 
@@ -73,8 +80,8 @@ def test_the_poll_ceiling_states_the_probes_and_names_no_cause(tmp):
 def test_the_poll_ceiling_spires_a_reader_that_probes_often(tmp):
     """A reader spending more probes per pass than today's stays under it.
 
-    The tolerance is `_POLL_HEADROOM`, not the derivation: the ceiling
-    observes nothing and does not move when the reader does.
+    The tolerance is `_POLL_HEADROOM`: the ceiling observes nothing and
+    does not move when the reader does.
     """
     attempts = 3
     per_pass = _PROBES_PER_ATTEMPT + 3
@@ -100,9 +107,10 @@ def test_the_poll_ceiling_is_derived_from_the_probes_one_pass_costs(tmp):
 
 
 def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
-    """The bound's coverage is this spelling, so the spelling is pinned.
+    """The bound's coverage is the reader's spelling, so it is pinned.
 
-    It counts `_QUEUE_PROBES` and nothing else, so another API hangs.
+    The oracle is asserted live first: a walker finding nothing would
+    make the absence below trivially true.
     """
     del tmp
     source = (Path(__file__).resolve().parent / '_cmdqueue.py').read_text()
@@ -111,18 +119,20 @@ def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
         node for node in tree.body
         if isinstance(node, ast.FunctionDef)
         and node.name == '_poll_queue_reads')
-    reached = set()
-    for node in ast.walk(reader):
-        if not isinstance(node, ast.Call):
-            continue
-        if not any(isinstance(arg, ast.Name) and arg.id == 'directory'
-                   for arg in node.args):
-            continue
-        callee = node.func
-        if isinstance(callee, ast.Attribute):
-            reached.add(callee.attr)
-        elif isinstance(callee, ast.Name):
-            reached.add(callee.id)
+    scope_by_node = _scope_map(tree)
+    roots = _bound_to(_enclosing_scopes(reader, scope_by_node) + [reader],
+                      {arg.arg for arg in reader.args.args})
+    reached = _reached_through(reader, roots)
+    direct = {_callee_name(node) for node in ast.walk(reader)
+              if isinstance(node, ast.Call)
+              and any(isinstance(arg, ast.Name) and arg.id in roots
+                      for arg in node.args)}
+    reached |= {name for name in direct if name}
+    for probe in _QUEUE_PROBES:
+        assert probe in reached, (
+            'the probe classifier is blind: the reader no longer shows a '
+            f'{probe!r} probe, so the absence below proves nothing: '
+            f'{sorted(reached)}')
     uncharged = reached - set(_QUEUE_PROBES)
     assert not uncharged, (
         'the reader reaches the queue through names the bound does not '
@@ -186,73 +196,38 @@ _READER_ENTRY_POINTS = frozenset({
 })
 
 
-def _callee_name(node):
-    callee = node.func
-    if isinstance(callee, ast.Attribute):
-        return callee.attr
-    if isinstance(callee, ast.Name):
-        return callee.id
-    return None
-
-
-def _reader_names(owner):
-    """The reader entry points `owner` can reach, aliases included."""
-    names = set(_READER_ENTRY_POINTS)
-    for statement in ast.walk(owner):
-        if not isinstance(statement, ast.Assign):
-            continue
-        if _callee_name_for_value(statement.value) not in names:
-            continue
-        for target in statement.targets:
-            if isinstance(target, ast.Name):
-                names.add(target.id)
-    return names
-
-
-def _callee_name_for_value(value):
-    if isinstance(value, ast.Attribute):
-        return value.attr
-    if isinstance(value, ast.Name):
-        return value.id
-    return None
-
-
 def _unbounded_reader_calls(source):
     """Reader call sites in `source` that no `_bounded_polls` block covers."""
     tree = ast.parse(source)
-    funcs = [node for node in ast.walk(tree)
-             if isinstance(node, ast.FunctionDef)]
+    scope_by_node = _scope_map(tree)
     loose = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        owners = [f for f in funcs
-                  if f.lineno <= node.lineno <= (f.end_lineno or 0)]
-        owner = min(owners, key=lambda f: (f.end_lineno or f.lineno)
-                    - f.lineno) if owners else tree
-        if _callee_name(node) not in _reader_names(owner):
-            continue
-        if not owners:
+        scope = scope_by_node.get(node)
+        if scope is None:
             loose.append((node.lineno, '<module scope>'))
             continue
-        covered = any(
-            isinstance(item, ast.With) and item.lineno <= node.lineno
-            <= (item.end_lineno or 0)
-            and any((ast.get_source_segment(source, entry.context_expr) or '')
-                    .startswith('_bounded_polls') for entry in item.items)
-            for item in ast.walk(owner))
-        if not covered:
-            loose.append((node.lineno, owner.name))
+        scopes = _enclosing_scopes(node, scope_by_node) + [scope]
+        names = _bound_to(scopes, _READER_ENTRY_POINTS)
+        if _callee_name(node) not in names:
+            continue
+        if not _enclosing_bound_blocks(
+                node, scope_by_node, source, '_bounded_polls'):
+            loose.append((node.lineno, _scope_label(scope)))
     return loose
+
+
+def _scope_label(scope):
+    return getattr(scope, 'name', type(scope).__name__)
 
 
 def test_every_reader_call_in_the_scanned_suites_is_inside_a_bound(tmp):
     """Each read in `test_cmdqueue.py` and `test_queued_command.py` is
     bounded, and only the read is.
 
-    Nothing outside those two files is scanned, which is why the name
-    says so. Without this control the property holds by construction:
-    drop a wrapper and nothing reds until a runaway probe, which hangs.
+    Nothing outside those two files is scanned. Without this control the
+    property holds by construction: drop a wrapper and nothing reds.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
@@ -273,13 +248,8 @@ def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
     for suite in _SCANNED_SUITES:
         source = (tests_dir / suite).read_text()
         tree = ast.parse(source)
-        for block in ast.walk(tree):
-            if not isinstance(block, ast.With):
-                continue
-            if not any((ast.get_source_segment(source, entry.context_expr)
-                        or '').startswith('_bounded_polls')
-                       for entry in block.items):
-                continue
+        scope_by_node = _scope_map(tree)
+        for block in _bound_blocks(tree, source, '_bounded_polls'):
             reads = [node for node in ast.walk(block)
                      if isinstance(node, ast.Call)
                      and _callee_name(node) in _READER_ENTRY_POINTS]
