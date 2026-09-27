@@ -8,11 +8,13 @@ _LAUNCHERS = frozenset(
     {'run', 'Popen', 'call', 'check_call', 'check_output'})
 
 # An attribute naming a launch method is a launcher read rather than a
-# constant read, so the walk opens its receiver. `__call__` joins that set
-# and not the other one: bound to a name it is the launcher called later,
-# which is the defect the inline form already states. The callee descent
-# does not take it, where it is the outer callee of the inline form and is
-# excluded there anyway.
+# constant read, so the walk opens its receiver, and the callee descent
+# reads it too. `__call__` is in this set and not in `_LAUNCHERS`: bound to
+# a name it is the launcher called later, which is the defect the inline
+# form already states, and the descent needs it here or its chain closes on
+# the outermost callee and `subprocess.run.__call__(...)` stops being caught
+# through the `subprocess.run` above it. The descent adds two conditions the
+# walk does not, both in `_call_receiver_parts` and stated in its docstring.
 _LAUNCH_READS = _LAUNCHERS | {'__call__'}
 
 # A header binds names: a decorator binds the decorated name, and a
@@ -211,6 +213,14 @@ def _carried_parts(value):
 
     It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
+    One form in that second list is opened on a condition. An `Attribute`
+    whose `attr` names a launch method is a launcher read rather than a
+    constant read, so the walk yields it and descends into the receiver it
+    is read off; every other attribute is a constant read and stays the
+    atom it is. Without that descent `d[subprocess].run` and
+    `subprocess.run.__call__` are two names the predicates judge and find
+    nothing, and the launcher behind either is invisible.
+
     A form in neither class is refused rather than read as clean, so a
     Python that adds one fails closed instead.
 
@@ -223,14 +233,6 @@ def _carried_parts(value):
     ground. A form a later grammar adds is registered only where that
     grammar has it, and an interpreter without that form registers nothing
     and produces none of it.
-
-    An attribute is opened on one condition. An `Attribute` whose `attr`
-    names a launch method is a launcher read rather than a constant read,
-    so the walk yields it and descends into the receiver it is read off,
-    and every other attribute is a constant read and stays the atom it is.
-    Without that descent `d[subprocess].run` and `subprocess.run.__call__`
-    are two names the predicates judge and find nothing, and the launcher
-    behind either is invisible.
 
     Two entries carry a reason the rule does not give them. A dict
     comprehension opens its key as well as its value.
@@ -317,18 +319,29 @@ def _call_receiver_parts(value):
     An attribute the descent consumes is handed over on the same rule as
     a subscript and for the same reason: naming a launch method is a read
     off what the chain has already reached, and that read is invisible
-    while the chain swallows it. The call's own outermost callee is the
-    exception, because that one is a direct launch, already resolved, and
-    the arm above judges it.
+    while the chain swallows it. Two attributes are excepted. The call's
+    own outermost callee, because that one is a direct launch, already
+    resolved, and the arm above judges it; and any launch method below an
+    attribute that named a constant, because the descent has by then left
+    the launcher that constant hangs off, so what it reaches is a bound
+    method of the string the constant read produced. `subprocess.run` and
+    `subprocess.run.__call__(...)` sit on the other side of that line from
+    `subprocess.run.__name__.upper()`.
     """
     callee = value.func
+    # Once the descent has read a constant it has left the launcher that
+    # constant hangs off, so a launch method further down that chain is a
+    # bound method of something else. A subscript is not a read of its own
+    # and does not close the chain.
+    launch_only = True
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         if isinstance(callee, ast.Subscript):
             yield from _carried_parts(callee.slice)
-        if (isinstance(callee, ast.Attribute)
-                and callee is not value.func
-                and callee.attr in _LAUNCHERS):
+        names_launch = (isinstance(callee, ast.Attribute)
+                        and callee.attr in _LAUNCH_READS)
+        if names_launch and launch_only and callee is not value.func:
             yield callee
+        launch_only = launch_only and names_launch
         callee = callee.value
     if not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
