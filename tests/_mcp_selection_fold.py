@@ -132,7 +132,7 @@ def _operator_settled(operation, *operands):
         return UNREACHABLE
 
 
-def _runtime_settled(node, bound):
+def _runtime_settled(node, bound, scopes):
     """The value a form the runtime has already SETTLED produces, `UNREAD`
     when this walk will not compute it, and `UNREACHABLE` when the runtime
     raises before the value exists.
@@ -150,37 +150,42 @@ def _runtime_settled(node, bound):
         unary = _UNARY.get(type(node.op))
         return (UNREAD if unary is None
                 else _operator_settled(
-                    unary, _runtime_settled(node.operand, bound)))
+                    unary, _runtime_settled(node.operand, bound, scopes)))
     if isinstance(node, ast.BinOp):
         arithmetic = _ARITHMETIC.get(type(node.op))
         return (UNREAD if arithmetic is None
                 else _operator_settled(
-                    arithmetic, _runtime_settled(node.left, bound),
-                    _runtime_settled(node.right, bound)))
+                    arithmetic, _runtime_settled(node.left, bound, scopes),
+                    _runtime_settled(node.right, bound, scopes)))
     if isinstance(node, ast.NamedExpr):
-        return _runtime_settled(node.value, bound)
+        return _runtime_settled(node.value, bound, scopes)
     if isinstance(node, ast.IfExp):
         # The branch is a runtime value, so a conditional settles only when
         # BOTH arms do and they agree: the value is then the same whichever
         # one the runtime picks.
-        body = _runtime_settled(node.body, bound)
-        other = _runtime_settled(node.orelse, bound)
+        body = _runtime_settled(node.body, bound, scopes)
+        other = _runtime_settled(node.orelse, bound, scopes)
         if not _computable(body) or not _computable(other) or body != other:
             return UNREAD
         return body
-    if _is_the_bool_call(node, bound):
-        value = _runtime_settled(node.args[0], bound)
+    if _is_the_bool_call(node, scopes):
+        value = _runtime_settled(node.args[0], bound, scopes)
         return UNREAD if not _computable(value) else int(bool(value))
     return UNREAD
 
 
-def _is_the_bool_call(node, bound) -> bool:
-    """Whether this is a call of the `bool` BUILTIN over one argument: a
-    module that binds `bool` to something of its own has not called it, and
-    the map is what says so."""
+def _is_the_bool_call(node, scopes) -> bool:
+    """Whether this call is a call of the `bool` BUILTIN over one argument.
+
+    What settles the call is the VALUE it produces, so the question is what
+    its callee denotes: a name the module leaves alone is the builtin, a
+    `from builtins import bool [as x]` alias is the same builtin, and a name
+    bound to something of its own is not it. `bound` is not asked, because
+    it tracks the import-by-name operation and carries no builtin to find.
+    """
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == 'bool' and len(node.args) == 1
-            and not node.keywords and 'bool' not in bound)
+            and len(node.args) == 1 and not node.keywords
+            and scopes.denotes_builtin(node.func, 'bool'))
 
 
 def _is_getattr(node) -> TypeGuard[ast.Call]:
@@ -264,18 +269,18 @@ def _expanded_elts(base):
     return elements
 
 
-def _settled_position(node, bound):
+def _settled_position(node, bound, scopes):
     """A POSITION or a KEY an index expression names, or `UNREAD` when this
     walk does not read one. A value is not a position until the container
     says so, so the reading is the caller's decision and not this one's.
     """
-    value, decided = static_value(node, bound)
+    value, decided = static_value(node, bound, scopes)
     if not decided or isinstance(value, ast.AST):
         return UNREAD
     return value
 
 
-def _keyed(node, base, bound):
+def _keyed(node, base, bound, scopes):
     """The value a dict literal's key selects, or `UNREACHABLE` for a key
     the display does not carry.
 
@@ -298,13 +303,13 @@ def _keyed(node, base, bound):
             # display raises `TypeError` before it is built at all — the
             # same decision an index the runtime cannot satisfy is.
             return UNREACHABLE, True
-        settled = _settled_position(key, bound)
+        settled = _settled_position(key, bound, scopes)
         if settled is UNREACHABLE:
             return UNREACHABLE, True
         if settled is UNREAD:
             return node, False
         entries.append((settled, value))
-    wanted = _settled_position(node.slice, bound)
+    wanted = _settled_position(node.slice, bound, scopes)
     if wanted is UNREAD:
         return node, False
     selected = None
@@ -312,10 +317,10 @@ def _keyed(node, base, bound):
         if key == wanted:
             selected = value
     return ((UNREACHABLE, True) if selected is None
-            else static_value(selected, bound))
+            else static_value(selected, bound, scopes))
 
 
-def _is_the_operation(node, bound):
+def _is_the_operation(node, bound, scopes):
     """Whether this expression IS the operation, and so a FUNCTION — the one
     decided value that is neither a container nor subscriptable.
 
@@ -326,10 +331,11 @@ def _is_the_operation(node, bound):
     """
     if isinstance(node, ast.Name):
         return bound.get(node.id) == 'by name'
-    return isinstance(node, ast.Attribute) and is_dynamic_import(node, bound)
+    return isinstance(node, ast.Attribute) and is_dynamic_import(
+        node, bound, scopes)
 
 
-def _called(func, call, bound):
+def _called(func, call, bound, scopes):
     """The value a call of a LAMBDA produces: the body its signature
     accepts, or `UNREACHABLE` when it accepts none of what is supplied.
 
@@ -341,10 +347,10 @@ def _called(func, call, bound):
     """
     if not _fills(func, call):
         return UNREACHABLE, True
-    return static_value(func.body, bound)
+    return static_value(func.body, bound, scopes)
 
 
-def static_value(node, bound):
+def static_value(node, bound, scopes):
     """The value an expression produces, and whether this walk decided it.
 
     Every arm below is a rule about WHAT AN EXPRESSION PRODUCES and never
@@ -357,13 +363,13 @@ def static_value(node, bound):
     # of something that cannot be called raises on the expression itself.
     wrapped = _projected(node)
     if wrapped is not None:
-        value, decided = static_value(wrapped, bound)
+        value, decided = static_value(wrapped, bound, scopes)
         return ((UNREACHABLE, True) if decided and not _is_callable(value)
                 else (value, decided))
     # A form the runtime has already settled. Read as a position or a key
     # it is the value itself, and a settlement that RAISES is a value
     # nothing can be.
-    settled = _runtime_settled(node, bound)
+    settled = _runtime_settled(node, bound, scopes)
     if settled is not UNREAD:
         return ((UNREACHABLE, True) if settled is UNREACHABLE
                 else (settled, True))
@@ -373,17 +379,17 @@ def static_value(node, bound):
         # the exception, because that is a rule about a VALUE: the callee
         # is folded, and a lambda the signature accepts produces its body
         # however the fold reached it.
-        callee, decided = static_value(node.func, bound)
+        callee, decided = static_value(node.func, bound, scopes)
         if decided and isinstance(callee, ast.Lambda):
-            return _called(callee, node, bound)
+            return _called(callee, node, bound, scopes)
         return node, True
     if not isinstance(node, ast.Subscript):
         return node, True
-    base, decided = static_value(node.value, bound)
+    base, decided = static_value(node.value, bound, scopes)
     if not decided:
         return node, False
     if not isinstance(base, ast.AST) or isinstance(base, UNSUBSCRIPTED) \
-            or _is_the_operation(base, bound):
+            or _is_the_operation(base, bound, scopes):
         return UNREACHABLE, True
     if isinstance(node.slice, ast.Slice):
         # A slice produces a NEW container — or raises, on a mapping or a
@@ -391,19 +397,19 @@ def static_value(node, bound):
         # on the bounds or on what the slice is taken of.
         return UNREACHABLE, True
     if isinstance(base, ast.Dict):
-        return _keyed(node, base, bound)
+        return _keyed(node, base, bound, scopes)
     if not isinstance(base, (ast.Tuple, ast.List)):
         return node, False
     elements = _expanded_elts(base)
     if elements is None:
         return node, False
-    position = _settled_position(node.slice, bound)
+    position = _settled_position(node.slice, bound, scopes)
     if position is UNREAD:
         return node, False
     if not isinstance(position, int) \
             or not -len(elements) <= position < len(elements):
         return UNREACHABLE, True
-    return static_value(elements[position], bound)
+    return static_value(elements[position], bound, scopes)
 
 
 def _is_callable(value):
@@ -416,13 +422,13 @@ def _is_callable(value):
     return isinstance(value, ast.AST) and not isinstance(value, CONTAINERS)
 
 
-def callee_value(call, bound):
+def callee_value(call, bound, scopes):
     """A call's callee value: folded where the fold decides, else whole."""
-    value, decided = static_value(call.func, bound)
+    value, decided = static_value(call.func, bound, scopes)
     return call.func if not _is_callable(value) or not decided else value
 
 
-def unresolvable_callee(call, bound):
+def unresolvable_callee(call, bound, scopes):
     """The callee a mention refusal reads, or None when there is none.
 
     Two decided values are none of the refusal's business, and both are
@@ -433,13 +439,13 @@ def unresolvable_callee(call, bound):
     container or a position the fold does not decide is the same class one
     level out, and is still a value the caller may refuse.
     """
-    value, decided = static_value(call.func, bound)
+    value, decided = static_value(call.func, bound, scopes)
     if not _is_callable(value):
         return None
     return value if decided else call.func
 
 
-def is_dynamic_import(func, bound):
+def is_dynamic_import(func, bound, scopes):
     """A call to import_module or __import__, per the module's own bindings.
 
     An attribute names the operation by its own name, so one whose attribute
@@ -456,11 +462,11 @@ def is_dynamic_import(func, bound):
     if isinstance(func, ast.Attribute):
         if func.attr not in DYNAMIC_ATTRIBUTES:
             return False
-        return yields_the_operation(func.value, bound)
+        return yields_the_operation(func.value, bound, scopes)
     return False
 
 
-def yields_the_operation(value, bound, delivered=False):
+def yields_the_operation(value, bound, scopes, delivered=False):
     """True when an expression's own subtree mentions the import-by-name
     operation, so a store of it can hand the operation to a name this map
     cannot follow.
@@ -494,24 +500,25 @@ def yields_the_operation(value, bound, delivered=False):
     """
     wrapped = _projected(value)
     if wrapped is not None:
-        return yields_the_operation(wrapped, bound, delivered)
-    produced, _decided = static_value(value, bound)
+        return yields_the_operation(wrapped, bound, scopes, delivered)
+    produced, _decided = static_value(value, bound, scopes)
     if isinstance(produced, ast.AST) and produced is not value:
-        return yields_the_operation(produced, bound, delivered)
+        return yields_the_operation(produced, bound, scopes, delivered)
     if isinstance(value, ast.Name):
         tracked = bound.get(value.id)
         return tracked is not None and tracked not in REGISTRY_NAMES
     if isinstance(value, ast.Attribute):
-        return is_dynamic_import(value, bound)
+        return is_dynamic_import(value, bound, scopes)
     if isinstance(value, ast.Call):
         # A `getattr` whose KEY this walk cannot read may be reading
         # `__call__`, so the lookup produces the value it reads off and is
         # asked about that. A readable key is an ordinary attribute, and
         # `_projection` has already read the one that is a projection.
         if _is_getattr(value) and not isinstance(value.args[1], ast.Constant):
-            return yields_the_operation(value.args[0], bound, delivered)
+            return yields_the_operation(value.args[0], bound, scopes,
+                                        delivered)
         return False
     if isinstance(value, ast.Lambda) and not delivered:
         return False
-    return any(yields_the_operation(child, bound, delivered)
+    return any(yields_the_operation(child, bound, scopes, delivered)
                for child in ast.iter_child_nodes(value))

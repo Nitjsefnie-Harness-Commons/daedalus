@@ -6,9 +6,18 @@ tracked-name map left open. This module owns that axis so the guard's shared
 store grammar (`_hidden`) routes the code-eval store through the same
 decision it routes the operation and the registry through.
 
-The shadow test is a PROPERTY, not a list: `symtable` is Python's own binding
-grammar, so a name no enclosing scope binds is the builtin. A `from builtins
-import eval` binds the builtin itself and is not a shadow.
+It also owns the SCOPE model both axes resolve a name against, because there
+is one question behind both: does this name resolve to the builtin here?
+`_Scopes.denotes_builtin` answers it for any builtin, and the fold asks it
+about `bool` — the builtin whose value the index axis computes. The shadow
+test is a PROPERTY, not a list: `symtable` is Python's own binding grammar,
+so a name no enclosing scope binds is the builtin, and a `from builtins
+import X` binds the builtin ITSELF and is not a shadow either.
+
+`is_code_evaluating` deliberately asks the looser question, over every alias
+in the module rather than over the one the use resolves to: a false
+positive there costs a refusal, and a false negative would cost a closure
+entry. The two directions are not the same, so they are not the same answer.
 """
 import ast
 import symtable
@@ -38,6 +47,12 @@ class _Scopes:
         self._scope_of = {}
         self._from_builtins = set()
         self._module_bind_line = {}
+        # The scope model the alias question is read off: which table
+        # encloses which, which names each binds of its own, and what each
+        # one bound from `builtins` and under which name.
+        self._enclosing = {}
+        self._local = {}
+        self._alias = {}
         self._walk(tree, self._root)
 
     @staticmethod
@@ -58,10 +73,9 @@ class _Scopes:
         return matches[0] if len(matches) == 1 else None
 
     def _note(self, name, lineno):
-        if name in CODE_EVAL_BUILTINS:
-            prior = self._module_bind_line.get(name)
-            if prior is None or lineno < prior:
-                self._module_bind_line[name] = lineno
+        prior = self._module_bind_line.get(name)
+        if prior is None or lineno < prior:
+            self._module_bind_line[name] = lineno
 
     def _record_module_binding(self, node):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
@@ -82,22 +96,81 @@ class _Scopes:
             self._record_module_binding(node)
         if isinstance(node, ast.ImportFrom) and node.module == 'builtins' \
                 and not node.level:
-            self._from_builtins.update(
-                alias.asname or alias.name for alias in node.names
-                if alias.name in CODE_EVAL_BUILTINS)
+            self._record_builtin_alias(node, table)
         if isinstance(node, self._SCOPE_NODES):
             name = 'lambda' if isinstance(node, ast.Lambda) else node.name
             child = self._match(table, name, node.lineno)
             if child is not None:
+                self._enclosing[id(child)] = table
+                self._local[id(child)] = {symbol.get_name() for symbol
+                                          in child.get_symbols()
+                                          if symbol.is_local()}
                 table = child
         for child in ast.iter_child_nodes(node):
             self._walk(child, table)
 
+    def _record_builtin_alias(self, node, table):
+        """A `from builtins import X [as y]` binds the builtin ITSELF, so `y`
+        is the builtin and not a shadow of it.
+
+        Recorded against the scope the statement is in rather than against
+        the module, because a nearer binding is what takes it back, and a
+        name this walk resolves to a nearer scope's alias is that alias.
+        """
+        aliases = self._alias.setdefault(id(table), {})
+        for alias in node.names:
+            aliases[alias.asname or alias.name] = (alias.name, node.lineno)
+            if alias.name in CODE_EVAL_BUILTINS:
+                self._from_builtins.add(alias.asname or alias.name)
+
     def is_code_evaluating(self, node):
         """The name is a code-evaluating builtin at `node`'s own scope: an
-        unshadowed builtin name, or one bound by a from-builtins import."""
+        unshadowed builtin name, or one bound by a from-builtins import
+        anywhere in the module. The looser half of the alias question, kept
+        loose on purpose — see `denotes_builtin`."""
         return node.id in self._from_builtins or (
             node.id in CODE_EVAL_BUILTINS and self.is_builtin(node))
+
+    def _owner(self, table, name):
+        """The nearest enclosing scope that binds `name`, or None when no
+        scope does — which is what leaves it the builtin."""
+        while table is not None:
+            bound = self._root_binds if table is self._root \
+                else self._local.get(id(table), ())
+            if name in bound:
+                return table
+            table = self._enclosing.get(id(table))
+        return None
+
+    def denotes_builtin(self, node, name) -> bool:
+        """Whether a name reference IS the builtin `name` at its own scope.
+
+        The question is what the name RESOLVES TO, so it is read off the
+        module's own symbol table rather than off a spelling and a map that
+        carries no builtin: the builtin under its own name where nothing
+        binds it, and a `from builtins import name [as x]` alias where the
+        scope that binds it imports the builtin itself. `symtable` says which
+        of the two a binding is — imported and not assigned is the import, a
+        store or a parameter over the same name is a shadow of it — so one
+        rule answers every scope, and a name bound at the module is read in
+        the order the module runs: before its own import there is no binding
+        at all.
+        """
+        if node.id == name and self.is_builtin(node):
+            return True
+        table = self._scope_of.get(id(node))
+        owner = self._owner(table, node.id)
+        if owner is None:
+            return False
+        symbol = self._symbols(owner).get(node.id)
+        if symbol is None or not symbol.is_imported() or symbol.is_assigned() \
+                or symbol.is_parameter() or symbol.is_namespace():
+            return False
+        imported, lineno = self._alias.get(id(owner), {}).get(
+            node.id, (None, 0))
+        if imported != name:
+            return False
+        return owner is not self._root or node.lineno >= lineno
 
     def is_builtin(self, node):
         """The name is an unshadowed builtin at `node`'s own scope. A module
