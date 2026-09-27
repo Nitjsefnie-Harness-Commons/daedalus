@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals  # noqa: E402
+from _launch_keep import control_keeps  # noqa: E402
 from _repo import iter_tree_files  # noqa: E402
 
 ROOT = _util.ROOT
@@ -51,11 +52,10 @@ def _dropped_sites():
     """Every site the control's keep rule drops, and whether it is refused.
 
     The population is the control's own, because the boundary checked here
-    is that control's and not the analyser's. The keep rule is
-    `_bound_sites`'s single condition; it is spelled rather than imported
-    because a tests module importing a sibling suite is itself refused, and
-    it is a copy rather than a derivation, so a change to the rule surfaces
-    here as a change in the population reported.
+    is that control's and not the analyser's, and the keep rule is read
+    from `tests/_launch_keep.py` rather than restated — the control reads
+    the same one, so narrowing it moves this control's population with it
+    instead of quietly beside it.
     """
     dropped = []
     reported = 0
@@ -63,7 +63,7 @@ def _dropped_sites():
         refused = _refused_lines(here, source)
         for line, head, kind in bound_sites(source, here):
             reported += 1
-            if head in ('git', 'ambiguous') or kind == 'unplaced':
+            if control_keeps(head, kind):
                 continue
             dropped.append((here, line, head, kind, line in refused))
     return reported, dropped
