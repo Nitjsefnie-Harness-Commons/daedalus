@@ -80,6 +80,21 @@ REACHES = (
     ('**k', ''),
     ('**k', 'z=1'),
     ('', ''),
+    # A default says a parameter MAY go unfilled, not that naming it is an
+    # error, so a keyword-only parameter with one is still a supply.
+    ('*, k=1', 'k=1'),
+    ('*, k=1', 'k=2'),
+    ('*, k=1', "**{'k': 2}"),
+    ('*a, k=1', 'k=1'),
+    ('*a, k=1', 'k=2'),
+    # A `*args` soaks up what comes AFTER it and not what came before, so a
+    # required positional before one still has to be supplied.
+    ('x, *a', '1'),
+    ('x, *a, k', '1, k=1'),
+    ('x, *a, k=1', '1'),
+    # A display keeps the LAST of two equal keys, so one name carried twice
+    # is one supply rather than a call that supplies a parameter twice.
+    ('x', "**{'x': 1, 'x': 2}"),
 )
 
 # What the call's own binding refuses, and Python refuses with it. A
@@ -101,6 +116,10 @@ RAISES = (
     ('*, k', ''),
     ('*, k, j', 'k=1'),
     ('', '1'),
+    # The three cells a `*args` beside a required parameter crosses.
+    ('x, *a, k', 'k=1'),
+    ('x, *a, k', 'k=2'),
+    ('x, *a, k', "**{'k': 1}"),
 )
 
 # A `*args` unpacks to a length and a `**` mapping to a set of keys, and
@@ -113,6 +132,11 @@ UNDECIDED = (
     ('x', '**d'),
     ('x, y', '1, *d'),
     ('x, y', '**d, y=2'),
+    # A display the walk cannot read its KEYS out of is the same question:
+    # `**{**d}` fills the parameter and `**{1: 2}` raises, and the walk
+    # reads neither.
+    ('x', '**{**d}'),
+    ('x', '**{1: 2}'),
 )
 
 

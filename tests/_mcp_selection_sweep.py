@@ -43,7 +43,7 @@ import _mcp_import_closure
 import _mcp_lambda_sweep
 
 
-_FILLER = '0'
+_FILLER = _mcp_lambda_sweep._FILLER
 
 # How the generated source NAMES the operation. The second is the alias a
 # `from ... import ... as` binds, which the guard's own map follows. It is
