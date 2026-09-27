@@ -132,6 +132,10 @@ def test_a_parked_timer_runs_only_when_fired(_tmp):
     assert report['armed']['text'] == 'sure?', report
     assert report['armed']['has'] is True, report
     assert len(report['armed']['live']) == 1, report
+    # The delay the section asked for, which the id alone does not carry:
+    # `armedAction` re-arms on 2500 ms, and a slot parked at some other
+    # period is a different control than the one the section wrote.
+    assert report['armed']['delays'] == [2500], report
     # clearTimeout cancelled the second timer, so the id it returned is
     # gone rather than waiting to be fired into the assertions below.
     assert report['afterClear']['id'] not in report['armed']['live'], report
@@ -539,22 +543,28 @@ def test_a_module_name_that_escapes_the_dashboard_is_refused(_tmp):
 
 
 def test_the_attribute_selector_grammar_answers_and_declines(_tmp):
-    """`overview.js` reaches its four stat cells with `[data-stat=tabs]`
-    and the page's status line with `[data-meta="tab-count"]`, so a grammar
-    that took only the role spelling left the whole section unmountable.
-    Quoting does not make a different selector, an empty value is a value,
-    and a NAME the page does not carry is a miss rather than a refusal --
-    because a miss and a refusal are the two situations a suite cannot tell
-    apart. Everything else still refuses by name: the existence test, the
-    class selector, the bare tag, a non-string, the empty string, the
-    unterminated quote, the capitalised attribute and the two nameless
-    spellings."""
+    """`overview.js` reaches its stat cells with `[data-stat=tabs]` and the
+    page's status line with `[data-meta="tab-count"]`, so a grammar that
+    took only the role spelling left the whole section unmountable.
+    Quoting and padding are not different selectors, an empty value is a
+    value, quoting is the escape hatch for a value that is not an
+    identifier, and `find` is singular, so with two cells carrying one
+    `data-stat` it answers the first.
+
+    Every other row refuses by name, and each is the only row holding its
+    own gate -- another attribute's name for the prefix clause, an
+    unclosed selector for the suffix clause, a nameless `data-` for the
+    width clause, and the compound, list and space-bearing values for the
+    value's character class."""
     report = run_scenario(scenarios.ATTRIBUTE_SELECTORS)
     assert report['role'] is True, report
     assert report['quotedRole'] is True, report
     assert report['stat'] is True, report
-    assert report['meta'] is True, report
     assert report['throughQuery'] is True, report
+    assert report['firstOfTwo'] is True, report
+    assert report['quotedValue'] is True, report
+    assert report['padded'] is True, report
+    assert report['meta'] is True, report
     assert report['emptyValue'] is True, report
     assert report['emptyIsNotAbsent'] is True, report
     assert report['miss'] is None, report
@@ -568,6 +578,13 @@ def test_the_attribute_selector_grammar_answers_and_declines(_tmp):
         '[data-Role=log]': 'unsupported selector [data-Role=log]',
         '[data-meta=]': 'ANSWERED',
         '[=log]': 'unsupported selector [=log]',
+        '[aria-label=x]': 'unsupported selector [aria-label=x]',
+        '[data-stat=tabs': 'unsupported selector [data-stat=tabs',
+        '[data-=x]': 'unsupported selector [data-=x]',
+        '[data-stat=tabs][x]': 'unsupported selector [data-stat=tabs][x]',
+        '[data-stat=tabs,role]': 'unsupported selector [data-stat=tabs,role]',
+        '[data-stat= tabs]': 'unsupported selector [data-stat= tabs]',
+        '[data-stat=tab s]': 'unsupported selector [data-stat=tab s]',
     }, report
 
 
