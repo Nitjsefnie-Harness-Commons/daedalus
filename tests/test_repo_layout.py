@@ -437,14 +437,21 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     # A dict literal keeps one of two identical keys and drops the other,
     # so a pasted key that already existed loses a row and every check
     # below passes on the smaller table. Only the source still has it, and
-    # only an `Assign` locates it: an annotated table would go quiet here.
+    # a locator that stopped finding it would go quiet rather than red, so
+    # what it found is asserted rather than assumed. Both statement forms
+    # are read, since an annotated table is an `AnnAssign` and not one.
     table = ast.parse((ROOT / 'tests/_bounded_git_launches.py').read_text(
         encoding='utf-8', errors='surrogateescape'))
-    written = [ast.unparse(key) for node in table.body
-               if isinstance(node, ast.Assign)
-               and isinstance(node.value, ast.Dict)
-               and getattr(node.targets[0], 'id', '') == 'BOUNDED_GIT_LAUNCHES'
-               for key in node.value.keys if key is not None]
+    dicts = [node.value for node in table.body
+             if isinstance(node, (ast.Assign, ast.AnnAssign))
+             and isinstance(node.value, ast.Dict)
+             and getattr(node.targets[0] if isinstance(node, ast.Assign)
+                         else node.target, 'id', '') == 'BOUNDED_GIT_LAUNCHES']
+    assert len(dicts) == 1, (
+        f'the allowance table is {len(dicts)} dict literals in '
+        f'tests/_bounded_git_launches.py, not 1, so a row written twice '
+        'could not be seen')
+    written = [ast.unparse(key) for key in dicts[0].keys if key is not None]
     repeated = sorted({w for w in written if written.count(w) > 1})
     findings = [f'the row {key} is written twice in the table source, so a '
                 'pasted key that already existed lost a row silently'
