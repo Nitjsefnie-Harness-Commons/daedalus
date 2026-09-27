@@ -25,11 +25,13 @@ none carries a launcher in an argument or a container receiver, and exactly
 one carries a bare module name — the module-versus-launcher split in the list
 below, the one distinction here about the value rather than a name.
 
-Outside it: a `child_coverage(...)` call itself, a launcher, owner or
-chdir reached only by a string (`getattr(os, 'chdir')`), an owner or chdir
-reached by a call result, a call argument carrying the subprocess module
-bare rather than a launcher read off it (`patch.object(subprocess, 'run',
-...)`), and an unreadable `**` spread on an unrecognised callee.
+Outside it: a `child_coverage(...)` call itself, an owner or chdir reached
+only by a string (`getattr(os, 'chdir')`), an owner or chdir reached by a
+call result, a call argument carrying the subprocess module bare rather than
+a launcher read off it (`patch.object(subprocess, 'run', ...)`), and an
+unreadable `**` spread on an unrecognised callee. A launcher reached by a
+string is not among them: `getattr(subprocess, 'run')` is refused, because
+the string names the launch method itself.
 
 A launcher reached through an opened form is inside however it is reached, and
 the argument, decorator and assignment arms all judge what comes back. So
