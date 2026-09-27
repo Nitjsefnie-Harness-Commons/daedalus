@@ -558,19 +558,22 @@ def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
     """A flow child is neither a block mapping nor a plain scalar."""
     del tmp
     for child in ('[x]', '{k: v}', '{a}'):
-        source = _step_workflow('name: *a', f'anchors:\n gate: &a\n  {child}\n')
+        source = _step_workflow(
+            'name: *a', f'anchors:\n gate: &a\n  {child}\n')
         _reader_refused(
             source, 'unsupported alias to a nested flow collection')
 
 
 def test_a_non_string_tag_is_refused(tmp):
     del tmp
-    _reader_refused(_step_workflow('name: !!int 5'), 'unsupported YAML tag !!int')
+    _reader_refused(
+        _step_workflow('name: !!int 5'), 'unsupported YAML tag !!int')
 
 
 def test_a_malformed_anchor_is_refused(tmp):
     del tmp
-    _reader_refused(_step_workflow('name: &[bad] target'), 'malformed YAML anchor')
+    _reader_refused(
+        _step_workflow('name: &[bad] target'), 'malformed YAML anchor')
 
 
 def test_a_malformed_alias_is_refused(tmp):
@@ -602,7 +605,8 @@ def test_a_tag_with_no_value_is_refused(tmp):
     untagged empty field refuses the same way.
     """
     del tmp
-    _reader_refused(_step_workflow('name: !!str'), 'step name has no scalar value')
+    _reader_refused(
+        _step_workflow('name: !!str'), 'step name has no scalar value')
 
 
 def test_two_anchors_on_one_node_are_refused(tmp):
@@ -612,7 +616,8 @@ def test_two_anchors_on_one_node_are_refused(tmp):
 
 def test_two_tags_on_one_node_are_refused(tmp):
     del tmp
-    _reader_refused(_step_workflow('name: !!str !!str target'), 'two YAML tags')
+    _reader_refused(
+        _step_workflow('name: !!str !!str target'), 'two YAML tags')
 
 
 if __name__ == '__main__':
