@@ -18,6 +18,7 @@ import _queueread  # noqa: E402
 import _util  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _assert_slept_its_attempt_budget,
+    _scope_map,
     _bounded_polls,
     _poll_budget,
     _virtual_cmdqueue_clock,
@@ -248,28 +249,7 @@ def test_mcp_suite_has_no_json_loads_of_read_text_results(tmp):
     del tmp
     source_path = Path(__file__).with_name('test_mcp_server.py')
     tree = ast.parse(source_path.read_text(encoding='utf-8'))
-    scope_by_node = {}
-
-    class ScopeMap(ast.NodeVisitor):
-        def __init__(self):
-            self.scope = None
-
-        def visit_scope(self, node):
-            previous, self.scope = self.scope, node
-            self.generic_visit(node)
-            self.scope = previous
-
-        visit_Module = visit_scope
-        visit_ClassDef = visit_scope
-        visit_FunctionDef = visit_scope
-        visit_AsyncFunctionDef = visit_scope
-        visit_Lambda = visit_scope
-
-        def generic_visit(self, node):
-            scope_by_node[node] = self.scope
-            super().generic_visit(node)
-
-    ScopeMap().visit(tree)
+    scope_by_node = _scope_map(tree)
     assigned_reads = {
         (scope_by_node[assignment], target.id)
         for assignment in ast.walk(tree)
@@ -313,14 +293,9 @@ def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
     attempt budget with the pinned message whatever the wall clock did
     in between.
 
-    What this pins is the TOTAL the attempt budget spends. What it does
-    NOT pin is the cadence across passes: the reader makes no per-pass
-    clock call, so a reader banking its whole wait into one sleep is
-    indistinguishable here from one that spreads it evenly. A reader
-    that stops waiting, or waits twice as long, still dies; one that
-    waits the right total in a single burst does not, deliberately. The
-    name predates that scope; `_assert_slept_its_attempt_budget` carries
-    the full statement.
+    What this pins is the TOTAL the attempt budget spends, and not the
+    cadence across passes; `_assert_slept_its_attempt_budget` carries the
+    record of what that gives up.
     """
     qdir = Path(tmp) / 'commands' / 'tok_extension'
     qdir.mkdir(parents=True)
