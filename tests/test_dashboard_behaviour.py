@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
@@ -133,6 +134,7 @@ function response(status, data) {
     text: async () => JSON.stringify(data),
   };
 }
+""" + _dashfetch.DOOR + r"""
 (async () => {
   const tokenKey = 'daedalus-token';
   globalThis.localStorage = {
@@ -142,15 +144,18 @@ function response(status, data) {
   globalThis.setTimeout = callback => { callback(); return 0; };
   let commandSent = false;
   globalThis.fetch = async (target, init = {}) => {
+    const where = String(target);
     const method = init.method || 'GET';
     if (method === 'PUT') {
+      if (where !== '/command') return refuse(where);
       commandSent = true;
       return response(200, { ok: true, did: 'command-delivery' });
     }
-    if (String(target).includes('consume=1')) {
+    if (where.startsWith('/result?') && where.includes('consume=1')) {
       if (!commandSent) return response(200, { pending: true });
       return response(500, { error: 'consume failed' });
     }
+    if (!where.startsWith('/result?')) return refuse(where);
     return response(200, {
       id: 'dashboard-command',
       deliveryId: 'command-delivery',
@@ -182,6 +187,7 @@ function response(status, data) {
   }
   if (!rejected) throw new Error('failed consume surfaced as a"""
     r""" successful read');
+  process.stdout.write(JSON.stringify({ unplanned: UNPLANNED }));
   phase('dashboard call settled');
   phase('dashboard harness finished');
 })().catch(leave);
@@ -189,7 +195,8 @@ function response(status, data) {
 
 
 def test_dashboard_failed_consume_is_not_a_success(_tmp):
-    _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
+    result = _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
+    assert json.loads(result.stdout)['unplanned'] == [], result.stdout
 
 
 _DASHBOARD_WORLD_HARNESS = _dashnode.DashboardNodeHarness(r"""

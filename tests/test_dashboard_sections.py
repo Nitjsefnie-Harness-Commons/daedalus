@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -23,7 +24,8 @@ from _repo import ROOT  # noqa: E402
 
 _DOM = _dashnode.DOM
 
-_UPLOADS_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+_UPLOADS_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const fetched = [];
 const listing = { total: 2, items: [
@@ -34,15 +36,19 @@ const listing = { total: 2, items: [
 ] };
 globalThis.fetch = async (target, init) => {
   const headers = (init && init.headers) || {};
-  fetched.push({ target: String(target), auth: headers.Authorization || '' });
-  if (String(target).startsWith('/upload?limit=')) {
+  const where = String(target);
+  fetched.push({ target: where, auth: headers.Authorization || '' });
+  if (where.startsWith('/upload?limit=')) {
     return jsonResponse(listing);
   }
-  return {
-    ok: true, status: 200,
-    headers: { get: () => 'application/octet-stream' },
-    blob: async () => ({ from: String(target) }), json: async () => ({}),
-  };
+  if (where.startsWith('/upload?path=')) {
+    return {
+      ok: true, status: 200,
+      headers: { get: () => 'application/octet-stream' },
+      blob: async () => ({ from: where }), json: async () => ({}),
+    };
+  }
+  return refuse(where);
 };
 let held = 0;
 URL.createObjectURL = () => 'blob:held-' + (++held);
@@ -77,11 +83,12 @@ const previewNode = {
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
   rendered, fetched, downloadFetches, previewFetches, previewNode, clicks,
+  unplanned: UNPLANNED,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=4, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+    """, bounded_steps=4, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
 
 
 def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
@@ -95,6 +102,7 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
     each of them to carry that object URL rather than a web URL."""
     result = _dashnode.run_dashboard_node(_UPLOADS_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     token = 'dashboard-token'
     hrefs = seen['rendered'] + [
         click['href'] for click in seen['clicks'] if click.get('href')]
@@ -124,7 +132,8 @@ def test_uploads_carry_the_token_in_a_header_and_never_in_a_link(_tmp):
 
 # A file fetch settles only when the test says so, so a stale fetch can be
 # rejected after a re-render has already replaced its cache entry.
-_LIFECYCLE_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+_LIFECYCLE_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const fetched = [];
 const deferred = [];
@@ -135,12 +144,16 @@ const listing = { total: 1, items: [
 ] };
 globalThis.fetch = (target, init) => {
   const headers = (init && init.headers) || {};
-  fetched.push({ target: String(target), auth: headers.Authorization || '' });
-  if (String(target).startsWith('/upload?limit=')) {
+  const where = String(target);
+  fetched.push({ target: where, auth: headers.Authorization || '' });
+  if (where.startsWith('/upload?limit=')) {
     return Promise.resolve(jsonResponse(listing));
   }
+  if (!where.startsWith('/upload?path=')) {
+    return Promise.resolve(refuse(where));
+  }
   return new Promise((resolve, reject) => {
-    deferred.push({ target: String(target), resolve, reject });
+    deferred.push({ target: where, resolve, reject });
   });
 };
 const blobResponse = {
@@ -184,11 +197,12 @@ phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
   deferredTargets: deferred.map((d) => d.target),
   beforeRejection, afterRejection, clicks, revokedBeforeRelease, revoked,
+  unplanned: UNPLANNED,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=9, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+    """, bounded_steps=9, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
 
 
 def test_a_stale_fetch_rejecting_leaves_the_newer_entry_held(_tmp):
@@ -204,6 +218,7 @@ def test_a_stale_fetch_rejecting_leaves_the_newer_entry_held(_tmp):
     """
     result = _dashnode.run_dashboard_node(_LIFECYCLE_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     assert seen['deferredTargets'][:2] == ['/upload?path=up1%2Fa.txt'] * 2
     assert seen['beforeRejection'] == 2, seen
     assert seen['afterRejection'] == 2, seen['deferredTargets']
@@ -216,7 +231,8 @@ def test_a_stale_fetch_rejecting_leaves_the_newer_entry_held(_tmp):
 
 
 # The listing can be made to fail and the token to vanish between loads.
-_REFRESH_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+_REFRESH_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const revoked = [];
 const listing = { total: 1, items: [
@@ -225,7 +241,8 @@ const listing = { total: 1, items: [
 ] };
 let listingFails = false;
 globalThis.fetch = async (target) => {
-  if (String(target).startsWith('/upload?limit=')) {
+  const where = String(target);
+  if (where.startsWith('/upload?limit=')) {
     if (listingFails) {
       return {
         ok: false, status: 500,
@@ -236,11 +253,14 @@ globalThis.fetch = async (target) => {
     }
     return jsonResponse(listing);
   }
-  return {
-    ok: true, status: 200,
-    headers: { get: () => 'application/octet-stream' },
-    blob: async () => ({}), json: async () => ({}),
-  };
+  if (where.startsWith('/upload?path=')) {
+    return {
+      ok: true, status: 200,
+      headers: { get: () => 'application/octet-stream' },
+      blob: async () => ({}), json: async () => ({}),
+    };
+  }
+  return refuse(where);
 };
 let held = 0;
 URL.createObjectURL = () => 'blob:held-' + (++held);
@@ -270,11 +290,12 @@ listingFails = true;
 container.find('[data-role=refresh]').click();
 await bounded(settle(), 'failed refresh', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ afterTokenless, revoked, clicks }));
+process.stdout.write(JSON.stringify({ afterTokenless, revoked, clicks,
+  unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=7, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+    """, bounded_steps=7, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
 
 
 def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
@@ -283,6 +304,7 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
     alive, because only a successful render released them."""
     result = _dashnode.run_dashboard_node(_REFRESH_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     saved = [click['href'] for click in seen['clicks']
              if click.get('download')]
     assert saved == ['blob:held-1', 'blob:held-2'], seen['clicks']
@@ -302,7 +324,8 @@ globalThis.setTimeout = (callback) => {
 globalThis.clearTimeout = (id) => { timers[id - 1] = null; };
 """
 
-_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
+_PAGER_CLAMP_HARNESS = _dashnode.DashboardNodeHarness(
+    _PAGER_PREFIX + _dashfetch.DOOR + r"""
 (async () => {
 const fetched = [];
 const metaSnapshots = [];
@@ -324,8 +347,11 @@ globalThis.fetch = async (target, init) => {
     }
     return jsonResponse({ total, items });
   }
-  if (init && init.method === 'DELETE') total = 50;
-  return jsonResponse({});
+  if (where === '/upload' && init && init.method === 'DELETE') {
+    total = 50;
+    return jsonResponse({});
+  }
+  return refuse(where);
 };
 phase('dashboard module import started');
 const { mount } = await bounded(
@@ -358,11 +384,12 @@ const afterDelete = pagerState();
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
   firstPage, lastPage, afterDelete, listingTargets: fetched, metaSnapshots,
+  unplanned: UNPLANNED,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=4, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+    """, bounded_steps=4, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
 
 
 def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
@@ -374,6 +401,7 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     even transiently between the listing round-trips."""
     result = _dashnode.run_dashboard_node(_PAGER_CLAMP_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     assert seen['firstPage'] == {
         'meta': '1–50 / 51', 'prevDisabled': True, 'nextDisabled': False,
         'rows': 50}, seen
@@ -390,7 +418,8 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
         '', '1–50 / 51', '51–51 / 51', '51–51 / 51'], seen['metaSnapshots']
 
 
-_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(_PAGER_PREFIX + r"""
+_PAGER_EMPTY_HARNESS = _dashnode.DashboardNodeHarness(
+    _PAGER_PREFIX + _dashfetch.DOOR + r"""
 (async () => {
 const fetched = [];
 let total = 1;
@@ -402,8 +431,11 @@ globalThis.fetch = async (target, init) => {
       items: total ? [{ id: 'up1', filename: 'a.txt', size: 1, mtime: 1,
         path: token + '/up1/a.txt' }] : [] });
   }
-  if (init && init.method === 'DELETE') total = 0;
-  return jsonResponse({});
+  if (where === '/upload' && init && init.method === 'DELETE') {
+    total = 0;
+    return jsonResponse({});
+  }
+  return refuse(where);
 };
 phase('dashboard module import started');
 const { mount } = await bounded(
@@ -428,11 +460,12 @@ await bounded(settle(), 'delete settles', _dashnodeStepTimeoutMs);
 const afterEmpty = { meta: metaEl.textContent, list: listEl.textContent,
   prevDisabled: prevBtn.disabled, nextDisabled: nextBtn.disabled };
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ oneRow, afterEmpty }));
+process.stdout.write(JSON.stringify({ oneRow, afterEmpty,
+  unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=3, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'uploads.js',))
+    """, bounded_steps=3, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'uploads.js',))
 
 
 def test_an_emptied_list_reads_zero_slash_zero(_tmp):
@@ -442,6 +475,7 @@ def test_an_emptied_list_reads_zero_slash_zero(_tmp):
     went negative would leave prev enabled over an impossible page."""
     result = _dashnode.run_dashboard_node(_PAGER_EMPTY_HARNESS)
     seen = json.loads(result.stdout)
+    assert seen['unplanned'] == [], seen
     assert seen['oneRow']['meta'] == '1–1 / 1', seen
     assert seen['oneRow']['prevDisabled'] is True, seen
     assert seen['oneRow']['nextDisabled'] is True, seen
@@ -450,7 +484,7 @@ def test_an_emptied_list_reads_zero_slash_zero(_tmp):
         'nextDisabled': True}, seen
 
 
-_CAPTURE_HARNESS = _DOM + r"""
+_CAPTURE_HARNESS = _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const commands = [];
 const imageTargets = [];
@@ -492,7 +526,7 @@ globalThis.fetch = async (target, init = {}) => {
     imageTargets.push(target);
     return { ok: true, blob: async () => ({}) };
   }
-  throw new Error('unexpected request ' + target);
+  return refuse(target);
 };
 URL.createObjectURL = () => 'blob:capture';
 URL.revokeObjectURL = () => {};
@@ -530,7 +564,8 @@ await bounded(settle(), 'remount', _dashnodeStepTimeoutMs);
 capture('11');
 await bounded(settle(), 'remounted capture', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify({ commands, imageTargets }));
+process.stdout.write(JSON.stringify({ commands, imageTargets,
+  unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
 """
@@ -541,6 +576,7 @@ def _repeated_captures(section):
         _CAPTURE_HARNESS, bounded_steps=7, module=True, arguments=(
             ROOT / 'dashboard' / 'sections' / (section + '.js'),))
     seen = json.loads(_dashnode.run_dashboard_node(harness).stdout)
+    assert seen['unplanned'] == [], seen
     commands = seen['commands']
     assert [cmd['tabId'] for cmd in commands] == [11, 11, 22, 11], seen
     assert all(cmd['type'] == 'screenshot' for cmd in commands), seen
@@ -562,16 +598,17 @@ def test_tab_row_captures_reuse_one_upload_id(_tmp):
     _repeated_captures('tabs')
 
 
-_RECENT_HARNESS = _DOM + r"""
+_RECENT_HARNESS = _DOM + _dashfetch.DOOR + r"""
 import { readFileSync } from 'node:fs';
 (async () => {
 const pages = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 globalThis.fetch = async (target) => {
   if (target === '/tabs') return jsonResponse([]);
-  if (target.startsWith('/upload?')) {
-    if (!(target in pages)) throw new Error('unexpected page ' + target);
+  if (target.startsWith('/upload?limit=')) {
+    if (!(target in pages)) return refuse(target);
     return jsonResponse(pages[target]);
   }
+  if (!target.startsWith('/screenshot?path=')) return refuse(target);
   const path = new URLSearchParams(target.split('?')[1]).get('path');
   return { ok: true, blob: async () => ({ path }) };
 };
@@ -589,7 +626,7 @@ await bounded(settle(), 'recent listing', _dashnodeStepTimeoutMs);
 const paths = container.find('[data-role=recent]').all()
   .filter(el => el.tag === 'img').map(el => el.attrs.src.slice(5));
 phase('dashboard call settled');
-process.stdout.write(JSON.stringify(paths));
+process.stdout.write(JSON.stringify({ paths, unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
 """
@@ -624,9 +661,10 @@ def _recent_captures(tmp, count, ids):
     harness = _dashnode.DashboardNodeHarness(
         _RECENT_HARNESS, bounded_steps=2, module=True, arguments=(
             ROOT / 'dashboard' / 'sections' / 'screenshot.js', fixture))
-    actual = json.loads(_dashnode.run_dashboard_node(harness).stdout)
+    report = json.loads(_dashnode.run_dashboard_node(harness).stdout)
+    assert report['unplanned'] == [], report
     expected = list(reversed(captures[-24:]))
-    assert actual == expected, {'actual': actual, 'expected': expected}
+    assert report['paths'] == expected, report
 
 
 def test_recent_captures_show_newest_24_within_one_id(tmp):

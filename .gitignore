@@ -294,6 +294,7 @@
 !/tests/_coverage_suite_fixture.py
 !/tests/_daedalus_env.py
 !/tests/_dashdom.py
+!/tests/_dashfetch.py
 !/tests/_dashfield.py
 !/tests/_dashnode.py
 !/tests/_dashsection.py
@@ -522,6 +523,7 @@
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
+!/tests/test_dashfetch.py
 !/tests/test_dashsection_harness.py
 !/tests/test_dashshell_harness.py
 !/tests/test_dashshell_selectors.py
