@@ -292,43 +292,19 @@ class _Clock:
         return 'answered'
 
 
-class _PinnedTime:
-    """The `time` module reduced to one instant, standing in for the real.
-
-    A pinned phase is what makes the near-reset window deterministic: the
-    time left to the reset is whatever the test says it is, not whatever
-    the wall clock happened to be at when the line ran.
-    """
-
-    def __init__(self, instant):
-        self.instant = instant
-
-    def time(self):
-        return self.instant
-
-
-@contextlib.contextmanager
-def _pinned_clock(mod, instant):
-    """Hand one loaded client a clock frozen at `instant`."""
-    saved = mod.time
-    mod.time = _PinnedTime(instant)
-    try:
-        yield
-    finally:
-        mod.time = saved
-
-
 def _paused(mod, instant, resume_at):
-    """(stamp the line names, seconds slept) from one real `_pause`."""
+    """(duration rendered, stamp named, seconds slept) from one `_pause`."""
     out = io.StringIO()
     slept = []
     watcher = mod.Watcher('w', out=out)
     watcher.sleep = slept.append
-    with _pinned_clock(mod, instant):
+    with _frozen_client_clock(mod, instant):
         watcher._pause(mod.RateLimited('rate limited', resume_at))
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
-    return lines[0].rsplit(' ', 1)[-1], slept
+    _, _, rest = lines[0].partition('waiting ')
+    duration, _, stamp = rest.partition('s until ')
+    return duration, stamp, slept
 
 
 def _stamp(instant):
@@ -348,9 +324,9 @@ def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
     now = 1789012345.0
     reset = now + 5.0
     assert mod.MIN_BACKOFF <= reset - now, (mod.MIN_BACKOFF, reset - now)
-    stamp, slept = _paused(mod, now, reset)
+    duration, stamp, slept = _paused(mod, now, reset)
     assert slept == [5.0], slept
-    assert stamp == _stamp(reset), (stamp, _stamp(reset))
+    assert (duration, stamp) == ('5', _stamp(reset)), (duration, stamp)
 
 
 def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
@@ -369,11 +345,34 @@ def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
     now = 1789012345.0
     reset = now + 0.001
     assert reset - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, reset - now)
-    stamp, slept = _paused(mod, now, reset)
+    duration, stamp, slept = _paused(mod, now, reset)
     assert mod.MIN_BACKOFF == 2, mod.MIN_BACKOFF
     assert slept == [2.0], slept
     wanted = _stamp(now + mod.MIN_BACKOFF)
-    assert stamp == wanted, (stamp, wanted)
+    assert (duration, stamp) == ('2', wanted), (duration, stamp)
+
+
+def test_a_fractional_retry_after_reaches_the_pause_as_a_near_reset(tmp):
+    """The exposure the floor above defends against is reachable today.
+
+    `_graphql_refusal` accepts any `retryAfter` that is a number, and a
+    GraphQL body is JSON, so a fractional one arrives. What it becomes is
+    a reset a thousandth of a second out - nearer than the floor, which
+    is the input the hot loop is made of. Exact values, not a range, so
+    tightening the producer's own validation is told apart from any
+    change in the pause: without this, that tightening would leave every
+    control green and the control above justifying itself falsely.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    payload = {'errors': [{'type': 'RATE_LIMITED', 'extensions': {
+        'rateLimit': {'retryAfter': 0.001}}}]}
+    with _frozen_client_clock(mod, now):
+        refused, resume = mod._graphql_refusal(payload)
+    assert refused is True, refused
+    assert resume == now + 0.001, resume
+    assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
 
 
 def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
@@ -386,10 +385,10 @@ def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
     del tmp
     mod = _client()
     now = 1789012345.0
-    stamp, slept = _paused(mod, now, now - 5000)
+    duration, stamp, slept = _paused(mod, now, now - 5000)
     assert slept == [float(mod.MIN_BACKOFF)], slept
     wanted = _stamp(now + mod.MIN_BACKOFF)
-    assert stamp == wanted, (stamp, wanted)
+    assert (duration, stamp) == ('2', wanted), (duration, stamp)
 
 
 def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
@@ -402,10 +401,10 @@ def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
     del tmp
     mod = _client()
     now = 1789012345.0
-    stamp, slept = _paused(mod, now, now + 10 ** 9)
+    duration, stamp, slept = _paused(mod, now, now + 10 ** 9)
     assert slept == [float(mod.MAX_BACKOFF)], slept
     wanted = _stamp(now + mod.MAX_BACKOFF)
-    assert stamp == wanted, (stamp, wanted)
+    assert (duration, stamp) == ('21600', wanted), (duration, stamp)
 
 
 def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
@@ -418,11 +417,11 @@ def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
     del tmp
     mod = _client()
     now = 1789012345.0
-    stamp, slept = _paused(mod, now, None)
+    duration, stamp, slept = _paused(mod, now, None)
     assert slept == [float(mod.DEFAULT_BACKOFF)], slept
     assert slept == [60.0], slept
     wanted = _stamp(now + mod.DEFAULT_BACKOFF)
-    assert stamp == wanted, (stamp, wanted)
+    assert (duration, stamp) == ('60', wanted), (duration, stamp)
 
 
 def _suite_page(suites, has_next=False, cursor=None):
