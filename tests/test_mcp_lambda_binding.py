@@ -48,7 +48,7 @@ def _verdict(directory, source):
     return 'resolved' if 'pkg/leaf.py' in names else 'silent'
 
 
-def _callee(signature, arguments):
+def _lambda_composition(signature, arguments):
     """A composition whose callee is a lambda, called with `arguments`."""
     head = f'lambda {signature}' if signature else 'lambda'
     return ('\nimport importlib\n\n\ndef load():\n'
@@ -172,7 +172,7 @@ def test_a_parameter_supplied_by_name_supplies_it(_tmp):
     table and none of the other twenty-seven.
     """
     for signature, arguments in REACHES:
-        source = _callee(signature, arguments)
+        source = _lambda_composition(signature, arguments)
         assert _verdict(_tmp, source) == 'resolved', (signature, arguments)
 
 
@@ -191,10 +191,10 @@ def test_a_binding_python_refuses_is_clean_and_still_is(_tmp):
     forbids: a form the runtime raises must never enter the closure.
     """
     for signature, arguments in RAISES:
-        source = _callee(signature, arguments)
+        source = _lambda_composition(signature, arguments)
         assert _verdict(_tmp, source) == 'silent', (signature, arguments)
-    assert _verdict(_tmp, _callee('x', '1, 2')) == 'silent'
-    assert _verdict(_tmp, _callee('x, y', '1, 2, 3')) == 'silent'
+    assert _verdict(_tmp, _lambda_composition('x', '1, 2')) == 'silent'
+    assert _verdict(_tmp, _lambda_composition('x, y', '1, 2, 3')) == 'silent'
 
 
 def test_a_call_the_walk_cannot_account_for_is_undecided(_tmp):
@@ -208,7 +208,7 @@ def test_a_call_the_walk_cannot_account_for_is_undecided(_tmp):
     would be the same claim in the other direction.
     """
     for signature, arguments, _shape in UNDECIDED:
-        source = _callee(signature, arguments)
+        source = _lambda_composition(signature, arguments)
         assert _verdict(_tmp, source) == 'refused', (signature, arguments)
 
 
