@@ -9,6 +9,42 @@ import ast
 import warnings
 
 
+# PEP 750's template-string forms are a 3.14 addition, and a `t"..."` is
+# 3.14 syntax, so an older parser rejects the source outright. The rows are
+# therefore built only where the parser is the one that will read them, and
+# they are absent rather than skipped: `_refused` and `_accepted` both walk
+# a whole table, so a row that could not compile would be a false green and
+# an early return would drop the rows beside it. The registration of the
+# forms themselves is exercised on every version by the stand-in control in
+# tests/test_coverage_unfollowable_forms.py, which installs them on `ast`
+# and re-imports the walk.
+_TEMPLATE_CARRIERS = ((
+    ('template string argument', """import operator
+import subprocess
+operator.call(t"{subprocess.run}", 1)
+""", 'operator.call('),
+    ('template string bound', """import subprocess
+go = t"{subprocess.run}"
+""", 'go = '),
+    ('template string format spec', """import operator
+import subprocess
+operator.call(t"{value:{subprocess.run}}", 1)
+""", 'operator.call('),
+) if hasattr(ast, 'TemplateStr') else ())
+
+_TEMPLATE_FREES = (
+    ('template string, nothing carried', """import subprocess
+go = t"{name}"
+"""),
+    ('template string, plain text', """import operator
+operator.call(t"plain", 1)
+"""),
+    ('template string with a width', """import operator
+operator.call(t"{value:>{width}}", 1)
+"""),
+) if hasattr(ast, 'TemplateStr') else ()
+
+
 def _value_preserving_cases():
     """Forms whose sub-value reaches the binding unchanged.
 
@@ -119,7 +155,7 @@ def go():
 def go(cb=lambda: subprocess.run):
     pass
 """, 'def go(cb='),
-    )
+    ) + _TEMPLATE_CARRIERS
 
 
 def _receiver_carrier_cases():
@@ -392,7 +428,7 @@ operator.call((held := 2), 1)
 def go():
     operator.call((yield from plain()), 1)
 """),
-    )
+    ) + _TEMPLATE_FREES
 
 
 def _target_carrier_cases():

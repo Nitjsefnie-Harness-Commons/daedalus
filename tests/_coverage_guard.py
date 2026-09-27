@@ -55,7 +55,8 @@ The four comprehension forms reach their conditions through the statement-level
 node their `generators` hold, and not through their own iterable, which
 `_bound_values` judges as the comprehension arm's own business. FormattedValue
 is the exception, opened on the issue's requirement rather than on that
-argument, since `f"{launcher}"` binds a string and not the launcher.
+argument, since `f"{launcher}"` binds a string and not the launcher, and
+TemplateStr and Interpolation are opened on the same ground, as its successors.
 
 Two positions read differently from the rest. The descent that walks a callee
 hands the walk every subscript the descent consumes, index and bounds included.
