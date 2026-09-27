@@ -240,14 +240,13 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_suite_runner.py', 408,
      'test_output_close_failure_reaps_the_spawned_suite'):
         'the final reap, on the same process',
-    ('tests/_watcher_once.py', 73, 'stop'):
-        'a fixture stopping a watcher process it started',
-    ('tests/test_watcher_budget.py', 98, 'stop'):
-        'a fixture stopping a child it started',
-    ('tests/test_watcher_budget.py', 523,
+    ('tests/_watcher_waits.py', 97, 'stop'):
+        'a reap that follows a group kill, on a process already signalled',
+    ('tests/test_watcher_budget.py', 494,
      'test_a_graceful_exit_leaves_no_children_behind'):
-        'the same, in the graceful-exit control',
-    ('tests/test_watcher_budget.py', 338,
+        'a parent handle reaping a child it signalled itself, in the'
+        ' graceful-exit control',
+    ('tests/test_watcher_budget.py', 310,
      'test_the_children_die_with_their_parent'):
         'a parent handle stopping a child the test started',
 }

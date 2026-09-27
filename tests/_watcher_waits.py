@@ -6,8 +6,13 @@ Every wait here synchronises on what the process under test DID - a line
 drained from its stream, a call appended to the log, a pid gone - and not
 on how long the runner took to do it. The clock appears exactly once, as
 the failure-reporting backstop on the single wait with no live process to
-give up on.
+give up on, and once more as the bound on a reap that follows a kill and
+can only return.
 """
+import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 
@@ -46,6 +51,75 @@ class Stream:
         with self.changed:
             self.ended = True
             self.changed.notify_all()
+
+
+class ChildProcess:
+    """A started process, with the two streams the waits read drained.
+
+    The contract every wait below consumes: `alive()`, `captured()`, a
+    `proc` carrying the exit code, and the streams `await_lines` reads. A
+    subclass supplies the argv and the environment and whatever else its
+    launch needs; the kill is here, because a kill naming one process
+    abandons whatever that process had already spawned.
+
+    The child leads a process group of its own, so `stop` is a
+    cancellation rather than an abandonment. A group is also what lets a
+    graceful signal reach one child and not the runner: on Windows that
+    is the new-process-group flag `CTRL_BREAK_EVENT` needs, and on POSIX
+    a new session means a signal sent to the pid is never the runner's.
+    """
+
+    def __init__(self, argv, env):
+        self.argv = argv
+        self.proc = subprocess.Popen(
+            argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+            start_new_session=True,
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP
+                           if sys.platform.startswith('win') else 0))
+        self.out = Stream()
+        self.err = Stream()
+        for pipe, sink in ((self.proc.stdout, self.out),
+                           (self.proc.stderr, self.err)):
+            threading.Thread(target=sink.pump, args=(pipe,),
+                             daemon=True).start()
+
+    def alive(self):
+        return self.proc.poll() is None
+
+    def captured(self):
+        """Everything the child printed, for a wait's failure report."""
+        return '\n'.join(self.out.lines + self.err.lines)
+
+    def stop(self):
+        if self.proc.poll() is None:
+            _cancel(self.proc)
+        self.proc.wait(timeout=60)
+        return self.proc.returncode
+
+
+def _cancel(proc):
+    """Signal the whole group the child leads, so nothing outlives it.
+
+    A kill names one process, and the `gh` a watcher had already spawned
+    is not it: the orphan keeps running, and keeps appending to the call
+    log a measurement is still reading, after the child it belonged to is
+    gone. The group is every process the child started, so signalling it
+    cancels the work. `start_new_session` made the child its own group
+    leader, so the group id is its pid - and the child is unreaped here,
+    so that pid is still its own and cannot have been handed to anyone
+    else. A group that does not exist is a child that has not reached
+    `setsid` yet, and naming the child alone is all there is to do.
+    """
+    if sys.platform.startswith('win'):
+        # Windows has no group to signal, so the tree is named instead.
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                       capture_output=True)
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        proc.kill()
 
 
 def await_lines(stream, match, count, what):
