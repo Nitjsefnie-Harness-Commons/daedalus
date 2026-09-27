@@ -215,32 +215,100 @@ def _projected(node: ast.expr):
     return node.args[0]
 
 
-def _fills(func: ast.Lambda, call: ast.Call) -> bool:
-    """Whether a call supplies what a lambda's signature requires, and so
-    produces the body rather than raising `TypeError` on the spot.
+def _carried_keys(node, bound, scopes):
+    """The names a `**` mapping supplies, or None when the walk cannot read
+    them.
 
-    Every REQUIRED parameter has to be supplied and every supplied argument
-    has to be one a parameter can take: a vararg takes any number of
-    positionals, a kwarg any number of names at all, a default means the
-    parameter is not required, and a keyword-only parameter is required
-    unless a default or a kwarg covers it. A `**` unpacking names this
-    walk cannot know, so it is accepted only where a kwarg takes it.
+    A dict DISPLAY settles its own entries — the last of two equal keys, and
+    the equality is Python's — so `**{'x': 1}` supplies exactly the keys it
+    carries. Anything else is a runtime value this walk cannot read, and a
+    call that carries one supplies an UNKNOWN set of names rather than none:
+    `d` empty raises and `d` holding the key reaches, and the walk is not
+    entitled to pick one.
+    """
+    if not isinstance(node, ast.Dict):
+        return None
+    keys = []
+    for key in node.keys:
+        if key is None:
+            return None
+        value = _settled_position(key, bound, scopes)
+        if not isinstance(value, str):
+            return None
+        keys.append(value)
+    return keys
+
+
+def _supplied(call, bound, scopes):
+    """The names a call supplies BY NAME, or None when the call does not say.
+
+    A keyword says its own name, and a `**` mapping says the keys the
+    display it reads carries. One of them the walk cannot read leaves the
+    whole call undecided rather than half-bound, because a required
+    parameter it may or may not fill is the question the call is being
+    asked.
+    """
+    names = []
+    for keyword in call.keywords:
+        if keyword.arg is not None:
+            names.append(keyword.arg)
+            continue
+        carried = _carried_keys(keyword.value, bound, scopes)
+        if carried is None:
+            return None
+        names.extend(carried)
+    return names
+
+
+def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
+    """What a call supplies to a lambda's signature: whether it supplies
+    what the signature requires, whether it RAISES instead, or `UNREAD` when
+    it does not say.
+
+    A parameter is supplied by POSITION or by NAME, and the two are one
+    supply, so the call's arguments are bound to the signature the way
+    Python binds them rather than counted against it. The call raises
+    wherever Python's own binding raises: a second value for one parameter,
+    a name the signature does not have and no `**kwargs` to catch it, or a
+    name for a POSITIONAL-ONLY parameter. What the call does not say is what
+    a `*args` unpacks to, so that is `UNREAD`, and the caller's own class.
     """
     args = func.args
-    positional = args.posonlyargs + args.args
-    if len(call.args) > len(positional) and args.vararg is None:
+    params = args.posonlyargs + args.args
+    at = {argument.arg: index for index, argument in enumerate(params)}
+    only = {argument.arg for argument in args.posonlyargs}
+    wanted = {argument.arg for argument, default
+              in zip(args.kwonlyargs, args.kw_defaults) if default is None}
+    names = _supplied(call, bound, scopes)
+    if names is None or any(isinstance(value, ast.Starred)
+                            for value in call.args):
+        return UNREAD
+    filled = set()
+    for position in range(len(call.args)):
+        if position >= len(params):
+            if args.vararg is None:
+                return False
+            break
+        filled.add(position)
+    for name in names:
+        if name in only:
+            return False
+        index = at.get(name)
+        if index is not None:
+            if index in filled:
+                return False
+            filled.add(index)
+        elif name in wanted:
+            wanted.discard(name)
+        elif args.kwarg is None:
+            return False
+    # A default is on the TAIL of the parameters, so the required ones are
+    # the head — and `zip` rather than a count for the same reason the
+    # keyword-only arm reads its defaults one by one.
+    required = set(range(len(params) - len(args.defaults)))
+    if args.vararg is None and not filled >= required:
         return False
-    if len(call.args) < len(positional) - len(args.defaults):
-        return False
-    keywords = [keyword.arg for keyword in call.keywords]
-    named = sum(1 for name in keywords if name is not None)
-    known = {argument.arg for argument in positional
-             + list(args.kwonlyargs)}
-    if args.kwarg is None and (named != len(keywords)
-                               or set(keywords) - known):
-        return False
-    required = sum(1 for default in args.kw_defaults if default is None)
-    return args.kwarg is not None or named >= required
+    return not wanted
 
 
 def _expanded_elts(base):
@@ -337,15 +405,24 @@ def _is_the_operation(node, bound, scopes):
 
 def _called(func, call, bound, scopes):
     """The value a call of a LAMBDA produces: the body its signature
-    accepts, or `UNREACHABLE` when it accepts none of what is supplied.
+    accepts, `UNREACHABLE` when the call is a raise, and nothing decided
+    when the call does not say what it supplies.
 
     A function's value is its RETURN, so a call of one IS that return and
     a bare lambda is the function itself. That is the whole of the lambda
     rule, and it is why a lambda reached by a fold reads the same as one
     written at the call site: the fold produces the lambda, and the call
     of a produced lambda is the same call.
+
+    A call this walk cannot account for is UNDETERMINED rather than either
+    verdict, and the value it carries is the BODY it may produce: a refusal
+    reads the mention property over that, which is the direction a question
+    the walk cannot answer has to go.
     """
-    if not _fills(func, call):
+    filled = _fills(func, call, bound, scopes)
+    if filled is UNREAD:
+        return func.body, False
+    if not filled:
         return UNREACHABLE, True
     return static_value(func.body, bound, scopes)
 
