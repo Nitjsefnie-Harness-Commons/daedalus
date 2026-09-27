@@ -15,8 +15,9 @@ as a measurement.
 
 The module binds no fixture: a caller hands in the answers and the fake, so
 the same harness measures this tree's watchers and the base commit's. It is
-not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls
-live in tests/test_watcher_budget.py.
+not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls live
+in tests/test_watcher_budget.py, which judges the idle bounds, and in
+tests/test_watcher_loop_budget.py, which judges the figure over a loop.
 """
 import os
 import shutil
