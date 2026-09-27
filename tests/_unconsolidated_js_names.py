@@ -14,20 +14,20 @@ pair-keyed rule covers it for free, because the first declaration's row
 already matches the pair.
 
 It reads the base tree's own declarations rather than a list of the
-files the branch touched. That form is not a preference: 71 files carry
-a row in the Python table and 27 in this one, this branch edits fifteen
-of those twenty-seven, and a path list cannot tell a site the branch
-wrote from one it did not. It cost this branch five renames in test
-files it was not asked to touch, every one of them honest and every one
-of them undone when the boundary changed.
+files the branch touched. That form is not a preference: 95 files carry
+a row in the Python table and 31 in this one, this branch edits seven
+of the ninety-five and eighteen of the thirty-one, and a path list
+cannot tell a site the branch wrote from one it did not. It cost that
+branch five renames in test files it was not asked to touch, every one
+of them honest and every one of them undone when the boundary changed.
 
 Like every row in the Python table, each of these is a site the rule
-finds and consolidation has not reached. The `streamResponse` factory is
-the largest cluster left: nine sites carry the same three lines, and the
-shared factory cannot take them, because a second `streamResponse` in
-`tests/_worker_sources.py` would make the row below excuse a declaration
-this branch wrote, and the branch-boundary rule counts declarations per
-(file, name) rather than per file.
+finds and consolidation has not reached. The `response`, `delay`, `copy`
+and `streamResponse` factories each have one copy now, in
+`tests/_worker_sources.py`, spliced where the local declaration stood.
+What is left below answers something a shared factory does not: a
+headers map, a `SyntaxError` from `json()`, a never-settling body, or a
+ledger of one stream's own answers.
 """
 
 UNCONSOLIDATED_JS_NAMES = {
@@ -145,9 +145,10 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_tabs_harness.py', 'run'):
         'the tabs harness own entry, which applies a plan over chrome.tabs',
     ('tests/_worker_sources.py', 'streamResponse'):
-        'the shared factory, reported because the oracle harness and the '
-        'dashboard shell each carry a ledger of their own stream answers '
-        'rather than importing it',
+        'the shared factory, reported because the oracle harness answers '
+        'from a ledger of its own stream bodies and the dashboard shell '
+        'answers with a headers map and an abort signal, so neither can '
+        'import it',
     ('tests/test_config_boot_generation.py', 'copy'):
         'the structural-clone helper under a parameter named v where the '
         'shared copy names it value, so the same expression with a '
@@ -173,33 +174,20 @@ UNCONSOLIDATED_JS_NAMES = {
         'the unparsed-plan harness answers ok from the caller over six '
         'body lines rather than from the status range, and the other two '
         'of the three harnesses now splice the shared factory',
-    ('tests/test_gate_extensions.py', 'streamResponse'):
-        'the gate extension suite writes the disabled-error line into each '
-        'of its three harnesses, and the shared factory carries it with a '
-        'hang body these do not',
     ('tests/test_gm_relay_authority.py', 'response'):
         'this one carries a reader body and a status text, because the '
         'relay harness answers its own fetch through it',
     ('tests/test_gm_relay_authority.py', 'run'):
         'the GM relay harness own entry, 98 lines over one page call',
-    ('tests/test_gm_relay_authority.py', 'streamResponse'):
-        'the GM relay harness answers only the disabled error, where the '
-        'shared factory also answers a hang',
     ('tests/test_gm_transfers.py', 'flushMessages'):
         'the transfer suite writes the drain loop into each of its own '
         'three harnesses, and two of them bound it with a guard the owner '
         'has no counter for',
-    ('tests/test_relay_example_placeholders.py', 'streamResponse'):
-        'the placeholder harness answers only the disabled error, where the '
-        'shared factory also answers a hang',
     ('tests/test_segment_mint.py', 'response'):
         'this one throws SyntaxError from json() on a null body, which the '
         'mint harness needs and the shared factory does not model',
     ('tests/test_segment_mint.py', 'run'):
         'the mint harness own entry, 42 lines over one job capability',
-    ('tests/test_segment_mint.py', 'streamResponse'):
-        'the mint harness answers only the disabled error, where the shared '
-        'factory also answers a hang',
     ('tests/test_starvation_bounds.py', 'delay'):
         'the next-turn delay, the same three lines as the other seven '
         'copies',
@@ -233,14 +221,11 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_worker_close_tab.py', 'setTimeoutStandIn'):
         'the close-tab harness defers timers behind its own flag, where the '
         'tabs harness records each timer and its error',
-    ('tests/test_worker_close_tab.py', 'streamResponse'):
-        'the close-tab harness answers only the disabled error, where the '
-        'shared factory also answers a hang',
     ('tests/test_worker_register_throttle.py', 'clearScheduled'):
         'the throttle harness records the clear and drops the pending flag, '
         'where the boundary fake only marks the timer and neither records',
     ('tests/test_worker_register_throttle.py', 'response'):
-        'the same answer as the shared factory over four body lines '
+        'the same answer as the shared factory over six body lines '
         'instead of nine, so the two do not meet',
     ('tests/test_worker_register_throttle.py', 'run'):
         'the register harness own entry, 35 lines over the registration '
@@ -252,17 +237,11 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_worker_register_throttle.py', 'settle'):
         'the throttle harness drains one turn without the owner comment, '
         'where the boot harness drains twenty-five',
-    ('tests/test_worker_register_throttle.py', 'streamResponse'):
-        'the throttle harness answers only the disabled error, where the '
-        'shared factory also answers a hang',
     ('tests/test_worker_result_post.py', 'run'):
         'the postResult harness own entry, 31 lines over one result post',
     ('tests/test_worker_result_post.py', 'settle'):
         'the postResult harness drains one turn, the same shape as the '
         'throttle harness and not the boot harness own loop',
-    ('tests/test_worker_result_post.py', 'streamResponse'):
-        'the postResult harness answers only the disabled error, where the '
-        'shared factory also answers a hang',
     ('tests/_dashdom.py', 'textNode'):
         'this is the text-node factory the jsdom-less shell document '
         'uses. Its twin is the row for tests/_dashnode.py, five body '
