@@ -99,6 +99,7 @@ BINDING_SHAPES = (
     ('a keyword-only parameter twice', 'raises'),
     ('a keyword-only parameter twice, by name and display', 'raises'),
     ('a name no parameter declares', 'raises'),
+    ('a name the catch-all takes twice', 'raises'),
 )
 
 # The shapes this class CANNOT cross, and why each is unreachable here. A
@@ -117,11 +118,6 @@ UNDECIDED_SHAPES = (
     ('a `**` display whose keys are not all names',
      'the walk cannot read them and Python refuses them outright'),
 )
-
-
-def shape_side(shape):
-    """Which side of the boundary a declared shape is on."""
-    return dict(BINDING_SHAPES)[shape]
 
 
 def _signatures():
@@ -179,8 +175,8 @@ def _bindings(signature):
     point: a side names which end of the boundary a row is on, so two
     refusals are one word and a rule that gets one of them wrong is
     indistinguishable from a rule that gets both right. A shape per refusal
-    is what lets `BINDING_SHAPES` be checked instead of trusted, and
-    `step_side` says which side a shape is on.
+    is what lets `BINDING_SHAPES` be checked instead of trusted — the suite
+    reads the side off that table directly.
 
     A signature emits a shape only where it can produce it — a
     `*args` absorbs the positional that would be one too many, and a `**w`
@@ -241,11 +237,15 @@ def _bindings(signature):
     if nameable and not signature['kwarg']:
         yield ('a name no parameter declares', ', '.join(
             leading + [f'{name}=0' for name in nameable]) + ', z=0')
-
-
-def step_side(shape):
-    """Which side of the boundary a row's shape is on."""
-    return shape_side(shape)
+    if signature['kwarg']:
+        # A name the CATCH-ALL takes twice. No parameter declares it, so both
+        # supplies land in the `**` and Python refuses the call there — and
+        # every declared parameter is supplied, so the duplicate is the only
+        # thing wrong with the call and the row measures this one rule.
+        declared = ', '.join(leading + ['0'] * len(names)
+                             + [f'{name}=0' for name in kwonly])
+        yield ('a name the catch-all takes twice', ', '.join(
+            ([declared] if declared else []) + ['z=0', '**{"z": 0}']))
 
 
 def signatures(imports, operation):

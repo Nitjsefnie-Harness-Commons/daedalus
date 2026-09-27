@@ -134,6 +134,16 @@ RAISES = (
     ('x, *a, k', 'k=1'),
     ('x, *a, k', 'k=2'),
     ('x, *a, k', "**{'k': 1}"),
+    # A name NO parameter declares, supplied twice into a `**kwargs` that
+    # catches it. Declared parameters are the arms that already check for a
+    # second supply, and the catch-all is the one arm that did not: a rule
+    # that absorbs an undeclared name reads the call as legal and resolves a
+    # form whose binding is a `TypeError` on the spot.
+    ('**w', 'z=1, **{"z": 2}'),
+    ('**w', '**{"z": 1}, z=2'),
+    ('**w', '**{"z": 1}, **{"z": 2}'),
+    ('x, **w', '1, z=1, **{"z": 2}'),
+    ('*, k, **w', 'k=1, z=1, **{"z": 2}'),
 )
 
 # A `*args` unpacks to a length and a `**` mapping to a set of keys, and
@@ -159,7 +169,7 @@ def test_a_parameter_supplied_by_name_supplies_it(_tmp):
     The property is not the KEYWORD but the supply: position and name are
     one supply, and a `**` mapping the fold reads carries the names it
     displays. A rule that counted positionals alone got the first row of this
-    table and none of the other twenty.
+    table and none of the other twenty-seven.
     """
     for signature, arguments in REACHES:
         source = _callee(signature, arguments)
@@ -171,6 +181,10 @@ def test_a_binding_python_refuses_is_clean_and_still_is(_tmp):
     name for a POSITIONAL-ONLY parameter, and a required one left out are
     each a `TypeError` on the call, so the call raises on the expression
     itself and the container's mention is beside the question — CLEAN.
+
+    A name a `**kwargs` CATCHES is not a name the signature does not have:
+    both supplies land in the catch-all and the call still raises, so the
+    catch-all arm carries the same second-supply check the declared arms do.
 
     Accepting any of them is where a fix that reads names too eagerly goes
     wrong, and it is the same fail-open direction the does-not-reach class
