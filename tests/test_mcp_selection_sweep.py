@@ -4,18 +4,21 @@
 `_mcp_selection_sweep` generates the product of the grammar over its axes
 and classifies each form by running it against a real `importlib`. The hand
 cases in `test_mcp_import_selection.py` are a sample of the spellings
-someone thought of; the four at the bottom are what the product is held to,
+someone thought of; the five at the bottom are what the product is held to,
 and a class the builders cannot name has no row at all — which is why the
 class marker below is itself checked.
 
-The two classes the CONTAINERS grammar could not name are here with their
+The three classes the CONTAINERS grammar could not name are here with their
 generated rows because they are one class's coverage: a dict DISPLAY
-carrying one key twice, and a LAMBDA in a position a fold selects. Both are
-members of the stated property, neither was a member of the shipped
-grammar, and each was a live bypass through a sweep that reported nothing
-unpaid. Their hand boundary pins sit beside their generated ones so that a
-row which stops discriminating and a case which stops agreeing are read in
-the same place.
+carrying one key twice, a LAMBDA in a position a fold selects, and a
+BUILTIN behind a binding the module may or may not have made. All three are
+members of the stated property, none was a member of the shipped grammar,
+and each was a live bypass through a sweep that reported nothing unpaid.
+The first two keep their hand boundary pins beside their generated ones, so
+that a row which stops discriminating and a case which stops agreeing are
+read in the same place; the third's hand cases are in
+`test_mcp_builtin_names.py`, and what this file adds for it is the twin that
+differs only in the module's own source.
 """
 import sys
 from pathlib import Path
@@ -153,6 +156,35 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
                    # a lambda is not the lambda's return.
                    '[(lambda: importlib.import_module)][0].__call__'):
         assert _callee_scan(_tmp, callee) == 'silent', callee
+
+
+def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
+    """The class's two sides, in the guard's OWN verdicts.
+
+    `test_every_class_of_the_property_has_a_discriminating_row` checks that
+    a class's rows disagree by ORACLE class; this checks the other half, and
+    it checks it the only way that can fail: a row and its twin differ by
+    one line of the module's own source and by nothing in the callee, so
+    every pair has to come back with two different verdicts. A rule that
+    read a replaced name as the builtin resolves a call that raises, and
+    one that read an unreplaced alias as anything else declines a position
+    the runtime settles; neither is visible in a count.
+    """
+    forms = _swept(_tmp)
+    rows = [form for form in forms
+            if 'a builtin behind a binding' in form['classes']]
+    assert len(rows) == 160, len(rows)
+    pairs = {}
+    for form in rows:
+        pairs.setdefault(form['callee'], set()).add(form['inline'])
+    assert all(len(verdicts) == 2 for verdicts in pairs.values()), [
+        (callee, sorted(verdicts)) for callee, verdicts in pairs.items()
+        if len(verdicts) != 2][:5]
+    assert {form['oracle'] for form in rows} == {
+        'reaches', 'does not reach', 'raises'}
+    reached = [form for form in rows
+               if form['oracle'] == 'reaches' and not form['pinned']]
+    assert not reached, reached[:2]
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
