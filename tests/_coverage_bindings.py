@@ -319,20 +319,22 @@ def _call_receiver_parts(value):
     An attribute the descent consumes is handed over on the same rule as
     a subscript and for the same reason: naming a launch method is a read
     off what the chain has already reached, and that read is invisible
-    while the chain swallows it. Two attributes are excepted. The call's
+    while the chain swallows it. Two conditions hold it back. The call's
     own outermost callee, because that one is a direct launch, already
-    resolved, and the arm above judges it; and any launch method below an
-    attribute that named a constant, because the descent has by then left
-    the launcher that constant hangs off, so what it reaches is a bound
-    method of the string the constant read produced. `subprocess.run` and
-    `subprocess.run.__call__(...)` sit on the other side of that line from
-    `subprocess.run.__name__.upper()`.
+    resolved, and the arm above judges it; and any item above it that does
+    not itself name a launch method, because the method below that is
+    bound to whatever the item evaluates to — a string, a mapping, a type
+    or a tuple — and nothing here tells those apart. So `subprocess.run`
+    and `subprocess.run.__call__(...)` are handed over, and
+    `subprocess.run.__name__.upper()` and `subprocess.run[k].run(...)`
+    are not, and the subscript is in the second pair for the same reason
+    the constant is.
     """
     callee = value.func
-    # Once the descent has read a constant it has left the launcher that
-    # constant hangs off, so a launch method further down that chain is a
-    # bound method of something else. A subscript is not a read of its own
-    # and does not close the chain.
+    # A launch method is read off the launcher only while everything above
+    # it in the chain is one too, and a subscript closes the chain as
+    # surely as a constant does: what it hands back is not the launcher
+    # either, and what a chain of them ends at is not decidable here.
     launch_only = True
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         if isinstance(callee, ast.Subscript):
