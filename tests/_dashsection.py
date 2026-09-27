@@ -12,11 +12,17 @@ and every fill is controlled by a case in
 The house rule is `_dashdom`'s and it is the reason the fills refuse
 rather than answer: a surface that is not modelled fails by name, because
 "the scaffold did not understand" and "nothing matched" are different
-situations that a permissive double renders identical.
+situations that a permissive double renders identical. The rule is
+`_dashdom`'s; the double this module composes is not. `_dashnode.DOM`
+carries no parking clock at all, which is why the clock below is
+`sectionPark` rather than an import of `_dashdom`'s.
 
 `SHELL` is `_dashnode.DOM` followed by the two halves below, which share
-one module scope in the child exactly as `_dashshell` composes
-`_dashdom.DOM` with its transport. The real `dashboard/api.js` is
+one module scope in the child. `_dashshell` composes the same way and with
+the OTHER double, `_dashdom.DOM`, over its own transport; this one composes
+`_dashnode.DOM` over the section transport, and every JavaScript name the
+two halves define for themselves carries a `section` prefix so the two
+preludes never collide by accident. The real `dashboard/api.js` is
 imported off disk and runs for real: the token header, the
 `URLSearchParams` assembly, the `/command` + `/result` two-leg retry and
 the per-tab serialisation are the shipped code, never a re-implementation.
@@ -99,7 +105,7 @@ function unmodelled(what, value) {
     + ': ' + String(value));
 }
 
-function describe(value) {
+function sectionDescribe(value) {
   try {
     if (typeof value === 'string') return value;
     if (value && typeof value.message === 'string') return value.message;
@@ -111,7 +117,7 @@ function describe(value) {
 
 const realConsoleError = console.error.bind(console);
 console.error = (...args) => {
-  ERRORS.push(args.map(describe).join(' '));
+  ERRORS.push(args.map(sectionDescribe).join(' '));
   realConsoleError(...args);
 };
 
@@ -248,13 +254,13 @@ globalThis.localStorage = {
   clear: () => { STORAGE.clear(); },
 };
 
-function park(kind, callback, delay, ...extra) {
+function sectionPark(kind, callback, delay, ...extra) {
   PARKED.push({ id: PARKED.length + 1, kind, callback, extra,
                 delay: Number(delay) || 0 });
   return PARKED.length;
 }
 
-function clearParked(id) {
+function sectionClearParked(id) {
   if (!(id >= 1 && id <= PARKED.length)) return false;
   if (!PARKED[id - 1]) return false;
   PARKED[id - 1] = null;
@@ -262,11 +268,11 @@ function clearParked(id) {
 }
 
 globalThis.setTimeout = (callback, delay, ...extra) => (
-  park('timeout', callback, delay, ...extra));
-globalThis.clearTimeout = (id) => { clearParked(id); };
+  sectionPark('timeout', callback, delay, ...extra));
+globalThis.clearTimeout = (id) => { sectionClearParked(id); };
 globalThis.setInterval = (callback, delay, ...extra) => (
-  park('interval', callback, delay, ...extra));
-globalThis.clearInterval = (id) => { clearParked(id); };
+  sectionPark('interval', callback, delay, ...extra));
+globalThis.clearInterval = (id) => { sectionClearParked(id); };
 
 // A parked clock would strand every command inside its first poll:
 // `api.js` waits 250 ms between result attempts and a scenario can never

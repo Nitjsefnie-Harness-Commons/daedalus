@@ -200,7 +200,7 @@ def test_the_mount_lists_the_tabs_and_says_it_is_not_capturing(_tmp):
     so a mount that got the tab list offers every tab and a mount that
     did not is still offering the placeholder. Nothing is sent: the panel
     has no automatic command the way the timings panel has."""
-    report = _run('report({ options: container.find("[data-role=tab]")'
+    report = _run('sectionReport({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  status: said(), sent: sent().length });\n')
     assert report['options'] == ['(active tab)', '11  first tab',
@@ -218,7 +218,7 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     about why. The panel is otherwise live -- `runCommand` still refuses
     a command at `api.js:128` -- and this case does not press anything to
     say so."""
-    report = _run('report({ options: container.find("[data-role=tab]")'
+    report = _run('sectionReport({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  status: said() });\n', setup=TABS + NO_TOKEN)
     assert report['options'] == ['(active tab)'], report
@@ -235,7 +235,7 @@ def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
     the try/catch, so it is not what is on offer here. What the bridge
     said is nowhere on the panel, which is the contract the missing
     `errorLabel` buys."""
-    report = _run('report({ options: container.find("[data-role=tab]")'
+    report = _run('sectionReport({ options: container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  toasts: toasts() });\n', setup=TABS_FAILING)
     assert report['options'] == ['(active tab)'], report
@@ -247,7 +247,7 @@ def test_start_sends_the_max_and_neither_tab_nor_filter(_tmp):
     """`fields(true)` adds the max from the control and adds a tab only
     when the select holds one, so the way to say "the active tab, default
     depth, no filter" is the absence of the other two keys."""
-    report = _run(_click('START') + 'report({ sent: sent(),'
+    report = _run(_click('START') + 'sectionReport({ sent: sent(),'
                   ' status: said() });\n',
                   answers=(ANSWER_START,))
     first = report['sent'][0]
@@ -265,13 +265,16 @@ def test_an_empty_or_unreadable_max_input_becomes_one_thousand(_tmp):
     empty box and a box holding letters both fall back to a thousand --
     and the `min` and `max` the control carries are never enforced here."""
     empty = _run(_set('max', MAX_NONE) + _click('START')
-                 + 'report({ sent: sent() });\n', answers=(ANSWER_START,))
+                 + 'sectionReport({ sent: sent() });\n',
+                 answers=(ANSWER_START,))
     assert empty['sent'][0]['maxRequests'] == 1000, empty
     letters = _run(_set('max', MAX_LETTERS) + _click('START')
-                   + 'report({ sent: sent() });\n', answers=(ANSWER_START,))
+                   + 'sectionReport({ sent: sent() });\n',
+                   answers=(ANSWER_START,))
     assert letters['sent'][0]['maxRequests'] == 1000, letters
     small = _run(_set('max', MAX_ONE) + _click('START')
-                 + 'report({ sent: sent() });\n', answers=(ANSWER_START,))
+                 + 'sectionReport({ sent: sent() });\n',
+                 answers=(ANSWER_START,))
     assert small['sent'][0]['maxRequests'] == 1, small
 
 
@@ -281,7 +284,7 @@ def test_a_chosen_tab_arrives_as_a_number_and_the_filter_is_trimmed(_tmp):
     trimmed here -- so a pattern typed with a trailing space reaches the
     worker without one."""
     report = _run(_set('tab', CHOSEN_TAB) + _set('filter', FILTER_PADDED)
-                  + _click('START') + 'report({ sent: sent() });\n',
+                  + _click('START') + 'sectionReport({ sent: sent() });\n',
                   answers=(ANSWER_START,))
     first = report['sent'][0]
     assert first['tabId'] == 11, report
@@ -299,7 +302,7 @@ def test_the_bodies_box_rides_on_start_poll_and_stop(_tmp):
     them, having attached nothing on the way in."""
     report = _run(_set('bodies', BODIES_ON)
                   + _click('START') + _click('poll') + _click('STOP')
-                  + 'report({ sent: sent() });\n',
+                  + 'sectionReport({ sent: sent() });\n',
                   answers=(ANSWER_START, ANSWER_POLL, ANSWER_STOPPED))
     assert [body['type'] for body in report['sent']] == [
         'net-capture', 'net-capture-get', 'net-capture-stop'], report
@@ -315,7 +318,7 @@ def test_the_max_is_on_the_start_command_and_on_nothing_else(_tmp):
     a member no handler would read, and a poll that could set the capture
     depth would be the operator's first sign of it."""
     report = _run(_click('START') + _click('poll') + _click('STOP')
-                  + 'report({ sent: sent() });\n',
+                  + 'sectionReport({ sent: sent() });\n',
                   answers=(ANSWER_START, ANSWER_POLL, ANSWER_STOPPED))
     first, second, third = report['sent']
     assert first['maxRequests'] == 1000, report
@@ -328,7 +331,7 @@ def test_start_says_already_capturing_with_the_buffered_depth(_tmp):
     it reports is the only record of what the previous capture already
     holds -- an operator who started twice and got `capturing` would read
     a buffer that is not empty as one that is."""
-    report = _run(_click('START') + 'report({ status: said() });\n',
+    report = _run(_click('START') + 'sectionReport({ status: said() });\n',
                   answers=(ANSWER_ALREADY,))
     assert report['status'] == {
         'text': 'already capturing on tab 22 · 40 buffered',
@@ -344,7 +347,7 @@ def test_poll_says_the_count_and_renders_the_rows(_tmp):
     that, so the cell is the first 139 characters and an ellipsis
     (`truncate` is `slice(0, n - 1) + '…'`), and a cap of 100 would show
     40 fewer."""
-    report = _run(_click('poll') + 'report({ status: said(),'
+    report = _run(_click('poll') + 'sectionReport({ status: said(),'
                   ' sub: sub.textContent, rows: rows() });\n',
                   answers=(ANSWER_POLL,))
     assert report['status'] == {'text': '3 request(s) on tab 11',
@@ -361,7 +364,7 @@ def test_a_poll_answer_without_a_count_says_undefined(_tmp):
     """`String(r.count)` has no fallback, so a count the worker did not
     send reaches the operator as the word `undefined` -- beside a table
     that is not empty, which is the confusing part of it."""
-    report = _run(_click('poll') + 'report({ status: said(),'
+    report = _run(_click('poll') + 'sectionReport({ status: said(),'
                   ' sub: sub.textContent });\n',
                   answers=(ANSWER_POLL_BARE,))
     assert report['status']['text'] == 'undefined request(s) on tab 11', \
@@ -376,7 +379,7 @@ def test_stop_when_it_was_not_capturing_says_the_reason_and_renders_nothing(
     with an empty one -- the operator keeps the rows the last poll gave
     them."""
     report = _run(_click('poll') + _click('STOP')
-                  + 'report({ status: said(), sub: sub.textContent,'
+                  + 'sectionReport({ status: said(), sub: sub.textContent,'
                     ' rows: rows().length });\n',
                   answers=(ANSWER_POLL, ANSWER_NOT_CAPTURING))
     assert report['status'] == {
@@ -389,7 +392,7 @@ def test_a_stop_that_had_no_reason_names_the_default(_tmp):
     """`String(r.reason || 'not capturing')` is the only fallback on the
     stop line, so a refusal with no reason of its own reads as the
     sentence rather than as `undefined`."""
-    report = _run(_click('STOP') + 'report({ status: said(),'
+    report = _run(_click('STOP') + 'sectionReport({ status: said(),'
                   ' rows: rows().length });\n',
                   answers=(ANSWER_NOT_CAPTURING_BARE,))
     assert report['status'] == {'text': 'not capturing', 'classes': ['dim']}, \
@@ -400,7 +403,7 @@ def test_a_stop_that_had_no_reason_names_the_default(_tmp):
 def test_stop_says_the_tab_and_what_it_captured(_tmp):
     """The stop line carries two spaces on each side of both `=`, which is
     what separates the tab id from the count at a glance."""
-    report = _run(_click('STOP') + 'report({ status: said(),'
+    report = _run(_click('STOP') + 'sectionReport({ status: said(),'
                   ' sub: sub.textContent, rows: rows().length });\n',
                   answers=(ANSWER_STOPPED,))
     assert report['status'] == {
@@ -419,7 +422,7 @@ def test_a_start_that_never_answers_gives_up_at_fifteen_seconds(_tmp):
     deadline early, so the count can be lower than sixty and never
     higher."""
     report = _run(_click('START')
-                  + 'report({ polls: legs(), status: said(),'
+                  + 'sectionReport({ polls: legs(), status: said(),'
                     '  toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
     assert report['toasts'][0]['text'].startswith(
@@ -437,7 +440,7 @@ def test_a_poll_that_never_answers_gives_up_at_thirty_seconds(_tmp):
     seconds outright, and the leg count is bounded by thirty rather than
     fifteen seconds of cadence."""
     report = _run(_click('poll')
-                  + 'report({ polls: legs(), status: said() });\n',
+                  + 'sectionReport({ polls: legs(), status: said() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
     assert report['status']['text'].startswith(
         'Timeout (30000ms) waiting for _net-capture-get_1_'), report
@@ -451,7 +454,7 @@ def test_a_stop_that_never_answers_gives_up_at_thirty_seconds(_tmp):
     the message -- and the stop reports a give-up by toast, where the poll
     renders it inline."""
     report = _run(_click('STOP')
-                  + 'report({ polls: legs(), status: said(),'
+                  + 'sectionReport({ polls: legs(), status: said(),'
                     '  toasts: toasts() });\n',
                   plan=NEVER_ANSWERED + shared.COMMAND, by_type=False)
     assert report['toasts'][0]['text'].startswith(
@@ -466,7 +469,7 @@ def test_a_failed_poll_is_rendered_inline_in_red(_tmp):
     a refusal there is visible without the operator looking for a toast
     that is not there. `assert report['toasts'] == []` is the half that
     would fail against a module that toasted as well."""
-    report = _run(_click('poll') + 'report({ status: said(),'
+    report = _run(_click('poll') + 'sectionReport({ status: said(),'
                   ' toasts: toasts() });\n',
                   answers=(REFUSE_POLL,))
     assert report['status'] == {'text': 'nothing running',
@@ -479,7 +482,7 @@ def test_a_failed_start_toasts_and_leaves_the_status_line_alone(_tmp):
     the pre-click sentence survives a refusal. That is the discriminator
     against the poll above: a module that rendered both the same way
     would pass one of the two and fail the other."""
-    report = _run(_click('START') + 'report({ status: said(),'
+    report = _run(_click('START') + 'sectionReport({ status: said(),'
                   ' toasts: toasts() });\n',
                   answers=(REFUSE_START,))
     assert report['status'] == {'text': 'not capturing.', 'classes': []}, \
@@ -493,7 +496,7 @@ def test_a_failed_stop_toasts_and_leaves_the_status_line_alone(_tmp):
     line. Pinned as its own case because the stop also has the
     `!r.stopped` branch above it, and the two are easy to confuse."""
     report = _run(_click('poll') + _click('STOP')
-                  + 'report({ status: said(), toasts: toasts(),'
+                  + 'sectionReport({ status: said(), toasts: toasts(),'
                     ' rows: rows().length });\n',
                   answers=(ANSWER_POLL, REFUSE_STOP))
     assert report['status'] == {'text': '3 request(s) on tab 11',
@@ -510,12 +513,12 @@ def test_the_status_cell_is_three_way_with_a_hyphen_for_nothing(_tmp):
     and both are the contract. The 400 is the boundary itself: a `> 400`
     comparison would read the third row amber, and the 301 is what makes
     the middle branch reachable at all."""
-    report = _run(_click('poll') + 'report({ rows: rows() });\n',
+    report = _run(_click('poll') + 'sectionReport({ rows: rows() });\n',
                   answers=(ANSWER_POLL,))
     assert [row[0] for row in report['rows']] == [
         ['mono green', '200'], ['mono amber', '301'], ['mono red', '400']], \
         report
-    bare = _run(_click('poll') + 'report({ rows: rows() });\n',
+    bare = _run(_click('poll') + 'sectionReport({ rows: rows() });\n',
                 setup=TABS + "const BARE = [{}];\n",
                 answers=(answer('net-capture-get',
                                 '{ count: 1, tabId: 11,'
@@ -528,7 +531,7 @@ def test_a_poll_with_no_rows_says_so_and_still_counts(_tmp):
     """`render` writes the section's own count before the empty check, so
     a poll that found nothing reports `0 req` beside the empty line
     rather than leaving the previous poll's count standing."""
-    report = _run(_click('poll') + 'report({ sub: sub.textContent,'
+    report = _run(_click('poll') + 'sectionReport({ sub: sub.textContent,'
                   ' list: list().textContent,'
                   ' rows: rows().length });\n',
                   answers=(ANSWER_POLL_NONE,))
@@ -549,7 +552,7 @@ def test_clicking_a_row_inserts_the_detail_just_below_it(_tmp):
     `requestHeaders` is the request's `headers` under a different name
     from the response's."""
     report = _run(_click('poll') + 'body().children[0].click();\n'
-                  + 'report({ open: detail().length,\n'
+                  + 'sectionReport({ open: detail().length,\n'
                     '  at: body().children.indexOf(detail()[0]),\n'
                     '  order: body().children.map((tr) =>\n'
                     '    tr.dataset.detail ? \'detail\' : tr.children[0]'
@@ -580,7 +583,7 @@ def test_clicking_the_same_row_again_closes_the_detail(_tmp):
                     'row.click();\n'
                     'const open = detail().length;\n'
                     'row.click();\n'
-                    'report({ open, closed: detail().length,\n'
+                    'sectionReport({ open, closed: detail().length,\n'
                     '  rows: rows().length, requests: sent().length });\n',
                   answers=(ANSWER_POLL,))
     assert report['open'] == 1, report
@@ -594,7 +597,7 @@ def test_a_body_of_exactly_two_thousand_characters_is_not_truncated(_tmp):
     whole. A cap applied with `>=` would print a truncation note on a
     body that was not cut."""
     report = _run(_click('poll') + 'body().children[0].click();\n'
-                  'report({ text: detailText() });\n',
+                  'sectionReport({ text: detailText() });\n',
                   setup=TABS + BODY_2000, answers=(ANSWER_ONE,))
     assert 'truncated' not in report['text'], report
     assert report['text'].count('q') == 2000, report
@@ -605,7 +608,7 @@ def test_a_body_of_two_thousand_and_one_characters_is_truncated(_tmp):
     how many were dropped, so the operator can see that the pane is not
     showing the whole body."""
     report = _run(_click('poll') + 'body().children[0].click();\n'
-                  'report({ text: detailText() });\n',
+                  'sectionReport({ text: detailText() });\n',
                   setup=TABS + BODY_2001, answers=(ANSWER_ONE,))
     assert '…(truncated 1 chars)' in report['text'], report
     assert report['text'].count('q') == 2000, report
@@ -617,7 +620,7 @@ def test_a_request_with_no_body_says_which_flag_fetches_one(_tmp):
     dropped by `JSON.stringify` -- an absent key would read as a member
     the worker never sent."""
     report = _run(_click('poll') + 'body().children[0].click();\n'
-                  'report({ text: detailText() });\n',
+                  'sectionReport({ text: detailText() });\n',
                   setup=TABS + NO_BODY, answers=(ANSWER_ONE,))
     assert '"bodyBase64": false' in report['text'], report
     assert '"body": "(no body — use bodies=on)"' in report['text'], report

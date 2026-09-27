@@ -92,7 +92,7 @@ def test_the_tab_list_says_nothing_when_there_is_no_token(_tmp):
     after the try/catch, so it never runs here. `runCommand` still
     refuses a command at `api.js:128`; this case does not press anything
     to say so."""
-    report = _run(SETTLED + 'report({ options:'
+    report = _run(SETTLED + 'sectionReport({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  toasts: toasts(), requests: REQUESTS.length });\n',
@@ -114,7 +114,7 @@ def test_the_tab_list_says_nothing_when_the_bridge_refuses_it(_tmp):
     case above makes the same disclosure about the no-token path, and
     neither shows an INJECT still reaching the bridge under an
     unpopulated select."""
-    report = _run(SETTLED + 'report({ options:'
+    report = _run(SETTLED + 'sectionReport({ options:'
                   ' container.find("[data-role=tab]")'
                   '.options.map((o) => o.textContent),\n'
                   '  toasts: toasts() });\n', setup=TABS_FAILING)
@@ -129,7 +129,7 @@ def test_the_tab_list_labels_a_tab_with_its_id_and_two_spaces(_tmp):
     label built from the title alone would offer a nameless option."""
     report = _run('const sel = container.find("[data-role=tab]");\n'
                   + SETTLED
-                  + 'report({ options: sel.options'
+                  + 'sectionReport({ options: sel.options'
                     '.map((o) => o.textContent),\n'
                   '  values: sel.options.map((o) => o.value),\n'
                   '  chosen: sel.value });\n',
@@ -147,7 +147,7 @@ def test_injecting_sends_the_css_and_neither_tab_nor_frames_by_default(_tmp):
     the absence of both keys rather than a defaulted pair."""
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=TABS_ONLY, answers=(INJECTED,))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'inject-css', report
@@ -166,7 +166,7 @@ def test_a_selected_tab_and_a_checked_box_reach_the_command(_tmp):
                   'container.find("[data-role=all]").checked = true;\n'
                   'container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=TABS_ONLY, answers=(INJECTED_11,))
     sent = shared.commands(report)[0]
     assert sent['tabId'] == 11, report
@@ -184,7 +184,7 @@ def test_a_textarea_holding_only_whitespace_is_refused(_tmp):
     report = _run('container.find("[data-role=css]").value = "  \\n\\t ";\n'
                   'button("INJECT").click();\n' + SETTLED
                   + 'button("REMOVE").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=SEEDED, answers=(INJECTED_PLAIN, REMOVED))
     assert shared.commands(report) == [], report
     assert report['toasts'] == [
@@ -199,7 +199,7 @@ def test_the_css_reaches_the_command_with_its_own_whitespace(_tmp):
     report = _run('container.find("[data-role=css]").value ='
                   ' "  a{\\n  color: red; }  ";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=TABS_ONLY, answers=(INJECTED_PLAIN,))
     assert shared.commands(report)[0]['css'] == '  a{\n  color: red; }  ', \
         report
@@ -224,7 +224,7 @@ def test_a_failed_inject_keeps_the_record_it_reserved(_tmp):
     """
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts(),\n'
+                  + 'sectionReport({ toasts: toasts(),\n'
                     '  rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED, answers=(INJECT_REFUSED,))
     assert report['toasts'] == [{'type': 'err',
@@ -244,7 +244,7 @@ def test_a_failed_remove_leaves_the_session_store_alone(_tmp):
     remove breaks below."""
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("REMOVE").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=SEEDED, answers=(REMOVE_NO_CSS,))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'remove-css', report
@@ -266,7 +266,7 @@ def test_a_session_rows_remove_aims_at_what_the_row_recorded(_tmp):
                   '  (el) => el.tag === "button" &&\n'
                   '    el.textContent === "remove")[0].click();\n' + SETTLED
                   + 'button("remove", container).click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   setup=SEEDED, answers=(REMOVED,))
     first, second = shared.commands(report)
     assert first['type'] == 'remove-css', report
@@ -290,7 +290,7 @@ def test_a_row_remove_that_failed_keeps_the_local_session(_tmp):
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
-                  + 'report({ toasts: toasts(), rows,\n'
+                  + 'sectionReport({ toasts: toasts(), rows,\n'
                     '  live: drive.live().length });\n',
                   setup=SEEDED, answers=(REMOVE_REFUSED,))
     assert shared.types(report) == ['remove-css'], report
@@ -312,7 +312,7 @@ def test_a_row_remove_that_succeeded_deletes_it_and_says_so(_tmp):
     report = _run('const del = button("remove", container);\n'
                   'del.click();\n' + SETTLED
                   + 'const rows = rowTexts(container.all()[0]);\n'
-                  'report({ toasts: toasts(), rows });\n',
+                  'sectionReport({ toasts: toasts(), rows });\n',
                   setup=SEEDED, answers=(REMOVED_13,))
     assert report['toasts'] == [{'type': 'ok', 'text': 'removed'}], report
     assert [row[3] for row in report['rows'][1:]] == ['b{--seed:2}'], report
@@ -352,7 +352,7 @@ def test_a_store_that_refuses_the_write_never_reaches_the_command(_tmp):
     """
     report = _run('container.find("[data-role=css]").value = "a{color:red}";\n'
                   'button("INJECT").click();\n' + SETTLED
-                  + 'report({ toasts: toasts(),\n'
+                  + 'sectionReport({ toasts: toasts(),\n'
                     '  rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED + QUOTA)
     assert shared.types(report) == [], report
@@ -387,7 +387,8 @@ def test_the_record_is_in_the_store_before_the_command_is_sent(_tmp):
             '};\n'
             'container.find("[data-role=css]").value = "a{color:red}";\n'
             'button("INJECT").click();\n' + SETTLED
-            + 'report({ atSend, stored: JSON.parse(localStorage.getItem(\n'
+            + 'sectionReport({ atSend, stored: JSON.parse(\n'
+              '  localStorage.getItem(\n'
               '  "daedalus-dash-css-sessions")).length });\n')
     report = _run(body, setup=SEEDED, answers=(INJECTED,))
     assert report['atSend'] == [3], report
@@ -403,7 +404,7 @@ def test_a_row_remove_the_store_refuses_says_so_and_keeps_the_row(_tmp):
     operator is looking at and what the store holds are the same two rows.
     """
     report = _run('button("remove", container).click();\n' + SETTLED
-                  + 'report({ toasts: toasts(),\n'
+                  + 'sectionReport({ toasts: toasts(),\n'
                     '  rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED + QUOTA, answers=(REMOVED_13,))
     # The removal itself succeeded, and the operator is told the record is
@@ -440,7 +441,7 @@ def test_a_full_session_list_refuses_the_next_injection(_tmp):
             '};\n'
             'await bounded(inject(), "twenty-one injections",'
             ' _dashnodeStepTimeoutMs);\n'
-            'report({ rows: rowTexts(container.all()[0]),'
+            'sectionReport({ rows: rowTexts(container.all()[0]),'
             ' toasts: toasts() });\n')
     report = _run(body, setup=TABS_ONLY, answers=(INJECTED_9,))
     # Twenty commands, and the twenty-first injection never reached the
@@ -474,7 +475,7 @@ def test_the_preview_collapses_whitespace_before_it_caps(_tmp):
             "    tabId: '', allFrames: false,\n"
             "    ts: 1750000000000 }]));\n"
             + "drive.route('/tabs', { json: TABS });\n")
-    report = _run('report({ rows: rowTexts(container.all()[0]) });\n',
+    report = _run('sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   setup=plan)
     preview = report['rows'][1][3]
     assert len(collapsed) > 100, report
@@ -491,7 +492,7 @@ def test_a_row_renders_the_tab_the_frames_and_a_local_time(_tmp):
     `HH:MM:SS`. The time is host-timezone dependent, so the case pins
     its SHAPE and its relation to the entry's own `ts` rather than a
     literal a runner in another zone would refuse."""
-    report = _run('report({ rows: rowTexts(container.all()[0]) });\n',
+    report = _run('sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   setup=SEEDED)
     rows = report['rows'][1:]
     assert [row[1] for row in rows] == ['11', '—'], report
@@ -508,7 +509,8 @@ def test_the_load_button_refills_the_form_from_the_row(_tmp):
     the page navigated, so it has to put the css, the tab and the frames
     flag back on the form rather than only showing the row."""
     report = _run(SETTLED + 'button("load", container).click();\n' + SETTLED
-                  + 'report({ css: container.find("[data-role=css]").value,\n'
+                  + 'sectionReport({ css:\n'
+                    '  container.find("[data-role=css]").value,\n'
                     '  tab: container.find("[data-role=tab]").value,\n'
                     '  all: container.find("[data-role=all]").checked,\n'
                     '  toasts: toasts() });\n',
@@ -526,7 +528,7 @@ def test_a_store_that_will_not_parse_renders_the_empty_state(_tmp):
     plan = (TABS + "drive.route('/tabs', { json: TABS });\n"
             + "localStorage.setItem('daedalus-dash-css-sessions',"
             " '{not json');\n")
-    report = _run('report({ sessions:'
+    report = _run('sectionReport({ sessions:'
                   ' container.find("[data-role=sessions]").textContent });\n',
                   setup=plan)
     assert report['sessions'] == 'none.', report
@@ -544,7 +546,7 @@ def test_a_bus_tab_event_repopulates_the_select_and_keeps_the_choice(_tmp):
                   + 'const before = REQUESTS.length;\n'
                     'container.find("[data-role=tab]").value = "11";\n'
                     'bus.emit({ type: "tab-updated" });\n' + SETTLED
-                  + 'report({ before, after: REQUESTS.length,\n'
+                  + 'sectionReport({ before, after: REQUESTS.length,\n'
                     '  chosen: container.find("[data-role=tab]").value,\n'
                     '  options: container.find("[data-role=tab]").options'
                     '.map((o) => o.textContent) });\n',
@@ -565,7 +567,7 @@ def test_an_internal_bus_event_repopulates_nothing(_tmp):
                   + 'const before = REQUESTS.length;\n'
                     'bus.emit({ type: "tab-updated", __internal: true });\n'
                   + SETTLED
-                  + 'report({ before, after: REQUESTS.length });\n',
+                  + 'sectionReport({ before, after: REQUESTS.length });\n',
                   setup=SEEDED)
     assert report['after'] - report['before'] == 0, report
 
@@ -578,7 +580,7 @@ NINETEEN = ("localStorage.setItem('daedalus-dash-css-sessions',\n"
 
 
 def _store_after(js, *, setup, answers=()):
-    return _run(js + 'report({ toasts: toasts(),\n'
+    return _run(js + 'sectionReport({ toasts: toasts(),\n'
                 '  rows: rowTexts(container.all()[0]),\n'
                 '  left: JSON.parse(localStorage.getItem(\n'
                 '    "daedalus-dash-css-sessions")) });\n',
@@ -647,7 +649,7 @@ def test_a_store_holding_a_valid_non_array_reads_as_an_empty_list(_tmp):
     `renderSessions` runs before any click and its row map calls `.slice`, so
     the panel dies at the table. The cap check would have waved the same
     `undefined` through -- against 20 is false -- so that guard belongs in
-    `load()`.
+    `sectionLoad()`.
     """
     report = _store_after(
         'container.find("[data-role=css]").value = "a{color:red}";\n'

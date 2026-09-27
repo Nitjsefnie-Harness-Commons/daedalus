@@ -87,7 +87,7 @@ def open_section(name):
     `load` is the shell's own importer, so the two import checkpoints come
     from it rather than from the scenario.
     """
-    return ("const { mount } = await bounded(load('" + name + "'),\n"
+    return ("const { mount } = await bounded(sectionLoad('" + name + "'),\n"
             "  'section import', _dashnodeStepTimeoutMs);\n"
             "phase('dashboard call started');\n")
 

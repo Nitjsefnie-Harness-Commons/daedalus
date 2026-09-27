@@ -118,13 +118,13 @@ _run = section_runner(scenario, SECTION, plan=shared.COMMAND, setup='')
 
 
 def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
-    """`load()` is called with no argument at the end of `mount`, so the
+    """`sectionLoad()` is called with no argument at the end of `mount`, so the
     first body is the command's own four keys. A defaulted pair added on
     the way in would be two members the handler reads no part of: it
     answers from `_fetchTimings` and the two globals beside it, and the
     only members of the command it reads are `cmd.reset` at
     `extension/worker/tabs.js:31` and `cmd._execution` at `:32`."""
-    report = _run('report({ sub: sub.textContent,\n'
+    report = _run('sectionReport({ sub: sub.textContent,\n'
                   '  head: headers(list()),\n'
                   '  rows: cells(list()) });\n',
                   setup=ONE, answers=(ANSWER,))
@@ -144,7 +144,7 @@ def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):
 def test_a_single_entry_is_counted_in_the_singular(_tmp):
     """`t.length === 1` is the whole of the singular test, so one entry
     and no entries are the two counts a shared plural would get wrong."""
-    report = _run('report({ sub: sub.textContent });\n',
+    report = _run('sectionReport({ sub: sub.textContent });\n',
                   setup=ONE, answers=(ANSWER,))
     assert report['sub'] == '1 entry', report
 
@@ -152,12 +152,12 @@ def test_a_single_entry_is_counted_in_the_singular(_tmp):
 def test_no_entries_and_two_entries_are_both_plural(_tmp):
     """Zero is `0 entries` and the empty state, because the count is
     written above the `length === 0` return."""
-    empty = _run('report({ sub: sub.textContent,'
+    empty = _run('sectionReport({ sub: sub.textContent,'
                  '  list: list().textContent });\n',
                  setup=NONE, answers=(ANSWER,))
     assert empty['sub'] == '0 entries', empty
     assert empty['list'] == 'ring buffer empty.', empty
-    two = _run('report({ sub: sub.textContent });\n',
+    two = _run('sectionReport({ sub: sub.textContent });\n',
                setup=TWO, answers=(ANSWER,))
     assert two['sub'] == '2 entries', two
 
@@ -167,7 +167,7 @@ def test_rows_are_rendered_in_the_reverse_of_the_buffer_order(_tmp):
     the order `extension/worker/util.js:88-91` recorded them in -- a
     `push` and a `shift`, so the newest is last there. A panel that
     dropped the reverse would show the oldest first."""
-    report = _run('report({ rows: cells(list()).slice(1) });\n',
+    report = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                   setup=TWO, answers=(ANSWER,))
     assert [row[7][1] for row in report['rows']] == [
         'https://one.example.com/b.js',
@@ -179,12 +179,12 @@ def test_the_native_flag_turns_the_meta_span_green_or_amber(_tmp):
     `timings`, so it decides the span's class on its own and its own text
     is the value stringified. The buffer here is all failures, so the
     meta span holds the flag alone and the text is exact."""
-    on = _run('report({ text: meta().textContent,\n'
+    on = _run('sectionReport({ text: meta().textContent,\n'
               '  className: meta().children[1].className });\n',
               setup=FAILED, answers=(answer('T', 'true'),))
     assert on['className'] == 'green', on
     assert on['text'] == 'nativeToBase64 = true', on
-    off = _run('report({ text: meta().textContent,\n'
+    off = _run('sectionReport({ text: meta().textContent,\n'
                '  className: meta().children[1].className });\n',
                setup=FAILED, answers=(answer('T', 'false'),))
     assert off['className'] == 'amber', off
@@ -196,7 +196,7 @@ def test_a_result_with_no_native_flag_reads_as_undefined_and_amber(_tmp):
     member renders the string `undefined` rather than `false` -- a reader
     told the base64 path is `undefined` is looking at a member the worker
     did not send, not at a falsy one."""
-    report = _run('report({ text: meta().textContent,\n'
+    report = _run('sectionReport({ text: meta().textContent,\n'
                   '  className: meta().children[1].className });\n',
                   setup=FAILED, answers=(ANSWER_NO_NATIVE,))
     assert report['text'] == 'nativeToBase64 = undefined', report
@@ -209,7 +209,7 @@ def test_the_count_is_written_before_a_result_that_is_not_an_object(_tmp):
     null result therefore reaches the pane AFTER the count was written,
     which is the only order that leaves `0 entries` standing beside an
     error the operator never sent for."""
-    report = _run('report({ sub: sub.textContent,\n'
+    report = _run('sectionReport({ sub: sub.textContent,\n'
                   '  pane: panes(list()),\n'
                   '  meta: meta().textContent });\n',
                   setup=ONE, answers=(ANSWER_NULL,))
@@ -225,7 +225,7 @@ def test_the_median_of_an_even_count_is_the_upper_middle(_tmp):
     UPPER middle for an even count, so four entries report 30 where a true
     median reports 25. The mean beside it is the ordinary one, which is
     what makes the pair worth reading together."""
-    report = _run('report({ text: meta().textContent });\n',
+    report = _run('sectionReport({ text: meta().textContent });\n',
                   setup=FOUR, answers=(ANSWER,))
     assert report['text'] == ('nativeToBase64 = true'
                               '  ·  median 30ms'
@@ -237,10 +237,10 @@ def test_a_status_cell_reads_green_when_the_status_is_missing_or_zero(_tmp):
     """`e.status >= 400` is false for both an absent member and a zero, so
     both render the success class, and the text is `String(e.status || '')`
     so a zero renders BLANK while a missing one renders the same blank."""
-    missing = _run('report({ rows: cells(list()).slice(1) });\n',
+    missing = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                    setup=NO_STATUS, answers=(answer('T'),))
     assert missing['rows'][0][1] == ['mono green', ''], missing
-    zero = _run('report({ rows: cells(list()).slice(1) });\n',
+    zero = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                 setup=ZERO_STATUS, answers=(answer('T'),))
     assert zero['rows'][0][1] == ['mono green', ''], zero
     assert shared.commands(zero)[0].get('status') is None, zero
@@ -252,7 +252,7 @@ def test_an_error_row_renders_four_bare_cells_and_the_error_in_the_url(_tmp):
     error leg records none of those four, and the reason is interpolated
     raw into the url cell behind TWO spaces. The total cell is the one
     timing cell that leg does set, so it still reads its number."""
-    report = _run('report({ rows: cells(list()).slice(1) });\n',
+    report = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                   setup=FAILED, answers=(answer('T'),))
     assert report['rows'] == [[['mono', 'GET'], ['mono red', 'ERR'],
                                ['', ''], ['', ''], ['', ''], ['', ''],
@@ -265,7 +265,7 @@ def test_entries_that_all_failed_get_no_stats_block(_tmp):
     """The block is guarded on `ok.length > 0`, so a buffer holding only
     failures reports the count and nothing else -- a median over an empty
     array has no value to render."""
-    report = _run('report({ text: meta().textContent,'
+    report = _run('sectionReport({ text: meta().textContent,'
                   '  rows: cells(list()).slice(1) });\n',
                   setup=FAILED, answers=(answer('T'),))
     assert report['text'] == 'nativeToBase64 = true', report
@@ -279,7 +279,7 @@ def test_a_success_row_with_a_server_error_status_reads_red(_tmp):
     failed. The 400 is the comparison's own boundary, so a `> 400` would
     read that row green; the pairs either side of the branch are the
     absent status and the zero status, which both read green above."""
-    report = _run('report({ rows: cells(list()).slice(1) });\n',
+    report = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                   setup=OK_AND_404, answers=(ANSWER,))
     # The buffer is rendered reversed, so the 404 is the row on top.
     assert [row[1] for row in report['rows']] == [
@@ -296,11 +296,11 @@ def test_a_url_over_a_hundred_characters_is_cut_in_both_row_kinds(_tmp):
     spaces, so a long url on an error row is the cut url and then the
     reason -- and a cap of 140 would show forty more characters of a url
     the table is already too wide for."""
-    report = _run('report({ rows: cells(list()).slice(1) });\n',
+    report = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                   setup=OK_AND_404, answers=(ANSWER,))
     assert [row[7] for row in report['rows']] == [
         ['url', CUT], ['url', CUT], ['url', CUT]], report
-    failed = _run('report({ rows: cells(list()).slice(1) });\n',
+    failed = _run('sectionReport({ rows: cells(list()).slice(1) });\n',
                   setup=LONG_ERROR, answers=(ANSWER,))
     assert failed['rows'][0][7] == [
         'url red', CUT + '  (timeout)'], failed
@@ -309,7 +309,7 @@ def test_a_url_over_a_hundred_characters_is_cut_in_both_row_kinds(_tmp):
 def test_the_stats_block_counts_the_entries_that_worked(_tmp):
     """`ok` is the entries with no error, so the ratio reads over the whole
     buffer and an error entry moves the denominator only."""
-    report = _run('report({ text: meta().textContent,'
+    report = _run('sectionReport({ text: meta().textContent,'
                   '  rows: cells(list()).slice(1) });\n',
                   setup=MIXED, answers=(ANSWER,))
     assert report['text'] == ('nativeToBase64 = true'
@@ -329,7 +329,7 @@ def test_the_meta_span_survives_a_load_that_failed(_tmp):
     failed."""
     report = _run('withoutToken();\n'
                   'button("refresh").click();\n' + SETTLED
-                  + 'report({ text: meta().textContent,\n'
+                  + 'sectionReport({ text: meta().textContent,\n'
                     '  pane: panes(list()) });\n',
                   setup=FAILED, answers=(ANSWER,))
     assert report['text'] == 'nativeToBase64 = true', report
@@ -341,11 +341,11 @@ def test_the_meta_span_survives_a_load_that_failed(_tmp):
 
 
 def test_the_refresh_click_sends_no_reset(_tmp):
-    """`refresh` is bound to `() => load()`, so no event object reaches
+    """`refresh` is bound to `() => sectionLoad()`, so no event object reaches
     `load` and no `opts` is built. A click that did forward its event
     would turn the argument into a `reset`."""
     report = _run('button("refresh").click();\n' + SETTLED
-                  + 'report({});\n',
+                  + 'sectionReport({});\n',
                   setup=ONE, answers=(ANSWER,))
     first, second = shared.commands(report)
     assert 'reset' not in first, report
@@ -364,7 +364,7 @@ def test_the_reset_arms_on_the_first_click_and_sends_on_the_second(_tmp):
                   '  label: reset.textContent, armed: reset.className,\n'
                   '  requests: REQUESTS.length };\n'
                   'reset.click();\n' + SETTLED
-                  + 'report({ before, mid, sent: sent().map(\n'
+                  + 'sectionReport({ before, mid, sent: sent().map(\n'
                     '  (b) => [b.type, b.reset]) });\n',
                   setup=ONE, answers=(ANSWER,))
     assert report['mid']['parked'] > 0, report
@@ -376,15 +376,15 @@ def test_the_reset_arms_on_the_first_click_and_sends_on_the_second(_tmp):
 
 
 def test_a_reset_that_failed_renders_the_error_pane_and_still_toasts_ok(_tmp):
-    """`load()` never rejects -- its own catch is total -- so the toast
-    beside `await load(...)` is unconditional. Asserting the toast ALONE
+    """`sectionLoad()` never rejects -- its own catch is total -- so the toast
+    beside `await sectionLoad(...)` is unconditional. Asserting the toast ALONE
     passes against a handler that only toasts, and the pane ALONE passes
     against one that only renders; the pair is the pin, and the reset's
     own `catch` above them is unreachable."""
     report = _run('const reset = button("reset buffer");\n'
                   'reset.click();\n'
                   'reset.click();\n' + SETTLED
-                  + 'report({ pane: panes(list()),\n'
+                  + 'sectionReport({ pane: panes(list()),\n'
                     '  toasts: toasts(),\n'
                     '  sent: sent().map((b) => [b.type, b.reset]) });\n',
                   setup=ONE, answers=(ANSWER_REFUSED,))
@@ -401,7 +401,7 @@ def test_a_reset_that_worked_toasts_ok_and_leaves_no_pane(_tmp):
     report = _run('const reset = button("reset buffer");\n'
                   'reset.click();\n'
                   'reset.click();\n' + SETTLED
-                  + 'report({ pane: panes(list()),\n'
+                  + 'sectionReport({ pane: panes(list()),\n'
                     '  toasts: toasts(), rows: cells(list()).length });\n',
                   setup=ONE, answers=(ANSWER,))
     assert report['toasts'] == [{'type': 'ok', 'text': 'reset'}], report
@@ -415,7 +415,7 @@ def test_a_command_the_bridge_refused_answers_nothing_at_all(_tmp):
     assertions say no poll and no consume leg was opened, and the pane
     says what the operator is left reading. What the bridge does with a
     refused command is not something this tree can see."""
-    report = _run('report({ pane: panes(list()) });\n',
+    report = _run('sectionReport({ pane: panes(list()) });\n',
                   setup=ONE, answers=(), plan=REFUSED_COMMAND)
     assert shared.types(report) == ['fetch-timings'], report
     assert shared.legs(report)['poll'] == [], report

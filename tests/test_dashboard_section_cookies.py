@@ -73,7 +73,7 @@ def test_a_query_with_a_scheme_is_sent_as_a_url_and_not_a_domain(_tmp):
     are alternatives: sending both would leave the bridge to choose, so
     the case asserts the other key is absent from the parsed body."""
     report = _run(_list_for('https://example.com/app')
-                  + 'report({ sub: sub.textContent,\n'
+                  + 'sectionReport({ sub: sub.textContent,\n'
                     '  host: container.find("[data-role=table-host]")'
                     '.textContent });\n',
                   answers=(LISTING,))
@@ -90,7 +90,7 @@ def test_a_bare_domain_is_sent_as_a_domain_and_not_a_url(_tmp):
     button, because the query field carries its own path to the same
     command and a listener wired to nothing would pass a click-only case."""
     report = _run(_list_for('example.com', how='enter')
-                  + 'report({ rows: rowTexts(container.all()[0]) });\n',
+                  + 'sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   answers=(LISTING,))
     sent = shared.commands(report)[0]
     assert sent.get('domain') == 'example.com', report
@@ -107,7 +107,7 @@ def test_the_flags_cell_joins_what_is_set_with_a_middle_dot(_tmp):
     join is U+00B7 with no spaces, and a falsy flag contributes nothing
     rather than a placeholder."""
     report = _run(_list_for('example.com')
-                  + 'report({ rows: rowTexts(container.all()[0]) });\n',
+                  + 'sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   answers=(LISTING,))
     flags = [row[4] for row in report['rows'][1:]]
     assert flags == ['S·H·l', ''], report
@@ -119,7 +119,7 @@ def test_a_value_longer_than_the_cap_is_truncated_with_an_ellipsis(_tmp):
     ellipsis, so a 141-character value arrives as its first 139 plus one
     and a 140-character value is left whole."""
     report = _run(_list_for('a.test')
-                  + 'report({ rows: rowTexts(container.all()[0]) });\n',
+                  + 'sectionReport({ rows: rowTexts(container.all()[0]) });\n',
                   setup='const wide = { name: "wide",'
                         ' value: "x".repeat(141),\n'
                         '  domain: "a.test", path: "/" };\n'
@@ -147,7 +147,7 @@ def test_set_sends_no_flag_field_and_an_untrimmed_value(_tmp):
                   'container.find("[data-role=sv]").value = "  pad  ";\n'
                   'container.find("[data-role=sp]").value = "";\n'
                   'button("SET").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   answers=(EMPTY, SET))
     sent = shared.commands(report)[0]
     assert sent['type'] == 'set-cookie', report
@@ -174,7 +174,7 @@ def test_set_sends_the_domain_when_one_was_typed(_tmp):
                   'container.find("[data-role=sd]").value = "  .a.test  ";\n'
                   'container.find("[data-role=sp]").value = "/deep";\n'
                   'button("SET").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   answers=(EMPTY, SET))
     sent = shared.commands(report)[0]
     assert sent['domain'] == '.a.test', report
@@ -187,7 +187,7 @@ def test_a_set_without_a_url_or_a_name_sends_nothing(_tmp):
     before the bridge is asked."""
     report = _run('container.find("[data-role=sv]").value = "v";\n'
                   'button("SET").click();\n' + SETTLED
-                  + 'report({ toasts: toasts() });\n',
+                  + 'sectionReport({ toasts: toasts() });\n',
                   answers=(SET,))
     assert shared.commands(report) == [], report
     assert report['requests'] == [], report
@@ -196,10 +196,11 @@ def test_a_set_without_a_url_or_a_name_sends_nothing(_tmp):
 
 
 def test_an_empty_query_asks_the_bridge_for_nothing(_tmp):
-    """`load()` refuses an empty query, and the table host keeps the hint
+    """`sectionLoad()` refuses an empty query, and the table host keeps
+    the hint
     it shipped with -- nothing was rendered because nothing was asked."""
     report = _run('button("LIST").click();\n' + SETTLED
-                  + 'report({ toasts: toasts(), sub: sub.textContent,\n'
+                  + 'sectionReport({ toasts: toasts(), sub: sub.textContent,\n'
                     '  host: container.find("[data-role=table-host]")'
                     '.textContent });\n',
                   answers=(LISTING,))
@@ -220,7 +221,7 @@ def test_a_removed_row_reloads_in_silence_and_a_failed_one_toasts(_tmp):
               + 'const host = container.find("[data-role=table-host]");\n'
               'const del = button("remove", host);\n'
               'del.click();\n' + SETTLED
-              + 'report({ toasts: toasts(), sub: sub.textContent });\n',
+              + 'sectionReport({ toasts: toasts(), sub: sub.textContent });\n',
               answers=(LISTING, DROPPED))
     assert shared.types(ok) == ['cookies', 'remove-cookie', 'cookies'], ok
     assert ok['toasts'] == [], ok
@@ -236,7 +237,7 @@ def test_a_removed_row_reloads_in_silence_and_a_failed_one_toasts(_tmp):
                + 'const host = container.find("[data-role=table-host]");\n'
                + 'const del = button("remove", host);\n'
                + 'del.click();\n' + SETTLED
-               + 'report({ toasts: toasts() });\n',
+               + 'sectionReport({ toasts: toasts() });\n',
                answers=(LISTING, GONE))
     assert shared.types(bad) == ['cookies', 'remove-cookie'], bad
     assert bad['toasts'] == [{'type': 'err',
@@ -255,7 +256,7 @@ def test_clear_all_arms_before_it_sends_and_reports_the_removed_count(
                     '  has: clear.classList.contains("armed"),\n'
                     '  sent: REQUESTS.length };\n'
                   'clear.click();\n' + SETTLED
-                  + 'report({ armed, toasts: toasts() });\n',
+                  + 'sectionReport({ armed, toasts: toasts() });\n',
                   answers=(EMPTY, CLEARED))
     assert report['armed'] == {'text': 'confirm clear all', 'has': True,
                                'sent': 0}, report
@@ -273,7 +274,7 @@ def test_clear_all_with_an_empty_query_sends_nothing(_tmp):
                   'clear.click();\n' + SETTLED
                   + 'const armed = clear.textContent;\n'
                   'clear.click();\n' + SETTLED
-                  + 'report({ armed, toasts: toasts() });\n',
+                  + 'sectionReport({ armed, toasts: toasts() });\n',
                   answers=(CLEARED_ZERO,))
     assert report['armed'] == 'confirm clear all', report
     assert report['requests'] == [], report
@@ -287,26 +288,26 @@ def test_an_absent_result_renders_the_empty_state_with_a_zero_count(_tmp):
     nothing renders the empty state and the counter reads zero -- and the
     counter never singularises, so one cookie reads `1 cookie(s)`."""
     empty = _run(_list_for('a.test')
-                 + 'report({ sub: sub.textContent,\n'
+                 + 'sectionReport({ sub: sub.textContent,\n'
                    '  host: container.find("[data-role=table-host]")'
                    '.textContent });\n',
                  answers=(ABSENT,))
     assert empty['sub'] == '0 cookie(s)', empty
     assert empty['host'] == 'no cookies.', empty
     one = _run(_list_for('a.test')
-               + 'report({ sub: sub.textContent });\n',
+               + 'sectionReport({ sub: sub.textContent });\n',
                answers=("answer('cookies',"
                         " { result: [{ name: 'k', value: 'v' }] });\n",))
     assert one['sub'] == '1 cookie(s)', one
 
 
 def test_a_failed_listing_renders_the_error_pane(_tmp):
-    """`load()`'s catch clears the host and renders the message, so a
+    """`sectionLoad()`'s catch clears the host and renders the message, so a
     refused listing does not leave the previous rows on screen behind a
     toast."""
     report = _run(_list_for('a.test')
                   + 'const host = container.find("[data-role=table-host]");\n'
-                    + 'report({ sub: sub.textContent,\n'
+                    + 'sectionReport({ sub: sub.textContent,\n'
                     + '  host: host.textContent,\n'
                     + '  pane: host.all().some((el) => '
                       'hasClass(el, "pane err")) });\n',
