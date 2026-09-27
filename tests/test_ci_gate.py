@@ -67,7 +67,8 @@ def test_a_superset_requirement_names_each_missing_workflow(tmp):
     del tmp
     mod = _ci_gate()
     wanted = frozenset({'tests', 'audit'})
-    assert mod.missing_required([_gate_run('tests')], required=wanted) == ['audit']
+    assert mod.missing_required(
+        [_gate_run('tests')], required=wanted) == ['audit']
     assert mod.missing_required(
         [_gate_run('tests'), _gate_run('audit')], required=wanted) == []
     assert mod.missing_required([], required=wanted) == ['audit', 'tests']

@@ -19,7 +19,8 @@ hand-rolled loops this replaces conflate:
      Never wrap this tool in a retry: retrying a failed query behind a
      message that reads like waiting is the failure it exists to remove
   4  every run concluded acceptably and none of them is a REQUIRED_WORKFLOWS
-     run, so the gate that decides the merge was never dispatched
+     run, so this head is not certified. No merge is claimed: this is
+     reached with a pull request, without one, and on a branch of its own
 
 The fourth outcome is the one this tool got wrong (issue 1217). "Every run
 that happened to exist concluded" is not "every run that should exist did",
