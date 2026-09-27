@@ -145,6 +145,7 @@ def main():
     gh_client.watch_parent()
 
     if args.once:
+        os.environ[POLL_MARK] = '1'
         sha, checks, concluded = head_and_checks(args.repo, args.branch)
         print(f'ok head {sha}', file=sys.stderr)
         print(f'ok {len(checks)} check run(s), {len(concluded)} concluded',

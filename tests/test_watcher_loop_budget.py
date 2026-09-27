@@ -94,13 +94,36 @@ def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
     fake = _fake_gh.FakeGh(here, idle_answers())
     per_poll, seen = once_run.measure(script, [PR], fake, TICK)
     fake.clear()
-    trial = once_run.once(script, [PR, '--interval', str(TICK)], fake)
+    ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
     print(f'\n  a loop repeating its last request: {per_poll} call(s) per '
           f'poll, from {len(seen)} logged call(s), and a trial that sees '
-          f'{len(trial)}')
-    assert len(trial) == 1, [call['request'][:80] for call in trial]
+          f'{len(ran)}')
+    assert len(ran) == 1, [call['request'][:80] for call in ran]
     assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
     assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
+
+
+def test_a_trial_of_a_watcher_that_names_its_boundary_is_refused(tmp):
+    """A one-poll loop is not a measure of the loop, and says so.
+
+    The idle bounds are judged over the loop because a loop repeats its
+    body and a `--once` invocation of the same script runs one poll. So
+    the trial measure refuses a script that names its own poll boundary
+    rather than answering in `measure`'s place with a figure that passes
+    a bound the loop would fail.
+    """
+    here = Path(tmp) / 'refused'
+    here.mkdir(parents=True, exist_ok=True)
+    script = once_run.planted(here, 'pr_comment_watch.py')
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    refused = None
+    try:
+        once_run.once(script, [PR, '--interval', str(TICK)], fake)
+    except AssertionError as exc:
+        refused = exc.args[0]
+    assert refused is not None, (
+        'a one-poll trial answered as a measure of the loop')
+    assert 'measure()' in refused[0], refused
 
 
 def test_a_loop_that_grows_from_its_third_poll_costs_two(tmp):
