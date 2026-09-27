@@ -53,9 +53,9 @@ def _scan(_tmp, callee):
 
 def _swept(_tmp):
     """The whole generated product, run against the oracle and the guard
-    once for this process: three cases ask the same question of the same
-    deterministic forms, and scanning every one of them per case triples a
-    cost no assertion is buying."""
+    once for this process: four cases ask the same question of the same
+    deterministic forms, and scanning every one of them per case multiplies
+    a cost no assertion is buying."""
     _write_tree(Path(_tmp), {'pkg/__init__.py': '',
                              'pkg/leaf.py': 'leaf = True\n'})
     forms = _mcp_selection_sweep.sweep(
@@ -169,7 +169,10 @@ def _owed(form):
     """The verdicts a CORRECT guard may answer for this form.
 
     Stated here rather than read from `duty`, because the instrument's own
-    allowance cannot be the witness that it has not been widened.
+    allowance cannot be the witness that it has not been widened. A
+    restatement beside the instrument still moves with it, so what stops
+    the two being widened together is the `_FORBIDDEN` table below, which
+    is written out rather than derived from either.
 
     A verdict is wrong when the value the walk settled contradicts it, so
     RESOLVED is right only where the walk settled the value to the operation
@@ -187,6 +190,42 @@ def _owed(form):
     if form['oracle'] == 'reaches':
         return {'resolved', 'refused'}
     return {'silent'}
+
+
+# The verdict a CORRECT guard may NOT answer a pinned form of each oracle
+# class, written out here instead of derived from `duty` or from `_owed`.
+# Those two agree by construction, so a widening that moves them together
+# leaves every generated form paid and the two restatements equal: the pair
+# witnesses DISAGREEMENT, never content. An entry here is a statement no
+# lockstep edit of the other two can satisfy without editing this as well.
+_FORBIDDEN = (
+    ('reaches', 'silent'),
+    ('does not reach', 'resolved'),
+    ('does not reach', 'refused'),
+    ('raises', 'resolved'),
+    ('raises', 'refused'),
+)
+
+
+def test_a_pinned_form_may_not_be_answered_what_the_contract_forbids(_tmp):
+    """A form the oracle REACHES may not be answered `silent`, and one it
+    does not reach or raises on may not be answered `resolved` or `refused`.
+
+    The sharpest cell is the first: a guard that answers a reaching form
+    `silent` omits the module the runtime imports, which is this file's
+    whole defect class, and it does so with nothing refused anywhere. Every
+    pinned form of a class is offered the verdict its class forbids and has
+    to come back named, so a widening that answers one builder's forms
+    differently from another's is named too.
+    """
+    forms = _swept(_tmp)
+    for oracle, verdict in _FORBIDDEN:
+        for form in [f for f in forms
+                     if f['pinned'] and f['oracle'] == oracle]:
+            unpaid = _mcp_selection_sweep.unpaid([dict(form, inline=verdict)])
+            assert unpaid.startswith('1 unpaid of 1:'), (
+                f'{form["callee"]}: a {oracle} form answered {verdict} is '
+                f'paid: {unpaid}')
 
 
 def test_every_generated_form_pays_what_it_owes(_tmp):
