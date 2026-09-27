@@ -119,7 +119,7 @@ def test_the_paragraph_still_claims_the_unreached_module(tmp):
     del tmp
     text = _paragraph()
     assert UNREACHED in text, 'the paragraph no longer names the module'
-    assert 'no suite reaches' in text, (
+    assert re.search(r'no\s+suite\s+reaches', text), (
         'the paragraph no longer claims the module is unreached')
 
 
