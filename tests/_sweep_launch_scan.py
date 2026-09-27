@@ -78,10 +78,6 @@ def _spelled(node, bound, seen=(), before=0):
     return None
 
 
-def _statement(node):
-    return node.value if isinstance(node, ast.Expr) else node
-
-
 def _captures(pattern):
     """Every name one match pattern binds, at any depth."""
     names = []
@@ -104,12 +100,13 @@ def _bind(node, bound):
     its own pattern matched, which over-approximates — every capture gets
     the whole subject — and fails toward finding a launch, not past one.
 
-    What is left unbound is the list the guard's own docstring owns, so
-    that the two cannot drift: the forms naming a value this cannot read
-    (`with` and `except` name a context manager and an exception, so they
-    spell to nothing) and the targets that are not bare names.
+    What is left unbound is the list
+    `tests/test_static_guard_regressions.py`'s
+    `test_a_sweep_launch_carries_no_wall_clock_bound` owns, so that the
+    two cannot drift: the forms naming a value this cannot read (`with`
+    and `except` name a context manager and an exception, so they spell
+    to nothing) and the targets that are not bare names.
     """
-    node = _statement(node)
     line = getattr(node, 'lineno', None)
     if line is None:
         return
@@ -152,10 +149,7 @@ def _carries_sweep(call, bound):
 
 
 def _own_nodes(scope):
-    """Every node of one scope's own body, nested scopes left unopened.
-
-    A nested scope is yielded as a node but not descended into.
-    """
+    """Every node of one scope's own body, nested scopes left unopened."""
     pending = [scope]
     while pending:
         for child in ast.iter_child_nodes(pending.pop()):

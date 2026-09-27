@@ -482,12 +482,16 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     because it does not reproduce to a figure: the same child has been
     measured from 16s to 145s, `returncode 0` every time. What moves the
     number is the host's AMBIENT load, not the measurement — these boxes
-    run at loadavg 25 on 12 cores while a 127-child sweep wants all of
-    them — so a saturation figure says more about the neighbours than
+    run at loadavg 25 on 12 cores while the suites beside this one want
+    the cores — the sweep itself is a sequential loop running one child
+    at a time, so the contention is the aggregate's other legs, not this
+    child — and a saturation figure says more about the neighbours than
     about the bound. The arithmetic above is what the removal rests on;
     the timing only shows the margin is not comfortably large. Re-derive
-    it by timing the entry test under `nproc` burners while reading
-    /proc/loadavg.
+    it by timing the entry test under as many burners as the cgroup
+    quota allows, reading /proc/loadavg as it runs — note that `nproc`
+    reports the cgroup affinity (11 here) against 12 physical cores, so
+    `nproc` burners is not saturation.
 
     What bounds a wedged child now: `run_tests.py:14`
     `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:95` by
@@ -517,7 +521,10 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     either direction: not for the launch that ran before the reuse, and
     not for one that ran after an unrelated binding replaced the program
     it holds. The cost is a program the scope defines BELOW its launch,
-    which is not read into a call it did not run.
+    which is not read into a call it did not run — except a MULTI-LINE
+    call, where `ast.Call.lineno` is the line the call opens on, so a
+    binding written between the parentheses is below that line and is
+    still what the call runs.
 
     Not enforced, and not claimed to be: (1) a `timeout` unpacked from
     a `**` mapping on the same call, which the scan does not read; (2) a
@@ -525,8 +532,10 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     from a mapping or off disk, or a template built at runtime; (3) a
     program bound in another scope — read in a nested function, class or
     lambda, named by a comprehension target, a parameter default, or a
-    `global` / `nonlocal` declaration, or imported from another module,
-    because each scope reads only its own bindings; (4) a bare-name
+    `global` / `nonlocal` declaration, because each scope reads only its
+    own bindings, and — by a different mechanism, since the scope is the
+    same one — a name bound by `import helpers as program`, which the
+    scan does not read at all; (4) a bare-name
     target bound by a form the scan does not read — `with ... as`,
     `except ... as` and `except* ... as`, which name a context manager
     and an exception, and a target that is not a bare name at all: a
@@ -551,11 +560,18 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     bounded launch whose program only mentions that name in a string is
     refused. Separating them means parsing the child program itself, and
     a false red on a correct suite is the worse failure here, so the arm
-    is declared, not closed.
+    is declared, not closed; and (11) the false red the match-capture
+    over-approximation admits — every capture binds to the whole match
+    SUBJECT, so `case [_, _, host]:` on a subject holding the sweep
+    elsewhere reads as the sweep and refuses a launch of, say, a ping.
 
-    Arms 1 to 8 are the analyser's, and each has a row pinned as missed
-    in `tests/test_sweep_launch_scan.py`; arm 9 is the caller's glob and
-    arm 10 is a false red this control accepts on purpose.
+    Arms 1 to 8 are the analyser's and each has at least one row pinned
+    as missed in `tests/test_sweep_launch_scan.py`; where an arm names
+    more than one route, one route is pinned and the rest were verified
+    by planting but carry no row. Arm 9 is the caller's glob. Arms 10
+    and 11 are false reds this control accepts on purpose, and each has
+    its own row asserting that it IS refused, so the cost is pinned
+    rather than described.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent

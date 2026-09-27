@@ -15,6 +15,11 @@ a red test here on purpose: the row must move to the first group in the
 same change that closes the arm, or the docstring's list and the scan's
 behaviour drift apart silently. A row deleted without a closure is a
 false green, not a fix.
+
+The caught group also holds one row that is a declared FALSE RED, marked
+in place and named arm 11: the match capture that reads as the sweep a
+launch is not running. It is asserted refused on purpose, so it is a
+third kind of row, not a missed one and not a caught one.
 """
 import ast
 import sys
@@ -87,17 +92,34 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         'subprocess.run(p, timeout=120)\n',
         f'for p in [["-c", "{PROGRAM}"]]:\n'
         '    subprocess.run(p, timeout=120)\n',
+        'async def go(src):\n'
+        f'    async for p in [["-c", "{PROGRAM}"]]:\n'
+        '        subprocess.run(p, timeout=120)\n',
         f'name = "{SWEEP_ENTRY}"\n'
         f'subprocess.run(["-c", f"{{name}}(tmp)"], timeout=120)\n',
         f'name = "{SWEEP_ENTRY}"\n'
         f'subprocess.run(f"{{name}}(tmp)", timeout=120)\n',
         f'p = ["-c", "{PROGRAM}"]; subprocess.run(p, timeout=120)\n',
+        # Two bindings of one name on ONE line, the sweep last. Document
+        # order is what decides this; max() by line returns the first of
+        # two entries sharing a lineno and would read the `print(1)`.
+        f'p = "print(1)"; p = ["-c", "{PROGRAM}"]\n'
+        'subprocess.run([p], timeout=120)\n',
         f'match ["-c", "{PROGRAM}"]:\n    case ["-c", program]:\n'
         '        subprocess.run([program], timeout=120)\n',
         f'match ["-c", "{PROGRAM}"]:\n    case _ as program:\n'
         '        subprocess.run([program], timeout=120)\n',
         f'match ["-c", "{PROGRAM}"]:\n    case ["-c", *rest]:\n'
         '        subprocess.run([rest], timeout=120)\n',
+        # The DECLARED FALSE RED, asserted refused. A capture binds to the
+        # whole match subject, so a capture spent on a launch the sweep is
+        # not in still reads as the sweep and is refused. This row pins
+        # that cost: it is the reason arm 11 exists, and bounding the
+        # capture would be a second call, not a fix to this one.
+        f'cmd = ["-c", "{PROGRAM}", host]\n'
+        'match cmd:\n'
+        '    case [_, _, h]:\n'
+        '        subprocess.run(["ping", h], timeout=5)\n',
     )
     for index, body in enumerate(rows):
         _bounded(f'row {index}', body)
