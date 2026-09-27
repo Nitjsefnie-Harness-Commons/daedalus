@@ -155,6 +155,20 @@ def go():
 def go(cb=lambda: subprocess.run):
     pass
 """, 'def go(cb='),
+        # The leaf the walk never descends into, read in its binding
+        # position: an attribute naming a launch method carries whatever
+        # it is read off, and the receiver here is a subscript and then a
+        # further attribute.
+        ('subscript receiver bound', """import os
+import subprocess
+os.chdir(tmp)
+go = d[subprocess].run
+""", 'go = '),
+        ('launch method bound as a call attribute', """import os
+import subprocess
+os.chdir(tmp)
+go = subprocess.run.__call__
+""", 'go = '),
     ) + _TEMPLATE_CARRIERS
 
 
@@ -310,6 +324,15 @@ operator.call(
         cwd=ROOT)(
         cwd=ROOT), 1)
 """, 'operator.call('),
+        # The outer callee is a `__call__` the descent excludes, because a
+        # direct launch is a resolved one. The attribute inside the chain
+        # is a launch method read off a launcher, and that read is what
+        # this row refuses.
+        ('launch method inside a callee chain', """import os
+import subprocess
+os.chdir(tmp)
+subprocess.run.__call__(['python3', 'child.py'])
+""", 'subprocess.run.__call__('),
     )
 
 
@@ -582,7 +605,12 @@ go += 2
 
 
 def _transforming_cases():
-    """Forms that build a new value, so a launcher in one is not carried."""
+    """Forms that build a new value, so a launcher in one is not carried.
+
+    The last two rows are the other side of the attribute arm: an
+    attribute naming a constant is a constant read, and the receiver it
+    is read off is not a launcher reaching the walk.
+    """
     return (
         ('sum of a launcher', """import operator
 import subprocess
@@ -602,6 +630,12 @@ go = subprocess.run + 1
         ('sum in a comprehension element', """import operator
 import subprocess
 operator.call([subprocess.run + 1 for _ in xs], 1)
+"""),
+        ('constant read off a module', """import subprocess
+go = subprocess.DEVNULL
+"""),
+        ('constant read off a launcher', """import subprocess
+go = subprocess.run.__name__
 """),
     )
 
