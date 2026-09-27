@@ -52,6 +52,11 @@ once, here, rather than twice.
 
   python3 -u watch_all.py --once 195 my-branch     # trial both, print, exit
   python3 -u watch_all.py 195 my-branch            # persistent, debounced
+
+This file sits at the 500-line production ceiling the size policy
+enforces, so the next change to it belongs in `ci_gate.py` or a module of
+its own rather than in here: what stays here is the batching, the pipes
+and the hold's own decisions.
 """
 
 import argparse
