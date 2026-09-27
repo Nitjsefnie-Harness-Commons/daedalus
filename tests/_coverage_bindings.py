@@ -7,6 +7,14 @@ from _coverage_memo import nodes as memo_nodes
 _LAUNCHERS = frozenset(
     {'run', 'Popen', 'call', 'check_call', 'check_output'})
 
+# An attribute naming a launch method is a launcher read rather than a
+# constant read, so the walk opens its receiver. `__call__` joins that set
+# and not the other one: bound to a name it is the launcher called later,
+# which is the defect the inline form already states. The callee descent
+# does not take it, where it is the outer callee of the inline form and is
+# excluded there anyway.
+_LAUNCH_READS = _LAUNCHERS | {'__call__'}
+
 # A header binds names: a decorator binds the decorated name, and a
 # signature binds its parameters. Each form carries one, both or neither.
 _HEADER_FORMS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
@@ -216,6 +224,14 @@ def _carried_parts(value):
     grammar has it, and an interpreter without that form registers nothing
     and produces none of it.
 
+    An attribute is opened on one condition. An `Attribute` whose `attr`
+    names a launch method is a launcher read rather than a constant read,
+    so the walk yields it and descends into the receiver it is read off,
+    and every other attribute is a constant read and stays the atom it is.
+    Without that descent `d[subprocess].run` and `subprocess.run.__call__`
+    are two names the predicates judge and find nothing, and the launcher
+    behind either is invisible.
+
     Two entries carry a reason the rule does not give them. A dict
     comprehension opens its key as well as its value.
 
@@ -249,6 +265,10 @@ def _carried_parts(value):
         for field in _CARRIED_FIELDS[type(value)]:
             for part in _field_parts(getattr(value, field)):
                 yield from _carried_parts(part)
+    elif (isinstance(value, ast.Attribute)
+            and value.attr in _LAUNCH_READS):
+        yield value
+        yield from _carried_parts(value.value)
     elif isinstance(value, _LEAVES):
         yield value
     else:
@@ -293,11 +313,22 @@ def _call_receiver_parts(value):
     arms already read and the receiver position reads a launch method
     off what it carries — handing one over would find a bare module name
     and refuse a direct launch.
+
+    An attribute the descent consumes is handed over on the same rule as
+    a subscript and for the same reason: naming a launch method is a read
+    off what the chain has already reached, and that read is invisible
+    while the chain swallows it. The call's own outermost callee is the
+    exception, because that one is a direct launch, already resolved, and
+    the arm above judges it.
     """
     callee = value.func
     while isinstance(callee, (ast.Attribute, ast.Subscript)):
         if isinstance(callee, ast.Subscript):
             yield from _carried_parts(callee.slice)
+        if (isinstance(callee, ast.Attribute)
+                and callee is not value.func
+                and callee.attr in _LAUNCHERS):
+            yield callee
         callee = callee.value
     if not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
