@@ -7,6 +7,7 @@ hold the predicate in place live beside the predicate rather than in either
 caller. A caller can only be as right as the thing it asks, and both of them
 would be wrong together if this were a copy.
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -85,13 +86,162 @@ def test_an_empty_requirement_is_satisfied_by_every_run_set(tmp):
                                 required=frozenset()) == []
 
 
+def _definition_line(path):
+    """The first line of the expectation, read off the source under test."""
+    for index, line in enumerate(path.read_text(
+            encoding='utf-8').splitlines(), 1):
+        if line.startswith('REQUIRED_WORKFLOWS = '):
+            return index
+    raise AssertionError('ci_gate.py declares no expectation')
+
+
+def _spells_a_required_name(node, wanted):
+    """Whether a set or frozenset literal names a required workflow."""
+    literals = None
+    if isinstance(node, ast.Set):
+        literals = node
+    elif (isinstance(node, ast.Call)
+            and getattr(node.func, 'id', None) in ('set', 'frozenset')
+            and node.args and isinstance(node.args[0], ast.Set)):
+        literals = node.args[0]
+    if literals is None:
+        return False
+    return bool({item.value for item in literals.elts
+                 if isinstance(item, ast.Constant)
+                 and isinstance(item.value, str)} & wanted)
+
+
+def _is_an_alias(node):
+    """Whether a definition's value is a plain reference to the authority.
+
+    `ci_wait.REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS` is the same
+    object under a second name, which is what keeps this tool's public
+    constant working after the extraction. A copy computes its own value,
+    and that is the one this control refuses.
+    """
+    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        return False
+    value = node.value
+    return (isinstance(value, ast.Attribute)
+            and getattr(value.value, 'id', None) == 'ci_gate')
+
+
+def test_the_expectation_has_exactly_one_definition(tmp):
+    """The control that answers Task 2's question, which import identity
+    could not: a caller that grew its own copy of the expectation.
+
+    Identity is satisfied by the import system - two modules that merely
+    `import ci_gate` hold the same object whether or not either one calls
+    it - so it passes for a value-identical copy, and for a caller that
+    stopped calling the predicate altogether. Enumerating DEFINITIONS is
+    the one form that sees a copy written under a definition's name, and
+    an alias bound to the authority is not a copy.
+
+    Read from source with `ast`, not by importing: an import would collapse
+    the very thing being counted.
+    """
+    del tmp
+    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    found = []
+    for path in sorted(skill.iterdir()):
+        if path.suffix != '.py':
+            continue
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+        for node in tree.body:
+            name = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                name = getattr(node.targets[0], 'id', None)
+            elif isinstance(node, ast.FunctionDef):
+                name = node.name
+            if name not in ('REQUIRED_WORKFLOWS', 'missing_required'):
+                continue
+            if name == 'missing_required' or not _is_an_alias(node):
+                found.append(f'{path.name}:{node.lineno} {name}')
+    first = _definition_line(SOURCE)
+    assert found == [f'ci_gate.py:{first} REQUIRED_WORKFLOWS',
+                     f'ci_gate.py:{first + 3} missing_required'], found
+
+
+def test_the_required_names_are_spelled_in_exactly_one_module(tmp):
+    """The same drift under a name the control above would miss.
+
+    A copy need not call itself `missing_required` - the shape the review
+    planted was an expression inside a caller's own body. What every copy
+    has in common is that it spells the workflow names out again, so this
+    looks for the names inside a set or frozenset literal and requires one
+    file to carry them.
+    """
+    del tmp
+    wanted = set(_ci_gate().REQUIRED_WORKFLOWS)
+    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    spelled = []
+    for path in sorted(skill.iterdir()):
+        if path.suffix != '.py':
+            continue
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+        # One entry per FILE: `frozenset({'tests'})` is both a Call and the
+        # Set it wraps, and the same file spelling it twice is still one
+        # place the expectation is written down.
+        if any(_spells_a_required_name(node, wanted)
+               for node in ast.walk(tree)):
+            spelled.append(path.name)
+    assert spelled == ['ci_gate.py'], spelled
+
+
+def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
+    """The behavioural half, and the one that sees a deleted call.
+
+    A source-level control cannot see an absence: deleting the predicate's
+    use from a caller removes a definition rather than adding one, and
+    spells no names. Planting a recorder on the module's `ci_gate` and
+    requiring both callers to go through it catches that, and catches a
+    caller's own copy for the same reason - neither of them would call it.
+    """
+    del tmp
+    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_reaches_gate')
+    hold = _util.load(skill / 'watch_all.py', 'watch_all_reaches_gate')
+
+    def _asked_and_answered(caller, call):
+        """(did it call the predicate, what did it answer) for one caller."""
+        seen = []
+
+        def _recorder(runs, *args, **kwargs):
+            seen.append(list(runs))
+            return []
+
+        real = caller.ci_gate.missing_required
+        setattr(caller.ci_gate, 'missing_required', _recorder)
+        try:
+            answer = call(caller)
+            asked = bool(seen)
+        finally:
+            setattr(caller.ci_gate, 'missing_required', real)
+        return asked, answer
+
+    # A recorder answering "nothing missing" is what makes the answer
+    # assertion bite: with the call in place the verdict is the predicate's
+    # own, and without it the caller answered for itself.
+    asked, answer = _asked_and_answered(
+        wait, lambda m: m.verdict([_gate_run('tests')]))
+    assert asked, 'ci_wait never asked ci_gate'
+    assert answer == ('acceptable', []), answer
+    asked, answer = _asked_and_answered(
+        hold, lambda m: m._settled([_gate_run('tests')]))
+    assert asked, 'watch_all never asked ci_gate'
+    assert answer is True, answer
+
+
 def test_both_waiters_read_this_one_predicate(tmp):
-    """The extraction, not a reimplementation: both callers hold the SAME
-    module object, so renaming or retargeting the gate cannot leave one of
-    them answering for the old name. Equality carries the constant (two
-    separately built frozensets are the same value and not the same
-    object); identity carries the predicate, which is what "one mechanism"
-    means."""
+    """Kept, and no longer the control that carries the weight.
+
+    These assertions hold for any two modules that import the name, so
+    they cannot see a caller that grew a copy or stopped calling the
+    predicate - the three controls above are the ones that do. What is
+    left here is the weaker property, still worth pinning: both callers
+    reach the same module object rather than each resolving `ci_gate`
+    somewhere of its own.
+    """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
     mod = _ci_gate()
