@@ -317,7 +317,8 @@ def test_each_caller_passes_the_set_it_wants_judged(tmp):
             {'number': 1, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
              'mergeStateStatus': 'DIRTY', 'headRefOid': sha}])
         out, err = io.StringIO(), io.StringIO()
-        with _frozen_wait_clock(caller, clock), contextlib.redirect_stderr(err):
+        with _frozen_wait_clock(caller, clock), \
+                contextlib.redirect_stderr(err):
             return caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300)
 
     # The verdict's own check first, then the refusal's: a caller that
