@@ -36,10 +36,11 @@ TESTS = Path(__file__).resolve().parent
 #
 # It must clear the healthy path with room to spare and still fire well
 # inside any external bound. The healthy budget is
-# `round(CHILD_DEADLINE_S * 0.1)` = 11s, so the slowest observed correct
-# run of the whole arm is well under a minute; 60s is roughly five times
-# the healthy budget, and turning it into a failure costs a minute where
-# the alternative costs whatever the runner's ceiling costs.
+# `round(CHILD_DEADLINE_S * 0.1)` = 11s, and the slowest observed correct
+# run of the whole arm — a file timed at about 120s — is well under a
+# minute; 57s is roughly five times the healthy budget, and turning a
+# wedge into a named failure costs a minute where the alternative costs
+# whatever the runner's ceiling costs.
 OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
 OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
 OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
