@@ -293,7 +293,7 @@ class _Clock:
 
 
 def _paused(mod, instant, resume_at):
-    """(duration rendered, stamp named, seconds slept) from one `_pause`."""
+    """What one real `_pause` claimed and slept, at a pinned instant."""
     out = io.StringIO()
     slept = []
     watcher = mod.Watcher('w', out=out)
@@ -313,11 +313,9 @@ def _stamp(instant):
 
 
 def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
-    """The wait a reset asked for is the wait performed and the wait named.
-
-    Past the floor there is no clamp at all, so the line, the sleep and
-    the reported reset are the same instant. This is the property the
-    near-reset case cannot have, and the one it is measured against.
+    """Past the floor nothing is clamped, so the line, the sleep and the
+    reported reset are one instant - the property the near-floor case
+    cannot have, and the one it is measured against.
     """
     del tmp
     mod = _client()
@@ -330,15 +328,13 @@ def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
 
 
 def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
-    """Overshooting by a second is the price of not spinning.
+    """Overshooting by the floor's worth is the price of not spinning.
 
-    `_graphql_refusal` accepts a fractional `retryAfter`, so a reset can
-    arrive a millisecond out. A wait sized to it spends the poll
-    interval as one request per millisecond, and the class promises
-    neither a hostile header nor an absurd reset can hot-loop the
-    watcher - the floor is what delivers that. So the floor holds and
-    the line names the moment the watcher really resumes, not the reset
-    it will have passed. Pinned phase, so what is overslept is fixed.
+    A wait sized to a millisecond out spends the poll interval as one
+    request per millisecond, and the class promises neither a hostile
+    header nor an absurd reset can hot-loop the watcher. So the floor
+    holds, and the line names the moment the watcher really resumes -
+    after the reset it will have passed.
     """
     del tmp
     mod = _client()
@@ -355,13 +351,11 @@ def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
 def test_a_fractional_retry_after_reaches_the_pause_as_a_near_reset(tmp):
     """The exposure the floor above defends against is reachable today.
 
-    `_graphql_refusal` accepts any `retryAfter` that is a number, and a
-    GraphQL body is JSON, so a fractional one arrives. What it becomes is
-    a reset a thousandth of a second out - nearer than the floor, which
-    is the input the hot loop is made of. Exact values, not a range, so
-    tightening the producer's own validation is told apart from any
-    change in the pause: without this, that tightening would leave every
-    control green and the control above justifying itself falsely.
+    `_graphql_refusal` takes any `retryAfter` that is a number, and a
+    GraphQL body is JSON, so a fractional one arrives - a reset a
+    thousandth of a second out. Without this, tightening that
+    validation would leave every other control green while the one
+    above justified itself falsely.
     """
     del tmp
     mod = _client()
@@ -376,11 +370,8 @@ def test_a_fractional_retry_after_reaches_the_pause_as_a_near_reset(tmp):
 
 
 def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
-    """The case the floor was written for, still floor and still honest.
-
-    A stale header reports an instant already gone. Waiting exactly to
-    it is no wait at all, so the line names the moment the watcher
-    really resumes - which is after the reset, and says so.
+    """The case the floor was written for: a stale header names an
+    instant already gone, and waiting exactly to it is no wait at all.
     """
     del tmp
     mod = _client()
@@ -392,11 +383,8 @@ def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
 
 
 def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
-    """A capped future reset names the wait, which is not the reset.
-
-    The ceiling is what an absurd header gets; naming the reported reset
-    there would promise a wait of six hours ends at a moment none of the
-    watcher's waits end at.
+    """The ceiling is what an absurd header gets, so naming the reset
+    there would promise a six-hour wait ends somewhere it never does.
     """
     del tmp
     mod = _client()
@@ -408,11 +396,8 @@ def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
 
 
 def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
-    """No evidence of when to resume is a plain minute, not any number.
-
-    A 403 whose only evidence is its body, or a refusal naming no
-    instant, is the one case with nothing to be accurate about - and
-    the case the ceiling and floor are both inert on.
+    """Nothing to be accurate about, and nothing for the floor or the
+    ceiling to act on: a plain minute.
     """
     del tmp
     mod = _client()
