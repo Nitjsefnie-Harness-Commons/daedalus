@@ -82,15 +82,22 @@ def runs_page(suites=()):
 
 
 def suite(rid, conclusion='SUCCESS', status='COMPLETED', workflow=11,
-          started='2026-09-20T10:00:00Z'):
-    """One check suite of a workflow run, as the live schema reports it."""
+          started='2026-09-20T10:00:00Z', name=None):
+    """One check suite of a workflow run, as the live schema reports it.
+
+    `name` overrides the workflow's own name, which is how a fixture
+    carries the gating workflow: since issue 1217 a run set with no run of
+    it is an INCOMPLETE set, not a settled one, so a fixture standing in
+    for a head whose matrix ran has to name that workflow or it is
+    exercising a different state than it did before.
+    """
     return {'status': status, 'conclusion': conclusion, 'createdAt': started,
             'workflowRun': {
                 'databaseId': rid, 'createdAt': started,
                 'url': f'https://github.com/o/r/actions/runs/{rid}',
                 'file': {'path': '.github/workflows/ci.yml'},
                 'workflow': {'databaseId': workflow,
-                             'name': f'workflow {workflow}'}}}
+                             'name': name or f'workflow {workflow}'}}}
 
 
 def refusal_response(status=403, headers=None,
@@ -139,6 +146,6 @@ def idle_answers():
     return {
         'reviews(first: 100': pr_page(),
         'statusCheckRollup': ci_page([check(1, 'pylint')]),
-        'checkSuites': runs_page([suite(1)]),
+        'checkSuites': runs_page([suite(1, name='tests')]),
         **base_answers(),
     }
