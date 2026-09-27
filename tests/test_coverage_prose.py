@@ -3,9 +3,14 @@
 
 The paragraph in `CONTRIBUTING.md` that names the one shipped module no
 suite reaches carries one figure: that module's own code-line count, beside
-the `0` that is the claim of being unreached. Both are functions of one
-file, so both are derived here, in one command, with no suite run and no
-coverage data.
+the `0` that is the claim of being unreached. The count is a function of
+that one file and is derived here, in one command, with no suite run and no
+coverage data. The `0` is PERMITTED, not derived: whether a suite executes
+the module is the claim itself, so the accept set admits it on the prose's
+word and no assertion here would fail if it were untrue. The figure scan
+is what holds the two apart, since the paragraph's own `0` is admitted
+only while 0 is in the set; the coverage report is what settles the claim,
+and #1245 tracks the gap between the two.
 
 The figures the paragraph used to carry and no longer does are refused
 rather than quietly forgotten, because a refused figure is what stops the
@@ -156,12 +161,14 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """The property, not a token: a figure may appear only if the tree
     proves it, so the test is the VALUE and never the wording around it.
 
-    The accept set is what this paragraph is about: the `0` that is the
-    claim, and the module's own code-line count, which the case above pins.
-    Dropping the denominator narrowed the set rather than dropping the
-    property, so every other figure is still refused as a VALUE -- rewording
-    around one does not slip past, and neither does inserting one into the
-    sentence that disclaims it.
+    The accept set is what this paragraph is about: the module's own
+    code-line count, which the case above derives, and the bare `0`,
+    which is PERMITTED rather than derived -- it is not a measurement but
+    the claim that the module is unreached, so the set admits it on the
+    prose's word. Dropping the denominator narrowed the set rather than
+    dropping the property, so every other figure is still refused as a
+    VALUE -- rewording around one does not slip past, and neither does
+    inserting one into the sentence that disclaims it.
 
     A percentage is refused outright, and the paragraph is required to state
     none. A share is provable only against a base the paragraph states, and
