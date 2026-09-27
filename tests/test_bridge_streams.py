@@ -178,6 +178,7 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
 
 _GC_TRIGGER = '.gc-trigger'
 _GC_DONE = '.gc-done'
+_GC_DONE_TEMP = '.gc-done.tmp'
 
 # How far outside the TTL window each arm stamps, on opposite sides. A stall
 # in the handshake has to exceed this before it can move either verdict, so
@@ -197,6 +198,7 @@ def _on_demand_command_gc(fault_dir):
     """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
+        'import os\n'
         'import pathlib\n'
         'import sys\n'
         'import time\n'
@@ -206,6 +208,7 @@ def _on_demand_command_gc(fault_dir):
         '    root = pathlib.Path(cmd_dir)\n'
         f'    trigger = root / "{_GC_TRIGGER}"\n'
         f'    done = root / "{_GC_DONE}"\n'
+        f'    temp = root / "{_GC_DONE_TEMP}"\n'
         '    while True:\n'
         '        while not trigger.exists():\n'
         '            time.sleep(0.01)\n'
@@ -213,8 +216,10 @@ def _on_demand_command_gc(fault_dir):
         '        command_queue.collect_expired(cmd_dir, ttl)\n'
         f'        left = sorted(p.name for p in root.iterdir()\n'
         f'                      if p.name not in ("{_GC_TRIGGER}",\n'
-        f'                                         "{_GC_DONE}"))\n'
-        '        done.write_text("\\n".join(left), encoding="utf-8")\n'
+        f'                                         "{_GC_DONE}",\n'
+        f'                                         "{_GC_DONE_TEMP}"))\n'
+        '        temp.write_text("\\n".join(left), encoding="utf-8")\n'
+        '        os.replace(temp, done)\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
     return str(fault_dir)
@@ -282,7 +287,11 @@ def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
         now = time.time()
         _stamp(queues, now + _STAMP_LEASH)
         kept = _sweep(command_root, served)
-        assert kept == sorted(q.name for q in queues), (kept, ''.join(served))
+        # The root beside the record says which route a failure took: four
+        # namespaces still there is the record read early, none of them is
+        # the sweep having reaped work inside the TTL.
+        assert kept == sorted(q.name for q in queues), (
+            kept, _root_names(command_root), ''.join(served))
 
         _stamp(queues, now - _STAMP_LEASH)
         taken = _sweep(command_root, served)
