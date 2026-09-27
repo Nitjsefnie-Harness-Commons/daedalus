@@ -29,7 +29,7 @@ _SL = '\nsend = ext_cmd\nreturn '
 _QUIET = 'def quiet(): return lambda *a, **k: ordinary()\n'
 
 
-def _run(tmp, shape, clean=False):
+def _verdict(tmp, shape, clean=False):
     return _tracked_focus_verdict(
         tmp, (_PRE_CLEAN if clean else _PRE) + shape, counts=True)
 
@@ -72,7 +72,7 @@ _NO_ITEM_ASSIGNMENT_DELETE = (
     't = (relay(), quiet())\n', 't', 0, '', 't[1]()', 'del t[0]')
 
 
-def _key(k, spelling):
+def _spelling(k, spelling):
     return {'literal': f'x[{k}]', 'name': 'x[i]',
             'parens': f'x[({k})]'}[spelling]
 
@@ -81,13 +81,10 @@ def _bind(k, spelling):
     return f'i = {k}\n' if spelling == 'name' else ''
 
 
-def _elements(length, relay_at):
-    return ', '.join('relay()' if index == relay_at else 'quiet()'
-                     for index in range(length))
-
-
 def _pair(length, relay_at):
-    return f'x = [{_elements(length, relay_at)}]\n'
+    body = ', '.join('relay()' if index == relay_at else 'quiet()'
+                     for index in range(length))
+    return f'x = [{body}]\n'
 
 
 def _clean(length):
@@ -95,7 +92,7 @@ def _clean(length):
 
 
 def _store_shape(k, spelling, list_shape, value, read):
-    return _QUIET + _bind(k, spelling) + list_shape + _key(k, spelling) \
+    return _QUIET + _bind(k, spelling) + list_shape + _spelling(k, spelling) \
         + f' = {value}' + _SL + read
 
 
@@ -105,7 +102,7 @@ def _refused_shape(k, spelling, list_shape, value, read):
     the read after it is one the runtime would never run uncaught. Either
     way the position is unreachable and the verdict is clean."""
     return _QUIET + _bind(k, spelling) + list_shape \
-        + f'try:\n    {_key(k, spelling)} = {value}\n' \
+        + f'try:\n    {_spelling(k, spelling)} = {value}\n' \
         + 'except IndexError:\n    pass\n' + _SL + read
 
 
@@ -124,9 +121,9 @@ def _negative_store_verdicts(tmp, row):
     overwrites."""
     k, length, position = row
     for spelling in _SPELLINGS:
-        carried = _run(tmp, _store_shape(
+        carried = _verdict(tmp, _store_shape(
             k, spelling, _clean(length), 'relay()', f'x[{position}]()'))
-        overwritten = _run(tmp, _store_shape(
+        overwritten = _verdict(tmp, _store_shape(
             k, spelling, _pair(length, position), 'quiet()',
             f'x[{position}]()'))
         yield spelling, carried, overwritten
@@ -168,12 +165,12 @@ def test_the_last_reachable_key_is_not_the_first_refused_one(tmp):
             # and a read at position 0 catches one that clamps the
             # out-of-range position to 0 instead of declining it.
             for read in ('x[-1]()', 'x[0]()'):
-                dropped = _run(tmp, _refused_shape(
+                dropped = _verdict(tmp, _refused_shape(
                     refused, spelling, _clean(length), 'relay()', read))
                 if dropped != (0, 0):
                     wrong.append((length, spelling, 'refused', read,
                                   dropped))
-            named = _run(tmp, _store_shape(
+            named = _verdict(tmp, _store_shape(
                 reachable, spelling, _clean(length), 'relay()',
                 f'x[{length + reachable}]()'))
             if named != (1, 1):
@@ -192,10 +189,10 @@ def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
     # store into a kind without one would pass all five rows and fail it.
     wrong = []
     for name, row in _NO_ITEM_ASSIGNMENT.items():
-        verdict = _run(tmp, _no_assignment_shape(*row))
+        verdict = _verdict(tmp, _no_assignment_shape(*row))
         if verdict != (0, 0):
             wrong.append((name, verdict))
-    recorded = _run(tmp, _store_shape(
+    recorded = _verdict(tmp, _store_shape(
         -1, 'literal', _clean(2), 'relay()', 'x[1]()'))
     if recorded != (1, 1):
         wrong.append(('list_negative', recorded))
@@ -209,7 +206,7 @@ def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
     # position to it: the same shape on a tuple reads (0, 0) on `main` and
     # (0, 1) here, so the tuple row is not one that was always reporting.
     # Pinned because it is the verdict, not because it is right.
-    deleted = _run(tmp, _no_assignment_shape(*_NO_ITEM_ASSIGNMENT_DELETE))
+    deleted = _verdict(tmp, _no_assignment_shape(*_NO_ITEM_ASSIGNMENT_DELETE))
     if deleted != (0, 1):
         wrong.append(('tuple_delete', deleted))
     assert not wrong, wrong
@@ -225,7 +222,7 @@ def test_negative_store_on_an_unknown_length_fails_closed(tmp):
     for spelling in _SPELLINGS:
         for read, expected in (('x[0]()', (0, 1)), ('x[2]()', (1, 1))):
             body = _store_shape(-1, spelling, _OPEN_LENGTH, 'relay()', read)
-            verdict = _run(tmp, body)
+            verdict = _verdict(tmp, body)
             if verdict != expected:
                 wrong.append((spelling, read, verdict))
     assert not wrong, wrong
@@ -233,29 +230,29 @@ def test_negative_store_on_an_unknown_length_fails_closed(tmp):
 
 def test_negative_store_on_an_unknown_length_stays_clean(tmp):
     body = _store_shape(-1, 'literal', _OPEN_LENGTH, 'quiet()', 'x[1]()')
-    assert _run(tmp, body) == (0, 0)
-    assert _run(tmp, body, clean=True) == (0, 0)
+    assert _verdict(tmp, body) == (0, 0)
+    assert _verdict(tmp, body, clean=True) == (0, 0)
 
 
 def test_subscript_delete_at_a_negative_key_removes_that_position(tmp):
     # `del x[-1]` removes the last element, not a key named `-1`.
     body = _QUIET + 'x = [quiet(), quiet(), relay()]\ndel x[-1]' \
         + _SL + 'x[-1]()'
-    assert _run(tmp, body) == (0, 0)
-    assert _run(tmp, body.replace('relay()', 'quiet()')) == (0, 0)
+    assert _verdict(tmp, body) == (0, 0)
+    assert _verdict(tmp, body.replace('relay()', 'quiet()')) == (0, 0)
 
 
 def test_a_mapping_keyed_at_a_negative_index_is_untouched(tmp):
     # `d[-1]` is a genuine key: no length, no position, nothing to resolve.
     body = 'd = {}\nd[-1] = relay()' + _SL + 'd[-1]()'
-    assert _run(tmp, body) == (1, 1)
-    assert _run(tmp, body, clean=True) == (0, 0)
+    assert _verdict(tmp, body) == (1, 1)
+    assert _verdict(tmp, body, clean=True) == (0, 0)
 
 
 def test_a_read_at_a_negative_index_reports_its_own_position(tmp):
     body = _QUIET + 'x = [quiet(), relay()]' + _SL + 'x[-1]()'
-    assert _run(tmp, body) == (1, 1)
-    assert _run(tmp, body, clean=True) == (0, 0)
+    assert _verdict(tmp, body) == (1, 1)
+    assert _verdict(tmp, body, clean=True) == (0, 0)
 
 
 def main():
