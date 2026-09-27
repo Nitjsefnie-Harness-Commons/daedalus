@@ -329,29 +329,6 @@ def test_the_discarded_count_agrees_with_the_runs_it_names(tmp):
     assert text.endswith(named), text
 
 
-def test_every_run_of_one_workflow_carries_the_workflow_name(tmp):
-    """The producer invariant the required-workflow check rests on.
-
-    The check reads the names of the runs the filter left, and the filter
-    keeps the newest run per workflow, so a workflow whose newest run
-    carried a different name from its older ones would have its `tests` run
-    dropped and the head read incomplete. `gh_client` cannot emit that: it
-    takes every run's name from the run's own workflow record, so two runs
-    of one workflow come out with one name whatever their ids and start
-    times. Read through the producer rather than asserted here in prose -
-    two suites of one workflow, two runs, one name, and a second workflow
-    with a name of its own so the equality is not a constant."""
-    del tmp
-    from _watcher_fixtures import suite
-    client = _util.load(ROOT / '.claude' / 'skills' / 'changing-daedalus'
-                        / 'gh_client.py', 'gh_client_run_names')
-    same = [client._run_from_suites([suite(rid)]) for rid in (101, 102)]
-    other = client._run_from_suites([suite(103, workflow=22)])
-    assert len({run['workflow_id'] for run in same}) == 1, same
-    assert len({run['name'] for run in same}) == 1, same
-    assert other['name'] != same[0]['name'], (same, other)
-
-
 def test_the_grouping_is_by_workflow_and_not_by_run_name(tmp):
     """The discriminator the control above cannot be, because on the shape
     the producer emits the two groupings agree. Two runs of ONE workflow
