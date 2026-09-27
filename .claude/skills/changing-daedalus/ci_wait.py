@@ -172,10 +172,8 @@ def _superseded(run, runs):
 def _judged(runs):
     """The runs the verdict reads: each workflow's newest run, and no other.
 
-    Supersession, not the conclusion, is what takes a run out of the judged
-    set, so a run with no newer run of its own workflow is judged whatever it
-    concluded. The rule's rationale and the cost it pays are the module
-    docstring's; the naming that pays it is in `wait`.
+    The rule's rationale and the cost it pays are the module docstring's;
+    the naming that pays it is in `wait`.
     """
     return [run for run in runs if not _superseded(run, runs)]
 
@@ -336,9 +334,9 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
                     if discarded else '')
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{note}', file=out, flush=True)
-            # The rule's cost, named: a superseded failure is real evidence
-            # on this very merge ref, and a caller who cannot see the run
-            # this line discards is holding a green it cannot audit.
+            # The count above is this loop's length, so the two cannot
+            # disagree; a dropped run was judged acceptable, so exit 1 has
+            # none to disclose, and the run id rides on these lines alone.
             for run in discarded:
                 print(f'  {run.get("name")} (run {run.get("id")}): '
                       f'{run.get("conclusion")} {run.get("html_url") or ""}',

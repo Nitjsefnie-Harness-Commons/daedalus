@@ -527,9 +527,9 @@ def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
 
 def test_a_superseded_failure_is_ignored_through_the_new_query(tmp):
     """Issue 1249 end to end, through the query the wait really makes: a
-    close/reopen left a `tests` failure on the SHA beside the newer `tests`
-    run that cleared it, and the wait answered unacceptable. The discarded
-    failure is still named, so a caller can audit the green it is handed."""
+    `tests` failure on the SHA beside the newer `tests` run that cleared
+    it. The rationale is ci_wait's module docstring; what is pinned here
+    is that the discarded failure is still named."""
     answers = dict(idle_answers())
     answers['checkSuites'] = [runs_page([
         suite(1, 'FAILURE', started='2026-09-20T10:00:00Z', name='tests'),
