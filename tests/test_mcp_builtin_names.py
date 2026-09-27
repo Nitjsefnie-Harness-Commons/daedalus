@@ -165,18 +165,18 @@ def test_a_binding_under_a_global_declaration_is_a_module_binding(_tmp):
 
     Each row is a runtime measurement, not a claim about the symbol table — the
     binding has run by the time the index is read, so the call is a
-    `TypeError` or a `NameError` before it imports anything. The spellings are
-    the ones CPython does NOT write as a `Store` name, because a rule that
-    collects `ast.Name` nodes with a `Store` context sees the first row and
-    neither of the other two: a `del` and an `except ... as` are the same
-    module binding wearing a different node, and the import binds to a module
-    that is not callable. The `nonlocal` row is the same rebinding one scope
-    nearer, held because the resolver DOES report that one.
+    `TypeError` or a `NameError` before it imports anything. Every row after
+    the first is a spelling CPython does NOT write as a `Store` name, so a rule
+    that collects `ast.Name` nodes with a `Store` context sees the first and
+    misses them: a `del` and an `except ... as` are the same module binding
+    wearing a different node, and an import binds the name to a module that is
+    not callable. The `nonlocal` row is the same rebinding one scope nearer,
+    held because the resolver DOES report that one.
 
     The controls are the other half: a declaration with nothing behind it
-    binds nothing, and a `global` scope whose only use of the name is a
-    SUBSCRIPT store does not rebind it either — the compiler agrees, so the
-    walk resolves the alias and the module enters the closure.
+    binds nothing, and a `global` scope that only READS the name through a
+    subscript binds nothing either — the compiler agrees, and the walk leaves
+    the alias alone and the module in the closure.
     """
     for bindings, name in _ALIASES[:2]:
         index = f'[{_OPERATION}, 0][{name}(0)]'

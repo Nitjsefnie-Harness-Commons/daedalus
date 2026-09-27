@@ -227,14 +227,17 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     # axis is about the NAME and not about the statement.
     for callee, step in own:
         assert by_step[(callee, step)] == _twin(callee, step), (callee, step)
-    # A binding under a `global` declaration takes the name back under BOTH
-    # spellings, in each of the four ways CPython spells one, and every one of
-    # these rows is refused where its twin is decided — so a rule that reads
-    # the ROOT symbol without reading the nested one resolves a quarter of
-    # them, and a rule that collects only `Store` names resolves the three
-    # spellings CPython does not write as one.
-    for _name, suffix, _before, _after, _replaced in \
-            _mcp_builtin_carriers.CARRIERS[3:]:
+    # Every carrier that TAKES THE NAME BACK is refused where its
+    # straight-line twin is decided — the module-level store, and each of the
+    # ways a `global` declaration hands a binding to the module. So a rule
+    # that reads the ROOT symbol without reading the nested one resolves a
+    # quarter of the `global` rows, and a rule that collects only `Store`
+    # names resolves the three spellings CPython does not write that way.
+    # Which carriers those are comes off the table's own flag rather than off
+    # its order, so adding or moving one does not silently drop the rows.
+    replaced = {suffix for _name, suffix, _before, _after, replaced
+                in _mcp_builtin_carriers.CARRIERS if replaced}
+    for suffix in replaced:
         rebound = _twins(suffix)
         assert len(rebound) == 80, (suffix, len(rebound))
         for callee, step in rebound:
@@ -242,8 +245,6 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
             assert by_step[(callee, step[:-len(suffix)])] \
                 in ('resolved', 'silent'), (callee, step)
     # A name the module has NOT bound to the builtin itself is never resolved.
-    replaced = {suffix for _name, suffix, _b, _a, replaced
-                in _mcp_builtin_carriers.CARRIERS if replaced}
     undecided = [form for form in rows
                  if form['step'].endswith(' and replaced')
                  or form['step'].startswith('bound under an alias under a')
