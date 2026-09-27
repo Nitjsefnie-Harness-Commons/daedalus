@@ -272,10 +272,12 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
     A parameter is supplied by POSITION or by NAME, and the two are one
     supply, so the call's arguments are bound to the signature the way
     Python binds them rather than counted against it. The call raises
-    wherever Python's own binding raises: a second value for one parameter,
-    a name the signature does not have and no `**kwargs` to catch it, or a
-    name for a POSITIONAL-ONLY parameter. What the call does not say is what
-    a `*args` unpacks to, so that is `UNREAD`, and the caller's own class.
+    wherever Python's own binding raises: a second value for one parameter
+    — BY POSITION, by name, or through a `**` the walk reads, which are
+    three spellings of one rule and are checked the same way — a name the
+    signature does not have and no `**kwargs` to catch it, or a name for a
+    POSITIONAL-ONLY parameter. What the call does not say is what a `*args`
+    unpacks to, so that is `UNREAD`, and the caller's own class.
     """
     args = func.args
     params = args.posonlyargs + args.args
@@ -294,6 +296,7 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
                             for value in call.args):
         return UNREAD
     filled = set()
+    by_keyword = set()
     for position in range(len(call.args)):
         if position >= len(params):
             if args.vararg is None:
@@ -309,6 +312,9 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
                 return False
             filled.add(index)
         elif name in keyword_only:
+            if name in by_keyword:
+                return False
+            by_keyword.add(name)
             wanted.discard(name)
         elif args.kwarg is None:
             return False

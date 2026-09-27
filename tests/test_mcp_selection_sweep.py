@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+import _mcp_lambda_sweep  # noqa: E402
 import _mcp_selection_sweep  # noqa: E402
 import _util  # noqa: E402
 
@@ -229,50 +230,61 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
 
 
 def test_a_parameter_supplied_by_name_is_supplied(_tmp):
-    """The class's two sides, in the guard's OWN verdicts.
+    """The class's shapes, checked rather than trusted, and every one of them
+    in the guard's OWN verdicts.
 
-    A call that binds its arguments produces the operation and resolves; a
-    call whose own binding is a `TypeError` names nothing and is clean. Every
-    signature carries BOTH sides, which is what makes the class discriminate:
-    a rule that reads only the positional arguments is caught by the keyword
-    rows and a rule that reads only the names by the positional ones, and
-    neither has a row it passes.
+    The oracle is checked form by form; this case checks the thing the oracle
+    cannot see, which is the GENERATOR'S COVERAGE. A shape the walk must
+    answer and the builder never emits is a rule that may be wrong with
+    nothing to catch it, so the builder states its shapes in
+    `BINDING_SHAPES` and the first assertion is that the rows are exactly
+    those — every declared shape crossed, and nothing crossed that is not
+    declared. A shape the builder cannot emit is declared in
+    `UNDECIDED_SHAPES` instead, with the reason, and the hand suite holds a
+    case for each.
 
-    The filler-body rows are the class's `does not reach` side and the reason
-    the two bodies are generated: the same call over a filler selects
-    nothing, so a rule that resolves the callee as the operation without
-    binding the call at all fails them.
+    Then the verdicts, one shape at a time. A call that binds its arguments
+    produces the operation and resolves; a call whose own binding is a
+    `TypeError` names nothing and is clean. The refusal shapes are separate
+    rows rather than one word, which is what makes a rule that gets ONE of
+    them wrong distinguishable from a rule that gets them all right.
     """
     forms = _swept(_tmp)
     rows = [form for form in forms
             if 'a parameter supplied by name' in form['classes']]
-    reached = [form for form in rows if form['step'] == 'bound reaches']
-    raised = [form for form in rows if form['step'] == 'bound raises']
-    assert len(rows) == 4176, len(rows)
-    assert {form['inline'] for form in reached} == {'resolved', 'silent'}
-    reached_oracles = {form['oracle'] for form in reached}
-    assert reached_oracles == {'reaches', 'does not reach'}, reached_oracles
-    assert {form['inline'] for form in raised} == {'silent'}
-    assert {form['oracle'] for form in raised} == {'raises'}
-    for form in reached:
-        assert form['inline'] == (
-            'resolved' if form['oracle'] == 'reaches' else 'silent'), form
+    crossed = {form['step'] for form in rows}
+    declared = {shape for shape, _ in _mcp_lambda_sweep.BINDING_SHAPES}
+    missing = sorted(declared - crossed)
+    assert crossed == declared, (missing, sorted(crossed - declared))
+    for shape, side in _mcp_lambda_sweep.BINDING_SHAPES:
+        shaped = [form for form in rows if form['step'] == shape]
+        assert shaped, shape
+        for form in shaped:
+            if side == 'raises':
+                # The SIDE is a prediction and the ORACLE is the
+                # measurement; a shape predicted to refuse and read by the
+                # walk as a raise is the class failing at its own claim.
+                assert form['oracle'] == 'raises', form
+                assert form['inline'] == 'silent', form
+            else:
+                assert form['inline'] == (
+                    'resolved' if form['oracle'] == 'reaches' else 'silent'), \
+                    form
+    assert len(rows) == 13080, len(rows)
     signatures = {form['kind'] for form in rows}
     assert len(signatures) == 144, len(signatures)
     one_sided = []
     for kind in signatures:
         of = [form for form in rows if form['kind'] == kind]
-        steps = {form['step'] for form in of}
-        assert steps <= {'bound reaches', 'bound raises'}, kind
-        resolves = 'resolved' in {form['inline'] for form in of
-                                  if form['step'] == 'bound reaches'}
-        if 'bound raises' in steps:
-            assert {form['inline'] for form in of
-                    if form['step'] == 'bound raises'} == {'silent'}, kind
-            # A signature the product can make raise carries BOTH sides: the
+        shapes = {form['step'] for form in of}
+        resolving = any(form['inline'] == 'resolved' for form in of)
+        refusals = {shape for shape, side
+                    in _mcp_lambda_sweep.BINDING_SHAPES if side == 'raises'}
+        if shapes & refusals:
+            # A signature the product can make refuse carries BOTH sides: the
             # boundary is inside it, and a rule that reads only one binding
             # form has a row here that fails.
-            assert resolves, kind
+            assert resolving, kind
         else:
             # A signature whose only feature is a `*args` is not one of
             # these: it soaks up every positional, so no call can make its
