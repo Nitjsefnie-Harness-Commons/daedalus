@@ -10,9 +10,8 @@ the module is the claim itself, so the count phrase admits it on the
 prose's word and no assertion here would fail if it were untrue. The
 phrase's shape is what holds the two apart, naming the `0` and the code-line
 count as separate parts of one claim, so each is admitted for being part
-of that claim and not for being a number in a set: the same `0` is refused
-a sentence later. The coverage report is what settles the claim, and #1245
-tracks the gap between the two.
+of that claim and not for being a number in a set. The coverage report is
+what settles the claim, and #1245 tracks the gap between the two.
 
 The figures the paragraph used to carry and no longer does are refused
 rather than quietly forgotten, because a refused figure is what stops the
@@ -27,8 +26,7 @@ whose base the paragraph does not state has nothing to prove it against.
 Admissibility is therefore a POSITION and not a value: the figures the
 paragraph may state are the ones the count phrase itself carries, so an
 unrelated figure is refused wherever it appears, at every value, including
-one that happens to equal the count. The same `0` is admitted in the
-phrase and refused a sentence later, which is the whole of the rule.
+one that happens to equal the count.
 
 What the paragraph calls a shipped module is also checked against the
 population, so a file that is renamed, moved out of `extension/`, or stops
@@ -65,9 +63,7 @@ from js_lines import code_lines  # noqa: E402
 CONTRIBUTING = ROOT / 'CONTRIBUTING.md'
 UNREACHED = 'extension/options.js'
 # Every token boundary takes whitespace, not one space: the paragraph is
-# hand-wrapped, and a rewrap of a correct figure is not a change to it. The
-# words and their order are what this pins; a break between any two of them
-# is where the sentence happened to end, not a claim about the figure.
+# hand-wrapped, and a rewrap of a correct figure is not a change to it.
 COUNT_PHRASE = r'at\s+0\s+of\s+(\d+)\s+code\s+lines'
 
 
@@ -78,13 +74,12 @@ def _prose():
 def _paragraph():
     """The coverage paragraph alone, bounded at BOTH ends.
 
-    The upper bound is what the docstring used to omit and what the code did
-    not have: the slice ran from the opening sentence to end of file, so a
-    correct unrelated sentence further down -- a percentage in House style,
-    say -- was read as a restatement and reded this suite with a message
-    blaming the paragraph. The next editor's move would be to delete correct
-    prose. Both markers are sentences, so a reword of either is a loud failure
-    here rather than a silent change of scope.
+    Without the upper bound the slice ran to end of file, so a correct
+    unrelated sentence further down -- a percentage in House style, say --
+    was read as a restatement and reded this suite with a message blaming
+    the paragraph, and the next editor's move would be to delete correct
+    prose. Both markers are sentences, so a reword of either is a loud
+    failure rather than a silent change of scope.
     """
     text = _prose()
     start = text.index('Coverage is two numbers')
@@ -109,10 +104,11 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
     also carried, and the one claim this paragraph has besides the count.
 
     Dropping the denominator must not drop this with it. A file that stops
-    being tracked shipped JavaScript has not changed a line, and the file
-    itself may not even be readable at the path the paragraph names, so
-    nothing else here reports it: this is the control that says the
-    coverage population has lost the module the prose is about.
+    being tracked shipped JavaScript has not changed a line, so the count
+    control still measures it and passes; a file that is gone as well makes
+    that control raise rather than judge, which reports a missing file and
+    not a population. This is the only control here that speaks to whether
+    the coverage run still sees the module the prose is about.
     """
     del tmp
     sources = tracked_sources(ROOT)
@@ -169,9 +165,8 @@ def _claim_figures(phrase, offset):
     read this one list: the rule tests a scanned run's span against the
     spans returned here, and the message prints the runs returned here. A
     message that spelled the admissible figures out itself would be a second
-    copy of the rule, and the copy is what drifts -- this is the defect the
-    value-based form had, where a message naming "0 and the count" outlived
-    the set it described.
+    copy of the rule, and the copy is what drifts -- a message naming "0 and
+    the count" once outlived the set it described.
     """
     return [(offset + start, offset + end, run)
             for run, start, end in _digit_runs(phrase)]
@@ -179,30 +174,22 @@ def _claim_figures(phrase, offset):
 
 def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """The property, not a token: a figure may appear only if the claim it
-    sits in is one the tree proves. Admissibility is therefore a POSITION.
+    sits in is one the tree proves, so admissibility is a POSITION.
 
-    The claim the tree proves is the count phrase, and the figures it may
-    state are the ones that phrase itself carries: the bare `0`, which is
-    PERMITTED rather than derived -- it is not a measurement but the claim
-    that the module is unreached -- and the code-line count, which the case
-    above derives. Judging the figure rather than its value is what stops
-    an unrelated figure that happens to equal the count from being admitted
-    wherever it appears; rewriting around one does not slip past either, and
-    neither does inserting one into the sentence that disclaims it.
+    The claim is the count phrase, and the figures it may state are the ones
+    that phrase itself carries, each admitted for being part of that claim:
+    the bare `0`, PERMITTED rather than derived because it is the claim that
+    the module is unreached, and the code-line count, which the case above
+    derives. That is what refuses an unrelated figure colliding with the
+    count, wherever it appears and at whatever value.
 
-    A percentage is refused outright, and the paragraph is required to state
-    none. A share is provable only against a base the paragraph states, and
-    the one base that would make this one checkable is a count of every
-    shipped JavaScript file in the tree: it moves for reasons that have
-    nothing to do with the module named here, and the run that prints it
-    prints it in the coverage step summary.
+    A percentage is refused outright and the paragraph is required to state
+    none, because a share is provable only against a base it states and the
+    only base that would make one checkable is the tree-wide count.
 
-    What this does NOT read is in the module docstring and repeated here: the
-    scan is digit form, so a figure spelled in words -- "four thousand three
-    hundred and forty" -- passes, and so does a percentage spelled in words.
-    That is a known limit rather than a bug to be fixed by writing a prose
-    parser, and the honest remedy is this sentence, not a bigger regular
-    expression.
+    What this does NOT read is in the module docstring: the scan is digit
+    form, so a figure spelled in words passes, and so does a percentage
+    spelled in words.
     """
     del tmp
     text = _paragraph()
@@ -215,8 +202,7 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     claim = ' '.join(said_count.group(0).split())
 
     # Percentages are blanked first, so their digits are not also judged as
-    # bare figures; they keep their offset either way, and whether one is
-    # allowed at all is decided below, where the refusal can say why.
+    # bare figures; they keep their offset either way.
     blanked = re.sub(r'\d+(?:\.\d+)?\s*%',
                      lambda m: ' ' * len(m.group(0)), text)
     for run, start, end in _digit_runs(blanked):
