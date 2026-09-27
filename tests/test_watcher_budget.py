@@ -33,7 +33,7 @@ from _watcher_fixtures import comment  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 from _watcher_fixtures import pr_page  # noqa: E402
 from _watcher_fixtures import rate_limited_error  # noqa: E402
-from _watcher_fixtures import refusal  # noqa: E402
+from _watcher_fixtures import refusal_response  # noqa: E402
 from _watcher_fixtures import review  # noqa: E402
 from _watcher_fixtures import runs_page  # noqa: E402
 from _watcher_fixtures import suite  # noqa: E402
@@ -319,7 +319,7 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
     reset = int(time.time()) + 6
     answers = dict(idle_answers())
     answers['reviews(first: 100'] = [
-        refusal(headers={'X-RateLimit-Reset': str(reset)}),
+        refusal_response(headers={'X-RateLimit-Reset': str(reset)}),
         pr_page(reviews=[review(1)], conversation=[comment(2)])]
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
@@ -346,7 +346,7 @@ def test_a_refused_ci_poll_pauses_on_a_retry_after(tmp):
     before = time.time()
     answers = dict(idle_answers())
     answers['statusCheckRollup'] = [
-        refusal(429, {'Retry-After': '4'}),
+        refusal_response(429, {'Retry-After': '4'}),
         ci_page([check(1, 'pyright', 'FAILURE')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     child = _watcher('ci_watch.py',
@@ -502,7 +502,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
 def test_a_plain_refusal_still_exits_three_at_once(tmp):
     answers = dict(idle_answers())
     answers['checkSuites'] = [
-        refusal(403, {}, 'Resource not accessible by integration.')]
+        refusal_response(403, {}, 'Resource not accessible by integration.')]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 3, (done.returncode, done.stdout, done.stderr)
