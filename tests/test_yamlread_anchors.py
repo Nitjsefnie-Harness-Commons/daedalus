@@ -17,7 +17,7 @@ from workflow_yaml import (  # noqa: E402
 import yamlanchor  # noqa: E402
 
 
-def _step_workflow(field, prefix=''):
+def _step_with_field(field, prefix=''):
     """A one-step workflow whose step carries `field` before an `if`."""
     return (f'{prefix}jobs:\n sample:\n  steps:\n'
             f'   - {field}\n     if: z\n')
@@ -79,12 +79,12 @@ def test_parse_alias_refuses_a_malformed_alias_spelling(tmp):
 
 def test_anchored_step_name_decodes_like_the_plain_spelling(tmp):
     del tmp
-    assert _names(_step_workflow('name: &a target')) == ['target']
+    assert _names(_step_with_field('name: &a target')) == ['target']
 
 
 def test_string_tagged_step_name_decodes_like_the_plain_spelling(tmp):
     del tmp
-    assert _names(_step_workflow('name: !!str target')) == ['target']
+    assert _names(_step_with_field('name: !!str target')) == ['target']
 
 
 def test_the_non_specific_tag_is_refused_in_every_scalar_form(tmp):
@@ -93,7 +93,7 @@ def test_the_non_specific_tag_is_refused_in_every_scalar_form(tmp):
     for field in (
             'name: ! 5', 'name: ! true', 'name: ! null',
             'name: ! "5"'):
-        _reader_refused(_step_workflow(field), 'unsupported YAML tag !')
+        _reader_refused(_step_with_field(field), 'unsupported YAML tag !')
 
 
 def test_the_non_specific_tag_is_refused_on_a_block_scalar(tmp):
@@ -109,32 +109,32 @@ def test_a_string_tagged_number_and_bool_decode_to_strings(tmp):
     del tmp
     for field, decoded in (('name: !!str 5', '5'),
                            ('name: !!str true', 'true')):
-        assert _names(_step_workflow(field)) == [decoded], field
+        assert _names(_step_with_field(field)) == [decoded], field
 
 
 def test_an_anchor_and_a_tag_decode_in_either_order(tmp):
     del tmp
     for field in ('name: &a !!str target', 'name: !!str &a target'):
-        assert _names(_step_workflow(field)) == ['target'], field
+        assert _names(_step_with_field(field)) == ['target'], field
 
 
 def test_a_quoted_name_after_properties_keeps_hash_sign_text(tmp):
     del tmp
     for field in ('name: &a "one # two"', 'name: !!str "one # two"'):
-        assert _names(_step_workflow(field)) == ['one # two'], field
+        assert _names(_step_with_field(field)) == ['one # two'], field
 
 
 def test_a_quoted_name_continued_past_a_property_is_a_boundary(tmp):
     """A multiline quoted scalar is an unsupported boundary, not invalid."""
     del tmp
     _reader_refused(
-        _step_workflow('name: &a "one\n          two"'),
+        _step_with_field('name: &a "one\n          two"'),
         'unsupported multiline scalar')
 
 
 def test_aliased_step_name_decodes_to_the_anchored_value(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a target\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a target\n')
     assert _names(source) == ['target']
 
 
@@ -143,9 +143,10 @@ def test_step_id_accepts_every_property_spelling(tmp):
     prefix = 'anchors:\n gate: &a target\n'
     for field in ('id: &b target', 'id: !!str target',
                   'id: &b !!str target', 'id: *a'):
-        assert _identities(_step_workflow(field, prefix)) == ['target'], field
+        assert _identities(_step_with_field(
+            field, prefix)) == ['target'], field
     _reader_refused(
-        _step_workflow('id: ! target', prefix), 'unsupported YAML tag !')
+        _step_with_field('id: ! target', prefix), 'unsupported YAML tag !')
 
 
 def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
@@ -168,7 +169,7 @@ def test_anchored_block_scalar_name_decodes_like_the_plain_block(tmp):
 def test_an_alias_resolves_to_the_last_anchor_defined_before_it(tmp):
     del tmp
     prefix = 'anchors:\n first: &a wrong\n second: &a target\n'
-    assert _names(_step_workflow('name: *a', prefix)) == ['target']
+    assert _names(_step_with_field('name: *a', prefix)) == ['target']
 
 
 def test_mapping_value_aliases_match_base_loader_strings(tmp):
@@ -183,7 +184,7 @@ def test_mapping_value_aliases_match_base_loader_strings(tmp):
         ('folded', '>\n  folded block\n'),
     )
     for key, value in cases:
-        source = _step_workflow(
+        source = _step_with_field(
             'name: *a', f'anchors:\n {key}: &a {value}'
             + ('' if value.endswith('\n') else '\n'))
         parsed = yaml.load(source, Loader=yaml.BaseLoader)
@@ -202,7 +203,7 @@ def test_an_alias_reads_an_anchor_defined_on_an_earlier_step_field(tmp):
 def test_an_alias_with_no_earlier_anchor_is_refused(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('name: *missing'), 'unknown YAML alias: &missing')
+        _step_with_field('name: *missing'), 'unknown YAML alias: &missing')
 
 
 def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
@@ -211,7 +212,7 @@ def test_a_decoy_anchor_in_content_defines_no_alias_target(tmp):
                    'anchors:\n gate: "&a hidden"\n',
                    'anchors:\n# gate: &a hidden\n gate: real\n'):
         _reader_refused(
-            _step_workflow('name: *a', prefix), 'unknown YAML alias: &a')
+            _step_with_field('name: *a', prefix), 'unknown YAML alias: &a')
 
 
 def test_bare_sequence_block_scalars_do_not_define_alias_targets(tmp):
@@ -224,7 +225,7 @@ def test_bare_sequence_block_scalars_do_not_define_alias_targets(tmp):
         '    key: &a hidden\n'
         '  - >\n'
         '    key: &a hidden\n')
-    assert _names(_step_workflow('name: *a', prefix)) == ['target']
+    assert _names(_step_with_field('name: *a', prefix)) == ['target']
 
 
 def test_bare_sequence_open_quotes_do_not_define_alias_targets(tmp):
@@ -237,7 +238,7 @@ def test_bare_sequence_open_quotes_do_not_define_alias_targets(tmp):
         '    key: &a hidden"\n'
         "  - 'open\n"
         "    key: &a hidden'\n")
-    assert _names(_step_workflow('name: *a', prefix)) == ['target']
+    assert _names(_step_with_field('name: *a', prefix)) == ['target']
 
 
 def test_multiline_flow_alias_candidates_are_refused_as_opaque(tmp):
@@ -247,7 +248,7 @@ def test_multiline_flow_alias_candidates_are_refused_as_opaque(tmp):
             ('{\n  key: &a hidden,\n', '}\n')):
         prefix = f'anchors:\n first: &a target\n decoy: {value}{closing}'
         _reader_refused_exact(
-            _step_workflow('name: *a', prefix),
+            _step_with_field('name: *a', prefix),
             'step name has an unsupported YAML alias target in a flow '
             'collection: &a')
 
@@ -263,7 +264,7 @@ def test_unclosed_flow_keeps_apparent_jobs_opaque(tmp):
 def _assert_flow_property_decoy(decoy):
     prefix = 'anchors:\n first: &a target\n ' + decoy
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target in a flow '
         'collection: &a')
 
@@ -305,7 +306,7 @@ def test_flow_properties_keep_same_line_quoted_members_opaque(tmp):
     for value in values:
         prefix = f'anchors:\n first: &a target\n decoy: {value}\n'
         _reader_refused_exact(
-            _step_workflow('name: *a', prefix),
+            _step_with_field('name: *a', prefix),
             'step name has an unsupported YAML alias target in a flow '
             'collection: &a')
 
@@ -334,7 +335,7 @@ def test_no_space_flow_mapping_keeps_quoted_closing_brace_opaque(tmp):
             f'  {member},\n'
             '  "other": &a hidden\n'
             ' }\n')
-        source = _step_workflow('name: *a', prefix)
+        source = _step_with_field('name: *a', prefix)
         parsed = yaml.load(source, Loader=yaml.BaseLoader)
         assert parsed['anchors']['decoy']['key'] == expected
         assert parsed['jobs']['sample']['steps'][0]['name'] == 'hidden'
@@ -380,7 +381,7 @@ def test_verbatim_tag_flow_candidates_refuse_without_an_older_target(tmp):
         '  &a hidden\n'
         ' ]\n')
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target in a flow '
         'collection: &a')
 
@@ -395,7 +396,7 @@ def test_unclosed_verbatim_tag_keeps_the_remaining_flow_opaque(tmp):
         '  &a hidden\n'
         ' ]\n')
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target in a flow '
         'collection: &a')
 
@@ -405,7 +406,7 @@ def test_same_line_flow_alias_candidates_are_refused_as_opaque(tmp):
     for value in ('[&a hidden]', '{key: &a hidden}'):
         prefix = f'anchors:\n first: &a target\n decoy: {value}\n'
         _reader_refused_exact(
-            _step_workflow('name: *a', prefix),
+            _step_with_field('name: *a', prefix),
             'step name has an unsupported YAML alias target in a flow '
             'collection: &a')
 
@@ -420,7 +421,7 @@ def test_flow_extent_keeps_nested_quotes_and_comments_opaque(tmp):
         '  &a hidden\n'
         ']\n')
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target in a flow '
         'collection: &a')
 
@@ -429,7 +430,7 @@ def test_an_anchor_on_a_sequence_item_is_an_unsupported_alias_target(tmp):
     del tmp
     prefix = 'anchors:\n - &a target\n'
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target on a sequence '
         'item: &a')
 
@@ -438,7 +439,7 @@ def test_an_anchor_on_a_mapping_key_is_an_unsupported_alias_target(tmp):
     del tmp
     prefix = 'anchors:\n &a key: target\n'
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target on a mapping key: &a')
 
 
@@ -458,7 +459,7 @@ def test_anchor_name_boundaries_do_not_match_a_longer_name(tmp):
     del tmp
     prefix = 'anchors:\n first: &ab wrong\n decoy: [&ab hidden]\n'
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unknown YAML alias: &a')
 
 
@@ -470,7 +471,7 @@ def test_a_later_unsupported_candidate_does_not_fall_back_to_an_older_one(tmp):
         ' decoys:\n'
         '  - &a hidden\n')
     _reader_refused_exact(
-        _step_workflow('name: *a', prefix),
+        _step_with_field('name: *a', prefix),
         'step name has an unsupported YAML alias target on a sequence '
         'item: &a')
 
@@ -478,13 +479,13 @@ def test_a_later_unsupported_candidate_does_not_fall_back_to_an_older_one(tmp):
 def test_a_colon_bearing_decoy_in_a_block_body_defines_no_target(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
+        _step_with_field('name: *a', 'anchors:\n gate: |\n  k: &a hidden\n'),
         'unknown YAML alias: &a')
 
 
 def test_a_colon_bearing_decoy_in_a_quoted_scalar_defines_no_target(tmp):
     del tmp
-    _reader_refused(_step_workflow(
+    _reader_refused(_step_with_field(
         'name: *a',
         'anchors:\n gate: "k: &a hidden\n  j: &a deeper"\n'),
         'unknown YAML alias: &a')
@@ -512,45 +513,46 @@ def test_an_alias_to_a_multiline_quoted_scalar_is_a_boundary(tmp):
     """Resolving an alias re-reads the anchor's value, which refuses a
     quote this reader cannot take, exactly as the direct form does."""
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a "one\n  two"\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a "one\n  two"\n')
     _reader_refused(source, 'unsupported multiline scalar')
 
 
 def test_an_alias_to_a_nested_mapping_is_refused(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n  key: value\n')
+    source = _step_with_field(
+        'name: *a', 'anchors:\n gate: &a\n  key: value\n')
     _reader_refused(source, 'unsupported alias to a nested mapping')
 
 
 def test_an_alias_to_a_nested_scalar_names_the_scalar(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n  hidden\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a\n  hidden\n')
     _reader_refused(source, 'unsupported alias to a nested scalar')
 
 
 def test_an_alias_to_an_empty_mapping_value_names_an_empty_node(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a\n')
     _reader_refused_exact(
         source, 'step name has an unsupported alias to an empty node: &a')
 
 
 def test_an_alias_to_a_sequence_is_refused(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n  - one\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a\n  - one\n')
     _reader_refused(source, 'unsupported alias to a nested sequence')
 
 
 def test_a_dash_without_a_space_names_a_scalar(tmp):
     """`-5` is the plain scalar `-5`, so the dash-width limb names it."""
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n  -5\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a\n  -5\n')
     _reader_refused(source, 'unsupported alias to a nested scalar')
 
 
 def test_a_tab_widened_dash_still_names_a_sequence(tmp):
     del tmp
-    source = _step_workflow('name: *a', 'anchors:\n gate: &a\n  -\t5\n')
+    source = _step_with_field('name: *a', 'anchors:\n gate: &a\n  -\t5\n')
     _reader_refused(source, 'unsupported alias to a nested sequence')
 
 
@@ -558,7 +560,7 @@ def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
     """A flow child is neither a block mapping nor a plain scalar."""
     del tmp
     for child in ('[x]', '{k: v}', '{a}'):
-        source = _step_workflow(
+        source = _step_with_field(
             'name: *a', f'anchors:\n gate: &a\n  {child}\n')
         _reader_refused(
             source, 'unsupported alias to a nested flow collection')
@@ -567,33 +569,33 @@ def test_an_alias_to_a_flow_collection_names_the_collection(tmp):
 def test_a_non_string_tag_is_refused(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('name: !!int 5'), 'unsupported YAML tag !!int')
+        _step_with_field('name: !!int 5'), 'unsupported YAML tag !!int')
 
 
 def test_a_malformed_anchor_is_refused(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('name: &[bad] target'), 'malformed YAML anchor')
+        _step_with_field('name: &[bad] target'), 'malformed YAML anchor')
 
 
 def test_a_malformed_alias_is_refused(tmp):
     del tmp
     for field in ('name: *', 'name: *[bad]'):
-        _reader_refused(_step_workflow(field), 'malformed YAML alias')
+        _reader_refused(_step_with_field(field), 'malformed YAML alias')
 
 
 def test_an_alias_carrying_an_anchor_is_refused(tmp):
     """An alias is a complete node; PyYAML refuses properties on one."""
     del tmp
     _reader_refused(
-        _step_workflow('name: &x *b'),
+        _step_with_field('name: &x *b'),
         'alias carrying node properties: &x *b')
 
 
 def test_an_alias_carrying_a_tag_is_refused(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('id: !!str *t'),
+        _step_with_field('id: !!str *t'),
         'alias carrying node properties: !!str *t')
 
 
@@ -606,18 +608,18 @@ def test_a_tag_with_no_value_is_refused(tmp):
     """
     del tmp
     _reader_refused(
-        _step_workflow('name: !!str'), 'step name has no scalar value')
+        _step_with_field('name: !!str'), 'step name has no scalar value')
 
 
 def test_two_anchors_on_one_node_are_refused(tmp):
     del tmp
-    _reader_refused(_step_workflow('name: &a &b target'), 'two YAML anchors')
+    _reader_refused(_step_with_field('name: &a &b target'), 'two YAML anchors')
 
 
 def test_two_tags_on_one_node_are_refused(tmp):
     del tmp
     _reader_refused(
-        _step_workflow('name: !!str !!str target'), 'two YAML tags')
+        _step_with_field('name: !!str !!str target'), 'two YAML tags')
 
 
 if __name__ == '__main__':
