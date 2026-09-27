@@ -11,7 +11,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub)
+    RESPONSE_STUB, event_target_stub, import_scripts_stub)
 
 RESULT = 'POST /result'
 
@@ -65,15 +65,7 @@ const resultPosts = [];
 const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
+""" + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }

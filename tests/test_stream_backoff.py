@@ -21,7 +21,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import STRICT_FETCH  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub)
+    COPY_STUB, DELAY_STUB, RESPONSE_STUB, event_target_stub,
+    import_scripts_stub)
 
 TOKEN = 'tok-1'
 BRIDGE = 'https://bridge.example.com'
@@ -73,21 +74,7 @@ function openLedger() {
   }
 }
 
-function copy(value) {
-  return value === undefined ? undefined :
-    JSON.parse(JSON.stringify(value));
-}
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + COPY_STUB + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   if (answer === 'silent') {
     return {
@@ -272,11 +259,7 @@ const context = vm.createContext({
   console: { log() {}, warn() {}, error() {} },
 });
 """ + import_scripts_stub('context') + r"""
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function waitFor(predicate, label) {
   for (let attempt = 0; attempt < 2000; attempt++) {
     if (predicate()) return;

@@ -17,7 +17,8 @@ import json
 from _noderun import run_node_program  # noqa: F401,E501 pylint: disable=W0611
 from _stream_fake import STRICT_FETCH
 from _worker_sources import (
-    STREAM_RESPONSE, event_target_stub, import_scripts_stub)
+    COPY_STUB, DELAY_STUB, RESPONSE_STUB, STREAM_RESPONSE, event_target_stub,
+    import_scripts_stub)
 
 BRIDGE = 'https://initial.example.com'
 REPLACEMENT = 'https://replacement.example.com'
@@ -146,20 +147,7 @@ const workerSourcePaths = new WeakMap();
 
 // chrome.storage.local hands back a structured clone, so a reader that has not
 // written yet cannot see another writer's in-flight mutation.
-function copy(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + COPY_STUB + RESPONSE_STUB + r"""
 function schedule(callback, delay) {
   const timer = {
     id: ++nextTimerId,
@@ -459,11 +447,7 @@ function makeContext() {
 }
 
 const context = makeContext();
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function waitFor(predicate, label) {
   for (let attempt = 0; attempt < 1000; attempt++) {
     if (predicate()) return;

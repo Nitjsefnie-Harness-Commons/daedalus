@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub, resolve_target_stub)
+    DELAY_STUB, RESPONSE_STUB, event_target_stub, import_scripts_stub,
+    resolve_target_stub)
 
 
 _MAINWORLD_HARNESS = (
@@ -86,16 +87,7 @@ function nextDeadline() {
   return at;
 }
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 const chrome = {
   storage: {
     local: {
@@ -233,11 +225,7 @@ const pageContext = vm.createContext({
   evalResolvers,
   console: { log() {}, warn() {}, error() {} },
 });
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 // Attempt-bounded and returns a verdict instead of throwing: a control that
 // asserts a bound is absent must report the absence, not hang the child.
 async function waitForResult(predicate) {
