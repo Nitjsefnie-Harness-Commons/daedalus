@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
-from _dashsection import run_scenario  # noqa: E402
+from _dashsection import section_runner  # noqa: E402
 
 SECTION = ('sections/net-capture.js',)
 
@@ -170,12 +170,8 @@ def scenario(body, *, setup=DEFAULT, answers=(), plan=shared.COMMAND,
             + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=None, answers=(), plan=shared.COMMAND,
-         by_type=True):
-    return run_scenario(
-        scenario(body, setup=DEFAULT if setup is None else setup,
-                 answers=answers, plan=plan, by_type=by_type),
-        sections=SECTION)
+_run = section_runner(
+    scenario, SECTION, plan=shared.COMMAND, setup=DEFAULT, by_type=True)
 
 
 def _click(label):

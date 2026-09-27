@@ -350,27 +350,36 @@ def dashboard_module(name: str) -> Path:
     return ROOT / 'dashboard' / Path(*parts.parts)
 
 
-def build_harness(scenario: str, *,
-                  modules: tuple[str, ...] = ('app.js',)
-                  ) -> DashboardNodeHarness:
+def build_harness(scenario: str, *, modules: tuple[str, ...] = ('app.js',),
+                  shell: str | None = None) -> DashboardNodeHarness:
     """Wrap one scenario in the shell and the shipped process boundary.
 
     The bounded-step count is derived from the assembled source, so a
     scenario cannot disagree with the bound it declares. A scenario
     still writes every awaited step out as `await bounded(...)`, because
     a named bound says what was being waited for.
+
+    `shell` is the assembled prelude, and it is a parameter because the
+    section suites drive the same boundary over a DIFFERENT one: they add
+    the gaps a section needs and use the section transport, where the shell
+    uses its own. Passing it here is what lets one builder serve both
+    rather than each keeping a copy that differs only in the prelude it
+    assembles -- a difference invisible in the Python and load-bearing in
+    the child.
     """
+    prelude = SHELL if shell is None else shell
     source = 'const MODULES = ' + json.dumps(list(modules)) + ';\n'
     source += 'const UNPLANNED_STATUS = ' + str(UNPLANNED_STATUS) + ';\n'
-    source += SHELL + '\n' + scenario
+    source += prelude + '\n' + scenario
     steps = len(_BOUNDED_AWAIT.findall(blank_js_comments(source)))
     return DashboardNodeHarness(
         source, bounded_steps=steps, module=True,
         arguments=tuple(dashboard_module(name) for name in modules))
 
 
-def run_scenario(scenario: str, *,
-                 modules: tuple[str, ...] = ('app.js',)) -> dict:
+def run_scenario(scenario: str, *, modules: tuple[str, ...] = ('app.js',),
+                 shell: str | None = None) -> dict:
     """Run one scenario through the shell and return the report it printed."""
-    result = run_dashboard_node(build_harness(scenario, modules=modules))
+    result = run_dashboard_node(
+        build_harness(scenario, modules=modules, shell=shell))
     return json.loads(result.stdout)

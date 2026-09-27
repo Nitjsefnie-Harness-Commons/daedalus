@@ -28,7 +28,9 @@ import _dashsection  # noqa: E402
 import _dashsection_controls as scenarios  # noqa: E402
 import _util  # noqa: E402
 from _dashnode import run_dashboard_node  # noqa: E402
-from _dashsection import build_harness, run_scenario, section_path  # noqa
+from _dashsection import (section_harness,  # noqa
+                        section_scenario as run_scenario,
+                        section_path)
 
 
 def _legs(report):
@@ -50,7 +52,7 @@ def _legs(report):
 
 def _phases(scenario, sections=()):
     """The diagnostic checkpoint labels one scenario run recorded."""
-    result = run_dashboard_node(build_harness(scenario, sections=sections))
+    result = run_dashboard_node(section_harness(scenario, sections=sections))
     return re.findall(r'^\[phase\] (.+)$', result.stderr, re.MULTILINE)
 
 
@@ -399,7 +401,7 @@ def test_the_session_store_round_trips(_tmp):
 
 
 def test_loading_an_undeclared_module_is_refused(_tmp):
-    """`build_harness` passes one path per declared section, so a name it
+    """`section_harness` passes one path per declared section, so a name it
     was not given has no `process.argv` slot to read. Importing something
     else instead would load a module the scenario never declared."""
     report = run_scenario(scenarios.UNDECLARED_MODULE)
@@ -510,10 +512,10 @@ def test_a_scenario_records_the_six_phase_checkpoints(_tmp):
 
 
 def test_a_scenario_cannot_disagree_with_its_declared_bound(_tmp):
-    """`build_harness` counts the bounds in the assembled source, so the
+    """`section_harness` counts the bounds in the assembled source, so
     count a scenario's own `await bounded(` earns is the count the child
     is timed against."""
-    harness = build_harness(
+    harness = section_harness(
         "await bounded(work, 'a step', _dashnodeStepTimeoutMs);\n"
         "await bounded(more, 'another step', _dashnodeStepTimeoutMs);\n",
         sections=())
@@ -539,7 +541,8 @@ def test_a_module_name_that_escapes_the_dashboard_is_refused(_tmp):
 def test_the_public_surface_is_the_set_the_suite_imports(_tmp):
     """`__all__` is a promise, and a name in it that does not exist is a
     section suite's `ImportError` rather than a test failure here."""
-    assert _dashsection.__all__ == ['SHELL', 'build_harness', 'run_scenario',
+    assert _dashsection.__all__ == ['SHELL', 'section_harness',
+                                    'section_runner', 'section_scenario',
                                     'section_path'], _dashsection.__all__
     for name in _dashsection.__all__[1:]:
         assert callable(getattr(_dashsection, name)), name

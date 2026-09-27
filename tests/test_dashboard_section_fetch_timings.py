@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
-from _dashsection import run_scenario  # noqa: E402
+from _dashsection import section_runner  # noqa: E402
 
 SECTION = ('sections/fetch-timings.js',)
 
@@ -114,10 +114,7 @@ def scenario(body, *, setup='', answers=(), plan=shared.COMMAND):
             + '})().catch(leave);\n')
 
 
-def _run(body, *, setup='', answers=(), plan=shared.COMMAND):
-    return run_scenario(
-        scenario(body, setup=setup, answers=answers, plan=plan),
-        sections=SECTION)
+_run = section_runner(scenario, SECTION, plan=shared.COMMAND, setup='')
 
 
 def test_the_mount_sends_a_bare_fetch_timings_and_renders_a_row(_tmp):

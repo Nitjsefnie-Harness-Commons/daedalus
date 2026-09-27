@@ -64,16 +64,14 @@ read, a non-string body and a body that will not parse. A refusal
 nothing exercises is still better than an answer, but it is not a
 control and should not be counted as one.
 """
-import json
-
 from _dashnode import DOM as _DOM
-from _dashnode import (DashboardNodeHarness, _BOUNDED_AWAIT,
-                       run_dashboard_node)
+from _dashnode import DashboardNodeHarness
 from _dashsection_transport import TRANSPORT as _TRANSPORT
 from _dashshell import dashboard_module as section_path
-from _jsread import blank_js_comments
+from _dashshell import build_harness, run_scenario
 
-__all__ = ['SHELL', 'build_harness', 'run_scenario', 'section_path']
+__all__ = ['SHELL', 'section_harness', 'section_runner',
+           'section_scenario', 'section_path']
 
 
 # The gaps `_dashnode.DOM` carries for a section, and the bus the
@@ -367,24 +365,45 @@ const bus = {
 SHELL = _DOM + _ELEMENTS + _TRANSPORT
 
 
-def build_harness(scenario: str, *,
-                  sections: tuple[str, ...] = ()
-                  ) -> DashboardNodeHarness:
-    """Wrap one scenario in the shell and the shipped process boundary.
+def section_harness(scenario: str, *,
+                    sections: tuple[str, ...] = ()
+                    ) -> DashboardNodeHarness:
+    """`build_harness` over the SECTION shell, bound once.
 
-    The bounded-step count is derived from the assembled source, so a
-    scenario cannot disagree with the bound it declares.
+    The two shells differ in the prelude they assemble and not in the
+    process boundary, so the builder is `_dashshell`'s with the prelude
+    named. This is the binding rather than a second builder: a copy would
+    differ from the original in exactly the one line that decides which
+    transport the child gets.
     """
-    source = 'const MODULES = ' + json.dumps(list(sections)) + ';\n'
-    source += SHELL + '\n' + scenario
-    steps = len(_BOUNDED_AWAIT.findall(blank_js_comments(source)))
-    return DashboardNodeHarness(
-        source, bounded_steps=steps, module=True,
-        arguments=tuple(section_path(name) for name in sections))
+    return build_harness(scenario, modules=sections, shell=SHELL)
 
 
-def run_scenario(scenario: str, *,
-                 sections: tuple[str, ...] = ()) -> dict:
-    """Run one scenario through the shell and return the report it printed."""
-    result = run_dashboard_node(build_harness(scenario, sections=sections))
-    return json.loads(result.stdout)
+def section_scenario(scenario: str, *,
+                     sections: tuple[str, ...] = ()) -> dict:
+    """`run_scenario` over the section shell; see `section_harness`."""
+    return run_scenario(scenario, modules=sections, shell=SHELL)
+
+
+def section_runner(scenario, sections, *, plan, setup, by_type=None):
+    """The `_run` the section suites share, bound to one suite's own parts.
+
+    Each suite assembles its own `scenario` from its own fixtures and names
+    the one section it mounts, and what the six `_run`s had in common was
+    everything except those defaults. So the body lives here once and each
+    suite binds the result under its own module name, rather than six copies
+    of four lines drifting apart from one another.
+
+    `setup`, `plan` and `by_type` are the suite's own `_run` defaults, passed
+    in rather than guessed: three suites default `setup` to a fixture, two to
+    nothing and one to `None` its `scenario` resolves, so a shared default
+    would be a claim about a suite this module has never read. `by_type` is
+    left out of the call entirely for the suites whose `scenario` has no such
+    parameter, which is why it is a keyword the factory adds only when set.
+    """
+    def _run(body, *, setup=setup, answers=(), plan=plan, by_type=by_type):
+        extra = {} if by_type is None else {'by_type': by_type}
+        return run_scenario(
+            scenario(body, setup=setup, answers=answers, plan=plan, **extra),
+            modules=sections, shell=SHELL)
+    return _run
