@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Fault controls for test-side command queue readers."""
-import ast
 import asyncio
 import contextlib
 import json
@@ -17,7 +16,7 @@ import _util  # noqa: E402
 import _bridge  # noqa: E402
 import _cmdqueue  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
-    _QUEUE_PROBES,
+    _assert_slept_its_attempt_budget,
     _bounded_polls,
     _disappear_on_first_open,
     _poll_budget,
@@ -76,13 +75,12 @@ def test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded(tmp):
     assert baseline is None, baseline
     queue_events, _queue = observed_wait(True)
     # The wait's budget is poll attempts: all three waits spend the same
-    # POLL_DELAY train, the observed loss costs exactly one read, and the
+    # total interval, the observed loss costs exactly one read, and the
     # queue loss is event-identical to the file loss.
-    sleep_train = [('sleep', _cmdqueue.POLL_DELAY)] * (
-        math.ceil(timeout / _cmdqueue.POLL_DELAY) - 1)
+    attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
     for events in (vanish_events, baseline_events, queue_events):
-        assert [event for event in events if event[0] == 'sleep'] == (
-            sleep_train), events
+        _assert_slept_its_attempt_budget(
+            events, attempts, _cmdqueue.POLL_DELAY)
     assert vanish_events[0][0] == 'read', vanish_events
     assert vanish_events[1:] == baseline_events, (
         vanish_events, baseline_events)
@@ -244,8 +242,9 @@ def test_the_cli_answer_helper_survives_a_transient_queue_read_refusal(tmp):
         queue = (Path(docroot) / 'commands'
                  / f'{test_cli.TOK}_extension')
         with _refuse_first_queue_read(queue):
-            code, out, err, queued = test_cli._answer_one_ext_command(
-                base, docroot, ['ext-reload'], {}, env)
+            with _bounded_polls(_poll_budget(1)):
+                code, out, err, queued = test_cli._answer_one_ext_command(
+                    base, docroot, ['ext-reload'], {}, env)
     assert code == 0, (code, out, err)
     assert queued['type'] == 'reload', queued
 
@@ -259,8 +258,9 @@ def test_the_mcp_answer_helper_survives_a_transient_queue_read_refusal(tmp):
         queue = (Path(docroot) / 'commands'
                  / f'{test_mcp_server.TOK}_extension')
         with _refuse_first_queue_read(queue):
-            _value, queued = test_mcp_server._answer_mcp_command(
-                base, docroot, mod, mod.ext_reload, {})
+            with _bounded_polls(_poll_budget(1)):
+                _value, queued = test_mcp_server._answer_mcp_command(
+                    base, docroot, mod, mod.ext_reload, {})
     assert queued['type'] == 'reload', queued
 
 
@@ -435,106 +435,6 @@ def test_a_permanent_read_refusal_bounds_the_multi_command_wait(tmp):
             with _bounded_polls(_poll_budget(0.1)):
                 commands = _cmdqueue.wait_for_commands(queue, 2, timeout=0.1)
         assert commands is None, commands
-
-
-_READER_CALLS = ('wait_for_command', 'wait_for_commands',
-                 'queued_command', 'queued_commands')
-
-
-def _unbounded_reader_calls(source):
-    """Reader call sites in `source` that no `_bounded_polls` block covers."""
-    tree = ast.parse(source)
-    funcs = [node for node in ast.walk(tree)
-             if isinstance(node, ast.FunctionDef)]
-    loose = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        callee = node.func
-        name = getattr(callee, 'attr', None) or getattr(callee, 'id', None)
-        if name not in _READER_CALLS:
-            continue
-        owner = min(
-            (f for f in funcs
-             if f.lineno <= node.lineno <= (f.end_lineno or 0)),
-            key=lambda f: (f.end_lineno or f.lineno) - f.lineno)
-        covered = any(
-            isinstance(item, ast.With) and item.lineno <= node.lineno
-            <= (item.end_lineno or 0)
-            and any((ast.get_source_segment(source, entry.context_expr) or '')
-                    .startswith('_bounded_polls') for entry in item.items)
-            for item in ast.walk(
-                ast.Module(body=owner.body, type_ignores=[])))
-        if not covered:
-            loose.append((node.lineno, owner.name))
-    return loose
-
-
-def test_every_reader_call_site_is_inside_a_poll_bound(tmp):
-    """Each read is bounded, and the bound is the only thing charging it.
-
-    Without this the property holds by construction: drop a wrapper and
-    nothing reds until a runaway probe, which hangs — the one failure
-    mode the bound exists to remove.
-    """
-    del tmp
-    tests_dir = Path(__file__).resolve().parent
-    for suite in ('test_cmdqueue.py', 'test_queued_command.py'):
-        loose = _unbounded_reader_calls((tests_dir / suite).read_text())
-        assert not loose, (
-            f'{suite}: reader call sites no _bounded_polls block covers, so a '
-            f'runaway read is uncharged and hangs: {loose}')
-
-
-def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
-    """A reader's bound holds the read and nothing of the control's own.
-
-    A control's `is_dir` or `write_text` inside the block spends the
-    reader's budget, so a control that probes a queue it just built
-    would spend the ceiling on its own bookkeeping. Only the read call
-    itself may sit inside; the guard's own controls probe deliberately
-    and are not reader-driving blocks.
-    """
-    del tmp
-    tests_dir = Path(__file__).resolve().parent
-    charged_to_the_control = []
-    own_work = _QUEUE_PROBES + ('exists', 'mkdir', 'rmdir', 'write_text',
-                                'unlink', 'read_text')
-    for suite in ('test_cmdqueue.py', 'test_queued_command.py'):
-        source = (tests_dir / suite).read_text()
-        tree = ast.parse(source)
-        for block in ast.walk(tree):
-            if not isinstance(block, ast.With):
-                continue
-            if not any((ast.get_source_segment(source, entry.context_expr)
-                        or '').startswith('_bounded_polls')
-                       for entry in block.items):
-                continue
-            reads = [node for node in ast.walk(block)
-                     if isinstance(node, ast.Call)
-                     and (getattr(node.func, 'attr', None)
-                          or getattr(node.func, 'id', None)) in _READER_CALLS]
-            if not reads:
-                continue
-            spans = [(node.lineno, node.end_lineno or node.lineno)
-                     for node in reads]
-            for node in ast.walk(block):
-                if not isinstance(node, ast.Call):
-                    continue
-                callee = node.func
-                if not isinstance(callee, ast.Attribute):
-                    continue
-                if callee.attr not in own_work:
-                    continue
-                if any(first <= node.lineno <= last
-                       for first, last in spans):
-                    continue
-                charged_to_the_control.append(
-                    (suite, node.lineno, callee.attr))
-    assert not charged_to_the_control, (
-        'a control does its own filesystem work inside a reader\'s poll '
-        'bound, so the reader is charged for the control: '
-        f'{sorted(charged_to_the_control)}')
 
 
 def _whole_set_retry_returns_the_rewrite(tmp, error):

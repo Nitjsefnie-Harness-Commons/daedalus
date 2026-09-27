@@ -88,8 +88,13 @@ def test_the_poll_ceiling_spires_a_reader_that_probes_often(tmp):
     """A reader spending more probes per pass than today's stays under it.
 
     Semantically identical to today's reader, sleeping on every pass, but
-    probing the queue five times where it probes twice. The ceiling is
-    derived from the probes one pass costs, so it moves with the reader.
+    probing the queue five times where it probes twice.
+
+    The tolerance is `_POLL_HEADROOM`, not the derivation: the ceiling is
+    a fixed product of two declared constants and does not observe the
+    reader, so it does not move when the reader does. Five probes per
+    pass fits because headroom is 4 and the correct spend is 2, and the
+    derivation control is what pins the two terms — not this one.
     """
     attempts = 3
     per_pass = _PROBES_PER_ATTEMPT + 3
@@ -207,6 +212,153 @@ def test_the_poll_bound_reaches_a_queue_that_does_not_exist(tmp):
     assert spent == 3, spent
     assert isinstance(failure, AssertionError), failure
     assert '2' in _polls_named_in(str(failure)), failure
+
+
+_SCANNED_SUITES = ('test_cmdqueue.py', 'test_queued_command.py')
+_READER_ENTRY_POINTS = frozenset({
+    'wait_for_command', 'wait_for_commands',
+    'queued_command', 'queued_commands',
+    '_wait_for_client_commands',
+    '_answer_one_ext_command', '_answer_mcp_command',
+})
+
+
+def _callee_name(node):
+    callee = node.func
+    if isinstance(callee, ast.Attribute):
+        return callee.attr
+    if isinstance(callee, ast.Name):
+        return callee.id
+    return None
+
+
+def _reader_names(owner):
+    """The reader entry points `owner` can reach, aliases included."""
+    names = set(_READER_ENTRY_POINTS)
+    for statement in ast.walk(owner):
+        if not isinstance(statement, ast.Assign):
+            continue
+        if _callee_name_for_value(statement.value) not in names:
+            continue
+        for target in statement.targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+    return names
+
+
+def _callee_name_for_value(value):
+    if isinstance(value, ast.Attribute):
+        return value.attr
+    if isinstance(value, ast.Name):
+        return value.id
+    return None
+
+
+def _unbounded_reader_calls(source):
+    """Reader call sites in `source` that no `_bounded_polls` block covers.
+
+    A call with no enclosing function is resolved against the module body
+    and reported as `<module scope>` rather than searched, so a reader
+    call at module scope is a named red instead of a `min()` over an
+    empty sequence.
+    """
+    tree = ast.parse(source)
+    funcs = [node for node in ast.walk(tree)
+             if isinstance(node, ast.FunctionDef)]
+    loose = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        owners = [f for f in funcs
+                  if f.lineno <= node.lineno <= (f.end_lineno or 0)]
+        owner = min(owners, key=lambda f: (f.end_lineno or f.lineno)
+                    - f.lineno) if owners else tree
+        if _callee_name(node) not in _reader_names(owner):
+            continue
+        if not owners:
+            loose.append((node.lineno, '<module scope>'))
+            continue
+        covered = any(
+            isinstance(item, ast.With) and item.lineno <= node.lineno
+            <= (item.end_lineno or 0)
+            and any((ast.get_source_segment(source, entry.context_expr) or '')
+                    .startswith('_bounded_polls') for entry in item.items)
+            for item in ast.walk(owner))
+        if not covered:
+            loose.append((node.lineno, owner.name))
+    return loose
+
+
+def test_every_reader_call_in_the_scanned_suites_is_inside_a_bound(tmp):
+    """Each read in these two suites is bounded, and only the read is.
+
+    The scan covers `tests/test_cmdqueue.py` and
+    `tests/test_queued_command.py` and nothing else. Other suites reach
+    the reader through `tests/_cli_helpers.py` and `tests/_mcp_load.py`
+    and are outside this control's world, which is why the name says
+    "the scanned suites".
+
+    Without it the property holds by construction: drop a wrapper and
+    nothing reds until a runaway probe, which hangs — the one failure
+    mode the bound exists to remove.
+    """
+    del tmp
+    tests_dir = Path(__file__).resolve().parent
+    for suite in _SCANNED_SUITES:
+        loose = _unbounded_reader_calls((tests_dir / suite).read_text())
+        assert not loose, (
+            f'{suite}: reader call sites no _bounded_polls block covers, so a '
+            f'runaway read is uncharged and hangs: {loose}')
+
+
+def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
+    """A reader's bound holds the read and nothing of the control's own.
+
+    A control's `is_dir` or `write_text` inside the block spends the
+    reader's budget, so a control that probes a queue it just built
+    would spend the ceiling on its own bookkeeping. Only the read call
+    itself may sit inside; the guard's own controls probe deliberately
+    and are not reader-driving blocks.
+    """
+    del tmp
+    tests_dir = Path(__file__).resolve().parent
+    charged_to_the_control = []
+    own_work = _QUEUE_PROBES + ('exists', 'mkdir', 'rmdir', 'write_text',
+                                'unlink', 'read_text')
+    for suite in _SCANNED_SUITES:
+        source = (tests_dir / suite).read_text()
+        tree = ast.parse(source)
+        for block in ast.walk(tree):
+            if not isinstance(block, ast.With):
+                continue
+            if not any((ast.get_source_segment(source, entry.context_expr)
+                        or '').startswith('_bounded_polls')
+                       for entry in block.items):
+                continue
+            reads = [node for node in ast.walk(block)
+                     if isinstance(node, ast.Call)
+                     and _callee_name(node) in _READER_ENTRY_POINTS]
+            if not reads:
+                continue
+            spans = [(node.lineno, node.end_lineno or node.lineno)
+                     for node in reads]
+            for node in ast.walk(block):
+                if not isinstance(node, ast.Call):
+                    continue
+                callee = node.func
+                if not isinstance(callee, ast.Attribute):
+                    continue
+                if callee.attr not in own_work:
+                    continue
+                if any(first <= node.lineno <= last
+                       for first, last in spans):
+                    continue
+                charged_to_the_control.append(
+                    (suite, node.lineno, callee.attr))
+    assert not charged_to_the_control, (
+        'a control does its own filesystem work inside a reader\'s poll '
+        'bound, so the reader is charged for the control: '
+        f'{sorted(charged_to_the_control)}')
 
 
 if __name__ == '__main__':
