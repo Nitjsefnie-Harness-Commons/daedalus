@@ -114,7 +114,14 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
     with a default is a parameter that is not required: each has a row the
     runtime produces the body on and a row it raises on, so a rule that
     accepted every name, or required every keyword-only parameter, fails
-    here rather than passing on the shape.
+    here rather than passing on the shape. What these rows hold is the
+    BEHAVIOUR these limbs produce, checked against a real `importlib` and
+    unchanged by the keyword-binding defect filed as #1211 — not a claim
+    that a limb cannot be driven to that defect's answer, which two probes
+    can: `(lambda x: op)(**{'x': 1})` and `(lambda *, b: op)(**{'b': 1})`
+    both reach and both scan clean. None of the pinned spellings is one of
+    them, so none of them freezes a defect; that was a decision about which
+    spellings to pin, not about which limbs are clean.
     """
     for callee in ('(lambda: importlib.import_module)()',
                    '[(lambda: importlib.import_module)][0]()',
