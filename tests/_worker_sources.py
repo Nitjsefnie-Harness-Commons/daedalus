@@ -80,11 +80,10 @@ __CONTEXT__.importScripts = (...sourceNames) => {
 
 
 # The fetch-answer factory: a status range answered as ok, a null body, and
-# readers that hand back the caller's own data. The three factories below
-# have one copy each because the cross-file duplicate check reads parsed
-# Python, so a copy inside a string literal is invisible to it and a second
-# one would drift unremarked. A harness that answers more than the factory
-# keeps its own.
+# readers that hand back the caller's own data. Each factory here has one
+# copy because the cross-file duplicate check reads parsed Python, so a copy
+# inside a string literal is invisible to it and a second would drift
+# unremarked; a harness answering more than the factory keeps its own.
 RESPONSE_STUB = r"""
 function response(status, data) {
   return {
@@ -97,15 +96,14 @@ function response(status, data) {
 }
 """
 
-# One settled turn of the microtask queue, with no wall-clock margin in it.
+# One settled turn of the microtask queue, no wall-clock margin in it.
 DELAY_STUB = r"""
 function delay() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 """
 
-# A structural clone, so a stored value cannot carry a later mutation to the
-# next reader.
+# A structural clone, so a stored value cannot carry a later mutation on.
 COPY_STUB = r"""
 function copy(value) {
   return value === undefined
@@ -114,11 +112,10 @@ function copy(value) {
 }
 """
 
-# The stream answer factory. A declared `hang` is a connected body that never
-# yields and every other answer is the disabled error, so a harness whose
-# plan declares no statuses sees the answer it would have written for itself;
-# one that declares `statuses: ['hang']` gains the connected body, which is
-# what such a plan is asking for. One copy, for RESPONSE_STUB's reason.
+# The stream answer factory. A declared `hang` is a connected body that
+# never yields and every other answer is the disabled error, so a harness
+# declaring no statuses sees what it would have written, and one declaring
+# `['hang']` gains the connected body, which is what such a plan asks for.
 STREAM_RESPONSE = r"""
 function streamResponse(answer) {
   if (answer === 'hang') {
@@ -242,8 +239,7 @@ const chrome = {
 # The attribute store is real rather than a set of no-ops. A documentElement
 # that swallowed the write would let a control pass against a page that never
 # planted anything, which is the shape of a false green this suite family has
-# produced before. One copy, because a second would drift from the first and
-# the drift would be invisible.
+# produced before.
 CONTENT_SCRIPT_PAGE = r"""
 function contentScriptPage() {
   const attributes = new Map();
