@@ -486,10 +486,11 @@ sectionReport({ refused: seen.filter((m) => m !== null).length,
 """
 
 
-# The three surfaces `_dashnode_dom` gained, each with the negative table
-# that widens alongside it. `overview.js` is the shipped section that reads
-# all three. A matcher that grew a grammar and not a negative table
-# answers shapes it does not understand.
+# The three surfaces `_dashnode_dom` gained. `overview.js` is the shipped
+# section that reads all three. The two that grew a GRAMMAR each grew a
+# negative table with it -- a matcher that answers shapes it does not
+# understand -- and the third, `lastChild`, is a getter with no grammar to
+# widen, so what it is held on instead is its value at both ends.
 
 ATTRIBUTE_SELECTORS = r"""
 (async () => {

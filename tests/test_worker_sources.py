@@ -5,6 +5,13 @@ The `eventTarget` stand-in is opt-in twice over, and both halves are load
 bearing: a target built without the flag cannot be fired at all, and one
 built with it delivers to every listener. A stub whose only control
 exercised a single listener would pin none of that.
+
+`TEXT_NODE_STUB` is held here for the same reason the factory it sits beside
+is: a stub is only shared while every consumer gets the same bytes, and the
+suite that owns a constant is the one place a rename of it should turn red.
+Left unpoliced, renaming it failed three consumers with an `ImportError`
+naming a module that does not own it, and the suite that does own it stayed
+green.
 """
 import json
 import sys
@@ -15,7 +22,7 @@ import _util  # noqa: E402
 from _noderun import run_node_program  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _stream_fake import require_node  # noqa: E402
-from _worker_sources import event_target_stub  # noqa: E402
+from _worker_sources import TEXT_NODE_STUB, event_target_stub  # noqa: E402
 
 
 def _run(program):
@@ -119,6 +126,36 @@ def test_a_target_that_did_not_opt_in_carries_no_way_to_dispatch(tmp):
     assert record['sharedDispatch'] == 'undefined', record
     assert record['attempted'] == 'TypeError', record
     assert record['recording'] == [], record
+
+
+# The factory closes over `El`, which belongs to the consumer's document and
+# not to the stub, so the document here is the smallest thing that lets the
+# factory run. What the case holds is that the constant is present, that it
+# parses as the function it claims to be, and that the node it mints is the
+# one both dashboard documents' `set textContent` and `createTextNode` hand
+# back to a caller reading `.tag` and `.text`.
+_TEXT_NODE = r"""
+class El {
+  constructor(tag) { this.tag = tag; this.text = ''; }
+}
+""" + TEXT_NODE_STUB + r"""
+const node = textNode('hello');
+process.stdout.write(JSON.stringify({
+  declared: typeof textNode,
+  tag: node.tag,
+  text: node.text,
+  coerced: textNode(7).text,
+}));
+"""
+
+
+def test_the_text_node_stub_is_the_factory_both_documents_splice_in(tmp):
+    del tmp
+    record = _run(_TEXT_NODE)
+    assert record['declared'] == 'function', record
+    assert record['tag'] == '#text', record
+    assert record['text'] == 'hello', record
+    assert record['coerced'] == '7', record
 
 
 def main():
