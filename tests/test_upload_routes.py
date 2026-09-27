@@ -13,12 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
-from _upload_fixture import _load, _store  # noqa: E402
+from _upload_fixture import _load, _place_upload  # noqa: E402
 
 
 def test_list_uploads_answers_a_bare_array_without_paging(tmp):
     routes = _load('fixture_upload_routes_list')
-    _store(tmp, 'tok', 'id1', 'a.png', b'abc')
+    _place_upload(tmp, 'tok', 'id1', 'a.png', b'abc')
     status, payload = routes.list_uploads(Path(tmp), 'tok', {})
     assert status == 200, (status, payload)
     assert [item['path'] for item in payload] == ['id1/a.png'], payload
@@ -27,8 +27,8 @@ def test_list_uploads_answers_a_bare_array_without_paging(tmp):
 
 def test_list_uploads_answers_a_page_shape_when_paging_is_asked_for(tmp):
     routes = _load('fixture_upload_routes_page')
-    _store(tmp, 'tok', 'id1', 'a.png')
-    _store(tmp, 'tok', 'id1', 'b.png')
+    _place_upload(tmp, 'tok', 'id1', 'a.png')
+    _place_upload(tmp, 'tok', 'id1', 'b.png')
     status, payload = routes.list_uploads(
         Path(tmp), 'tok', {'limit': ['1'], 'offset': ['1']})
     assert status == 200, (status, payload)
@@ -118,8 +118,8 @@ def test_delete_upload_logs_the_token_free_relative_path(tmp):
     prefix, without an ellipsis.
     """
     routes = _load('fixture_upload_routes_delete_log')
-    _store(tmp, 'tok-verify', 'shot', 'a.txt')
-    _store(tmp, 'tok-verify', 'other', 'b.txt')
+    _place_upload(tmp, 'tok-verify', 'shot', 'a.txt')
+    _place_upload(tmp, 'tok-verify', 'other', 'b.txt')
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         assert routes.delete_upload(
@@ -139,7 +139,7 @@ def test_delete_upload_logs_the_token_free_relative_path(tmp):
 def test_delete_upload_refuses_a_filename_without_an_id(tmp):
     """A filename names a file inside an id, never the token namespace."""
     routes = _load('fixture_upload_routes_delete_filename')
-    _store(tmp, 'tok', 'id1', 'a.png')
+    _place_upload(tmp, 'tok', 'id1', 'a.png')
     status, payload = routes.delete_upload(
         Path(tmp), {'token': 'tok', 'filename': 'a.png'})
     assert (status, payload) == (
@@ -149,8 +149,8 @@ def test_delete_upload_refuses_a_filename_without_an_id(tmp):
 
 def test_delete_upload_removes_one_named_file(tmp):
     routes = _load('fixture_upload_routes_delete_file')
-    kept = _store(tmp, 'tok', 'id1', 'keep.png')
-    gone = _store(tmp, 'tok', 'id1', 'gone.png')
+    kept = _place_upload(tmp, 'tok', 'id1', 'keep.png')
+    gone = _place_upload(tmp, 'tok', 'id1', 'gone.png')
     status, payload = routes.delete_upload(
         Path(tmp), {'token': 'tok', 'id': 'id1', 'filename': 'gone.png'})
     assert (status, payload) == (200, {'ok': True}), (status, payload)
@@ -159,8 +159,8 @@ def test_delete_upload_removes_one_named_file(tmp):
 
 def test_delete_upload_removes_an_id_and_then_a_token(tmp):
     routes = _load('fixture_upload_routes_delete_tree')
-    _store(tmp, 'tok', 'id1', 'a.png')
-    _store(tmp, 'tok', 'id2', 'b.png')
+    _place_upload(tmp, 'tok', 'id1', 'a.png')
+    _place_upload(tmp, 'tok', 'id2', 'b.png')
     assert routes.delete_upload(
         Path(tmp), {'token': 'tok', 'id': 'id1'}) == (200, {'ok': True})
     assert not (Path(tmp) / 'tok' / 'id1').exists()
@@ -173,7 +173,7 @@ def test_delete_upload_answers_404_for_an_absent_target(tmp):
     routes = _load('fixture_upload_routes_delete_absent')
     assert routes.delete_upload(
         Path(tmp), {'token': 'tok'}) == (404, {'error': 'token not found'})
-    _store(tmp, 'tok', 'id1', 'a.png')
+    _place_upload(tmp, 'tok', 'id1', 'a.png')
     assert routes.delete_upload(
         Path(tmp), {'token': 'tok', 'id': 'nope'}) == (
             404, {'error': 'id not found'})
@@ -184,8 +184,8 @@ def test_delete_upload_answers_404_for_an_absent_target(tmp):
 
 def test_latest_screenshot_serves_the_newest_file_with_its_mime(tmp):
     routes = _load('fixture_upload_routes_latest')
-    older = _store(tmp, 'tok', 'id1', '1.png', b'old')
-    newer = _store(tmp, 'tok', 'id2', '2.jpg', b'new')
+    older = _place_upload(tmp, 'tok', 'id1', '1.png', b'old')
+    newer = _place_upload(tmp, 'tok', 'id2', '2.jpg', b'new')
     now = time.time()
     os.utime(older, (now - 100, now - 100))
     os.utime(newer, (now, now))
@@ -198,15 +198,15 @@ def test_latest_screenshot_answers_404_without_uploads(tmp):
     routes = _load('fixture_upload_routes_latest_absent')
     assert routes.latest_screenshot(Path(tmp), 'tok', {}) == (
         404, {'error': 'no uploads'})
-    _store(tmp, 'tok', 'id1', 'notes.txt')
+    _place_upload(tmp, 'tok', 'id1', 'notes.txt')
     assert routes.latest_screenshot(Path(tmp), 'tok', {}) == (
         404, {'error': 'no screenshot'})
 
 
 def test_named_upload_serves_exactly_the_path_a_result_carried(tmp):
     routes = _load('fixture_upload_routes_named')
-    target = _store(tmp, 'tok', 'id1', 'shot.png', b'IMG')
-    _store(tmp, 'tok', 'id1', 'zzz-newer.png', b'NEWER')
+    target = _place_upload(tmp, 'tok', 'id1', 'shot.png', b'IMG')
+    _place_upload(tmp, 'tok', 'id1', 'zzz-newer.png', b'NEWER')
     answer = routes.named_upload(Path(tmp), 'tok', 'tok/id1/shot.png')
     assert answer.path == target, answer
     assert answer.mime == 'image/png', answer
@@ -222,8 +222,8 @@ def test_named_upload_serves_the_relative_selector_of_the_same_file(tmp):
     a screenshot type is answered here.
     """
     routes = _load('fixture_upload_routes_named_rel')
-    target = _store(tmp, 'tok', 'id1', 'shot.png', b'IMG')
-    _store(tmp, 'tok', 'id1', 'notes.txt', b'text')
+    target = _place_upload(tmp, 'tok', 'id1', 'shot.png', b'IMG')
+    _place_upload(tmp, 'tok', 'id1', 'notes.txt', b'text')
     answer = routes.named_upload(Path(tmp), 'tok', 'id1/shot.png')
     assert answer.path == target, answer
     assert answer.mime == 'image/png', answer
@@ -236,7 +236,7 @@ def test_named_upload_serves_the_relative_selector_of_the_same_file(tmp):
 def test_named_upload_refuses_a_one_component_selector(tmp):
     """A selector with no separator has no id directory to resolve under."""
     routes = _load('fixture_upload_routes_named_one')
-    _store(tmp, 'tok', 'id1', 'shot.png')
+    _place_upload(tmp, 'tok', 'id1', 'shot.png')
     assert routes.named_upload(Path(tmp), 'tok', 'shot.png') == (
         400, {'error': 'path must be <id>/<file>'})
     assert routes.named_upload(Path(tmp), 'tok', 'tok') == (
@@ -264,7 +264,7 @@ def test_a_token_led_selector_deeper_than_three_components_still_resolves(tmp):
 def test_named_upload_refuses_another_tokens_path(tmp):
     """The leading component must be the caller's own token."""
     routes = _load('fixture_upload_routes_named_other')
-    _store(tmp, 'other', 'id1', 'shot.png', b'IMG')
+    _place_upload(tmp, 'other', 'id1', 'shot.png', b'IMG')
     status, payload = routes.named_upload(
         Path(tmp), 'tok', 'other/id1/shot.png')
     assert (status, payload) == (
@@ -281,7 +281,7 @@ def test_named_upload_refuses_an_unsafe_component(tmp):
 
 def test_named_upload_refuses_a_non_screenshot_suffix(tmp):
     routes = _load('fixture_upload_routes_named_suffix')
-    _store(tmp, 'tok', 'id1', 'notes.txt', b'text')
+    _place_upload(tmp, 'tok', 'id1', 'notes.txt', b'text')
     assert routes.named_upload(Path(tmp), 'tok', 'tok/id1/notes.txt') == (
         404, {'error': 'no screenshot'})
 
@@ -304,7 +304,7 @@ def test_an_uppercase_suffix_is_typed_the_same_by_each_route(tmp):
         mime = mimes[member.lower()]
         for spelling in (member, member.upper(), member.capitalize()):
             name = 'SHOT.' + spelling
-            _store(tmp, 'tok', 'id1', name, b'IMG')
+            _place_upload(tmp, 'tok', 'id1', name, b'IMG')
             named = routes.named_upload(Path(tmp), 'tok', f'tok/id1/{name}')
             assert named.mime == mime, (name, named)
             all_ids = routes.latest_screenshot(Path(tmp), 'tok', {})
@@ -329,9 +329,9 @@ def test_screenshot_mime_maps_every_served_format(_tmp):
 
 def test_stored_uploads_orders_newest_id_first_and_names_within(tmp):
     routes = _load('fixture_upload_routes_stored')
-    _store(tmp, 'tok', 'old', 'b.png')
-    _store(tmp, 'tok', 'old', 'a.png')
-    _store(tmp, 'tok', 'new', 'c.png')
+    _place_upload(tmp, 'tok', 'old', 'b.png')
+    _place_upload(tmp, 'tok', 'old', 'a.png')
+    _place_upload(tmp, 'tok', 'new', 'c.png')
     now = time.time()
     os.utime(Path(tmp) / 'tok' / 'old', (now - 100, now - 100))
     os.utime(Path(tmp) / 'tok' / 'new', (now, now))

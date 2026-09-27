@@ -19,7 +19,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _upload_fixture import _load, _store  # noqa: E402
+from _upload_fixture import _load, _place_upload  # noqa: E402
 
 
 def test_list_uploads_skips_an_entry_deleted_during_the_walk(tmp):
@@ -27,8 +27,8 @@ def test_list_uploads_skips_an_entry_deleted_during_the_walk(tmp):
 
     def check_case(remove_id):
         root = Path(tmp) / str(remove_id)
-        gone = _store(root, 'tok', 'id1', 'a.png')
-        _store(root, 'tok', 'id2', 'survivor.png')
+        gone = _place_upload(root, 'tok', 'id1', 'a.png')
+        _place_upload(root, 'tok', 'id2', 'survivor.png')
         real_stat = routes.os.stat
         removed = []
 
@@ -56,7 +56,7 @@ def test_list_uploads_answers_empty_when_token_vanishes_before_scan(tmp):
     routes = _load('fixture_upload_routes_vanished_token')
 
     def check_case(params, expected):
-        _store(tmp, 'tok', 'id1', 'a.png')
+        _place_upload(tmp, 'tok', 'id1', 'a.png')
         token_dir = Path(tmp) / 'tok'
         real_scan = routes.os.scandir
         removed = []
@@ -79,8 +79,8 @@ def test_list_uploads_answers_empty_when_token_vanishes_before_scan(tmp):
 
 def test_list_uploads_skips_an_id_deleted_before_sorting(tmp):
     routes = _load('fixture_upload_routes_vanished_id')
-    _store(tmp, 'tok', 'gone', 'a.png')
-    _store(tmp, 'tok', 'kept', 'b.png')
+    _place_upload(tmp, 'tok', 'gone', 'a.png')
+    _place_upload(tmp, 'tok', 'kept', 'b.png')
     gone = Path(tmp) / 'tok' / 'gone'
     real_stat = routes.os.stat
     removed = []
@@ -103,8 +103,8 @@ def test_list_uploads_skips_an_id_deleted_before_its_scan(tmp):
 
     def check_case(error):
         root = Path(tmp) / error.__name__
-        _store(root, 'tok', 'gone', 'a.png')
-        _store(root, 'tok', 'kept', 'b.png')
+        _place_upload(root, 'tok', 'gone', 'a.png')
+        _place_upload(root, 'tok', 'kept', 'b.png')
         gone = root / 'tok' / 'gone'
         real_scan = routes.os.scandir
         removed = []
@@ -132,7 +132,7 @@ def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
     routes = _load('fixture_upload_routes_token_not_directory')
 
     def check_case(route, expected, error):
-        _store(tmp, 'tok', 'id1', 'a.png')
+        _place_upload(tmp, 'tok', 'id1', 'a.png')
         token_dir = Path(tmp) / 'tok'
         assert token_dir.is_dir()
         real_is_dir = routes.pathlib.Path.is_dir
@@ -158,8 +158,8 @@ def test_upload_reads_answer_absent_when_token_is_not_a_directory(tmp):
 
 def test_list_uploads_skips_only_the_entry_whose_type_check_fails(tmp):
     routes = _load('fixture_upload_routes_entry_type')
-    gone = _store(tmp, 'tok', 'id1', 'gone.png')
-    _store(tmp, 'tok', 'id1', 'kept.png')
+    gone = _place_upload(tmp, 'tok', 'id1', 'gone.png')
+    _place_upload(tmp, 'tok', 'id1', 'kept.png')
     real_scan = routes.os.scandir
 
     def delete_then_check():
@@ -208,9 +208,9 @@ def test_latest_screenshot_skips_a_file_deleted_during_the_scan(tmp):
 
     def check_case(survivor, params):
         root = Path(tmp) / str(survivor) / str(bool(params))
-        gone = _store(root, 'tok', 'id1', 'gone.png')
+        gone = _place_upload(root, 'tok', 'id1', 'gone.png')
         if survivor:
-            kept = _store(root, 'tok', 'id1', 'kept.png')
+            kept = _place_upload(root, 'tok', 'id1', 'kept.png')
         real_stat = routes.pathlib.Path.stat
         removed = []
 
@@ -248,7 +248,7 @@ def test_latest_screenshot_answers_no_uploads_when_token_vanishes(tmp):
         return is_dir
 
     for params in ({}, {'id': ['id1']}):
-        _store(tmp, 'tok', 'id1', 'gone.png')
+        _place_upload(tmp, 'tok', 'id1', 'gone.png')
         removed.clear()
         with mock.patch.object(routes.pathlib.Path, 'is_dir',
                                is_dir_then_delete):
@@ -262,10 +262,10 @@ def test_latest_screenshot_skips_an_id_deleted_before_scan(tmp):
 
     def check_case(survivor):
         root = Path(tmp) / str(survivor)
-        _store(root, 'tok', 'gone', 'a.png')
+        _place_upload(root, 'tok', 'gone', 'a.png')
         gone = root / 'tok' / 'gone'
         if survivor:
-            kept = _store(root, 'tok', 'kept', 'b.png')
+            kept = _place_upload(root, 'tok', 'kept', 'b.png')
         real_is_dir = routes.pathlib.Path.is_dir
         removed = []
 
@@ -397,7 +397,7 @@ def test_store_upload_answers_500_and_leaves_no_temp_when_publish_fails(tmp):
 def test_named_file_refuses_a_temp_name(tmp):
     routes = _load('fixture_upload_routes_named_file_tmp')
     for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
-        _store(tmp, 'tok', 'id1', name, b'part')
+        _place_upload(tmp, 'tok', 'id1', name, b'part')
         answer = routes.named_file(Path(tmp), 'tok', f'id1/{name}')
         assert answer == (400, {'error': 'invalid path component'}), answer
 
@@ -405,7 +405,7 @@ def test_named_file_refuses_a_temp_name(tmp):
 def test_delete_upload_refuses_a_temp_name(tmp):
     routes = _load('fixture_upload_routes_delete_tmp')
     for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
-        temp = _store(tmp, 'tok', 'id1', name, b'part')
+        temp = _place_upload(tmp, 'tok', 'id1', name, b'part')
         answer = routes.delete_upload(
             Path(tmp), {'token': 'tok', 'id': 'id1', 'filename': name})
         assert answer == (400, {'error': 'invalid path component'}), answer
@@ -428,11 +428,11 @@ def test_store_upload_refuses_a_caller_name_ending_in_tmp(tmp):
 
 def test_listing_skips_an_in_progress_temp_sibling(tmp):
     routes = _load('fixture_upload_routes_skip_tmp')
-    real = _store(tmp, 'tok', 'id1', 'abc.png', b'done')
+    real = _place_upload(tmp, 'tok', 'id1', 'abc.png', b'done')
     now = time.time()
     os.utime(real, (now - 100, now - 100))
     for name in ('.abc.png.tmp', '.abc.png.TMP', '.abc.png.Tmp'):
-        temp = _store(tmp, 'tok', 'id1', name, b'part')
+        temp = _place_upload(tmp, 'tok', 'id1', name, b'part')
         os.utime(temp, (now, now))
     status, payload = routes.list_uploads(Path(tmp), 'tok', {})
     assert status == 200, (status, payload)
