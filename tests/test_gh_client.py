@@ -517,6 +517,27 @@ def test_a_sha_with_no_run_yet_reads_as_no_runs(tmp):
         assert mod.workflow_runs('o', 'r', 'a' * 40) == []
 
 
+def test_every_run_of_one_workflow_carries_the_workflow_name(tmp):
+    """The producer invariant a required-workflow check rests on.
+
+    `ci_wait.py` reads the names of the runs its newest-run filter left, and
+    the filter keeps one run per workflow, so a workflow whose newest run
+    carried a different name from its older ones would have its `tests` run
+    dropped and the head read incomplete. `_run_from_suites` cannot emit
+    that: it takes every run's name from the run's own workflow record, so
+    two runs of one workflow come out with one name whatever their ids and
+    start times. Read through the producer rather than asserted in prose -
+    two suites of one workflow, two runs, one name, and a second workflow
+    with a name of its own so the equality is not a constant."""
+    del tmp
+    mod = _client()
+    same = [mod._run_from_suites([_suite(rid)]) for rid in (101, 102)]
+    other = mod._run_from_suites([_suite(103, workflow=22)])
+    assert len({run['workflow_id'] for run in same}) == 1, same
+    assert len({run['name'] for run in same}) == 1, same
+    assert other['name'] != same[0]['name'], (same, other)
+
+
 def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     del tmp
     mod = _client()

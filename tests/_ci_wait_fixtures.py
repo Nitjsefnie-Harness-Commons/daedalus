@@ -22,11 +22,12 @@ to suites this branch has no business editing.
 import contextlib
 
 
-def _ci_wait_run(rid, conclusion, started, workflow=11, path=None,
-                 **fields):
+def _ci_wait_run(rid, conclusion, started, workflow: int | None = 11,
+                 path=None, **fields):
     """One workflow run as the actions API reports it against a SHA.
 
-    Passing `path` removes workflow_id, standing the path in alone.
+    Passing `path` removes workflow_id, standing the path in alone;
+    `workflow=None` leaves a run naming no workflow at all.
     """
     run = {
         'id': rid,
