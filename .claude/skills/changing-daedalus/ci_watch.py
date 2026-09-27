@@ -42,8 +42,9 @@ DEFAULT_INTERVAL = 60
 FAIL_ESCALATE = 5
 DEBOUNCE_SECONDS = 60
 # The poll index this watcher names for its own boundary, published where
-# the `gh` children inherit it. Nothing reads it back; real `gh` ignores an
-# environment variable it does not know.
+# the `gh` children inherit it. Nothing in production reads it back; real
+# `gh` ignores an environment variable it does not know, and the only
+# reader is the fake the suites measure through.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 TARGET = ('repository', 'ref', 'target')
