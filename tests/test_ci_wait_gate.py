@@ -195,6 +195,69 @@ def test_each_limb_of_the_conflict_test_alone_still_refuses(tmp):
         assert 'grace' not in text, (mergeable, merge_state, text)
 
 
+def _pull(number, mergeable='MERGEABLE', merge_state='CLEAN'):
+    return {'number': number, 'state': 'OPEN', 'mergeable': mergeable,
+            'mergeStateStatus': merge_state}
+
+
+def test_the_blocked_scan_returns_the_first_blocking_pull_request(tmp):
+    """`_blocked` scans a LIST, and the list is the only thing here that had
+    no fixture differing in it: every other case put one pull request in
+    front of the scan, so a mutant that returned the first request whatever
+    its state - or the last blocking one - would have survived.
+
+    Every outcome the scan can have over a list, each differing from its
+    neighbours in that outcome alone: nothing, one unblocked, one blocked
+    (either limb), an unblocked request BEFORE a blocked one, a blocked one
+    before an unblocked, and two blocked. The third-from-last is the gap the
+    sweep found: it is the only row that tells "first blocking" apart from
+    "first".
+    """
+    del tmp
+    mod = _ci_wait()
+    cases = (
+        ('no pull request at all', [], None),
+        ('one unblocked', [_pull(1)], None),
+        ('blocked on mergeable alone', [_pull(2, 'CONFLICTING')], 2),
+        ('blocked on merge state alone', [_pull(3, merge_state='DIRTY')], 3),
+        ('unblocked first, blocked second',
+         [_pull(1), _pull(2, 'CONFLICTING')], 2),
+        ('blocked first, unblocked second',
+         [_pull(1, 'CONFLICTING'), _pull(2)], 1),
+        ('two blocked, the first wins',
+         [_pull(1, merge_state='DIRTY'), _pull(2, 'CONFLICTING')], 1),
+    )
+    for label, pull_requests, wanted in cases:
+        answer = mod._blocked(pull_requests)
+        if wanted is None:
+            assert answer is None, (label, answer)
+        else:
+            assert answer is not None, (label, answer)
+            assert answer['number'] == wanted, (label, answer)
+
+
+def test_the_refusal_names_the_blocking_request_not_the_first_one(tmp):
+    """The same property through `wait()`, where it is the refusal line
+    that carries the number: a non-blocking pull request in front of a
+    blocking one must not turn the line into a refusal about the wrong
+    pull request - or into no refusal at all."""
+    del tmp
+    mod = _ci_wait()
+    clock = _Clock()
+    setattr(mod, 'runs_on', lambda repo, s: [
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness')])
+    setattr(mod, 'prs_on', lambda repo, s: [
+        _pull(101), _pull(202, 'CONFLICTING')])
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
+        code = mod.wait('o/r', '4' * 40, 60, 600, out, grace=300)
+    text = out.getvalue()
+    assert code == 4, text
+    assert '#202' in text, text
+    assert '#101' not in text, text
+    assert clock.now == 1000.0, clock.now
+
+
 def test_a_still_computing_pull_request_is_not_a_refusal(tmp):
     """`UNKNOWN` is GitHub still working out mergeability, the opposite of
     CONFLICTING. The wait must not refuse on it, so the refusal arrives
