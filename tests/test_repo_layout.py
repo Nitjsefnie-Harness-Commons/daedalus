@@ -20,65 +20,10 @@ from _bounded_git_launches import BOUNDED_GIT_LAUNCHES  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
 
+from _package_layout import (  # noqa: E402
+    BRIDGE_PACKAGE, MCP_OLD_NAMES, MCP_PACKAGE)
+
 ROOT = _util.ROOT
-
-BRIDGE_PACKAGE = (
-    '__init__.py',
-    'atomic_file.py',
-    'command_queue.py',
-    'config.py',
-    'dashboard_drain.py',
-    'data_root_lock.py',
-    'delivery_stripes.py',
-    'env_config.py',
-    'http_transport.py',
-    'json_body.py',
-    'log_safe.py',
-    'mcp_bootstrap.py',
-    'parent_watch.py',
-    'path_safety.py',
-    'queue_order.py',
-    'result_routes.py',
-    'result_store.py',
-    'route_answer.py',
-    'segment_jobs.py',
-    'segment_routes.py',
-    'segment_store.py',
-    'static_routes.py',
-    'stream_route.py',
-    'stream_service.py',
-    'tab_registry.py',
-    'upload_routes.py',
-)
-
-MCP_PACKAGE = (
-    '__init__.py',
-    'auth.py',
-    'request_guard.py',
-    'server.py',
-    'tools_cookies.py',
-    'tools_css.py',
-    'tools_eval.py',
-    'tools_hotfixes.py',
-    'tools_media.py',
-    'tools_network.py',
-    'tools_tabs.py',
-    'transport.py',
-)
-
-MCP_OLD_NAMES = (
-    'mcp_auth.py',
-    'mcp_request_guard.py',
-    'mcp_server.py',
-    'mcp_tools_cookies.py',
-    'mcp_tools_css.py',
-    'mcp_tools_eval.py',
-    'mcp_tools_hotfixes.py',
-    'mcp_tools_media.py',
-    'mcp_tools_network.py',
-    'mcp_tools_tabs.py',
-    'mcp_transport.py',
-)
 
 
 def _clone(root, target):
@@ -459,37 +404,14 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     or that runs as a standalone tool with nothing above it to catch a
     hang, keeps a bound and a table row naming it.
 
-    A site is in scope two ways, and both are decidable rather than a
-    list of spellings. A launch the analyser places whose head reads as
-    the constant `git` (through a `+` concat, a single-bound name, or a
-    container of argv literals, to a cap of `ARGV_UNWRAP_CAP` in
-    `tests/_argv_read.py`) is refused, as is a `**`-unpacked mapping on
-    it; a name bound more than once in a module reads `unreadable`,
-    never a guessed non-git. Second, and this is what keeps the policy
-    decidable: ANY other call carrying a `timeout=` or a `**`-unpacked
-    mapping is reported at `unreadable` unless its receiver is PROVED a
-    fixed, non-launch value. Proof is a bare name this module binds and
-    the analyser read — not a method parameter, not an attribute, not a
-    subscript, and not a name bound to a call the import machinery makes
-    (its argument decides what it returns, so an argument the analyser
-    cannot read leaves the module itself unknown).
-
-    So a receiver reached through an import name held in a variable, an
-    `import_module` argument it cannot read, a class attribute however
-    that attribute was bound, an instance, or a run-time namespace is
-    not passed. It is reported, and reported is in scope: the rule then
-    demands a refusal or an allowance row. That is the whole of what the
-    analyser resolves rather than enumerates — the `import_module`
-    argument, whose spellings the reader can list, because it makes a
-    placed launch head git instead of a reported one at `unreadable`, and
-    nothing else.
-
-    A placed launch whose head is a dynamic expression (a parameter, a
-    call, a slice, a comprehension, a starred argument, or a return value)
-    reads `unreadable` and, as a single placed launch, is not re-examined
-    for git. The shipped tree holds a bounded git launch in the allowance
-    table only, so the summary sentence is true of it; a future one with
-    no row is the filed boundary issue, not enforced here.
+    Which sites are in scope, and what makes a launch head readable, is
+    `tests/_launch_audit.py`'s to say and its own docstrings to state.
+    This consumes its structured classification rather than re-parsing
+    the human-readable refusal, so a message-format change cannot move
+    the rule. Reported is in scope, so each one demands a refusal or an
+    allowance row. A placed launch whose head the analyser cannot read
+    is reported at `unreadable` and, on its own, is not re-examined for
+    git: the boundary issue, filed, and not enforced here.
 
     The allowance is pinned from both sides, and a key is the site's own
     shape rather than a position, so an edit above a baselined launch is
