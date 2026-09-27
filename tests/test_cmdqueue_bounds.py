@@ -248,7 +248,6 @@ def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
     for suite in _SCANNED_SUITES:
         source = (tests_dir / suite).read_text()
         tree = ast.parse(source)
-        scope_by_node = _scope_map(tree)
         for block in _bound_blocks(tree, source, '_bounded_polls'):
             reads = [node for node in ast.walk(block)
                      if isinstance(node, ast.Call)
