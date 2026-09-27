@@ -416,6 +416,28 @@ once on stderr and the wait continues to the grace - a slower correct
 answer, never a green. A present-but-red `tests` run is exit 1, not exit 4:
 the conclusion is judged before the set is.
 
+**A workflow's verdict is the run GitHub's required-check status reports for
+it, which is that workflow's NEWEST run on the SHA.** Every older run of the
+same workflow is out of the judged set whatever it concluded (issue #1249).
+A cancelled remnant of a re-run has always gated nothing; a FAILED one is
+the intermittent failure the re-run then cleared, and the same status
+supersedes it. A close/reopen is the shape that shows it - the head gets a
+second run against a new merge ref while the first run's failure lingers on
+the same SHA - and on such a head the older failure used to outvote the
+newer green. A run with NO newer sibling is judged as it stands, so a
+deliberate cancel and an unretried failure both still fail, and nothing is
+judged by a run name: the grouping is by workflow id, the path standing in
+when the id is absent, with "newer" by `run_started_at`, `created_at`
+standing in, ties by numeric id.
+
+**Discarding a failure is what that rule costs, so the discard is never
+silent.** The exit-0 line counts the runs the filter dropped AND prints
+each one, with its workflow, its run id, its conclusion and its URL - the
+same fields the exit-1 offender line prints. A green handed over without
+the failure it discarded is a green nobody can audit, and an intermittent
+failure on the very merge ref that cleared it is exactly the thing a caller
+reading only the exit code cannot see.
+
 Unlike `ci_watch.py` it
 PINS the SHA it is given instead of re-resolving the branch head each poll:
 a push landing mid-wait must not turn the answer into one about a commit the

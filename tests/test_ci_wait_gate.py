@@ -84,16 +84,20 @@ def test_a_red_required_run_fails_rather_than_reading_as_incomplete(tmp):
     assert [run['id'] for run in offenders] == [1]
 
 
-def test_a_superseded_cancelled_required_run_does_not_satisfy_the_gate(tmp):
-    """The filter runs first, so a name the verdict never reads cannot
-    satisfy the requirement. The newer run shares the workflow, so it
-    supersedes the cancelled one, and it is the one that is judged."""
+def test_the_newest_run_of_the_required_workflow_satisfies_the_gate(tmp):
+    """The filter runs first, so the name the check reads is the one the
+    run it kept carries. Both runs here are of ONE workflow and both carry
+    its name, which is the only shape the producer emits: `gh_client` takes
+    every run's name from the run's own workflow record, so a workflow
+    whose newest run dropped the name `tests` while an older one kept it is
+    a fixture artefact, and it is the one this control used to assert. What
+    the check now reads is the newest run, and it is named `tests`."""
     del tmp
     runs = [
         _run(1, 'cancelled', '2026-09-20T10:00:00Z', name='tests'),
-        _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness'),
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
     ]
-    assert _verdict(runs) == ('incomplete', [])
+    assert _verdict(runs) == ('acceptable', [])
 
 
 def test_an_empty_required_set_reproduces_the_previous_verdicts(tmp):
@@ -484,27 +488,27 @@ def test_a_bound_shorter_than_the_grace_names_the_missing_gate(tmp):
     assert 'merge' not in text, text
 
 
-def test_the_refusal_names_the_gate_a_superseded_run_did_not_satisfy(tmp):
-    """`_missing` reads the run set through the superseded-cancelled filter,
-    and that read was documented and unpinned: drop the filter and the
-    refusal degrades to `no  run on <sha>` - a doubled space and no
+def test_the_refusal_names_the_gate_the_judged_set_is_missing(tmp):
+    """`_missing` answers with the required names the run set carries none
+    of, and that read was documented and unpinned: an answer of nothing
+    makes the refusal degrade to `no  run on <sha>` - a doubled space and no
     workflow name, which is issue #839's shape on this same file, a line
     that reads like a verdict while saying nothing useful.
 
-    The fixture is the only one that can separate the two: the sole
-    `tests` run is cancelled-and-superseded, so the filter leaves nothing
-    naming it, and the refusal has to fall back on the constant and NAME
-    the workflow. A run that merely happens to be absent is already
-    covered elsewhere and would pass either way.
+    Two workflows, neither of them the gate, is what leaves the answer
+    empty by nothing more than absence - a superseded `tests` run is not
+    what made it, and could not be: the filter keeps the newest run per
+    workflow and the producer names every run of a workflow alike, so the
+    name a filter dropped is a name the kept run carries.
     """
     del tmp
     mod = _ci_wait()
     clock = _Clock()
     setattr(mod, 'runs_on', lambda repo, s: [
-        # id 2 is newer and the same workflow, so id 1 is the remnant of a
-        # re-run: the filter drops it, and its name cannot satisfy the gate.
-        _run(1, 'cancelled', '2026-09-20T10:00:00Z', name='tests'),
-        _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness')])
+        _run(1, 'success', '2026-09-20T10:00:00Z', name='gate freshness',
+             workflow=11),
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='CodeQL',
+             workflow=22)])
     setattr(mod, 'prs_on', lambda repo, s: [])
     out, err = io.StringIO(), io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(err):
