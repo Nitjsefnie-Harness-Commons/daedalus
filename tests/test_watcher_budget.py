@@ -184,7 +184,7 @@ def test_a_poll_asking_the_same_question_twice_costs_two(tmp):
     script = once_run.planted(here, 'pr_comment_watch.py',
                               (_PULL_PAGE, _IDENTICAL_POLL))
     fake = _fake_gh.FakeGh(here, idle_answers())
-    seen = once_run.once(script, [PR, '--interval', str(TICK)], fake)
+    seen = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
     print(f'\n  a trial poll asking twice: {len(seen)} call(s) per poll, '
           f'from {len(seen)} logged call(s)')
     assert len(seen) == 2, [call['request'][:80] for call in seen]
@@ -209,7 +209,7 @@ def test_a_trial_that_dies_part_way_through_is_not_counted(tmp):
     fake = _fake_gh.FakeGh(here, idle_answers())
     refused = None
     try:
-        once_run.once(script, [PR, '--interval', str(TICK)], fake)
+        once_run.trial(script, [PR, '--interval', str(TICK)], fake)
     except AssertionError as exc:
         refused = exc.args[0]
     assert refused is not None, 'a trial that exited 1 was counted'

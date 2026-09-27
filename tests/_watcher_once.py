@@ -2,10 +2,10 @@
 
 A poll is the set of log entries sharing one poll marker - the watcher names
 its own boundary, because a poll's width is data-dependent and only the
-watcher knows it - or the whole log of a single `--once` invocation, which is
-one poll because the process exited. Nothing is inferred and no clock is
-read: the marker is in the log, so the log is complete by the time it is
-read, and two identical calls inside one poll are two.
+watcher knows it, and a `--once` invocation names its single poll like any
+other. Nothing is inferred and no clock is read: the marker is in the log, so
+the log is complete by the time it is read, and two identical calls inside
+one poll are two.
 
 The figure is the largest call count in any one of the polls observed. Not
 the first poll's: a bound that reads one poll bounds one poll, and a loop
@@ -97,7 +97,7 @@ def cancel(proc):
         proc.kill()
 
 
-def once(script, args, fake, limit=60):
+def trial(script, args, fake, limit=60):
     """The calls one `--once` invocation made, read once it has exited.
 
     A nonzero exit is refused rather than counted, because a trial that died
@@ -110,6 +110,25 @@ def once(script, args, fake, limit=60):
         timeout=limit)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
     return fake.calls()
+
+
+def once(script, args, fake, limit=60):
+    """`trial`, for a script that cannot name its own poll boundary.
+
+    The base commit's watchers predate the marker, so their whole log is
+    one poll and its length is that poll's cost. A script that does name
+    its boundary is `measure`'s subject, and a trial of it is a loop that
+    ran once: its count answers for one poll of a body the loop repeats,
+    which is how a watcher spending two reports one. So this refuses
+    rather than answers in `measure`'s place.
+    """
+    calls = trial(script, args, fake, limit)
+    named = sorted({call['poll'] for call in calls if call.get('poll')})
+    assert not named, (
+        f'{Path(script).name} names its own poll boundary {named}, so a '
+        f'trial of it is one poll of a repeating body: measure it with '
+        f'measure()', named)
+    return calls
 
 
 def planted(directory, name, *splices):
@@ -160,10 +179,10 @@ def measure(script, args, fake, interval, polls=POLLS):
 
     A poll is the set of log entries sharing one poll marker - the watcher
     names its own boundary, because a poll's width is data-dependent and
-    only the watcher knows it. A `--once` invocation needs no marker: the
-    process exiting IS the boundary, so its whole log is one poll, and
-    `once` is where the base commit's scripts are measured, whose watchers
-    predate the marker and cannot carry one.
+    only the watcher knows it, and a `--once` invocation names its one poll
+    like any other. `once` is therefore the measure for the base commit's
+    scripts, whose watchers predate the marker and cannot carry one, and
+    it refuses anything that names a boundary of its own.
 
     The figure is the LARGEST call count in any one of the polls observed,
     and the window is every one of them, not the first. A bound that reads

@@ -255,6 +255,7 @@ def main():
     gh_client.watch_parent()
 
     if args.once:
+        os.environ[POLL_MARK] = '1'
         seen = {}
         found = poll(args.repo, args.pr, seen, announce=False)
         for kind in KINDS:
