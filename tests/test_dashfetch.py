@@ -77,6 +77,40 @@ def test_an_unplanned_request_is_refused_and_recorded(_tmp):
     assert seen['refusal'] == 'HTTP 599: unplanned request', seen
 
 
+# The refusal's header bag is keyed: `api.js` reads `content-type` and
+# nothing else, and a bag that answered every name would hand a module a
+# header this transport never modelled.
+def test_a_response_header_the_refusal_does_not_model_fails_by_name(_tmp):
+    """The response half of "fail on what you do not model".
+
+    `tests/_dashshell.py` keys its bag for the same reason, and a
+    transport that answered `application/json` to a name nobody modelled
+    would let a section reach for a header the assertion cannot see. The
+    read is the real one: `api.js`'s own `r.headers.get('content-type')`,
+    not a call this suite invented.
+    """
+    del _tmp
+    seen = json.loads(_dashnode.run_dashboard_node(_HEADER_PROBE).stdout)
+    assert seen['contentType'] == 'application/json', seen
+    assert seen['failure'] == (
+        'response header not modelled: x-invented-by-the-control'), seen
+
+
+_HEADER_PROBE = _dashnode.DashboardNodeHarness(
+    _dashnode.DOM + _dashfetch.DOOR + r"""
+(async () => {
+globalThis.fetch = async (target) => refuse(String(target));
+const refused = await fetch('/invented/by-the-control');
+const contentType = refused.headers.get('content-type');
+let failure = null;
+try { refused.headers.get('x-invented-by-the-control'); }
+catch (error) { failure = error.message; }
+process.stdout.write(JSON.stringify({ contentType, failure }));
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=0, module=True)
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='dashfetch_')
 

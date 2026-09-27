@@ -17,8 +17,8 @@ against the tree, not remembered):
      for however long other dashboard children hold the gate.
   2. The amplifier test in test_dashboard_harness.py — a drain-timing control
      that fakes Popen with a 1.2 s delay, which would hold the real lock.
-  3. _controlled_run in test_dashboard_behaviour.py — a fully faked retry run
-     that should not take a real cross-process lock at all.
+  3. _controlled_run in tests/_dashnode_retry_control.py — a fully faked
+     retry run that should not take a real cross-process lock at all.
 
 A gate whose comment names a closed set nobody checked is worse than one that
 names nothing, so if a new bypass is added, add it here.
