@@ -84,11 +84,13 @@ def _fixture_binds(tree, shared):
     """The shared names `tree` binds during module execution.
 
     A bind is a bind: a `for` target, a `with ... as`, an `except ... as`,
-    a walrus, a comprehension target, a `type` alias and a tuple or star
-    target in an assignment all establish one during module execution, and
-    each shadows a shared fixture exactly as a `def` does. What does not
-    count is a function-local binding, which is a namespace of its own and
-    reaches no import.
+    a walrus, a `type` alias and a tuple or star target in an assignment
+    all establish one during module execution, and each shadows a shared
+    fixture exactly as a `def` does. What does not count is a
+    function-local binding, which is a namespace of its own and reaches no
+    import, and neither does a comprehension target: `[_real for i in
+    ()]` binds nothing at module scope, so it is not read and does not
+    shadow.
 
     An import is the one carrier counted conditionally, and either half
     of its spelling can say no. Bringing one of these names from anywhere
