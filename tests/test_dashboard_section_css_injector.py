@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _dashsection_wave1 as shared  # noqa: E402
-from _dashsection import run_scenario  # noqa: E402
+from _dashsection import section_runner  # noqa: E402
 
 SECTION = ('sections/css-injector.js',)
 
@@ -74,10 +74,7 @@ def scenario(body, *, setup=SEEDED, answers=(), plan=shared.COMMAND):
             + shared.MOUNT + body + '})().catch(leave);\n')
 
 
-def _run(body, *, setup=SEEDED, answers=(), plan=shared.COMMAND):
-    return run_scenario(
-        scenario(body, setup=setup, answers=answers, plan=plan),
-        sections=SECTION)
+_run = section_runner(scenario, SECTION, plan=shared.COMMAND, setup=SEEDED)
 
 
 def _store(report):
