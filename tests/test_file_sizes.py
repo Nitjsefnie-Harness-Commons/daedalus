@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned module-size policy and its ratchet."""
-import contextlib
-import io
 import shutil
 import subprocess
 import sys
@@ -9,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ratchet_fixture import _captured_main, _document  # noqa: E402
 
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -24,18 +23,6 @@ def _policy():
 def _thresholds():
     return _util.load(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                       'size_thresholds_contract')
-
-
-def _document():
-    return _thresholds().load(THRESHOLDS_SOURCE)
-
-
-def _captured_main(policy, argv):
-    stdout, stderr = io.StringIO(), io.StringIO()
-    with (contextlib.redirect_stdout(stdout),
-          contextlib.redirect_stderr(stderr)):
-        status = policy.main(argv)
-    return status, stdout.getvalue(), stderr.getvalue()
 
 
 def test_every_tracked_module_satisfies_the_size_policy(tmp):
@@ -399,13 +386,19 @@ def test_real_cli_tighten_missing_entry_reports_without_deleting_it(tmp):
     assert after['coverage'] == data['coverage']
 
 
-def _normalised(text):
+def _prose(text):
+    """Prose folded for a phrase search, contractions expanded first.
+
+    The skill paragraph the phrases below come from writes a contraction
+    where a line wrap would otherwise hide one, which is why this is not
+    the shared `_normalised`.
+    """
     text = text.lower().replace("n't", ' not')
     return ' '.join(text.split())
 
 
 def _skill_decisions(path=SKILL_SOURCE):
-    text = _normalised(path.read_text(encoding='utf-8'))
+    text = _prose(path.read_text(encoding='utf-8'))
     return {
         'owner': '.github/ci-thresholds.json' in text
         and 'module_size_baseline' in text,
@@ -473,7 +466,7 @@ def test_skill_mutations_are_caught_independently(tmp):
 
 def test_skill_pressure_scenarios_name_the_operator_action(tmp):
     del tmp
-    text = _normalised(SKILL_SOURCE.read_text(encoding='utf-8'))
+    text = _prose(SKILL_SOURCE.read_text(encoding='utf-8'))
     assert 'recorded number is never raised' in text
     assert 'shrinking is recorded with ' \
         '`python3 scripts/ci/size_baseline.py --tighten`' \
@@ -484,9 +477,9 @@ def test_skill_pressure_scenarios_name_the_operator_action(tmp):
 def test_script_docstring_carries_each_printed_remedy(tmp):
     del tmp
     policy = _policy()
-    doc = _normalised(policy.__doc__ or '')
+    doc = _prose(policy.__doc__ or '')
     for kind, remedy in policy.REMEDY_FOR.items():
-        assert _normalised(remedy) in doc, (kind, remedy)
+        assert _prose(remedy) in doc, (kind, remedy)
 
 
 def test_refused_kinds_print_the_correct_remedy(tmp):

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Contracts for the JSON-owned line-length policy and its ratchet."""
-import contextlib
-import io
 import shutil
 import subprocess
 import sys
@@ -9,6 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _ratchet_fixture import (  # noqa: E402
+    _captured_main, _document, _git, _normalised)
 
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -25,23 +25,6 @@ def _policy():
 def _thresholds():
     return _util.load(ROOT / 'scripts' / 'ci' / 'thresholds.py',
                       'line_thresholds_contract')
-
-
-def _document():
-    return _thresholds().load(THRESHOLDS_SOURCE)
-
-
-def _captured_main(policy, argv):
-    stdout, stderr = io.StringIO(), io.StringIO()
-    with (contextlib.redirect_stdout(stdout),
-          contextlib.redirect_stderr(stderr)):
-        status = policy.main(argv)
-    return status, stdout.getvalue(), stderr.getvalue()
-
-
-def _git(repo, *args):
-    subprocess.run(('git', '-C', str(repo)) + args, check=True,
-                   capture_output=True, env=_util.child_coverage('scrub'))
 
 
 def _line_fixture(tmp, files, baseline, name):
@@ -171,10 +154,6 @@ def test_tightening_preserves_an_entry_for_a_missing_file(tmp):
     assert policy.tightened({'gone.py': 2}, {}) is None
     assert policy.tightened({'gone.py': 2, 'a.py': 2}, {'a.py': 1}) == {
         'gone.py': 2, 'a.py': 1}
-
-
-def _normalised(text):
-    return ' '.join(text.lower().split())
 
 
 def test_script_docstring_carries_each_printed_remedy(tmp):
