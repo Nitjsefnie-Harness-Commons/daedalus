@@ -36,7 +36,9 @@ shipped module the coverage report never sees.
 The scan reads DIGIT FORM, and its exemptions are by SHAPE rather than by
 example, so the shapes are what is written down here: a figure written in
 words, a run that touches a letter or an underscore, a run carrying its own
-dot, and a run a hyphen runs into. All four are outside what it sees -- so
+dot, and a run a hyphen runs into either side. Only the first of those four
+is outside what it sees. The other three it reads and then lets past, which
+is a weaker promise than invisibility and the honest one to make -- so
 `3.5 seconds` is as unchecked as `SHA-256`, and a maintainer must not read
 the familiar-looking second one as the boundary. The case docstring repeats
 this rather than claiming completeness the scan does not have. This is
@@ -87,8 +89,10 @@ def _paragraph():
 
 
 def test_the_unreached_module_line_count_is_the_trees(tmp):
-    """`0 of 51 code lines` — the 51 is that file's own physical code lines,
-    and it moves the moment the file does."""
+    """`0 of N code lines` — the N is that file's own physical code lines,
+    and it moves the moment the file does. No figure is copied into this
+    line: a hand-copied count in the guard's own documentation drifts
+    exactly as the one in the prose did."""
     del tmp
     said = re.search(COUNT_PHRASE, _paragraph())
     assert said, 'the paragraph no longer states the unreached module count'
