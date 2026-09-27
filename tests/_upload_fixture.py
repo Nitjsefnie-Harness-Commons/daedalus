@@ -19,7 +19,7 @@ def _load(name):
     return _util.load(ROUTES, name)
 
 
-def _store(root, token, upload_id, name, data=b'x'):
+def _place_upload(root, token, upload_id, name, data=b'x'):
     """Put a file into the upload namespace without going through a route."""
     target = Path(root) / token / upload_id
     target.mkdir(parents=True, exist_ok=True)
