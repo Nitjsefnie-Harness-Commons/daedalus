@@ -121,12 +121,24 @@ def test_every_name_carries_sorted_owners_within_the_tests_tree(tmp):
 
 
 def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
-    """The union-level statement neither guard can make alone.
+    """No reserved name is re-implemented without a row in its own table.
 
-    A name a shared helper owns is invisible to the workflow-fixture rule
-    and a fixture name is invisible to the re-implementation rule, so the
-    two owner sets are read as one here and a site is a finding unless the
-    table matching its own limb carries a row for it.
+    WHAT THIS ADDS, MEASURED AND STATED. Against this tree its sites are
+    set-equal to `reimplementations` union `js_reimplementations` -- 196
+    of them, and each difference in both directions empty -- and the
+    reason is structural rather than incidental. `tests/_wffixtures.py`
+    IS a `tests/_*.py` module, so the three fixture names that are
+    definitions are already in the python limb, and the two that are not
+    (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are `Assign` binds, which
+    `definitions` never reports. While the fixture module remains a
+    shared helper, the union therefore adds nothing HERE.
+
+    It is kept rather than deleted for the day that stops being true: a
+    fixture module that is not a shared helper puts its names in the
+    union and nowhere else, and this is the statement that would notice.
+    The fixture limb beside it is the half that is not a restatement
+    today, and the single entry point both of them make is the other
+    half of the issue's ask.
     """
     del tmp
     unallowed = sorted(
@@ -425,6 +437,33 @@ def test_a_document_that_is_not_the_generated_form_is_refused_by_name(tmp):
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert result.stderr.startswith(
         'cannot read reserved names: '), result.stderr
+
+
+def test_a_tree_carrying_the_script_alone_refuses_by_name(tmp):
+    """The one refusal path the import direction creates, pinned.
+
+    The script reaches out of its own directory for the derivation, so a
+    checkout carrying the script and its tests but not
+    `tests/_reserved_names.py` is a shape an operator produces by copying
+    one file. An import at module scope would traceback before `main`
+    could refuse, so the other four refusals this suite pins would have
+    been the only ones that refused.
+    """
+    bare = _fixture_checkout(tmp, {
+        'scripts/ci/reserved_names.py': POLICY_SOURCE.read_text(
+            encoding='utf-8'),
+        'tests/_owner.py': _OWNER,
+        'tests/_wffixtures.py': _FIXTURES,
+    }, 'bare')
+    result = subprocess.run(
+        [sys.executable, 'scripts/ci/reserved_names.py'], cwd=bare,
+        env=_util.child_coverage('scrub'), capture_output=True, text=True,
+        timeout=180)
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert result.stdout == '', result.stdout
+    assert result.stderr.strip() == (
+        "No module named '_reserved_names'"), result.stderr
+    assert 'Traceback' not in result.stderr
     assert 'Traceback' not in result.stderr
 
 
