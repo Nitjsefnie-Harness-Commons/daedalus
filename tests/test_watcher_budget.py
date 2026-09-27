@@ -514,13 +514,34 @@ def test_a_plain_refusal_still_exits_three_at_once(tmp):
 def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
     answers = dict(idle_answers())
     answers['checkSuites'] = [runs_page([
-        suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
+        suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z', name='tests'),
         suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
               name='tests')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
-    assert '1 superseded cancelled ignored' in done.stdout, done.stdout
+    assert '1 superseded run(s) ignored' in done.stdout, done.stdout
+    assert '  tests (run 1): cancelled ' \
+           'https://github.com/o/r/actions/runs/1' in done.stdout, done.stdout
+
+
+def test_a_superseded_failure_is_ignored_through_the_new_query(tmp):
+    """Issue 1249 end to end, through the query the wait really makes: a
+    close/reopen left a `tests` failure on the SHA beside the newer `tests`
+    run that cleared it, and the wait answered unacceptable. The discarded
+    failure is still named, so a caller can audit the green it is handed."""
+    answers = dict(idle_answers())
+    answers['checkSuites'] = [runs_page([
+        suite(1, 'FAILURE', started='2026-09-20T10:00:00Z', name='tests'),
+        suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
+              name='tests')])]
+    fake = _fake_gh.FakeGh(tmp, answers)
+    done = _ci_wait(fake)
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    assert 'all 1 run(s)' in done.stdout, done.stdout
+    assert '1 superseded run(s) ignored' in done.stdout, done.stdout
+    assert '  tests (run 1): failure ' \
+           'https://github.com/o/r/actions/runs/1' in done.stdout, done.stdout
 
 
 def test_a_deliberate_cancel_still_fails_through_the_new_query(tmp):

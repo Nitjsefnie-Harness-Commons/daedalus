@@ -10,7 +10,7 @@ hand-rolled loops this replaces conflate:
   0  every run on the SHA has `status: completed`, every conclusion is
      `success`, `neutral` or `skipped`, and every workflow in
      REQUIRED_WORKFLOWS has at least one run of its own left after the
-     superseded-cancelled filter below
+     newest-run-per-workflow filter below
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding, or with
@@ -58,17 +58,28 @@ by its own --timeout, which then ends the wait rather than buying another
 request) and polls again. Every other failure exits 3 at once, which keeps a
 403 that is really a permission refusal loud.
 
-A cancelled run whose workflow has a strictly newer run against the same SHA
-is ignored: it is the remnant of a re-run, which says nothing about the
-commit and gates nothing; with no newer sibling it is a deliberate cancel and
-still fails. The grouping is by workflow, the path standing in when the id
-is absent; "newer" is by run_started_at, created_at standing in when that is
-missing, ties broken by numeric id. Only a cancelled run is ever superseded,
-so an older failure beside a newer success fails as before, and a superseded
-run's name never satisfies the required-workflow check, because that check
-reads the set the filter left. The runs are read through the commit's check
-suites rather than the check-runs list because that list is appended to while
-a matrix fills; how is `gh_client`'s subject.
+A workflow's verdict is decided by its NEWEST run on the SHA - the run
+GitHub's required-check status reports for it. Every older run of that
+workflow is out of the judged set, whatever it concluded: a cancelled
+remnant of a re-run has always gated nothing, and a FAILED one is the
+intermittent failure the re-run then cleared, which that same status
+supersedes. A close/reopen is the shape that makes it show - the head gets
+a second run of the workflow against a new merge ref while the first run's
+failure lingers on the same SHA - and issue #1249 is a head on which the
+older failure outvoted the newer green. With no newer sibling a run is
+judged as it stands, so a deliberate cancel and an unretried failure both
+still fail.
+
+Discarding a failure is what that rule costs, so the discard is never
+silent: the acceptable line names every run the filter dropped, with its
+workflow, its run id, its conclusion and its URL, and its count is the
+number of lines printed. The grouping is by workflow, the path standing in
+when the id is absent, and never by the run's name; "newer" is by
+run_started_at, created_at standing in when that is missing, ties broken by
+numeric id. A superseded run's name never satisfies the required-workflow
+check, because that check reads the set the filter left. The runs are read
+through the commit's check suites rather than the check-runs list because
+that list is appended to while a matrix fills; how is `gh_client`'s subject.
 
 Run --once before a long wait; --once prints the matrix to stderr and exits 0
 when the query succeeded, `state: incomplete` included, because a trial call
@@ -150,21 +161,22 @@ def _superseded(run, runs):
                for other in runs)
 
 
-def _superseded_cancelled(run, runs):
-    """A cancelled run a newer run of the same workflow has replaced."""
-    return (run.get('conclusion') == 'cancelled' and _superseded(run, runs))
-
-
 def _judged(runs):
-    """The runs the verdict reads: a superseded cancelled run gates nothing."""
-    return [run for run in runs if not _superseded_cancelled(run, runs)]
+    """The runs the verdict reads: each workflow's newest run, and no other.
+
+    Supersession, not the conclusion, is what takes a run out of the judged
+    set, so a run with no newer run of its own workflow is judged whatever it
+    concluded. The rule's rationale and the cost it pays are the module
+    docstring's; the naming that pays it is in `wait`.
+    """
+    return [run for run in runs if not _superseded(run, runs)]
 
 
 def _missing(runs, required=REQUIRED_WORKFLOWS):
-    """The required workflow names no surviving run carries.
+    """The required workflow names no run the filter kept carries.
 
     Read through the shared predicate and over the set the filter left, so
-    a superseded cancelled run's name cannot satisfy the gate.
+    a superseded run's name cannot satisfy the gate on its own.
     """
     return ci_gate.missing_required(_judged(runs), required=required)
 
@@ -175,8 +187,8 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     States: acceptable (exit 0), unacceptable (exit 1), waiting, incomplete
     (exit 4). Zero runs is waiting - "no run yet" must not read as "all
     concluded", and must not read as an incomplete set either. A superseded
-    cancelled run is ignored: it gates nothing, and its name cannot satisfy
-    the required-workflow check that runs after the filter.
+    run is out of the judged set whatever it concluded: its name cannot
+    satisfy the required-workflow check that runs after the filter.
 
     The order is load-bearing. A conclusion is judged before the set is:
     a required workflow that is present and red is a failure (1), never an
@@ -311,12 +323,18 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            ignored = sum(1 for run in runs
-                          if _superseded_cancelled(run, runs))
-            note = (f' ({ignored} superseded cancelled ignored)'
-                    if ignored else '')
-            print(f'all {len(runs) - ignored} run(s) on {sha[:12]}'
+            discarded = [run for run in runs if _superseded(run, runs)]
+            note = (f' ({len(discarded)} superseded run(s) ignored)'
+                    if discarded else '')
+            print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{note}', file=out, flush=True)
+            # The rule's cost, named: a superseded failure is real evidence
+            # on this very merge ref, and a caller who cannot see the run
+            # this line discards is holding a green it cannot audit.
+            for run in discarded:
+                print(f'  {run.get("name")} (run {run.get("id")}): '
+                      f'{run.get("conclusion")} {run.get("html_url") or ""}',
+                      file=out, flush=True)
             return 0
         if state == 'unacceptable':
             print(f'run matrix on {sha[:12]} UNACCEPTABLE:', file=out,
