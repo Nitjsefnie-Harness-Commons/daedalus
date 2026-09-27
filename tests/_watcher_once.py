@@ -41,11 +41,7 @@ POLLS = 3
 
 
 class Child:
-    """A watcher process with both of its streams drained.
-
-    It leads a process group of its own, which is what makes `stop` a
-    cancellation rather than an abandonment.
-    """
+    """A watcher process with both of its streams drained, in its own group."""
 
     def __init__(self, script, args, fake):
         self.argv = [sys.executable, '-u', str(script), *args]
@@ -85,7 +81,8 @@ def cancel(proc):
     cancels the work. `start_new_session` made the child its own group
     leader, so the group id is its pid - and the child is unreaped here,
     so that pid is still its own and cannot have been handed to anyone
-    else. A group already gone is the answer the kill wanted.
+    else. A group that does not exist is a child that has not reached
+    `setsid` yet, and naming the child alone is all there is to do.
     """
     if sys.platform.startswith('win'):
         # Windows has no group to signal, so the tree is named instead.
@@ -164,9 +161,7 @@ def planted(directory, name, *splices):
 def polls_in(calls):
     """`(poll marker, calls in that poll)` per poll, in the order polled.
 
-    The boundary is the watcher's, so this reads rather than infers: a poll
-    is the set of entries sharing one marker, and the number of such sets is
-    how many polls the run made.
+    The number of such sets is how many polls the run made.
     """
     counts = {}
     for call in calls:
@@ -176,22 +171,7 @@ def polls_in(calls):
 
 
 def measure(script, args, fake, interval, polls=POLLS):
-    """Calls per poll for one watcher, read from the loop that runs it.
-
-    A poll is the set of log entries sharing one poll marker - the watcher
-    names its own boundary, because a poll's width is data-dependent and
-    only the watcher knows it, and a `--once` invocation names its one poll
-    like any other. `once` is therefore the measure for the base commit's
-    scripts, whose watchers predate the marker and cannot carry one, and
-    it refuses anything that names a boundary of its own.
-
-    The figure is the LARGEST call count in any one of the polls observed,
-    and the window is every one of them, not the first. A bound that reads
-    a single poll bounds a single poll: a loop that starts spending an
-    extra request from its third poll on is then measured at the width it
-    began at and reported at half its real cost, which is a measurement
-    the idle bound is meant to refuse.
-    """
+    """`(calls per poll, those polls' calls)`, read from the running loop."""
     child = Child(script, args + ['--interval', str(interval)], fake)
     try:
         # One marker more than the window needs, because a poll is only
