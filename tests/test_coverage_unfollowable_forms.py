@@ -450,6 +450,60 @@ def test_every_grammar_expression_form_is_classified(tmp):
         assert _UNRECOGNISED not in parts, form.__name__
 
 
+# PEP 750's two forms, and the value-bearing fields each carries. A real
+# 3.14 instance has exactly these fields among the ones the walk reads.
+TEMPLATE_SHAPES = (
+    ('TemplateStr', ('values',)),
+    ('Interpolation', ('value', 'format_spec')),
+)
+
+
+def _install_stand_ins():
+    """Put the template forms on `ast` where the grammar lacks them.
+
+    They are a 3.14 addition, and this interpreter parses neither the
+    node nor the `t"..."` syntax, so the registration cannot be
+    exercised here by writing a source. Installing stand-ins and
+    re-importing the walk takes the same code path a 3.14 interpreter
+    takes, which is what makes this a control rather than a note.
+    """
+    added = []
+    for name, fields in TEMPLATE_SHAPES:
+        if not hasattr(ast, name):
+            setattr(ast, name, type(name, (ast.expr,),
+                                    {'_fields': fields, '_attributes': ()}))
+            added.append(name)
+    return added
+
+
+def test_a_newer_grammar_form_is_registered_when_the_grammar_has_it(tmp):
+    """Totality is over the grammar the interpreter actually has.
+
+    The control that failed on 3.14 is the one above: it enumerates the
+    interpreter's own expression forms and found two the table did not
+    name. This is the other half, and it is the half that can be
+    exercised on every version: where the grammar has the template
+    forms the table must carry them, and where it does not the table
+    must not claim them.
+    """
+    import importlib
+
+    del tmp
+    added = _install_stand_ins()
+    bindings = sys.modules['_coverage_bindings']
+    try:
+        reloaded = importlib.reload(bindings)
+        for name, fields in TEMPLATE_SHAPES:
+            form = getattr(ast, name)
+            assert reloaded._CARRIED_FIELDS.get(form) == fields, name
+            parts = list(reloaded._carried_parts(_bare_form(form)))
+            assert reloaded._UNRECOGNISED not in parts, name
+    finally:
+        for name in added:
+            delattr(ast, name)
+        importlib.reload(bindings)
+
+
 def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
     """A guard's prose is a claim about the code beside it, in both files.
 

@@ -44,6 +44,21 @@ _CARRIED_FIELDS = {
     ast.comprehension: ('ifs',),
 }
 
+# PEP 750's template-string forms are a 3.14 addition, so a literal naming
+# them raises at import on 3.11-3.13 and takes every suite with it. Read
+# each the way tests/_helper_binds.py reads `ast.TypeAlias`: absent, the
+# form is not registered, and that is correct rather than merely quiet --
+# an older parser can neither produce the node nor parse the `t"..."`
+# that makes one. Only the value-bearing fields are named, because
+# `_field_parts` hands back whatever is not None and `str` and
+# `conversion` are a str and an int, which the walk would refuse.
+_TEMPLATE_FIELDS = {
+    getattr(ast, 'TemplateStr', None): ('values',),
+    getattr(ast, 'Interpolation', None): ('value', 'format_spec'),
+}
+_CARRIED_FIELDS.update({form: fields for form, fields
+                        in _TEMPLATE_FIELDS.items() if form is not None})
+
 # The atoms `_names_one_of` and `_is_launch_value` judge, and the forms
 # that build a new value out of their operands, where a launcher is
 # transformed rather than carried and opening one would only manufacture
@@ -199,6 +214,13 @@ def _carried_parts(value):
     And FormattedValue is opened on requirement rather than on that argument,
     because `f"{launcher}"` binds a string and not the launcher, and the issue
     asks for the interpolation to be judged all the same.
+
+    Its successors carry the same ground. TemplateStr and Interpolation are
+    the 3.14 template-string forms, opened because the issue asks for an
+    f-string's successor judged too, and registered only where the
+    interpreter has them: an older parser can neither produce the node nor
+    parse the `t"..."` that makes one, so there is nothing there for the
+    walk to open.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,
