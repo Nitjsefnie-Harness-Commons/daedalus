@@ -13,7 +13,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_inline_gate)
 from _worker_sources import (  # noqa: E402
-    STREAM_RESPONSE, chrome_stub, event_target_stub, import_scripts_stub)
+    DELAY_STUB, RESPONSE_STUB, STREAM_RESPONSE, chrome_stub, event_target_stub,
+    import_scripts_stub)
 
 SYNC = 'POST /sync-tabs'
 RESULT = 'POST /result'
@@ -125,16 +126,7 @@ async function sendCommand(_target, method, params) {
   return {};
 }
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 const BRIDGE_URL = 'https://bridge.example.com';
 const streamFetches = [];
 const resultPosts = [];
@@ -179,11 +171,7 @@ const context = vm.createContext({
   console: { log() {}, warn() {}, error() {} },
 });
 """) + import_scripts_stub('context') + r"""
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function runEval(id, code) {
   context.command = { id, code, tabId: '7', _did: id };
   await vm.runInContext(

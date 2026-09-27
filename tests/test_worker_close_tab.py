@@ -13,7 +13,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
-from _worker_sources import RELAY_CONTEXT, event_target_stub  # noqa: E402
+from _worker_sources import (  # noqa: E402
+    COPY_STUB, RELAY_CONTEXT, RESPONSE_STUB, event_target_stub)
 
 TOKEN = 'close-token'
 SERVER = 'https://bridge.example.com'
@@ -56,20 +57,7 @@ const storageStore = {
   'daedalus-server': '__SERVER__',
 };
 
-function copy(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
-}
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + COPY_STUB + RESPONSE_STUB + r"""
 // The window a removal reports. A constant of this harness's own rather than
 // one derived from the tab id the scenario supplied, so the stand-in can
 // never answer with the caller's own value; no control reads it yet.

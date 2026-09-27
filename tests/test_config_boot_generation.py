@@ -29,7 +29,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub)
+    DELAY_STUB, RESPONSE_STUB, event_target_stub, import_scripts_stub)
 
 BRIDGE = 'https://bridge.example.com'
 SYNC = 'POST /sync-tabs'
@@ -73,16 +73,7 @@ function copy(v) {
   return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
 }
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 // The shared gate's in-scope contract. The gate answers only what the
 // scenario declared and records every request it sees.
 const BRIDGE_URL = '__BRIDGE__';
@@ -191,11 +182,7 @@ const context = vm.createContext({
     error() {} },
 });
 """ + import_scripts_stub('context') + r"""
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function settle() {
   for (let i = 0; i < 25; i++) await delay();
 }

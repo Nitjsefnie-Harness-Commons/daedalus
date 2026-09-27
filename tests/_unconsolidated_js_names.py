@@ -22,11 +22,12 @@ files it was not asked to touch, every one of them honest and every one
 of them undone when the boundary changed.
 
 Like every row in the Python table, each of these is a site the rule
-finds and consolidation has not reached. The `response` factory is the
-largest of them — sixteen harnesses carry the same nine lines, which is
-the same mechanism this issue is about and under the same fifteen-line
-duplicate threshold — and it is the second wave of that consolidation,
-not this one.
+finds and consolidation has not reached. The `streamResponse` factory is
+the largest cluster left: nine sites carry the same three lines, and the
+shared factory cannot take them, because a second `streamResponse` in
+`tests/_worker_sources.py` would make the row below excuse a declaration
+this branch wrote, and the branch-boundary rule counts declarations per
+(file, name) rather than per file.
 """
 
 UNCONSOLIDATED_JS_NAMES = {
@@ -43,12 +44,6 @@ UNCONSOLIDATED_JS_NAMES = {
         'the promise in inFlight, where the GM harnesses deliver a page '
         'message to a registered listener and the tabs harness runs the next '
         'queued command',
-    ('tests/_debugger_attachment_harness.py', 'response'):
-        'byte-identical to the other fifteen owners (every one digest '
-        'e50263b1658e3244). This is the sixteen-harness response cluster '
-        'this module own docstring records as the second wave of the '
-        'consolidation, and this branch is the first wave: the eventTarget '
-        'copy it migrates. The cluster stays tabled to #1149',
     ('tests/_dashfield.py', 'describe'):
         'this destructures a [label, control] pair and returns the '
         'label/control association record the a11y assertions read, where the '
@@ -68,12 +63,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_hotfixharness.py', 'clearScheduled'):
         'the hotfix fake clears the timer at an index it minted, where the '
         'boundary fake finds the timer by id out of a list it searched',
-    ('tests/_hotfixharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/_hotfixharness.py', 'response'):
-        'the fetch-response factory, one of the copies the second wave of '
-        'this consolidation is about',
     ('tests/_hotfixharness.py', 'schedule'):
         'the hotfix fake arms a timer and returns its index without ever '
         'firing it, where the boundary fake fires it on the route '
@@ -82,17 +71,6 @@ UNCONSOLIDATED_JS_NAMES = {
         'the hotfix wait polls two thousand times and answers a boolean, '
         'where the boundary wait throws on exhaustion and the overlap one '
         'takes a deadline',
-    ('tests/_boundary_env.py', 'copy'):
-        'the structural-clone helper each harness writes for itself, one '
-        'of five carrying the same expression; a sixth names its '
-        'parameter v where these name it value',
-    ('tests/_boundary_env.py', 'delay'):
-        'the next-turn delay each harness writes for itself, one of '
-        'eight '
-        'copies of the same three lines',
-    ('tests/_boundary_env.py', 'response'):
-        'the fetch-response factory each harness writes for itself, one of '
-        'sixteen copies of the same nine lines',
     ('tests/_boundary_env.py', 'waitFor'):
         'the boundary fake polls a predicate a thousand times, where the '
         'overlap wait takes a deadline and the stream wait polls two '
@@ -104,21 +82,12 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_bridge_fake_oracle_harness.py', 'main'):
         'the oracle harness own entry, which starts the upstream server a '
         'plan forwards to, where the GM harness runs storage cases',
-    ('tests/_bridge_fake_oracle_harness.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_bridge_fake_oracle_harness.py', 'run'):
         'the oracle harness own entry, which serves a plan against a real '
         'upstream server',
     ('tests/_bridge_fake_oracle_harness.py', 'streamResponse'):
         'the oracle harness own stream factory, which carries a hang body '
         'the shared copy also carries, so the two are copies of one another',
-    ('tests/_cdpharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/_cdpharness.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_dashnode.py', 'bounded'):
         'the dashboard harness own deadline, which samples wall time and '
         'caps a late sample, where the overlap harness reads the clock it '
@@ -146,12 +115,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_gm_two_origin.py', 'storedValues'):
         'the GM harness store reader, one of two copies of the same eight '
         'lines',
-    ('tests/_mainworldharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/_mainworldharness.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_mainworldharness.py', 'run'):
         'the MAIN-world harness own entry, 190 lines of step machine over '
         'the injected function',
@@ -159,21 +122,9 @@ UNCONSOLIDATED_JS_NAMES = {
         'the overlap harness own deadline, which reads an injected clock '
         'and takes a null to disable itself, where the dashboard harness '
         'samples wall time and has no such parameter',
-    ('tests/_overlap.py', 'delay'):
-        'the overlap delay takes a millisecond count the shared shape has '
-        'no parameter for, so the signatures do not meet',
-    ('tests/_overlap.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_overlap.py', 'waitFor'):
         'the overlap wait takes a deadline and can be disabled outright, '
         'which neither of the two polled forms has',
-    ('tests/_relayharness.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/_relayharness.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_relayharness.py', 'run'):
         'the eval-relay harness own entry, 236 lines driving the three '
         'shipped scripts',
@@ -188,30 +139,19 @@ UNCONSOLIDATED_JS_NAMES = {
         'the tabs harness own fetch, which records a result post and '
         'answers a disabled stream, where the gate fake refuses by origin '
         'first and records a bad origin',
-    ('tests/_tabs_harness.py', 'copy'):
-        'the structural-clone helper, the same expression as the other four '
-        'copies',
     ('tests/_tabs_harness.py', 'dispatch'):
         'the tabs harness runs the next queued command in the VM, where the '
         'GM harness delivers a page message',
-    ('tests/_tabs_harness.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/_tabs_harness.py', 'run'):
         'the tabs harness own entry, which applies a plan over chrome.tabs',
     ('tests/_worker_sources.py', 'streamResponse'):
-        'the shared factory, reported because the oracle harness carries '
-        'its own copy of it rather than importing it',
+        'the shared factory, reported because the oracle harness and the '
+        'dashboard shell each carry a ledger of their own stream answers '
+        'rather than importing it',
     ('tests/test_config_boot_generation.py', 'copy'):
         'the structural-clone helper under a parameter named v where the '
-        'other copies name it value, so the same expression with a '
+        'shared copy names it value, so the same expression with a '
         'different local',
-    ('tests/test_config_boot_generation.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/test_config_boot_generation.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_config_boot_generation.py', 'run'):
         'the boot-generation harness own entry, 120 lines over the config '
         'read',
@@ -227,13 +167,12 @@ UNCONSOLIDATED_JS_NAMES = {
         'the boundary fake marks a timer and the throttle harness drops a '
         'pending flag',
     ('tests/test_dashboard_behaviour.py', 'response'):
-        'this one carries a headers map the other fifteen do not, '
-        'because '
-        'the dashboard reads a content type off the answer',
+        'this one carries a headers map the shared factory does not, '
+        'because the dashboard reads a content type off the answer',
     ('tests/test_gate_extensions.py', 'response'):
-        'the gate extension suite writes two response factories into its '
-        'three harnesses, one of which answers ok from the caller rather '
-        'than from the status range',
+        'the unparsed-plan harness answers ok from the caller over six '
+        'body lines rather than from the status range, and the other two '
+        'of the three harnesses now splice the shared factory',
     ('tests/test_gate_extensions.py', 'streamResponse'):
         'the gate extension suite writes the disabled-error line into each '
         'of its three harnesses, and the shared factory carries it with a '
@@ -250,18 +189,12 @@ UNCONSOLIDATED_JS_NAMES = {
         'the transfer suite writes the drain loop into each of its own '
         'three harnesses, and two of them bound it with a guard the owner '
         'has no counter for',
-    ('tests/test_relay_example_placeholders.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_relay_example_placeholders.py', 'streamResponse'):
         'the placeholder harness answers only the disabled error, where the '
         'shared factory also answers a hang',
-    ('tests/test_segment_mint.py', 'copy'):
-        'the structural-clone helper, the same expression as the other four '
-        'copies',
     ('tests/test_segment_mint.py', 'response'):
         'this one throws SyntaxError from json() on a null body, which the '
-        'mint harness needs and none of the other fifteen models',
+        'mint harness needs and the shared factory does not model',
     ('tests/test_segment_mint.py', 'run'):
         'the mint harness own entry, 42 lines over one job capability',
     ('tests/test_segment_mint.py', 'streamResponse'):
@@ -280,15 +213,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_starvation_bounds.py', 'streamResponse'):
         'the starvation harness answers only a never-settling body, where '
         'the shared factory answers a hang and a disabled error',
-    ('tests/test_stream_backoff.py', 'copy'):
-        'the structural-clone helper, the same expression as the other four '
-        'copies',
-    ('tests/test_stream_backoff.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/test_stream_backoff.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_stream_backoff.py', 'run'):
         'the stream harness own entry, 137 lines over the reconnect ledger',
     ('tests/test_stream_backoff.py', 'settle'):
@@ -304,12 +228,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_tab_routing_js_operations.py', 'run'):
         'the routing suite writes two five-line run helpers into its '
         'operation cases, and neither is a copy of a harness entry',
-    ('tests/test_worker_close_tab.py', 'copy'):
-        'the structural-clone helper, the same expression as the other four '
-        'copies',
-    ('tests/test_worker_close_tab.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_worker_close_tab.py', 'run'):
         'the close-tab harness own entry, 30 lines over one closed tab',
     ('tests/test_worker_close_tab.py', 'setTimeoutStandIn'):
@@ -322,8 +240,8 @@ UNCONSOLIDATED_JS_NAMES = {
         'the throttle harness records the clear and drops the pending flag, '
         'where the boundary fake only marks the timer and neither records',
     ('tests/test_worker_register_throttle.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
+        'the same answer as the shared factory over four body lines '
+        'instead of nine, so the two do not meet',
     ('tests/test_worker_register_throttle.py', 'run'):
         'the register harness own entry, 35 lines over the registration '
         'window',
@@ -337,9 +255,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/test_worker_register_throttle.py', 'streamResponse'):
         'the throttle harness answers only the disabled error, where the '
         'shared factory also answers a hang',
-    ('tests/test_worker_result_post.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_worker_result_post.py', 'run'):
         'the postResult harness own entry, 31 lines over one result post',
     ('tests/test_worker_result_post.py', 'settle'):
@@ -364,29 +279,16 @@ UNCONSOLIDATED_JS_NAMES = {
         'where the owner belongs to the dashboard node harness',
     ('tests/_dashshell.py', 'streamResponse'):
         'this answers the shell harness own stream shape, where the owner '
-        'is the shared hang/disabled factory two harnesses splice in',
-    ('tests/_netcapture_harness.py', 'copy'):
-        'byte-identical to the row for tests/_tabs_harness.py, and '
-        'neither is a copy of the owner: the same chrome-double helper '
-        'written into two harnesses. Consolidating them means editing '
-        '_netcapture_harness.py, which another seat owns, so the '
-        'duplication is real and deferred',
+        'is the shared hang/disabled factory five harnesses splice in',
     ('tests/_netcapture_harness.py', 'maybeReject'):
         'this refuses a declarativeNetRequest entry by RULESET key, where '
         'the tabs harness refuses a chrome surface by API name',
     ('tests/_netcapture_harness.py', 'record'):
         'byte-identical to the row for tests/_tabs_harness.py, and '
         'neither is a copy of the owner: the same chrome-double helper '
-        'written into two harnesses. Consolidating them means editing '
-        '_netcapture_harness.py, which another seat owns, so the '
-        'duplication is real and deferred',
-    ('tests/_netcapture_harness.py', 'response'):
-        'byte-identical to the row for tests/_tabs_harness.py, and '
-        'neither is a copy of the owner: the same chrome-double helper '
-        'written into two harnesses. Consolidating them means editing '
-        '_netcapture_harness.py, which another seat owns, so the '
-        'duplication is real and deferred, and the wider response-factory '
-        'cluster is the second wave of this consolidation',
+        'written into two harnesses whose chrome doubles differ '
+        'elsewhere, and a third copy of it does not exist, so a shared '
+        'one would have exactly two users',
     ('tests/_netcapture_harness.py', 'run'):
         'this is the capture harness own driver, 45 body lines. Ranked '
         'from 1 over the 21 JavaScript `run` declarations in the tree '
@@ -400,9 +302,9 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_tabs_harness.py', 'record'):
         'byte-identical to the row for tests/_netcapture_harness.py, and '
         'neither is a copy of the owner: the same chrome-double helper '
-        'written into two harnesses. Consolidating them means editing '
-        '_netcapture_harness.py, which another seat owns, so the '
-        'duplication is real and deferred',
+        'written into two harnesses whose chrome doubles differ '
+        'elsewhere, and a third copy of it does not exist, so a shared '
+        'one would have exactly two users',
     ('tests/test_tab_routing.py', 'load'):
         'this is the routing suite own payload loader, where the owner is '
         'the shell harness node loader',

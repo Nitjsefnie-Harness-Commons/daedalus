@@ -36,7 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _noderun import run_node_program  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    event_target_stub, import_scripts_stub, resolve_target_stub)
+    DELAY_STUB, RESPONSE_STUB, event_target_stub, import_scripts_stub,
+    resolve_target_stub)
 
 _HOTFIX_HARNESS = (
     event_target_stub() + resolve_target_stub()
@@ -73,15 +74,7 @@ const storageStore = {
 };
 let sequence = 0;
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
+""" + RESPONSE_STUB + r"""
 function schedule(callback, delay) {
   const timer = { callback, delay, cleared: false };
   timers.push(timer);
@@ -479,11 +472,7 @@ const context = vm.createContext({
   },
 });
 """ + import_scripts_stub('context') + r"""
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + DELAY_STUB + r"""
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 2000; attempt++) {
     if (predicate()) return true;

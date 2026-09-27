@@ -20,7 +20,7 @@ import _util  # noqa: E402
 from _clientstate import _KILLED_CLIENT_PIPE_RELEASE_S  # noqa: E402,F401
 from _stream_fake import STRICT_FETCH, assert_gate_clean  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    STREAM_RESPONSE, event_target_stub)
+    RESPONSE_STUB, STREAM_RESPONSE, event_target_stub)
 
 _STEP_LINE = re.compile(r'^\[step\] (.+)$', re.MULTILINE)
 
@@ -51,16 +51,7 @@ const forwardedBodies = new Map();
 const settledDispatches = new Set();
 const nativeFetch = globalThis.fetch;
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 const BRIDGE_URL = bridgeUrl;
 const streamFetches = [];
 const resultPosts = [];
@@ -210,7 +201,10 @@ const context = vm.createContext({
 });
 __IMPORT_SCRIPTS_STUB__
 
-function delay(ms) {
+// A wall-clock wait, named apart from the shared `delay` (one turn of the
+// microtask queue, no margin) because this one takes milliseconds and the
+// two are not interchangeable.
+function waitMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -272,7 +266,7 @@ async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
   if (timeoutMs === null) {
     for (;;) {
       if (await predicate()) return;
-      await delay(10);
+      await waitMs(10);
     }
   }
   const deadline = clock.now() + timeoutMs;
@@ -280,7 +274,7 @@ async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
     const left = deadline - clock.now();
     if (left <= 0) throw new Error('timed out waiting for ' + label);
     if (await bounded(predicate(), label, left)) return;
-    await delay(10);
+    await waitMs(10);
   }
 }
 

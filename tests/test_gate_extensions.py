@@ -15,6 +15,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, require_node, run_gate, run_inline_gate)
+from _worker_sources import RESPONSE_STUB  # noqa: E402
 
 SYNC = 'POST /sync-tabs'
 
@@ -32,17 +33,7 @@ const badOrigins = [];
 const gatePlanArg = process.argv[process.argv.length - 1];
 const plan = typeof gatePlanArg === 'string'
   ? JSON.parse(gatePlanArg) : gatePlanArg;
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }
@@ -156,17 +147,7 @@ const badOrigins = [];
 const gatePlanArg = process.argv[process.argv.length - 1];
 const plan = typeof gatePlanArg === 'string'
   ? JSON.parse(gatePlanArg) : gatePlanArg;
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   return response(answer, { error: 'disabled' });
 }

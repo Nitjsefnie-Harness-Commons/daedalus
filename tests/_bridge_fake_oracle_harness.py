@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _stream_fake import STRICT_FETCH  # noqa: E402
+from _worker_sources import RESPONSE_STUB  # noqa: E402
 
 _ORACLE_HARNESS = r"""
 const planArg = process.argv[1];
@@ -42,16 +43,7 @@ const upstreamServer = http.createServer((req, res) => {
   });
 });
 
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 function streamResponse(answer) {
   // The gate routes every stream answer through this factory, so a harness
   // that serves 'hang' models the connected-but-idle body here.

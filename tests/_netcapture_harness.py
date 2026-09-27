@@ -29,7 +29,8 @@ from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import (  # noqa: E402
-    STREAM_RESPONSE, chrome_stub, event_target_stub, import_scripts_stub)
+    COPY_STUB, RESPONSE_STUB, STREAM_RESPONSE, chrome_stub, event_target_stub,
+    import_scripts_stub)
 
 TOKEN = 'netcapture-token'
 SERVER = 'https://net.example.com'
@@ -49,22 +50,7 @@ const calls = [];
 const released = [];
 let pendingResolve = null;
 
-function copy(value) {
-  return value === undefined
-    ? undefined
-    : JSON.parse(JSON.stringify(value));
-}
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + COPY_STUB + RESPONSE_STUB + r"""
 function record(api, args) {
   calls.push({ api, args: copy(args) });
 }
