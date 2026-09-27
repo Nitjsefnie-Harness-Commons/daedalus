@@ -283,7 +283,8 @@ def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
                for node in ast.walk(drains)
                if isinstance(node, ast.Call)), lines
     assert scan._analyze(relative, source) == []
-    for caller in ('tests/_speedharness.py', 'tests/_noderun.py'):
+    for caller in ('tests/_speedharness.py', 'tests/_noderun.py',
+                   'tests/_watcher_waits.py'):
         text = (ROOT / caller).read_text(encoding='utf-8')
         assert 'cleanup_process_tree(' in text, caller
         # No second copy: neither caller defines a kill or a reap of its own.
