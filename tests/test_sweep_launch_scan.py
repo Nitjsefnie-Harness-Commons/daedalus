@@ -22,6 +22,7 @@ launch is not running. It is asserted refused on purpose, so it is a
 third kind of row, not a missed one and not a caught one.
 """
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -57,6 +58,8 @@ def test_every_launcher_spelling_names_a_deadline_keyword(tmp):
         ('from subprocess import run\n', 'run'),
         ('from subprocess import run as go\n', 'go'),
         ('from subprocess import *\n', '{launcher}'),
+        ('import subprocess.run\n', 'subprocess.{launcher}'),
+        ('import subprocess.run as sr\n', 'sr'),
     )
     for head, callee in rows:
         for launcher in ('run', 'call', 'check_call', 'check_output'):
@@ -110,6 +113,8 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         f'match ["-c", "{PROGRAM}"]:\n    case _ as program:\n'
         '        subprocess.run([program], timeout=120)\n',
         f'match ["-c", "{PROGRAM}"]:\n    case ["-c", *rest]:\n'
+        '        subprocess.run([rest], timeout=120)\n',
+        f'match {{"{PROGRAM}": rest}}:\n    case {{**rest}}:\n'
         '        subprocess.run([rest], timeout=120)\n',
         # The DECLARED FALSE RED, asserted refused. A capture binds to the
         # whole match subject, so a capture spent on a launch the sweep is
@@ -204,12 +209,66 @@ def test_a_name_is_read_as_the_binding_in_force_at_its_line(tmp):
              'program = ["-c", "print(1)"]\n'
              f'program = ["-c", "{PROGRAM}"]\n'
              'subprocess.run([program], timeout=5)\n')
+    # A binding inside a COMPOUND statement is appended out of source
+    # order, so these two are what separate last-by-line from
+    # last-appended. The first is a false green without the sort; the
+    # second is a false red with it.
+    _bounded('a branch binding, then the sweep flattened after it',
+             'if flag:\n    program = "print(3)"\n'
+             f'program = ["-c", "{PROGRAM}"]\n'
+             'subprocess.run([program], timeout=5)\n')
+    for label, body in (
+            ('at module level',
+             'if flag:\n    program = "print(3)"\n'
+             'program = ["-c", "print(1)"]\n'
+             'subprocess.run([program], timeout=5)\n'),
+            ('inside a function',
+             'def go():\n    if flag:\n        program = "print(3)"\n'
+             '    program = ["-c", "print(1)"]\n'
+             '    subprocess.run([program], timeout=5)\n'),
+            ('inside a try/except',
+             'try:\n    if flag:\n        program = "print(3)"\n'
+             '    program = ["-c", "print(1)"]\n'
+             '    subprocess.run([program], timeout=5)\n'
+             'except OSError:\n    pass\n')):
+        assert _scan(body) == ([], []), (label, _scan(body))
 
 
 def test_an_untimed_sweep_launch_is_reported_but_not_flagged(tmp):
     del tmp
     body = f'subprocess.run(["-c", "{PROGRAM}"])\n'
     assert _scan(body) == ([(HERE, 2)], []), _scan(body)
+
+
+# The declared miss set, frozen. A row in the table below is a claim
+# about the analyser and can only red when the analyser IMPROVES,
+# so it is not a control against this branch's defect class. This
+# constant is the control over the table: a route added, dropped or
+# renamed is a single edit HERE, visible in the diff, rather than a
+# row that quietly joins or leaves nineteen. The disclosure a
+# reader debugging `assert not timed` consults is the guard's own
+# docstring, not this list.
+_DECLARED_MISSES = frozenset((
+    'a timeout unpacked from a mapping',
+    'a program the scope only defines afterwards',
+    'an argv grown afterwards',
+    'a program named by a with/as target',
+    'a program named by an except/as target',
+    'a program named by an except*/as target',
+    'a comprehension target, which is its own scope',
+    'a lambda default parameter',
+    'a global name',
+    'a nonlocal name',
+    'a subscript target',
+    'an argv grown by insert',
+    'a Popen whose wait carries the deadline',
+    'a program read in a nested scope',
+    'a program read in a lambda body',
+    'a program that only mentions the entry name',
+    'a deadline spelled without the word timeout',
+    'a timeout defaulted inside a helper',
+    'a program no readable binding reaches',
+))
 
 
 def test_each_declared_blind_spot_is_really_missed(tmp):
@@ -303,8 +362,45 @@ def test_each_declared_blind_spot_is_really_missed(tmp):
          'subprocess.run(["-c", program], timeout=120)\n',
          [], []),
     )
+    assert {label for label, _, _, _ in rows} == _DECLARED_MISSES
     for label, body, launches, timed in rows:
         assert _scan(body) == (launches, timed), (label, _scan(body))
+
+
+def _guard_docstring():
+    """The sweep-bound guard's own docstring, read from the tree."""
+    text = (Path(__file__).parent / 'test_static_guard_regressions.py'
+            ).read_text(encoding='utf-8')
+    name = 'test_a_sweep_launch_carries_no_wall_clock_bound'
+    node = next(n for n in ast.parse(text).body
+                if isinstance(n, ast.FunctionDef) and n.name == name)
+    return ast.get_docstring(node) or ''
+
+
+def _forms_beside(docstring, marker, stop):
+    """The backticked forms the docstring lists inside one clause."""
+    clause = docstring[docstring.index(marker):docstring.index(stop)]
+    return frozenset(re.findall(r'`([^`]+)`', clause))
+
+
+def test_the_read_and_unread_binding_lists_are_disjoint(tmp):
+    """No form is claimed both read and unread by the guard's docstring.
+
+    The two lists are complementary by design and nothing tested that,
+    which is the exposure that let `case {**p}` through four rounds: the
+    read list said "a match capture" and no control checked the analyser
+    read every way one is written. A form on both sides makes the
+    disclosure self-contradicting with nothing failing.
+    """
+    del tmp
+    docstring = _guard_docstring()
+    read = _forms_beside(docstring, 'Binding forms the scan READS:',
+                         'Binding forms it does NOT read:')
+    unread = _forms_beside(docstring, 'Binding forms it does NOT read:',
+                           'Three cost arms')
+    assert read, 'the read list is empty'
+    assert unread, 'the unread list is empty'
+    assert not read & unread, sorted(read & unread)
 
 
 if __name__ == '__main__':
