@@ -185,7 +185,7 @@ def _on_demand_command_gc(fault_dir):
 
     A collector on a wall clock spends the TTL while the test is still
     setting itself up, so what an assertion finds removed is partly a
-    measure of how long setup took. This one sleeps for a trigger.
+    measure of how long setup took.
     """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
@@ -210,7 +210,7 @@ def _on_demand_command_gc(fault_dir):
 
 
 def _sweep(command_root, served):
-    """Run one sweep in the bridge and wait for it to finish."""
+    """Run one sweep in the bridge child and wait for it to finish."""
     done = command_root / _GC_DONE
     if done.exists():
         done.unlink()
@@ -233,10 +233,8 @@ def _root_names(command_root):
 
 
 def _age(queues, seconds):
-    """Put every queued command's own mtime `seconds` in the past.
-
-    The collector ages on that mtime, so a sweep compares this age against
-    the TTL, never the time setup took.
+    """The collector ages on each command file's own mtime, so a sweep
+    compares that against the TTL, never the time the setup took.
     """
     stamp = time.time() - seconds
     for queue in queues:
