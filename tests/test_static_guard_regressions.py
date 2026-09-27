@@ -483,95 +483,75 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     measured from 16s to 145s, `returncode 0` every time. What moves the
     number is the host's AMBIENT load, not the measurement — these boxes
     run at loadavg 25 on 12 cores while the suites beside this one want
-    the cores — the sweep itself is a sequential loop running one child
-    at a time, so the contention is the aggregate's other legs, not this
-    child — and a saturation figure says more about the neighbours than
-    about the bound. The arithmetic above is what the removal rests on;
-    the timing only shows the margin is not comfortably large. Re-derive
-    it by timing the entry test under as many burners as the cgroup
-    quota allows, reading /proc/loadavg as it runs — note that `nproc`
-    reports the cgroup affinity (11 here) against 12 physical cores, so
-    `nproc` burners is not saturation.
+    the cores; the sweep itself is a sequential loop running one child
+    at a time, so the contention is the aggregate's other legs and not
+    this child. The arithmetic above is what the removal rests on.
+    Re-derive the timing by running the entry test under as many burners
+    as the cgroup quota allows, reading /proc/loadavg as it runs — note
+    that `nproc` reports the cgroup affinity (11 here) against 12
+    physical cores, so `nproc` burners is not saturation.
 
-    What bounds a wedged child now: `run_tests.py:14`
-    `DEFAULT_SUITE_TIMEOUT_S = 900`, applied at `:95` by
-    `process.wait(timeout=timeout)` and reported as `SUITE TIMED OUT` at
-    `:101`, so under the `suites` job a wedged sweep child hangs for 900s
-    and then says so. `scripts/ci/coverage_suites.py:28-34` passes no
-    `timeout=` at all and `tests/_util.py:621` has no per-test bound, so
-    under `coverage-matrix` the only escape is the job's
-    `timeout-minutes: 30` (`.github/workflows/tests.yml:716`) — a
-    30-minute hang the runner kills. The removal trades a 120s red for
-    that; it does not remove the need for a bound, only this one.
+    What bounds a wedged child now, in symbols that cannot drift:
+    `run_tests.py` sets `DEFAULT_SUITE_TIMEOUT_S = 900` and applies it
+    through `process.wait(timeout=timeout)`, reporting `SUITE TIMED
+    OUT`, so under the `suites` job a wedged sweep child hangs 900s and
+    then says so. `scripts/ci/coverage_suites.py` passes no `timeout=`
+    and `tests/_util.py`'s `runner` has no per-test bound, so under
+    `coverage-matrix` the only escape is that job's `timeout-minutes:
+    30`. The removal trades a 120s red for those; it does not remove the
+    need for a bound, only this one.
 
     Enforced structurally over every `tests/test_*.py`, so a site added
     later is covered without a list to maintain: no `timeout` keyword on
-    a `subprocess.run` / `call` / `check_call` / `check_output` call —
-    spelled by `import subprocess`, `import subprocess as x`,
-    `from subprocess import run [as x]` or `from subprocess import *` —
-    carrying the sweep's entry test in an argument, as a literal, an
-    f-string, a name, or a list those are elements of. It also fails
-    when the scan reaches no such launch, and when the entry name it
-    keys on is no function any tracked suite defines, which a rename
-    that stranded the two program strings would have left green.
+    a bounded launcher — `subprocess.run` / `call` / `check_call` /
+    `check_output`, reached through `import subprocess`, an alias, a
+    from-import, a star-import or a dotted import — carrying the sweep's
+    entry test in one of its arguments, read from a literal, an
+    f-string, a name, or a list or mapping those are elements of. The
+    control also fails when the scan reaches no such launch, and when
+    the entry name it keys on is no function any tracked suite defines,
+    which a rename that stranded the program strings would leave green.
 
     Each launch is judged on the binding in force AT ITS OWN LINE — the
-    LAST one at or before it, never the join of every binding that ever
-    existed by then. So a scope that reuses a name reds nothing in
-    either direction: not for the launch that ran before the reuse, and
-    not for one that ran after an unrelated binding replaced the program
-    it holds. The cost is a program the scope defines BELOW its launch,
-    which is not read into a call it did not run — except a MULTI-LINE
-    call, where `ast.Call.lineno` is the line the call opens on, so a
-    binding written between the parentheses is below that line and is
-    still what the call runs.
+    last one at or before it by SOURCE position, not the last one
+    appended, so a name bound inside a compound statement does not
+    shadow a later flat binding. A scope that reuses a name reds nothing
+    in either direction. The cost is a program the scope defines BELOW
+    its launch, which is not read into a call it did not run — except a
+    MULTI-LINE call, where `ast.Call.lineno` is the line the call opens
+    on, so a binding written between the parentheses is below that line
+    and is still what the call runs.
 
-    Not enforced, and not claimed to be: (1) a `timeout` unpacked from
-    a `**` mapping on the same call, which the scan does not read; (2) a
-    program no readable binding reaches — a `str.join`, a value read
-    from a mapping or off disk, or a template built at runtime; (3) a
-    program bound in another scope — read in a nested function, class or
-    lambda, named by a comprehension target, a parameter default, or a
-    `global` / `nonlocal` declaration, because each scope reads only its
-    own bindings, and — by a different mechanism, since the scope is the
-    same one — a name bound by `import helpers as program`, which the
-    scan does not read at all; (4) a bare-name
-    target bound by a form the scan does not read — `with ... as`,
-    `except ... as` and `except* ... as`, which name a context manager
-    and an exception, and a target that is not a bare name at all: a
-    tuple unpacking, a subscript, a class attribute. `=`, `+=`, an
-    annotated `=`, a walrus, a `for ... in` target, a match capture and
-    `append` / `extend` ARE read; a `for` target binds the iterated
-    expression and a match capture binds the match subject, both
-    over-approximations of the value they will really hold, which fail
-    toward finding a launch rather than past one; (5) an argv grown by
-    anything but `append` / `extend` — an `insert`, say; (6) a launcher
-    the import scan does not type — `__import__`, `getattr`,
-    `sys.modules`, or a `subprocess.Popen` whose `wait` or
-    `communicate` carries the deadline; (7) a deadline spelled without
-    the word, a clock comparison plus a kill or a `signal.alarm`; (8) a
-    `timeout` defaulted inside a helper the launch is routed through;
-    (9) any file
-    outside `tests/test_*.py` — the sweep's own grandchildren are
-    bounded at 30s each in `tests/_mutation_sweep.py`, which this
-    control leaves alone: a bound on one child is a backstop, only a
-    bound on the aggregate a margin; and (10) the flip side of the key —
-    the scan reads the entry NAME, not the call it belongs to, so a
-    bounded launch whose program only mentions that name in a string is
-    refused. Separating them means parsing the child program itself, and
-    a false red on a correct suite is the worse failure here, so the arm
-    is declared, not closed; and (11) the false red the match-capture
-    over-approximation admits — every capture binds to the whole match
-    SUBJECT, so `case [_, _, host]:` on a subject holding the sweep
-    elsewhere reads as the sweep and refuses a launch of, say, a ping.
+    Binding forms the scan READS: `=`, `+=`, an annotated `=`, a
+    walrus, a `for`/`in` target, a match capture, `append` and
+    `extend`. A `for` target binds the iterated expression and a match
+    capture binds the whole match subject, both over-approximations of
+    the value they will really hold, and both fail toward finding a
+    launch rather than past one.
 
-    Arms 1 to 8 are the analyser's and each has at least one row pinned
-    as missed in `tests/test_sweep_launch_scan.py`; where an arm names
-    more than one route, one route is pinned and the rest were verified
-    by planting but carry no row. Arm 9 is the caller's glob. Arms 10
-    and 11 are false reds this control accepts on purpose, and each has
-    its own row asserting that it IS refused, so the cost is pinned
-    rather than described.
+    Binding forms it does NOT read: `with ... as`, `except ... as`,
+    `except* ... as`, an `import` binding, a comprehension target, a
+    parameter default, and any target that is not a bare name — a tuple
+    unpacking, a subscript, a class attribute.
+
+    Three cost arms this control accepts on purpose, each with a row in
+    `tests/test_sweep_launch_scan.py` asserting the refusal rather than
+    the miss. (i) It scans the files the caller names, so a bound on
+    the sweep's own grandchildren — bounded individually in
+    `tests/_mutation_sweep.py` — is outside it: a bound on one child is
+    a backstop, only a bound on the aggregate a margin. (ii) The scan
+    reads the entry NAME, not the call it belongs to, so a bounded
+    launch whose program only mentions that name in a string is
+    refused. (iii) The match-capture over-approximation refuses a
+    capture spent on a launch the sweep is not in: `case [_, _, host]:`
+    on a subject holding the sweep elsewhere reads as the sweep and
+    refuses a ping. A false red on a correct suite is the worse failure
+    for a control this wide, so each is declared, not closed.
+
+    The routes between those three are enumerated in
+    `tests/test_sweep_launch_scan.py` and frozen in `_DECLARED_MISSES`,
+    so a widening is one visible edit. A row there can only red when the
+    analyser IMPROVES; it is a claim, not a control.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
@@ -585,6 +565,60 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     timed = [site for pair in found for site in pair[1]]
     assert launches, 'no tracked suite launches the mutation sweep at all'
     assert not timed, timed
+
+
+def _guard_disclosure():
+    """The docstring of the sweep-bound test, as the tree reads it."""
+    tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
+    name = 'test_a_sweep_launch_carries_no_wall_clock_bound'
+    node = next(n for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name == name)
+    return ast.get_docstring(node) or ''
+
+
+def _child_deadlines():
+    """Every `timeout=` a launch inside tests/_mutation_sweep.py carries."""
+    tree = ast.parse(
+        (Path(__file__).parent / '_mutation_sweep.py').read_text(
+            encoding='utf-8'))
+    return {kw.value.value for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'run'
+            for kw in node.keywords
+            if kw.arg == 'timeout'
+            and isinstance(kw.value, ast.Constant)
+            and isinstance(kw.value.value, int)}
+
+
+def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
+    """The row count, the child bound and the arithmetic are measured.
+
+    The removal's whole argument scales with 127: a row added makes
+    3810s wrong, and 120s stops being a thirty-second margin. Nothing
+    else on this branch would notice, because a docstring is prose and
+    prose does not fail. This builds the spec table in a child — cheap,
+    it does not run the sweep — reads the per-child bound out of the
+    sweep's own source, and requires the disclosure's own numbers to
+    match both.
+    """
+    del tmp
+    child = subprocess.run(
+        [sys.executable, '-B', '-c',
+         'import sys; sys.path.insert(0, "tests");'
+         ' import test_coverage_bindings as s;'
+         ' print(len(s._mutation_specs()))'],
+        cwd=_util.ROOT, capture_output=True, text=True, check=True)
+    rows = int(child.stdout.strip())
+    bounds = _child_deadlines()
+    assert bounds == {30}, bounds
+    child_bound = int(next(iter(bounds)))
+    worst = rows * child_bound
+    disclosure = _guard_disclosure()
+    assert f'runs {rows} mutation rows' in disclosure, rows
+    assert f'{rows} x {child_bound}s = {worst}s' in disclosure, worst
+    assert 'truncates it about thirty-two times' in disclosure
+    assert 30 <= worst / 120 < 33, worst
 
 
 if __name__ == '__main__':

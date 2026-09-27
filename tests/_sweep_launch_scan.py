@@ -30,10 +30,20 @@ def _run_spellings(tree):
     spellings = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            spellings |= {f'{alias.asname or "subprocess"}.{launcher}'
-                          for alias in node.names
-                          if alias.name == 'subprocess'
-                          for launcher in _LAUNCHERS}
+            for alias in node.names:
+                if alias.name == 'subprocess':
+                    spellings |= {f'{alias.asname or "subprocess"}.{one}'
+                                  for one in _LAUNCHERS}
+                elif alias.name.startswith('subprocess.'):
+                    # `import subprocess.run` binds the name
+                    # `subprocess`, so it reaches the same launchers; but
+                    # `import subprocess.run as sr` binds `sr` to the
+                    # FUNCTION, so `sr` is itself a launcher.
+                    member = alias.name.split('.', 1)[1]
+                    spellings |= ({alias.asname} if alias.asname
+                                  and member in _LAUNCHERS
+                                  else {f'subprocess.{one}'
+                                        for one in _LAUNCHERS})
         elif (isinstance(node, ast.ImportFrom)
                 and node.module == 'subprocess'):
             spellings |= (_LAUNCHERS if any(alias.name == '*'
@@ -64,6 +74,10 @@ def _spelled(node, bound, seen=(), before=0):
     if isinstance(node, (ast.List, ast.Tuple)):
         parts = [_spelled(item, bound, seen, before) for item in node.elts]
         return '\n'.join(part for part in parts if part is not None)
+    if isinstance(node, ast.Dict):
+        parts = [_spelled(item, bound, seen, before)
+                 for item in (*node.keys, *node.values) if item is not None]
+        return '\n'.join(part for part in parts if part is not None)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         parts = [_spelled(side, bound, seen, before)
                  for side in (node.left, node.right)]
@@ -74,18 +88,27 @@ def _spelled(node, bound, seen=(), before=0):
                     if entry[0] <= before]
         if not eligible:
             return None
-        return _spelled(eligible[-1][1], bound, spelling, before)
+        in_force = sorted(eligible, key=lambda entry: entry[0])[-1]
+        return _spelled(in_force[1], bound, spelling, before)
     return None
 
 
-def _captures(pattern):
-    """Every name one match pattern binds, at any depth."""
+def _captures(statement):
+    """Every name one match statement binds, at any depth.
+
+    Most capture slots are nodes and the walk reaches them, including a
+    `*rest` (a `MatchStar`) inside a sequence pattern. A mapping's
+    `**rest` is the exception: `ast.MatchMapping.rest` is a plain `str`,
+    so there is nothing to walk to and it is collected by hand.
+    """
     names = []
-    for node in ast.walk(pattern):
+    for node in ast.walk(statement):
         if isinstance(node, ast.MatchAs) and node.name is not None:
             names.append(node.name)
         elif isinstance(node, ast.MatchStar) and node.name is not None:
             names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+            names.append(node.rest)
     return names
 
 
@@ -122,7 +145,7 @@ def _bind(node, bound):
         for name in _captures(node):
             bound.setdefault(name, []).append((line, node.subject))
     for target in targets:
-        if isinstance(target, ast.Name) and value is not None:
+        if isinstance(target, ast.Name):
             bound.setdefault(target.id, []).append((line, value))
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr in _APPENDERS and node.args
@@ -172,6 +195,10 @@ def sweep_launches(tree, relative):
     while pending:
         scope, bound = pending.pop()
         own = list(_own_nodes(scope))
+        # TWO PASSES, AND THE ORDER IS LOAD-BEARING: every binding in this
+        # scope is recorded before any call in it is judged, so a program
+        # written inside a branch is read. Collapsing the two loops is a
+        # false green, not a simplification.
         for node in own:
             if isinstance(node, _SCOPE_NODES):
                 pending.append((node, {}))
