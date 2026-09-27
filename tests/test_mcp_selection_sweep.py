@@ -248,7 +248,7 @@ def test_a_parameter_supplied_by_name_is_supplied(_tmp):
             if 'a parameter supplied by name' in form['classes']]
     reached = [form for form in rows if form['step'] == 'bound reaches']
     raised = [form for form in rows if form['step'] == 'bound raises']
-    assert len(rows) == 3792, len(rows)
+    assert len(rows) == 4176, len(rows)
     assert {form['inline'] for form in reached} == {'resolved', 'silent'}
     reached_oracles = {form['oracle'] for form in reached}
     assert reached_oracles == {'reaches', 'does not reach'}, reached_oracles
