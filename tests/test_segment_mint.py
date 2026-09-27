@@ -16,7 +16,7 @@ from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_chrome_fake import INERT_WORKER_APIS  # noqa: E402
 from _worker_sources import (  # noqa: E402
-    COPY_STUB, RELAY_CONTEXT, event_target_stub)
+    COPY_STUB, RELAY_CONTEXT, event_target_stub, STREAM_RESPONSE)
 
 ORIGINS_KEY = 'daedalus-segment-origins'
 ALLOWED = 'https://allowed.example.com'
@@ -113,9 +113,7 @@ const resultPosts = [];
 const nonStreamFetches = [];
 const refusedFetches = [];
 const badOrigins = [];
-function streamResponse(answer) {
-  return response(answer, { error: 'disabled' });
-}
+""" + STREAM_RESPONSE + r"""
 """ + STRICT_FETCH + RELAY_CONTEXT + r"""
 
 // One message, one answer, as content.js relays for a page. The sender is
