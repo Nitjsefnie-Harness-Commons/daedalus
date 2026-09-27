@@ -132,7 +132,7 @@ def _requests_at(log):
     the cancellation is still writing to that path and the fake is no
     longer the thing naming it.
     """
-    # `_entries` is private to another branch's file, and skips a KeyError.
+    # Another branch's `_entries` catches no KeyError; this except is wider.
     if not log.exists():
         return []
     found = []
