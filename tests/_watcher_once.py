@@ -18,7 +18,9 @@ the same harness measures this tree's watchers and the base commit's. It is
 not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls
 live in tests/test_watcher_budget.py.
 """
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -38,7 +40,11 @@ POLLS = 3
 
 
 class Child:
-    """A watcher process with both of its streams drained."""
+    """A watcher process with both of its streams drained.
+
+    It leads a process group of its own, which is what makes `stop` a
+    cancellation rather than an abandonment.
+    """
 
     def __init__(self, script, args, fake):
         self.argv = [sys.executable, '-u', str(script), *args]
@@ -46,7 +52,7 @@ class Child:
             self.argv,
             env=_util.child_coverage('scrub', environment=fake.env()),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding='utf-8', errors='replace')
+            encoding='utf-8', errors='replace', start_new_session=True)
         self.out = Stream()
         self.err = Stream()
         for pipe, sink in ((self.proc.stdout, self.out),
@@ -63,9 +69,32 @@ class Child:
 
     def stop(self):
         if self.proc.poll() is None:
-            self.proc.kill()
+            cancel(self.proc)
         self.proc.wait(timeout=60)
         return self.proc.returncode
+
+
+def cancel(proc):
+    """Signal the whole group the child leads, so nothing outlives it.
+
+    A kill names one process, and the `gh` a watcher had already spawned
+    is not it: the orphan keeps running, and keeps appending to the call
+    log a measurement is still reading, after the child it belonged to is
+    gone. The group is every process the child started, so signalling it
+    cancels the work. `start_new_session` made the child its own group
+    leader, so the group id is its pid - and the child is unreaped here,
+    so that pid is still its own and cannot have been handed to anyone
+    else. A group already gone is the answer the kill wanted.
+    """
+    if sys.platform.startswith('win'):
+        # Windows has no group to signal, so the tree is named instead.
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                       capture_output=True)
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        proc.kill()
 
 
 def once(script, args, fake, limit=60):
