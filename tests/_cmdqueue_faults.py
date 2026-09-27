@@ -1,4 +1,5 @@
 """Fault-injection controls for test-side command queue readers."""
+import ast
 import contextlib
 import inspect
 import io
@@ -27,12 +28,11 @@ def _poll_budget(timeout):
     machine speed, and it is the backstop for the one shape the virtual
     clock's guards cannot see: each is consulted from inside a call into
     that clock, so a reader that stops calling it — or never entered it —
-    is charged by none. `_queueread.POLL_DELAY` aliases this module's,
-    so both suites budget one interval.
+    is charged by none. `_queueread.POLL_DELAY` aliases this module's.
 
     The `ceil` is float-sensitive on the products call sites pass
     (`3 * POLL_DELAY / POLL_DELAY` ceils to 4, not 3), so a budget can
-    quietly gain a pass. That errs toward more headroom, never less.
+    quietly gain a pass, always toward more headroom.
     """
     attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
     return _PROBES_PER_ATTEMPT * _POLL_HEADROOM * attempts
@@ -44,11 +44,12 @@ def _bounded_polls(max_polls, what=None):
 
     The patch is process-wide, and that has a failure direction in each
     way. A reader reaching the queue through any other API — `os.listdir`
-    behind `Path.exists`, say — calls nothing here, spends nothing, and
-    hangs. A probe from outside the reader, on this process or on a thread
-    it shares, spends the reader's budget and is itself the call that
-    raises. `what` names the wait for the first reader of a traceback;
-    it cannot name either direction, so the shape itself is pinned by
+    behind `Path.exists`, `iterdir`, either nested in another call or off
+    an aliased receiver — calls nothing here, spends nothing, and hangs.
+    A probe from outside the reader, on this process or on a thread it
+    shares, spends the reader's budget and is itself the call that
+    raises. `what` names the wait for the first reader of a traceback; it
+    cannot name either direction, so the uncounted direction is pinned by
     `test_the_reader_probes_the_queue_through_the_bounded_names`.
     """
     originals = {name: getattr(Path, name) for name in _QUEUE_PROBES}
@@ -78,13 +79,149 @@ def _bounded_polls(max_polls, what=None):
 def _assert_slept_its_attempt_budget(events, attempts, poll_delay):
     """The wait spent (attempts - 1) intervals, however it spent them.
 
-    The cadence across passes is deliberately NOT pinned: the reader has
+    The cadence across passes is deliberately NOT pinned. The reader has
     no per-pass clock call, so a reader banking its whole wait into one
-    sleep is indistinguishable here from one that spreads it evenly.
+    sleep, or splitting the total into three unequal chunks, is
+    indistinguishable here from one that spreads it evenly, and neither
+    is caught.
     """
     total = sum(seconds for kind, seconds in events if kind == 'sleep')
     expected = (attempts - 1) * poll_delay
     assert abs(total - expected) < 1e-9, (attempts, total, expected, events)
+
+
+def _scope_map(tree):
+    """Map every node to the lexical scope that encloses it.
+
+    Module, ClassDef, FunctionDef, AsyncFunctionDef and Lambda are scopes,
+    so a name bound in any of them is visible to what they contain. A
+    scope node maps to the scope ENCLOSING it, so walking the chain ends
+    at the Module rather than looping on it.
+    """
+    scope_by_node = {}
+
+    class ScopeMap(ast.NodeVisitor):
+        def __init__(self):
+            self.scope = None
+
+        def visit_scope(self, node):
+            scope_by_node[node] = self.scope
+            previous, self.scope = self.scope, node
+            super().generic_visit(node)
+            self.scope = previous
+
+        visit_Module = visit_scope
+        visit_ClassDef = visit_scope
+        visit_FunctionDef = visit_scope
+        visit_AsyncFunctionDef = visit_scope
+        visit_Lambda = visit_scope
+
+        def generic_visit(self, node):
+            scope_by_node[node] = self.scope
+            super().generic_visit(node)
+
+    ScopeMap().visit(tree)
+    return scope_by_node
+
+
+def _enclosing_scopes(node, scope_by_node):
+    """Every scope enclosing `node`, outermost first."""
+    scopes = []
+    scope = scope_by_node.get(node)
+    while scope is not None:
+        scopes.append(scope)
+        scope = scope_by_node.get(scope)
+    scopes.reverse()
+    return scopes
+
+
+def _callee_name(node):
+    """The final identifier a call or value resolves to, or None."""
+    func = node.func if isinstance(node, ast.Call) else node
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _bound_to(scopes, seeds):
+    """Every name in `scopes` that resolves to a name in `seeds`.
+
+    A binding is a plain or annotated assignment, an import's `asname`, or
+    a def or class name. The walk repeats until it stops growing, so an
+    alias of an alias resolves as deep as the reader wrote it.
+    """
+    names = set(seeds)
+    while True:
+        grown = set(names)
+        for scope in scopes:
+            for bound, value in _bindings(scope):
+                if isinstance(bound, ast.Name) and _callee_name(
+                        value if value is not None else bound) in names:
+                    grown.add(bound.id)
+                elif isinstance(bound, ast.alias) and bound.asname:
+                    if bound.name.rsplit('.', 1)[-1] in names:
+                        grown.add(bound.asname)
+        if grown == names:
+            return names
+        names = grown
+
+
+def _bindings(scope):
+    """The (bound, value) pairs a scope introduces."""
+    pairs = []
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            pairs += [(target, node.value) for target in node.targets]
+        elif isinstance(node, ast.AnnAssign):
+            pairs.append((node.target, node.value))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            pairs += [(alias, None) for alias in node.names]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            pairs.append((node, None))
+    return pairs
+
+
+def _reached_through(node, roots):
+    """Every `.name` reached off a name in `roots`, however it is nested.
+
+    Collecting by the attribute's own value chain rather than by the
+    shape of the call around it is what makes a probe spelled inside
+    `sorted(...)`, inside `list(...)`, or as a bare statement visible.
+    """
+    reached = set()
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Attribute):
+            continue
+        base = candidate.value
+        while isinstance(base, ast.Attribute):
+            base = base.value
+        if isinstance(base, ast.Name) and base.id in roots:
+            reached.add(candidate.attr)
+    return reached
+
+
+def _bound_blocks(scope, source, marker):
+    """Every `with` block under `scope` whose head starts with `marker`."""
+    blocks = []
+    for item in ast.walk(scope):
+        if not isinstance(item, ast.With):
+            continue
+        for entry in item.items:
+            head = ast.get_source_segment(source, entry.context_expr) or ''
+            if head.startswith(marker):
+                blocks.append(item)
+                break
+    return blocks
+
+
+def _enclosing_bound_blocks(node, scope_by_node, source, marker):
+    """The bound blocks under `node`'s scope that also span `node`."""
+    scope = scope_by_node.get(node) or node
+    return [block for block in _bound_blocks(scope, source, marker)
+            if block.lineno <= node.lineno <= (block.end_lineno or 0)]
 
 
 class _ModuleDefault:
