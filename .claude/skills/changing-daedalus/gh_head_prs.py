@@ -1,0 +1,41 @@
+"""The open pull requests whose head is one commit SHA.
+
+Its own module rather than another query in `gh_client.py`, which is one
+line under the 500-line production ceiling the size policy enforces. The
+query and the two filters it carries are the whole of a subject, and
+`gh_client` stays the transport it already is for every watcher here.
+
+Both filters are load-bearing, and `origin/main` is why. That tip is an
+ancestor of the head of a branch whose pull request has been merged, so the
+API answers it with that MERGED pull request; and a branch is merged while
+its own earlier commits are still queried. Unfiltered, every commit on the
+line to a merged head looks like an open pull request of its own, which is
+how a wait on `main` would come to read as a pull request that blocks it.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gh_client  # noqa: E402
+
+HEAD_PULL_REQUESTS_QUERY = '''query HeadPullRequests(
+    $owner: String!, $name: String!, $sha: GitObjectID!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $sha) { ... on Commit {
+      associatedPullRequests(first: 20) { nodes {
+        number state mergeable mergeStateStatus headRefOid } } } } } }'''
+
+
+def head_pull_requests(owner, name, sha):
+    """The open pull requests whose head is exactly this SHA.
+
+    A SHA the repository does not have answers with a null object, which is
+    a head with no pull request rather than a failed query: `ci_wait.py`
+    reads that as no pull request and hands the head to its grace.
+    """
+    page = gh_client.graphql(HEAD_PULL_REQUESTS_QUERY,
+                             {'owner': owner, 'name': name, 'sha': sha})
+    found = gh_client.nodes(
+        page, ('repository', 'object', 'associatedPullRequests'))
+    return [pull for pull in found
+            if pull.get('headRefOid') == sha and pull.get('state') == 'OPEN']
