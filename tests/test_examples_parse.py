@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
 
 ROOT = _util.ROOT
 
@@ -51,9 +52,7 @@ def _async_body_result(node, target, tmp):
     # make require() throw before any example is compiled.
     helper = Path(tmp) / 'parse_async_body.cjs'
     helper.write_text(_ASYNC_BODY_HELPER, encoding='utf-8')
-    return subprocess.run(
-        [node, str(helper), str(target)], cwd=ROOT, capture_output=True,
-        text=True, timeout=30)
+    return run_node_argv(node, [str(helper), str(target)], ROOT)
 
 
 def _assert_parses_as_async_body(node, filename, tmp):
@@ -85,9 +84,7 @@ def test_tracked_examples_have_expected_node_syntax(tmp):
         f'{stale}')
 
     for filename in examples:
-        checked = subprocess.run(
-            [node, '--check', filename], cwd=ROOT, capture_output=True,
-            text=True, timeout=30)
+        checked = run_node_argv(node, ['--check', filename], ROOT)
         reason = EXPECTED_FAILURES.get(filename)
         if reason is not None:
             assert checked.returncode != 0, (
@@ -136,9 +133,7 @@ def test_async_body_check_catches_delimiter_crossing(tmp):
     wrapped.write_text(
         'async function __example__() {\n' + attack + '\n}\n',
         encoding='utf-8')
-    checked = subprocess.run(
-        [node, '--check', str(wrapped)], cwd=ROOT, capture_output=True,
-        text=True, timeout=30)
+    checked = run_node_argv(node, ['--check', str(wrapped)], ROOT)
     assert checked.returncode == 0, checked.stderr
 
     mutated = Path(tmp) / 'mutated.js'

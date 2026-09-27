@@ -13,6 +13,7 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
 from _ratchet_fixture import _git  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import directive_entries  # noqa: E402
@@ -486,10 +487,9 @@ def test_real_node_dump_reports_executed_and_skipped_lines(tmp):
     env = dict(os.environ)
     env['NODE_V8_COVERAGE'] = str(dumps)
 
-    completed = subprocess.run(
-        [node, str(root / 'extension' / 'real.js')], cwd=str(root),
-        env=_util.child_coverage('scrub', env), capture_output=True,
-        text=True, timeout=30)
+    completed = run_node_argv(
+        node, [str(root / 'extension' / 'real.js')], str(root),
+        environment=_util.child_coverage('scrub', env))
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
     assert list(dumps.glob('coverage-*.json')), 'node wrote no coverage dump'
 
@@ -519,10 +519,9 @@ def test_real_node_dump_preserves_crlf_offsets(tmp):
     env = dict(os.environ)
     env['NODE_V8_COVERAGE'] = str(dumps)
 
-    completed = subprocess.run(
-        [node, str(script)], cwd=str(root),
-        env=_util.child_coverage('scrub', env),
-        capture_output=True, text=True, timeout=30)
+    completed = run_node_argv(
+        node, [str(script)], str(root),
+        environment=_util.child_coverage('scrub', env))
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
 
     report = collect_coverage(dumps, root)
