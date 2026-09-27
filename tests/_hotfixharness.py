@@ -338,7 +338,13 @@ function evaluateIn(doc, expression) {
 
 // CDP is tab-bound: the expression runs in whatever document the tab holds
 // now, which is the whole reason the submitted source carries its own check.
-async function sendCommand(_target, method, params) {
+//
+// Named for what it is rather than for the chrome property it is bound to:
+// four other doubles in this tree declare a `sendCommand` with a different
+// contract, and a reader grepping for that name should land on one of them
+// rather than on whichever. The chrome surface key stays `sendCommand` —
+// that is Chrome's API name, not this file's.
+async function cdpEvaluateCommand(_target, method, params) {
   // An unmodelled method is refused, not answered: `_cdpError({})` is null, so
   // a `{}` here reads as "no error, the fix ran" and a control that planted
   // a different method would be told the page said nothing wrong.
@@ -424,7 +430,7 @@ const chrome = {
       if (spec.attach === 'fail') throw new Error('debugger refused');
     },
     detach: async (target) => { detachCalls.push(target.tabId); },
-    sendCommand,
+    sendCommand: cdpEvaluateCommand,
   },
   cookies: { getAll: async () => [], remove: async () => null },
   declarativeNetRequest: {
