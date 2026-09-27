@@ -165,7 +165,7 @@ UNCONSOLIDATED_NAMES = {
         'the name it collides with is the drain analyser',
     ('tests/test_case_fold_parent.py', '_load'):
         'this loads a bridge module by path under a name of its own, where '
-        'the owner is a JSON file reader',
+        'the shared owner loads the upload routes module',
     ('tests/test_ci_ratchets.py', '_git'):
         'this returns the CompletedProcess, because the cases read a diff '
         'back out of it, where the shared runner discards the result',
@@ -260,16 +260,16 @@ UNCONSOLIDATED_NAMES = {
         'owner walks up from a node through a parent map',
     ('tests/test_result_routes.py', '_load'):
         'this loads result_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'shared owner loads the upload routes module',
     ('tests/test_result_stripe.py', '_load'):
         'this loads result_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'shared owner loads the upload routes module',
     ('tests/test_runner_refuses_unawaited.py', '_run'):
         'this runs the suite collector with warnings recorded, where the '
         'shared _run boots a node scenario',
     ('tests/test_static_routes.py', '_load'):
         'this loads static_routes by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'shared owner loads the upload routes module',
     ('tests/test_segment_mint.py', '_refused'):
         'this asserts a refused mint answer is exactly {error: message} and '
         'that the plan sent nothing else to the bridge, where the owner '
@@ -283,7 +283,7 @@ UNCONSOLIDATED_NAMES = {
         'shared _run boots a recorded scenario',
     ('tests/test_tab_registry.py', '_load'):
         'this loads tab_registry by path under a name of its own, where the '
-        'owner is a JSON file reader',
+        'shared owner loads the upload routes module',
     ('tests/test_suite_import_boundaries.py', '_scan'):
         'this walks one module AST for sibling-suite imports and returns '
         '(lineno, leaf, spelling) hits, where the drain owner scans a module '
@@ -313,18 +313,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_timed_refresh.py', '_run'):
         'this runs the refresh main with both streams captured, where the '
         'shared _run boots a node scenario',
-    ('tests/test_upload_races.py', '_load'):
-        'byte-identical to the row for tests/test_upload_routes.py, and '
-        'neither is a copy of the owner: this loads upload_routes by path '
-        'under a name of its own where the owner is a JSON file reader. The '
-        'pair is a real duplicate and consolidating it is deferred, not '
-        'dismissed',
-    ('tests/test_upload_routes.py', '_load'):
-        'byte-identical to the row for tests/test_upload_races.py, and '
-        'neither is a copy of the owner: this loads upload_routes by path '
-        'under a name of its own where the owner is a JSON file reader. The '
-        'pair is a real duplicate and consolidating it is deferred, not '
-        'dismissed',
     ('tests/test_version_empty_values.py', '_assert_duplicate_refused'):
         'this asserts the empty string reached stderr and that no ok: line '
         'reached stdout, where the owner takes both competing values and '
