@@ -536,6 +536,7 @@
 !/tests/test_dashboard_accessibility.py
 !/tests/test_dashboard_app_shell.py
 !/tests/test_dashboard_behaviour.py
+!/tests/test_dashboard_command_line.py
 !/tests/test_dashboard_drain_blocking.py
 !/tests/test_dashboard_eval.py
 !/tests/test_dashboard_fanout.py

@@ -438,114 +438,159 @@ def _dashboard_child_gate():
         os.close(handle)
 
 
+@contextlib.contextmanager
+def _dashboard_program_file(program: str, *, module: bool):
+    """Write the child program to a file and yield the path to run it from.
+
+    `--eval` handed the whole program to node as ONE argv element, so the
+    command line grew with everything the child reads -- the prelude, the
+    timeout constant, and whatever the scenario body carried. Windows caps one
+    command line at 32,767 characters and `CreateProcessW` refuses past it
+    with `ERROR_FILENAME_EXCED_RANGE`, which Python surfaces as a
+    `FileNotFoundError` naming the FILENAME rather than the length, so the
+    failure reads like a missing node. A file takes the program off the line
+    entirely, and the line stops depending on the program's size at all.
+
+    The prologue drops the program path so `process.argv[1]` is the first
+    caller argument: `node --eval SRC ARG` has no script filename, so the
+    argument the child sees at index 1 is the caller's first, and every
+    `sectionLoad` index in the composed shells is written against that.
+    `node PROGRAM ARG` would otherwise shift every one of them by one.
+
+    `--input-type=module` may only be used with `--eval`, `--print` or stdin
+    -- node raises `ERR_INPUT_TYPE_NOT_ALLOWED` for a file -- so a module
+    harness is marked by its extension instead. There is no `package.json` in
+    this tree, so `.mjs` is ESM and `.cjs` is CommonJS whatever the nearest
+    manifest would have said.
+
+    The removal is best-effort and silent: the child's own output is the
+    diagnostic, and a removal that failed after a dead child must not replace
+    it. This runs on every launch, so a leak is not an acceptable trade for
+    a louder failure either -- `rmtree(ignore_errors=True)` is the shape
+    `tests/_noderun.py` uses for the same reason.
+    """
+    directory = tempfile.mkdtemp(prefix='daedalus-dashnode-')
+    try:
+        path = Path(directory) / ('program.mjs' if module else 'program.cjs')
+        path.write_text(
+            'process.argv.splice(1, 1);\n' + program, encoding='utf-8')
+        yield path
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def _run_dashboard_node_once(
         harness: DashboardNodeHarness, *, attempt: int
 ) -> subprocess.CompletedProcess[str]:
     node = shutil.which('node')
     if not node:
         raise AssertionError('node is required to execute dashboard harnesses')
-    options = ['--input-type=module'] if harness.module else []
     timeout_scale = attempt
     step_timeout = _DASHBOARD_STEP_TIMEOUT_S * timeout_scale
     process_grace = _DASHBOARD_PROCESS_GRACE_S * timeout_scale
     step_timeout_ms = round(step_timeout * 1000)
     timeout_source = (
         f'const _dashnodeStepTimeoutMs = {step_timeout_ms};\n')
-    command = [
-        node, *options, '--eval',
-        _DASHBOARD_PRELUDE + timeout_source + harness.source,
-        *map(str, harness.arguments),
-    ]
-    with _dashboard_child_gate():
-        # duration_s measures the child from admission, not the gate queue.
-        started = time.monotonic()
-        process = subprocess.Popen(
-            command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding='utf-8', errors='replace')
-        timeout = dashboard_child_timeout(
-            harness.bounded_steps, step_timeout, process_grace)
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired as failure:
-            child_cpu_at_timeout = _child_cpu_at_timeout(process)
-            process.kill()
-            cleanup_failure = None
-            cleanup_failed = False
-            cancelled = set()
-            drain_started = time.monotonic()
+    with _dashboard_program_file(
+            _DASHBOARD_PRELUDE + timeout_source + harness.source,
+            module=harness.module) as program_path:
+        command = [node, str(program_path), *map(str, harness.arguments)]
+        with _dashboard_child_gate():
+            # duration_s measures the child from admission, not the gate queue.
+            started = time.monotonic()
+            process = subprocess.Popen(
+                command, cwd=ROOT, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding='utf-8',
+                errors='replace')
+            timeout = dashboard_child_timeout(
+                harness.bounded_steps, step_timeout, process_grace)
             try:
-                stdout, stderr = process.communicate(
-                    timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
-            except subprocess.TimeoutExpired as drain_failure:
-                drain_outcome = 'timed out'
-                stdout = _latest_output(drain_failure.stdout, failure.stdout)
-                stderr = _latest_output(drain_failure.stderr, failure.stderr)
-            except Exception as drain_failure:  # pylint: disable=W0718
-                drain_outcome = (
-                    f'raised {type(drain_failure).__name__}: {drain_failure}')
-                stdout = _output_text(failure.stdout)
-                stderr = _output_text(failure.stderr)
-                cleanup_failure = drain_failure
-            else:
-                drain_outcome = 'completed'
-            if drain_outcome != 'completed':
-                cleanup_deadline = (
-                    time.monotonic() + _DASHBOARD_DRAIN_TIMEOUT_S)
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as failure:
+                child_cpu_at_timeout = _child_cpu_at_timeout(process)
+                process.kill()
+                cleanup_failure = None
+                cleanup_failed = False
+                cancelled = set()
+                drain_started = time.monotonic()
                 try:
-                    if sys.platform == 'win32':
-                        _finish_windows_pipe_readers(
-                            process, cleanup_deadline, cancelled)
-                    else:
-                        _close_process_pipes(process)
-                except Exception as settle_failure:  # pylint: disable=W0718
-                    cleanup_failed = True
-                    if cleanup_failure is None:
-                        cleanup_failure = settle_failure
-                try:
-                    process.wait(timeout=max(
-                        0.0, cleanup_deadline - time.monotonic()))
-                except subprocess.TimeoutExpired as wait_failure:
-                    cleanup_failed = True
-                    if cleanup_failure is None:
-                        cleanup_failure = wait_failure
-                if sys.platform == 'win32':
+                    stdout, stderr = process.communicate(
+                        timeout=_DASHBOARD_DRAIN_TIMEOUT_S)
+                except subprocess.TimeoutExpired as drain_failure:
+                    drain_outcome = 'timed out'
                     stdout = _latest_output(
-                        _settled_stream(process, 'stdout',
-                                        'stdout' in cancelled), stdout)
+                        drain_failure.stdout, failure.stdout)
                     stderr = _latest_output(
-                        _settled_stream(process, 'stderr',
-                                        'stderr' in cancelled), stderr)
-            stdout = _output_text(stdout)
-            stderr = _output_text(stderr)
-            phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
-            last_phase = phases[-1] if phases else 'none recorded'
-            drain_duration = time.monotonic() - drain_started
-            record = _OuterTimeoutAttempt(
-                attempt=attempt,
-                pid=process.pid,
-                argv=tuple(command),
-                timeout_s=timeout,
-                child_cpu_at_timeout=child_cpu_at_timeout,
-                kill_issued=True,
-                drain_outcome=drain_outcome,
-                returncode=process.returncode,
-                stdout=stdout,
-                stderr=stderr,
-                last_phase=last_phase,
-                drain_duration_s=drain_duration,
-                duration_s=time.monotonic() - started,
-            )
-            # A retry must wait out a first child whose cleanup cannot finish;
-            # once the Windows reader cleanup settled, that objection is gone.
-            cleanup_completed = not cleanup_failed
-            timeout_failure = _DashboardOuterTimeout(
-                record, retryable=drain_outcome == 'completed' or (
-                    sys.platform == 'win32' and cleanup_completed))
-            raise timeout_failure from (cleanup_failure or failure)
-        if process.returncode != 0:
-            raise AssertionError((process.returncode, stdout, stderr))
-        return subprocess.CompletedProcess(
-            command, process.returncode, stdout, stderr)
+                        drain_failure.stderr, failure.stderr)
+                except Exception as drain_failure:  # pylint: disable=W0718
+                    drain_outcome = (
+                        f'raised {type(drain_failure).__name__}: '
+                        f'{drain_failure}')
+                    stdout = _output_text(failure.stdout)
+                    stderr = _output_text(failure.stderr)
+                    cleanup_failure = drain_failure
+                else:
+                    drain_outcome = 'completed'
+                if drain_outcome != 'completed':
+                    cleanup_deadline = (
+                        time.monotonic() + _DASHBOARD_DRAIN_TIMEOUT_S)
+                    try:
+                        if sys.platform == 'win32':
+                            _finish_windows_pipe_readers(
+                                process, cleanup_deadline, cancelled)
+                        else:
+                            _close_process_pipes(process)
+                    # pylint: disable-next=broad-except
+                    except Exception as settle_failure:
+                        cleanup_failed = True
+                        if cleanup_failure is None:
+                            cleanup_failure = settle_failure
+                    try:
+                        process.wait(timeout=max(
+                            0.0, cleanup_deadline - time.monotonic()))
+                    except subprocess.TimeoutExpired as wait_failure:
+                        cleanup_failed = True
+                        if cleanup_failure is None:
+                            cleanup_failure = wait_failure
+                    if sys.platform == 'win32':
+                        stdout = _latest_output(
+                            _settled_stream(process, 'stdout',
+                                            'stdout' in cancelled), stdout)
+                        stderr = _latest_output(
+                            _settled_stream(process, 'stderr',
+                                            'stderr' in cancelled), stderr)
+                stdout = _output_text(stdout)
+                stderr = _output_text(stderr)
+                phases = re.findall(r'^\[phase\] (.+)$', stderr, re.MULTILINE)
+                last_phase = phases[-1] if phases else 'none recorded'
+                drain_duration = time.monotonic() - drain_started
+                record = _OuterTimeoutAttempt(
+                    attempt=attempt,
+                    pid=process.pid,
+                    argv=tuple(command),
+                    timeout_s=timeout,
+                    child_cpu_at_timeout=child_cpu_at_timeout,
+                    kill_issued=True,
+                    drain_outcome=drain_outcome,
+                    returncode=process.returncode,
+                    stdout=stdout,
+                    stderr=stderr,
+                    last_phase=last_phase,
+                    drain_duration_s=drain_duration,
+                    duration_s=time.monotonic() - started,
+                )
+                # A retry must wait out a first child whose cleanup
+                # cannot finish; once the Windows reader cleanup
+                # settled, that objection is gone.
+                cleanup_completed = not cleanup_failed
+                timeout_failure = _DashboardOuterTimeout(
+                    record, retryable=drain_outcome == 'completed' or (
+                        sys.platform == 'win32' and cleanup_completed))
+                raise timeout_failure from (cleanup_failure or failure)
+            if process.returncode != 0:
+                raise AssertionError((process.returncode, stdout, stderr))
+            return subprocess.CompletedProcess(
+                command, process.returncode, stdout, stderr)
 
 
 def run_dashboard_node(
