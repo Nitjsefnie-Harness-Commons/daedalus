@@ -8,18 +8,20 @@ someone thought of; the five at the bottom are what the product is held to,
 and a class the builders cannot name has no row at all — which is why the
 class marker below is itself checked.
 
-The three classes the CONTAINERS grammar could not name are here with their
+The four classes the CONTAINERS grammar could not name are here with their
 generated rows because they are one class's coverage: a dict DISPLAY
-carrying one key twice, a LAMBDA in a position a fold selects, and a
-BUILTIN behind a binding the module may or may not have made. All three are
-members of the stated property, none was a member of the shipped grammar,
-and each was a live bypass through a sweep that reported nothing unpaid.
-The first two keep their hand boundary pins beside their generated ones, so
-that a row which stops discriminating and a case which stops agreeing are
-read in the same place; the third's hand cases are in
-`test_mcp_builtin_names.py`, which also holds the two shapes the oracle
-cannot run, and what this file adds for it is the twin that differs only in
-the module's own source.
+carrying one key twice, a LAMBDA in a position a fold selects, a BUILTIN
+behind a binding the module may or may not have made, and a PARAMETER the
+call supplies by name rather than by position. All four are members of the
+stated property, none was a member of the shipped grammar, and each was a
+live bypass through a sweep that reported nothing unpaid. The first two
+keep their hand boundary pins beside their generated ones, so that a row
+which stops discriminating and a case which stops agreeing are read in the
+same place. The last two are held in their own suites, which also carry the
+shapes the oracle cannot run — a comprehension scope and a sibling scope on
+one line for the binding class, an unpacked `*args` and an unreadable `**`
+for the signature class — and what this file adds for each is the twin that
+differs only in the module's own source or only in the arguments.
 """
 import sys
 from pathlib import Path
@@ -224,6 +226,47 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
                if form['step'] not in undecided_steps)
     assert {form['oracle'] for form in rows} == {
         'reaches', 'does not reach', 'raises'}
+
+
+def test_a_parameter_supplied_by_name_is_supplied(_tmp):
+    """The class's two sides, in the guard's OWN verdicts.
+
+    A call that binds its arguments produces the operation and resolves; a
+    call whose own binding is a `TypeError` names nothing and is clean. Every
+    signature carries BOTH sides, which is what makes the class discriminate:
+    a rule that reads only the positional arguments is caught by the keyword
+    rows and a rule that reads only the names by the positional ones, and
+    neither has a row it passes.
+
+    The filler-body rows are the class's `does not reach` side and the reason
+    the two bodies are generated: the same call over a filler selects
+    nothing, so a rule that resolves the callee as the operation without
+    binding the call at all fails them.
+    """
+    forms = _swept(_tmp)
+    rows = [form for form in forms
+            if 'a parameter supplied by name' in form['classes']]
+    reached = [form for form in rows if form['step'] == 'bound reaches']
+    raised = [form for form in rows if form['step'] == 'bound raises']
+    assert len(rows) == 880, len(rows)
+    assert {form['inline'] for form in reached} == {'resolved', 'silent'}
+    reached_oracles = {form['oracle'] for form in reached}
+    assert reached_oracles == {'reaches', 'does not reach'}, reached_oracles
+    assert {form['inline'] for form in raised} == {'silent'}
+    assert {form['oracle'] for form in raised} == {'raises'}
+    for form in reached:
+        assert form['inline'] == (
+            'resolved' if form['oracle'] == 'reaches' else 'silent'), form
+    signatures = {form['kind'] for form in rows}
+    assert len(signatures) == 13, sorted(signatures)
+    for kind in signatures:
+        of = [form for form in rows if form['kind'] == kind]
+        assert {form['step'] for form in of} == {
+            'bound reaches', 'bound raises'}, kind
+        assert {form['inline'] for form in of
+                if form['step'] == 'bound raises'} == {'silent'}, kind
+        assert 'resolved' in {form['inline'] for form in of
+                              if form['step'] == 'bound reaches'}, kind
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
