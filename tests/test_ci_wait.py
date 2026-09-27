@@ -44,9 +44,12 @@ def _verdict(runs):
 def test_superseded_cancelled_run_is_ignored(tmp):
     """The defect case: a re-run's cancelled remnant must not fail the wait."""
     del tmp
+    # Named as the gating workflow because an `acceptable` verdict now also
+    # requires that workflow to have a run at all (issue 1217); a green set
+    # without it reads as incomplete, which is the defect itself.
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
-        _run(2, 'success', '2026-09-07T10:05:00Z'),
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
     assert _verdict(runs) == ('acceptable', [])
     assert _verdict(list(reversed(runs))) == ('acceptable', [])
@@ -105,12 +108,12 @@ def test_equal_timestamps_tie_break_by_numeric_id(tmp):
     stamp = '2026-09-07T10:00:00Z'
     state, offenders = _verdict([
         _run(9, 'cancelled', stamp),
-        _run(10, 'success', stamp),
+        _run(10, 'success', stamp, name='tests'),
     ])
     assert state == 'acceptable'
     state, offenders = _verdict([
         _run(10, 'cancelled', stamp),
-        _run(9, 'success', stamp),
+        _run(9, 'success', stamp, name='tests'),
     ])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [10]
@@ -120,12 +123,14 @@ def test_created_at_stands_in_for_a_missing_run_started_at(tmp):
     del tmp
     state, offenders = _verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:00:00Z'),
-        _run(2, 'success', None, created_at='2026-09-07T10:05:00Z'),
+        _run(2, 'success', None, name='tests',
+             created_at='2026-09-07T10:05:00Z'),
     ])
     assert state == 'acceptable'
     state, offenders = _verdict([
         _run(1, 'cancelled', None, created_at='2026-09-07T10:05:00Z'),
-        _run(2, 'success', None, created_at='2026-09-07T10:00:00Z'),
+        _run(2, 'success', None, name='tests',
+             created_at='2026-09-07T10:00:00Z'),
     ])
     assert state == 'unacceptable'
     assert [run['id'] for run in offenders] == [1]
@@ -135,7 +140,7 @@ def test_fractional_second_stamps_are_ordered_by_instant_not_text(tmp):
     del tmp
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
-        _run(2, 'success', '2026-09-07T10:00:00.500Z'),
+        _run(2, 'success', '2026-09-07T10:00:00.500Z', name='tests'),
     ]
     assert _verdict(runs) == ('acceptable', [])
 
@@ -145,7 +150,7 @@ def test_the_workflow_path_groups_when_the_id_is_absent(tmp):
     same = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z',
              path='.github/workflows/ci.yml'),
-        _run(2, 'success', '2026-09-07T10:05:00Z',
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
              path='.github/workflows/ci.yml'),
     ]
     assert _verdict(same) == ('acceptable', [])
@@ -165,7 +170,7 @@ def test_only_the_newest_cancelled_run_of_a_workflow_survives(tmp):
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
         _run(2, 'cancelled', '2026-09-07T10:05:00Z'),
-        _run(3, 'success', '2026-09-07T10:10:00Z'),
+        _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
     ]
     assert _verdict(runs) == ('acceptable', [])
     state, offenders = _verdict(runs[:2])
@@ -177,7 +182,7 @@ def test_the_zero_and_green_contracts_are_unchanged(tmp):
     del tmp
     assert _verdict([]) == ('waiting', [])
     runs = [
-        _run(1, 'success', '2026-09-07T10:00:00Z'),
+        _run(1, 'success', '2026-09-07T10:00:00Z', name='tests'),
         _run(2, 'neutral', '2026-09-07T10:05:00Z'),
         _run(3, 'skipped', '2026-09-07T10:10:00Z'),
     ]
@@ -189,7 +194,7 @@ def test_the_success_line_counts_judged_runs_only(tmp):
     mod = _ci_wait()
     runs = [
         _run(1, 'cancelled', '2026-09-07T10:00:00Z'),
-        _run(2, 'success', '2026-09-07T10:05:00Z'),
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='tests'),
     ]
     # Direct on purpose, unlike the setattr elsewhere: these two stubs
     # (here and in the next test) are the file's recorded type errors,
@@ -201,7 +206,7 @@ def test_the_success_line_counts_judged_runs_only(tmp):
     assert out.getvalue() == (
         'aaaaaaaaaaaa 2 run(s)\n'
         '  run 1: completed/cancelled\n'
-        '  run 2: completed/success\n'
+        '  tests: completed/success\n'
         'all 1 run(s) on aaaaaaaaaaaa acceptable'
         ' (1 superseded cancelled ignored)\n'
     )
@@ -211,13 +216,13 @@ def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
     del tmp
     mod = _ci_wait()
     mod.runs_on = lambda repo, sha: [
-        _run(1, 'success', '2026-09-07T10:00:00Z')]
+        _run(1, 'success', '2026-09-07T10:00:00Z', name='tests')]
     out = io.StringIO()
     code = mod.wait('o/r', 'b' * 40, 60, 60, out)
     assert code == 0
     assert out.getvalue() == (
         'bbbbbbbbbbbb 1 run(s)\n'
-        '  run 1: completed/success\n'
+        '  tests: completed/success\n'
         'all 1 run(s) on bbbbbbbbbbbb acceptable\n'
     )
 
@@ -333,7 +338,7 @@ def test_a_refusal_that_ended_early_still_answers_the_wait(tmp):
         if len(polls) == 1:
             raise mod.gh_client.RateLimited(
                 'slow down', resume_at=clock.now + 5)
-        return [_run(1, 'success', '2026-09-07T10:00:00Z')]
+        return [_run(1, 'success', '2026-09-07T10:00:00Z', name='tests')]
 
     setattr(mod, 'runs_on', _refuse_first)
     out, err = io.StringIO(), io.StringIO()
