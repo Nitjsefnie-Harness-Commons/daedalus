@@ -23,7 +23,7 @@ const REQUESTS = [];
 const REFUSALS = [];
 const LEDGER = { command: null, generation: 0, wrong: 0, stale: 0 };
 
-function queryValue(target, name) {
+function sectionQueryValue(target, name) {
   const at = target.indexOf('?');
   if (at < 0) return null;
   for (const pair of target.slice(at + 1).split('&')) {
@@ -38,7 +38,7 @@ function queryValue(target, name) {
 // what it peeked, so the plan a scenario writes for the poll answers
 // both legs and a generation it could not have known in advance.
 function pollTarget(target) {
-  if (queryValue(target, 'consume') !== '1') return target;
+  if (sectionQueryValue(target, 'consume') !== '1') return target;
   const at = target.indexOf('?');
   const kept = [];
   for (const pair of target.slice(at + 1).split('&')) {
@@ -165,9 +165,9 @@ function resultAnswer(target, spec) {
     deliveryId: command.did,
     resultGeneration: LEDGER.generation,
   };
-  if (queryValue(target, 'consume') === '1') {
+  if (sectionQueryValue(target, 'consume') === '1') {
     PUMP.open = false;
-    const expected = queryValue(target, 'expected');
+    const expected = sectionQueryValue(target, 'expected');
     const answered = { consumed: expected !== null
       && String(LEDGER.generation) === expected,
       resultGeneration: LEDGER.generation };
@@ -284,7 +284,7 @@ globalThis.setImmediate = (callback) => hostImmediate(function turn() {
 // The two import checkpoints belong to the shell because `load` is the
 // only way a scenario reaches a module, and a scenario that emitted them
 // itself could emit them out of order or not at all.
-function load(name) {
+function sectionLoad(name) {
   const at = MODULES.indexOf(name);
   if (at < 0) throw new Error('no module argument for ' + name);
   phase('dashboard module import started');
@@ -295,7 +295,7 @@ function load(name) {
     });
 }
 
-function report(extra) {
+function sectionReport(extra) {
   phase('dashboard call settled');
   phase('dashboard harness finished');
   process.stdout.write(JSON.stringify(Object.assign({

@@ -15,7 +15,7 @@ TOKEN = 'tok-abcdefghijklmnop'
 SEED = (
     "localStorage.setItem('daedalus-token', '" + TOKEN + "');\n")
 
-IMPORT_API = """const api = await bounded(load('api.js'), 'api import',
+IMPORT_API = """const api = await bounded(sectionLoad('api.js'), 'api import',
   _dashnodeStepTimeoutMs);
 phase('dashboard call started');
 """
@@ -31,7 +31,7 @@ first.textContent = '1 active';
 let refusal = null;
 try { document.querySelector('#s04 [data-sub]'); }
 catch (error) { refusal = error.message; }
-report({ same: first === second, isSub: first === sub,
+sectionReport({ same: first === second, isSub: first === sub,
   observed: second.textContent, refusal });
 })().catch(leave);
 """
@@ -46,7 +46,7 @@ parent.append(...rows);
 // so the past-the-end value is reported both as the claim and as a kind
 // a reader can see.
 const kind = (value) => (value === null ? 'null' : String(value));
-report({
+sectionReport({
   first: rows[0].nextSibling === rows[1],
   second: rows[1].nextSibling === rows[2],
   end: rows[2].nextSibling === null,
@@ -68,7 +68,7 @@ const last = new El('tr');
 parent.append(first, last);
 const detail = new El('tr');
 const returned = parent.insertBefore(detail, last);
-report({ returned: returned === detail,
+sectionReport({ returned: returned === detail,
   index: parent.children.indexOf(detail),
   afterFirst: first.nextSibling === detail,
   afterDetail: detail.nextSibling === last,
@@ -91,7 +91,7 @@ const rewritten = { value: el.className,
                     has: el.classList.contains('armed') };
 el.classList.add('armed');
 el.classList.remove('armed');
-report({ added, rewritten, value: el.className,
+sectionReport({ added, rewritten, value: el.className,
   has: el.classList.contains('armed'), length: el.classList.length });
 })().catch(leave);
 """
@@ -104,7 +104,7 @@ report({ added, rewritten, value: el.className,
 # claims: parked, cancelled, fired.
 CLOCK = r"""
 (async () => {
-const { armedAction } = await bounded(load('sections/_util.js'),
+const { armedAction } = await bounded(sectionLoad('sections/_util.js'),
   'util import', _dashnodeStepTimeoutMs);
 phase('dashboard call started');
 const button = new El('button');
@@ -124,7 +124,7 @@ button.click();
 const rearmed = drive.live();
 button.click();
 const confirmed = { ran, live: drive.live() };
-report({ armed, afterClear, reverted, rearmed, confirmed });
+sectionReport({ armed, afterClear, reverted, rearmed, confirmed });
 })().catch(leave);
 """
 
@@ -139,7 +139,7 @@ const parsed = { tag: child.tag, text: child.textContent,
 let refusal = null;
 try { host.innerHTML = '<span>two</span>'; }
 catch (error) { refusal = error.message; }
-report({ parsed, refusal, untouched: host.children.length,
+sectionReport({ parsed, refusal, untouched: host.children.length,
   stillThere: host.firstChild === child });
 })().catch(leave);
 """
@@ -154,7 +154,7 @@ try {
     _dashnodeStepTimeoutMs);
 } catch (error) { refusal = error.message; }
 await bounded(settle(), 'after the refusal', _dashnodeStepTimeoutMs);
-report({ refusal });
+sectionReport({ refusal });
 })().catch(leave);
 """
 
@@ -165,7 +165,7 @@ drive.route('/tabs', { json: [] });
 let refusal = null;
 try { drive.route('/tabs', { json: [] }); }
 catch (error) { refusal = error.message; }
-report({ refusal, planned: drive.planned() });
+sectionReport({ refusal, planned: drive.planned() });
 })().catch(leave);
 """
 
@@ -190,7 +190,7 @@ try {
     'a command no envelope matches', _dashnodeStepTimeoutMs);
 } catch (error) { outcome = error.message; }
 await bounded(settle(), 'after the give-up', _dashnodeStepTimeoutMs);
-report({ outcome });
+sectionReport({ outcome });
 })().catch(leave);
 """
 
@@ -230,7 +230,7 @@ globalThis.fetch = async (target, init) => {
 const result = await bounded(api.extCmd('list-block-rules', {},
   { timeout: 5000 }), 'a command the third poll answers',
   _dashnodeStepTimeoutMs);
-report({ result, seen });
+sectionReport({ result, seen });
 })().catch(leave);
 """
 
@@ -249,7 +249,7 @@ drive.route('/result?tab=extension',
 const result = await bounded(api.extCmd('list-block-rules', {},
   { timeout: 5000 }), 'a command the stamped poll answers',
   _dashnodeStepTimeoutMs);
-report({ result });
+sectionReport({ result });
 })().catch(leave);
 """
 
@@ -262,7 +262,7 @@ drive.route('/result?tab=extension', { result: 'the right result' });
 const result = await bounded(api.extCmd('list-block-rules', {},
   { timeout: 700 }), 'a command its own envelope answers',
   _dashnodeStepTimeoutMs);
-report({ result });
+sectionReport({ result });
 })().catch(leave);
 """
 
@@ -276,7 +276,8 @@ localStorage.setItem('daedalus-dash-css-sessions',
 const back = JSON.parse(
   localStorage.getItem('daedalus-dash-css-sessions'));
 localStorage.setItem('daedalus-dash-css-sessions', '');
-report({ back, emptied: localStorage.getItem('daedalus-dash-css-sessions'),
+sectionReport({ back,
+  emptied: localStorage.getItem('daedalus-dash-css-sessions'),
   absent: localStorage.getItem('daedalus-nothing-here') });
 })().catch(leave);
 """
@@ -285,8 +286,8 @@ report({ back, emptied: localStorage.getItem('daedalus-dash-css-sessions'),
 UNDECLARED_MODULE = r"""
 (async () => {
 let refusal = null;
-try { load('api.js'); } catch (error) { refusal = error.message; }
-report({ refusal, planned: drive.planned() });
+try { sectionLoad('api.js'); } catch (error) { refusal = error.message; }
+sectionReport({ refusal, planned: drive.planned() });
 })().catch(leave);
 """
 
@@ -310,19 +311,19 @@ const stopSecond = bus.on((event) => {
 bus.on(() => { seen.push('third'); throw new Error('listener failed'); });
 bus.on((event) => { seen.push('fourth:' + event.type); });
 let escaped = null;
-const dispatch = (type) => {
+const emitBusEvent = (type) => {
   try { bus.emit({ type }); }
   catch (error) { if (escaped === null) escaped = error.message; }
 };
-dispatch('tabs-synced');
+emitBusEvent('tabs-synced');
 // `seen` is one array the whole run appends to, so each snapshot copies it
 // at the moment it was taken rather than aliasing what came later.
 const first = { seen: seen.slice(), errors: ERRORS.length };
-dispatch('tab-updated');
+emitBusEvent('tab-updated');
 const second = { seen: seen.slice() };
 stopSecond();
-dispatch('tab-unregistered');
-report({ first, second, third: { seen: seen.slice() }, escaped,
+emitBusEvent('tab-unregistered');
+sectionReport({ first, second, third: { seen: seen.slice() }, escaped,
   errors: ERRORS.slice() });
 })().catch(leave);
 """
@@ -351,7 +352,7 @@ const result = await bounded(api.extCmd('list-block-rules', {},
   { timeout: 700 }), 'a command with a timer parked beside it',
   _dashnodeStepTimeoutMs);
 await bounded(settle(), 'after the command', _dashnodeStepTimeoutMs);
-report({ result, planted, live: drive.live() });
+sectionReport({ result, planted, live: drive.live() });
 })().catch(leave);
 """
 
@@ -377,7 +378,7 @@ const sub = new El('span');
 drive.selector('#s08 [data-sub]', sub);
 try { drive.selector('#s08 [data-sub]', sub); }
 catch (error) { twice = error.message; }
-report({ bag, polled, twice, requests: REQUESTS.length,
+sectionReport({ bag, polled, twice, requests: REQUESTS.length,
   errors: ERRORS.slice() });
 })().catch(leave);
 """
@@ -401,7 +402,7 @@ const contentType = answer.headers.get('content-type');
 let refusal = null;
 try { answer.headers.get('x-dash-header'); }
 catch (error) { refusal = error.message; }
-report({ contentType, refusal, ok: answer.ok, status: answer.status });
+sectionReport({ contentType, refusal, ok: answer.ok, status: answer.status });
 })().catch(leave);
 """
 
@@ -413,7 +414,7 @@ let escaped = null;
 const unprintable = { toString() { throw new Error('no'); } };
 try { console.error('[bus] listener failed', unprintable); }
 catch (error) { escaped = error.message; }
-report({ escaped });
+sectionReport({ escaped });
 })().catch(leave);
 """
 
@@ -426,7 +427,7 @@ drive.route('/result?tab=extension', { result: [] });
 await bounded(api.extCmd('list-block-rules'), 'the command',
   _dashnodeStepTimeoutMs);
 await bounded(settle(), 'settled', _dashnodeStepTimeoutMs);
-report();
+sectionReport();
 })().catch(leave);
 """
 
@@ -450,7 +451,7 @@ try {
     'a command type the plan does not name', _dashnodeStepTimeoutMs);
 } catch (error) { refusal = error.message; }
 await bounded(settle(), 'after the refusal', _dashnodeStepTimeoutMs);
-report({ declared, refusal });
+sectionReport({ declared, refusal });
 })().catch(leave);
 """
 
@@ -478,7 +479,7 @@ for (const type of ['toString', 'constructor', 'hasOwnProperty',
   seen.push(refusal);
   await bounded(settle(), 'after ' + type, _dashnodeStepTimeoutMs);
 }
-report({ refused: seen.filter((m) => m !== null).length,
+sectionReport({ refused: seen.filter((m) => m !== null).length,
   refusals: REFUSALS.length, seen, inherited });
 })().catch(leave);
 """
