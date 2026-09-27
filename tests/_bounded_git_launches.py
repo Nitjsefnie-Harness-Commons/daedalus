@@ -5,7 +5,8 @@ what the call IS and which of its shape in its function, so an
 edit above a baselined launch cannot move a row onto another
 launch. `tests/test_repo_layout.py` computes the live keys from
 the analyser's own classification and matches them here; both
-sides read the same string, so a failure names the key to paste.
+sides read the same string, so a finding about a live site names
+the key in the form this table writes.
 """
 BOUNDED_GIT_LAUNCHES = {
     # Every reason says what the call is and why it cannot hang a git

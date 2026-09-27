@@ -67,26 +67,17 @@ def _tracked_python(root=ROOT):
     return paths
 
 
-def _function_spans(tree):
-    """Every function's (start, end, name), latest start first.
-
-    One list answers "which function holds this line" for every caller, so
-    the two places that ask cannot answer it differently, and the answer
-    costs one walk of the tree instead of one per call.
-    """
-    return sorted(
-        ((node.lineno, getattr(node, 'end_lineno', node.lineno), node.name)
-         for node in ast.walk(tree)
-         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))),
-        reverse=True)
-
-
-def _enclosing_function(spans, line):
+def _enclosing_function(tree, line):
     """The innermost function whose body spans `line`, else '<module>'."""
-    for start, end, name in spans:
-        if start <= line <= end:
-            return name
-    return '<module>'
+    best_lineno = -1
+    best_name = '<module>'
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, 'end_lineno', node.lineno)
+            if node.lineno <= line <= end and node.lineno > best_lineno:
+                best_lineno = node.lineno
+                best_name = node.name
+    return best_name
 
 
 def _call_signature(node):
@@ -138,12 +129,11 @@ def _spelled_signatures(source):
     actually say, and not against the table's own agreement with itself.
     """
     tree = ast.parse(source)
-    spans = _function_spans(tree)
     spelled = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             spelled.setdefault(
-                _enclosing_function(spans, node.lineno), set()
+                _enclosing_function(tree, node.lineno), set()
             ).add(_call_signature(node))
     return spelled
 
@@ -215,11 +205,10 @@ def _bound_sites(source, here):
     by the control over the kept-out ones as well.
     """
     tree = ast.parse(source)
-    spans = _function_spans(tree)
     found = []
     for line, head, kind in bound_sites(source, here):
         if control_keeps(head, kind):
-            found.append((line, _enclosing_function(spans, line),
+            found.append((line, _enclosing_function(tree, line),
                           _site_signature(tree, line), kind))
     found.sort()
     seen = {}
@@ -419,15 +408,15 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     function does not bind a call spelling that signature fails; a row
     matching zero live sites fails, because a stale allowance is a
     refusal; and a key two live sites share fails. That last one holds by
-    the ordinal's construction, so it is the tripwire for a counter that
-    stopped counting rather than a property the walk can break, and the
-    one assert reports all four together — a run answers the whole
-    question, not the class its first failure happened to name. Matching
-    is on the (path, function, signature, ordinal) key, so another
-    function of an allowed module, a second launch of the same shape in
-    an allowed function, and a launch that has changed shape are each a
-    refusal — the exemption cannot be widened by a prefix or substring
-    match, and every failure names the key to paste.
+    the ordinal's construction, so the loop is the tripwire for a counter
+    that stopped counting rather than a property the walk can break. One
+    assert reports all four, so a run answers the whole question and not
+    only the class its first failure happened to name. Matching is on the
+    (path, function, signature, ordinal) key, so another function of an
+    allowed module, a second launch of the same shape in an allowed
+    function, and a launch that has changed shape are each a refusal —
+    the exemption cannot be widened by a prefix or substring match, and
+    every finding about a live site names the key to paste.
     """
     del tmp
     live = {}
@@ -447,18 +436,18 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
              if len(row) == 4 and isinstance(row[3], int)]
     # A dict literal keeps one of two identical keys and drops the other,
     # so a pasted key that already existed loses a row and every check
-    # below passes on the smaller table. Only the source still has it.
+    # below passes on the smaller table. Only the source still has it, and
+    # only an `Assign` locates it: an annotated table would go quiet here.
     table = ast.parse((ROOT / 'tests/_bounded_git_launches.py').read_text(
         encoding='utf-8', errors='surrogateescape'))
     written = [ast.unparse(key) for node in table.body
                if isinstance(node, ast.Assign)
                and isinstance(node.value, ast.Dict)
                and getattr(node.targets[0], 'id', '') == 'BOUNDED_GIT_LAUNCHES'
-               for key in node.value.keys]
+               for key in node.value.keys if key is not None]
     repeated = sorted({w for w in written if written.count(w) > 1})
-    findings = [f'the row {key} is written twice in the table source; a '
-                'dict keeps one copy and drops the other, so a pasted key '
-                'that already existed loses a row with nothing to notice'
+    findings = [f'the row {key} is written twice in the table source, so a '
+                'pasted key that already existed lost a row silently'
                 for key in repeated]
     findings += sorted(
         f'{_row_text(key)} {sites}{_shifted_note(key, keyed)}'
