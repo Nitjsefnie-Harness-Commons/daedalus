@@ -243,10 +243,15 @@ def _remove_temp(path):
         pass
 
 
-def write(path, data):
-    """Validate and atomically replace ``path`` with canonical JSON bytes."""
+def publish(path, payload):
+    """Atomically replace ``path`` with ``payload``, a bytes object.
+
+    The destination's own mode is carried across, a new one keeps
+    mkstemp's restrictive default, and a publication that raises leaves
+    the destination and the directory as they were: the temporary file is
+    removed and the committed document is never truncated in place.
+    """
     target = Path(path)
-    payload = _render(data)
     mode = None
     try:
         mode = stat.S_IMODE(target.stat().st_mode)
@@ -278,6 +283,11 @@ def write(path, data):
                 pass
         if not replaced:
             _remove_temp(temporary_path)
+
+
+def write(path, data):
+    """Validate and atomically replace ``path`` with canonical JSON bytes."""
+    publish(path, _render(data))
 
 
 def _parser():
