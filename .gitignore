@@ -565,6 +565,7 @@
 !/tests/test_gate_freshness_run.py
 !/tests/test_generator_second_consumption.py
 !/tests/test_gh_client.py
+!/tests/test_gh_head_prs.py
 !/tests/test_ghexpr.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_relay_authority.py

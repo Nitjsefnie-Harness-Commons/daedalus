@@ -8,10 +8,10 @@ matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate and
 the answer an absent gate gets live here and both callers import them.
 
-It is a module of its own for a third reason: both callers sit at or near
-the 500-line production ceiling the size policy enforces, and an
-expectation that lives inside a caller is an expectation the other caller
-can drift from.
+It is a module of its own for a third reason: the callers sit near the
+500-line production ceiling the size policy enforces - `watch_all.py`
+measured 483 lines and `ci_wait.py` 400 - and an expectation that lives
+inside a caller is an expectation the other caller can drift from.
 
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
 different workflows, and treating either as the gate would reinstate the
@@ -36,17 +36,17 @@ class GateAbsent:
     """A run set that concluded and never carried the gating workflow.
 
     The fourth answer, beside True (settled), False (runs still open) and
-    None (nothing to judge) - and it belongs here rather than in a caller
-    because the predicate below raises it and both callers must recognise
-    it. Its own type rather than a falsy value, so it can never be read as
-    one of the other three by an `is` comparison, and it carries the names
-    so a refusal can name the workflow instead of falling back on
-    "unknown" - the shape issue #839 was filed about, reached by whichever
-    caller is asking.
+    None (nothing to judge). Its own type rather than a falsy value, so it
+    can never be read as one of the other three by an `is` comparison, and
+    it carries the names so a refusal can name the workflow instead of
+    falling back on "unknown" - the shape issue #839 was filed about.
 
-    `missing_required` answers with a list and every caller turns it into
-    whatever its own contract says; this is the one answer both contracts
-    share, so it is named here and imported, never re-declared.
+    What constructs it, exactly: `missing_required` below answers with the
+    missing NAMES, and `watch_all._settled` turns those names into this
+    value. Nothing here raises it. It lives in this module because it is
+    the one answer the two callers' contracts share and
+    `watch_all._hold_release` recognises it by `isinstance` - so it is
+    named here and imported, not re-declared beside its recogniser.
     """
 
     def __init__(self, missing):

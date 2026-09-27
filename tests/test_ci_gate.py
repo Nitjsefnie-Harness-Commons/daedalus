@@ -86,15 +86,6 @@ def test_an_empty_requirement_is_satisfied_by_every_run_set(tmp):
                                 required=frozenset()) == []
 
 
-def _definition_line(path):
-    """The first line of the expectation, read off the source under test."""
-    for index, line in enumerate(path.read_text(
-            encoding='utf-8').splitlines(), 1):
-        if line.startswith('REQUIRED_WORKFLOWS = '):
-            return index
-    raise AssertionError('ci_gate.py declares no expectation')
-
-
 def _spells_a_required_name(node, wanted):
     """Whether a set or frozenset literal names a required workflow."""
     literals = None
@@ -172,9 +163,13 @@ def test_the_expectation_has_exactly_one_definition(tmp):
                 continue
             if name == 'missing_required' or not _is_an_alias(node):
                 found.append(f'{path.name}:{node.lineno} {name}')
-    first = _definition_line(SOURCE)
-    assert found == [f'ci_gate.py:{first} REQUIRED_WORKFLOWS',
-                     f'ci_gate.py:{first + 3} missing_required'], found
+    # BY NAME, not by line: an expected list carrying `first + 3` made a
+    # blank line inserted between the two definitions a red whose message
+    # was a list rather than a reason, and editing the `3` is the first
+    # thing the next author would do. Both names are already in hand.
+    named = [entry.split(' ', 1)[1] for entry in found]
+    assert named == ['REQUIRED_WORKFLOWS', 'missing_required'], found
+    assert {entry.split(':')[0] for entry in found} == {'ci_gate.py'}, found
 
 
 def _declared_names(path):

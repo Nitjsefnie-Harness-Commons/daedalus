@@ -549,24 +549,36 @@ def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
     While the set is incomplete the wait re-reads the head's pull request
     every tick, because `mergeable` is UNKNOWN while GitHub computes it and
     can still come back CONFLICTING minutes later. So this path costs TWO
-    calls per tick where the acceptable path costs one, and at the defaults
-    (a 60s tick, a 300s grace) that is five extra calls for one wait. The
-    equality is the measurement: one pull-request read for every runs read,
-    and the bound is deliberately shorter than the grace so the wait ends
-    on the timeout rather than on the refusal.
+    calls per tick where the acceptable path costs one, and the read count
+    is `grace/interval + 1` for one wait: the read happens on the first
+    observation AND on the tick that reaches the grace, which is SIX at
+    the defaults (300/60) - by that arithmetic, not by a 300-second run,
+    and the five an earlier version of this sentence claimed was wrong.
+    What this control actually measures is one read per tick, since its
+    bound is deliberately shorter than the grace, and that is the equality
+    below.
+
+    The count is taken from the fake's own key rather than by subtracting
+    the runs reads from the total: a third query kind added to the wait
+    later would otherwise be counted as pull-request reads and the equality
+    would keep passing.
     """
     answers = dict(_idle_answers())
     answers['checkSuites'] = runs_page([_suite(1, name='gate freshness')])
+    empty = {'associatedPullRequests': {'nodes': []}}
+    answers['associatedPullRequests'] = {'data': {'repository': {
+        'object': empty}}}
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake, bound=5, limit=40)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert 'not certified' in done.stdout, done.stdout
     run_calls = fake.calls('checkSuites')
-    # The fake logs a call it has no fixture for with a null fragment, so
-    # the pull-request reads are the remainder rather than their own key.
-    head_calls = len(fake.calls()) - len(run_calls)
+    head_calls = fake.calls('associatedPullRequests')
     assert len(run_calls) >= 2, [c['request'][:60] for c in fake.calls()]
-    assert head_calls == len(run_calls), (head_calls, len(run_calls))
+    # Lengths, not the call lists: two calls of different kinds are
+    # different entries, so comparing the lists compares timestamps.
+    assert len(head_calls) == len(run_calls), (
+        len(head_calls), len(run_calls))
 
 
 def main():

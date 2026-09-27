@@ -9,7 +9,8 @@ hand-rolled loops this replaces conflate:
 
   0  every run on the SHA has `status: completed`, every conclusion is
      `success`, `neutral` or `skipped`, and every workflow in
-     REQUIRED_WORKFLOWS has at least one run of its own on the SHA
+     REQUIRED_WORKFLOWS has at least one run of its own left after the
+     superseded-cancelled filter below
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding, or with
@@ -184,14 +185,15 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     can be incomplete, and the set question is ci_gate's, which
     watch_all.py asks the same way.
 
-    That question is ALL-OF, and the base's was any-of: a set satisfied the
-    requirement when ONE of the required workflows was present, and is now
-    incomplete unless EVERY one of them is. The default is unchanged, since
-    the default names one workflow; the multi-name reading got stricter, and
-    stricter is the correct one - being satisfied by one of two required
+    That question is ALL-OF: a set is incomplete unless EVERY required
+    workflow is present. An earlier form on this branch read it any-of,
+    accepting a set that carried ONE of several required workflows; the base
+    had no `required` argument at all, so it had neither reading. The
+    default is unchanged either way, since the default names one workflow,
+    and all-of is the correct one - being satisfied by one of two required
     workflows is not being satisfied. A run's conclusion is not part of the
-    question either way, which is why the check sits after the conclusion
-    has already been judged above.
+    question, which is why the check sits after the conclusion has already
+    been judged above.
     """
     runs = _judged(runs)
     if not runs:
