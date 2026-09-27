@@ -156,9 +156,9 @@ def go(cb=lambda: subprocess.run):
     pass
 """, 'def go(cb='),
         # The leaf the walk never descends into, read in its binding
-        # position: an attribute the walk opens carries whatever it is
-        # read off, per `_carried_parts.__doc__`, and the receiver here
-        # is a subscript and then a further attribute.
+        # position, where the receiver is a subscript and then a further
+        # attribute; which attributes the walk opens, see the authority
+        # in `_carried_parts.__doc__`.
         ('subscript receiver bound', """import os
 import subprocess
 os.chdir(tmp)
@@ -285,12 +285,9 @@ json.loads(text)
 json.JSONDecoder().decode(text)
 """),
         # `__call__` is in `_LAUNCH_READS` and not in `_LAUNCHERS`, and
-        # that difference is the whole of this row. The walk opens the
-        # receiver either way, so the name never reaches the launcher
-        # test and a call through it launches nothing. Fold `__call__`
-        # into `_LAUNCHERS` and the same call is classified a launcher,
-        # which a `chdir` above turns into a refusal — that is what pins
-        # the two sets apart rather than letting them quietly become one.
+        # that difference is the whole of this row. Fold `__call__` into
+        # `_LAUNCHERS` and the same call is classified a launcher, which
+        # the `chdir` above turns into a refusal.
         ('module call attribute is not a launch method', """import os
 import subprocess
 os.chdir(tmp)
@@ -620,8 +617,7 @@ def _transforming_cases():
     """Forms that build a new value, so a launcher in one is not carried.
 
     The last three rows are the other side of the attribute arm, whose
-    condition is stated once in `_carried_parts.__doc__`: the receiver is
-    read off, and reading it carries nothing.
+    condition `_carried_parts.__doc__` states once.
     """
     return (
         ('sum of a launcher', """import operator
