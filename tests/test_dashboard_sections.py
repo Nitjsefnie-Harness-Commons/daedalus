@@ -36,9 +36,8 @@ const listing = { total: 2, items: [
   { id: 'up1', filename: 'shot.png', size: 4, mtime: 2,
     path: token + '/up1/shot.png' },
 ] };
-// The two targets this scenario can name, built the way the module
-// builds them: the listing is the one page it asks for, and each file
-// selector is the listed row's own id and filename.
+// The file selectors are the listed rows' own id and filename, built
+// the way the module builds them.
 const LISTING = '/upload?limit=50&offset=0';
 const FILES = new Set(listing.items.map(
   (f) => '/upload?path=' + encodeURIComponent(f.id + '/' + f.filename)));
@@ -152,9 +151,6 @@ const listing = { total: 1, items: [
   { id: 'up1', filename: 'a.txt', size: 1, mtime: 1,
     path: token + '/up1/a.txt' },
 ] };
-// One listing page and one file selector: both are named by the
-// scenario, and the file selector is the listed row's own id and
-// filename the way the module builds it.
 const LISTING = '/upload?limit=50&offset=0';
 const FILE = '/upload?path=' + encodeURIComponent('up1/a.txt');
 globalThis.fetch = (target, init) => {
@@ -325,8 +321,7 @@ def test_a_refresh_that_removes_the_rows_revokes_their_object_urls(_tmp):
     assert seen['revoked'] == ['blob:held-1', 'blob:held-2'], seen
 
 
-# The two pager cases live in `tests/_dashpager.py`; the ceiling this
-# file was pushed past by the refusal door put the harnesses there.
+# The two pager cases read their harnesses from `tests/_dashpager.py`.
 def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     """The issue's reproduction: the last page shows 51–51 / 51, the
     last-page file is deleted, and the pager must land on the last valid
@@ -375,18 +370,14 @@ _CAPTURE_HARNESS = _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const commands = [];
 const uploads = [];
-// Every target this scenario can name, and none of them a shape. The
-// section asks for one listing page (its pager is never clicked), the
-// command and both result legs carry the id and generation this fake
-// itself just handed out, and a thumbnail selector is the capture path
-// this fake minted. A target built any other way is one no scenario
-// planned.
+// The section's pager is never clicked, so one listing page is the
+// only listing it can ask for.
 const LISTING = '/upload?limit=200&offset=0';
 const imageSelector = (path) => '/screenshot?path=' + encodeURIComponent(path);
 const PEEK = '/result?tab=extension';
 let envelope;
-// Every capture this fake minted is a thumbnail the scenario can name;
-// the section fetches the whole recent grid, not only the newest.
+// Every capture this fake minted, because the section fetches the
+// whole recent grid rather than only the newest.
 const imageTargets = new Set();
 const thumbnailTargets = [];
 let consumeTarget = '';
@@ -504,9 +495,7 @@ import { readFileSync } from 'node:fs';
 (async () => {
 const fixture = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 // The thumbnail selectors the listing itself names, handed over by the
-// side that produced the listing, so the fake holds exact targets rather
-// than a shape. A capture the listing does not name is a request no
-// scenario planned, whatever it looks like.
+// side that produced the listing.
 const previews = new Set(fixture.previews);
 globalThis.fetch = async (target) => {
   if (target === '/tabs') return jsonResponse([]);

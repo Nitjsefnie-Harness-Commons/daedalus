@@ -7,13 +7,9 @@ refused, so nothing is reported, and no scenario reads a record that was
 never written. Issue #1083 is that shape, on the two suites whose fakes
 model their routes by shape rather than from a plan.
 
-The control drives the REAL `dashboard/api.js` through the door: one
-route the scenario declared and one it did not, in the same child, so a
-door that refused everything cannot pass the declared half and a door
-that recorded without refusing cannot pass the other. The real `api.js`
-makes both requests, so the status in the refusal is the number the
-shipped wrapper read off a response rather than one this suite wrote into
-its own assertion.
+The control drives the REAL `dashboard/api.js` through the door, so the
+status in the refusal below is the number the shipped wrapper read off a
+response rather than one this suite wrote into its own assertion.
 """
 import json
 import sys
@@ -61,14 +57,15 @@ phase('dashboard harness finished');
 def test_an_unplanned_request_is_refused_and_recorded(_tmp):
     """Both halves, and neither alone.
 
-    The declared route answers and the invented one does not, in the same
-    child. The record is compared as a list rather than searched as a
-    string, and the exact target is the claim, so a door that recorded
-    every request it saw -- declared ones included -- fails here rather
-    than passing a substring search.
+    The declared route and the invented one are made in the same child, so
+    a door that refused everything cannot pass the first and a door that
+    recorded without refusing cannot pass the second. The record is
+    compared as a list rather than searched as a string, and the exact
+    target is the claim, so a door that recorded every request it saw --
+    declared ones included -- fails here rather than passing a substring
+    search.
 
-    This holds the door. The per-suite `unplanned == []` assertions in
-    `test_dashboard_sections.py` and `test_dashboard_behaviour.py` are
+    This holds the door. The per-suite `unplanned == []` assertions are
     what hold the real fakes, and only a module that invents a request
     makes either of them bite.
     """

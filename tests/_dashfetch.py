@@ -12,10 +12,12 @@ because a shape match is not a plan.
 A refusal is a record plus a 599 rather than a throw, because
 `uploads.js` wraps its own fetch in a catch at `load`, `download` and
 `preview` and `sse.js` swallows a throw into an ordinary stream error: a
-thrown refusal reaches the suite as a symptom somewhere else. The record
-is the half a test reads either way, so `UNPLANNED` is what every harness
-splicing this in reports and `unplanned == []` claims that nothing was
-invented rather than naming the routes somebody remembered to enumerate.
+thrown refusal reaches the suite as a symptom somewhere else. The 599 is
+re-spelled here rather than imported, so `_dashshell.py`'s
+`UNPLANNED_STATUS` can change without this one following.
+`UNPLANNED` is what every harness splicing this in reports, so
+`unplanned == []` claims that nothing was invented rather than naming the
+routes somebody remembered to enumerate.
 """
 
 __all__ = ['DOOR']
@@ -24,13 +26,12 @@ __all__ = ['DOOR']
 DOOR = r"""
 const UNPLANNED = [];
 
-// 599 rather than a throw: see the module docstring. `api.js` reads
-// `statusText` only on the objectUrl path and `error` off the body on
-// the rest, so both spellings name the refusal to the caller. The header
-// bag is keyed, so a module reaching for a name this transport does not
-// model fails by name rather than reading `application/json` off it --
-// the same rule `_dashshell` follows and the same one it was corrected
-// on for answering `text/event-stream` to anything (2026-08-26).
+// `api.js` reads `statusText` only on the objectUrl path and `error` off
+// the body on the rest, so both spellings name the refusal to the caller.
+// The header bag is keyed: a module reaching for a name this transport
+// does not model fails by name rather than reading `application/json`
+// off it, which is the response-side half of "fail on what you do not
+// model" and the half `tests/_dashshell.py` follows.
 function refuse(target) {
   UNPLANNED.push(String(target));
   return {
