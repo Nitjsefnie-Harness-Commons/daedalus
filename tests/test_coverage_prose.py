@@ -132,13 +132,19 @@ def _claim_subject(text, said, count):
     """What the claim says about, between the claim phrase and the figure.
 
     The module is the subject the claim is made about, and the prose puts it
-    between "no suite reaches" and the count -- so that span is where it has
-    to be named. Bounding the sentence instead would red a rewrap that
-    merely split the claim in two, which is the same false positive as a
-    rewrap anywhere else; the span survives that and still refuses a
-    paragraph that names one module as unreached and another elsewhere.
+    between "no suite reaches" and the count. Bounding the sentence instead
+    would red a rewrap that merely split the claim in two, which is the same
+    false positive as a rewrap anywhere else.
+
+    A wording that states the figure FIRST has no such span, and slicing
+    backwards yields an empty string, which the assertion below then reports
+    as a module that is not there. So that order falls back to the whole
+    paragraph, and the binding is positional only when the figure follows the
+    claim phrase.
     """
-    return text[said.end():count.start()]
+    if said.end() < count.start():
+        return text[said.end():count.start()]
+    return text
 
 
 def test_the_paragraph_still_claims_the_unreached_module(tmp):
