@@ -30,8 +30,9 @@ in an `else` or `finally` body all bind during module execution, and
 none of them is a second DEFINITION of a
 name. A name its own module calls inside `if __name__ == '__main__':`
 is that module's script entry point, excluded on either side of the
-comparison, so the hundred and seventy suites that each call a `main` are
-not copies of the one helper module that also has one.
+comparison, so the 196 modules that each define a `main` and call it
+under that guard are not copies of the one helper module that also has
+one.
 
 What this control does not see, by design: a local spelled without the
 owner's leading underscore, which is a spelling difference and not a

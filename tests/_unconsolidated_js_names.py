@@ -14,9 +14,9 @@ pair-keyed rule covers it for free, because the first declaration's row
 already matches the pair.
 
 It reads the base tree's own declarations rather than a list of the
-files the branch touched. That form is not a preference: 95 files carry
-a row in the Python table and 31 in this one, this branch edits seven
-of the ninety-five and eighteen of the thirty-one, and a path list
+files the branch touched. That form is not a preference: 89 files carry
+a row in the Python table and 31 in this one, this branch edits twelve
+of the eighty-nine and eighteen of the thirty-one, and a path list
 cannot tell a site the branch wrote from one it did not.
 
 Like every row in the Python table, each of these is a site the rule
@@ -114,7 +114,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'the GM harness store reader, one of two copies of the same eight '
         'lines',
     ('tests/_mainworldharness.py', 'run'):
-        'the MAIN-world harness own entry, 190 lines of step machine over '
+        'the MAIN-world harness own entry, 202 lines of step machine over '
         'the injected function',
     ('tests/_overlap.py', 'bounded'):
         'the overlap harness own deadline, which reads an injected clock '
@@ -250,7 +250,7 @@ UNCONSOLIDATED_JS_NAMES = {
         'where the owner belongs to the dashboard node harness',
     ('tests/_dashshell.py', 'streamResponse'):
         'this answers the shell harness own stream shape, where the owner '
-        'is the shared hang/disabled factory five harnesses splice in',
+        'is the shared hang/disabled factory twelve harnesses splice in',
     ('tests/_netcapture_harness.py', 'maybeReject'):
         'this refuses a declarativeNetRequest entry by RULESET key, where '
         'the tabs harness refuses a chrome surface by API name',
@@ -261,11 +261,11 @@ UNCONSOLIDATED_JS_NAMES = {
         'elsewhere, and a third copy of it does not exist, so a shared '
         'one would have exactly two users',
     ('tests/_netcapture_harness.py', 'run'):
-        'this is the capture harness own driver, 45 body lines. Ranked '
+        'this is the capture harness own driver, 52 body lines. Ranked '
         'from 1 over the 21 JavaScript `run` declarations in the tree '
-        'by body lines, it is the seventh, where the owner is '
+        'by body lines, it is the sixth, where the owner is '
         'tests/_relayharness.py at 236, the largest; the order runs '
-        '236, 198, 137, 120, 98, 50, 45. No shared copy of either '
+        '236, 202, 137, 120, 98, 52, 50. No shared copy of either '
         'driver would serve both harnesses',
     ('tests/_tabs_harness.py', 'maybeReject'):
         'this refuses a chrome surface by API name, where the netcapture '
