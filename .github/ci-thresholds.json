@@ -6,15 +6,15 @@
       "floor": 92.9
     },
     "javascript": {
-      "measured": 76.2,
-      "floor": 74.7
+      "measured": 89.2,
+      "floor": 87.7
     }
   },
   "module_size_baseline": {
     "tests/test_bridge_results.py": 976,
     "tests/test_cli.py": 1117,
     "tests/test_mcp_server.py": 1506,
-    "tests/test_tab_routing.py": 768
+    "tests/test_tab_routing.py": 719
   },
   "long_line_baseline": {
     "scripts/check_versions.py": 9,
