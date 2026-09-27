@@ -154,8 +154,16 @@ def _started_key(run):
 
 
 def _superseded(run, runs):
-    """True when a strictly newer run of the same workflow exists."""
+    """True when a strictly newer run of the same workflow exists.
+
+    A run naming no workflow - neither an id nor a path, which `gh_client`
+    emits when both are null - is never superseded: there is nothing to
+    group it on, so grouping it would let one unidentified run clear
+    another's conclusion.
+    """
     mine = _workflow_of(run)
+    if not mine:
+        return False
     started = _started_key(run)
     return any(_workflow_of(other) == mine and _started_key(other) > started
                for other in runs)
