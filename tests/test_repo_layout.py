@@ -241,7 +241,7 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_suite_runner.py', 408,
      'test_output_close_failure_reaps_the_spawned_suite'):
         'the final reap, on the same process',
-    ('tests/_watcher_waits.py', 97, 'stop'):
+    ('tests/_watcher_waits.py', 99, 'stop'):
         'a reap that follows a group kill, on a process already signalled',
     ('tests/test_watcher_budget.py', 494,
      'test_a_graceful_exit_leaves_no_children_behind'):
