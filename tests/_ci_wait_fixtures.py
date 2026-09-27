@@ -1,4 +1,4 @@
-"""The run builder and the frozen clock the ci_wait suites both drive.
+"""The run builder and the frozen clock the ci_wait suites drive.
 
 Not a suite itself — `run_tests.py` only loads `test_*.py`.
 
