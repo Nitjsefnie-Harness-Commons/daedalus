@@ -204,4 +204,9 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_watcher_budget.py', 'test_the_children_die_with_their_parent',
      'parent.proc.wait(timeout)', 1):
          'a parent handle stopping a child the test started',
+    ('tests/test_watcher_waits.py',
+     'test_a_cancel_ends_the_whole_tree_and_not_only_the_child',
+     'child.proc.wait(timeout)', 1):
+         'a cleanup reap on a real child the control started itself, in the'
+         ' finally of the tree-kill control',
 }
