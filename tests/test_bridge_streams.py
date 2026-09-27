@@ -179,6 +179,11 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
 _GC_TRIGGER = '.gc-trigger'
 _GC_DONE = '.gc-done'
 
+# How far outside the TTL window each arm stamps, on opposite sides. A stall
+# in the handshake has to exceed this before it can move either verdict, so
+# the shipped comparison is settled by the sign of its difference.
+_STAMP_LEASH = 3600
+
 
 def _on_demand_command_gc(fault_dir):
     """Install a collector the test sweeps on demand, and return its path.
@@ -203,14 +208,21 @@ def _on_demand_command_gc(fault_dir):
         '            time.sleep(0.01)\n'
         '        trigger.unlink()\n'
         '        command_queue.collect_expired(cmd_dir, ttl)\n'
-        '        done.write_text("done", encoding="utf-8")\n'
+        f'        left = sorted(p.name for p in root.iterdir()\n'
+        f'                      if p.name not in ("{_GC_TRIGGER}",\n'
+        f'                                         "{_GC_DONE}"))\n'
+        '        done.write_text("\\n".join(left), encoding="utf-8")\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
     return str(fault_dir)
 
 
 def _sweep(command_root, served):
-    """Run one sweep in the bridge child and wait for it to finish."""
+    """Run one sweep in the bridge child and return the root it left.
+
+    The list is the sweep's own record, written by the sweep after it ran,
+    so a trigger answered early cannot stand in for one that finished.
+    """
     done = command_root / _GC_DONE
     if done.exists():
         done.unlink()
@@ -220,6 +232,7 @@ def _sweep(command_root, served):
         time.sleep(0.01)
     assert done.exists(), (
         'the controlled command sweep did not finish: ' + ''.join(served))
+    return done.read_text(encoding='utf-8').split()
 
 
 def _root_names(command_root):
@@ -232,14 +245,16 @@ def _root_names(command_root):
                   if p.name not in (_GC_TRIGGER, _GC_DONE))
 
 
-def _age(queues, seconds):
-    """The collector ages on each command file's own mtime, so a sweep
-    compares that against the TTL, never the time the setup took.
+def _stamp(queues, when):
+    """Put every queued command's own mtime at `when`.
+
+    The collector decides by comparing that mtime's distance from its own
+    clock to the TTL, so an age inside the window is a boundary assertion
+    that a stall the size of the window crosses.
     """
-    stamp = time.time() - seconds
     for queue in queues:
         for command_file in queue.iterdir():
-            os.utime(command_file, (stamp, stamp))
+            os.utime(command_file, (when, when))
 
 
 def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
@@ -265,14 +280,14 @@ def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
         assert _root_names(command_root) == sorted(q.name for q in queues), (
             _root_names(command_root), ''.join(served))
 
-        _age(queues, 0)
-        _sweep(command_root, served)
-        assert _root_names(command_root) == sorted(q.name for q in queues), (
-            _root_names(command_root), ''.join(served))
+        now = time.time()
+        _stamp(queues, now + _STAMP_LEASH)
+        kept = _sweep(command_root, served)
+        assert kept == sorted(q.name for q in queues), (kept, ''.join(served))
 
-        _age(queues, 2)
-        _sweep(command_root, served)
-        assert _root_names(command_root) == [], _root_names(command_root)
+        _stamp(queues, now - _STAMP_LEASH)
+        taken = _sweep(command_root, served)
+        assert taken == [], (taken, ''.join(served))
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
 
