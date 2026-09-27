@@ -21,6 +21,7 @@ from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -28,32 +29,41 @@ from _repo import ROOT  # noqa: E402
 _DOM = _dashnode.DOM
 
 
-_EVAL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+_EVAL_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
 (async () => {
 let tabs = [];
 const puts = [];
 const listeners = [];
 let resultTabId = '';
 const bus = { on: (fn) => listeners.push(fn) };
+// Both result legs are derived from the tab this fake last saw in a
+// command, so they are exact targets rather than a `/result` shape: a
+// peek for a tab the scenario never sent is a request nobody planned.
+let resultTargets = [];
 globalThis.fetch = async (target, init) => {
   const options = init || {};
   const where = String(target);
   if (options.method === 'PUT') {
+    if (where !== '/command') return refuse(where);
     puts.push(JSON.parse(options.body));
+    const sent = puts[puts.length - 1].tab;
+    const poll = sent ? '/result?tab=' + sent : '/result';
+    resultTargets = [poll, poll + (sent ? '&' : '?')
+      + 'consume=1&expected=gen'];
     return jsonResponse({ ok: true, did: 'delivery' });
   }
-  if (where.startsWith('/tabs')) return jsonResponse(tabs);
-  if (where.includes('consume=1')) {
-    return jsonResponse({ consumed: true, resultGeneration: 'gen' });
+  if (where === '/tabs') return jsonResponse(tabs);
+  if (resultTargets.includes(where)) {
+    return jsonResponse(where.includes('consume=1')
+      ? { consumed: true, resultGeneration: 'gen' }
+      : {
+        id: puts[puts.length - 1].id, deliveryId: 'delivery',
+        resultGeneration: 'gen', result: 'ran', world: 'page',
+        tabId: resultTabId,
+      });
   }
-  if (where.startsWith('/result')) {
-    return jsonResponse({
-      id: puts[puts.length - 1].id, deliveryId: 'delivery',
-      resultGeneration: 'gen', result: 'ran', world: 'page',
-      tabId: resultTabId,
-    });
-  }
-  throw new Error('unexpected fetch ' + where);
+  return refuse(where);
 };
 phase('dashboard module import started');
 const { mount } = await bounded(
@@ -121,11 +131,11 @@ await bounded(settle(), 'run with an under-range timeout',
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify(
   { refused, activeTab, targeted, activeTabChosen, targetedLabel,
-    chosenStatusAfter, highTimeout, lowTimeout }));
+    chosenStatusAfter, highTimeout, lowTimeout, unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=9, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'eval.js',))
+    """, bounded_steps=9, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'eval.js',))
 
 
 def test_run_refuses_an_empty_target_and_names_where_untargeted_code_runs(
@@ -137,6 +147,11 @@ def test_run_refuses_an_empty_target_and_names_where_untargeted_code_runs(
     merely at the non-empty check kept beside it."""
     result = _dashnode.run_dashboard_node(_EVAL_HARNESS)
     seen = json.loads(result.stdout)
+    # Every faked route is an exact target -- one command, one `/tabs`,
+    # and the two result legs derived from the tab that command carried --
+    # so an empty record is a claim that the module asked for nothing
+    # else.
+    assert seen['unplanned'] == [], seen
     assert seen['refused']['selected'] == '', seen
     assert seen['refused']['puts'] == 0, seen
     assert seen['refused']['status'].strip(), seen
@@ -221,14 +236,64 @@ def test_the_timeout_renders_clamped_to_the_section_bounds(_tmp):
     assert seen['lowTimeout'].endswith('  timeout=1000ms'), seen
 
 
-_EVAL_TABS_FAIL_HARNESS = _dashnode.DashboardNodeHarness(_DOM + r"""
+# The control for the door the three fakes above close. It runs a
+# DIFFERENT method through it than `tests/test_dashfetch.py` does -- a
+# typed command rather than a `get` -- because the property is the same on
+# every path into `api.js` and a control that reuses a shape proves only
+# the shape.
+_NO_ROUTES_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
+(async () => {
+const asked = [];
+globalThis.fetch = async (target, init) => {
+  asked.push({ target: String(target), method: (init || {}).method || 'GET' });
+  return refuse(String(target));
+};
+phase('dashboard module import started');
+const { runCommand } = await bounded(
+  import(pathToFileURL(process.argv[1]).href),
+  'dashboard module import', _dashnodeStepTimeoutMs,
+);
+phase('dashboard module imported');
+let refusal = null;
+try {
+  await bounded(runCommand({ type: 'cookies', id: 'no-route',
+                            timeout: 1000 }),
+                'a command on a transport with no routes',
+                _dashnodeStepTimeoutMs);
+} catch (error) { refusal = error.message; }
+process.stdout.write(JSON.stringify({ asked, refusal, unplanned: UNPLANNED }));
+phase('dashboard call settled');
+phase('dashboard harness finished');
+})().catch(leave);
+""", bounded_steps=2, module=True, arguments=(ROOT / 'dashboard' / 'api.js',))
+
+
+def test_a_request_this_file_never_planned_is_refused_and_recorded(_tmp):
+    """The control for the fakes above, and the anti-vacuity half: the
+    record is compared as a list holding the exact target, so a fake that
+    recorded nothing and a fake that recorded the declared route as well
+    both fail rather than passing a truthiness check. The 599 in the
+    refusal is the number `api.js` read off the response, not one this
+    suite wrote into its own assertion."""
+    del _tmp
+    seen = json.loads(
+        _dashnode.run_dashboard_node(_NO_ROUTES_HARNESS).stdout)
+    assert seen['asked'] == [
+        {'target': '/command', 'method': 'PUT'}], seen
+    assert seen['unplanned'] == ['/command'], seen
+    assert seen['refusal'] == 'HTTP 599: unplanned request', seen
+
+
+_EVAL_TABS_FAIL_HARNESS = _dashnode.DashboardNodeHarness(
+    _DOM + _dashfetch.DOOR + r"""
 (async () => {
 const listeners = [];
 const bus = { on: (fn) => listeners.push(fn) };
 const body = JSON.stringify({ error: 'tabs unavailable' });
 globalThis.fetch = async (target) => {
   const where = String(target);
-  if (where.startsWith('/tabs')) {
+  if (where === '/tabs') {
     return {
       ok: false, status: 500,
       headers: { get: () => 'application/json' },
@@ -236,7 +301,7 @@ globalThis.fetch = async (target) => {
       text: async () => body,
     };
   }
-  throw new Error('unexpected fetch ' + where);
+  return refuse(where);
 };
 phase('dashboard module import started');
 const { mount } = await bounded(
@@ -252,11 +317,11 @@ const sel = container.find('[data-role=tab-select]');
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify(
   { options: sel.options.map((o) => o.textContent),
-    values: sel.options.map((o) => o.value) }));
+    values: sel.options.map((o) => o.value), unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=2, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'eval.js',))
+    """, bounded_steps=2, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'eval.js',))
 
 
 def test_a_tab_list_the_bridge_refused_says_why_in_the_option(_tmp):
@@ -319,7 +384,8 @@ def test_settings_caveat_says_where_an_untargeted_command_runs(_tmp):
     assert 'every tab' not in lowered, seen
 
 
-_SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(_dashnode.DOM + r"""
+_SETTINGS_STREAM_HARNESS = _dashnode.DashboardNodeHarness(
+    _dashnode.DOM + _dashfetch.DOOR + r"""
 (async () => {
 const storage = new Map();
 globalThis.localStorage = {
@@ -338,13 +404,24 @@ globalThis.clearTimeout = (id) => timers.delete(id);
 const streams = [];
 const probes = [];
 let available = false;
+const TABS = '/tabs';
+const STREAM = '/stream?tab=dashboard';
+// The three origins this scenario can reach once it types a bridge URL
+// into the server field: same-origin, and the two it types. Both routes
+// ride that origin, so a target on any other one is a request no
+// scenario planned -- and a path match alone would serve it, which is
+// what this fake used to do.
+const SERVERS = ['', 'https://example.com/first',
+                 'https://example.com/second'];
+const onAServer = (path) => (target) => SERVERS.some(
+  (server) => target === server + path);
+const isTabs = onAServer(TABS);
+const isStream = onAServer(STREAM);
 globalThis.fetch = (target, init) => {
-  if (target.endsWith('/tabs')) {
+  if (isTabs(target)) {
     return new Promise((resolve, reject) => probes.push({ resolve, reject }));
   }
-  if (!target.endsWith('/stream?tab=dashboard')) {
-    throw new Error('unexpected request ' + target);
-  }
+  if (!isStream(target)) return refuse(target);
   streams.push({ target, auth: init.headers.Authorization,
     signal: init.signal });
   if (!available) return Promise.reject(new Error('bridge unavailable'));
@@ -403,12 +480,13 @@ sse.stop();
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({ initial, failed, recovered,
   pending, final, beforeProbeCount: beforeProbe.count, afterProbe,
-  requests: streams.map(({ target, auth }) => ({ target, auth })) }));
+  requests: streams.map(({ target, auth }) => ({ target, auth })),
+  unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
-""", bounded_steps=5, module=True, arguments=(
-    ROOT / 'dashboard' / 'sections' / 'settings.js',
-    ROOT / 'dashboard' / 'sse.js'))
+    """, bounded_steps=5, module=True, arguments=(
+        ROOT / 'dashboard' / 'sections' / 'settings.js',
+        ROOT / 'dashboard' / 'sse.js'))
 
 
 def test_saving_token_restarts_stream_independently_of_probe(_tmp):
@@ -417,6 +495,7 @@ def test_saving_token_restarts_stream_independently_of_probe(_tmp):
             replace(_SETTINGS_STREAM_HARNESS, arguments=(
                 *_SETTINGS_STREAM_HARNESS.arguments, outcome)))
         seen = json.loads(result.stdout)
+        assert seen['unplanned'] == [], seen
         assert seen['initial'] == ['no-token'], seen
         assert seen['failed']['token'] == 'first-token', seen
         assert 'bridge unavailable' in seen['failed']['status'], seen

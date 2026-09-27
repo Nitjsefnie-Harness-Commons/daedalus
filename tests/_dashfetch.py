@@ -9,11 +9,16 @@ and no scenario failed (#1083). `DOOR` is what those fakes close, and it
 is the one thing they share -- each fake keeps the routes it models,
 because a shape match is not a plan.
 
-A refusal is a record plus a 599 rather than a throw, because
-`uploads.js` wraps its own fetch in a catch at `load`, `download` and
-`preview` and `sse.js` swallows a throw into an ordinary stream error: a
-thrown refusal reaches the suite as a symptom somewhere else. The 599 is
-re-spelled here rather than imported, so `_dashshell.py`'s
+A refusal is a record plus a 599 rather than a throw, and the reason is
+narrower than it first looks: a 599 is a RESPONSE, so the module's own
+error path runs and the child reaches its report. That is what puts the
+record in front of the assertion. A throw would do the same at the three
+sites in `uploads.js` that catch their own fetch -- both spellings reach
+the module as a failure there -- so the choice is made for the sites that
+do NOT catch, and the status is what keeps the child alive to write
+`UNPLANNED` at all.
+
+The 599 is re-spelled here rather than imported, so `_dashshell.py`'s
 `UNPLANNED_STATUS` can change without this one following.
 `UNPLANNED` is what every harness splicing this in reports, so
 `unplanned == []` claims that nothing was invented rather than naming the
