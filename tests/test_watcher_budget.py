@@ -76,6 +76,24 @@ def _watcher(name, args, fake):
                   fake.env())
 
 
+def _watcher_on_a_pinned_clock(name, args, fake, now):
+    """A watcher child whose `time.time` reads `now` from its first line.
+
+    The patch lands on the `time` module object itself, which the
+    `gh_client` the script imports shares, so the instant the pause reads
+    and the instant the refusal's reset was measured against are one
+    reading by construction. Only `time()` is pinned: `sleep` and
+    `monotonic` stay real, so the pause is a real sleep and nothing
+    deadline-shaped is disturbed.
+    """
+    script = SKILL / name
+    preamble = ('import runpy, sys, time;'
+                f' time.time = lambda: {now!r};'
+                f' sys.argv = [{str(script)!r}] + {list(args)!r};'
+                f' runpy.run_path({str(script)!r}, run_name="__main__")')
+    return _Child([sys.executable, '-u', '-c', preamble], fake.env())
+
+
 def _await_calls(fake, count, child):
     return waits.await_calls(fake, count, child, f'{count} gh call(s)')
 
@@ -316,13 +334,19 @@ def test_the_children_die_with_their_parent(tmp):
 
 
 def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
-    reset = int(time.time()) + 6
+    # One reading supplies the instant the child is pinned to and the reset
+    # the fixture names, so the six seconds between them is a value this
+    # test chose. A reset stamped from a reading of its own is nameable by
+    # the pause only while a cold child start has not already overtaken it.
+    now = int(time.time())
+    reset = now + 6
     answers = dict(idle_answers())
     answers['reviews(first: 100'] = [
         refusal_response(headers={'X-RateLimit-Reset': str(reset)}),
         pr_page(reviews=[review(1)], conversation=[comment(2)])]
     fake = _fake_gh.FakeGh(tmp, answers)
-    child = _watcher('pr_comment_watch.py', [PR, '--interval', '5'], fake)
+    child = _watcher_on_a_pinned_clock(
+        'pr_comment_watch.py', [PR, '--interval', '5'], fake, now)
     try:
         waits.await_lines(child.out, _reports_rate_limit, 1,
                           'the pause line naming the reset')
@@ -330,6 +354,7 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         pause = [line for line in child.out.lines
                  if _reports_rate_limit(line)][0]
         assert stamp in pause, (stamp, pause)
+        assert 'waiting 6s' in pause, pause
         waits.await_lines(child.out, _reports_state, 1,
                           'the resumed poll to report what it found')
         calls = fake.calls()
