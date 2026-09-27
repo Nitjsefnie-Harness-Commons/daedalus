@@ -66,11 +66,12 @@ def test_an_unplanned_request_is_refused_and_recorded(_tmp):
     string, and the exact target is the claim, so a door that recorded
     every request it saw -- declared ones included -- fails here rather
     than passing a substring search.
+
+    This holds the door. The per-suite `unplanned == []` assertions in
+    `test_dashboard_sections.py` and `test_dashboard_behaviour.py` are
+    what hold the real fakes, and only a module that invents a request
+    makes either of them bite.
     """
-    # The door itself is held by this control; the per-suite
-    # `unplanned == []` assertions in `test_dashboard_sections.py` and
-    # `test_dashboard_behaviour.py` are what hold the real fakes, and
-    # only a module that invents a request makes either of them bite.
     del _tmp
     seen = json.loads(_dashnode.run_dashboard_node(_TWO_ROUTES).stdout)
     assert seen['declared'] == [{'tabId': '11', 'age': 0}], seen
