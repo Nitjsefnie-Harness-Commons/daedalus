@@ -11,7 +11,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -64,39 +63,12 @@ def _announces_failure(line):
     return 'pyright: failure' in line
 
 
-class _Child:
-    """A watcher process with both of its streams drained."""
+class _Child(waits.ChildProcess):
+    """A child the budget suite starts from an argv and an environment."""
 
-    def __init__(self, argv, env, interruptible=False):
-        self.argv = argv
-        # Its own process group on Windows, so a graceful stop can be
-        # delivered to it alone: the shared console would take the test
-        # with it.
-        group = (subprocess.CREATE_NEW_PROCESS_GROUP
-                 if interruptible and sys.platform.startswith('win') else 0)
-        self.proc = subprocess.Popen(
-            argv, env=_util.child_coverage('scrub', environment=env),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding='utf-8', errors='replace', creationflags=group)
-        self.out = waits.Stream()
-        self.err = waits.Stream()
-        for stream, sink in ((self.proc.stdout, self.out),
-                             (self.proc.stderr, self.err)):
-            threading.Thread(target=sink.pump, args=(stream,),
-                             daemon=True).start()
-
-    def alive(self):
-        return self.proc.poll() is None
-
-    def captured(self):
-        """Everything the child printed, for a wait's failure report."""
-        return '\n'.join(self.out.lines + self.err.lines)
-
-    def stop(self):
-        if self.proc.poll() is None:
-            self.proc.kill()
-        self.proc.wait(timeout=60)
-        return self.proc.returncode
+    def __init__(self, argv, env):
+        super().__init__(argv, _util.child_coverage('scrub',
+                                                    environment=env))
 
 
 def _watcher(name, args, fake):
@@ -506,8 +478,7 @@ def test_a_graceful_exit_leaves_no_children_behind(tmp):
     fake = _fake_gh.FakeGh(tmp, idle_answers())
     parent = _Child([sys.executable, '-u', str(SKILL / 'watch_all.py'),
                      PR, BRANCH, '--log', str(Path(tmp) / 'watch.log'),
-                     '--debounce', '1', '--max-hold', '5'], fake.env(),
-                    interruptible=True)
+                     '--debounce', '1', '--max-hold', '5'], fake.env())
     try:
         waits.await_lines(parent.err, _announces_pid, 2,
                           'both children to announce their pid')
