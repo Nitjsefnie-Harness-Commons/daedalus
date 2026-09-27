@@ -173,7 +173,7 @@ content and page scripts run under `tests/test_extension_boundary.py`,
 `tests/test_eval_relay.py` and the `tests/test_worker_*.py` and
 `tests/test_gm_*.py` suites. The one shipped module no suite reaches is
 the extension options page, `extension/options.js`, at 0 of 51 code
-lines — about 1% of the 4943 the number is measured over. Both of those are
+lines — about 1% of the 4945 the number is measured over. Both of those are
 read off the tree by `tests/test_coverage_prose.py`, so a shipped file that
 grows turns that suite red. The covered count and the total are deliberately
 not restated here: both are measurements of one run, and that run's own
