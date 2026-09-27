@@ -19,20 +19,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-
-
-def _load(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'upload_routes.py', name)
-
-
-def _store(root, token, upload_id, name, data=b'x'):
-    """Put a file into the upload namespace without going through a route."""
-    target = Path(root) / token / upload_id
-    target.mkdir(parents=True, exist_ok=True)
-    path = target / name
-    path.write_bytes(data)
-    return path
+from _upload_fixture import _load, _store  # noqa: E402
 
 
 def test_list_uploads_skips_an_entry_deleted_during_the_walk(tmp):

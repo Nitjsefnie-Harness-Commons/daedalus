@@ -13,20 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _util  # noqa: E402
-
-
-def _load(name):
-    return _util.load(
-        _util.ROOT / 'daedalus_bridge' / 'upload_routes.py', name)
-
-
-def _store(root, token, upload_id, name, data=b'x'):
-    """Put a file into the upload namespace without going through a route."""
-    target = Path(root) / token / upload_id
-    target.mkdir(parents=True, exist_ok=True)
-    path = target / name
-    path.write_bytes(data)
-    return path
+from _upload_fixture import _load, _store  # noqa: E402
 
 
 def test_list_uploads_answers_a_bare_array_without_paging(tmp):

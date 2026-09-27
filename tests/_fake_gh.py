@@ -64,7 +64,7 @@ def _write_atomic(path, text):
     os.replace(tmp, path)
 
 
-def _load(path):
+def _load_answers(path):
     with open(path, encoding='utf-8') as handle:
         return json.load(handle)
 
@@ -139,7 +139,7 @@ def main(argv):
         return 0
     request = (sys.stdin.read() if GRAPHQL_MARK in argv
                else (argv[-1] if argv else ''))
-    answers = _load(os.environ['DAEDALUS_FAKE_GH_ANSWERS'])
+    answers = _load_answers(os.environ['DAEDALUS_FAKE_GH_ANSWERS'])
     fragment, response = _fixture(answers, request)
     _logged(os.environ['DAEDALUS_FAKE_GH_LOG'],
             {'t': time.time(), 'argv': list(argv), 'request': request,

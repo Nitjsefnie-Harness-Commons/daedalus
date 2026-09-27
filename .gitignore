@@ -415,6 +415,7 @@
 !/tests/_token_policy_cases.py
 !/tests/_unconsolidated_js_names.py
 !/tests/_unconsolidated_names.py
+!/tests/_upload_fixture.py
 !/tests/_util.py
 !/tests/_version_contract.py
 !/tests/_version_contract_dashboard_duplicates.py
