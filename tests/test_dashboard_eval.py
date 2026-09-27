@@ -270,12 +270,17 @@ phase('dashboard harness finished');
 
 
 def test_a_request_this_file_never_planned_is_refused_and_recorded(_tmp):
-    """The control for the fakes above, and the anti-vacuity half: the
-    record is compared as a list holding the exact target, so a fake that
-    recorded nothing and a fake that recorded the declared route as well
-    both fail rather than passing a truthiness check. The 599 in the
-    refusal is the number `api.js` read off the response, not one this
-    suite wrote into its own assertion."""
+    """The control for the fakes above: a transport with no routes at all
+    still refuses and records, so the suite's own `unplanned == []`
+    assertions are not reading an array that can only ever be empty.
+
+    The record is compared as a list holding the exact target, so a fake
+    that recorded nothing fails rather than passing a truthiness check.
+    A fake that recorded its DECLARED routes alongside is the case this
+    control cannot reach -- it declares none -- and
+    `tests/test_dashfetch.py` holds that half. The 599 in the refusal is
+    the number `api.js` read off the response, not one this suite wrote
+    into its own assertion."""
     del _tmp
     seen = json.loads(
         _dashnode.run_dashboard_node(_NO_ROUTES_HARNESS).stdout)
