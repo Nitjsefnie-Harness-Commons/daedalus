@@ -489,7 +489,7 @@ def _oracle(forms, stored):
     return answered
 
 
-def _verdict(root, form, stored):
+def _scanned_form(root, form, stored):
     """What the scan does with one form: refused, resolved to the target, or
     silent. The target is a repo module, so a resolution shows up in the
     scan set rather than having to be told apart from a silence."""
@@ -518,10 +518,10 @@ def sweep(root, forms):
     if key not in _SWEEPED:
         for form, reached in zip(forms, _oracle(forms, False)):
             form['oracle'] = reached
-            form['inline'] = _verdict(root, form, False)
+            form['inline'] = _scanned_form(root, form, False)
         for form, reached in zip(forms, _oracle(forms, True)):
             form['stored'] = reached
-            form['store'] = _verdict(root, form, True)
+            form['store'] = _scanned_form(root, form, True)
         _SWEEPED[key] = forms
     return _SWEEPED[key]
 
