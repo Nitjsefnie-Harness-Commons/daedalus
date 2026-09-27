@@ -190,7 +190,10 @@ def _on_demand_command_gc(fault_dir):
 
     A collector on a wall clock spends the TTL while the test is still
     setting itself up, so what an assertion finds removed is partly a
-    measure of how long setup took.
+    measure of how long setup took. The record each sweep leaves is taken
+    by name and not by kind: a namespace the sweep left where a queue
+    directory was is a leftover, and a directory filter would drop it from
+    the record that has to show it.
     """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
@@ -236,11 +239,7 @@ def _sweep(command_root, served):
 
 
 def _root_names(command_root):
-    """Every entry in the command root but the fixture's sweep markers.
-
-    A name filter, not a directory filter: a namespace left where a queue
-    directory was is as much a leftover as the directory.
-    """
+    """Every entry in the command root but the fixture's sweep markers."""
     return sorted(p.name for p in command_root.iterdir()
                   if p.name not in (_GC_TRIGGER, _GC_DONE))
 
@@ -307,7 +306,7 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         fresh.write_text('{"id":"fresh"}', encoding='utf-8')
         expired.write_text('{"id":"expired"}', encoding='utf-8')
         now = time.time()
-        os.utime(fresh, (now - 1, now - 1))
+        os.utime(fresh, (now + _STAMP_LEASH, now + _STAMP_LEASH))
         os.utime(expired, (now - 15, now - 15))
         _sweep(command_root, served)
         assert fresh.exists(), 'configured TTL expired a fresh command'
