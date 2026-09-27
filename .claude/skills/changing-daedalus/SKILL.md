@@ -372,7 +372,9 @@ Its exit code is the verdict, so a caller never has to read the loop: 0 every
 run on the SHA concluded `success`, `neutral` or `skipped` **and the
 `tests` matrix has a run on that SHA**; 1 every run concluded and one
 concluded otherwise, offenders named with URLs; 2 the `--timeout` bound
-expired first; 3 the invocation was rejected or a query failed - loud and at
+expired first - with named runs still open, with no run ever appearing, or
+with every run concluded and the `tests` matrix still absent; 3 the
+invocation was rejected or a query failed - loud and at
 once, never retried behind a message that reads like waiting; 4 every run
 concluded acceptably and none of them is a `tests` run, so the workflow
 that gates the merge was never dispatched. A rate-limit refusal is the one

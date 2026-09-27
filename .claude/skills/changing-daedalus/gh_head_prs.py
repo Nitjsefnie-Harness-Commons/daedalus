@@ -1,9 +1,11 @@
 """The open pull requests whose head is one commit SHA.
 
-Its own module rather than another query in `gh_client.py`, which is one
-line under the 500-line production ceiling the size policy enforces. The
-query and the two filters it carries are the whole of a subject, and
-`gh_client` stays the transport it already is for every watcher here.
+Its own module rather than another query in `gh_client.py`, which measured
+490 lines at the commit this branch starts from against the 500-line
+production ceiling the size policy enforces: ten lines of headroom, and the
+query and its two filters are more than ten lines. The whole of a subject
+lives here, and `gh_client` stays the transport it already is for every
+watcher in this directory.
 
 Both filters are load-bearing, and `origin/main` is why. That tip is an
 ancestor of the head of a branch whose pull request has been merged, so the
@@ -32,6 +34,12 @@ def head_pull_requests(owner, name, sha):
     A SHA the repository does not have answers with a null object, which is
     a head with no pull request rather than a failed query: `ci_wait.py`
     reads that as no pull request and hands the head to its grace.
+
+    The all-zero OID is the one input that does not, and it is the one
+    input a caller cannot have meant: GitHub answers it with `data: null`
+    and no errors array, which is a body `gh_client.graphql` refuses as a
+    failed read. A caller that supplied it gets a `QueryError`, which
+    `ci_wait.py` reports once and then carries on to its grace.
     """
     page = gh_client.graphql(HEAD_PULL_REQUESTS_QUERY,
                              {'owner': owner, 'name': name, 'sha': sha})
