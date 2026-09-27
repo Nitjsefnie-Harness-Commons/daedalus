@@ -258,6 +258,8 @@ const drive = {
   },
   planned() { return Array.from(ROUTES.keys()); },
   live() { return PARKED.filter(Boolean).map((slot) => slot.id); },
+  // The delay a parked slot was asked for, which its id does not carry.
+  delays() { return PARKED.filter(Boolean).map((slot) => slot.delay); },
   fire(id) {
     const slot = PARKED[id - 1];
     if (!slot) throw new Error('no parked timer with id ' + id);

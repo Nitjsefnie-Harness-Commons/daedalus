@@ -236,17 +236,19 @@ UNCONSOLIDATED_JS_NAMES = {
         'throttle harness and not the boot harness own loop',
     ('tests/_dashdom.py', 'textNode'):
         'this is the text-node factory the jsdom-less shell document '
-        'uses. Its twin is the row for tests/_dashnode_dom.py, five '
-        'body '
+        'uses. Its twin is the row for tests/_dashnode_dom.py, five body '
         'lines each, and that twin is the owner',
     ('tests/_dashnode_dom.py', 'jsonResponse'):
         'this is the JSON answer the dashboard node own reader expects, '
-        'where the owner is the shell harness one',
+        'where the owner is the shell harness one. The scaffold moved here '
+        'out of tests/_dashnode.py, so the row moved with it; the name and '
+        'its body did not change',
     ('tests/_dashnode_dom.py', 'textNode'):
         'this is the text-node factory the dashboard node document uses, '
         'five body lines, and its twin in tests/_dashdom.py is the owner. '
         'A separate file, tests/_dashshell.py, defines no textNode at '
-        'all',
+        'all. The scaffold moved here out of tests/_dashnode.py, so the '
+        'row moved with it',
     ('tests/_dashshell.py', 'jsonResponse'):
         'this is the JSON answer the shell harness own reader expects, '
         'where the owner belongs to the dashboard node harness',

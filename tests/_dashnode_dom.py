@@ -28,22 +28,18 @@ phase('dashboard harness started');
 const clicks = [];
 // The shipped dashboard both WRITES `[data-stat=rate]` on an element it has
 // just built and READS `[data-meta="tab-count"]` off elements the page owns,
-// so one grammar answers both and the quoted and unquoted spellings are the
-// same selector. A matcher that took only one of them would answer the
-// other's call with a refusal a reader cannot tell from a miss, which is
-// the one confusion this double exists to prevent.
+// so one grammar answers both and quoting does not make a different
+// selector. A matcher that took only one spelling would answer the other
+// call with a refusal indistinguishable from a miss.
 //
-// The grammar is deliberately narrow, and narrowness is the refusal: an
-// existence test (`[data-sub]`), a class or descendant selector, a name
-// this one does not spell, and a quoted value with no closing quote are
-// all shapes it declines, because answering one of those wrongly is the
-// failure this double is for. `dataset` keys are camelCase and every
-// attribute name in the shipped dashboard is lowercase, so a lowercase
-// name is the whole of the domain rather than a shortcut.
+// Narrowness IS the refusal: every clause declines a shape rather than
+// parsing it and answering a miss. A space, a `]` or a `,` in a value is
+// how CSS writes a compound, a selector list and a padded value, none of
+// which this models. An empty value IS a value, and quoting is the escape
+// hatch for one that is not an identifier.
 //
 // String operations, not a regular expression: `_dashnode`'s bound-count
-// check refuses a slash token in the harness source, and every other
-// parser in these two modules parses that way for the same reason.
+// check refuses a slash token in the harness source.
 function dataSelector(selector) {
   const text = String(selector).trim();
   const eq = text.indexOf('=');
@@ -57,8 +53,14 @@ function dataSelector(selector) {
   if (value.slice(0, 1) === '"') {
     if (value.length < 2 || value.slice(-1) !== '"') return null;
     value = value.slice(1, -1);
-  } else if (value.indexOf('"') >= 0) {
-    return null;
+  } else {
+    if (value.indexOf('"') >= 0) return null;
+    for (const ch of value) {
+      const word = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+        || (ch >= '0' && ch <= '9');
+      if (!word && ch !== '-' && ch !== '_'
+          && ch.codePointAt(0) < 0xa0) return null;
+    }
   }
   return { name, value };
 }
@@ -151,11 +153,9 @@ globalThis.document = {
   createTextNode: textNode,
   getElementById: () => null,
   querySelector: () => new El('span'),
-  // The page's own furniture, which a section reaches from outside its
-  // container. It is walked rather than registered: `dashboard/index.html`
-  // carries the status-line count the dashboard writes to, and a registry
+  // The page's own furniture, walked rather than registered: a registry
   // would make a scenario's fixture indistinguishable from the page it
-  // stands for. A selector the grammar does not parse refuses by name.
+  // stands for.
   querySelectorAll: (selector) => {
     const spec = dataSelector(selector);
     if (!spec) throw new Error('unsupported selector ' + selector);
