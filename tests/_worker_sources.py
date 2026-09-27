@@ -116,6 +116,13 @@ function copy(value) {
 # never yields and every other answer is the disabled error, so a harness
 # declaring no statuses sees what it would have written, and one declaring
 # `['hang']` gains the connected body, which is what such a plan asks for.
+#
+# Reaching it is not every splice's fate. Of the seven suites that splice it
+# in directly, the register-throttle, close-tab and mint harnesses call it
+# and the other four never do, so a change here moves those three and is
+# inert for the rest; the suites reached through a shared harness module --
+# the relay, CDP, overlap, boundary and netcapture ones -- do call it.
+# Measured by instrumenting the factory and counting, not by reading plans.
 STREAM_RESPONSE = r"""
 function streamResponse(answer) {
   if (answer === 'hang') {
