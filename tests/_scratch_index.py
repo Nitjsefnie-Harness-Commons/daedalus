@@ -18,7 +18,7 @@ from _repo import ROOT  # noqa: E402
 _TEMPLATE = None
 
 
-def _git(root, *command):
+def _git_at(root, *command):
     subprocess.run(['git', '-C', str(root), *command],
                    capture_output=True, check=True)
 
@@ -30,11 +30,11 @@ def _build_template():
         copy_test_tree(root)
         (root / 'run_tests.py').write_bytes(
             (ROOT / 'run_tests.py').read_bytes())
-        _git(root, 'init', '-q')
+        _git_at(root, 'init', '-q')
         # A split index links to a `.git/sharedindex.<sha>` the copy does
         # not carry, so a scratch would fail `ls-files`; stage one index.
-        _git(root, '-c', 'core.splitIndex=false', 'add', '--', 'tests',
-             'run_tests.py')
+        _git_at(root, '-c', 'core.splitIndex=false', 'add', '--', 'tests',
+                'run_tests.py')
         return (root / '.git' / 'index').read_bytes()
 
 
@@ -54,5 +54,5 @@ def install(root):
     the same way, since it never re-staged. Only a fresh add would list
     it.
     """
-    _git(root, 'init', '-q')
+    _git_at(root, 'init', '-q')
     (root / '.git' / 'index').write_bytes(_template())

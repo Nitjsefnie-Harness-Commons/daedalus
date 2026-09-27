@@ -385,6 +385,7 @@
 !/tests/_pyroute_values.py
 !/tests/_pyroute_violations.py
 !/tests/_queueread.py
+!/tests/_ratchet_fixture.py
 !/tests/_realbrowser.py
 !/tests/_realbrowser_broken_worker.py
 !/tests/_realbrowser_classification_support.py

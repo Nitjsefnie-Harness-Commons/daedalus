@@ -13,6 +13,7 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _worker_runtime  # noqa: E402
+from _ratchet_fixture import _git  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import directive_entries  # noqa: E402
 
@@ -23,12 +24,6 @@ from js_coverage import (_data_source, _file_url_path, _resolve_data,
 
 
 _SCRIPT = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
-
-
-def _git(root, *args):
-    return subprocess.run(
-        ['git', '-C', str(root), *args], capture_output=True,
-        check=True, text=True)
 
 
 def _repository(tmp, sources):

@@ -17,7 +17,7 @@ from workflow_yaml import (  # noqa: E402
 import yamlanchor  # noqa: E402
 
 
-def _document(prefix):
+def _workflow(prefix):
     return (f'{prefix}jobs:\n sample:\n  steps:\n'
             '   - name: *a\n     if: z\n')
 
@@ -66,7 +66,7 @@ def test_nested_sequence_block_headers_hide_scalar_content_anchors(tmp):
         '    key: &a hidden\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         parsed = yaml.load(source, Loader=yaml.BaseLoader)
         expected = parsed['jobs']['sample']['steps'][0]['name']
         assert _names(source) == [expected] == ['target'], source
@@ -96,7 +96,7 @@ def test_following_line_block_headers_hide_mapping_scalar_content(tmp):
         '  : value\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -128,7 +128,7 @@ def test_nested_quoted_scalar_content_hides_anchors(tmp):
         "     key: &a hidden'\n",
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -149,7 +149,7 @@ def test_nested_scalar_boundaries_preserve_same_level_siblings(tmp):
             '    - first: &a target\n',
         )
         for prefix in prefixes:
-            source = _document(prefix)
+            source = _workflow(prefix)
             expected = _base_name(source)
             assert _names(source) == [expected] == ['target'], source
 
@@ -169,7 +169,7 @@ def test_bare_sequence_anchor_position_skips_blank_and_comment_lines(tmp):
         '   &a target\n',
     )
     for prefix in prefixes:
-        _refused(_document(prefix), 'sequence item')
+        _refused(_workflow(prefix), 'sequence item')
 
 
 def test_separate_line_explicit_key_anchor_names_mapping_key(tmp):
@@ -189,7 +189,7 @@ def test_separate_line_explicit_key_anchor_names_mapping_key(tmp):
         '  : value\n',
     )
     for prefix in prefixes:
-        _refused(_document(prefix), 'mapping key')
+        _refused(_workflow(prefix), 'mapping key')
 
 
 def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
@@ -204,7 +204,7 @@ def test_nested_explicit_key_scalar_content_hides_anchors(tmp):
                 f'  - - ? {properties}{header}\n'
                 '        key: &a hidden\n'
                 '      : value\n')
-            source = _document(prefix)
+            source = _workflow(prefix)
             expected = _base_name(source)
             assert _names(source) == [expected] == ['target'], source
 
@@ -242,7 +242,7 @@ def test_nested_explicit_quoted_key_scalar_hides_anchors(tmp):
         "          : value\n",
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -292,7 +292,7 @@ def test_inline_anchored_keys_name_their_yaml_position(tmp):
         ),
     )
     for prefix, detail in cases:
-        _refused(_document(prefix), detail)
+        _refused(_workflow(prefix), detail)
 
 
 def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
@@ -310,7 +310,7 @@ def test_nested_mapping_scalar_header_keeps_mapping_sibling_visible(tmp):
         '      first: &a target\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -337,7 +337,7 @@ def test_empty_nested_literal_stops_before_a_sibling_anchor(tmp):
         '    - first: &a target\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -402,7 +402,7 @@ def test_following_line_scalar_headers_stop_before_sibling_anchors(tmp):
         '      first: &a target\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -427,7 +427,7 @@ def test_standalone_scalar_headers_keep_the_containing_dash_indent(tmp):
             f'anchors:\n first: &a target\n decoys:\n{marker}{gap}'
             f'{" " * header_indent}{header}\n'
             f'{" " * content_indent}key: &a hidden\n')
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -449,7 +449,7 @@ def test_nested_explicit_key_scalar_keeps_mapping_sibling_visible(tmp):
         '      first: &a target\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert _names(source) == [expected] == ['target'], source
 
@@ -488,7 +488,7 @@ def test_nested_flow_scalar_quotes_are_opaque(tmp):
         '   ]\n',
     )
     for prefix in prefixes:
-        source = _document(prefix)
+        source = _workflow(prefix)
         expected = _base_name(source)
         assert expected == 'target', source
         _refused(source, 'flow collection')
@@ -529,7 +529,7 @@ def test_nested_anchor_position_diagnostics_normalize_prefixes(tmp):
         ),
     )
     for prefix, detail in cases:
-        _refused(_document(prefix), detail)
+        _refused(_workflow(prefix), detail)
 
 
 def test_step_reader_rejects_nested_sequence_items(tmp):
@@ -558,7 +558,7 @@ def test_present_unsupported_anchor_positions_name_their_yaml_position(tmp):
         ('anchors:\n - - &a target\n', 'nested sequence'),
     )
     for prefix, detail in cases:
-        _refused(_document(prefix), detail)
+        _refused(_workflow(prefix), detail)
 
 
 def test_unsupported_tag_diagnostic_does_not_claim_a_false_resolution(tmp):
@@ -584,7 +584,7 @@ def test_explicit_flow_key_quotes_hide_delimiters_and_anchor_text(tmp):
                           f'{closer} delimiter\n'
                           '   key: &a hidden\n'
                           f'   end{quote} : value {closer}{outer[1]}\n')
-                source = _document(prefix)
+                source = _workflow(prefix)
                 expected = _base_name(source)
                 assert expected == 'target', source
                 _refused(source, 'flow collection')
