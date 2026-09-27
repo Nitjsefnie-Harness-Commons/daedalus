@@ -272,6 +272,7 @@
 !/tests/_carrier_cases.py
 !/tests/_case_fold.py
 !/tests/_cdpharness.py
+!/tests/_ci_wait_fixtures.py
 !/tests/_cli_arg_audit_conditions.py
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py

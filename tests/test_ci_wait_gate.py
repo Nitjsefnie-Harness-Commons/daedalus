@@ -22,7 +22,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
-from test_ci_wait import _Clock, _frozen_wait_clock, _run  # noqa: E402
+# Aliased to the names these suites have always called them, so the
+# extraction is the only thing the call sites see.
+from _ci_wait_fixtures import (  # noqa: E402
+    _ci_wait_run as _run,
+    _ci_wait_clock as _Clock,
+    _frozen_ci_wait_clock as _frozen_wait_clock)
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -408,6 +413,34 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
                 f'trigger by {filtered}, so a pull request whose changes are '
                 f'all filtered out gets no run of it and this wait would '
                 f'refuse a head the merge never had to gate')
+
+
+def test_both_contract_surfaces_agree_on_what_exit_four_means(tmp):
+    """The exit-code contract is stated twice - the docstring and SKILL.md -
+    and both used to claim that exit 4 meant the gate "that decides the
+    merge" was never dispatched, on a path that reaches a ratchet commit to
+    `main` where no merge exists at all. The line the tool prints says the
+    head is not certified, and both documents have to say what the line
+    says, in the same words, so neither can drift into a claim the data
+    does not support.
+
+    Whitespace is normalised because a contract sentence is rewrapped as
+    prose is edited, and a check that failed on a rewrap would be a check
+    about typography rather than about the claim.
+    """
+    del tmp
+    mod = _ci_wait()
+    skill = (ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
+             ).read_text(encoding='utf-8')
+    for name, text in (('the docstring', mod.__doc__), ('SKILL.md', skill)):
+        flat = ' '.join((text or '').split())
+        assert 'so this head is not certified' in flat, name
+        assert 'the merge was never dispatched' not in flat, name
+        assert 'gates the merge was never dispatched' not in flat, name
+    # The narrative about the cb67badf head is about a head that really was
+    # merge-gated, and is the one place the word belongs.
+    assert 'gates the merge' in ' '.join((mod.__doc__ or '').split()), (
+        'the cb67badf narrative no longer says what gates it')
 
 
 # ---- the head's pull requests ----

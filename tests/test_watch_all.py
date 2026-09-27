@@ -29,8 +29,13 @@ def _watch_all():
     return mod
 
 
-def _run(rid, status, conclusion, name=None):
+def _hold_run(rid, status, conclusion, name=None):
     """One workflow run as the shared client reports it against a SHA.
+
+    A different shape from the ci_wait suites' run builder, and named apart
+    from it on purpose: that one is a shared helper in
+    `tests/_ci_wait_fixtures.py`, and a second builder called `_run` is the
+    collision `tests/_unconsolidated_names.py` exists to catch.
 
     `name` overrides the workflow's own name, which is how a fixture
     carries the gating workflow: a run set with no run of it is not a
@@ -65,9 +70,9 @@ def test_a_queued_run_holds_even_when_every_check_run_is_complete(tmp):
     """
     del tmp
     mod = _watch_all()
-    _fake_runs(mod, [_run(1, 'completed', 'success'),
-                     _run(2, 'queued', None),
-                     _run(3, 'completed', 'success', name='tests')])
+    _fake_runs(mod, [_hold_run(1, 'completed', 'success'),
+                     _hold_run(2, 'queued', None),
+                     _hold_run(3, 'completed', 'success', name='tests')])
     assert mod._all_concluded(SHA) is False
 
 
@@ -82,11 +87,11 @@ def test_no_run_yet_is_not_settled(tmp):
 def test_every_run_completed_is_settled(tmp):
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success'),
-            _run(2, 'completed', 'skipped'),
-            _run(3, 'completed', 'neutral'),
-            _run(4, 'completed', 'failure'),
-            _run(5, 'completed', 'success', name='tests')]
+    runs = [_hold_run(1, 'completed', 'success'),
+            _hold_run(2, 'completed', 'skipped'),
+            _hold_run(3, 'completed', 'neutral'),
+            _hold_run(4, 'completed', 'failure'),
+            _hold_run(5, 'completed', 'success', name='tests')]
     assert mod._settled(runs) is True
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
@@ -95,9 +100,9 @@ def test_every_run_completed_is_settled(tmp):
 def test_an_in_progress_run_is_not_settled(tmp):
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success'),
-            _run(2, 'in_progress', None),
-            _run(3, 'completed', 'success', name='tests')]
+    runs = [_hold_run(1, 'completed', 'success'),
+            _hold_run(2, 'in_progress', None),
+            _hold_run(3, 'completed', 'success', name='tests')]
     assert mod._settled(runs) is False
 
 
@@ -126,11 +131,11 @@ def test_every_run_the_client_reports_is_considered(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_run(index, 'completed', 'success') for index in range(1, 6)]
-    runs.append(_run(6, 'completed', 'success', name='tests'))
+    runs = [_hold_run(index, 'completed', 'success') for index in range(1, 6)]
+    runs.append(_hold_run(6, 'completed', 'success', name='tests'))
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
-    _fake_runs(mod, [*runs, _run(7, 'queued', None)])
+    _fake_runs(mod, [*runs, _hold_run(7, 'queued', None)])
     assert mod._all_concluded(SHA) is False
 
 
@@ -166,7 +171,7 @@ def test_a_rate_limited_completion_query_waits_rather_than_holding(tmp):
     _fake_runs_in_order(
         mod,
         [RateLimited('rate limited', time.time() + 2),
-         [_run(1, 'completed', 'success', name='tests')]], seen)
+         [_hold_run(1, 'completed', 'success', name='tests')]], seen)
     out = io.StringIO()
     assert mod._all_concluded(SHA, Watcher('watch_all', out=out)) is True
     assert len(seen) == 2, seen
@@ -220,8 +225,8 @@ def test_a_head_with_no_gating_run_is_not_settled(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success', name='gate freshness'),
-            _run(2, 'completed', 'success', name='CodeQL - Code Quality')]
+    runs = [_hold_run(1, 'completed', 'success', name='gate freshness'),
+            _hold_run(2, 'completed', 'success', name='CodeQL - Code Quality')]
     verdict = mod._settled(runs)
     assert verdict is not True
     assert verdict is not False and verdict is not None
@@ -238,9 +243,9 @@ def test_a_head_with_a_gating_run_still_settles(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success', name='gate freshness'),
-            _run(2, 'completed', 'success', name='CodeQL - Code Quality'),
-            _run(3, 'completed', 'success', name='tests')]
+    runs = [_hold_run(1, 'completed', 'success', name='gate freshness'),
+            _hold_run(2, 'completed', 'success', name='CodeQL - Code Quality'),
+            _hold_run(3, 'completed', 'success', name='tests')]
     assert mod._settled(runs) is True
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
@@ -256,8 +261,8 @@ def test_a_red_gating_run_is_present_and_not_absent(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success', name='tests'),
-            _run(2, 'completed', 'failure', name='speed')]
+    runs = [_hold_run(1, 'completed', 'success', name='tests'),
+            _hold_run(2, 'completed', 'failure', name='speed')]
     assert mod._settled(runs) is True
     _fake_runs(mod, runs)
     assert mod._all_concluded(SHA) is True
@@ -272,7 +277,7 @@ def test_the_cap_line_names_the_absent_gate(tmp):
     """
     del tmp
     mod = _watch_all()
-    runs = [_run(1, 'completed', 'success', name='gate freshness')]
+    runs = [_hold_run(1, 'completed', 'success', name='gate freshness')]
     verdict = mod._settled(runs)
     batch = [f'[ci] CI b {SHA} gate freshness: success '
              'https://github.com/o/r/1']

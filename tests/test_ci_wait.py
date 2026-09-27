@@ -7,6 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+# Aliased to the names these suites have always called them, so the
+# extraction is the only thing the call sites see.
+from _ci_wait_fixtures import (  # noqa: E402
+    _ci_wait_run as _run,
+    _ci_wait_clock as _Clock,
+    _frozen_ci_wait_clock as _frozen_wait_clock)
 
 ROOT = _util.ROOT
 SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py'
@@ -14,27 +20,6 @@ SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'ci_wait.py'
 
 def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_contract')
-
-
-def _run(rid, conclusion, started, workflow=11, path=None, **fields):
-    """One workflow run as the actions API reports it against a SHA.
-
-    Passing `path` removes workflow_id, standing the path in alone.
-    """
-    run = {
-        'id': rid,
-        'name': f'run {rid}',
-        'status': 'completed',
-        'conclusion': conclusion,
-        'run_started_at': started,
-        'workflow_id': workflow,
-        'html_url': f'https://github.com/o/r/actions/runs/{rid}',
-    }
-    if path is not None:
-        del run['workflow_id']
-        run['path'] = path
-    run.update(fields)
-    return run
 
 
 def _verdict(runs):
@@ -225,40 +210,6 @@ def test_the_success_line_is_unchanged_without_ignored_runs(tmp):
         '  tests: completed/success\n'
         'all 1 run(s) on bbbbbbbbbbbb acceptable\n'
     )
-
-
-class _Clock:
-    """The clock both modules read, moved only by the sleeps themselves."""
-
-    def __init__(self, now=1000.0):
-        self.now = now
-
-    def monotonic(self):
-        return self.now
-
-    def time(self):
-        return self.now
-
-    def sleep(self, seconds):
-        self.now += seconds
-
-
-@contextlib.contextmanager
-def _frozen_wait_clock(mod, clock):
-    """One clock for ci_wait and the client it polls through.
-
-    The bound is read from the client's own `time`, so a wait faked on
-    ci_wait's clock alone would compare a real monotonic clock against the
-    fake deadline and expire immediately, before any request. Nothing real
-    is waited on, so a timeout here is a value, not a margin.
-    """
-    real = (mod.time, mod.gh_client.time)
-    mod.time = clock
-    mod.gh_client.time = clock
-    try:
-        yield clock
-    finally:
-        mod.time, mod.gh_client.time = real
 
 
 def test_a_timeout_names_the_runs_still_open(tmp):

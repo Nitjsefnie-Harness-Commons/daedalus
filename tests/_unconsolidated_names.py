@@ -169,9 +169,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_ci_ratchets.py', '_git'):
         'this runs git with text output and a scrubbed child environment, '
         'which the shared runner does not set',
-    ('tests/test_ci_wait.py', '_run'):
-        'this builds one workflow run against a SHA, optionally without a '
-        'workflow id, where the shared _run boots a node scenario',
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
@@ -360,9 +357,6 @@ UNCONSOLIDATED_NAMES = {
         'this asserts the empty string reached stderr and that no ok: line '
         'reached stdout, where the owner takes both competing values and '
         'asserts each repr in stderr',
-    ('tests/test_watch_all.py', '_run'):
-        'this builds one shared-client workflow run against a SHA, where the '
-        'shared _run boots a node scenario',
     ('tests/test_yamlread_anchor_edges.py', '_refused'):
         'this calls workflow_step_items and asserts the YAMLReadError carries '
         'a detail and is not the unknown-alias refusal, where the owner takes '

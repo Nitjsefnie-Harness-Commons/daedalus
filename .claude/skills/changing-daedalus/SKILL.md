@@ -389,10 +389,11 @@ expired first - with named runs still open, with no run ever appearing, or
 with every run concluded and the `tests` matrix still absent; 3 the
 invocation was rejected or a query failed - loud and at
 once, never retried behind a message that reads like waiting; 4 every run
-concluded acceptably and none of them is a `tests` run, so the workflow
-that gates the merge was never dispatched. A rate-limit refusal is the one
-exception to exit 3: it is a known wait, so it pauses until the reset and
-polls again, bounded by the same `--timeout`.
+concluded acceptably and none of them is a `tests` run, so this head is not
+certified - no merge is claimed, because this is reached with a pull
+request, without one, and on a branch of its own. A rate-limit refusal is
+the one exception to exit 3: it is a known wait, so it pauses until the
+reset and polls again, bounded by the same `--timeout`.
 
 **Exit 4 exists because "every run that happened to exist passed" is not
 "every run that should exist did"** (issue #1217, PR #1122 head
