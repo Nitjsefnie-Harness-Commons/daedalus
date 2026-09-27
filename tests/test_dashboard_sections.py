@@ -332,7 +332,6 @@ def test_a_delete_that_shrinks_total_clamps_the_pager_to_the_last_page(_tmp):
     result = _dashnode.run_dashboard_node(_dashpager._PAGER_CLAMP_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['unplanned'] == [], seen
-    assert seen['unplanned'] == [], seen
     assert seen['firstPage'] == {
         'meta': '1–50 / 51', 'prevDisabled': True, 'nextDisabled': False,
         'rows': 50}, seen
@@ -357,7 +356,6 @@ def test_an_emptied_list_reads_zero_slash_zero(_tmp):
     result = _dashnode.run_dashboard_node(_dashpager._PAGER_EMPTY_HARNESS)
     seen = json.loads(result.stdout)
     assert seen['unplanned'] == [], seen
-    assert seen['unplanned'] == [], seen
     assert seen['oneRow']['meta'] == '1–1 / 1', seen
     assert seen['oneRow']['prevDisabled'] is True, seen
     assert seen['oneRow']['nextDisabled'] is True, seen
@@ -378,8 +376,8 @@ const PEEK = '/result?tab=extension';
 let envelope;
 // Every capture this fake minted, because the section fetches the
 // whole recent grid rather than only the newest.
-const imageTargets = new Set();
-const thumbnailTargets = [];
+const mintedPaths = new Set();
+const imageTargets = [];
 let consumeTarget = '';
 globalThis.fetch = async (target, init = {}) => {
   const method = init.method || 'GET';
@@ -405,7 +403,7 @@ globalThis.fetch = async (target, init = {}) => {
     };
     consumeTarget = PEEK + '&consume=1&expected='
       + encodeURIComponent(envelope.resultGeneration);
-    imageTargets.add(imageSelector(envelope.result.path));
+    mintedPaths.add(imageSelector(envelope.result.path));
     uploads.push({ id: command.id,
       filename: 'capture-' + commands.length + '.png', size: 3,
       mtime: commands.length, path: envelope.result.path });
@@ -414,8 +412,8 @@ globalThis.fetch = async (target, init = {}) => {
   if ((target === PEEK || target === consumeTarget) && method === 'GET') {
     return jsonResponse({ ...envelope, consumed: true });
   }
-  if (imageTargets.has(target) && method === 'GET') {
-    thumbnailTargets.push(target);
+  if (mintedPaths.has(target) && method === 'GET') {
+    imageTargets.push(target);
     return { ok: true, blob: async () => ({}) };
   }
   return refuse(target);
@@ -457,7 +455,7 @@ capture('11');
 await bounded(settle(), 'remounted capture', _dashnodeStepTimeoutMs);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({ commands,
-  imageTargets: thumbnailTargets, unplanned: UNPLANNED }));
+  imageTargets, unplanned: UNPLANNED }));
 phase('dashboard harness finished');
 })().catch(leave);
 """

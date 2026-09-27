@@ -3,15 +3,15 @@
 Not a suite itself -- `run_tests.py` only loads `test_*.py`.
 
 Two harnesses, one question each, both driven by the same parked confirm
-timer. They moved out of `tests/test_dashboard_sections.py` because the
-refusal door that closed their fakes pushed that file past the 700-line
-ceiling. Every target each fake models is an exact one the scenario can
-name -- a listing page, or `/upload` with a DELETE -- and anything else is
-recorded on `unplanned` and answered 599.
+timer. They moved out of `tests/test_dashboard_sections.py`, which naming
+every target exactly pushed past the 700-line ceiling. Every target each
+fake models is one the scenario can name -- a listing page, or `/upload`
+with a DELETE -- and anything else is recorded on `unplanned` and
+answered 599.
 """
-import _dashfetch  # noqa: E402
-import _dashnode  # noqa: E402
-from _repo import ROOT  # noqa: E402
+import _dashfetch
+import _dashnode
+from _repo import ROOT
 
 
 _DOM = _dashnode.DOM
