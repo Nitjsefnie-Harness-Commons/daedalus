@@ -78,10 +78,6 @@ UNCONSOLIDATED_JS_NAMES = {
         'the hotfix fake arms a timer and returns its index without ever '
         'firing it, where the boundary fake fires it on the route '
         'scenarios itself',
-    ('tests/_hotfixharness.py', 'sendCommand'):
-        'the hotfix double refuses every CDP method but Runtime.evaluate, '
-        'where the CDP harness answers the whole protocol and compiles '
-        'through it, so neither could stand in for the other',
     ('tests/_hotfixharness.py', 'waitFor'):
         'the hotfix wait polls two thousand times and answers a boolean, '
         'where the boundary wait throws on exhaustion and the overlap one '
@@ -117,11 +113,6 @@ UNCONSOLIDATED_JS_NAMES = {
     ('tests/_bridge_fake_oracle_harness.py', 'streamResponse'):
         'the oracle harness own stream factory, which carries a hang body '
         'the shared copy also carries, so the two are copies of one another',
-    ('tests/_cdpharness.py', 'sendCommand'):
-        'the CDP harness answers the whole protocol and compiles through '
-        'it, and the hotfix double refusing every method but '
-        'Runtime.evaluate is the other side of this pair rather than a '
-        'copy of it',
     ('tests/_cdpharness.py', 'delay'):
         'the next-turn delay, the same three lines as the other seven '
         'copies',
