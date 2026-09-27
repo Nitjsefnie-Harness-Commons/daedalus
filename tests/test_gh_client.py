@@ -292,13 +292,23 @@ class _Clock:
         return 'answered'
 
 
-def _paused(mod, instant, resume_at):
-    """What one real `_pause` claimed and slept, at a pinned instant."""
+def _paused(mod, instant, resume_at, deadline=None, monotonic=None):
+    """What one real `_pause` claimed and slept, at a pinned instant.
+
+    A bound is measured against `time.monotonic`, which the frozen clock
+    delegates to the real module - so an unpinned monotonic leaves the
+    remainder this reports decided by how fast the runner is, and the
+    assertion a margin rather than a value. `monotonic` pins it on the
+    same frozen object: an instance attribute shadows `__getattr__`,
+    which only fires for names the instance does not carry.
+    """
     out = io.StringIO()
     slept = []
-    watcher = mod.Watcher('w', out=out)
+    watcher = mod.Watcher('w', out=out, deadline=deadline)
     watcher.sleep = slept.append
     with _frozen_client_clock(mod, instant):
+        if monotonic is not None:
+            mod.time.monotonic = lambda: monotonic
         watcher._pause(mod.RateLimited('rate limited', resume_at))
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
@@ -312,6 +322,8 @@ def _stamp(instant):
         '%Y-%m-%dT%H:%M:%SZ')
 
 
+# Across the clamps below, a literal is pinned where the number itself is
+# the point, and the constant where it is not.
 def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
     """Past the floor nothing is clamped, so the line, the sleep and the
     reported reset are one instant - the property the near-floor case
@@ -348,7 +360,7 @@ def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
     assert (duration, stamp) == ('2', wanted), (duration, stamp)
 
 
-def test_a_fractional_retry_after_reaches_the_pause_as_a_near_reset(tmp):
+def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
     """The exposure the floor above defends against is reachable today.
 
     `_graphql_refusal` takes any `retryAfter` that is a number, and a
@@ -356,6 +368,10 @@ def test_a_fractional_retry_after_reaches_the_pause_as_a_near_reset(tmp):
     thousandth of a second out. Without this, tightening that
     validation would leave every other control green while the one
     above justified itself falsely.
+
+    The fixture omits `resetAt` because the refusal reads it first and
+    would never reach `retryAfter`; add one and this passes for the
+    wrong reason.
     """
     del tmp
     mod = _client()
@@ -395,6 +411,25 @@ def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
     assert (duration, stamp) == ('21600', wanted), (duration, stamp)
 
 
+def test_a_bound_shorter_than_the_reset_truncates_and_names_the_bound(tmp):
+    """The last clamp: a bound shorter than the wait, and its own moment.
+
+    The floor and the ceiling bound the wait; the bound ends it. When
+    the watcher would sleep past its own deadline the sleep is the
+    remainder, and the line names that - the deadline reached, not a
+    reset no part of this watcher will be alive to see.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    bound = 1000.0
+    duration, stamp, slept = _paused(
+        mod, now, now + 3600, deadline=bound + 3.0, monotonic=bound)
+    assert slept == [3.0], slept
+    wanted = _stamp(now + 3.0)
+    assert (duration, stamp) == ('3', wanted), (duration, stamp)
+
+
 def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
     """Nothing to be accurate about, and nothing for the floor or the
     ceiling to act on: a plain minute.
@@ -403,7 +438,6 @@ def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
     mod = _client()
     now = 1789012345.0
     duration, stamp, slept = _paused(mod, now, None)
-    assert slept == [float(mod.DEFAULT_BACKOFF)], slept
     assert slept == [60.0], slept
     wanted = _stamp(now + mod.DEFAULT_BACKOFF)
     assert (duration, stamp) == ('60', wanted), (duration, stamp)
