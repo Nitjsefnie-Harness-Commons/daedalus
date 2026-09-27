@@ -44,7 +44,7 @@ argument position and in the decorator and assignment binding
 positions alike. The four comprehension forms reach their conditions
 through the statement-level node their `generators` hold, and not
 through their own iterable, which `_bound_values` judges as the
-comprehension arm's own business; and FormattedValue is opened on the
+comprehension arm's own business. FormattedValue is opened on the
 issue's requirement rather than on that argument, since `f"{launcher}"`
 binds a string and not the launcher.
 
@@ -59,6 +59,14 @@ subscript the descent consumes, index and bounds included, and hands
 the base over only when the base is not an atom — a direct launch
 bottoms out at one and must not be refused where the receiver reads a
 launch method off what it carries.
+
+The binding arms are read the same way, and one position among them is
+not. A target binds a name, so the names a target declares are not
+carriers and what it reaches through are. A Name target is exempt, and
+so is every Name inside a Starred, Tuple or List of one, because a name
+that already spells a module is being shadowed rather than carried. A
+subscript's index is not exempt, so `d[subprocess]` binds a launcher
+and `d[key]` does not.
 
 `tests/_coverage_bindings.py` names every form on both sides of that
 line, and a control fails when its prose and its table stop agreeing.

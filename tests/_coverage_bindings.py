@@ -142,12 +142,13 @@ def _target_parts(target):
     """What a binding target carries, with the names it binds left out.
 
     A target is an assignment target, so its own `Name` — and every name
-    inside a starred or tuple form of it — is a name being bound, and
-    one that already spells a module shadows the name rather than
-    carrying a launcher. That is the exemption the Assign arm makes for
-    the same shape, and it is why the two positions are not the same
-    test. What the target reaches *through* is carrying: a subscript's
-    index and a container's elements are judged as the walk finds them.
+    inside a `Starred`, `Tuple` or `List` form of it — is a name being
+    bound, and one that already spells a module shadows the name rather
+    than carrying a launcher. That is the exemption the Assign arm
+    makes for the same shape, and it is why the two positions are not
+    the same test. What the target reaches *through* is carrying.
+    A subscript's index is not exempt, so `d[subprocess]` binds a
+    launcher and `d[key]` does not.
     """
     if isinstance(target, ast.Name):
         return []
@@ -191,11 +192,12 @@ def _carried_parts(value):
     comprehension opens its key as well as its value.
     The four comprehension forms reach their conditions through the
     statement-level node their `generators` hold, and not through their
-    own iterable, which `_bound_values` judges as the comprehension arm's
-    own business. And FormattedValue is opened on requirement rather
-    than on the argument above, because `f"{launcher}"` binds a string
-    and not the launcher, and the issue asks for the interpolation to
-    be judged all the same.
+    own iterable, which `_bound_values` judges as the comprehension
+    arm's own business.
+    And FormattedValue is opened on requirement rather than on the
+    argument above, because `f"{launcher}"` binds a string and not the
+    launcher, and the issue asks for the interpolation to be judged all
+    the same.
     """
     if isinstance(value, ast.Call):
         for part in [*value.args,

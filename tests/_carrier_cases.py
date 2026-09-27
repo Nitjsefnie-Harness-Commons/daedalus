@@ -352,10 +352,12 @@ def _opened_form_free_cases():
     A matcher that widens has to widen its negative table, so each class
     gets a spelling that carries nothing. They differ from one another
     on purpose: two rows sharing a spelling prove only that one of them
-    does. The classes this table holds, one row each: Await, BoolOp,
-    FormattedValue, IfExp, JoinedStr, Lambda, NamedExpr, Slice, Yield,
-    YieldFrom. The comprehension forms are not here — they have a
-    position of their own, and all four of them are pinned by
+    does. Nine rows hold ten classes: Await, BoolOp, FormattedValue,
+    IfExp, JoinedStr, Lambda, NamedExpr, Slice, Yield, YieldFrom, and
+    FormattedValue cannot have a row of its own because the parser
+    never emits one outside a JoinedStr, so the f-string row covers
+    both. The comprehension forms are not here — they have a position
+    of their own, and all four of them are pinned by
     `_comprehension_free_cases`.
     """
     return (
@@ -402,13 +404,14 @@ def _target_carrier_cases():
     decoy, and the mutation rows that drop each arm catch that.
 
     Two of the rows are not load-bearing for the walk and should not be
-    read as pinning it. A `Tuple` or `Starred` target that the walk
-    stopped opening would fall to the refusal branch and still be
-    refused, so the tuple and starred rows here prove the arm reads a
-    target, not that the walk opens those two forms; their counterparts
-    in `_target_free_cases` are what catch the over-refusal, and
-    `test_every_grammar_expression_form_is_classified` is what catches
-    the walk losing them.
+    read as pinning it. `_target_parts` intercepts a `Tuple`, `List` or
+    `Starred` target before `_carried_parts` sees it, so the walk's own
+    arms for those forms are never reached from a target and the tuple
+    and starred rows here prove the arm reads a target rather than what
+    the walk does with one. What pins the walk is
+    `test_every_grammar_expression_form_is_classified`, and what pins
+    the exemption on the exemption's own side is the three container
+    shadowing rows in `_target_free_cases`.
     """
     return (
         ('with target', """import subprocess
@@ -487,6 +490,23 @@ with open(handle) as subprocess:
 """),
         ('comprehension target shadowing a module', """import subprocess
 go = [y for subprocess in items]
+"""),
+        # The container arms of the exemption. A bare-Name shadow says
+        # nothing about them: each of these reaches a name only through
+        # a tuple, a list or a starred target, so each goes clean
+        # because that arm drops the names inside it and for no other
+        # reason.
+        ('tuple target shadowing a module', """import subprocess
+for head, subprocess in items:
+    pass
+"""),
+        ('list target shadowing a module', """import subprocess
+for [head, subprocess] in items:
+    pass
+"""),
+        ('starred target shadowing a module', """import subprocess
+for head, *subprocess in items:
+    pass
 """),
     )
 

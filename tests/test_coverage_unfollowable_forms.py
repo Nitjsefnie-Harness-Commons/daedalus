@@ -10,6 +10,7 @@ code and not only against a source string. That table now lives in
 tests/_coverage_mutation_specs.py, and the planted snippets with it.
 """
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -470,7 +471,7 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
     inherent to matching prose, and it is stated here rather than left
     to be discovered.
     """
-    from _coverage_bindings import _carried_parts
+    from _coverage_bindings import _carried_parts, _target_parts
 
     del tmp
     opened, leaves = _classification()
@@ -486,8 +487,10 @@ def test_both_docstrings_state_the_boundary_the_table_draws(tmp):
         # the false green this replaces, and only the full claim
         # catches it.
         assert _squash(FAIL_CLOSED) in flat, prose
-        assert _squash(CONDITIONS_CLAIM) in flat, prose
+        assert _fold(CONDITIONS_CLAIM) in _sentences(prose), prose
     assert _squash(RECEIVER_CARRY) in _squash(_GUARD_PROSE), _GUARD_PROSE
+    for prose in _target_parts.__doc__ or '', _GUARD_PROSE:
+        assert _fold(TARGET_EXEMPTION) in _sentences(prose), prose
     assert _receiver_carries_a_subscript(), _BINDING_MESSAGE
     assert _the_walk_reaches_a_conditions_launcher(), (
         'a condition carries no launcher back: ' + CONDITIONS_CLAIM)
@@ -559,6 +562,20 @@ def _squash(text):
     return ''.join(text.split())
 
 
+def _fold(text):
+    """A claim the way a reader meets it, wrapping and case dropped."""
+    return ' '.join(text.split()).lower()
+
+
+def _sentences(prose):
+    """The prose split into its sentences, folded the same way.
+
+    A pin against this asks the claim to be a whole sentence, so a
+    longer sentence that contains it and denies it is not a match.
+    """
+    return {part.strip(' ,;:') for part in re.split(r'[.!?]', _fold(prose))}
+
+
 def _classification():
     """The opened and leaf form names, read from the walk's own table.
 
@@ -588,8 +605,12 @@ FAIL_CLOSED = 'a form in neither class is refused rather than read as clean'
 RECEIVER_CARRY = 'every subscript the descent consumes'
 CONDITIONS_CLAIM = (
     'The four comprehension forms reach their conditions through the '
-    'statement-level node their `generators` hold, and not through their '
-    'own iterable')
+    'statement-level node their `generators` hold, and not through '
+    'their own iterable, which `_bound_values` judges as the '
+    'comprehension arm\'s own business')
+TARGET_EXEMPTION = (
+    'A subscript\'s index is not exempt, so `d[subprocess]` binds a '
+    'launcher and `d[key]` does not')
 ITERABLE_CLAIM = 'the comprehension node opens its own iterable'
 
 
