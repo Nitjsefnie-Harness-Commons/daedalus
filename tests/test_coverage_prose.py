@@ -45,7 +45,7 @@ the familiar-looking one as the boundary.
 
 The hyphen rule is there for the `N-line` figure a future editor would add.
 The cost is that a hyphen-joined figure is admitted whatever it is, and the
-position rule cannot catch it, because the scan never gets that far.
+position check never sees it, because the exemption is applied first.
 
 The case docstring repeats this rather than claiming completeness the scan
 does not have. This is deliberate: the alternative is a natural-language
