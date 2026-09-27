@@ -96,14 +96,19 @@ def _signatures():
             # positional list, say — composes the same signature twice, and
             # the domain is the signatures a lambda can DECLARE.
             continue
+        declared = [part for part in star.split(', ')[1:] if part]
         seen.add(text)
         yield (text, {
             'only': only,
             'names': positional,
             'required': len(positional) - tail,
             'vararg': star == '*a',
-            'kwonly': tuple(part.split('=')[0]
-                            for part in star.split(', ')[1:] if part),
+            'kwonly': tuple(part.split('=')[0] for part in declared),
+            # Whether the signature REQUIRES anything, which is what makes
+            # a call that supplies no name at all a raise rather than a
+            # legal call to a lambda that wants nothing.
+            'requires': (len(positional) - tail > 0
+                         or any('=' not in part for part in declared)),
             'kwarg': bool(kwarg)})
 
 
@@ -151,6 +156,13 @@ def _bindings(signature):
         yield f'{only[0]}=0', 'raises'
     if named and not signature['kwarg']:
         yield yields + ', z=0', 'raises'
+    if signature['requires']:
+        # A display that carries NO name: the walk reads the keys a display
+        # displays, and one that displays none supplies none. It is the cell
+        # a rule that reads a `**` as supplying nothing cannot be told from
+        # the rule that reads it correctly on every other display, because
+        # every other display this class generates carries a parameter.
+        yield '**{}', 'raises'
     # One positional too many, and a `*args` is what makes it one: it soaks
     # up whatever comes after the parameters it follows, so a signature that
     # has one cannot be made to raise this way.
