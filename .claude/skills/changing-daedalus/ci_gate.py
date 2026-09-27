@@ -10,7 +10,7 @@ the answer an absent gate gets live here and both callers import them.
 
 It is a module of its own for a third reason: the callers sit near the
 500-line production ceiling the size policy enforces - `watch_all.py`
-measured 483 lines and `ci_wait.py` 400 - and an expectation that lives
+measured 483 lines and `ci_wait.py` 402 - and an expectation that lives
 inside a caller is an expectation the other caller can drift from.
 
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
@@ -43,9 +43,8 @@ class GateAbsent:
 
     What constructs it, exactly: `missing_required` below answers with the
     missing NAMES, and `watch_all._settled` turns those names into this
-    value. Nothing here raises it. It lives in this module because it is
-    the one answer the two callers' contracts share and
-    `watch_all._hold_release` recognises it by `isinstance` - so it is
+    value. Nothing here raises it, and `ci_wait.py` never names it. One
+    caller builds it and the other recognises it by `isinstance` - so it is
     named here and imported, not re-declared beside its recogniser.
     """
 
