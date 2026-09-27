@@ -469,18 +469,13 @@ class Watcher:
             left -= SLEEP_SLICE
 
     def _wait_seconds(self, refusal, now=None):
-        """How long to wait for this refusal, clamped into a sane bound.
-
-        A reset the API still holds us to is slept to exactly; the floor
-        below is for one already past.
-        """
+        """How long to wait for this refusal, clamped into a sane bound."""
         moment = time.time() if now is None else now
         if refusal.resume_at is None:
             delay = DEFAULT_BACKOFF
-        elif refusal.resume_at > moment:
-            delay = min(refusal.resume_at - moment, MAX_BACKOFF)
         else:
-            delay = MIN_BACKOFF
+            delay = refusal.resume_at - moment
+        delay = min(max(delay, MIN_BACKOFF), MAX_BACKOFF)
         if self.deadline is not None:
             delay = min(delay, max(0.0, self.deadline - time.monotonic()))
         return delay
@@ -488,12 +483,8 @@ class Watcher:
     def _pause(self, refusal):
         now = time.time()
         delay = self._wait_seconds(refusal, now)
-        # Name the reset only when the wait really ends on it; every
-        # clamp moves the wake, and then now + delay is the true moment.
-        resume = refusal.resume_at
-        wake = resume if resume is not None and now + delay == resume \
-            else now + delay
-        stamp = datetime.fromtimestamp(wake, timezone.utc).strftime(STAMP)
+        stamp = datetime.fromtimestamp(now + delay,
+                                       timezone.utc).strftime(STAMP)
         print(f'{self.label}: rate limit reached; waiting {delay:.0f}s '
               f'until {stamp}', file=self.out, flush=True)
         self.sleep(delay)
