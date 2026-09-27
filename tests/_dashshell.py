@@ -204,7 +204,7 @@ function newReaderScript() {
   return script;
 }
 
-function jsonResponse(data, status) {
+function guardJsonResponse(data, status) {
   const code = status === undefined ? 200 : status;
   return guardResponse({
     ok: code >= 200 && code < 300,
@@ -230,7 +230,7 @@ function streamResponse(signal) {
 }
 
 function refusedResponse() {
-  return Object.assign(jsonResponse({}, UNPLANNED_STATUS), {
+  return Object.assign(guardJsonResponse({}, UNPLANNED_STATUS), {
     statusText: 'unplanned request',
     headers: contentTypeHeader('text/plain'),
     body: null,
@@ -260,7 +260,7 @@ globalThis.fetch = async (target, init) => {
     return refusedResponse();
   }
   if (spec.stream) return streamResponse(options.signal);
-  return jsonResponse(spec.json, spec.status);
+  return guardJsonResponse(spec.json, spec.status);
 };
 
 const drive = {

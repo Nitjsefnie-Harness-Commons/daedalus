@@ -96,6 +96,16 @@ function response(status, data) {
 }
 """
 
+# The text-node factory both dashboard documents build their tree with.
+# One copy because the two documents are separate strings with separate
+# call sites, and a second would drift unremarked.
+TEXT_NODE_STUB = r"""function textNode(value) {
+  const node = new El('#text');
+  node.text = String(value);
+  return node;
+}
+"""
+
 # One settled turn of the microtask queue, no wall-clock margin in it.
 DELAY_STUB = r"""
 function delay() {
