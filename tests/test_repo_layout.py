@@ -67,17 +67,26 @@ def _tracked_python(root=ROOT):
     return paths
 
 
-def _enclosing_function(tree, line):
+def _function_spans(tree):
+    """Every function's (start, end, name), latest start first.
+
+    One list answers "which function holds this line" for every caller, so
+    the two places that ask cannot answer it differently, and the answer
+    costs one walk of the tree instead of one per call.
+    """
+    return sorted(
+        ((node.lineno, getattr(node, 'end_lineno', node.lineno), node.name)
+         for node in ast.walk(tree)
+         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))),
+        reverse=True)
+
+
+def _enclosing_function(spans, line):
     """The innermost function whose body spans `line`, else '<module>'."""
-    best_lineno = -1
-    best_name = '<module>'
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            end = getattr(node, 'end_lineno', node.lineno)
-            if node.lineno <= line <= end and node.lineno > best_lineno:
-                best_lineno = node.lineno
-                best_name = node.name
-    return best_name
+    for start, end, name in spans:
+        if start <= line <= end:
+            return name
+    return '<module>'
 
 
 def _call_signature(node):
@@ -127,28 +136,15 @@ def _spelled_signatures(source):
     Read from the parse rather than from the allowance table, so a row's
     function and signature are checked against what the file it names can
     actually say, and not against the table's own agreement with itself.
-    The enclosing function is resolved against one precomputed span list:
-    walking the tree per call is quadratic and this control runs on twelve
-    CI legs.
     """
     tree = ast.parse(source)
-    spans = sorted(
-        ((node.lineno, getattr(node, 'end_lineno', node.lineno), node.name)
-         for node in ast.walk(tree)
-         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))),
-        reverse=True)
+    spans = _function_spans(tree)
     spelled = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        function = '<module>'
-        for start, end, name in spans:
-            if start > node.lineno:
-                continue
-            if end >= node.lineno:
-                function = name
-                break
-        spelled.setdefault(function, set()).add(_call_signature(node))
+        if isinstance(node, ast.Call):
+            spelled.setdefault(
+                _enclosing_function(spans, node.lineno), set()
+            ).add(_call_signature(node))
     return spelled
 
 
@@ -219,10 +215,11 @@ def _bound_sites(source, here):
     by the control over the kept-out ones as well.
     """
     tree = ast.parse(source)
+    spans = _function_spans(tree)
     found = []
     for line, head, kind in bound_sites(source, here):
         if control_keeps(head, kind):
-            found.append((line, _enclosing_function(tree, line),
+            found.append((line, _enclosing_function(spans, line),
                           _site_signature(tree, line), kind))
     found.sort()
     seen = {}
@@ -421,15 +418,16 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     not a change to its row. A live site with no row fails; a row whose
     function does not bind a call spelling that signature fails; a row
     matching zero live sites fails, because a stale allowance is a
-    refusal; and a key two live sites share fails, because the ordinal
-    that separates two calls of one shape in a function is what makes a
-    key name a site. One assert reports all four, so a run answers the
-    whole question and not only the class its first failure happened to
-    name. Matching is on the (path, function, signature, ordinal) key, so
-    another function of an allowed module, a second launch of the same
-    shape in an allowed function, and a launch that has changed shape are
-    each a refusal — the exemption cannot be widened by a prefix or
-    substring match, and every failure names the key to paste.
+    refusal; and a key two live sites share fails. That last one holds by
+    the ordinal's construction, so it is the tripwire for a counter that
+    stopped counting rather than a property the walk can break, and the
+    one assert reports all four together — a run answers the whole
+    question, not the class its first failure happened to name. Matching
+    is on the (path, function, signature, ordinal) key, so another
+    function of an allowed module, a second launch of the same shape in
+    an allowed function, and a launch that has changed shape are each a
+    refusal — the exemption cannot be widened by a prefix or substring
+    match, and every failure names the key to paste.
     """
     del tmp
     live = {}
@@ -441,27 +439,35 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         for site in _bound_sites(source, path):
             live.setdefault(site[:4], []).append(site[4])
 
-    # Ordered by the rendered key rather than by the tuple, so a row of
-    # the wrong shape — a fixer's first draft is the old (path, line,
-    # function) — sorts beside the rest instead of raising where an int
-    # meets a str. A malformed row is reported below, not here.
+    # Ordered by the rendered key, not the tuple, so a row of the wrong
+    # shape — a fixer's first draft is the old (path, line, function) —
+    # sorts beside the rest instead of raising where an int meets a str.
     rows = sorted(BOUNDED_GIT_LAUNCHES, key=_row_text)
     keyed = [row for row in rows
              if len(row) == 4 and isinstance(row[3], int)]
-    findings = sorted(
+    # A dict literal keeps one of two identical keys and drops the other,
+    # so a pasted key that already existed loses a row and every check
+    # below passes on the smaller table. Only the source still has it.
+    table = ast.parse((ROOT / 'tests/_bounded_git_launches.py').read_text(
+        encoding='utf-8', errors='surrogateescape'))
+    written = [ast.unparse(key) for node in table.body
+               if isinstance(node, ast.Assign)
+               and isinstance(node.value, ast.Dict)
+               and getattr(node.targets[0], 'id', '') == 'BOUNDED_GIT_LAUNCHES'
+               for key in node.value.keys]
+    repeated = sorted({w for w in written if written.count(w) > 1})
+    findings = [f'the row {key} is written twice in the table source; a '
+                'dict keeps one copy and drops the other, so a pasted key '
+                'that already existed loses a row with nothing to notice'
+                for key in repeated]
+    findings += sorted(
         f'{_row_text(key)} {sites}{_shifted_note(key, keyed)}'
         for key, sites in live.items()
         if key not in BOUNDED_GIT_LAUNCHES)
-    # The keying is what carries the anti-prefix promise, so it is
-    # checked rather than asserted in prose: a (path,) key alone, the
-    # loosest prefix the sentence forbids, would let one row stand for
-    # every site in a module. The test for that is that a row's function
-    # and signature are the ones the file it names spells, that it names
-    # four of them, and that the file it names is one this tree has — a
-    # literal a fixer chose, a short key and a mistyped path all match
-    # nothing, and each is said in the same words. The file is read here
-    # rather than in the walk above, so a row in a file the prefilter
-    # skips is still judged on what it says.
+    # The keying carries the anti-prefix promise, so it is checked rather
+    # than asserted: a (path,) key alone would let one row stand for every
+    # site in a module. The file a row names is read here, not in the walk
+    # above, so a row in a file the prefilter skips is still judged.
     for key, sites in live.items():
         if len(sites) > 1:
             findings.append(
@@ -478,8 +484,8 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
         if defect:
             findings.append(
                 f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} {defect}; the '
-                'analyser computes every component, so the key printed '
-                'here is the one to paste')
+                'analyser computes every component, so this is a draft it '
+                'did not produce, and pasting it back will not help')
     assert not findings, '\n'.join(findings)
 
 
