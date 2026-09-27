@@ -189,6 +189,41 @@ def test_fractional_second_stamps_are_ordered_by_instant_not_text(tmp):
     assert _verdict(runs) == ('acceptable', [])
 
 
+def test_an_unidentifiable_run_is_never_superseded(tmp):
+    """A run with no workflow id and no file path belongs to no workflow, and
+    `gh_client` emits exactly that shape when the suite's workflow record and
+    its file are both null. Two such runs shared one group, so the newer
+    cleared the older one's conclusion and an unrelated failure was dropped
+    by a filter with nothing to tell the two apart. With no workflow to
+    group on, the conservative answer is that the run is judged as it stands.
+    """
+    del tmp
+    runs = [
+        _run(1, 'failure', '2026-09-07T10:00:00Z', name='Alpha',
+             workflow=None),
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='Beta',
+             workflow=None),
+        _run(3, 'success', '2026-09-07T10:10:00Z', name='tests'),
+    ]
+    state, offenders = _verdict(runs)
+    assert state == 'unacceptable', state
+    assert [run['id'] for run in offenders] == [1], offenders
+    # The guard is the GROUP, not the verdict: a run that does name its
+    # workflow still supersedes within it, by id and by path alike.
+    assert _verdict([
+        _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
+             workflow=11),
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
+             workflow=11),
+    ]) == ('acceptable', [])
+    assert _verdict([
+        _run(1, 'cancelled', '2026-09-07T10:00:00Z', name='tests',
+             path='.github/workflows/ci.yml'),
+        _run(2, 'success', '2026-09-07T10:05:00Z', name='tests',
+             path='.github/workflows/ci.yml'),
+    ]) == ('acceptable', [])
+
+
 def test_the_workflow_path_groups_when_the_id_is_absent(tmp):
     del tmp
     same = [
