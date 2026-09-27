@@ -483,3 +483,113 @@ sectionReport({ refused: seen.filter((m) => m !== null).length,
   refusals: REFUSALS.length, seen, inherited });
 })().catch(leave);
 """
+
+
+# The three surfaces `_dashnode_dom` gained, each with the negative table
+# that widens alongside it. `overview.js` is the shipped section that reads
+# all three: it reaches `[data-stat=…]` on the stat cells it just built,
+# `[data-meta="tab-count"]` on the page's status line, and `lastChild` to
+# trim its log. Every refusal below is a shape the grammar declines, and
+# the case asserts each one by name -- a matcher that grew a grammar and
+# not a negative table answers shapes it does not understand.
+
+ATTRIBUTE_SELECTORS = r"""
+(async () => {
+const root = new El('div');
+const role = new El('div');
+role.dataset.role = 'log';
+const stat = new El('div');
+stat.dataset.stat = 'rate';
+const meta = new El('span');
+meta.dataset.meta = 'tab-count';
+const blank = new El('span');
+blank.dataset.meta = '';
+root.append(role, stat, meta, blank);
+const refusals = {};
+for (const sel of ['[data-sub]', '.rail-list > li', 'div', 'null', '',
+                   '[data-meta="token]', '[data-Role=log]',
+                   '[data-meta=]', '[=log]']) {
+  try { root.find(sel); refusals[String(sel)] = 'ANSWERED'; }
+  catch (error) { refusals[String(sel)] = error.message; }
+}
+sectionReport({
+  role: root.find('[data-role=log]') === role,
+  quotedRole: root.find('[data-role="log"]') === role,
+  stat: root.find('[data-stat=rate]') === stat,
+  meta: root.find('[data-meta="tab-count"]') === meta,
+  throughQuery: root.querySelector('[data-stat=rate]') === stat,
+  emptyValue: root.find('[data-meta=]') === blank,
+  emptyIsNotAbsent: root.find('[data-meta=tab-count]') === meta,
+  miss: root.find('[data-stat=tabs]'),
+  refusals,
+});
+})().catch(leave);
+"""
+
+
+LAST_CHILD = r"""
+(async () => {
+const parent = new El('div');
+const kids = [new El('span'), new El('span'), new El('span')];
+parent.append(...kids);
+const one = new El('div');
+one.appendChild(new El('i'));
+const tail = parent.lastChild;
+// Read the agreement BEFORE the removal: after it the tail is no longer a
+// child, so the same expression would be comparing against a stale index.
+const agrees = tail === parent.children[parent.children.length - 1];
+const removed = parent.removeChild(tail);
+sectionReport({
+  isLast: tail === kids[2],
+  agreesWithChildren: agrees,
+  afterRemove: parent.lastChild === kids[1],
+  firstUnchanged: parent.firstChild === kids[0],
+  mirrorOnOne: one.firstChild === one.lastChild,
+  emptyIsNull: new El('div').lastChild === null,
+  emptiedIsNull: (() => { const box = new El('div');
+    box.appendChild(new El('b'));
+    box.removeChild(box.lastChild);
+    return box.lastChild === null; })(),
+  removedIsTail: removed === kids[2],
+  size: parent.children.length,
+});
+})().catch(leave);
+"""
+
+
+DOCUMENT_QUERY_SELECTOR_ALL = r"""
+(async () => {
+const bar = new El('div');
+const first = new El('span');
+first.dataset.meta = 'tab-count';
+const second = new El('span');
+second.dataset.meta = 'tab-count';
+const other = new El('span');
+other.dataset.meta = 'sse-dot';
+document.body.appendChild(bar);
+bar.append(first, second, other);
+const refusals = {};
+for (const sel of ['.rail-list > li', 'null', '[data-meta="token]',
+                   '[data-sub]']) {
+  try { document.querySelectorAll(sel); refusals[String(sel)] = 'ANSWERED'; }
+  catch (error) { refusals[String(sel)] = error.message; }
+}
+const before = first.textContent;
+const found = document.querySelectorAll('[data-meta="tab-count"]');
+for (const el of found) el.textContent = '7';
+sectionReport({
+  count: found.length,
+  isFirst: found[0] === first,
+  isSecond: found[1] === second,
+  written: [first.textContent, second.textContent],
+  untouched: other.textContent,
+  before,
+  // A selector the grammar parses and the page does not carry is a MISS,
+  // and a miss is an empty list rather than a refusal.
+  miss: document.querySelectorAll('[data-meta="nothing-here"]').length,
+  // The walk is the tree's, so a second read sees the first read's writes.
+  reread: document.querySelectorAll('[data-meta="tab-count"]')[0].textContent,
+  refusals,
+});
+})().catch(leave);
+"""
