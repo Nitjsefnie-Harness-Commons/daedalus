@@ -176,13 +176,16 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
             status, body)
 
 
+_GC_TRIGGER = '.gc-trigger'
+_GC_DONE = '.gc-done'
+
+
 def _on_demand_command_gc(fault_dir):
     """Install a collector the test sweeps on demand, and return its path.
 
     A collector on a wall clock spends the TTL while the test is still
     setting itself up, so what an assertion finds removed is partly a
-    measure of how long setup took. This one sleeps until the test
-    triggers it; the TTL is untouched.
+    measure of how long setup took. This one sleeps for a trigger.
     """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
@@ -193,8 +196,8 @@ def _on_demand_command_gc(fault_dir):
         'from daedalus_bridge import command_queue\n'
         'def gc_loop(cmd_dir, ttl):\n'
         '    root = pathlib.Path(cmd_dir)\n'
-        '    trigger = root / ".gc-trigger"\n'
-        '    done = root / ".gc-done"\n'
+        f'    trigger = root / "{_GC_TRIGGER}"\n'
+        f'    done = root / "{_GC_DONE}"\n'
         '    while True:\n'
         '        while not trigger.exists():\n'
         '            time.sleep(0.01)\n'
@@ -207,11 +210,11 @@ def _on_demand_command_gc(fault_dir):
 
 
 def _sweep(command_root, served):
-    """Run one sweep in the bridge and wait for it to report back."""
-    done = command_root / '.gc-done'
+    """Run one sweep in the bridge and wait for it to finish."""
+    done = command_root / _GC_DONE
     if done.exists():
         done.unlink()
-    (command_root / '.gc-trigger').touch()
+    (command_root / _GC_TRIGGER).touch()
     deadline = time.time() + 10
     while not done.exists() and time.time() < deadline:
         time.sleep(0.01)
@@ -219,18 +222,21 @@ def _sweep(command_root, served):
         'the controlled command sweep did not finish: ' + ''.join(served))
 
 
-def _queue_dirs(command_root):
-    """The queue namespaces in the root. The sweep markers live there too, so
-    counting every entry would count the fixture's own bookkeeping.
+def _root_names(command_root):
+    """Every entry in the command root but the fixture's sweep markers.
+
+    A name filter, not a directory filter: a namespace left where a queue
+    directory was is as much a leftover as the directory.
     """
-    return sorted(p.name for p in command_root.iterdir() if p.is_dir())
+    return sorted(p.name for p in command_root.iterdir()
+                  if p.name not in (_GC_TRIGGER, _GC_DONE))
 
 
 def _age(queues, seconds):
     """Put every queued command's own mtime `seconds` in the past.
 
     The collector ages on that mtime, so a sweep compares this age against
-    the TTL, never the time the setup took.
+    the TTL, never the time setup took.
     """
     stamp = time.time() - seconds
     for queue in queues:
@@ -251,20 +257,24 @@ def test_expired_command_namespaces_are_collected_without_a_consumer(tmp):
                 base, {'token': TOK, 'tab': tab,
                        'id': f'c{index}', 'code': '1'})
             assert status == 200, (status, body)
+        # A second command in one namespace, so a one-child sweep shows.
+        status, body = put_command(
+            base, {'token': TOK, 'tab': tabs[0], 'id': 'c4', 'code': '1'})
+        assert status == 200, (status, body)
 
         command_root = Path(docroot) / 'commands'
         queues = [command_root / f'{TOK}_{tab}' for tab in tabs]
-        assert _queue_dirs(command_root) == sorted(q.name for q in queues), (
-            _queue_dirs(command_root), ''.join(served))
+        assert _root_names(command_root) == sorted(q.name for q in queues), (
+            _root_names(command_root), ''.join(served))
 
         _age(queues, 0)
         _sweep(command_root, served)
-        assert _queue_dirs(command_root) == sorted(q.name for q in queues), (
-            _queue_dirs(command_root), ''.join(served))
+        assert _root_names(command_root) == sorted(q.name for q in queues), (
+            _root_names(command_root), ''.join(served))
 
         _age(queues, 2)
         _sweep(command_root, served)
-        assert _queue_dirs(command_root) == [], _queue_dirs(command_root)
+        assert _root_names(command_root) == [], _root_names(command_root)
         status, health = _util.get_json(base + '/health')
         assert status == 200 and health['ok'] is True, (status, health)
 
