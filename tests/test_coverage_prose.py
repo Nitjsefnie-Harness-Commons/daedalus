@@ -118,15 +118,42 @@ def test_the_named_module_is_still_shipped_javascript(tmp):
         f'reaches')
 
 
+def _claim_subject(text, said, count):
+    """What the claim says about, between the claim phrase and the figure.
+
+    The module is the subject the claim is made about, and the prose puts it
+    between "no suite reaches" and the count -- so that span is where it has
+    to be named. Bounding the sentence instead would red a rewrap that
+    merely split the claim in two, which is the same false positive as a
+    rewrap anywhere else; the span survives that and still refuses a
+    paragraph that names one module as unreached and another elsewhere.
+    """
+    return text[said.end():count.start()]
+
+
 def test_the_paragraph_still_claims_the_unreached_module(tmp):
     """The qualitative claim is what the paragraph is for. The figure beside
     it is decoration on it, so a gate that only checked the figure would pass
-    on a paragraph that had quietly stopped claiming anything."""
+    on a paragraph that had quietly stopped claiming anything.
+
+    The three things the claim needs are checked together rather than
+    separately: the phrase, the module, and the module AS THE SUBJECT
+    BETWEEN THE PHRASE AND THE FIGURE. Held apart they are three presences
+    a rewrap can separate, and a paragraph that passes all three while
+    claiming a different module is false rather than vague.
+    """
     del tmp
     text = _paragraph()
+    said = re.search(r'no\s+suite\s+reaches', text)
+    assert said, 'the paragraph no longer claims the module is unreached'
     assert UNREACHED in text, 'the paragraph no longer names the module'
-    assert re.search(r'no\s+suite\s+reaches', text), (
-        'the paragraph no longer claims the module is unreached')
+    count = re.search(COUNT_PHRASE, text)
+    assert count, 'the paragraph no longer states the module count'
+    subject = _claim_subject(text, said, count)
+    assert UNREACHED in subject, (
+        f'the claim names a different module as the one no suite reaches: '
+        f'...{" ".join(subject.split())}... , so {UNREACHED} is named '
+        f'somewhere in the paragraph but is not the module the claim is about')
 
 
 def _digit_runs(text):
@@ -253,8 +280,8 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     count = int(said_count.group(1))
     figures = _claim_figures(said_count.group(0), said_count.start())
     spans = {(start, end) for start, end, _ in figures}
-    admits = ' and '.join(run for _, _, run in figures)
     claim = ' '.join(said_count.group(0).split())
+    claims = len(re.findall(COUNT_PHRASE, text))
 
     # Percentages are blanked first, so their digits are not also judged as
     # bare figures; they keep their offset either way.
@@ -267,13 +294,15 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
             f'the paragraph states {run!r} in '
             f'...{blanked[max(0, start - 14):end + 14].strip()}... , which is '
             f'not a figure this paragraph can prove. A figure is admissible '
-            f'by the claim it sits in, and the only claim here the tree '
-            f'checks is `{claim}`, whose figures are {admits}; an unrelated '
-            f'figure is refused at every value, including one that happens '
-            f'to equal the {count} code lines of {UNREACHED}. A count '
-            f'measured by a coverage run, and a denominator over every '
-            f'tracked shipped JavaScript file, both belong in the coverage '
-            f'step summary that run prints')
+            f'by the claim it sits in; the rule admits the figures of one '
+            f'claim -- `{claim}` -- of the {claims} the paragraph states, '
+            f'and within it the count is the tree\'s while the 0 is the '
+            f'claim itself, permitted rather than derived. A figure anywhere '
+            f'else is refused at every value, including one that happens to '
+            f'equal the {count} code lines of {UNREACHED}. A count measured '
+            f'by a coverage run, and a denominator over every tracked '
+            f'shipped JavaScript file, both belong in the coverage step '
+            f'summary that run prints')
 
     percents = re.findall(r'(\d+(?:\.\d+)?)\s*%', text)
     assert not percents, (
