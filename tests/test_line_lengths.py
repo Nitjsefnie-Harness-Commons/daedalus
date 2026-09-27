@@ -13,7 +13,6 @@ from _ratchet_fixture import (  # noqa: E402
 ROOT = _util.ROOT
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
-THRESHOLDS_SOURCE = ROOT / '.github' / 'ci-thresholds.json'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
 WORKFLOW_SOURCE = ROOT / '.github' / 'workflows' / 'tests.yml'
 

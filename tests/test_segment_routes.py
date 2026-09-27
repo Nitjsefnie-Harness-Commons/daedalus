@@ -114,7 +114,7 @@ def _symlink_or_skip(link, target):
         _util.skip(f'this filesystem will not hold a symlink: {why}')
 
 
-def _post_segment(routes, sig, job, index, raw, root=SEG_DIR):
+def _admit_and_store(routes, sig, job, index, raw, root=SEG_DIR):
     """Admit and store one segment, returning the store answer."""
     admitted = routes.admit_segment(
         root, {'job': [job], 'seg': [str(index)]}, sig)
@@ -186,7 +186,7 @@ def test_store_writes_the_zero_padded_segment_and_its_totals(_tmp):
     jobs = _jobs('fixture_segment_jobs_write')
     routes = _routes('fixture_segment_routes_write')
     sig = _mint(jobs, 'writetok', 'write-job')
-    assert _post_segment(routes, sig, 'write-job', 3, b'abcde') == (
+    assert _admit_and_store(routes, sig, 'write-job', 3, b'abcde') == (
         200, {'ok': True})
     stored = SEG_DIR / 'write-job' / '000003.ts'
     assert stored.read_bytes() == b'abcde'
@@ -199,9 +199,9 @@ def test_store_counts_a_replacement_as_the_same_segment(_tmp):
     jobs = _jobs('fixture_segment_jobs_replace')
     routes = _routes('fixture_segment_routes_replace')
     sig = _mint(jobs, 'replacetok', 'replace-job')
-    assert _post_segment(routes, sig, 'replace-job', 0, b'aaaa') == (
+    assert _admit_and_store(routes, sig, 'replace-job', 0, b'aaaa') == (
         200, {'ok': True})
-    assert _post_segment(routes, sig, 'replace-job', 0, b'bbbbbb') == (
+    assert _admit_and_store(routes, sig, 'replace-job', 0, b'bbbbbb') == (
         200, {'ok': True})
     record = _record('replace-job')
     assert (record['stored_count'], record['stored_bytes']) == (1, 6)
@@ -213,9 +213,9 @@ def test_store_refuses_a_segment_past_the_count_quota(_tmp):
     routes = _routes('fixture_segment_routes_count')
     sig = _mint(jobs, 'counttok', 'count-job')
     for index in range(QUOTAS[1]):
-        assert _post_segment(routes, sig, 'count-job', index, b'aa') == (
+        assert _admit_and_store(routes, sig, 'count-job', index, b'aa') == (
             200, {'ok': True})
-    assert _post_segment(routes, sig, 'count-job', QUOTAS[1], b'aa') == (
+    assert _admit_and_store(routes, sig, 'count-job', QUOTAS[1], b'aa') == (
         413, {'error': 'segment count limit exceeded'})
     assert not (SEG_DIR / 'count-job' / '000003.ts').exists()
 
@@ -224,9 +224,9 @@ def test_store_refuses_a_segment_past_the_byte_quota(_tmp):
     jobs = _jobs('fixture_segment_jobs_bytes')
     routes = _routes('fixture_segment_routes_bytes')
     sig = _mint(jobs, 'bytestok', 'bytes-job')
-    assert _post_segment(routes, sig, 'bytes-job', 0, b'x' * 40) == (
+    assert _admit_and_store(routes, sig, 'bytes-job', 0, b'x' * 40) == (
         200, {'ok': True})
-    assert _post_segment(routes, sig, 'bytes-job', 1, b'x' * 40) == (
+    assert _admit_and_store(routes, sig, 'bytes-job', 1, b'x' * 40) == (
         413, {'error': 'job byte limit exceeded'})
     assert not (SEG_DIR / 'bytes-job' / '000001.ts').exists()
 
@@ -236,7 +236,7 @@ def test_status_lists_the_stored_indices_in_order(_tmp):
     routes = _routes('fixture_segment_routes_status')
     sig = _mint(jobs, 'statustok', 'status-job')
     for index in (2, 0, 1):
-        assert _post_segment(routes, sig, 'status-job', index, b'zz') == (
+        assert _admit_and_store(routes, sig, 'status-job', index, b'zz') == (
             200, {'ok': True})
     assert routes.segment_status(
         SEG_DIR, {'job': ['status-job']}, sig) == (
@@ -394,7 +394,7 @@ def test_a_write_that_cannot_scan_the_directory_is_answered(_tmp):
         'max_bytes': QUOTAS[2]})
     seg_dir = SEG_DIR / job
     with _refused('iterdir', job) as fired:
-        assert _post_segment(routes, sig, job, 0, b'abc') == (
+        assert _admit_and_store(routes, sig, job, 0, b'abc') == (
             500, {'error': 'segment storage failure'})
     assert fired == [job], fired
     assert not (seg_dir / '000000.ts').exists()
@@ -680,9 +680,9 @@ def test_the_passed_quota_is_the_one_the_write_path_enforces(tmp):
     status, payload = jobs.mint_job(
         root, 'altquotatok', {'job': job}, jobs.JobQuotas(5, 1, 64))
     assert status == 200, (status, payload)
-    assert _post_segment(routes, payload['sig'], job, 0, b'ab', root) == (
+    assert _admit_and_store(routes, payload['sig'], job, 0, b'ab', root) == (
         200, {'ok': True})
-    assert _post_segment(routes, payload['sig'], job, 1, b'cd', root) == (
+    assert _admit_and_store(routes, payload['sig'], job, 1, b'cd', root) == (
         413, {'error': 'segment count limit exceeded'})
 
 
