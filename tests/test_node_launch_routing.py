@@ -122,21 +122,29 @@ UNRESOLVED_LAUNCHES = {
         "a bash child behind `_util.workflow_bash()`",
     ('test_reserved_test_names.py', '_fixture_checkout', 'subprocess.run'):
         'a git child',
-    ('test_static_guard_regressions.py', '_cache_collision_sequence',
-     'real_run'):
-        'a mutation-planting DOUBLE for subprocess.run, holding the real '
-        "one under a local and calling it through `*args`",
     ('test_static_guard_regressions.py', 'run', 'real_run'):
-        'the same double, reached through the patched subprocess.run',
-    ('test_static_guard_regressions.py',
-     'test_mutation_gate_refuses_site_initialization', 'real_run'):
-        'the same double, with the `-S` argument filtered out of a caller '
-        "command the walk does not resolve",
+        'a mutation-planting DOUBLE for subprocess.run, holding the real '
+        "one under a local and calling it through `*args`, installed by "
+        "each of the two controls that patch subprocess.run",
     ('test_workflow_bash.py',
      'test_workflow_bash_resolves_relative_candidate_for_other_cwd',
      'subprocess.run'):
         "a bash child behind `_util.workflow_bash()`, the thing under test",
 }
+
+# A `node` verdict can be a FALSE one: a control that plants its own stub
+# executable to prove routing writes a function whose parameter is named
+# `node` and launches it, and the walk admits that spelling for exactly the
+# reason it admits `_realbrowser_workers.py`. Such a site is named here
+# rather than being a finding its author cannot answer — a control that
+# cries wolf is one whose findings stop being read.
+#
+# The rows are keyed on the call's shape exactly as `UNRESOLVED_LAUNCHES`
+# is, and the unused-row check covers this class too. **A row here may only
+# excuse a `node` verdict the walk could not BIND.** A launch that resolves
+# to a real `shutil.which('node')` is never exempteable, so a row written
+# to silence a control's own stub cannot become the place a real one hides.
+NOT_FIXED_WORK = {}
 
 NODE = 'node'
 OTHER = 'other'
@@ -162,26 +170,36 @@ def _assignments_in(function):
 
 
 def _executable_verdict(expression, scope, depth=0):
-    """`node`, `other` or `unresolved` for a launch's executable.
+    """`(verdict, why)` for a launch's executable.
 
-    `unresolved` is the default and is what anything the walk cannot PROVE
-    is not node reaches: a parameter, a subscript, a computed string, a
-    call it does not recognise. Answering `other` for those would make the
-    population close on the resolver's own vocabulary, and a rename is all
-    it takes for a real site to disappear.
+    `verdict` is `node`, `other` or `unresolved`. `unresolved` is the default
+    and is what anything the walk cannot PROVE is not node reaches: a
+    parameter, a subscript, a computed string, a call it does not
+    recognise. Answering `other` for those would make the population close
+    on the resolver's own vocabulary, and a rename is all it takes for a
+    real site to disappear.
+
+    `why` is what a `node` verdict rests on, and it is what the exemption
+    table is checked against: `bound` means the walk followed the name to
+    something that names node, and `spelled` means it could not bind the
+    name at all and admitted it for saying `node`. Only a `spelled` one may
+    be exempted — otherwise a row written to silence a control's own stub
+    would also silence a real `which('node')` launch dropped into the same
+    function.
 
     `scope` carries the three tables resolution reads — the names this
     module binds, the constants its siblings export, and the sibling stems
     it imports — so nothing is reached through a global.
     """
     if depth > RESOLUTION_DEPTH:
-        return UNRESOLVED
+        return (UNRESOLVED, None)
     if isinstance(expression, (ast.List, ast.Tuple)):
         if not expression.elts:
-            return UNRESOLVED
+            return (UNRESOLVED, None)
         return _executable_verdict(expression.elts[0], scope, depth)
     if isinstance(expression, ast.Constant):
-        return NODE if expression.value == 'node' else OTHER
+        return ((NODE, 'bound') if expression.value == 'node'
+                else (OTHER, 'bound'))
     if isinstance(expression, ast.BinOp):
         # `CLI + ['exec', …]` is how most of the CLI suites spell their
         # argv: the executable is the left operand and the `+` only adds
@@ -189,11 +207,11 @@ def _executable_verdict(expression, scope, depth=0):
         # node, and folding it would read as "not node", so a constant on
         # the left stays unresolved.
         if isinstance(expression.left, (ast.Constant, ast.BinOp)):
-            return UNRESOLVED
+            return (UNRESOLVED, None)
         return _executable_verdict(expression.left, scope, depth)
     if isinstance(expression, ast.Attribute):
         if ast.unparse(expression) == 'sys.executable':
-            return OTHER
+            return (OTHER, 'bound')
         # `test_cli.CLI + [...]` reaches a sibling's constant through the
         # module object. The same constant imported by name resolves
         # through `bound`; this is the other spelling, and both are used.
@@ -202,7 +220,7 @@ def _executable_verdict(expression, scope, depth=0):
             return _verdicts_over(
                 scope['exported'].get(owner.id, {}).get(expression.attr, []),
                 scope, depth)
-        return UNRESOLVED
+        return (UNRESOLVED, None)
     if isinstance(expression, ast.Name):
         # A name spelled `node` is admitted as the node executable whether
         # or not this walk can bind it. That is the conservative
@@ -211,9 +229,12 @@ def _executable_verdict(expression, scope, depth=0):
         # `_realbrowser_workers.py` binds its executable as a parameter
         # precisely so that this admits it.
         if expression.id == 'node':
-            return NODE
+            if expression.id in scope['bound']:
+                return _verdicts_over(
+                    reversed(scope['bound'][expression.id]), scope, depth + 1)
+            return (NODE, 'spelled')
         if expression.id not in scope['bound']:
-            return UNRESOLVED
+            return (UNRESOLVED, None)
         return _verdicts_over(
             reversed(scope['bound'][expression.id]), scope, depth + 1)
     if isinstance(expression, ast.Call):
@@ -224,20 +245,27 @@ def _executable_verdict(expression, scope, depth=0):
                     # Only the exact spelling is provable. `which('nodejs')`
                     # may name the same executable, so it stays unresolved
                     # rather than being read as "not node".
-                    return (NODE if argument.value == 'node' else UNRESOLVED)
-            return UNRESOLVED
-        if expression.args:
-            return _executable_verdict(expression.args[0], scope, depth + 1)
-    return UNRESOLVED
+                    return ((NODE, 'bound') if argument.value == 'node'
+                            else (UNRESOLVED, None))
+            return (UNRESOLVED, None)
+        # No other call's first argument IS the executable.
+        # `os.environ.get('RUNTIME', 'node')` takes a KEY, and resolving it
+        # would assert `other` on an executable read from the environment
+        # that may be node; `os.path.basename(sys.argv[0])` and
+        # `Path(x).name` return a derivation, not their argument. Only the
+        # `which` family returns the executable it is handed.
+        return (UNRESOLVED, None)
+    return (UNRESOLVED, None)
 
 
 def _verdicts_over(expressions, scope, depth):
     """One verdict for several bindings of one name, most specific first."""
     verdicts = {_executable_verdict(expression, scope, depth)
                 for expression in expressions}
-    if NODE in verdicts:
-        return NODE
-    return OTHER if verdicts == {OTHER} else UNRESOLVED
+    if NODE in {verdict for verdict, _ in verdicts}:
+        return (NODE, 'bound')
+    return ((OTHER, 'bound') if {verdict for verdict, _ in verdicts} == {OTHER}
+            else (UNRESOLVED, None))
 
 
 def _sibling_constants():
@@ -352,18 +380,22 @@ def _launches(tree, exported=None):
         'exported': exported,
         'stems': _imported_stems(tree, exported),
     }
-    scopes = [(node.name, node) for node in ast.walk(tree)
-              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    # A launch at module scope is a site too, and a walk that only entered
-    # functions would miss every one of them. Classes are excluded as well
-    # as functions: a method is a scope of its own and is reached by the
-    # walk above, so leaving a class in would count every one of them
-    # twice under two different names.
-    scopes.append(('<module>', ast.Module(body=[
-        statement for statement in tree.body
-        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                      ast.ClassDef))],
-        type_ignores=[])))
+    scopes = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scopes.append((node.name, _own_statements(node, node.body)))
+    # A launch at module scope, in a class body, or in a nested function is
+    # a site too, and a walk that only entered top-level functions would
+    # miss every one of them. Each is built the same way: the container's
+    # own statements, minus the definitions that are scopes of their own —
+    # so a method is counted once under its own name and a class-body
+    # statement once under the class, rather than twice or not at all.
+    for owner, label in ((tree, '<module>'),):
+        scopes.append((label, _own_statements(owner, tree.body)))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            scopes.append((node.name,
+                           _own_statements(node, node.body)))
     for name, scope in scopes:
         scope_context = dict(shared)
         scope_context['bound'] = dict(module_constants)
@@ -378,20 +410,44 @@ def _launches(tree, exported=None):
             argv = node.args[0] if node.args else next(
                 (k.value for k in node.keywords if k.arg in ('args', 'argv')),
                 None)
-            deadline = next(
-                (ast.unparse(k.value) for k in node.keywords
-                 if k.arg == 'timeout'),
-                None)
             found.append({
                 'line': node.lineno,
                 'callee': ast.unparse(node.func),
                 'function': name,
                 'verdict': (_executable_verdict(argv, scope_context)
-                            if argv is not None else UNRESOLVED),
-                'deadline': deadline,
+                            if argv is not None else (UNRESOLVED, None)),
+                'deadline': _deadline(node),
                 'node': node,
             })
     return sorted(found, key=lambda row: row['line'])
+
+
+def _own_statements(owner, body):
+    """A container's own statements: its body minus every nested definition.
+
+    A method, a nested function and a nested class are each a scope the walk
+    enters on its own, so leaving one in here would report its launches a
+    second time under the enclosing name — and a table row keyed on the
+    inner name would then silence both, which is wider than the key reads.
+    """
+    definitions = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    return ast.Module(
+        body=[statement for statement in body
+              if not isinstance(statement, definitions)],
+        type_ignores=[])
+
+
+def _deadline(launch):
+    """The value node of this launch's `timeout=`, or None.
+
+    The VALUE, not its printed form. `timeout=None`, `timeout=0` and
+    `timeout=False` are a deadline that never arrives, and reading them off
+    `ast.unparse` reported all three as a bound.
+    """
+    for keyword in launch.keywords:
+        if keyword.arg == 'timeout':
+            return keyword.value
+    return None
 
 
 def _inside_expiry_handler(node, parents):
@@ -421,7 +477,7 @@ def _bounds_its_own_child(tree, launch, parents):
     the enclosing function is not this: the drain of a killed process and
     the reap after it are both bounded and neither bounds the child.
     """
-    if launch['deadline'] is not None:
+    if _bounds(launch['deadline']):
         return True
     name = _child_name(tree, launch['node'])
     if name is None:
@@ -429,7 +485,8 @@ def _bounds_its_own_child(tree, launch, parents):
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if not any(word.arg == 'timeout' for word in node.keywords):
+        if not _bounds(next((word.value for word in node.keywords
+                             if word.arg == 'timeout'), None)):
             continue
         function = node.func
         if not isinstance(function, ast.Attribute):
@@ -444,6 +501,27 @@ def _bounds_its_own_child(tree, launch, parents):
     return False
 
 
+def _bounds(value):
+    """Whether this `timeout=` value is a deadline that can actually expire.
+
+    A keyword that is present is not a bound. `timeout=None` waits forever,
+    `timeout=0` expires before the child is launched, and `timeout=False`
+    is `0` — each is the stdlib's own "no deadline" spelling, and reading
+    them off the printed form reported all three as a bound. A composed
+    name is a deadline; a constant is only one if it is a positive number.
+    """
+    if value is None:
+        return False
+    if isinstance(value, ast.Constant):
+        number = value.value
+        if number is None or number is False:
+            return False
+        if isinstance(number, (int, float)) and number <= 0:
+            return False
+        return True
+    return True
+
+
 def _child_name(tree, launch):
     """The name the launch call binds the launched child to, or None."""
     for node in ast.walk(tree):
@@ -454,6 +532,18 @@ def _child_name(tree, launch):
         if isinstance(node.targets[0], ast.Name):
             return node.targets[0].id
     return None
+
+
+def _exempt(shape, launch):
+    """Whether a `node` verdict this table excuses.
+
+    Keyed on the call's shape, exactly as `UNRESOLVED_LAUNCHES` is, so a
+    row is as auditable as the rows it joins. And restricted to a verdict
+    the walk could not BIND: a launch that resolves to a real
+    `shutil.which('node')` is never exempteable, so a row written to
+    silence a control's own stub cannot become the place a real one hides.
+    """
+    return shape in NOT_FIXED_WORK and launch['verdict'][1] == 'spelled'
 
 
 def _sweep():
@@ -467,47 +557,215 @@ def _sweep():
         parents = _parents(tree)
         for launch in _launches(tree):
             shape = (path.name, launch['function'], launch['callee'])
-            if launch['verdict'] == UNRESOLVED:
+            verdict = launch['verdict'][0]
+            if verdict == UNRESOLVED:
                 if shape in UNRESOLVED_LAUNCHES:
                     used.add(shape)
                 else:
                     unclassified.append(f'{path.name}:{launch["line"]} in '
                                         f'{launch["function"]}()')
                 continue
-            if launch['verdict'] != NODE:
+            if verdict != NODE:
                 continue
             if path.name in CLASSIFYING_MODULES:
                 if not _bounds_its_own_child(tree, launch, parents):
                     unbounded.append(f'{path.name}:{launch["line"]}')
                 continue
+            # A control that plants its own stub node to prove routing is a
+            # real thing in this tree, and a finding it cannot be excused
+            # from is a finding its author learns to ignore. So the table is
+            # consulted here too — but ONLY for a `node` verdict the walk
+            # could not bind. A row cannot silence a launch that resolves
+            # to a real `which('node')`, so it cannot become the hiding
+            # place for one, and the unused-row check covers this class
+            # exactly as it covers the other.
+            if _exempt(shape, launch):
+                used.add(shape)
+                continue
             unrouted.append(f'{path.name}:{launch["line"]} '
-                            f'(timeout={launch["deadline"]})')
-    unused = sorted(set(UNRESOLVED_LAUNCHES) - used)
+                            f'(timeout={ast.unparse(launch["deadline"])})')
+    unused = sorted(
+        (set(UNRESOLVED_LAUNCHES) | set(NOT_FIXED_WORK)) - used)
     return unrouted, unbounded, unclassified, unused
 
 
 def test_every_fixed_work_node_child_goes_through_the_shared_detector(tmp):
-    """The rule, read off the tree rather than off a list of sites."""
+    """The rule, read off the tree rather than off a list of sites.
+
+    One findings list and one assert over all four classes, so a run reports
+    every class it found rather than the first. An early assert here is how
+    a plant in a later class hides behind one caught by an earlier one.
+    """
     del tmp
     unrouted, unbounded, unclassified, unused = _sweep()
-    assert not unrouted, (
-        'a Node child whose cost is a fixed unit of work is launched '
-        'outside the shared hang detector:\n' + '\n'.join(unrouted))
-    assert not unbounded, (
-        'a classifying module left its child with no bound of its own:\n'
-        + '\n'.join(unbounded))
+    findings = []
+    if unrouted:
+        findings.append(
+            'a Node child whose cost is a fixed unit of work is launched '
+            'outside the shared hang detector:\n  '
+            + '\n  '.join(unrouted))
+    if unbounded:
+        findings.append(
+            'a classifying module left its child with no bound of its own:\n  '
+            + '\n  '.join(unbounded))
     # Fail-closed: an executable the walk cannot resolve is a site it has
     # not discharged, not a site it has decided is not node.
-    assert not unclassified, (
-        'a launch whose executable this walk cannot resolve, so it cannot '
-        'prove the child is not node. Name it in UNRESOLVED_LAUNCHES with '
-        'the reason, or teach the resolver the shape:\n'
-        + '\n'.join(unclassified))
+    if unclassified:
+        findings.append(
+            'a launch whose executable this walk cannot resolve, so it '
+            'cannot prove the child is not node. Name it in '
+            'UNRESOLVED_LAUNCHES with the reason, or teach the resolver '
+            'the shape:\n  ' + '\n  '.join(unclassified))
     # And the table cannot outlive what it excused, or it becomes a set of
     # permissions rather than a record of what could not be classified.
-    assert not unused, (
-        'a UNRESOLVED_LAUNCHES row that no longer matches any launch:\n'
-        + '\n'.join(str(row) for row in unused))
+    if unused:
+        findings.append(
+            'a row in UNRESOLVED_LAUNCHES or NOT_FIXED_WORK that no '
+            'longer matches any launch:\n  '
+            + '\n  '.join(str(row) for row in unused))
+    assert not findings, '\n'.join(findings)
+
+
+def test_a_deadline_that_cannot_expire_is_not_a_deadline(tmp):
+    """`timeout=` being present is not a bound, in all five spellings.
+
+    The value is read as a node, not off its printed form, so the stdlib's
+    own "no deadline" spellings are refused. A `Constant` that is not a
+    positive number bounds nothing; a composed name is a deadline, because
+    what it composes to is not visible from here and refusing it would
+    refuse every real bound in the tree.
+    """
+    del tmp
+    for value in ('None', '0', 'False', '0.0'):
+        source = ('import subprocess\n'
+                  'def launch():\n'
+                  "    return subprocess.run(['node', 'c.js'],\n"
+                  f'                          timeout={value})\n')
+        launch = _launches(ast.parse(source))[0]
+        assert not _bounds(launch['deadline']), (value, launch['deadline'])
+    for value in ('CHILD_DEADLINE_S', 'round(30 * 2)', 'None if x else 5',
+                 "'30'"):
+        source = ('import subprocess\n'
+                  'def launch():\n'
+                  "    return subprocess.run(['node', 'c.js'],\n"
+                  f'                          timeout={value})\n')
+        launch = _launches(ast.parse(source))[0]
+        assert _bounds(launch['deadline']), (value, launch['deadline'])
+    # And the same rule on the wait that bounds a `Popen`.
+    tree = ast.parse(
+        'import subprocess\n'
+        'def launch():\n'
+        "    process = subprocess.Popen(['node', 'c.js'])\n"
+        '    return process.communicate(timeout=None)\n')
+    launch = _launches(tree)[0]
+    assert not _bounds_its_own_child(tree, launch, _parents(tree)), (
+        'timeout=None was read as a bound on the child')
+
+
+def test_a_launch_in_a_class_body_is_a_site(tmp):
+    """Liveness of the class-body scope, in both of its halves.
+
+    A class body is walked by no method scope, so a launch declared as a
+    class attribute is in neither the class nor any method. The second half
+    is the other side of the same construction: a METHOD is counted once,
+    under its own name, and not again under the class.
+    """
+    del tmp
+    in_a_body = ('import subprocess\n'
+                 'class Harness:\n'
+                 "    LAUNCH = subprocess.run(['node', 'c.js'], timeout=30)\n")
+    launches = _launches(ast.parse(in_a_body))
+    assert [row['verdict'][0] for row in launches] == [NODE], launches
+    assert [row['function'] for row in launches] == ['Harness'], launches
+    in_a_method = ('import subprocess\n'
+                   'class Harness:\n'
+                   '    def probe(self):\n'
+                   "        return subprocess.run(['node', 'c.js'],\n"
+                   '                          timeout=30)\n')
+    launches = _launches(ast.parse(in_a_method))
+    assert len(launches) == 1, launches
+    assert launches[0]['function'] == 'probe', launches
+    # A nested function is its own scope too, and is counted once.
+    nested = ('import subprocess\n'
+              'def outer():\n'
+              '    def inner():\n'
+              "        return subprocess.run(['node', 'c.js'], timeout=30)\n"
+              '    return inner\n')
+    launches = _launches(ast.parse(nested))
+    assert len(launches) == 1, launches
+    assert launches[0]['function'] == 'inner', launches
+
+
+def test_a_call_the_walk_does_not_recognise_is_not_resolved_through_it(tmp):
+    """A call's first argument is not the call's result.
+
+    `os.environ.get('RUNTIME', 'node')` takes a KEY, and resolving it
+    asserted `other` — a positive proof of non-node about an executable
+    read from the environment that may be node. `os.path.basename` and
+    `Path(x).name` return a derivation, not their argument. Only the
+    `which` family returns the executable it is handed.
+    """
+    del tmp
+    for line in ("name = os.environ.get('RUNTIME', 'node')",
+                 'name = os.path.basename(sys.argv[0])',
+                 'name = Path(sys.argv[0]).name'):
+        source = ('import os\n'
+                  'import sys\n'
+                  'from pathlib import Path\n'
+                  'import subprocess\n'
+                  'def launch():\n'
+                  f'    {line}\n'
+                  "    return subprocess.run([name, 'c.js'], timeout=30)\n")
+        launch = _launches(ast.parse(source))[0]
+        assert launch['verdict'][0] == UNRESOLVED, (line, launch['verdict'])
+    # And the one call that DOES return its argument still resolves.
+    which = ('import shutil\n'
+             'import subprocess\n'
+             'def launch():\n'
+             "    name = shutil.which('node')\n"
+             "    return subprocess.run([name, 'c.js'], timeout=30)\n")
+    assert _launches(ast.parse(which))[0]['verdict'][0] == NODE
+
+
+def test_a_node_row_silences_a_stub_and_not_a_real_child(tmp):
+    """The false positive is answerable, and the answer is narrow.
+
+    A control that plants its own stub executable to prove routing is a
+    real thing in this tree, and a finding it cannot be excused from is a
+    finding its author learns to ignore. So a `node` verdict is exempteable
+    — but only one the walk could not BIND, so the row cannot become the
+    place a real `which('node')` launch hides. Both halves are checked
+    against the decision the sweep actually makes.
+    """
+    del tmp
+    stub = ('import subprocess\n'
+            'def launch(node, tmp):\n'
+            "    return subprocess.run([node, 'probe.js'],\n"
+            '                          capture_output=True, timeout=30)\n')
+    real = ('import shutil\n'
+            'import subprocess\n'
+            'def launch(node=None, tmp=None):\n'
+            "    node = shutil.which('node')\n"
+            "    return subprocess.run([node, 'probe.js'], timeout=30)\n")
+    stub_launch = _launches(ast.parse(stub))[0]
+    real_launch = _launches(ast.parse(real))[0]
+    assert stub_launch['verdict'] == (NODE, 'spelled'), stub_launch['verdict']
+    assert real_launch['verdict'] == (NODE, 'bound'), real_launch['verdict']
+    # Same module, same function, same callee — the shape a row is keyed on
+    # — so the row cannot tell them apart by its key alone and must not try.
+    shape = ('planted.py', 'launch', 'subprocess.run')
+    original = dict(NOT_FIXED_WORK)
+    NOT_FIXED_WORK[shape] = "a control's own stub node"
+    try:
+        assert _exempt(shape, stub_launch), 'a row could not silence it'
+        assert not _exempt(shape, real_launch), (
+            'a row silenced a launch that resolves to a real which(node)')
+    finally:
+        NOT_FIXED_WORK.clear()
+        NOT_FIXED_WORK.update(original)
+    # And the table is back to what it was, so the control leaves nothing
+    # behind for the sweep that runs after it.
+    assert NOT_FIXED_WORK == original, 'the table did not restore'
 
 
 def test_a_launch_the_walk_cannot_read_is_not_a_non_launch(tmp):
@@ -520,7 +778,7 @@ def test_a_launch_the_walk_cannot_read_is_not_a_non_launch(tmp):
     del tmp
     constant = ('import subprocess\n'
                 "subprocess.run(['node', 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(constant))[0]['verdict'] == NODE
+    assert _launches(ast.parse(constant))[0]['verdict'][0] == NODE
     # A function PARAMETER named `node` is the shape that was live in this
     # tree and invisible: no walk of one module can bind it. It is admitted
     # anyway, so the control demands an answer for it rather than passing.
@@ -528,33 +786,33 @@ def test_a_launch_the_walk_cannot_read_is_not_a_non_launch(tmp):
                  'import subprocess\n'
                  'def launch(node):\n'
                  "    return subprocess.run([node, 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(parameter))[0]['verdict'] == NODE
+    assert _launches(ast.parse(parameter))[0]['verdict'][0] == NODE
     # A parameter under any OTHER name is unprovable, and that is the case
     # UNRESOLVED_LAUNCHES exists to discharge.
     other_parameter = ('import subprocess\n'
                        'def launch(exe):\n'
                        "    return subprocess.run([exe, 'child.js'],\n"
                        '                          timeout=30)\n')
-    assert _launches(ast.parse(other_parameter))[0]['verdict'] == UNRESOLVED
+    assert _launches(ast.parse(other_parameter))[0]['verdict'][0] == UNRESOLVED
     # A local bound to a parameter, and a second name for the executable.
     rebound = ('import subprocess\n'
                'def launch(exe):\n'
                "    other = exe\n"
                "    return subprocess.run([other, 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(rebound))[0]['verdict'] == UNRESOLVED
+    assert _launches(ast.parse(rebound))[0]['verdict'][0] == UNRESOLVED
     # A different spelling of the same executable, which may be node.
     alias = ('import shutil\n'
              'import subprocess\n'
              'def launch():\n'
              "    n = shutil.which('nodejs')\n"
              "    return subprocess.run([n, 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(alias))[0]['verdict'] == UNRESOLVED
+    assert _launches(ast.parse(alias))[0]['verdict'][0] == UNRESOLVED
     # A computed executable, and one read out of the environment.
     computed = ('import subprocess\n'
                 'def launch():\n'
                 "    name = 'no' + 'de'\n"
                 "    return subprocess.run([name, 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(computed))[0]['verdict'] == UNRESOLVED
+    assert _launches(ast.parse(computed))[0]['verdict'][0] == UNRESOLVED
     # And the two it IS allowed to discharge, so the cases above are not
     # passing because nothing is ever classified.
     resolved = ('import shutil\n'
@@ -562,13 +820,13 @@ def test_a_launch_the_walk_cannot_read_is_not_a_non_launch(tmp):
                 'def launch():\n'
                 "    node = shutil.which('node')\n"
                 "    return subprocess.run([node, 'child.js'], timeout=30)\n")
-    assert _launches(ast.parse(resolved))[0]['verdict'] == NODE
+    assert _launches(ast.parse(resolved))[0]['verdict'][0] == NODE
     python = ('import sys\n'
               'import subprocess\n'
               'def launch():\n'
               '    return subprocess.run([sys.executable, "s.py"],\n'
               '                          timeout=30)\n')
-    assert _launches(ast.parse(python))[0]['verdict'] == OTHER
+    assert _launches(ast.parse(python))[0]['verdict'][0] == OTHER
 
 
 def test_a_wait_inside_an_expiry_handler_is_not_the_bounds_of_the_child(tmp):

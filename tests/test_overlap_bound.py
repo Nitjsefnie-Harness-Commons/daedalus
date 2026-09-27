@@ -114,17 +114,9 @@ def _bound_source(work, call):
 def _bound_run(source):
     """Run one bound control in a node child, streams captured as text.
 
-    The `timeout_s` parameter this used to take is gone, and no caller ever
-    passed it: all five call sites below drove a source and nothing else,
-    so it was a wall-clock literal wearing a default, not a caller's choice.
-    Its removal does not leave a control unbounded — every one of these
-    children is bounded now by the shared hang detector in
-    `tests/_noderun.py`, which names the child and carries its output when
-    it fires. That matters more here than elsewhere: three of the five
-    sources are work that never settles, so a regression in the bound
-    machinery under test is exactly the case a wall bound was standing in
-    front of, and it is now reported inside the suite rather than hanging
-    the job.
+    Every one of these children is bounded by the shared hang detector in
+    `tests/_noderun.py`, and three of the five sources below are work that
+    never settles.
     """
     node = shutil.which('node')
     assert node, 'node is required to execute the extension worker'

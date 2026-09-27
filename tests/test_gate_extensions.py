@@ -7,6 +7,7 @@ of it: a declared `{hang: true}` relay answer that only cancellation ends,
 and the `node -e` launcher, which hands the program text to node as an
 argument instead of writing it to a file.
 """
+import signal
 import sys
 from pathlib import Path
 
@@ -19,6 +20,36 @@ from _worker_sources import (  # noqa: E402
     RESPONSE_STUB, STREAM_RESPONSE)
 
 SYNC = 'POST /sync-tabs'
+
+# The outer alarm this module owns. A control that provokes an expiry sets
+# its budget inside `tests/_noderun.py` — the code a reversion removes — so
+# without a bound of its own it hangs instead of failing. The census
+# requires the figure to be composed from a named chain rather than typed,
+# and refuses a constant carried in from a sibling, so the chain is
+# repeated here rather than imported; the measurement rides with it,
+# because a copy of a chain that is only a chain is not a copy of a bound.
+#
+#   OUTER_ALARM_SAMPLES  the slowest correct runs of the armed control
+#   OUTER_ALARM_SLOWEST  max of those samples
+#   OUTER_ALARM_S        the alarm, with no multiple: it is already five
+#                        times the healthy budget below
+#
+# The healthy budget is `round(CHILD_DEADLINE_S * 0.1)` = 11s, so the
+# slowest correct run of this arm has to clear it with room to spare and
+# the alarm has to fire well inside any external bound. 57s is about five
+# times the healthy budget: turning a wedge into a named failure costs a
+# minute, where the alternative costs whatever the runner's ceiling costs.
+OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
+OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
+# Cancelling a timer IS a zero-second deadline, and the census requires the
+# figure to be composed from a named chain rather than typed at the call.
+OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
+
+
+def _raise_outer_deadline(_signum, _frame):
+    """What the outer alarm raises. `TimeoutError` so it is a named expiry."""
+    raise TimeoutError('the outer alarm on this control fired')
 
 
 _HANG_HARNESS = r"""
@@ -223,22 +254,14 @@ def test_an_inline_plan_left_unparsed_is_a_contract_fault(tmp):
 
 
 def test_a_stalled_inline_child_is_reported_with_its_own_output(tmp):
-    """The inline launcher's stall is classified, where it used to hang.
+    """A wedged inline child is a classified failure inside this suite.
 
-    `run_inline_gate` carried no bound at all, and its own docstring said so
-    and named the consequence: a wedged child was a hung job under the
-    suite's ceiling and nothing more. That is the reporting gap this
-    routing closes, and this is the call site it closes it at.
-
-    The program below reaches Node, writes a line and then never settles,
-    so the child stalls having produced something — which is precisely the
-    case where its partial output is the only evidence there is. A bare
-    `subprocess.run` here would have returned nothing at all.
-
-    The budget is derived from the launcher's own deadline and deliberately
-    smaller: this provokes an expiry, so a tighter budget only makes it
-    arrive sooner. That Node wrote its line before the budget ran out is
-    asserted, not assumed.
+    The program reaches Node, writes a line and then never settles, so the
+    child stalls having produced something — which is precisely the case
+    where its partial output is the only evidence there is. A launcher with
+    no bound of its own returns nothing at all here, and leaves the suite
+    waiting, which is why the outer alarm below is armed by this control
+    rather than left to the machinery it is testing.
     """
     import subprocess  # noqa: E402
 
@@ -249,16 +272,26 @@ def test_a_stalled_inline_child_is_reported_with_its_own_output(tmp):
     real_deadline = _noderun.CHILD_DEADLINE_S
     _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
     caught = None
+    signal.signal(signal.SIGALRM, _raise_outer_deadline)
+    signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_S)
     try:
-        run_inline_gate(require_node(), program, [], cwd=ROOT,
-                        plan={'planned': []})
-    except _noderun.ChildDeadlineExceeded as failure:
-        caught = failure
-    except BaseException as unexpected:  # noqa: BLE001
-        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-            'a bare TimeoutExpired reached the caller', unexpected)
-        raise
+        try:
+            run_inline_gate(require_node(), program, [], cwd=ROOT,
+                            plan={'planned': []})
+        except _noderun.ChildDeadlineExceeded as failure:
+            caught = failure
+        except BaseException as unexpected:  # noqa: BLE001
+            assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+                'a bare TimeoutExpired reached the caller', unexpected)
+            raise
+    except TimeoutError as alarm:
+        raise AssertionError(
+            'the outer alarm fired: the inline child wedged and nothing in '
+            'the suite ended it, which is what this control exists to '
+            'prevent'
+        ) from alarm
     finally:
+        signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_CLEAR_S)
         _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the inline child that never settles finished'
     assert 'the inline child spoke' in caught.stdout, caught.stdout
