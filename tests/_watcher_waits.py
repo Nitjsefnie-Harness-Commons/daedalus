@@ -9,12 +9,12 @@ the failure-reporting backstop on the single wait with no live process to
 give up on, and once more as the bound on a reap that follows a kill and
 can only return.
 """
-import os
-import signal
 import subprocess
 import sys
 import threading
 import time
+
+from _processtree import cleanup_process_tree
 
 # The backstop on the one wait that cannot end on a state. 90s is the
 # figure tests/test_parent_watch.py already waits a real grandchild's death
@@ -24,6 +24,8 @@ BACKSTOP = 90
 # A wake-up interval, never a deadline: the waits below end on what the
 # process under test did.
 POLL = 0.05
+# The bound on the reap that follows a cancel, and on the cancel itself.
+CANCEL_BOUND = 60
 
 
 class Stream:
@@ -94,32 +96,41 @@ class ChildProcess:
     def stop(self):
         if self.proc.poll() is None:
             _cancel(self.proc)
-        self.proc.wait(timeout=60)
+        self.proc.wait(timeout=CANCEL_BOUND)
         return self.proc.returncode
 
 
 def _cancel(proc):
-    """Signal the whole group the child leads, so nothing outlives it.
+    """End the child's whole tree, through the one module that owns a kill.
 
-    A kill names one process, and the `gh` a watcher had already spawned
-    is not it: the orphan keeps running, and keeps appending to the call
-    log a measurement is still reading, after the child it belonged to is
-    gone. The group is every process the child started, so signalling it
-    cancels the work. `start_new_session` made the child its own group
-    leader, so the group id is its pid - and the child is unreaped here,
-    so that pid is still its own and cannot have been handed to anyone
-    else. A group that does not exist is a child that has not reached
-    `setsid` yet, and naming the child alone is all there is to do.
+    A kill names one process, and the `gh` a watcher had already spawned is
+    not it: the orphan keeps running, and keeps appending to the call log a
+    measurement is still reading, after the child it belonged to is gone.
+    The tree has to go, on both platforms, and `tests/_processtree.py` is
+    where that lives.
+
+    **This is deduplication, not a repair.** `Child` launches with
+    `start_new_session=True`, so the child is its own session and group
+    leader from `Popen` returning, and the local spelling that passed
+    `proc.pid` AS the group id resolved to the same group the owner's
+    lookup does - always, and not because of luck. The two spellings
+    already agreed; the guard in `tests/test_noderun_deadline.py` is what
+    disagreed with them, because a second copy of a kill is a second
+    mechanism wearing the same name. What rests on that equivalence, and
+    is worth saying where the code relies on it: `start_new_session=True`
+    AND the child being unreaped. The second half is load-bearing - a
+    reaped pid can be recycled, and a recycled pid is not its own group.
+
+    The `proc.kill()` below is the local copy's own fallback, kept. The
+    owner returns a description when a group is already gone and does not
+    fall back to a direct kill, so a bare delegation would drop it; here
+    it fires on the one state where a direct kill is wanted, the child
+    still running, rather than on the owner's wording.
     """
-    if sys.platform.startswith('win'):
-        # Windows has no group to signal, so the tree is named instead.
-        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
-                       capture_output=True)
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    killed = cleanup_process_tree(proc, CANCEL_BOUND)
+    if proc.poll() is None:
         proc.kill()
+    return killed
 
 
 def await_lines(stream, match, count, what):
