@@ -355,8 +355,9 @@ def _builtins(imports, operation):
     carrier would measure a rule that reads any `b` as the builtin just as
     happily as one that reads none of them. So every row is generated from
     the same construction with the module's own source between the twins, and
-    the twins DISAGREE: a name REPLACED, a name REPLACED from a nested scope
-    the symbol table does not report, and a binding the module may not have
+    the twins DISAGREE: a name REPLACED at the module level or from a nested
+    scope the root symbol table does not report — by a store, by a `del`, by
+    an `except ... as`, by an import — and a binding the module may not have
     RUN. A `bool` call settles — `b(0)` is `False` and names position
     zero, `b(2)` is `True` and names position one — so the first carrier
     decides, and the second does not, because `symtable` is a static grammar
@@ -374,7 +375,7 @@ def _builtins(imports, operation):
             elements[at] = operation
             container = route(elements)
             for spelling, binding, name, own in _BUILTIN_SPELLINGS:
-                for suffix, before, after, replaced in _CARRIERS:
+                for _carrier, suffix, before, after, replaced in _CARRIERS:
                     # The store comes AFTER the binding it takes back, and
                     # inside the condition when there is one, so the row says
                     # what it means whichever of the two is composed.

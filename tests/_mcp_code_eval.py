@@ -31,7 +31,9 @@ either. Both are refusals, which is the direction a false negative is cheap in.
 
 The same grammar does not answer the SHADOW question either: a store under a
 `global` declaration is a module binding that leaves the root symbol imported
-and not assigned, so the walk reads the module's own rebindings off the source.
+and not assigned, and the resolver's answer is on the NESTED side of it — a
+symbol the compiler says a scope binds — so the walk reads the module's own
+rebindings from there rather than from the nodes it walks.
 """
 import ast
 import symtable
@@ -89,24 +91,56 @@ class _Scopes:
         self._local = {}
         self._alias = {}
         self._uncertain = {}
-        # The names each scope DECLARES `global` and each scope STORES, kept
-        # per table and joined after the walk. A `global b` says `b` belongs
-        # to the module, so a store it licenses is a module binding — and
-        # `symtable` leaves the root symbol imported and not assigned all the
-        # same, because the store is inside a nested scope it does not fold
-        # back. A `nonlocal` store is NOT here: the resolver already reports
-        # the ENCLOSING function's own symbol as assigned for it.
-        self._declared = {}
-        self._stored = {}
+        # The names a NESTED scope rebinds in the MODULE, read off the
+        # resolver's own tables before the walk rather than off the nodes it
+        # walks. `symtable` is the compiler's answer to "does this scope bind
+        # this name", and it is an answer about every binding form rather than
+        # about the ones an AST walk enumerates — see `_rebindings`.
+        self._rebound = self._rebindings()
         # How far into each table's children the walk has read. The resolver
         # builds them in source order, and so does this walk EXCEPT that a
         # function's body is walked before its decorator list, so the cursor
         # has to be able to go back.
         self._cursor = {}
         self._walk(tree, self._root)
-        self._rebound = {name for scope, names in self._declared.items()
-                         for name in names
-                         if name in self._stored.get(scope, ())}
+
+    def _rebindings(self):
+        """The names a NESTED scope binds in the module it belongs to.
+
+        A `global b` says `b` belongs to the module, so a binding a nested
+        scope makes under one is a MODULE binding — and the root symbol does
+        not report it, because the store is in a table the resolver does not
+        fold back into its parent. The resolver's answer is on the NESTED side
+        instead, and it is the COMPILER's: a symbol that `is_global()` is not
+        local to the scope it is in, so binding it binds the module's, and the
+        compiler reports every form that binds one — a store, an augmented
+        store, a `del`, an `except ... as`, a `for` or `with` target, a
+        walrus, a `def`, a class and an import all read as `is_assigned()` or
+        `is_imported()`, while a USE, a subscript or attribute store and a
+        bare declaration read as neither. So the set comes from the resolver's
+        own tables rather than from a list of node types, and a binding form
+        nobody thought of is in it for free.
+
+        The ROOT is not walked: a module-level name is global to the resolver
+        and local to the module at once, so taking its own symbols would make
+        every alias a rebinding. A `nonlocal` store is not here either, for
+        the reason it never needed to be: the resolver reports the ENCLOSING
+        function's own symbol as assigned.
+
+        The cost is one name set with no scope on it, so a module-level use
+        standing ABOVE a rebinding is refused where the runtime reaches. That
+        is this walk's cheap direction, and it is bounded: only a name some
+        nested scope binds is in it.
+        """
+        rebound = set()
+        pending = list(self._root.get_children())
+        while pending:
+            table = pending.pop()
+            pending.extend(table.get_children())
+            rebound.update(symbol.get_name() for symbol in table.get_symbols()
+                           if symbol.is_global()
+                           and (symbol.is_assigned() or symbol.is_imported()))
+        return rebound
 
     @staticmethod
     def _symbols(table):
@@ -120,10 +154,16 @@ class _Scopes:
         except that `ast` walks a function's BODY before its decorator list,
         so a scope written ABOVE the `def` is named after one below it. A
         cursor that may only move forwards cannot answer that, so it returns
-        to the start when the line it is at has already passed. A name and a
-        line are not enough on their own either: two sibling scopes can share
-        both — two lambdas separated by `;` — and telling them apart by which
-        is next is what a cursor is for.
+        to the start when the line it is at has already passed. That is the
+        one place the cursor discards rather than seeks, and it is bounded by
+        the number of scopes in one table rather than by the module: a rescan
+        is a pass over a symbol table's own children. It cannot produce a
+        wrong answer, because every candidate it re-examines is still matched
+        on its name AND its line — a rewind makes more candidates available to
+        that test, never fewer, and a name the table does not hold at that
+        line is still a miss. A name and a line are not enough on their own
+        either: two sibling scopes can share both — two lambdas separated by
+        `;` — and telling them apart by which is next is what a cursor is for.
 
         The second answer is the walk's own miss. No scope of that kind here
         is a real answer (a comprehension the running interpreter has
@@ -166,10 +206,6 @@ class _Scopes:
         self._scope_of[id(node)] = table
         if uncertain:
             self._uncertain[id(node)] = True
-        if isinstance(node, ast.Global):
-            self._declared.setdefault(id(table), set()).update(node.names)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            self._stored.setdefault(id(table), set()).add(node.id)
         if table is self._root:
             # Only module-scope forms count; a nested function or
             # comprehension body is its own scope and is not walked as root.
@@ -278,8 +314,9 @@ class _Scopes:
 
         It reports a store as assigned, a parameter as a parameter and a
         class as a namespace, and any of those shadows the import over the
-        same name. What it does NOT report is a store the module made from a
-        nested scope under a `global` declaration, so `_rebound` carries it.
+        same name. What it does NOT report is a binding a nested scope makes
+        under a `global` declaration — the root symbol is left imported and
+        not assigned all the same — so `_rebound` carries that.
         """
         symbol = self._symbols(table).get(name)
         return (symbol is not None and symbol.is_imported()
