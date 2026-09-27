@@ -61,7 +61,11 @@ def _derivation():
     """
     global _DERIVATION
     if _DERIVATION is None:
-        import _reserved_names
+        # The main config excludes `tests/`, where this module lives, so
+        # pyright cannot resolve a name that `sys.path` above resolves at
+        # runtime. The suppression states that property of the config; an
+        # unresolvable import is `Any` to pyright either way.
+        import _reserved_names  # pyright: ignore[reportMissingImports]
         _DERIVATION = _reserved_names
     return _DERIVATION
 
