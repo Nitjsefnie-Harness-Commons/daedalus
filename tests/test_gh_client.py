@@ -556,6 +556,11 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
     assert 'rate limit' in lines[0]
+    # The stamp says which instant; the duration says how long the line claims
+    # to wait for it, and the two are separate claims of one pause. Pinned, the
+    # delay is the five seconds between `now` and `reset` and not a value
+    # rounded out of a clock the runner was hurrying past.
+    assert 'waiting 5s' in lines[0], lines[0]
     stamp = lines[0].rsplit(' ', 1)[-1]
     wanted = datetime.fromtimestamp(reset, timezone.utc).strftime(
         '%Y-%m-%dT%H:%M:%SZ')

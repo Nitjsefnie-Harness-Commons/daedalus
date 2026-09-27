@@ -63,6 +63,11 @@ def _announces_failure(line):
     return 'pyright: failure' in line
 
 
+def _reports_a_failed_poll(line):
+    """The watcher's own report that a poll raised rather than answered."""
+    return 'poll failed' in line
+
+
 class _Child(waits.ChildProcess):
     """A child the budget suite starts from an argv and an environment."""
 
@@ -357,6 +362,16 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         assert 'waiting 6s' in pause, pause
         waits.await_lines(child.out, _reports_state, 1,
                           'the resumed poll to report what it found')
+        # The second poll was the pause resuming, not the pause giving up and
+        # the watcher repolling on its own tick. Both produce a second call at
+        # or past the reset, so the timestamp cannot tell them apart - but only
+        # the abandoned one raises, and the script's own report that a poll
+        # raised is the difference. This is not a wall-clock bound: it reads
+        # the error stream once the resumed poll has already reported, so a
+        # line saying otherwise had the whole wait to arrive, and the pristine
+        # child never emits one at all.
+        assert not [line for line in child.err.lines
+                    if _reports_a_failed_poll(line)], child.err.lines
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
         assert calls[1]['t'] >= reset, (calls[1]['t'], reset)
