@@ -206,7 +206,8 @@ def _inline_conditions(starts, function, statement):
            f'return {ast.unparse(allow)}', guard.lineno)
 
 
-def _chain(statement):
+def _if_elif_chain(statement):
+    """Every arm of an if/elif chain, the first one first."""
     node = statement
     while isinstance(node, ast.If):
         yield node
@@ -242,7 +243,7 @@ def _conditions(source, names):
             continue
         for statement in function.body:
             if isinstance(statement, ast.If) and _own_returns(statement):
-                for arm in _chain(statement):
+                for arm in _if_elif_chain(statement):
                     if not _own_returns(arm):
                         continue
                     yield from _arm_conditions(starts, function, arm)
