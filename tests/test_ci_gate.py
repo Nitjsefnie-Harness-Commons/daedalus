@@ -139,9 +139,24 @@ def test_the_expectation_has_exactly_one_definition(tmp):
 
     Read from source with `ast`, not by importing: an import would collapse
     the very thing being counted.
+
+    And the control's own premise is asserted rather than assumed: a rename
+    of either name would leave this filtering for a name nothing defines,
+    enumerating everything and matching nothing, which is a control that
+    passes while measuring nothing. That is the same failure as I2 one
+    rename later, and the shape `tests/_unconsolidated_names.py` already
+    uses for its own table - a row naming no live site is a refusal.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    watched = ('REQUIRED_WORKFLOWS', 'missing_required')
+    declared = _declared_names(SOURCE)
+    missing = [name for name in watched if name not in declared]
+    assert not missing, (
+        f'ci_gate.py defines none of {missing}, so this control would '
+        f'enumerate every definition and match none of them - a green run '
+        f'that measures nothing; declare the expectation under the name '
+        f'this control watches, or teach it the new one')
     found = []
     for path in sorted(skill.iterdir()):
         if path.suffix != '.py':
@@ -153,13 +168,26 @@ def test_the_expectation_has_exactly_one_definition(tmp):
                 name = getattr(node.targets[0], 'id', None)
             elif isinstance(node, ast.FunctionDef):
                 name = node.name
-            if name not in ('REQUIRED_WORKFLOWS', 'missing_required'):
+            if name not in watched:
                 continue
             if name == 'missing_required' or not _is_an_alias(node):
                 found.append(f'{path.name}:{node.lineno} {name}')
     first = _definition_line(SOURCE)
     assert found == [f'ci_gate.py:{first} REQUIRED_WORKFLOWS',
                      f'ci_gate.py:{first + 3} missing_required'], found
+
+
+def _declared_names(path):
+    """Every top-level name the module declares, whatever its kind."""
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names.update(getattr(target, 'id', None)
+                         for target in node.targets)
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            names.add(node.name)
+    return names
 
 
 def test_the_required_names_are_spelled_in_exactly_one_module(tmp):

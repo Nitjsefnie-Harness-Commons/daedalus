@@ -52,10 +52,11 @@ once, here, rather than twice.
   python3 -u watch_all.py --once 195 my-branch     # trial both, print, exit
   python3 -u watch_all.py 195 my-branch            # persistent, debounced
 
-This file sits at the 500-line production ceiling the size policy
+This file is close to the 500-line production ceiling the size policy
 enforces, so the next change to it belongs in `ci_gate.py` or a module of
 its own rather than in here: what stays here is the batching, the pipes
-and the hold's own decisions.
+and the hold's own decisions. `GateAbsent` went that way for the same
+reason - the predicate raises it and both callers recognise it.
 """
 
 import argparse
@@ -206,24 +207,6 @@ def _runs_on(slug, sha):
         return None
 
 
-class _GateAbsent:
-    """A run set that concluded and never carried the gating workflow.
-
-    A fourth answer beside True (settled), False (runs still open) and None
-    (nothing to judge). Its own type rather than a falsy value, so it can
-    never be read as one of the other three by `is` comparison, and it
-    carries the names so the cap line can name the workflow instead of
-    falling back on "unknown" - the shape issue #839 was filed about,
-    reached here by the other route.
-    """
-
-    def __init__(self, missing):
-        self.missing = tuple(missing)
-
-    def __repr__(self):
-        return f'gate absent: {", ".join(self.missing)}'
-
-
 def _settled(runs):
     """True settled, False runs still open, None nothing to judge.
 
@@ -239,15 +222,15 @@ def _settled(runs):
         return None
     missing = ci_gate.missing_required(runs)
     if missing:
-        return _GateAbsent(missing)
+        return ci_gate.GateAbsent(missing)
     return all(run.get('status') == 'completed' for run in runs)
 
 
 def _all_concluded(sha, watcher=None):
     """`_settled`'s answer, passed through: True, False, None for nothing
-    to judge, or `_GateAbsent` for a run set that concluded without the
-    gating workflow. None and `_GateAbsent` both keep the batch held, and
-    are separate because the cap line says a different thing for each.
+    to judge, or a `ci_gate.GateAbsent` for a run set that concluded
+    without the gating workflow. None and GateAbsent both keep the batch
+    held, and are separate because the cap line says a different thing.
 
     None keeps the batch held: a failed query must never look settled.
     Runs rather than check runs for the reason in the module docstring. A
@@ -285,7 +268,7 @@ def _hold_release(settled, held_for, max_hold, sha):
         return []
     if held_for < max_hold:
         return None
-    if isinstance(settled, _GateAbsent):
+    if isinstance(settled, ci_gate.GateAbsent):
         return [_cap_line(
             sha, max_hold,
             f'no run of {", ".join(settled.missing)} on this head, so the '
