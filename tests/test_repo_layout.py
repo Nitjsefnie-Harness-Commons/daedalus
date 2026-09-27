@@ -17,7 +17,7 @@ from _launch_audit import bound_sites  # noqa: E402
 from _launch_audit import launch_refusals as _launch_refusals  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _bounded_git_launches import BOUNDED_GIT_LAUNCHES  # noqa: E402
-from _launch_keep import control_keeps  # noqa: E402
+from _launch_keep import control_keeps, in_launch_population  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
 
@@ -421,21 +421,22 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     not a change to its row. A live site with no row fails; a row whose
     function does not bind a call spelling that signature fails; a row
     matching zero live sites fails, because a stale allowance is a
-    refusal; and a row matching more than one fails. One assert reports
-    all four, so a run answers the whole question and not only the class
-    its first failure happened to name. Matching is on the (path,
-    function, signature, ordinal) key, so another function of an allowed
-    module, a second launch of the same shape in an allowed function, and
-    a launch that has changed shape are each a refusal — the exemption
-    cannot be widened by a prefix or substring match, and every failure
-    names the key to paste.
+    refusal; and a key two live sites share fails, because the ordinal
+    that separates two calls of one shape in a function is what makes a
+    key name a site. One assert reports all four, so a run answers the
+    whole question and not only the class its first failure happened to
+    name. Matching is on the (path, function, signature, ordinal) key, so
+    another function of an allowed module, a second launch of the same
+    shape in an allowed function, and a launch that has changed shape are
+    each a refusal — the exemption cannot be widened by a prefix or
+    substring match, and every failure names the key to paste.
     """
     del tmp
     live = {}
     for path in _tracked_python():
         source = (ROOT / path).read_text(encoding='utf-8',
                                          errors='surrogateescape')
-        if 'subprocess' not in source:
+        if not in_launch_population(path, source):
             continue
         for site in _bound_sites(source, path):
             live.setdefault(site[:4], []).append(site[4])
@@ -461,18 +462,18 @@ def test_no_git_subprocess_invocation_carries_a_wall_clock_bound(tmp):
     # nothing, and each is said in the same words. The file is read here
     # rather than in the walk above, so a row in a file the prefilter
     # skips is still judged on what it says.
+    for key, sites in live.items():
+        if len(sites) > 1:
+            findings.append(
+                f'two live bounded sites share the key {_row_text(key)}; the '
+                'ordinal separating repeats of one shape in a function is '
+                'what makes a key name a site')
     spelled = {}
     for key in rows:
-        count = len(live.get(key, ()))
-        if count == 0:
+        if not live.get(key):
             findings.append(
                 f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} has no live '
                 'bounded git launch; a stale allowance is a refusal')
-        elif count > 1:
-            findings.append(
-                f'BOUNDED_GIT_LAUNCHES row {_row_text(key)} matches {count} '
-                'live bounded sites; exactly one is required, so a site in '
-                'a function that already has a row must be given its own')
         defect = _row_defect(key, spelled)
         if defect:
             findings.append(
