@@ -201,12 +201,10 @@ const context = vm.createContext({
 });
 __IMPORT_SCRIPTS_STUB__
 
-// A wall-clock wait, named apart from the shared `delay` (one turn of the
-// microtask queue, no margin) because this one takes milliseconds and the
-// two are not interchangeable.
-function waitMs(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// A wall-clock wait, and not the shared next-turn `delay`: this one takes
+// milliseconds. The one-line form is the tree's own for a wait this small,
+// and the name stays because two declarations of this file call it.
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function step(label) {
   process.stderr.write('[step] ' + label + '\n');
@@ -266,7 +264,7 @@ async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
   if (timeoutMs === null) {
     for (;;) {
       if (await predicate()) return;
-      await waitMs(10);
+      await delay(10);
     }
   }
   const deadline = clock.now() + timeoutMs;
@@ -274,7 +272,7 @@ async function waitFor(predicate, label, timeoutMs = innerWaitMs) {
     const left = deadline - clock.now();
     if (left <= 0) throw new Error('timed out waiting for ' + label);
     if (await bounded(predicate(), label, left)) return;
-    await waitMs(10);
+    await delay(10);
   }
 }
 
