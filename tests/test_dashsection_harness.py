@@ -538,6 +538,84 @@ def test_a_module_name_that_escapes_the_dashboard_is_refused(_tmp):
         raise AssertionError(f'escaping module name accepted: {name!r}')
 
 
+def test_the_attribute_selector_grammar_answers_and_declines(_tmp):
+    """`overview.js` reaches its four stat cells with `[data-stat=tabs]`
+    and the page's status line with `[data-meta="tab-count"]`, so a grammar
+    that took only the role spelling left the whole section unmountable.
+    Quoting does not make a different selector, an empty value is a value,
+    and a NAME the page does not carry is a miss rather than a refusal --
+    because a miss and a refusal are the two situations a suite cannot tell
+    apart. Everything else still refuses by name: the existence test, the
+    class selector, the bare tag, a non-string, the empty string, the
+    unterminated quote, the capitalised attribute and the two nameless
+    spellings."""
+    report = run_scenario(scenarios.ATTRIBUTE_SELECTORS)
+    assert report['role'] is True, report
+    assert report['quotedRole'] is True, report
+    assert report['stat'] is True, report
+    assert report['meta'] is True, report
+    assert report['throughQuery'] is True, report
+    assert report['emptyValue'] is True, report
+    assert report['emptyIsNotAbsent'] is True, report
+    assert report['miss'] is None, report
+    assert report['refusals'] == {
+        '[data-sub]': 'unsupported selector [data-sub]',
+        '.rail-list > li': 'unsupported selector .rail-list > li',
+        'div': 'unsupported selector div',
+        'null': 'unsupported selector null',
+        '': 'unsupported selector ',
+        '[data-meta="token]': 'unsupported selector [data-meta="token]',
+        '[data-Role=log]': 'unsupported selector [data-Role=log]',
+        '[data-meta=]': 'ANSWERED',
+        '[=log]': 'unsupported selector [=log]',
+    }, report
+
+
+def test_last_child_mirrors_first_child_and_ends_in_null(_tmp):
+    """`overview.js` trims its log with `removeChild(logEl.lastChild)`, and
+    a `lastChild` that is absent rather than null hands the removal an
+    `undefined` -- which throws inside the call, inside the bus listener's
+    own catch, and leaves the log growing past the cap while the section
+    reads as though it worked. So this pins the tail, the mirror on a
+    one-child element, and the null at both ends."""
+    report = run_scenario(scenarios.LAST_CHILD)
+    assert report['isLast'] is True, report
+    assert report['agreesWithChildren'] is True, report
+    assert report['afterRemove'] is True, report
+    assert report['firstUnchanged'] is True, report
+    assert report['mirrorOnOne'] is True, report
+    assert report['emptyIsNull'] is True, report
+    assert report['emptiedIsNull'] is True, report
+    assert report['removedIsTail'] is True, report
+    assert report['size'] == 2, report
+
+
+def test_the_document_wide_read_walks_the_page_and_declines_the_rest(_tmp):
+    """`overview.js` writes the tab count to the page's status line, which
+    is markup the section did not build and its container does not hold --
+    `dashboard/index.html` carries it, so the double walks `document.body`
+    rather than registering anything, and a scenario's fixture stays a
+    fixture instead of standing in for the page. Every match is returned,
+    a neighbour with another `data-meta` is left alone, a name the page does
+    not carry is an empty list, a second read sees the first read's write,
+    and a shape the grammar does not parse still refuses by name."""
+    report = run_scenario(scenarios.DOCUMENT_QUERY_SELECTOR_ALL)
+    assert report['count'] == 2, report
+    assert report['isFirst'] is True, report
+    assert report['isSecond'] is True, report
+    assert report['written'] == ['7', '7'], report
+    assert report['untouched'] == '', report
+    assert report['before'] == '', report
+    assert report['miss'] == 0, report
+    assert report['reread'] == '7', report
+    assert report['refusals'] == {
+        '.rail-list > li': 'unsupported selector .rail-list > li',
+        'null': 'unsupported selector null',
+        '[data-meta="token]': 'unsupported selector [data-meta="token]',
+        '[data-sub]': 'unsupported selector [data-sub]',
+    }, report
+
+
 def test_the_public_surface_is_the_set_the_suite_imports(_tmp):
     """`__all__` is a promise, and a name in it that does not exist is a
     section suite's `ImportError` rather than a test failure here."""

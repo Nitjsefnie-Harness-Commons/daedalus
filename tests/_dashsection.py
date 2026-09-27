@@ -1,13 +1,16 @@
 """The strict harness every `dashboard/sections/*.js` suite shares.
 
 `_dashnode.DOM` mounts one section into a fresh container. The shipped
-sections read surface that double does not carry -- a document-wide
-selector, sibling links, a real class set, a clock the scenario drives,
-an observable `innerHTML` -- and each gap is silent: an unmodelled
-member answers `undefined`, the section misbehaves, and the suite pins
-the misbehaviour as though it were behaviour. Every gap is filled here
-and every fill is controlled by a case in
-`tests/test_dashsection_harness.py`.
+sections read surface that double does not carry -- sibling links, a real
+class set, a clock the scenario drives, an observable `innerHTML` -- and
+each gap is silent: an unmodelled member answers `undefined`, the section
+misbehaves, and the suite pins the misbehaviour as though it were
+behaviour. Every gap is filled here and every fill is controlled by a case
+in `tests/test_dashsection_harness.py`.
+
+The document-wide selector and the `[data-*]` attribute grammar are NOT
+among them: both are modelled by `_dashnode_dom` and held there, because
+`overview.js` is a shipped section that reads both.
 
 The house rule is `_dashdom`'s and it is the reason the fills refuse
 rather than answer: a surface that is not modelled fails by name, because

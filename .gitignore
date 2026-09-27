@@ -304,6 +304,7 @@
 !/tests/_dashfetch.py
 !/tests/_dashfield.py
 !/tests/_dashnode.py
+!/tests/_dashnode_dom.py
 !/tests/_dashnode_retry_control.py
 !/tests/_dashpager.py
 !/tests/_dashsection.py
@@ -549,6 +550,7 @@
 !/tests/test_dashboard_section_css_injector.py
 !/tests/test_dashboard_section_fetch_timings.py
 !/tests/test_dashboard_section_net_capture.py
+!/tests/test_dashboard_section_overview.py
 !/tests/test_dashboard_sections.py
 !/tests/test_dashboard_sse.py
 !/tests/test_dashboard_tab_events.py
