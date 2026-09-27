@@ -138,11 +138,11 @@ function response(status, data) {
   };
   globalThis.setTimeout = callback => { callback(); return 0; };
   let commandSent = false;
-  // Both result legs are exact targets, not a shape: `runCommand` polls
-  // the tab it was given and consumes with the generation this fake
-  // handed out, so the third query member is one the scenario knows
-  // before the first request. GET is the only method either leg is sent
-  // with, so a POST to the same target is a different request.
+  // `runCommand` polls the tab it was given and consumes with the
+  // generation this fake handed out, so the third query member is one
+  // the scenario knows before the first request. GET is the only method
+  // either leg is sent with, so a POST to the same target is a different
+  // request.
   const PEEK = '/result?tab=extension';
   const CONSUME = PEEK + '&consume=1&expected=result-generation';
   const ENVELOPE = {
@@ -342,16 +342,14 @@ phase('dashboard module imported');
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
 const listeners = [];
 const select = new El('select');
-// The one path `bindTabSelector` reads, refused and recorded like an
-// unplanned fetch: `api.get` taking no argument answered every path with
-// the tab list, so a call the module invented was served (#1238). The
-// seam is an injected object rather than `globalThis.fetch`, so the
-// refusal takes the shape `api.js` itself produces there -- a REJECTED
-// promise carrying `HTTP 599` -- rather than the 599 response, which is
-// what a fetch returns one layer below and what an `api.get` caller
-// would iterate as if it were the list. `populate()` wraps this call in
-// its own catch, so the module's error path runs; the record is the half
-// that survives it.
+// The one path `bindTabSelector` reads. `api.get` taking no argument
+// answered every path with the tab list, so a call the module invented
+// was served (#1238). The seam is an injected object rather than
+// `globalThis.fetch`, so the refusal takes the shape `api.js` itself
+// produces there -- a REJECTED promise carrying `HTTP 599` -- rather than
+// the 599 response a fetch returns one layer below, which an `api.get`
+// caller would iterate as if it were the list. `populate()` wraps this
+// call in its own catch, so the record is the half that survives it.
 const asked = [];
 const api = {
   get: async (path) => {
@@ -459,9 +457,9 @@ def test_no_dashboard_export_is_unreferenced(_tmp):
     assert not unused, f'exported but referenced nowhere: {unused}'
 
 
-# The process-boundary cases read the doubles in
-# `tests/_dashnode_retry_control.py`; a `test_` function in a
-# non-suite module never runs, so the cases stay here.
+# A `test_` function in a non-suite module never runs, which is why the
+# cases read their doubles from `tests/_dashnode_retry_control.py`
+# instead of living beside them.
 def test_windows_retries_one_outer_timeout_then_returns_success(_tmp):
     result, events, diagnostic = retry._controlled_run(
         'win32', (101, [retry._timeout(),

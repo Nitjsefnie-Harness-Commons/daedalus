@@ -569,11 +569,9 @@ const frame = (id) => enc.encode(
   + JSON.stringify({ kind: 'event', id, type: 'result' }) + '\n\n');
 const chunks = [frame('e1'), frame('e1'), frame('e2')];
 let next = 0;
-// The one target `sse.js` subscribes to, and the only one this scenario
-// plans. The fake used to answer every request with a stream reader
-// without reading the target at all, so a request the module invented
-// was neither refused nor recorded (#1231). `sse.js` reads `ok` and
-// `status` before `body`, so the door's refusal is enough here.
+// `sse.js` reads `ok` and `status` before `body`, so the door's
+// refusal is enough here; the fake used to answer every request with a
+// stream reader without reading the target at all (#1231).
 const STREAM = '/stream?tab=dashboard';
 globalThis.fetch = async (target) => {
   if (String(target) !== STREAM) return refuse(String(target));
