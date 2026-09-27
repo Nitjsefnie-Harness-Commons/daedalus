@@ -33,15 +33,10 @@ from _ci_wait_fixtures import (  # noqa: E402
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 SOURCE = SKILL / 'ci_wait.py'
-HEAD_PRS_SOURCE = SKILL / 'gh_head_prs.py'
 
 
 def _ci_wait():
     return _util.load(SOURCE, 'ci_wait_gate_contract')
-
-
-def _head_prs():
-    return _util.load(HEAD_PRS_SOURCE, 'gh_head_prs_contract')
 
 
 def _verdict(runs):
