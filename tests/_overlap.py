@@ -202,8 +202,9 @@ const context = vm.createContext({
 __IMPORT_SCRIPTS_STUB__
 
 // A wall-clock wait, and not the shared next-turn `delay`: this one takes
-// milliseconds. The one-line form is the tree's own for a wait this small,
-// and the name stays because two declarations of this file call it.
+// milliseconds. The one-line form is what _dashnode and _dashshell already
+// write for this pair of waits; the name stays because renaming it would
+// rewrite the calls inside `waitFor`, whose residue row is keyed on that body.
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function step(label) {
