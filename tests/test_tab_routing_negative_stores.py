@@ -202,10 +202,13 @@ def test_a_kind_with_no_item_assignment_refuses_every_store(tmp):
     # The gate's second sign. (0, 1) is a FALSE POSITIVE against a runtime
     # of (0, 0) - a tuple delete always raises, so the container is
     # provably unchanged - and it is one of the three named in the pull
-    # request. It is the pre-existing fail-closed answer for a subscript
-    # delete inside a branch, which fires on the statement rather than on
-    # the modelled effect; the same shape reads (0, 1) on a list on `main`
-    # today. Pinned because it is the verdict, not because it is right.
+    # request, tracked as #1220. It is the conservative answer for a
+    # subscript delete inside a branch, which fires on the statement
+    # rather than on the modelled effect. The family pre-dates this branch
+    # and is visible on a list at `main`, AND this branch adds the tuple
+    # position to it: the same shape on a tuple reads (0, 0) on `main` and
+    # (0, 1) here, so the tuple row is not one that was always reporting.
+    # Pinned because it is the verdict, not because it is right.
     deleted = _run(tmp, _no_assignment_shape(*_NO_ITEM_ASSIGNMENT_DELETE))
     if deleted != (0, 1):
         wrong.append(('tuple_delete', deleted))
