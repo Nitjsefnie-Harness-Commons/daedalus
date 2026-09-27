@@ -140,8 +140,11 @@ def _part_of_a_token(text, start, end, run):
 
     A run is a token's own when it touches a letter, a digit or an
     underscore (`V8`, `base64`, `NODE_V8_COVERAGE`), when it carries its own
-    dot (`Python 3.13`), or when a hyphen runs into it (`SHA-256`). Those are
-    spellings of something else, and the paragraph is allowed to name things.
+    dot (`Python 3.13`), or when a hyphen runs into it (`SHA-256`). A hyphen
+    running the other way is the same token only when a word follows it --
+    `51-line` -- because `40-11` and `10-20` put an operator between two
+    figures and the scan has to keep reading those. Those are spellings of
+    something else, and the paragraph is allowed to name things.
 
     This is an EXEMPTION list, not a description of what the scan can read.
     The scan reads digit form: a figure spelled in words is invisible to it,
@@ -149,13 +152,20 @@ def _part_of_a_token(text, start, end, run):
     into runs it will judge separately. The case docstring says so, because a
     gate that reads as complete and is not will be trusted past its reach.
     """
-    before = text[start - 1] if start else ''
+    before = text[start - 1] if start else ' '
     after = text[end] if end < len(text) else ''
     if before.isalnum() or before == '_':
         return True
     if after.isalnum() or after == '_':
         return True
-    return '.' in run or before in '.-'
+    if '.' in run or before in '.-':
+        return True
+    # A hyphen running OUT of the run, but only into a word. `51-line` is one
+    # token the figure belongs to, and it is the likeliest figure this
+    # paragraph could gain; `40-11` and `10-20` put an operator between two
+    # figures, which the scan has to keep reading. The character after the
+    # hyphen is the whole of the difference.
+    return after == '-' and text[end + 1:end + 2].isalpha()
 
 
 def _claim_figures(phrase, offset):
