@@ -33,43 +33,45 @@ module bare rather than a launcher read off it
 (`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
 on an unrecognised callee.
 
-The carrier walk is total over `ast.expr`. It opens Await, BoolOp,
-Call, Dict, DictComp, FormattedValue, GeneratorExp, IfExp, JoinedStr,
-Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice, Starred,
-Subscript, Tuple, Yield, YieldFrom, comprehension — a call with its
-arguments and its call-based callee, the containers and a subscript
-with its index, and every form that hands a sub-value on unchanged. A
-launcher behind any of them is judged by every arm here, in the
-argument position and in the decorator and assignment binding
-positions alike. The four comprehension forms reach their conditions
-through the statement-level node their `generators` hold, and not
-through their own iterable, which `_bound_values` judges as the
-comprehension arm's own business. FormattedValue is opened on the
-issue's requirement rather than on that argument, since `f"{launcher}"`
-binds a string and not the launcher.
+The carrier walk is total over `ast.expr`, and it puts every form of it in one
+of three classes.
 
-The leaves are Attribute, BinOp, Compare, Constant, Name, UnaryOp:
-the first three are atoms the predicates judge, and the last three
-build a new value out of their operands, so a launcher inside one is
-transformed rather than carried. Beyond both classes, a form in
-neither class is refused rather than read as clean, so one a later
-Python adds fails closed instead. The receiver position adds one rule
-of its own: the descent that walks a callee hands the walk every
-subscript the descent consumes, index and bounds included, and hands
-the base over only when the base is not an atom — a direct launch
-bottoms out at one and must not be refused where the receiver reads a
-launch method off what it carries.
+It opens Await, BoolOp, Call, Dict, DictComp, FormattedValue, GeneratorExp,
+IfExp, JoinedStr, Lambda, List, ListComp, NamedExpr, Set, SetComp, Slice,
+Starred, Subscript, Tuple, Yield, YieldFrom, comprehension.
 
-The binding arms are read the same way, and one position among them is
-not. A target binds a name, so the names a target declares are not
-carriers and what it reaches through are. A Name target is exempt, and
-so is every Name inside a Starred, Tuple or List of one, because a name
-that already spells a module is being shadowed rather than carried. A
-subscript's index is not exempt, so `d[subprocess]` binds a launcher
-and `d[key]` does not.
+It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 
-`tests/_coverage_bindings.py` names every form on both sides of that
-line, and a control fails when its prose and its table stop agreeing.
+A form in neither class is refused rather than read as clean, so a Python that
+adds one fails closed instead.
+
+A form is opened because a sub-value arrives as it was written, and left alone
+because the form builds a new value out of what it is handed, so a launcher
+inside one is transformed rather than carried. A launcher behind an opened form
+is judged by every arm here, in the argument position and in the decorator and
+assignment binding positions alike.
+
+The four comprehension forms reach their conditions through the statement-level
+node their `generators` hold, and not through their own iterable, which
+`_bound_values` judges as the comprehension arm's own business. FormattedValue
+is the exception, opened on the issue's requirement rather than on that
+argument, since `f"{launcher}"` binds a string and not the launcher.
+
+Two positions read differently from the rest. The descent that walks a callee
+hands the walk every subscript the descent consumes, index and bounds included.
+It hands the base over only when the base is not an atom, because the receiver
+position reads a launch method off what it carries and a direct launch bottoms
+out at one.
+
+The binding arms are read the same way, and one position among them is not. A
+target binds a name, so the names a target declares are not carriers and what
+it reaches through are. A Name target is exempt, and so is every Name inside a
+Starred, Tuple or List of one, because a name that already spells a module is
+being shadowed rather than carried. A subscript's index is not exempt, so
+`d[subprocess]` binds a launcher and `d[key]` does not.
+
+`tests/_coverage_bindings.py` names every form on both sides of that line, and
+a control fails when its prose and its table stop agreeing.
 """
 import ast
 
