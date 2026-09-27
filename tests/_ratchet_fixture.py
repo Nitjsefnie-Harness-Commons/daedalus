@@ -5,7 +5,7 @@ each drive one policy over a fixture repository built from the real
 policy source, and each of those runs is the same three or four steps
 wearing a different policy's name. The steps live here so a change to
 one reaches all three. `test_js_coverage.py` takes only `_git` from it,
-and gains the scrubbed child environment the other three launches
+and uses the scrubbed child environment the other three launches
 already used.
 
 Not a suite itself — `run_tests.py` only loads `test_*.py`.
