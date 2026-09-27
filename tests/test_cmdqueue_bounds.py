@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Controls for the poll-attempt bound on test-side command queue readers.
 
-`_cmdqueue_faults._bounded_polls` ends a reader whose poll loop stops
-terminating, and it counts queue probes rather than elapsed time. These
-are its own controls; the controls that drive the reader live with the
-reader, in `test_cmdqueue.py` and `test_queued_command.py`.
+`_bounded_polls` counts queue probes, not elapsed time, so it needs no
+clock. The controls that drive the reader live with it.
 """
 import ast
 import math
@@ -47,14 +45,7 @@ def _polls_under_a_ceiling(tmp, max_polls, globs):
 
 
 def test_the_poll_bound_refuses_a_reader_that_polls_past_it(tmp):
-    """The bound counts the probes, so a reader that never stops is charged.
-
-    It needs no clock, and every other bound a reader is given is
-    consulted from inside one, so a reader that stops consulting the
-    clock is charged by none of them. The `under` case is the direction
-    that matters most: a ceiling that also refuses a bounded reader is a
-    red the correct reader causes.
-    """
+    """The bound counts the probes, and spares a reader under the ceiling."""
     for max_polls, over, under in ((0, 1, 0), (10, 11, 10)):
         failure, spent = _polls_under_a_ceiling(tmp, max_polls, over)
         assert isinstance(failure, AssertionError), (max_polls, over, failure)
@@ -66,12 +57,7 @@ def test_the_poll_bound_refuses_a_reader_that_polls_past_it(tmp):
 
 
 def test_the_poll_ceiling_states_the_probes_and_names_no_cause(tmp):
-    """The refusal reports what was counted, never why it blames a sleep.
-
-    A reader that probes more per pass than today's spends the budget
-    while sleeping on every pass, so a message naming the sleep is a
-    diagnosis the guard never made.
-    """
+    """The refusal names what it counted, never a sleep it never saw."""
     ceiling = 4
     failure, spent = _polls_under_a_ceiling(tmp, ceiling, ceiling + 1)
     assert isinstance(failure, AssertionError), failure
@@ -87,14 +73,8 @@ def test_the_poll_ceiling_states_the_probes_and_names_no_cause(tmp):
 def test_the_poll_ceiling_spires_a_reader_that_probes_often(tmp):
     """A reader spending more probes per pass than today's stays under it.
 
-    Semantically identical to today's reader, sleeping on every pass, but
-    probing the queue five times where it probes twice.
-
-    The tolerance is `_POLL_HEADROOM`, not the derivation: the ceiling is
-    a fixed product of two declared constants and does not observe the
-    reader, so it does not move when the reader does. Five probes per
-    pass fits because headroom is 4 and the correct spend is 2, and the
-    derivation control is what pins the two terms — not this one.
+    The tolerance is `_POLL_HEADROOM`, not the derivation: the ceiling
+    observes nothing and does not move when the reader does.
     """
     attempts = 3
     per_pass = _PROBES_PER_ATTEMPT + 3
@@ -111,12 +91,7 @@ def test_the_poll_ceiling_spires_a_reader_that_probes_often(tmp):
 
 
 def test_the_poll_ceiling_is_derived_from_the_probes_one_pass_costs(tmp):
-    """The ceiling is a product of the domain's terms, not a fitted number.
-
-    Asserting only `_poll_budget(t) == 8 * attempts` would let the
-    headroom and the per-pass cost trade places unnoticed; asserting the
-    product keeps both terms named in the code that sets the ceiling.
-    """
+    """The ceiling is the product of both terms, not one fitted number."""
     for timeout in (0.01, 0.1, 0.2, 0.35, 1.0, 15.0):
         attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
         assert _poll_budget(timeout) == (
@@ -127,10 +102,7 @@ def test_the_poll_ceiling_is_derived_from_the_probes_one_pass_costs(tmp):
 def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
     """The bound's coverage is this spelling, so the spelling is pinned.
 
-    `_bounded_polls` counts the names in `_QUEUE_PROBES` and nothing else,
-    so a reader that reaches the queue by any other API is uncharged and
-    hangs rather than failing by name. A control naming the reader's
-    probe is what makes that a red instead of a hang.
+    It counts `_QUEUE_PROBES` and nothing else, so another API hangs.
     """
     del tmp
     source = (Path(__file__).resolve().parent / '_cmdqueue.py').read_text()
@@ -159,12 +131,7 @@ def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
 
 
 def test_the_poll_bound_names_what_it_was_entered_for(tmp):
-    """Three bounds in one control are told apart by what they are passed.
-
-    `test_observed_file_or_queue_loss_keeps_dead_producer_wait_bounded`
-    enters the bound three times with one ceiling, so the label is the
-    only thing that says which wait a traceback is about.
-    """
+    """A traceback says which of several bounds in one control raised."""
     unlabelled, _ = _polls_under_a_ceiling(tmp, 0, 1)
     queue = Path(tmp) / 'labelled'
     queue.mkdir()
@@ -194,11 +161,7 @@ def test_the_poll_bound_restores_every_probe_it_patched(tmp):
 
 
 def test_the_poll_bound_reaches_a_queue_that_does_not_exist(tmp):
-    """A reader spinning on a missing queue spends the count and is bounded.
-
-    The reader probes `is_dir` and only globs when the queue is there, so
-    a ceiling counting globs alone would never see this one spend.
-    """
+    """A reader spinning on a missing queue spends the count too."""
     queue = Path(tmp) / 'never-created'
     spent = 0
     failure = None
@@ -255,13 +218,7 @@ def _callee_name_for_value(value):
 
 
 def _unbounded_reader_calls(source):
-    """Reader call sites in `source` that no `_bounded_polls` block covers.
-
-    A call with no enclosing function is resolved against the module body
-    and reported as `<module scope>` rather than searched, so a reader
-    call at module scope is a named red instead of a `min()` over an
-    empty sequence.
-    """
+    """Reader call sites in `source` that no `_bounded_polls` block covers."""
     tree = ast.parse(source)
     funcs = [node for node in ast.walk(tree)
              if isinstance(node, ast.FunctionDef)]
@@ -290,17 +247,12 @@ def _unbounded_reader_calls(source):
 
 
 def test_every_reader_call_in_the_scanned_suites_is_inside_a_bound(tmp):
-    """Each read in these two suites is bounded, and only the read is.
+    """Each read in `test_cmdqueue.py` and `test_queued_command.py` is
+    bounded, and only the read is.
 
-    The scan covers `tests/test_cmdqueue.py` and
-    `tests/test_queued_command.py` and nothing else. Other suites reach
-    the reader through `tests/_cli_helpers.py` and `tests/_mcp_load.py`
-    and are outside this control's world, which is why the name says
-    "the scanned suites".
-
-    Without it the property holds by construction: drop a wrapper and
-    nothing reds until a runaway probe, which hangs — the one failure
-    mode the bound exists to remove.
+    Nothing outside those two files is scanned, which is why the name
+    says so. Without this control the property holds by construction:
+    drop a wrapper and nothing reds until a runaway probe, which hangs.
     """
     del tmp
     tests_dir = Path(__file__).resolve().parent
@@ -312,14 +264,7 @@ def test_every_reader_call_in_the_scanned_suites_is_inside_a_bound(tmp):
 
 
 def test_the_poll_bound_is_never_charged_for_a_control_s_own_probes(tmp):
-    """A reader's bound holds the read and nothing of the control's own.
-
-    A control's `is_dir` or `write_text` inside the block spends the
-    reader's budget, so a control that probes a queue it just built
-    would spend the ceiling on its own bookkeeping. Only the read call
-    itself may sit inside; the guard's own controls probe deliberately
-    and are not reader-driving blocks.
-    """
+    """A reader's budget is never spent on the control's own setup."""
     del tmp
     tests_dir = Path(__file__).resolve().parent
     charged_to_the_control = []

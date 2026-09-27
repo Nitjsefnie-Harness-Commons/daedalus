@@ -15,10 +15,6 @@ import _cmdqueue  # noqa: E402
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
 _RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
-# One reader pass probes the queue once per name below. Nothing observes
-# the reader to keep this current, so a reader that starts probing a
-# third time is a human raising this constant, which the bounds controls
-# then hold honest.
 _QUEUE_PROBES = ('is_dir', 'glob')
 _PROBES_PER_ATTEMPT = 2
 _POLL_HEADROOM = 4
@@ -27,22 +23,16 @@ _POLL_HEADROOM = 4
 def _poll_budget(timeout):
     """The poll ceiling a correct reader spends on `timeout`, with headroom.
 
-    Derived from the domain: a pass costs `_PROBES_PER_ATTEMPT` probes and a
-    correct reader stops at `ceil(timeout / POLL_DELAY)` passes, so the
-    ceiling is the product of the two and `_POLL_HEADROOM` passes of slack.
-    `_queueread.POLL_DELAY` aliases this module's, so both suites budget
-    the same interval.
-
     A poll attempt costs no real time, so this decides nothing about
-    machine speed. It is the backstop for the one shape the virtual
+    machine speed, and it is the backstop for the one shape the virtual
     clock's guards cannot see: each is consulted from inside a call into
     that clock, so a reader that stops calling it — or never entered it —
-    is charged by none of them.
+    is charged by none. `_queueread.POLL_DELAY` aliases this module's,
+    so both suites budget one interval.
 
     The `ceil` is float-sensitive on the products call sites pass
     (`3 * POLL_DELAY / POLL_DELAY` ceils to 4, not 3), so a budget can
-    quietly gain a pass. That errs toward more headroom, never less, so
-    the ceiling is never a tight fit to a correct reader.
+    quietly gain a pass. That errs toward more headroom, never less.
     """
     attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
     return _PROBES_PER_ATTEMPT * _POLL_HEADROOM * attempts
@@ -51,14 +41,6 @@ def _poll_budget(timeout):
 @contextlib.contextmanager
 def _bounded_polls(max_polls, what=None):
     """Refuse the queue probe that would pass `max_polls` polls.
-
-    One reader pass probes each name in `_QUEUE_PROBES` once, so all of
-    them are counted: a queue that does not exist is probed by `is_dir`
-    alone, and a bound counting globs alone would never see a reader
-    spinning on it.
-
-    The count needs no clock, so a control reading on the real time
-    module enters it exactly as one under `_virtual_cmdqueue_clock` does.
 
     The patch is process-wide, and that has a failure direction in each
     way. A reader reaching the queue through any other API — `os.listdir`
@@ -96,17 +78,9 @@ def _bounded_polls(max_polls, what=None):
 def _assert_slept_its_attempt_budget(events, attempts, poll_delay):
     """The wait spent (attempts - 1) intervals, however it spent them.
 
-    The contract promises an interval, not a call count: a reader that
-    splits one interval into two sleeps waits exactly as long, and a
-    control that rejects it is retired by whoever hits it. So the total
-    waited is what is asserted.
-
-    The cadence across passes is deliberately NOT pinned. The reader has
+    The cadence across passes is deliberately NOT pinned: the reader has
     no per-pass clock call, so a reader banking its whole wait into one
-    sleep and then polling with no interval is indistinguishable here
-    from one that spreads it evenly, and the probe count is a proxy for
-    the pass count rather than the cadence. Per-attempt pacing is out of
-    contract at this layer; the burst reader is not caught, by choice.
+    sleep is indistinguishable here from one that spreads it evenly.
     """
     total = sum(seconds for kind, seconds in events if kind == 'sleep')
     expected = (attempts - 1) * poll_delay
