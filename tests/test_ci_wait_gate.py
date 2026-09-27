@@ -146,6 +146,13 @@ def test_a_conflicting_head_refuses_before_the_grace_elapses(tmp):
     assert '1122' in text, text
     assert 'tests' in text, text
     assert 'CONFLICTING' in text, text
+    # This is the one refusal that is about a merge, and the pull request
+    # is what makes it so: it names the pull request, its number and the
+    # state that keeps the workflow from being dispatched. The grace it did
+    # not spend is what tells it apart from the other refusal, which
+    # claims nothing about a pull request at all.
+    assert 'DIRTY' in text, text
+    assert 'grace' not in text, text
 
 
 def test_a_still_computing_pull_request_is_not_a_refusal(tmp):
@@ -211,7 +218,15 @@ def test_an_incomplete_set_past_the_grace_refuses_without_a_pull_request(tmp):
     """A push to main, or a branch with no pull request open, is neither a
     conflict nor exempt: the grace governs it, and past the grace it names
     the missing workflow, the grace it waited out and the runs that do
-    exist."""
+    exist.
+
+    There is no pull request here, so the line may not talk about one, and
+    it may not talk about a merge either: a push to main is not a merge,
+    and this refusal is reached on that path with nothing in the data to
+    support the word. What it does claim is what the data supports on
+    every path - a required workflow has no run for this SHA, so the head
+    is not certified.
+    """
     del tmp
     mod = _ci_wait()
     clock = _Clock()
@@ -227,6 +242,9 @@ def test_an_incomplete_set_past_the_grace_refuses_without_a_pull_request(tmp):
     assert 'tests' in text, text
     assert '30s' in text, text
     assert 'gate freshness' in text and 'CodeQL' in text, text
+    assert 'pull request' not in text, text
+    assert 'merge' not in text, text
+    assert 'not certified' in text, text
 
 
 def test_an_incomplete_set_past_the_grace_refuses_on_a_mergeable_head(tmp):
@@ -321,6 +339,11 @@ def test_a_bound_shorter_than_the_grace_names_the_missing_gate(tmp):
     assert 'still open' not in text, text
     assert 'tests' in text, text
     assert '300s grace' in text, text
+    # The same two claims as the grace refusal, on the other exit: no
+    # pull request is named and no merge is asserted, because this path is
+    # reached with an open pull request, without one, and on main.
+    assert 'pull request' not in text, text
+    assert 'merge' not in text, text
 
 
 def test_a_non_positive_grace_is_refused(tmp):
@@ -344,10 +367,18 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
     """A required name no workflow carries, or one whose workflow lost its
     `pull_request` trigger, turns this gate into a no-op: every head would
     read incomplete and no real head could satisfy it. Renaming the
-    workflow has to fail the suite rather than pass it silently."""
+    workflow has to fail the suite rather than pass it silently.
+
+    A `pull_request` trigger that FILTERS is the same rot in a form the
+    first version of this control could not see: a `paths-ignore` under it
+    leaves the trigger declared, so the gate is still waiting for a run that
+    the matching pull requests will never produce. The event's own option
+    keys are read with the shared reader, which is the one that knows a
+    deeper `paths-ignore:` belongs to something else.
+    """
     del tmp
     mod = _ci_wait()
-    from _workflows import _entry, _workflow_triggers
+    from _workflows import _entry, _event_option_keys, _workflow_triggers
     assert mod.REQUIRED_WORKFLOWS, 'the gate names no workflow at all'
     by_name = {}
     for path in sorted((ROOT / '.github' / 'workflows').iterdir()):
@@ -369,6 +400,14 @@ def test_the_required_workflows_still_name_a_real_pull_request_gate(tmp):
                 f'the workflow named {wanted!r} declares '
                 f'{sorted(triggers)} and never runs on a pull request, so a '
                 f'head of a pull request has no run of it to wait for')
+            keys = _event_option_keys(triggers['pull_request'], wanted)
+            filters = ('paths', 'paths-ignore')
+            filtered = [key for key in filters if key in keys]
+            assert not filtered, (
+                f'the workflow named {wanted!r} filters its pull_request '
+                f'trigger by {filtered}, so a pull request whose changes are '
+                f'all filtered out gets no run of it and this wait would '
+                f'refuse a head the merge never had to gate')
 
 
 # ---- the head's pull requests ----
@@ -391,7 +430,14 @@ def test_a_merged_pull_request_of_another_head_is_not_this_heads(tmp):
     head, and the API answers that tip with that MERGED pull request. Both
     filters are load-bearing - headRefOid for the ancestor, state for the
     pull request that is already merged - and unfiltered every ancestor of
-    a merged branch would look like an open pull request of its own."""
+    a merged branch would look like an open pull request of its own.
+
+    The third fixture is the one the other two could not hold: it is this
+    head's own pull request, already merged, and it differs from an accepted
+    one in the state limb alone. The first two vary state and headRefOid
+    together, so the headRefOid clause answers both and nothing would say
+    the state clause is there at all.
+    """
     mod = _head_prs()
     fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
         _pull(1139, state='MERGED', head='f' * 40)])})
@@ -399,6 +445,10 @@ def test_a_merged_pull_request_of_another_head_is_not_this_heads(tmp):
         assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
     fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
         _pull(1139, state='OPEN', head='f' * 40)])})
+    with fake.activate():
+        assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
+    fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page([
+        _pull(1122, state='MERGED')])})
     with fake.activate():
         assert mod.head_pull_requests('o', 'r', 'a' * 40) == []
 
@@ -423,12 +473,45 @@ def test_a_commit_with_no_pull_request_reads_as_none(tmp):
 
 def test_an_unknown_sha_reads_as_no_pull_request(tmp):
     """A SHA the repository does not have answers with a null object, which
-    is a head with no pull request rather than a failed query."""
+    is a head with no pull request rather than a failed query.
+
+    A non-zero OID on purpose. Measured against this repository, an
+    unresolvable OID of any shape answers `data.repository.object: null` -
+    which is the body pinned here - and the all-zero OID is the one input
+    that does not: it answers `data: null` with no errors array, which the
+    next control pins instead. Naming it here would have made this control
+    assert a shape its own input never produces.
+    """
     mod = _head_prs()
     fake = _fake_gh.FakeGh(tmp, {'associatedPullRequests': _pr_page(
         [], null_object=True)})
     with fake.activate():
-        assert mod.head_pull_requests('o', 'r', '0' * 40) == []
+        assert mod.head_pull_requests(
+            'o', 'r', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef') == []
+
+
+def test_the_all_zero_oid_is_a_failed_query_rather_than_an_empty_answer(tmp):
+    """The one unknown SHA that does not come back as a null object.
+
+    GitHub answers the all-zero OID with `data: null` and no errors array,
+    and a body carrying no data is a failed read as far as `gh_client` is
+    concerned - the same answer a truncated or errored response gets. It is
+    a `QueryError` and not an empty list, because a caller that supplied
+    the all-zero OID is owed a refusal rather than a confident `[]`: the
+    wait reports it once and carries on to its grace, and a wrong answer
+    here would tell it the head has no pull request.
+    """
+    mod = _head_prs()
+    fake = _fake_gh.FakeGh(tmp, {
+        'associatedPullRequests': {'status': 200, 'body': {'data': None}}})
+    with fake.activate():
+        try:
+            mod.head_pull_requests('o', 'r', '0' * 40)
+        except mod.gh_client.QueryError as failure:
+            assert 'no data' in str(failure), failure
+        else:
+            raise AssertionError(
+                'a body carrying no data must fail the read, not answer []')
 
 
 def main():
