@@ -378,7 +378,7 @@ def test_a_refused_wait_pauses_and_still_answers(tmp):
     answers = dict(idle_answers())
     answers['checkSuites'] = [
         rate_limited_error(reset_at=reset_at.strftime(STAMP)),
-        runs_page([suite(1)])]
+        runs_page([suite(1, name='tests')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -515,7 +515,8 @@ def test_a_superseded_cancelled_run_is_ignored_through_the_new_query(tmp):
     answers = dict(idle_answers())
     answers['checkSuites'] = [runs_page([
         suite(1, 'CANCELLED', started='2026-09-20T10:00:00Z'),
-        suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z')])]
+        suite(2, 'SUCCESS', started='2026-09-20T10:05:00Z',
+              name='tests')])]
     fake = _fake_gh.FakeGh(tmp, answers)
     done = _ci_wait(fake)
     assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
@@ -563,8 +564,8 @@ def test_an_incomplete_wait_costs_one_query_beyond_the_runs_each_tick(tmp):
     later would otherwise be counted as pull-request reads and the equality
     would keep passing.
     """
-    answers = dict(_idle_answers())
-    answers['checkSuites'] = runs_page([_suite(1, name='gate freshness')])
+    answers = dict(idle_answers())
+    answers['checkSuites'] = runs_page([suite(1, name='gate freshness')])
     empty = {'associatedPullRequests': {'nodes': []}}
     answers['associatedPullRequests'] = {'data': {'repository': {
         'object': empty}}}
