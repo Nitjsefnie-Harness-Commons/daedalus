@@ -336,46 +336,68 @@ def _stamp(instant):
         '%Y-%m-%dT%H:%M:%SZ')
 
 
-def test_a_reset_nearer_than_the_floor_is_slept_to_and_named_exactly(tmp):
-    """A reset one second out is neither overslept nor misnamed.
+def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
+    """The wait a reset asked for is the wait performed and the wait named.
 
-    The floor guards a reset already in the past from becoming a hot
-    loop. Applied to one the API still holds us to, it overshoots the
-    reset the server named and the printed line says so - the line is
-    where a reader learns when the watcher resumes, so it has to be
-    true. Pinned phase: the wait left is exactly a second.
+    Past the floor there is no clamp at all, so the line, the sleep and
+    the reported reset are the same instant. This is the property the
+    near-reset case cannot have, and the one it is measured against.
     """
     del tmp
     mod = _client()
     now = 1789012345.0
-    reset = now + 1.0
-    assert reset - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, reset - now)
+    reset = now + 5.0
+    assert mod.MIN_BACKOFF <= reset - now, (mod.MIN_BACKOFF, reset - now)
     stamp, slept = _paused(mod, now, reset)
-    assert slept == [1.0], slept
+    assert slept == [5.0], slept
     assert stamp == _stamp(reset), (stamp, _stamp(reset))
 
 
-def test_a_reset_already_past_still_waits_the_floor_and_names_now(tmp):
-    """The half that must not move: a past reset keeps the floor.
+def test_a_reset_nearer_than_the_floor_is_floored_and_names_the_floor(tmp):
+    """Overshooting by a second is the price of not spinning.
 
-    There is no reset to land on any more, so the line names the moment
-    the watcher will actually resume - after the reset, not on it.
+    `_graphql_refusal` accepts a fractional `retryAfter`, so a reset can
+    arrive a millisecond out. A wait sized to it spends the poll
+    interval as one request per millisecond, and the class promises
+    neither a hostile header nor an absurd reset can hot-loop the
+    watcher - the floor is what delivers that. So the floor holds and
+    the line names the moment the watcher really resumes, not the reset
+    it will have passed. Pinned phase, so what is overslept is fixed.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    reset = now + 0.001
+    assert reset - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, reset - now)
+    stamp, slept = _paused(mod, now, reset)
+    assert mod.MIN_BACKOFF == 2, mod.MIN_BACKOFF
+    assert slept == [2.0], slept
+    wanted = _stamp(now + mod.MIN_BACKOFF)
+    assert stamp == wanted, (stamp, wanted)
+
+
+def test_a_reset_already_past_is_floored_and_names_the_floor(tmp):
+    """The case the floor was written for, still floor and still honest.
+
+    A stale header reports an instant already gone. Waiting exactly to
+    it is no wait at all, so the line names the moment the watcher
+    really resumes - which is after the reset, and says so.
     """
     del tmp
     mod = _client()
     now = 1789012345.0
     stamp, slept = _paused(mod, now, now - 5000)
-    assert slept == [mod.MIN_BACKOFF], slept
+    assert slept == [float(mod.MIN_BACKOFF)], slept
     wanted = _stamp(now + mod.MIN_BACKOFF)
     assert stamp == wanted, (stamp, wanted)
 
 
-def test_a_reset_beyond_the_ceiling_names_the_ceiling_not_the_reset(tmp):
+def test_a_reset_beyond_the_ceiling_is_capped_and_names_the_cap(tmp):
     """A capped future reset names the wait, which is not the reset.
 
-    The cap is what an absurd header gets; naming the reported reset
-    there would promise a wait six hours long ends at a moment none of
-    the watcher's waits end at.
+    The ceiling is what an absurd header gets; naming the reported reset
+    there would promise a wait of six hours ends at a moment none of the
+    watcher's waits end at.
     """
     del tmp
     mod = _client()
@@ -383,6 +405,23 @@ def test_a_reset_beyond_the_ceiling_names_the_ceiling_not_the_reset(tmp):
     stamp, slept = _paused(mod, now, now + 10 ** 9)
     assert slept == [float(mod.MAX_BACKOFF)], slept
     wanted = _stamp(now + mod.MAX_BACKOFF)
+    assert stamp == wanted, (stamp, wanted)
+
+
+def test_a_refusal_with_no_reset_at_all_waits_the_plain_minute(tmp):
+    """No evidence of when to resume is a plain minute, not any number.
+
+    A 403 whose only evidence is its body, or a refusal naming no
+    instant, is the one case with nothing to be accurate about - and
+    the case the ceiling and floor are both inert on.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    stamp, slept = _paused(mod, now, None)
+    assert slept == [float(mod.DEFAULT_BACKOFF)], slept
+    assert slept == [60.0], slept
+    wanted = _stamp(now + mod.DEFAULT_BACKOFF)
     assert stamp == wanted, (stamp, wanted)
 
 
