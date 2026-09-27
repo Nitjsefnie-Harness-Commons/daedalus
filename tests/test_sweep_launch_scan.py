@@ -130,6 +130,26 @@ def test_the_program_is_read_wherever_the_scope_binds_it(tmp):
         _bounded(f'row {index}', body)
 
 
+def test_a_false_red_the_name_only_reaches_is_pinned(tmp):
+    """The entry name in an argument that is not the program.
+
+    The argv here is a ping; the name is a value the call merely
+    carries, and the scan reads the NAME rather than the call it
+    belongs to, so it refuses a correct launch. That is the declared
+    cost, and this row is the second spelling of it — the first, a
+    program that merely quotes the name, sits in the caught group above.
+
+    The refusal is at the line the call OPENS on, not the line the
+    `timeout` keyword sits on: `ast.Call.lineno` is the opening line,
+    which is the multi-line case the guard's docstring names.
+    """
+    del tmp
+    body = (f'subprocess.run(["ping", host], env={{"NOTE": "{PROGRAM}"}},\n'
+            '                timeout=5)\n')
+    assert _scan(body) == ([(HERE, 2)], [(HERE, 2)]), _scan(body)
+    assert _line_of(body) == 3, 'the deadline sits on the second line'
+
+
 def test_each_scope_kind_binds_its_own_program(tmp):
     """Each member of `_SCOPE_NODES` reads its own and hides from outside.
 

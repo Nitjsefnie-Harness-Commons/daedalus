@@ -145,7 +145,7 @@ def _bind(node, bound):
         for name in _captures(node):
             bound.setdefault(name, []).append((line, node.subject))
     for target in targets:
-        if isinstance(target, ast.Name):
+        if isinstance(target, ast.Name) and value is not None:
             bound.setdefault(target.id, []).append((line, value))
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr in _APPENDERS and node.args
