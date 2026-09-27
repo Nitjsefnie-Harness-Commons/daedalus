@@ -186,12 +186,6 @@ UNCONSOLIDATED_JS_NAMES = {
         'mint harness needs and the shared factory does not model',
     ('tests/test_segment_mint.py', 'run'):
         'the mint harness own entry, 42 lines over one job capability',
-    ('tests/test_starvation_bounds.py', 'delay'):
-        'the next-turn delay, the same three lines as the other seven '
-        'copies',
-    ('tests/test_starvation_bounds.py', 'response'):
-        'the fetch-response factory, one of sixteen copies of the same '
-        'nine lines',
     ('tests/test_starvation_bounds.py', 'sendCommand'):
         'the starvation harness answers two CDP methods and never settles '
         'one, where the CDP harness answers the whole protocol and compiles '
