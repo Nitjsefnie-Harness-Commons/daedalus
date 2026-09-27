@@ -14,6 +14,7 @@ Every watcher here is a real process answering from the fake `gh` in
 reports two and a bound that refuses two are about the same poll.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -104,24 +105,28 @@ def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
     assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
 
 
-# One call, appended by a process of its own, in the shape the fake logs:
-# a `gh` child the cancellation did not reach writes exactly this much, and
-# writes it after the tree it belonged to is gone. The request is what says
-# the append reached the log, since a survivor may add entries beside it.
+# One call, appended by a process of its own, in the shape the fake logs: a
+# `gh` child the cancellation did not reach writes exactly this much, and
+# writes it after the tree it belonged to is gone. The request travels in the
+# environment rather than in the program text or an argument, because one of
+# the shapes is a query with newlines in it and the suites run on Windows.
+_LATE_ENV = 'DAEDALUS_FAKE_LATE_REQUEST'
 _LATE_REQUEST = 'query WatchPull { viewer }'
 _LATE_CALL = (
-    'import json, sys\n'
+    'import json, os, sys\n'
     'entry = {"t": 0.0, "argv": ["api", "-i"], "fragment": None,\n'
-    f'          "poll": None, "request": "{_LATE_REQUEST}"}}\n'
+    '          "poll": None, "request": os.environ[sys.argv[2]]}\n'
     'with open(sys.argv[1], "a", encoding="utf-8") as handle:\n'
     '    handle.write(json.dumps(entry) + "\\n")\n'
 )
 
 
-def _late_append(log):
+def _late_append(log, request):
     """One real process, appending one call to the log it is handed."""
-    done = subprocess.run([sys.executable, '-c', _LATE_CALL, str(log)],
-                          capture_output=True, text=True, timeout=60)
+    done = subprocess.run(
+        [sys.executable, '-c', _LATE_CALL, str(log), _LATE_ENV],
+        env=dict(os.environ, **{_LATE_ENV: request}),
+        capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, (done.returncode, done.stderr)
 
 
@@ -144,8 +149,47 @@ def _requests_at(log):
     return found
 
 
+def _trial_query(directory, script):
+    """The query one real trial makes, read off that trial's own log.
+
+    Its own fake, in its own directory: reading the subject's real call off
+    a real trial must not be a second subject writing to the log the case
+    is measuring.
+    """
+    here = Path(directory)
+    here.mkdir(parents=True, exist_ok=True)
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
+    assert len(ran) == 1, [call['request'][:60] for call in ran]
+    return ran[0]['request']
+
+
+def _survivor_ignored(root, script, name, request):
+    """One shape, from the cancelled log to the figure the trial reports.
+
+    The old log is emptied the way the pre-fix suite emptied it, so what a
+    trial sharing it reads is this one entry and its own - the two entries
+    both CI sightings carried, which is what makes each shape reproduce its
+    own signature rather than a longer log's.
+    """
+    here = Path(root) / name
+    here.mkdir(parents=True, exist_ok=True)
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    measured_log = fake.log
+    once_run.measure(script, [PR], fake, TICK)
+    measured_log.write_text('', encoding='utf-8')
+    _late_append(measured_log, request)
+    late = _requests_at(measured_log)
+    assert request in late, (name, len(late))
+    ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
+    assert len(ran) == 1, (name, [call['request'][:80] for call in ran])
+    assert fake.log != measured_log, (name, fake.log, measured_log)
+    return f'{name}: the trial sees {len(ran)} call(s) of its own, ' \
+           f'the cancelled log holds {len(late)}'
+
+
 def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
-    """#1256: a call the cancelled tree appended is not the trial's own.
+    """#1256: whatever a survivor wrote, the trial's figure is its own.
 
     `measure` cancels the watcher it started, and a `gh` child the
     cancellation did not reach keeps running: it appends to the log the
@@ -153,25 +197,30 @@ def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
     trial reads - the window in which a shared log let a survivor into
     the figure the trial reports. The stand-in is a real process, joined
     before the trial starts, so the append is ordered rather than timed.
+
+    Every shape the bug arrived in is driven, because the fix separates
+    FILES and the claim is that content does not matter. `_fake_gh` logs
+    `sys.stdin.read()`, so a survivor that read its GraphQL payload logs
+    the query - a full duplicate of the trial's own, the wide window and
+    the signature `suites (windows-latest, 3.13)` carried in run
+    36336201676 - and one killed before that write logs an empty string,
+    the narrow window `suites (macos-latest, 3.14)` carried in run
+    36318252784. The unrelated query is driven too, because a stand-in
+    that is not a copy of the subject's own call is the stronger control.
+
     `len(ran) == 1` is the line that carries the property, given the
     stand-in's entry is on the old log; the last line states that the
     two paths differ.
     """
-    here = Path(tmp) / 'late'
+    here = Path(tmp) / 'shapes'
     here.mkdir(parents=True, exist_ok=True)
     script = once_run.planted(here, 'pr_comment_watch.py',
                               (_LOOP_TAIL, _repeat(12)))
-    fake = _fake_gh.FakeGh(here, idle_answers())
-    measured_log = fake.log
-    once_run.measure(script, [PR], fake, TICK)
-    _late_append(measured_log)
-    late = _requests_at(measured_log)
-    assert _LATE_REQUEST in late, len(late)
-    ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
-    print(f'\n  a trial beside a late append: {len(ran)} call(s) of its own, '
-          f'beside the {len(late)} the cancelled log already held')
-    assert len(ran) == 1, [call['request'][:80] for call in ran]
-    assert fake.log != measured_log, (fake.log, measured_log)
+    duplicate = _trial_query(here / 'capture', script)
+    lines = [_survivor_ignored(here, script, name, request)
+             for name, request in (('wide', duplicate), ('narrow', ''),
+                                   ('unrelated', _LATE_REQUEST))]
+    print('\n  a trial beside a late append - ' + '; '.join(lines))
 
 
 def test_two_measurements_on_one_fake_hand_out_different_logs(tmp):
