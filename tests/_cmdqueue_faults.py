@@ -11,11 +11,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cmdqueue  # noqa: E402
+import _drain_scan  # noqa: E402
+
+_binding_of = _drain_scan._binding_of
+_loop_targets = _drain_scan._loop_targets
 
 # These bound runaways, never virtual pacing or sleep multiplicity.
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
 _RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp,
+                   ast.GeneratorExp)
 _QUEUE_PROBES = ('is_dir', 'glob')
 _PROBES_PER_ATTEMPT = 2
 _POLL_HEADROOM = 4
@@ -49,8 +55,15 @@ def _bounded_polls(max_polls, what=None):
     A probe from outside the reader, on this process or on a thread it
     shares, spends the reader's budget and is itself the call that
     raises. `what` names the wait for the first reader of a traceback; it
-    cannot name either direction, so the uncounted direction is pinned by
-    `test_the_reader_probes_the_queue_through_the_bounded_names`.
+    cannot name either direction.
+
+    The uncounted direction is not fully pinned.
+    `test_the_reader_probes_the_queue_through_the_bounded_names` refuses a
+    reader whose probe receiver it cannot follow and one whose probe name it
+    does not count, over the binding forms `_drain_scan` enumerates. A
+    receiver the reader binds by a form neither walks, inside a loop target,
+    is still uncharged. That control runs in its own process, so it reports
+    the reader rather than ending the wait.
     """
     originals = {name: getattr(Path, name) for name in _QUEUE_PROBES}
     spent = [0]
@@ -136,52 +149,113 @@ def _enclosing_scopes(node, scope_by_node):
 
 
 def _callee_name(node):
-    """The final identifier a call or value resolves to, or None."""
+    """The final identifier a call or value resolves to, or None.
+
+    A subscript and a call can both sit where the callee goes, so both
+    read; a name reached through either is still a name this guard has to
+    account for.
+    """
     func = node.func if isinstance(node, ast.Call) else node
     if isinstance(func, ast.Attribute):
         return func.attr
     if isinstance(func, ast.Name):
         return func.id
+    if isinstance(func, ast.Subscript):
+        return _callee_name(func.value)
     return None
 
 
 def _bound_to(scopes, seeds):
     """Every name in `scopes` that resolves to a name in `seeds`.
 
-    A binding is a plain or annotated assignment, an import's `asname`, or
-    a def or class name. The walk repeats until it stops growing, so an
-    alias of an alias resolves as deep as the reader wrote it.
+    The binding productions are `_drain_scan`'s, which already enumerates
+    assignment, walrus, `with ... as` and a one-element `for` or
+    comprehension target, and flattens a tuple target to the names in it.
+    An import's `asname` is added here because that scanner has no use for
+    one. The walk repeats until the name set stops growing, so an alias of
+    an alias resolves as deep as the reader wrote it.
     """
     names = set(seeds)
     while True:
         grown = set(names)
         for scope in scopes:
-            for bound, value in _bindings(scope):
-                if isinstance(bound, ast.Name) and _callee_name(
-                        value if value is not None else bound) in names:
-                    grown.add(bound.id)
-                elif isinstance(bound, ast.alias) and bound.asname:
-                    if bound.name.rsplit('.', 1)[-1] in names:
-                        grown.add(bound.asname)
+            for bound, value in _alias_sources(scope):
+                if value is not None and _callee_name(value) in names:
+                    grown.update(bound)
         if grown == names:
             return names
         names = grown
 
 
-def _bindings(scope):
-    """The (bound, value) pairs a scope introduces."""
+def _alias_sources(scope):
+    """The (names bound, value) pairs a scope can alias from."""
     pairs = []
     for node in ast.walk(scope):
-        if isinstance(node, ast.Assign):
-            pairs += [(target, node.value) for target in node.targets]
-        elif isinstance(node, ast.AnnAssign):
-            pairs.append((node.target, node.value))
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            pairs += [(alias, None) for alias in node.names]
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                               ast.ClassDef)):
-            pairs.append((node, None))
+        names, value = _binding_of(node)
+        if names and value is not None:
+            pairs.append((names, value))
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            pairs += [((alias.asname,), None) for alias in node.names
+                      if alias.asname]
+        pairs += list(_loop_targets(node))
     return pairs
+
+
+def _accounted_for(scope):
+    """Names a scope explains without them being an alias of a seed.
+
+    An imported module and an element a loop or comprehension target binds
+    are both accounted for: neither is the queue, and neither is a
+    receiver the reader reaches the queue by. A name in neither this set
+    nor the resolved one is a refusal.
+
+    A loop target is deliberately NOT added to the resolved set, so a name
+    the loop produced never makes a call look like a reader entry point.
+    """
+    names = set()
+    for node in ast.walk(scope):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names |= {(alias.asname or alias.name).split('.')[0]
+                      for alias in node.names}
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            names |= {part.id for part in ast.walk(node.target)
+                      if isinstance(part, ast.Name)}
+        elif isinstance(node, _COMPREHENSIONS):
+            for part in node.generators:
+                names |= {child.id for child in ast.walk(part.target)
+                          if isinstance(child, ast.Name)}
+    return names
+
+
+def _attribute_base(node):
+    """The root `Name` an attribute chain hangs off, or None."""
+    base = node
+    while isinstance(base, ast.Attribute):
+        base = base.value
+    return base.id if isinstance(base, ast.Name) else None
+
+
+def _probe_receivers(node):
+    """The names a call's callee hangs off, one per attribute callee.
+
+    Every receiver the reader reaches a member through, including the
+    members of a name it bound itself. A receiver here that the binding
+    walk cannot follow is a probe the census refuses rather than one it
+    misses.
+    """
+    receivers = set()
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Call):
+            continue
+        callee = candidate.func
+        if not isinstance(callee, ast.Attribute):
+            continue
+        base = callee.value
+        while isinstance(base, ast.Attribute):
+            base = base.value
+        if isinstance(base, ast.Name):
+            receivers.add(base.id)
+    return receivers
 
 
 def _reached_through(node, roots):

@@ -291,7 +291,9 @@ def test_a_queue_read_spends_one_poll_delay_per_attempt(tmp):
     A wall deadline spends the queue reader under a starved runner: the
     reader polls `ceil(timeout / POLL_DELAY)` times and rejects at its
     attempt budget with the pinned message whatever the wall clock did
-    in between.
+    in between. This pins that the whole wait spends (attempts - 1)
+    polling intervals, which is the property the name describes; the
+    per-interval cadence is the helper's, below.
 
     What this pins is the TOTAL the attempt budget spends, and not the
     cadence across passes; `_assert_slept_its_attempt_budget` carries the
