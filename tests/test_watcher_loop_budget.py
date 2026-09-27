@@ -13,6 +13,8 @@ Every watcher here is a real process answering from the fake `gh` in
 `test_watcher_budget.py` bounds the watchers against, so a control that
 reports two and a bound that refuses two are about the same poll.
 """
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -93,7 +95,6 @@ def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
                               (_LOOP_TAIL, _repeat(12)))
     fake = _fake_gh.FakeGh(here, idle_answers())
     per_poll, seen = once_run.measure(script, [PR], fake, TICK)
-    fake.clear()
     ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
     print(f'\n  a loop repeating its last request: {per_poll} call(s) per '
           f'poll, from {len(seen)} logged call(s), and a trial that sees '
@@ -101,6 +102,74 @@ def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
     assert len(ran) == 1, [call['request'][:80] for call in ran]
     assert per_poll == 2, (per_poll, [call['request'][:80] for call in seen])
     assert per_poll > IDLE_POLL_BOUND, (per_poll, IDLE_POLL_BOUND)
+
+
+# One call, appended by a process of its own, in the shape the fake logs:
+# a `gh` child the cancellation did not reach writes exactly this much, and
+# writes it after the tree it belonged to is gone. The request is what says
+# the append reached the log, since a survivor may add entries beside it.
+_LATE_REQUEST = 'query WatchPull { viewer }'
+_LATE_CALL = (
+    'import json, sys\n'
+    'entry = {"t": 0.0, "argv": ["api", "-i"], "fragment": None,\n'
+    f'          "poll": None, "request": "{_LATE_REQUEST}"}}\n'
+    'with open(sys.argv[1], "a", encoding="utf-8") as handle:\n'
+    '    handle.write(json.dumps(entry) + "\\n")\n'
+)
+
+
+def _late_append(log):
+    """One real process, appending one call to the log it is handed."""
+    done = subprocess.run([sys.executable, '-c', _LATE_CALL, str(log)],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, (done.returncode, done.stderr)
+
+
+def _requests_at(log):
+    """The requests one call log holds; a torn last line is ignored.
+
+    Read off the path rather than off the fake, because a survivor of
+    the cancellation is still writing to that path and the fake is no
+    longer the thing naming it.
+    """
+    if not log.exists():
+        return []
+    found = []
+    for line in log.read_text(encoding='utf-8').splitlines():
+        try:
+            found.append(json.loads(line)['request'])
+        except (ValueError, KeyError):
+            continue
+    return found
+
+
+def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
+    """#1256: a call the cancelled tree appended is not the trial's own.
+
+    `measure` cancels the watcher it started, and a `gh` child the
+    cancellation did not reach keeps running: it appends to the log the
+    measurement was reading, after `measure` has returned and before the
+    trial reads - the window in which a shared log let a survivor into
+    the figure the trial reports. The stand-in is a real process, joined
+    before the trial starts, so the append is ordered rather than timed.
+    The last line states the property the figure rests on: the trial
+    read a log the stand-in had no path to.
+    """
+    here = Path(tmp) / 'late'
+    here.mkdir(parents=True, exist_ok=True)
+    script = once_run.planted(here, 'pr_comment_watch.py',
+                              (_LOOP_TAIL, _repeat(12)))
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    measured_log = fake.log
+    once_run.measure(script, [PR], fake, TICK)
+    _late_append(measured_log)
+    late = _requests_at(measured_log)
+    assert _LATE_REQUEST in late, len(late)
+    ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
+    print(f'\n  a trial beside a late append: {len(ran)} call(s) of its own, '
+          f'beside the {len(late)} the cancelled log already held')
+    assert len(ran) == 1, [call['request'][:80] for call in ran]
+    assert fake.log != measured_log, (fake.log, measured_log)
 
 
 def test_a_trial_of_a_watcher_that_names_its_boundary_is_refused(tmp):
