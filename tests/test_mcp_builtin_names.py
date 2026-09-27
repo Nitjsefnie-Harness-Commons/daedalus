@@ -23,16 +23,19 @@ runtime raises on the index before it imports anything — that is the cost
 side filed as #1213, and these cases hold what the walk does rather than
 freeze the defect as the contract.
 
-These are also the hand half of what the sweep cannot generate: a name bound
-by a comprehension's own target, and a use in one of two scopes that share a
-name and a line, have no row there because the oracle evaluates a callee in a
-flat namespace. The sweep's class carries the two carriers it CAN run — a
-name replaced, and a binding under a condition — and the pair between them.
+These are also the hand half of what the sweep cannot generate, and
+`_mcp_builtin_carriers.UNDECIDED_CARRIERS` names that half: the oracle
+evaluates a callee in a flat namespace and builds no module for a decorator
+to run in, so a name bound by a comprehension's own target, a use in a scope
+the walk cannot line up with the resolver's, and a name a decorator's own
+scope shadows have no row there. The sweep's class carries the four carriers
+it CAN run, and the pair between them.
 """
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_builtin_carriers  # noqa: E402
 import _mcp_import_closure  # noqa: E402
 import _util  # noqa: E402
 
@@ -152,6 +155,110 @@ def test_a_builtin_the_module_replaces_is_not_read_at_all(_tmp):
             for route in _routes(at, f'{name}({argument})'):
                 assert _verdict(_tmp, _composition(
                     f'{bindings}\n', route)) == 'refused', (bindings, route)
+
+
+def test_a_store_under_a_global_declaration_takes_the_name_back(_tmp):
+    """A `global` declaration hands the store to the MODULE, and the module's
+    own symbol table does not report that: the root symbol comes back
+    imported and not assigned, so a rule that reads it alone sees the import
+    and never the store.
+
+    Each row is a runtime measurement, not a claim about the symbol table —
+    the store has run by the time the index is read, so the name is the
+    lambda and the call is a `TypeError` before it imports anything. The
+    `nonlocal` row is the same rebinding one scope nearer, and it is here
+    because the resolver DOES report that one: the enclosing function's own
+    symbol comes back assigned, so a rule that reads the table is already
+    right about it and this holds it there. The last row is the control — a
+    declaration with no store behind it rebinds nothing.
+    """
+    for bindings, name in _ALIASES[:2]:
+        index = f'[{_OPERATION}, 0][{name}(0)]'
+        for source in (
+                # a `global` in a function: the store belongs to the module
+                f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
+                f'    global {name}\n    {name} = lambda v: None\n'
+                f'    return {index}("pkg.leaf")\n',
+                # the same store at the module itself
+                f'\nimport importlib\n{bindings}\n{name} = lambda v: None'
+                f'\n\n\ndef load():\n    return {index}("pkg.leaf")\n',
+                # a `nonlocal` one scope nearer, which the resolver reports
+                f'\nimport importlib\n{bindings}\n\n\ndef _outer():\n'
+                f'    {name} = lambda v: None\n\n'
+                f'    def load():\n        nonlocal {name}\n'
+                f'        {name} = lambda v: None\n'
+                f'        return {index}("pkg.leaf")\n'):
+            assert _verdict(_tmp, source) == 'refused', (name, source)
+    # The CONTROL: the same declaration with no store behind it rebinds
+    # nothing, so the name is still the builtin and the call still imports.
+    assert _verdict(_tmp,
+                    f'\nimport importlib\n{_ALIASED}\n\n\ndef load():\n'
+                    '    global b\n'
+                    f'    return [{_OPERATION}, 0][b(0)]("pkg.leaf")\n'
+                    ) == 'resolved'
+
+
+def test_a_decorator_is_walked_where_it_is_written(_tmp):
+    """A decorator runs where the `def` it decorates IS and not inside it, so
+    a name the decorator's own scope binds shadows the module's there.
+
+    The two rows differ by ONE character — the name the decorator's own scope
+    binds — and they come back with two different verdicts. A walk that reads
+    a decorator's nodes against the decorated function's own scope sees the
+    module's alias through a parameter that shadows it, and puts a module in
+    the closure that nothing imports. The comprehension rows are the same
+    question with the shadowing name bound by a target rather than by a
+    parameter.
+    """
+    index = f'[{_OPERATION}, 0][b(0)]("pkg.leaf")'
+    for decorator, expected in (
+            (f'@lambda b: {index}', 'refused'),
+            (f'@lambda z: {index}', 'resolved'),
+            (f'@list({index} for b in [lambda v: None])', 'refused'),
+            (f'@list({index} for z in [lambda v: None])', 'resolved')):
+        source = ('\nimport importlib\nfrom builtins import bool as b\n\n\n'
+                  f'{decorator}\ndef f():\n    return 1\n')
+        assert _verdict(_tmp, source) == expected, decorator
+
+
+# The carriers of the class this suite HOLDS, as (the carrier, the case that
+# holds it). The generated class states the ones it cannot emit in
+# `_mcp_builtin_carriers.UNDECIDED_CARRIERS`, and a carrier in neither table
+# is a member of the class neither instrument can see — which is how a
+# bypass survives a sweep that reports nothing unpaid.
+_HELD_CARRIERS = (
+    ("a name bound by a comprehension's own target",
+     'test_a_comprehension_binds_its_own_name'),
+    ("a use in a scope the walk cannot line up with the resolver's",
+     'test_two_scopes_on_one_line_are_told_apart'),
+    ("a name a decorator's own scope shadows",
+     'test_a_decorator_is_walked_where_it_is_written'),
+)
+
+
+def test_every_carrier_the_sweep_cannot_cross_is_held_here(_tmp):
+    """The generated class states the carriers it CANNOT emit; this suite
+    holds one case for each, and the two tables have to agree.
+
+    A carrier the builder cannot emit is not a row, and a carrier that is
+    neither emitted nor held is invisible: nothing runs it, nothing reads it,
+    and a rule that gets it wrong passes everything. The check is in BOTH
+    directions, so a carrier added to one table and not the other fails here
+    rather than reading as an omission in a comment. Each named case is then
+    RUN, so a table entry that names a case which has stopped holding its
+    carrier fails here rather than in the case's own right.
+    """
+    module = sys.modules[__name__]
+    held = dict(_HELD_CARRIERS)
+    uncrossable = {carrier for carrier, _reason
+                   in _mcp_builtin_carriers.UNDECIDED_CARRIERS}
+    assert set(held) == uncrossable, (uncrossable - set(held),
+                                      set(held) - uncrossable)
+    crossed = {suffix for suffix, _before, _after, _replaced
+               in _mcp_builtin_carriers.CARRIERS}
+    assert not crossed & uncrossable, crossed & uncrossable
+    for case in held.values():
+        getattr(module, case)(_tmp)
 
 
 def test_a_shadow_nearer_the_use_is_a_shadow_too(_tmp):

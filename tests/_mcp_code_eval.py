@@ -28,6 +28,10 @@ module may not have executed yet — one ordered after the use, or one inside a
 statement that runs only sometimes — is not one, and the name is not the
 builtin there. A scope the walk cannot line up with the resolver's is not one
 either. Both are refusals, which is the direction a false negative is cheap in.
+
+The same grammar does not answer the SHADOW question either: a store under a
+`global` declaration is a module binding that leaves the root symbol imported
+and not assigned, so the walk reads the module's own rebindings off the source.
 """
 import ast
 import symtable
@@ -85,11 +89,24 @@ class _Scopes:
         self._local = {}
         self._alias = {}
         self._uncertain = {}
+        # The names each scope DECLARES `global` and each scope STORES, kept
+        # per table and joined after the walk. A `global b` says `b` belongs
+        # to the module, so a store it licenses is a module binding — and
+        # `symtable` leaves the root symbol imported and not assigned all the
+        # same, because the store is inside a nested scope it does not fold
+        # back. A `nonlocal` store is NOT here: the resolver already reports
+        # the ENCLOSING function's own symbol as assigned for it.
+        self._declared = {}
+        self._stored = {}
         # How far into each table's children the walk has read. The resolver
-        # builds them in source order and so does this walk, so the cursor is
-        # what tells two sibling scopes that share a name AND a line apart.
+        # builds them in source order, and so does this walk EXCEPT that a
+        # function's body is walked before its decorator list, so the cursor
+        # has to be able to go back.
         self._cursor = {}
         self._walk(tree, self._root)
+        self._rebound = {name for scope, names in self._declared.items()
+                         for name in names
+                         if name in self._stored.get(scope, ())}
 
     @staticmethod
     def _symbols(table):
@@ -99,11 +116,14 @@ class _Scopes:
         """The resolver's scope for a named scope node, and whether one was
         there and not taken.
 
-        Children arrive in SOURCE order and so do the nodes that name them,
-        so a cursor over the children lines the two up. A name and a line are
-        not enough on their own: two sibling scopes can share both — two
-        lambdas separated by `;` — and telling them apart by which is next is
-        what a cursor is for.
+        Children arrive in SOURCE order, and so do the nodes that name them —
+        except that `ast` walks a function's BODY before its decorator list,
+        so a scope written ABOVE the `def` is named after one below it. A
+        cursor that may only move forwards cannot answer that, so it returns
+        to the start when the line it is at has already passed. A name and a
+        line are not enough on their own either: two sibling scopes can share
+        both — two lambdas separated by `;` — and telling them apart by which
+        is next is what a cursor is for.
 
         The second answer is the walk's own miss. No scope of that kind here
         is a real answer (a comprehension the running interpreter has
@@ -112,6 +132,8 @@ class _Scopes:
         """
         children = table.get_children()
         index = self._cursor.get(id(table), 0)
+        if index and children[index - 1].get_lineno() > line:
+            index = 0
         while index < len(children) and children[index].get_lineno() < line:
             index += 1
         for later in range(index, len(children)):
@@ -144,6 +166,10 @@ class _Scopes:
         self._scope_of[id(node)] = table
         if uncertain:
             self._uncertain[id(node)] = True
+        if isinstance(node, ast.Global):
+            self._declared.setdefault(id(table), set()).update(node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            self._stored.setdefault(id(table), set()).add(node.id)
         if table is self._root:
             # Only module-scope forms count; a nested function or
             # comprehension body is its own scope and is not walked as root.
@@ -171,11 +197,15 @@ class _Scopes:
         inside = guarded or isinstance(node, _GUARDED)
         # Python evaluates a comprehension's FIRST iterable in the scope that
         # ENCLOSES it and every other part inside its own, so the iterable is
-        # walked where the runtime reads it.
-        iterable = node.generators[0].iter \
-            if isinstance(node, _COMPREHENSIONS) else None
+        # walked where the runtime reads it. A DECORATOR is the same: it runs
+        # where the `def` it decorates is written, and the function's own
+        # scope does not exist while its decorators are evaluated.
+        outside = {id(node.generators[0].iter)} \
+            if isinstance(node, _COMPREHENSIONS) else set()
+        outside.update(id(decorator)
+                       for decorator in getattr(node, 'decorator_list', ()))
         for child in ast.iter_child_nodes(node):
-            self._walk(child, enclosing if child is iterable else table,
+            self._walk(child, enclosing if id(child) in outside else table,
                        inside, uncertain)
 
     def _record_builtin_alias(self, node, table, guarded):
@@ -221,12 +251,10 @@ class _Scopes:
         module's own symbol table rather than off a spelling and a map that
         carries no builtin: the builtin under its own name where nothing
         binds it, and a `from builtins import name [as x]` alias where the
-        scope that binds it imports the builtin itself. `symtable` says which
-        of the two a binding is — imported and not assigned is the import, a
-        store or a parameter over the same name is a shadow of it — so one
-        rule answers every scope, and the ORDER the module runs in says the
-        rest: an alias is the builtin only where its own import has already
-        run by the time the name is read.
+        scope that binds it imports the builtin itself. `_is_the_import`
+        reads the two apart, and the ORDER the module runs in says the rest:
+        an alias is the builtin only where its own import has already run by
+        the time the name is read.
         """
         if self._uncertain.get(id(node)):
             return False
@@ -234,11 +262,7 @@ class _Scopes:
             return True
         table = self._scope_of.get(id(node))
         owner = self._owner(table, node.id)
-        if owner is None:
-            return False
-        symbol = self._symbols(owner).get(node.id)
-        if symbol is None or not symbol.is_imported() or symbol.is_assigned() \
-                or symbol.is_parameter() or symbol.is_namespace():
+        if owner is None or not self._is_the_import(owner, node.id):
             return False
         bound = self._alias.get(id(owner), {}).get(node.id)
         if bound is None or bound[0] != name:
@@ -248,6 +272,20 @@ class _Scopes:
         # ordered after the use has not run either. Neither is a builtin.
         return not bound[2] and node.lineno >= bound[1]
 
+    def _is_the_import(self, table, name):
+        """Whether `symtable` says `name` is an IMPORT here and not a shadow
+        of one.
+
+        It reports a store as assigned, a parameter as a parameter and a
+        class as a namespace, and any of those shadows the import over the
+        same name. What it does NOT report is a store the module made from a
+        nested scope under a `global` declaration, so `_rebound` carries it.
+        """
+        symbol = self._symbols(table).get(name)
+        return (symbol is not None and symbol.is_imported()
+                and not symbol.is_assigned() and not symbol.is_parameter()
+                and not symbol.is_namespace() and name not in self._rebound)
+
     def _binds_itself(self, name):
         """Whether the module binds `name` to the builtin `name` IS.
 
@@ -255,15 +293,11 @@ class _Scopes:
         to itself, so it is not a shadow of the name whichever way the
         statement goes: whether it runs or not, and whether it runs before
         the use or after, the name is the builtin. Only a store over the
-        same name takes it back, and `is_assigned` is what says so.
+        same name takes it back.
         """
         bound = self._alias.get(id(self._root), {}).get(name)
-        if bound is None or bound[0] != name:
-            return False
-        symbol = self._symbols(self._root).get(name)
-        return (symbol is not None and symbol.is_imported()
-                and not symbol.is_assigned() and not symbol.is_parameter()
-                and not symbol.is_namespace())
+        return (bound is not None and bound[0] == name
+                and self._is_the_import(self._root, name))
 
     def is_builtin(self, node):
         """The name is an unshadowed builtin at `node`'s own scope. A module

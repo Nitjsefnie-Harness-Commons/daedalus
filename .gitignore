@@ -353,6 +353,7 @@
 !/tests/_launch_path.py
 !/tests/_launch_refusal_rows.py
 !/tests/_mainworldharness.py
+!/tests/_mcp_builtin_carriers.py
 !/tests/_mcp_code_eval.py
 !/tests/_mcp_guard_floor.py
 !/tests/_mcp_import_closure.py

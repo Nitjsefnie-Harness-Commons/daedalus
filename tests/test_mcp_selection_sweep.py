@@ -18,10 +18,11 @@ live bypass through a sweep that reported nothing unpaid. The first two
 keep their hand boundary pins beside their generated ones, so that a row
 which stops discriminating and a case which stops agreeing are read in the
 same place. The last two are held in their own suites, which also carry the
-shapes the oracle cannot run — a comprehension scope and a sibling scope on
-one line for the binding class, an unpacked `*args` and an unreadable `**`
-for the signature class — and what this file adds for each is the twin that
-differs only in the module's own source or only in the arguments.
+shapes the oracle cannot run — a comprehension scope, a sibling scope on one
+line, a store under a `global` declaration and a decorator's own scope for
+the binding class, an unpacked `*args` and an unreadable `**` for the
+signature class — and what this file adds for each is the twin that differs
+only in the module's own source or only in the arguments.
 """
 import sys
 from pathlib import Path
@@ -174,26 +175,35 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     read an unreplaced alias as anything else declines a position the runtime
     settles; neither is visible in a count.
 
-    There are three carriers and TWO of them are twins of the first — the
-    name replaced, and the binding under a condition the module may not take
-    — because a name the module has not bound is a different question from
-    one it has bound to something else, and a builder that generated only
-    the straight-line one could not tell a rule that reads when a statement
-    ran from a rule that does not.
+    There are four carriers and THREE of them are twins of the first — the
+    name replaced, the name replaced from a nested scope under a `global`
+    declaration, and the binding under a condition the module may not take —
+    because a name the module has not bound is a different question from one
+    it has bound to something else, and a builder that generated only the
+    straight-line one could not tell a rule that reads when a statement ran
+    from a rule that does not. The `global` twin is the one a rule cannot
+    see coming: `symtable` reports that root symbol imported and not
+    assigned, so the store is invisible to anything that reads it.
 
     The conditional rows split once more, and that is the point of them: a
     name the module bound to ITSELF is the builtin whether or not the
     statement ran, so those rows are still decided, while an ALIAS the module
     may never have bound is a name this walk cannot account for and is
-    refused. A rule that asked only the spelling would resolve both.
+    refused. A rule that asked only the spelling would resolve both. The
+    `global` rows do NOT split that way: a store takes the name back
+    whichever spelling brought it in, own name included.
     """
     forms = _swept(_tmp)
     rows = [form for form in forms
             if 'a builtin behind a binding' in form['classes']]
-    assert len(rows) == 240, len(rows)
+    assert len(rows) == 320, len(rows)
     by_step = {(form['callee'], form['step']): form['inline'] for form in rows}
-    conditional = [(callee, step) for callee, step in by_step
-                   if step.endswith(' under a condition')]
+
+    def _twins(suffix):
+        return [(callee, step) for callee, step in by_step
+                if step.endswith(suffix)]
+
+    conditional = _twins(' under a condition')
     assert len(conditional) == 80, len(conditional)
 
     def _twin(callee, step):
@@ -215,11 +225,22 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     # axis is about the NAME and not about the statement.
     for callee, step in own:
         assert by_step[(callee, step)] == _twin(callee, step), (callee, step)
+    # A store under a `global` declaration takes the name back under BOTH
+    # spellings, and every one of these rows is refused where its twin is
+    # decided — so a rule that reads the symbol table without reading the
+    # declarations resolves half of them.
+    rebound = _twins(' and rebound under a global')
+    assert len(rebound) == 80, len(rebound)
+    for callee, step in rebound:
+        assert by_step[(callee, step)] == 'refused', (callee, step)
+        assert by_step[(callee, step[:-len(' and rebound under a global')])] \
+            in ('resolved', 'silent'), (callee, step)
     # A name the module has NOT bound to the builtin itself is never resolved.
     undecided = [form for form in rows
                  if form['step'].endswith(' and replaced')
-                 or form['step'].startswith('bound under an alias under a')]
-    assert len(undecided) == 120, len(undecided)
+                 or form['step'].startswith('bound under an alias under a')
+                 or form['step'].endswith(' and rebound under a global')]
+    assert len(undecided) == 200, len(undecided)
     assert not [form['callee'] for form in undecided
                 if form['inline'] == 'resolved']
     undecided_steps = {form['step'] for form in undecided}
@@ -270,16 +291,16 @@ def test_a_parameter_supplied_by_name_is_supplied(_tmp):
                 assert form['inline'] == (
                     'resolved' if form['oracle'] == 'reaches' else 'silent'), \
                     form
-    assert len(rows) == 13080, len(rows)
+    assert len(rows) == 13800, len(rows)
     signatures = {form['kind'] for form in rows}
     assert len(signatures) == 144, len(signatures)
+    refusals = {shape for shape, side
+                in _mcp_lambda_sweep.BINDING_SHAPES if side == 'raises'}
     one_sided = []
     for kind in signatures:
         of = [form for form in rows if form['kind'] == kind]
         shapes = {form['step'] for form in of}
         resolving = any(form['inline'] == 'resolved' for form in of)
-        refusals = {shape for shape, side
-                    in _mcp_lambda_sweep.BINDING_SHAPES if side == 'raises'}
         if shapes & refusals:
             # A signature the product can make refuse carries BOTH sides: the
             # boundary is inside it, and a rule that reads only one binding
@@ -288,14 +309,11 @@ def test_a_parameter_supplied_by_name_is_supplied(_tmp):
         else:
             # A signature whose only feature is a `*args` is not one of
             # these: it soaks up every positional, so no call can make its
-            # binding raise, and every parameter it declares is either a
-            # default or a keyword the `**w` beside it catches. They are
-            # named rather than papered over, so a signature that LOSES its
-            # other side shows here.
+            # binding raise, and it declares nothing that can be left out.
+            # They are named rather than papered over, so a signature that
+            # LOSES its other side shows here.
             one_sided.append(kind)
-    assert sorted(one_sided) == [
-        'a *a lambda', 'a *a, **w lambda', 'a x=0, *a, **w lambda',
-        'a x=0, y=0, *a, **w lambda'], sorted(one_sided)
+    assert sorted(one_sided) == ['a *a lambda'], sorted(one_sided)
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):
