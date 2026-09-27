@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_builtin_carriers  # noqa: E402
 import _mcp_import_closure  # noqa: E402
 import _mcp_lambda_sweep  # noqa: E402
 import _mcp_selection_sweep  # noqa: E402
@@ -175,15 +176,16 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     read an unreplaced alias as anything else declines a position the runtime
     settles; neither is visible in a count.
 
-    There are four carriers and THREE of them are twins of the first — the
-    name replaced, the name replaced from a nested scope under a `global`
-    declaration, and the binding under a condition the module may not take —
-    because a name the module has not bound is a different question from one
-    it has bound to something else, and a builder that generated only the
-    straight-line one could not tell a rule that reads when a statement ran
-    from a rule that does not. The `global` twin is the one a rule cannot
-    see coming: `symtable` reports that root symbol imported and not
-    assigned, so the store is invisible to anything that reads it.
+    There are seven carriers and SIX of them are twins of the first — the
+    name replaced, the binding under a condition the module may not take, and
+    the name taken back from a nested scope by each of the four ways CPython
+    spells a binding under a `global` declaration — because a name the module
+    has not bound is a different question from one it has bound to something
+    else, and a builder that generated only the straight-line one could not
+    tell a rule that reads when a statement ran from a rule that does not.
+    The four `global` twins are the ones a rule cannot see coming: `symtable`
+    reports the ROOT symbol imported and not assigned, so a store, a `del`, an
+    `except ... as` and an import are all invisible to anything that reads it.
 
     The conditional rows split once more, and that is the point of them: a
     name the module bound to ITSELF is the builtin whether or not the
@@ -196,7 +198,7 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     forms = _swept(_tmp)
     rows = [form for form in forms
             if 'a builtin behind a binding' in form['classes']]
-    assert len(rows) == 320, len(rows)
+    assert len(rows) == 560, len(rows)
     by_step = {(form['callee'], form['step']): form['inline'] for form in rows}
 
     def _twins(suffix):
@@ -225,22 +227,29 @@ def test_a_builtin_is_read_only_where_the_module_leaves_it(_tmp):
     # axis is about the NAME and not about the statement.
     for callee, step in own:
         assert by_step[(callee, step)] == _twin(callee, step), (callee, step)
-    # A store under a `global` declaration takes the name back under BOTH
-    # spellings, and every one of these rows is refused where its twin is
-    # decided — so a rule that reads the symbol table without reading the
-    # declarations resolves half of them.
-    rebound = _twins(' and rebound under a global')
-    assert len(rebound) == 80, len(rebound)
-    for callee, step in rebound:
-        assert by_step[(callee, step)] == 'refused', (callee, step)
-        assert by_step[(callee, step[:-len(' and rebound under a global')])] \
-            in ('resolved', 'silent'), (callee, step)
+    # A binding under a `global` declaration takes the name back under BOTH
+    # spellings, in each of the four ways CPython spells one, and every one of
+    # these rows is refused where its twin is decided — so a rule that reads
+    # the ROOT symbol without reading the nested one resolves a quarter of
+    # them, and a rule that collects only `Store` names resolves the three
+    # spellings CPython does not write as one.
+    for _name, suffix, _before, _after, _replaced in \
+            _mcp_builtin_carriers.CARRIERS[3:]:
+        rebound = _twins(suffix)
+        assert len(rebound) == 80, (suffix, len(rebound))
+        for callee, step in rebound:
+            assert by_step[(callee, step)] == 'refused', (callee, step)
+            assert by_step[(callee, step[:-len(suffix)])] \
+                in ('resolved', 'silent'), (callee, step)
     # A name the module has NOT bound to the builtin itself is never resolved.
+    replaced = {suffix for _name, suffix, _b, _a, replaced
+                in _mcp_builtin_carriers.CARRIERS if replaced}
     undecided = [form for form in rows
                  if form['step'].endswith(' and replaced')
                  or form['step'].startswith('bound under an alias under a')
-                 or form['step'].endswith(' and rebound under a global')]
-    assert len(undecided) == 200, len(undecided)
+                 or any(form['step'].endswith(suffix)
+                        for suffix in replaced)]
+    assert len(undecided) == 440, len(undecided)
     assert not [form['callee'] for form in undecided
                 if form['inline'] == 'resolved']
     undecided_steps = {form['step'] for form in undecided}
@@ -432,12 +441,22 @@ def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
     tolerated.
 
     Every one of them is a position the fold DECLINES to read — a free
-    name, and that is the only one the grammar now has — on a container
-    that carries the operation, so the value it selects is unknown to this
-    walk even where the oracle settles it. A negative, a
-    computed, an out-of-range, a float, a slice and a key position are not
-    in that set and are not here: the fold reads each of them, and one it
-    reads either selects an element or names nothing at all.
+    name, and that is the only one the grammar has for a position — on a
+    container that carries the operation, so the value it selects is unknown
+    to this walk even where the oracle settles it. A negative, a computed, an
+    out-of-range, a float, a slice and a key position are not in that set and
+    are not here: the fold reads each of them, and one it reads either
+    selects an element or names nothing at all.
+
+    The other two are the class's own cost and are bought the same way. A
+    module that DELETES the name the builtin was imported under, or unbinds
+    it with an `except ... as`, has no name there afterwards, and the walk
+    reads a name it cannot account for rather than one it can — so a `bool`
+    index in that module is a call the walk does not settle. At runtime the
+    real builtin shows through the deleted name, which is why these rows are
+    `does not reach` rather than `raises`; the module the runtime imports is
+    not the one the walk would have imported, and refusing is the direction
+    that costs a closure entry rather than a reach.
 
     Both the count and the SET are asserted, so a fold that widened, a step
     that stopped being settled, or a marker that drifted shows here as a
@@ -449,8 +468,11 @@ def test_the_refusals_the_sweep_buys_are_only_the_ones_it_owes(_tmp):
               and form['oracle'] == 'does not reach']
     for form in bought:
         assert not form['pinned'] and form['carries'], form
-    assert len(bought) == 52, len(bought)
-    assert sorted({form['step'] for form in bought}) == ['a name']
+    assert len(bought) == 92, len(bought)
+    assert sorted({form['step'] for form in bought}) == [
+        'a name',
+        'bound under its own name and caught by an except under a global',
+        'bound under its own name and deleted under a global']
 
 
 def test_a_stored_container_is_refused_exactly_when_it_mentions(_tmp):

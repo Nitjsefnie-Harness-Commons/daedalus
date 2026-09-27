@@ -157,20 +157,26 @@ def test_a_builtin_the_module_replaces_is_not_read_at_all(_tmp):
                     f'{bindings}\n', route)) == 'refused', (bindings, route)
 
 
-def test_a_store_under_a_global_declaration_takes_the_name_back(_tmp):
-    """A `global` declaration hands the store to the MODULE, and the module's
-    own symbol table does not report that: the root symbol comes back
-    imported and not assigned, so a rule that reads it alone sees the import
-    and never the store.
+def test_a_binding_under_a_global_declaration_is_a_module_binding(_tmp):
+    """A `global` declaration hands every binding made under it to the
+    MODULE, and the module's own symbol table does not report that: the root
+    symbol comes back imported and not assigned, so a rule that reads it alone
+    sees the import and never the store.
 
-    Each row is a runtime measurement, not a claim about the symbol table —
-    the store has run by the time the index is read, so the name is the
-    lambda and the call is a `TypeError` before it imports anything. The
-    `nonlocal` row is the same rebinding one scope nearer, and it is here
-    because the resolver DOES report that one: the enclosing function's own
-    symbol comes back assigned, so a rule that reads the table is already
-    right about it and this holds it there. The last row is the control — a
-    declaration with no store behind it rebinds nothing.
+    Each row is a runtime measurement, not a claim about the symbol table — the
+    binding has run by the time the index is read, so the call is a
+    `TypeError` or a `NameError` before it imports anything. The spellings are
+    the ones CPython does NOT write as a `Store` name, because a rule that
+    collects `ast.Name` nodes with a `Store` context sees the first row and
+    neither of the other two: a `del` and an `except ... as` are the same
+    module binding wearing a different node, and the import binds to a module
+    that is not callable. The `nonlocal` row is the same rebinding one scope
+    nearer, held because the resolver DOES report that one.
+
+    The controls are the other half: a declaration with nothing behind it
+    binds nothing, and a `global` scope whose only use of the name is a
+    SUBSCRIPT store does not rebind it either — the compiler agrees, so the
+    walk resolves the alias and the module enters the closure.
     """
     for bindings, name in _ALIASES[:2]:
         index = f'[{_OPERATION}, 0][{name}(0)]'
@@ -182,6 +188,20 @@ def test_a_store_under_a_global_declaration_takes_the_name_back(_tmp):
                 # the same store at the module itself
                 f'\nimport importlib\n{bindings}\n{name} = lambda v: None'
                 f'\n\n\ndef load():\n    return {index}("pkg.leaf")\n',
+                # a `del`, which unbinds the name rather than rebinding it
+                f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
+                f'    global {name}\n    del {name}\n'
+                f'    return {index}("pkg.leaf")\n',
+                # an `except ... as`, and the name is unbound once the handler
+                # has run at all
+                f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
+                f'    global {name}\n    try:\n        1 / 0\n'
+                f'    except Exception as {name}:\n        pass\n'
+                f'    return {index}("pkg.leaf")\n',
+                # an import, which binds the name to a module
+                f'\nimport importlib\n{bindings}\n\n\ndef load():\n'
+                f'    global {name}\n    import os as {name}\n'
+                f'    return {index}("pkg.leaf")\n',
                 # a `nonlocal` one scope nearer, which the resolver reports
                 f'\nimport importlib\n{bindings}\n\n\ndef _outer():\n'
                 f'    {name} = lambda v: None\n\n'
@@ -189,13 +209,43 @@ def test_a_store_under_a_global_declaration_takes_the_name_back(_tmp):
                 f'        {name} = lambda v: None\n'
                 f'        return {index}("pkg.leaf")\n'):
             assert _verdict(_tmp, source) == 'refused', (name, source)
-    # The CONTROL: the same declaration with no store behind it rebinds
+    # The CONTROL: the same declaration with no binding behind it rebinds
     # nothing, so the name is still the builtin and the call still imports.
     assert _verdict(_tmp,
                     f'\nimport importlib\n{_ALIASED}\n\n\ndef load():\n'
                     '    global b\n'
                     f'    return [{_OPERATION}, 0][b(0)]("pkg.leaf")\n'
                     ) == 'resolved'
+    # And the second control: a `global` scope that only READS the name
+    # through a subscript does not rebind it, so the alias is still the alias.
+    assert _verdict(_tmp,
+                    f'\nimport importlib\n{_ALIASED}\nTABLE = [0]\n\n\n'
+                    'def touch():\n    global b\n    b[0] = 1\n\n\n'
+                    'def load():\n'
+                    f'    return [{_OPERATION}, 0][b(0)]("pkg.leaf")\n'
+                    ) == 'resolved'
+
+
+def test_a_rewound_cursor_still_tells_siblings_apart(_tmp):
+    """The cursor returns to the start when a scope arrives out of source
+    order, and it has to be in the right place again afterwards.
+
+    A decorator's own scope is named AFTER the decorated function's, so the
+    cursor rewinds once per decorator; the two lambdas inside the function are
+    then named next, and they share a name and a LINE, so which one a use is
+    inside is settled by the cursor and by nothing else. A rewind that left
+    the cursor at the start would read the first of the two for the second,
+    and the verdicts below would swap. The decorator binds a name neither
+    lambda reads, so the only thing this pins is the cursor.
+    """
+    index = f'[{_OPERATION}, 0][b(0)]'
+    for tail, expected in ((f'lambda b=print: {index}', 'refused'),
+                           (f'lambda: {index}', 'resolved')):
+        source = ('\nimport importlib\nfrom builtins import bool as b\n\n\n'
+                  '@lambda z: 1\ndef outer():\n'
+                  f'    f = (lambda: 1), ({tail}("pkg.leaf"))\n'
+                  '    return f[1]()\n')
+        assert _verdict(_tmp, source) == expected, tail
 
 
 def test_a_decorator_is_walked_where_it_is_written(_tmp):
@@ -247,6 +297,14 @@ def test_every_carrier_the_sweep_cannot_cross_is_held_here(_tmp):
     rather than reading as an omission in a comment. Each named case is then
     RUN, so a table entry that names a case which has stopped holding its
     carrier fails here rather than in the case's own right.
+
+    The first assertion is the one that needed the tables renamed to agree:
+    it compares CARRIERS' NAMES against `UNDECIDED_CARRIERS`' names, and
+    while the crossed table carried step suffixes and the uncrossable one
+    carried prose the intersection was empty by construction and the
+    assertion could not fire. Both tables now name their carriers, so a
+    carrier listed as both crossed and uncrossable is a contradiction this
+    can actually see.
     """
     module = sys.modules[__name__]
     held = dict(_HELD_CARRIERS)
@@ -254,7 +312,7 @@ def test_every_carrier_the_sweep_cannot_cross_is_held_here(_tmp):
                    in _mcp_builtin_carriers.UNDECIDED_CARRIERS}
     assert set(held) == uncrossable, (uncrossable - set(held),
                                       set(held) - uncrossable)
-    crossed = {suffix for suffix, _before, _after, _replaced
+    crossed = {name for name, _suffix, _before, _after, _replaced
                in _mcp_builtin_carriers.CARRIERS}
     assert not crossed & uncrossable, crossed & uncrossable
     for case in held.values():
