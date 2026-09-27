@@ -52,21 +52,19 @@ from pathlib import Path
 from typing import cast
 
 import _mcp_code_eval
+import _mcp_dead_code
 import _mcp_selection_fold
 
 
-# The two name sets the moved recognisers read. They live in the fold
-# module beside the property that uses them, and are named here for the
-# five readers this module keeps.
+# The two name sets the fold module reads, named here for this module's
+# readers.
 DYNAMIC_ATTRIBUTES = _mcp_selection_fold.DYNAMIC_ATTRIBUTES
 REGISTRY_NAMES = _mcp_selection_fold.REGISTRY_NAMES
 
-# The one name the module registry answers to, whether it is read as a dotted
-# attribute or as the key of a module namespace.
+# The one name the registry answers to, dotted or as a namespace key.
 REGISTRY_ATTRIBUTE = 'modules'
 
-# The noun each refusal names, so the store and default paths word one thing
-# the same way.
+# The noun each refusal names, so every path words one thing the same way.
 _HIDDEN_NOUN = {
     'operation': 'the import-by-name operation',
     'registry': 'the module registry',
@@ -98,11 +96,16 @@ def composition_scan_set(composition, root):
     A static walk, not a runtime snapshot: every `import` and `from` at any
     depth — function bodies, `try` blocks, dead branches — resolves to
     files under the repository root or is provably elsewhere (stdlib, site
-    packages), and the walk iterates to a fixed point. A target the walk
-    cannot determine statically is unprovable and fails loudly, naming the
-    module and the import site. A module nested deeper than the walk's own
-    recursion can follow is unprovable the same way, and is refused by name
-    rather than raising out of the walk.
+    packages), and the walk iterates to a fixed point. That is the STATIC
+    reader: a declaration is collected wherever it is written, dead code
+    included. A CALL is the other reader, and one the runtime provably never
+    executes is CLEAN rather than collected or refused — the verdict a value
+    the runtime cannot reach through gets, asked of a position instead
+    (`_mcp_dead_code`). A target the walk cannot determine statically is
+    unprovable and fails loudly, naming the module and the import site. A
+    module nested deeper than the walk's own recursion can follow is
+    unprovable the same way, and is refused by name rather than raising out
+    of the walk.
     """
     root = Path(root).resolve()
     composition = Path(composition).resolve()
@@ -167,12 +170,10 @@ def _dynamic_callees(tree):
 
 def _unresolved_callee_mentions(call, bound, scopes):
     """Whether a call's callee mentions the operation AND is one the walk may
-    still refuse.
-
-    The fold is asked first, because it has already decided a value this
-    call cannot make: a container is not callable, so the call raises before
-    it reaches anything, and the mention the container carries is then a
-    fact about the wrong value.
+    still refuse. The fold is asked first, because it has already decided a
+    value this call cannot make: a container is not callable, so the call
+    raises before it reaches anything, and the mention the container
+    carries is then a fact about the wrong value.
     """
     value = _mcp_selection_fold.unresolvable_callee(call, bound, scopes)
     return value is not None and _mcp_selection_fold.yields_the_operation(
@@ -203,8 +204,9 @@ class _BindingWalk(ast.NodeVisitor):
     EXCEPTION, never the registry or a code-evaluating builtin, so neither
     is reachable through it. Because a tracked name is never allowed to be
     rebound, the map needs no rewriting to stay a fixed point: the
-    refusals are what
-    keep it one.
+    refusals are what keep it one. A node the runtime provably does not
+    execute binds nothing, so its refusals are dropped at the one callable
+    they all pass through.
     """
 
     def __init__(self, bound, scopes, refuse):
@@ -273,8 +275,7 @@ class _BindingWalk(ast.NodeVisitor):
             self._leaf(node, leaf, values)
 
     def _paired(self, node, target, value):
-        """Bind a target from the one value it receives, unpacking a
-        sequence element-wise when both sides have the same shape."""
+        """Bind a target from the one value it receives."""
         if isinstance(target, (ast.Tuple, ast.List)) \
                 and isinstance(value, (ast.Tuple, ast.List)):
             if len(target.elts) == len(value.elts):
@@ -298,11 +299,9 @@ class _BindingWalk(ast.NodeVisitor):
 
     def _refuse_default(self, node, name, default, hidden):
         """Refuse a default that hands the operation, the registry or a
-        code-evaluating builtin to its parameter.
-
-        The message names the offending parameter, not the whole
-        definition, so a maintainer reads one line in the traceback.
-        """
+        code-evaluating builtin to its parameter. The message names the
+        offending parameter, not the whole definition, so a maintainer
+        reads one line in the traceback."""
         self.refuse(
             node, f'parameter {name}={ast.unparse(default)} binds '
             f'{_HIDDEN_NOUN[hidden]} to a name this scan cannot follow')
@@ -397,11 +396,14 @@ class _BindingWalk(ast.NodeVisitor):
         self._keyword_defaults(node)
 
 
-def _refused_bindings(tree, bound, scopes, refuse):
-    """Refuse every store that hides the import-by-name operation, the
-    registry or a code-evaluating builtin from the map, whatever form the
-    store takes."""
-    _BindingWalk(bound, scopes, refuse).visit(tree)
+def _refused_bindings(tree, bound, scopes, refuse, dead):
+    """Refuse every store that hides the operation, the registry or a
+    code-evaluating builtin from the map, whatever form it takes.
+
+    Every refusal passes through one callable, so a node the runtime never
+    executes is dropped there rather than in each arm above."""
+    _BindingWalk(bound, scopes, lambda node, detail: None
+                 if node in dead else refuse(node, detail)).visit(tree)
 
 
 def _looks_the_operation_up(node, bound):
@@ -538,15 +540,17 @@ def _folded_string(node):
     return None
 
 
-def _refused_string_reads(tree, bound, refuse):
+def _refused_string_reads(tree, bound, refuse, dead):
     """A string that NAMES the operation, or a module read by string from
     the registry, reaches the import-by-name operation the way a name does.
 
     Both are matched against the operation's names, never a spelling of their
     own, and both go through the one constant-folder, the single authority
-    for a readable string.
-    """
+    for a readable string. A node the runtime never executes is beside the
+    question, as a container the fold decides is not callable is."""
     for node in ast.walk(tree):
+        if node in dead:
+            continue
         folded = _folded_string(node)
         if folded is not None and folded in DYNAMIC_ATTRIBUTES:
             refuse(node, f'the string {folded!r} names the import-by-name'
@@ -593,11 +597,12 @@ def _import_targets(path, root):
     source = path.read_text(encoding='utf-8')
     tree = ast.parse(source)
     bound = _dynamic_callees(tree)
+    dead = _mcp_dead_code.dead_nodes(tree)
     scopes = _mcp_code_eval.scopes_for(tree, source, str(path))
     package = path.resolve().relative_to(Path(root).resolve()).parent.parts
     _refused_bindings(
         tree, bound, scopes,
-        lambda node, detail: _refuse(path, root, node, detail))
+        lambda node, detail: _refuse(path, root, node, detail), dead)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -615,6 +620,12 @@ def _import_targets(path, root):
                     name = f'{node.module}.{alias.name}' if node.module \
                         else alias.name
                     targets |= _resolve_name(name, base, root)
+        elif node in dead:
+            # The gate is HERE, and the two branches above are deliberately
+            # ungated: a static import is a DECLARATION this scan collects
+            # wherever it is written, while a call the runtime provably
+            # never makes is not evidence, so it draws no refusal either.
+            pass
         elif isinstance(node, ast.Call) \
                 and _mcp_selection_fold.is_dynamic_import(
                     _mcp_selection_fold.callee_value(
@@ -626,9 +637,9 @@ def _import_targets(path, root):
             elif not _may_be_a_name(argument):
                 # The operation takes a NAME, so an argument this walk can
                 # see is not one — no argument at all, or a constant that is
-                # not a string — raises before it imports anything. The
-                # call names nothing, so this is the same decision `[op][4]`
-                # is: CLEAN rather than a refusal of the wrong question.
+                # not a string — raises before it imports anything. CLEAN,
+                # then, like `[op][4]`, rather than a refusal of the wrong
+                # question.
                 pass
             else:
                 _refuse(path, root, node,
@@ -658,7 +669,7 @@ def _import_targets(path, root):
             # limit, shared with the import name.
     _refused_string_reads(
         tree, bound,
-        lambda node, detail: _refuse(path, root, node, detail))
+        lambda node, detail: _refuse(path, root, node, detail), dead)
     return targets
 
 
