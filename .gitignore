@@ -71,6 +71,7 @@
 !/.github/PULL_REQUEST_TEMPLATE.md
 !/.github/ci-thresholds.json
 !/.github/dependabot.yml
+!/.github/reserved-test-names.json
 !/.github/suite-timings.json
 
 # ─── .github/ISSUE_TEMPLATE ───
@@ -244,6 +245,7 @@
 !/scripts/ci/ratchet.py
 !/scripts/ci/reference_workload.py
 !/scripts/ci/refresh_timings.py
+!/scripts/ci/reserved_names.py
 !/scripts/ci/size_baseline.py
 !/scripts/ci/speed_summary.py
 !/scripts/ci/thresholds.py
@@ -396,6 +398,7 @@
 !/tests/_realbrowser_workers.py
 !/tests/_relayharness.py
 !/tests/_repo.py
+!/tests/_reserved_names.py
 !/tests/_scratch_index.py
 !/tests/_seg_lock_seam.py
 !/tests/_segments.py
@@ -631,6 +634,7 @@
 !/tests/test_relay_example_placeholders.py
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
+!/tests/test_reserved_test_names.py
 !/tests/test_result_command_write_retry.py
 !/tests/test_result_routes.py
 !/tests/test_result_store.py
