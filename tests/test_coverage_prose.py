@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""The JavaScript coverage figures CONTRIBUTING.md states in prose.
+"""The JavaScript-coverage figures CONTRIBUTING.md states in prose.
 
 The paragraph in `CONTRIBUTING.md` that names the one shipped module no
-suite reaches carries two numbers: the unreached module's own code-line
-count, and the total the measurement is taken over. Both are functions of
-the tree — the first of one file, the second of every tracked shipped
-JavaScript file — so both are derived here, in one command, with no suite
-run and no coverage data.
+suite reaches carries one figure: that module's own code-line count, beside
+the `0` that is the claim of being unreached. Both are functions of one
+file, so both are derived here, in one command, with no suite run and no
+coverage data.
 
-The covered count is NOT a function of the tree; it is a measurement of one
-run, so no gate here can hold it and the prose is not permitted to state it.
-The percentage IS a function of the tree — it is the module's share of the
-denominator — so it is recomputed from the two figures above and compared by
-value, to the precision the prose states. Every remaining figure in the
-paragraph must be one the tree proves, and anything else is refused as a
-value rather than as a phrase, so rewording around it does not slip past.
+The figures the paragraph used to carry and no longer does are refused
+rather than quietly forgotten, because a refused figure is what stops the
+next one being written. A covered count is a measurement of one run, so no
+gate here can hold it. A denominator over every tracked shipped JavaScript
+file IS a function of the tree, and that is exactly why it is refused here:
+it moves whenever any other shipped file grows, for reasons that have
+nothing to do with the module this paragraph is about, so two pull requests
+that each ship JavaScript leave it behind between them. The percentage
+derived from such a denominator is refused for the same reason -- a share
+whose base the paragraph does not state has nothing to prove it against.
+So the accept set is the two figures above, and every other figure is
+refused as a VALUE, so rewording around one does not slip past.
 
-That split is the point. The figures that can be checked are checked here and
-go red the moment a shipped file grows; the ones that cannot are pointed at
-the run's own summary rather than copied into a file where nothing would
-notice them going stale.
+What the paragraph calls a shipped module is also checked against the
+population, so a file that is renamed, moved out of `extension/`, or stops
+shipping as JavaScript reds here rather than leaving the prose describing a
+shipped module the coverage report never sees.
 
 The scan reads DIGIT FORM, and its exemptions are by SHAPE rather than by
 example, so the shapes are what is written down here: a figure written in
@@ -33,8 +37,8 @@ worth more when its own limits are written down than when it pretends to have
 none.
 
 The population is `js_coverage.tracked_sources` rather than a second copy of
-its rule, so this suite cannot drift from the number it is checking: if the
-report's definition of "shipped JavaScript" moves, both move together.
+its rule, so this suite cannot drift from the definition it checks against:
+if the report's meaning of "shipped JavaScript" moves, both move together.
 """
 import re
 import sys
@@ -85,24 +89,26 @@ def test_the_unreached_module_line_count_is_the_trees(tmp):
         f'the file has {real}')
 
 
-def test_the_denominator_is_every_tracked_shipped_javascript_file(tmp):
-    """`the 4943 the number is measured over` — the same sum the coverage
-    report prints, over the same population, so any shipped file that grows
-    or shrinks turns this red instead of quietly making the prose false."""
+def test_the_named_module_is_still_shipped_javascript(tmp):
+    """`the one shipped module` — the population claim the denominator test
+    also carried, and the one figure this paragraph has besides the count.
+
+    Dropping the denominator must not drop this with it. A file that stops
+    being tracked shipped JavaScript keeps every physical code line it had,
+    so the count above stays green while the paragraph goes on calling it a
+    shipped module the coverage report never sees.
+    """
     del tmp
-    said = re.search(r'the (\d+) the number is measured over', _paragraph())
-    assert said, 'the paragraph no longer states the denominator'
     sources = tracked_sources(ROOT)
-    total = sum(len(code_lines(text, rel)) for rel, text in sources.items())
-    assert int(said.group(1)) == total, (
-        f'CONTRIBUTING.md says the number is measured over {said.group(1)}; '
-        f'the tree has {total}')
-    assert UNREACHED in sources, f'{UNREACHED} is not in the population'
+    assert UNREACHED in sources, (
+        f'{UNREACHED} is not in the population of tracked shipped JavaScript, '
+        f'so CONTRIBUTING.md cannot call it the one shipped module no suite '
+        f'reaches')
 
 
 def test_the_paragraph_still_claims_the_unreached_module(tmp):
-    """The qualitative claim is what the paragraph is for. The two numbers
-    are decoration on it, so a gate that only checked the numbers would pass
+    """The qualitative claim is what the paragraph is for. The figure beside
+    it is decoration on it, so a gate that only checked the figure would pass
     on a paragraph that had quietly stopped claiming anything."""
     del tmp
     text = _paragraph()
@@ -144,63 +150,59 @@ def test_every_figure_in_the_paragraph_is_one_the_tree_proves(tmp):
     """The property, not a token: a figure may appear only if the tree
     proves it, so the test is the VALUE and never the wording around it.
 
-    Two figures are provable here and are pinned by the cases above: the
-    unreached module's own code-line count, and the denominator. The
-    paragraph's percentage is the third, because it is computed FROM those
-    two -- it is the module's share of the denominator -- so it is
-    recomputed here and compared at the precision the prose states. That
-    admits `about 1%` and refuses `about 2%`, which a flat one-point
-    tolerance would have let through.
+    The accept set is what this paragraph is about: the `0` that is the
+    claim, and the module's own code-line count, which the case above pins.
+    Dropping the denominator narrowed the set rather than dropping the
+    property, so every other figure is still refused as a VALUE -- rewording
+    around one does not slip past, and neither does inserting one into the
+    sentence that disclaims it.
 
-    Every other figure is a measurement of a coverage run, which nothing here
-    can check, so it is refused as a VALUE: rewording around one does not
-    slip past, and neither does inserting one into the sentence that
-    disclaims it. The bare `0` is permitted because it is not a measurement
-    but the claim that the module is unreached.
+    A percentage is refused outright, and the paragraph is required to state
+    none. A share is provable only against a base the paragraph states, and
+    the one base that would make this one checkable is a count of every
+    shipped JavaScript file in the tree: it moves for reasons that have
+    nothing to do with the module named here, and the run that prints it
+    prints it in the coverage step summary.
 
     What this does NOT read is in the module docstring and repeated here: the
     scan is digit form, so a figure spelled in words -- "four thousand three
-    hundred and forty" -- passes. That is a known limit rather than a bug to
-    be fixed by writing a prose parser, and the honest remedy is this
-    sentence, not a bigger regular expression.
+    hundred and forty" -- passes, and so does a percentage spelled in words.
+    That is a known limit rather than a bug to be fixed by writing a prose
+    parser, and the honest remedy is this sentence, not a bigger regular
+    expression.
     """
     del tmp
     text = _paragraph()
     said_count = re.search(r'at 0 of (\d+) code\s+lines', text)
-    said_total = re.search(r'the (\d+) the number is measured over', text)
     assert said_count, 'the paragraph no longer states the module count'
-    assert said_total, 'the paragraph no longer states the denominator'
     count = int(said_count.group(1))
-    total = int(said_total.group(1))
-    share = 100.0 * count / total
 
-    percents = re.findall(r'(\d+(?:\.\d+)?)\s*%', text)
-    assert percents, (
-        'the paragraph states no percentage in digit form with a `%` sign, '
-        'so the share it expresses is not checked against anything. The '
-        'digits may well be there -- "about 1.03 percent" has them -- but '
-        'this reads the sign, and a percentage spelled in words is exactly '
-        'as unchecked as none at all, so both are refused rather than passed')
-    for said in percents:
-        decimals = len(said.split('.')[1]) if '.' in said else 0
-        half = 0.5 * 10 ** -decimals
-        assert abs(float(said) - round(share, decimals)) < half, (
-            f'the paragraph states {said}%, which is not the '
-            f'{share:.2f}% the two figures above give')
-
-    # Percentages are judged above; blank them so their digits are not also
-    # scanned as bare figures, keeping every other offset where it was.
+    # Percentages are blanked first, so their digits are not also judged as
+    # bare figures; they keep their offset either way, and whether one is
+    # allowed at all is decided below, where the refusal can say why.
     blanked = re.sub(r'\d+(?:\.\d+)?\s*%',
                      lambda m: ' ' * len(m.group(0)), text)
     for run, start, end in _digit_runs(blanked):
         if _part_of_a_token(blanked, start, end, run):
             continue
-        assert float(run) in (0, count, total), (
+        assert float(run) in (0, count), (
             f'the paragraph states {run!r} in '
             f'...{blanked[max(0, start - 14):end + 14].strip()}... , which is '
-            'a measurement of a coverage run rather than a figure the tree '
-            'proves; it belongs in the coverage step summary')
-    assert 'coverage step summary' in text, (
+            f'not a figure this paragraph can prove: the only ones the tree '
+            f'proves here are 0 and the {count} code lines of {UNREACHED}. A '
+            f'count measured by a coverage run, and a denominator over every '
+            f'tracked shipped JavaScript file, both belong in the coverage '
+            f'step summary that run prints')
+
+    percents = re.findall(r'(\d+(?:\.\d+)?)\s*%', text)
+    assert not percents, (
+        f'the paragraph states {percents[0]}%, a share of a denominator it '
+        f'does not state, so there is nothing here to prove it against. The '
+        f'only denominator that would make it checkable is a count of every '
+        f'shipped JavaScript file in the tree, which moves for reasons that '
+        f'have nothing to do with {UNREACHED}; the run prints the share in '
+        f'the coverage step summary')
+    assert re.search(r'coverage\s+step\s+summary', text), (
         'the run-only figures must point at the coverage step summary')
 
 
