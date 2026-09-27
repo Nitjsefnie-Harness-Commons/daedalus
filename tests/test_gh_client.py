@@ -292,6 +292,100 @@ class _Clock:
         return 'answered'
 
 
+class _PinnedTime:
+    """The `time` module reduced to one instant, standing in for the real.
+
+    A pinned phase is what makes the near-reset window deterministic: the
+    time left to the reset is whatever the test says it is, not whatever
+    the wall clock happened to be at when the line ran.
+    """
+
+    def __init__(self, instant):
+        self.instant = instant
+
+    def time(self):
+        return self.instant
+
+
+@contextlib.contextmanager
+def _pinned_clock(mod, instant):
+    """Hand one loaded client a clock frozen at `instant`."""
+    saved = mod.time
+    mod.time = _PinnedTime(instant)
+    try:
+        yield
+    finally:
+        mod.time = saved
+
+
+def _paused(mod, instant, resume_at):
+    """(stamp the line names, seconds slept) from one real `_pause`."""
+    out = io.StringIO()
+    slept = []
+    watcher = mod.Watcher('w', out=out)
+    watcher.sleep = slept.append
+    with _pinned_clock(mod, instant):
+        watcher._pause(mod.RateLimited('rate limited', resume_at))
+    lines = [line for line in out.getvalue().splitlines() if line.strip()]
+    assert len(lines) == 1, lines
+    return lines[0].rsplit(' ', 1)[-1], slept
+
+
+def _stamp(instant):
+    return datetime.fromtimestamp(instant, timezone.utc).strftime(
+        '%Y-%m-%dT%H:%M:%SZ')
+
+
+def test_a_reset_nearer_than_the_floor_is_slept_to_and_named_exactly(tmp):
+    """A reset one second out is neither overslept nor misnamed.
+
+    The floor guards a reset already in the past from becoming a hot
+    loop. Applied to one the API still holds us to, it overshoots the
+    reset the server named and the printed line says so - the line is
+    where a reader learns when the watcher resumes, so it has to be
+    true. Pinned phase: the wait left is exactly a second.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    reset = now + 1.0
+    assert reset - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, reset - now)
+    stamp, slept = _paused(mod, now, reset)
+    assert slept == [1.0], slept
+    assert stamp == _stamp(reset), (stamp, _stamp(reset))
+
+
+def test_a_reset_already_past_still_waits_the_floor_and_names_now(tmp):
+    """The half that must not move: a past reset keeps the floor.
+
+    There is no reset to land on any more, so the line names the moment
+    the watcher will actually resume - after the reset, not on it.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    stamp, slept = _paused(mod, now, now - 5000)
+    assert slept == [mod.MIN_BACKOFF], slept
+    wanted = _stamp(now + mod.MIN_BACKOFF)
+    assert stamp == wanted, (stamp, wanted)
+
+
+def test_a_reset_beyond_the_ceiling_names_the_ceiling_not_the_reset(tmp):
+    """A capped future reset names the wait, which is not the reset.
+
+    The cap is what an absurd header gets; naming the reported reset
+    there would promise a wait six hours long ends at a moment none of
+    the watcher's waits end at.
+    """
+    del tmp
+    mod = _client()
+    now = 1789012345.0
+    stamp, slept = _paused(mod, now, now + 10 ** 9)
+    assert slept == [float(mod.MAX_BACKOFF)], slept
+    wanted = _stamp(now + mod.MAX_BACKOFF)
+    assert stamp == wanted, (stamp, wanted)
+
+
 def _suite_page(suites, has_next=False, cursor=None):
     return {'data': {'repository': {'object': {'checkSuites': {
         'pageInfo': {'hasNextPage': has_next, 'endCursor': cursor},
