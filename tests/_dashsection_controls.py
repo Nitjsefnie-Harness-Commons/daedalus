@@ -113,6 +113,7 @@ let ran = 0;
 button.addEventListener('click', armedAction(() => { ran += 1; }));
 button.click();
 const armed = { ran, text: button.textContent, live: drive.live(),
+                delays: drive.delays(),
                 has: button.classList.contains('armed') };
 const cancelled = setTimeout(() => { ran += 100; }, 2500);
 clearTimeout(cancelled);
@@ -487,11 +488,8 @@ sectionReport({ refused: seen.filter((m) => m !== null).length,
 
 # The three surfaces `_dashnode_dom` gained, each with the negative table
 # that widens alongside it. `overview.js` is the shipped section that reads
-# all three: it reaches `[data-stat=…]` on the stat cells it just built,
-# `[data-meta="tab-count"]` on the page's status line, and `lastChild` to
-# trim its log. Every refusal below is a shape the grammar declines, and
-# the case asserts each one by name -- a matcher that grew a grammar and
-# not a negative table answers shapes it does not understand.
+# all three. A matcher that grew a grammar and not a negative table
+# answers shapes it does not understand.
 
 ATTRIBUTE_SELECTORS = r"""
 (async () => {
@@ -500,15 +498,28 @@ const role = new El('div');
 role.dataset.role = 'log';
 const stat = new El('div');
 stat.dataset.stat = 'rate';
+// A SECOND `rate` cell: `find` is singular, so which one it answers is a
+// claim of its own.
+const statAgain = new El('div');
+statAgain.dataset.stat = 'rate';
 const meta = new El('span');
 meta.dataset.meta = 'tab-count';
 const blank = new El('span');
 blank.dataset.meta = '';
-root.append(role, stat, meta, blank);
+const spaced = new El('span');
+spaced.dataset.meta = 'tab count';
+root.append(role, stat, meta, blank, statAgain, spaced);
 const refusals = {};
 for (const sel of ['[data-sub]', '.rail-list > li', 'div', 'null', '',
                    '[data-meta="token]', '[data-Role=log]',
-                   '[data-meta=]', '[=log]']) {
+                   '[data-meta=]', '[=log]',
+                   // The prefix clause, the suffix clause.
+                   '[aria-label=x]', '[data-stat=tabs',
+                   // The width clause.
+                   '[data-=x]',
+                   // The value's character class.
+                   '[data-stat=tabs][x]', '[data-stat=tabs,role]',
+                   '[data-stat= tabs]', '[data-stat=tab s]']) {
   try { root.find(sel); refusals[String(sel)] = 'ANSWERED'; }
   catch (error) { refusals[String(sel)] = error.message; }
 }
@@ -516,8 +527,14 @@ sectionReport({
   role: root.find('[data-role=log]') === role,
   quotedRole: root.find('[data-role="log"]') === role,
   stat: root.find('[data-stat=rate]') === stat,
-  meta: root.find('[data-meta="tab-count"]') === meta,
   throughQuery: root.querySelector('[data-stat=rate]') === stat,
+  firstOfTwo: root.find('[data-stat=rate]') === stat
+    && root.find('[data-stat=rate]') !== statAgain,
+  // The escape hatch for a value that is not an identifier.
+  quotedValue: root.find('[data-meta="tab count"]') === spaced,
+  // `.trim()` is a gate of its own.
+  padded: root.find('  [data-stat=rate] ') === stat,
+  meta: root.find('[data-meta="tab-count"]') === meta,
   emptyValue: root.find('[data-meta=]') === blank,
   emptyIsNotAbsent: root.find('[data-meta=tab-count]') === meta,
   miss: root.find('[data-stat=tabs]'),
