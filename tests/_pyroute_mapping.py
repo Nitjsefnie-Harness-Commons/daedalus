@@ -256,7 +256,7 @@ def _apply_modelled_store(statement, state, claimed):
         mapping = owner is None or (isinstance(owner, DeferredContainer)
                                     and owner.kind == 'dict')
         if call.func.attr == 'clear' and isinstance(owner, DeferredContainer):
-            clear_owner(state, owner)
+            clear_owner(state, owner_name, owner)
             claimed.add(id(call))
         elif call.func.attr == 'update' and mapping:
             # `update`'s two argument kinds partition `keywords` on `arg`:

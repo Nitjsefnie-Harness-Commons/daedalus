@@ -21,17 +21,10 @@ from _pyroute_values import (UNPROVABLE_SENDER, DeferredClass,
 _ASSIGNS_BY_INDEX = ('list', 'dict')
 
 
-def bound_names(state, value):
-    """The names a value is bound to."""
-    return {name for name, bound in state.callables.items() if bound is value}
-
-
 def _rebuilt(state, owner, replacement, owner_name):
-    names = bound_names(state, owner)
-    if owner_name:
-        names.add(owner_name)
     replace_deferred_storage(state, owner, replacement)
-    sync_cells(state, names)
+    if owner_name:
+        sync_cells(state, {owner_name})
 
 
 def replace_container(state, owner_name, owner,
@@ -47,12 +40,12 @@ def replace_slots(state, owner_name, owner, slots):
              else DeferredClass(slots), owner_name)
 
 
-def clear_owner(state, owner):
+def clear_owner(state, owner_name, owner):
     """Empty a tracked container, wherever the model reaches it from."""
-    names = bound_names(state, owner)
     replace_deferred_storage(state, owner, DeferredContainer(
         {}, 0, owner.kind, owner.identity))
-    sync_cells(state, names)
+    if owner_name:
+        sync_cells(state, {owner_name})
 
 
 def root_name(node):
@@ -87,9 +80,11 @@ def _seed_receiver(state, base, value):
         return False
     owner = _receiver_value(base.value, state)
     name = root_name(base)
-    if isinstance(base, ast.Attribute) and isinstance(owner, DeferredInstance):
-        slots = {**owner.attributes, base.attr: value}
-        replace_slots(state, name, owner, slots)
+    if isinstance(base, ast.Attribute) \
+            and isinstance(owner, (DeferredInstance, DeferredClass)):
+        held = owner.attributes if isinstance(owner, DeferredInstance) \
+            else owner.methods
+        replace_slots(state, name, owner, {**held, base.attr: value})
         return True
     if isinstance(base, ast.Subscript) \
             and isinstance(owner, DeferredContainer):
@@ -99,14 +94,6 @@ def _seed_receiver(state, base, value):
                               {**owner.items, cast(Hashable, key): value})
             return True
     return False
-
-
-def _unplaced(state, value, owner_name):
-    """A deferred value a store had nowhere to put must not read clean: the
-    name the receiver is rooted at holds something the guard cannot place, so
-    a call reached through it is unproved."""
-    if is_deferred_value(value) and owner_name:
-        state.aliases[owner_name] = UNPROVABLE_SENDER
 
 
 def _store_attribute(state, target, value, owner, owner_name):
@@ -195,8 +182,8 @@ def store_deferred_target(
             state.callables[owner_name] = DeferredInstance(
                 {target.attr: value})
             sync_cells(state, {owner_name})
-        elif not _seed_receiver(state, base, value):
-            _unplaced(state, value, owner_name)
+        else:
+            _seed_receiver(state, base, value)
         return
     if not isinstance(target, ast.Subscript):
         return
@@ -207,5 +194,3 @@ def store_deferred_target(
             state, base, DeferredContainer({}, None, 'dict', target)):
         _subscript_store(state, target, value, _receiver_value(base, state),
                          root_name(base), removing, unknown_call)
-    else:
-        _unplaced(state, value, owner_name)
