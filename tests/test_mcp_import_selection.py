@@ -664,9 +664,12 @@ def load():
 # One container, two spellings: written out, and handed to a name first.
 # The index is a name because a store hands the walk nothing to fold — the
 # point being that the STORE side has always refused the stored spelling,
-# so the inline one must not be the way past it.
+# so the inline one must not be the way past it. Neither prefix carries a
+# `return`: the template adds one, and a second would leave the call the
+# row is about in a tail the runtime never executes, which is a position
+# this walk now answers as clean and the row would then test nothing.
 STORED = '\nimport importlib\n\n\ndef load(i):\n    d = [0, importlib'
-INLINE = '\nimport importlib\n\n\ndef load(i):\n    return [0, importlib'
+INLINE = '\nimport importlib\n\n\ndef load(i):\n    [0, importlib'
 
 
 def test_a_selection_agrees_with_a_store_of_the_same_container(_tmp):
@@ -681,7 +684,7 @@ def test_a_selection_agrees_with_a_store_of_the_same_container(_tmp):
                              (INLINE, '[0, importlib.import_module][i]')):
         _write_tree(Path(_tmp), {
             'composition.py': f'{prefix}.import_module]\n'
-                              f"    return {spelling}('pkg.leaf')\n",
+                              f"    {spelling}('pkg.leaf')\n",
             'pkg/__init__.py': '',
             'pkg/leaf.py': 'leaf = True\n'})
         try:
