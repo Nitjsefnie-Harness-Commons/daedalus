@@ -468,15 +468,22 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child runs 127 mutation rows, one individually-bounded
+    That child runs at least 122 mutation rows, one individually-bounded
     grandchild each, so an outer bound on it decides a verdict its own
-    work does not own: 127 x 30s = 3810s is the work a runaway backstop
-    would have to cover, and 120s truncates it about thirty-two times
-    over. A wall bound is legitimate where the child always spends it on
-    real work — the freeze controls busy-wait on purpose, so a wedged
-    child is the only failure a ceiling names — but this child is real
-    work that runs long, and the aggregate is observed to take minutes
-    where a margin allows two.
+    work does not own: 122 x 30s = 3660s is the work a runaway backstop
+    would have to cover, and 120s truncates it about thirty times over.
+    The count is a floor because it is version-dependent — 3.12 and later
+    run 127 rows, 127 x 30s = 3810s, about thirty-two times over,
+    because PEP 695 type-parameter nodes exist only from 3.12 and the
+    rows mutating that arm in tests/_coverage_scopes.py find no needle
+    before it. The floor is the figure the removal rests on, since the
+    worst case is the one that has to be safe on every interpreter.
+
+    A wall bound is legitimate where the child always spends it on real
+    work — the freeze controls busy-wait on purpose, so a wedged child
+    is the only failure a ceiling names — but this child is real work
+    that runs long, and the aggregate is observed to take minutes where a
+    margin allows two.
 
     That observation supports the argument rather than carrying it,
     because it does not reproduce to a figure: the same child has been
@@ -567,6 +574,26 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     assert not timed, timed
 
 
+# The sweep's row count is VERSION-DEPENDENT, and the gate is
+# tests/_coverage_scopes.py's `_TYPE_PARAMETERS`: PEP 695 type-parameter
+# nodes exist only from 3.12, so on 3.11 that tuple is empty, the shared
+# shadow census reads a different arm, and the rows mutating it find no
+# needle. The count is therefore a floor and a ceiling, and the removal
+# rests on the FLOOR — the smallest count any supported version runs, so
+# the worst case is the one quoted. Keyed by the oldest `(major, minor)`
+# that carries each figure; `_rows_for` reads the newest key at or below
+# the running interpreter.
+_SWEEP_ROWS = {(3, 11): 122, (3, 12): 127}
+_CHILD_BOUND_S = 30
+_TRUNCATED_BY_S = 120
+
+
+def _rows_for(version):
+    """The figure for an interpreter: the newest key at or below it."""
+    eligible = [key for key in _SWEEP_ROWS if version[:2] >= key]
+    return _SWEEP_ROWS[max(eligible)]
+
+
 def _guard_disclosure():
     """The docstring of the sweep-bound test, as the tree reads it."""
     tree = ast.parse(Path(__file__).read_text(encoding='utf-8'))
@@ -594,13 +621,22 @@ def _child_deadlines():
 def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
     """The row count, the child bound and the arithmetic are measured.
 
-    The removal's whole argument scales with 127: a row added makes
-    3810s wrong, and 120s stops being a thirty-second margin. Nothing
-    else on this branch would notice, because a docstring is prose and
-    prose does not fail. This builds the spec table in a child — cheap,
-    it does not run the sweep — reads the per-child bound out of the
-    sweep's own source, and requires the disclosure's own numbers to
-    match both.
+    The removal's whole argument scales with the row count: a row
+    dropped makes 3660s wrong, and 120s stops being a thirty-fold
+    margin. Nothing else on this branch would notice, because a
+    docstring is prose and prose does not fail.
+
+    The count is version-dependent, so this derives it on the RUNNING
+    interpreter and requires the figure `_SWEEP_ROWS` holds for that
+    interpreter — 122 on 3.11, 127 from 3.12. Requiring 127 everywhere is
+    the defect this replaced: it can only ever be right on one version,
+    and it went red on the other three CI legs. The two figures live in
+    that table, and the last two assertions require the disclosure to
+    state both of them and both products, so the table and the prose
+    cannot drift from each other either. That last link is a check on
+    prose, not on behaviour: it fails on a reworded sentence, which is
+    loud rather than silent, and it is the price of keeping the numbers
+    in the sentence a reader of the control actually reads.
     """
     del tmp
     child = subprocess.run(
@@ -613,12 +649,19 @@ def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
     bounds = _child_deadlines()
     assert bounds == {30}, bounds
     child_bound = int(next(iter(bounds)))
-    worst = rows * child_bound
+    assert child_bound == _CHILD_BOUND_S, child_bound
+    expected = _rows_for(sys.version_info)
+    assert rows == expected, (sys.version_info[:2], rows, expected)
+    floor, ceiling = _SWEEP_ROWS[(3, 11)], _SWEEP_ROWS[(3, 12)]
+    worst = floor * child_bound
     disclosure = _guard_disclosure()
-    assert f'runs {rows} mutation rows' in disclosure, rows
-    assert f'{rows} x {child_bound}s = {worst}s' in disclosure, worst
-    assert 'truncates it about thirty-two times' in disclosure
-    assert 30 <= worst / 120 < 33, worst
+    assert f'at least {floor} mutation rows' in disclosure, floor
+    assert f'{floor} x {child_bound}s = {worst}s' in disclosure, worst
+    assert 'about thirty times over' in disclosure
+    assert f'run {ceiling} rows' in disclosure, ceiling
+    assert (f'{ceiling} x {child_bound}s = {ceiling * child_bound}s'
+            in disclosure)
+    assert 30 <= worst / _TRUNCATED_BY_S < 31, worst
 
 
 if __name__ == '__main__':
