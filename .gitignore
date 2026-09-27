@@ -53,6 +53,7 @@
 !/.claude/skills/
 !/.claude/skills/changing-daedalus/
 !/.claude/skills/changing-daedalus/SKILL.md
+!/.claude/skills/changing-daedalus/ci_gate.py
 !/.claude/skills/changing-daedalus/ci_wait.py
 !/.claude/skills/changing-daedalus/ci_watch.py
 !/.claude/skills/changing-daedalus/gh_client.py
@@ -459,6 +460,7 @@
 !/tests/test_change_classifier_callers.py
 !/tests/test_checkout_pin.py
 !/tests/test_child_coverage.py
+!/tests/test_ci_gate.py
 !/tests/test_ci_pip_cache.py
 !/tests/test_ci_ratchets.py
 !/tests/test_ci_thresholds.py

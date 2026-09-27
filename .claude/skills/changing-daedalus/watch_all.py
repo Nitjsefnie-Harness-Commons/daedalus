@@ -31,6 +31,17 @@ keeps it holding, because a failed query must never look like a settled
 matrix; a batch the `--max-hold` cap releases instead is announced as
 partial, so it never reads as settled.
 
+"Every run that exists has concluded" is not "every run that should exist
+did". A pull-request head that conflicts with its base dispatches no
+`pull_request` workflow at all, so the `tests` matrix that gates the merge is
+never created while `gate freshness` and CodeQL run and conclude - and the
+hold used to release that batch, reading exactly like a settled green matrix
+with the gating matrix silently absent from the tally (issue #1223). The
+hold now reads the run set through `ci_gate.missing_required`, the same
+predicate `ci_wait.py` refuses with, and treats an absent gating workflow as
+its own answer: keep holding, and if the cap releases the batch anyway, name
+the workflow that is missing rather than "unknown".
+
 This is a true debounce: the window restarts on every arrival, so nothing is
 emitted while either watcher is still producing. `ci_watch.py` chose a fixed
 batching window instead, on the grounds that a true debounce can hold a
@@ -54,6 +65,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_gate  # noqa: E402
 import gh_client  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -190,14 +202,41 @@ def _runs_on(slug, sha):
         return None
 
 
+class _GateAbsent:
+    """A run set that concluded and never carried the gating workflow.
+
+    A fourth answer beside True (settled), False (runs still open) and None
+    (nothing to judge). It is its own type rather than a falsy value so it
+    can never be read as one of the other three by `is` comparison, and it
+    carries the names so the cap line can name the workflow rather than
+    fall back on "unknown" - which is the shape issue #839 was filed
+    about, on a different route to the same place.
+    """
+
+    def __init__(self, missing):
+        self.missing = tuple(missing)
+
+    def __repr__(self):
+        return f'gate absent: {", ".join(self.missing)}'
+
+
 def _settled(runs):
-    """None with no run yet, which is not settled.
+    """True settled, False runs still open, None nothing to judge.
 
     A conclusion is the batch's business, not the hold's: a completed
     failure settles the matrix as much as a completed success does.
+
+    A run set with no run of the gating workflow is a fourth answer, and
+    not settled: every run it has concluded, and the one that decides the
+    merge was never dispatched, which is a wait that may never end rather
+    than a run still filling. The predicate is ci_gate's, the one
+    `ci_wait.py` refuses with.
     """
     if not runs:
         return None
+    missing = ci_gate.missing_required(runs)
+    if missing:
+        return _GateAbsent(missing)
     return all(run.get('status') == 'completed' for run in runs)
 
 
@@ -222,18 +261,29 @@ def _all_concluded(sha, watcher=None):
     return _settled(runs)
 
 
-def _cap_line(sha, max_hold):
+def _cap_line(sha, max_hold, why='runs still open or unknown'):
     """The line a cap release adds, so its tally cannot pass for settled."""
     return (f'[watch_all] hold cap {max_hold:.0f}s reached on {sha}; '
-            'runs still open or unknown — tally is partial')
+            f'{why} — tally is partial')
 
 
 def _hold_release(settled, held_for, max_hold, sha):
-    """None to keep holding, else the lines to add before emitting."""
+    """None to keep holding, else the lines to add before emitting.
+
+    An absent gate is a reason of its own, and the cap releases the batch
+    whatever the reason is, so the line has to carry it: a cap release that
+    said only "unknown" for a head whose gating matrix was never dispatched
+    would read as a partial tally of a matrix that exists.
+    """
     if settled is True:
         return []
     if held_for < max_hold:
         return None
+    if isinstance(settled, _GateAbsent):
+        return [_cap_line(
+            sha, max_hold,
+            f'no run of {", ".join(settled.missing)} on this head, so the '
+            'gating matrix is absent')]
     return [_cap_line(sha, max_hold)]
 
 
@@ -420,8 +470,10 @@ def main():
                              'would wait forever on runs nobody will finish '
                              '— silence indistinguishable from a clean '
                              'matrix. A batch the cap releases is emitted '
-                             'with a line naming the SHA and that runs are '
-                             'still open, so its tally reads as partial.')
+                             'with a line naming the SHA and why it is '
+                             'still held — runs open, or the gating '
+                             'workflow never dispatched — so its tally '
+                             'reads as partial.')
     parser.add_argument('--debounce', type=float, default=60.0,
                         help='seconds of silence before a batch is emitted')
     parser.add_argument('--max-chars', type=int, default=1000,
