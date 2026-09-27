@@ -240,7 +240,7 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_suite_runner.py', 408,
      'test_output_close_failure_reaps_the_spawned_suite'):
         'the final reap, on the same process',
-    ('tests/_watcher_once.py', 67, 'stop'):
+    ('tests/_watcher_once.py', 73, 'stop'):
         'a fixture stopping a watcher process it started',
     ('tests/test_watcher_budget.py', 98, 'stop'):
         'a fixture stopping a child it started',
