@@ -27,11 +27,10 @@ split below, which is the one distinction here that is about the value
 rather than a name.
 
 Outside it: a `child_coverage(...)` call itself, a launcher, owner or
-chdir reached only by a string (`getattr(os, 'chdir')`), an owner or
-chdir reached by a call result, a call argument carrying the subprocess
-module bare rather than a launcher read off it
-(`patch.object(subprocess, 'run', ...)`), and an unreadable `**` spread
-on an unrecognised callee.
+chdir reached only by a string (`getattr(os, 'chdir')`), an owner or chdir
+reached by a call result, a call argument carrying the subprocess module
+bare rather than a launcher read off it (`patch.object(subprocess, 'run',
+...)`), and an unreadable `**` spread on an unrecognised callee.
 
 Every form the running grammar has is in one of three classes.
 
@@ -44,11 +43,8 @@ It leaves Attribute, BinOp, Compare, Constant, Name, UnaryOp.
 A form in neither class is refused rather than read as clean, so a Python that
 adds one fails closed instead.
 
-A form is opened because a sub-value arrives as it was written, and left alone
-because the form builds a new value out of what it is handed, so a launcher
-inside one is transformed rather than carried. A launcher behind an opened form
-is judged by every arm here, in the argument position and in the decorator and
-assignment binding positions alike.
+A launcher behind an opened form is judged by every arm here, in the argument
+position and in the decorator and assignment binding positions alike.
 
 The four comprehension forms reach their conditions through the statement-level
 node their `generators` hold, and not through their own iterable, which
@@ -56,13 +52,17 @@ node their `generators` hold, and not through their own iterable, which
 is the exception, opened on the issue's requirement rather than on that
 argument, since `f"{launcher}"` binds a string and not the launcher, and a form
 that succeeds it is opened on the same ground. A form a later grammar adds is
-registered only where that grammar has it, and nothing is registered without
-it.
+registered only where that grammar has it.
 
 Two positions read differently. The descent that walks a callee hands the walk
 every subscript the descent consumes, index and bounds included. The base is
 handed over only when it is not an atom: the receiver reads a launch method off
 what it carries, and a direct launch bottoms out at one.
+
+An attribute is opened on one condition. An `Attribute` whose `attr` names a
+launch method is a launcher read rather than a constant read, so the walk
+yields it and descends into the receiver it is read off; every other
+attribute is a constant read and stays the atom it is.
 
 The binding arms read the same way, and one position does not. A target binds a
 name, so the names it declares are not carriers and what it reaches through
