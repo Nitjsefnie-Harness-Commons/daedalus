@@ -96,12 +96,13 @@ def test_the_unreached_module_line_count_is_the_trees(tmp):
 
 def test_the_named_module_is_still_shipped_javascript(tmp):
     """`the one shipped module` — the population claim the denominator test
-    also carried, and the one figure this paragraph has besides the count.
+    also carried, and the one claim this paragraph has besides the count.
 
     Dropping the denominator must not drop this with it. A file that stops
-    being tracked shipped JavaScript keeps every physical code line it had,
-    so the count above stays green while the paragraph goes on calling it a
-    shipped module the coverage report never sees.
+    being tracked shipped JavaScript has not changed a line, and the file
+    itself may not even be readable at the path the paragraph names, so
+    nothing else here reports it: this is the control that says the
+    coverage population has lost the module the prose is about.
     """
     del tmp
     sources = tracked_sources(ROOT)
