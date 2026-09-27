@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+import _mcp_lambda_sweep  # noqa: E402
 import _util  # noqa: E402
 
 _OPERATION = 'importlib.import_module'
@@ -120,6 +121,15 @@ RAISES = (
     # requires something is a raise for it.
     ('x, *, k', '**{}'),
     ('x', '**{}'),
+    # A KEYWORD-ONLY parameter supplied twice, by the two spellings the walk
+    # reads separately. A name and a display each say they supply it, and
+    # two supplies for one parameter is the same raise a positional twice
+    # is; the arm that reads a keyword-only name has to check for the second
+    # the way the positional arm does.
+    ('*, k', 'k=1, **{"k": 2}'),
+    ('*, k', '**{"k": 1}, k=2'),
+    ('*, k=1', 'k=1, **{"k": 2}'),
+    ('x, *, k', '1, k=1, **{"k": 2}'),
     # The three cells a `*args` beside a required parameter crosses.
     ('x, *a, k', 'k=1'),
     ('x, *a, k', 'k=2'),
@@ -132,15 +142,12 @@ RAISES = (
 # rather than resolved, and the ideal — silence — is the cost side filed as
 # #1213.
 UNDECIDED = (
-    ('x', '*d'),
-    ('x', '**d'),
-    ('x, y', '1, *d'),
-    ('x, y', '**d, y=2'),
-    # A display the walk cannot read its KEYS out of is the same question:
-    # `**{**d}` fills the parameter and `**{1: 2}` raises, and the walk
-    # reads neither.
-    ('x', '**{**d}'),
-    ('x', '**{1: 2}'),
+    ('x', '*d', 'a `*args` unpacking a runtime value'),
+    ('x, y', '1, *d', 'a `*args` unpacking a runtime value'),
+    ('x', '**d', 'a `**` mapping the walk cannot read'),
+    ('x, y', '**d, y=2', 'a `**` mapping the walk cannot read'),
+    ('x', '**{**d}', 'a `**` display unpacking another display'),
+    ('x', '**{1: 2}', 'a `**` display whose keys are not all names'),
 )
 
 
@@ -186,9 +193,24 @@ def test_a_call_the_walk_cannot_account_for_is_undecided(_tmp):
     one reading of `d` and the operation for another; declaring it a raise
     would be the same claim in the other direction.
     """
-    for signature, arguments in UNDECIDED:
+    for signature, arguments, _shape in UNDECIDED:
         source = _callee(signature, arguments)
         assert _verdict(_tmp, source) == 'refused', (signature, arguments)
+
+
+def test_every_shape_the_sweep_cannot_cross_is_held_here(_tmp):
+    """The generated class states the shapes it CROSSES; this suite holds
+    the ones it cannot.
+
+    A shape whose value is a runtime the oracle cannot supply is not a row,
+    and a shape that is neither crossed nor held here is invisible: the
+    builder does not emit it, the oracle never reads it, and a rule that gets
+    it wrong passes everything. The two tables therefore have to agree.
+    """
+    held = {shape for _signature, _arguments, shape in UNDECIDED}
+    uncrossable = {shape for shape, _reason in _mcp_lambda_sweep.
+                   UNDECIDED_SHAPES}
+    assert held == uncrossable, (uncrossable - held, held - uncrossable)
 
 
 # The routes a fold reads a lambda out of a value in, each written whole so
