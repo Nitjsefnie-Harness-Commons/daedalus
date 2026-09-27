@@ -6,13 +6,16 @@ that drive the reader live with it.
 """
 import ast
 import math
+import signal
 import re
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _cmdqueue  # noqa: E402
+import _cmdqueue_faults  # noqa: E402
 from _cmdqueue_faults import (  # noqa: E402
     _POLL_HEADROOM,
     _PROBES_PER_ATTEMPT,
@@ -24,6 +27,9 @@ from _cmdqueue_faults import (  # noqa: E402
     _enclosing_bound_blocks,
     _enclosing_scopes,
     _poll_budget,
+    _accounted_for,
+    _attribute_base,
+    _probe_receivers,
     _reached_through,
     _scope_map,
 )
@@ -98,12 +104,25 @@ def test_the_poll_ceiling_spires_a_reader_that_probes_often(tmp):
 
 
 def test_the_poll_ceiling_is_derived_from_the_probes_one_pass_costs(tmp):
-    """The ceiling is the product of both terms, not one fitted number."""
+    """The ceiling is the product of both terms, not one fitted number.
+
+    A hand-written `8 * attempts` would satisfy a restatement of this
+    product, so each term is moved in turn and the ceiling must move
+    with it.
+    """
+    del tmp
     for timeout in (0.01, 0.1, 0.2, 0.35, 1.0, 15.0):
         attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
         assert _poll_budget(timeout) == (
             _PROBES_PER_ATTEMPT * _POLL_HEADROOM * attempts), (
             timeout, attempts)
+    for name, moved in (('_PROBES_PER_ATTEMPT', 3), ('_POLL_HEADROOM', 1)):
+        before = _poll_budget(0.01)
+        with mock.patch.object(_cmdqueue_faults, name, moved):
+            after = _poll_budget(0.01)
+        assert after != before, (
+            f'moving {name} left the ceiling at {after}, so the ceiling is '
+            'fitted rather than derived from that term')
 
 
 def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
@@ -120,14 +139,34 @@ def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
         if isinstance(node, ast.FunctionDef)
         and node.name == '_poll_queue_reads')
     scope_by_node = _scope_map(tree)
-    roots = _bound_to(_enclosing_scopes(reader, scope_by_node) + [reader],
-                      {arg.arg for arg in reader.args.args})
-    reached = _reached_through(reader, roots)
-    direct = {_callee_name(node) for node in ast.walk(reader)
-              if isinstance(node, ast.Call)
-              and any(isinstance(arg, ast.Name) and arg.id in roots
-                      for arg in node.args)}
-    reached |= {name for name in direct if name}
+    # Every parameter, positional and keyword-only, is a root.
+    seeds = {arg.arg for arg in (*reader.args.args,
+                                 *reader.args.kwonlyargs)}
+    bound = _bound_to(_enclosing_scopes(reader, scope_by_node) + [reader],
+                      seeds)
+    reached = _reached_through(reader, bound)
+    # A receiver the resolver cannot follow is a refusal, not a pass: the
+    # census is over the reader's whole name space, so the binding form it
+    # fails to collect is itself the finding.
+    explained = _accounted_for(reader) | _accounted_for(tree)
+    unresolved = _probe_receivers(reader) - bound - explained
+    assert not unresolved, (
+        'a probe receiver the resolver cannot follow, so the probes it '
+        'reaches are invisible and a runaway is uncharged: '
+        f'{sorted(unresolved)}')
+    # The direct half catches a member of something ELSE handed the queue,
+    # as in `os.listdir(directory)`. A bare name callee is a builtin, not a
+    # way to the queue. No real reader uses this half; mutants alone do.
+    for node in ast.walk(reader):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if _attribute_base(node.func) in bound:
+            continue
+        if any(isinstance(arg, ast.Name) and arg.id in bound
+               for arg in node.args):
+            reached.add(node.func.attr)
     for probe in _QUEUE_PROBES:
         assert probe in reached, (
             'the probe classifier is blind: the reader no longer shows a '
@@ -138,6 +177,36 @@ def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
         'the reader reaches the queue through names the bound does not '
         f'count, so a runaway is uncharged and hangs: {sorted(uncharged)}; '
         f'the bound counts {list(_QUEUE_PROBES)}')
+
+
+def test_the_alias_fixpoint_terminates_on_a_cyclic_binding(tmp):
+    """A cycle in the binding graph ends the walk rather than spinning it.
+
+    A previous cut of this branch looped forever on the module scope and
+    killed the suite, so the guarantee is pinned here rather than assumed.
+    The alarm is the assertion: a spin shows up as a failure, not a hang.
+    """
+    del tmp
+    source = (
+        'import os\n'
+        'a = b\n'
+        'b = a\n'
+        'self_ref = self_ref\n'
+        'def f():\n'
+        '    inner = outer\n'
+        'def g():\n'
+        '    outer = g\n'
+        'reader = f\n')
+    tree = ast.parse(source)
+    scope_by_node = _scope_map(tree)
+    armed = signal.alarm(10)
+    try:
+        names = _bound_to(
+            _enclosing_scopes(tree.body[1], scope_by_node)
+            + [tree.body[1]], {'f'})
+    finally:
+        signal.alarm(armed)
+    assert 'f' in names, names
 
 
 def test_the_poll_bound_names_what_it_was_entered_for(tmp):
@@ -200,16 +269,18 @@ def _unbounded_reader_calls(source):
     """Reader call sites in `source` that no `_bounded_polls` block covers."""
     tree = ast.parse(source)
     scope_by_node = _scope_map(tree)
+    resolved = {}
     loose = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         scope = scope_by_node.get(node)
-        if scope is None:
-            loose.append((node.lineno, '<module scope>'))
-            continue
         scopes = _enclosing_scopes(node, scope_by_node) + [scope]
-        names = _bound_to(scopes, _READER_ENTRY_POINTS)
+        key = tuple(id(each) for each in scopes)
+        names = resolved.get(key)
+        if names is None:
+            names = resolved[key] = _bound_to(
+                scopes, _READER_ENTRY_POINTS)
         if _callee_name(node) not in names:
             continue
         if not _enclosing_bound_blocks(
@@ -219,7 +290,9 @@ def _unbounded_reader_calls(source):
 
 
 def _scope_label(scope):
-    return getattr(scope, 'name', type(scope).__name__)
+    # A lambda has no name; the scope it sits in does.
+    return getattr(scope, 'name', None) or getattr(
+        scope, 'name', type(scope).__name__)
 
 
 def test_every_reader_call_in_the_scanned_suites_is_inside_a_bound(tmp):

@@ -70,6 +70,7 @@ from typing import NoReturn
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _jsread import (js_bracket_end, js_mask,  # noqa: E402
                      js_split_top_level)
+from _cmdqueue_faults import _callee_name  # noqa: E402
 from _repo import ROOT  # noqa: E402
 
 _DISPATCH = 'dispatchCommand'
@@ -173,14 +174,6 @@ def served_types(source=None, path=None):
     duplicates = sorted({label for label in labels if labels.count(label) > 1})
     assert not duplicates, f'{path}: duplicate case labels: {duplicates}'
     return labels
-
-
-def _callee_name(node):
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    if isinstance(node, ast.Name):
-        return node.id
-    return None
 
 
 def _parents(tree):
