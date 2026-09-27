@@ -17,9 +17,7 @@ It reads the base tree's own declarations rather than a list of the
 files the branch touched. That form is not a preference: 95 files carry
 a row in the Python table and 31 in this one, this branch edits seven
 of the ninety-five and eighteen of the thirty-one, and a path list
-cannot tell a site the branch wrote from one it did not. It cost that
-branch five renames in test files it was not asked to touch, every one
-of them honest and every one of them undone when the boundary changed.
+cannot tell a site the branch wrote from one it did not.
 
 Like every row in the Python table, each of these is a site the rule
 finds and consolidation has not reached. The `response`, `delay`, `copy`
