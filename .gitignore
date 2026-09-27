@@ -29,6 +29,8 @@
 
 # ─── root ───
 !/.gitignore
+!/.gitignore
+!/.gitignore
 !/.gitleaks.toml
 !/.pylintrc
 !/AGENTS.md
@@ -411,6 +413,7 @@
 !/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
 !/tests/_node_harness_fixtures.py
+!/tests/_node_launch_routing.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
 !/tests/_overlap.py
@@ -711,6 +714,7 @@
 !/tests/test_mcp_transport_close.py
 !/tests/test_mcp_transport_guards.py
 !/tests/test_node_launch_routing.py
+!/tests/test_node_launch_routing_shapes.py
 !/tests/test_noderun_deadline.py
 !/tests/test_overlap_bound.py
 !/tests/test_overlap_client_state.py
