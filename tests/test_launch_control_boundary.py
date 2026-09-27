@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""The boundary `test_repo_layout.py` states about the sites it drops.
+"""The control over the sites `test_repo_layout.py` drops.
 
-Every other reported launch — a non-git or unreadable head carrying a
-bound — is dropped by `_bound_sites`, and the control's own docstring
-calls the dropped set out of scope "by its own stated boundary". This is
-the control that makes that sentence true.
+Its docstring calls the dropped set out of scope "by its own stated
+boundary"; this is the control that makes that sentence true.
 """
 import re
 import sys
@@ -48,11 +46,9 @@ def _refused_lines(here, refusals):
 def _dropped_sites():
     """Every site the control's keep rule drops, and whether it is refused.
 
-    The population is the control's own, because the boundary checked here
-    is that control's and not the analyser's, and the prefilter and the
-    keep rule are both read from `tests/_launch_keep.py` rather than
-    restated — the control reads the same two, so narrowing either moves
-    this control's population with it instead of quietly beside it.
+    The population and the rule are the control's own, both read from
+    `tests/_launch_keep.py`, so narrowing either moves this control's
+    population with it instead of quietly beside it.
 
     One `launch_refusals` walk yields both halves: `bound_sites` is that
     same walk with a sink, so asking for the refusals and the sites
@@ -74,16 +70,16 @@ def _dropped_sites():
 def test_every_bounded_site_the_launch_control_drops_is_a_refusal(tmp):
     """A site the keep rule drops is one the analyser refused.
 
-    The two cannot be true of one site: a launch read as a non-git or
-    unreadable head is dropped because it cannot be a git launch, and the
-    analyser said so in a refusal. Every orphan is in the one message,
-    because a fix that repaired only the first would meet the rest by
-    rerunning.
+    The two cannot be true of one site, and every orphan is in the one
+    message, because a fix that repaired only the first would meet the
+    rest by rerunning.
 
     What this does NOT reach: 135 of the 139 dropped sites are named by
     two or more refusals, so moving one refusal class leaves it green. The
-    sink's own contents are pinned in `test_repo_layout.py`, and this
-    control reaches the refusal text, not the sink.
+    sink's own contents are pinned by
+    `test_the_sink_pins_the_unplaced_and_ambiguous_branches` in
+    `test_repo_layout.py`; this control reaches the refusal text, not the
+    sink.
     """
     del tmp
     reported, dropped = _dropped_sites()
@@ -109,7 +105,7 @@ def test_a_refusal_line_is_parsed_and_not_matched_as_a_substring(tmp):
     such refusal already names a real site. The tree is therefore blind to
     a regression to the forbidden form, and this is the fixture the tree
     cannot supply: one refusal naming a line, and a site three lines
-    earlier, which the parse separates and the substring does not.
+    earlier.
     """
     del tmp
     refused = _refused_lines('probe.py', ['probe.py:2410 carries a timeout='])
