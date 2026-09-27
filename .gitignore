@@ -297,6 +297,8 @@
 !/tests/_dashfetch.py
 !/tests/_dashfield.py
 !/tests/_dashnode.py
+!/tests/_dashnode_retry_control.py
+!/tests/_dashpager.py
 !/tests/_dashsection.py
 !/tests/_dashsection_controls.py
 !/tests/_dashsection_transport.py

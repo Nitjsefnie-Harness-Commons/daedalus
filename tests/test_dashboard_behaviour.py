@@ -7,20 +7,15 @@ it, a consume that failed is not a result, every tab selector reads one
 controller, and no value reaches innerHTML. These run the shipped modules in
 a Node VM rather than reading them where a run can answer instead.
 """
-import contextlib
 import json
 import re
-import subprocess
 import sys
-import threading
-from contextlib import redirect_stderr
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _dashfetch  # noqa: E402
 import _dashnode  # noqa: E402
+import _dashnode_retry_control as retry  # noqa: E402
 import _util  # noqa: E402
 from _jsread import blank_js_comments  # noqa: E402
 from _repo import ROOT  # noqa: E402
@@ -143,6 +138,21 @@ function response(status, data) {
   };
   globalThis.setTimeout = callback => { callback(); return 0; };
   let commandSent = false;
+  // Both result legs are exact targets, not a shape: `runCommand` polls
+  // the tab it was given and consumes with the generation this fake
+  // handed out, so the third query member is one the scenario knows
+  // before the first request. GET is the only method either leg is sent
+  // with, so a POST to the same target is a different request.
+  const PEEK = '/result?tab=extension';
+  const CONSUME = PEEK + '&consume=1&expected=result-generation';
+  const ENVELOPE = {
+    id: 'dashboard-command',
+    deliveryId: 'command-delivery',
+    resultGeneration: 'result-generation',
+    result: 'fresh',
+    error: null,
+    world: 'page:cdp',
+  };
   globalThis.fetch = async (target, init = {}) => {
     const where = String(target);
     const method = init.method || 'GET';
@@ -151,19 +161,13 @@ function response(status, data) {
       commandSent = true;
       return response(200, { ok: true, did: 'command-delivery' });
     }
-    if (where.startsWith('/result?') && where.includes('consume=1')) {
+    if (method !== 'GET') return refuse(where);
+    if (where === PEEK) return response(200, ENVELOPE);
+    if (where === CONSUME) {
       if (!commandSent) return response(200, { pending: true });
       return response(500, { error: 'consume failed' });
     }
-    if (!where.startsWith('/result?')) return refuse(where);
-    return response(200, {
-      id: 'dashboard-command',
-      deliveryId: 'command-delivery',
-      resultGeneration: 'result-generation',
-      result: 'fresh',
-      error: null,
-      world: 'page:cdp',
-    });
+    return refuse(where);
   };
   phase('dashboard module import started');
   const source = fs.readFileSync(process.argv[1], 'utf8');
@@ -196,6 +200,10 @@ function response(status, data) {
 
 def test_dashboard_failed_consume_is_not_a_success(_tmp):
     result = _dashnode.run_dashboard_node(_DASHBOARD_CONSUME_HARNESS)
+    # Every faked route is an EXACT target the scenario names -- the one
+    # command and both result legs, at the generation this fake handed
+    # out -- so an empty record is a claim that the module asked for
+    # nothing else.
     assert json.loads(result.stdout)['unplanned'] == [], result.stdout
 
 
@@ -290,6 +298,7 @@ _TAB_SELECTOR_HARNESS = _dashnode.DashboardNodeHarness(
     r"""
 import { pathToFileURL } from 'node:url';
 phase('dashboard harness started');
+""" + _dashfetch.DOOR + r"""
 (async () => {
 // Enough DOM for `h` and `clear`; the controller under test is real.
 class El {
@@ -333,7 +342,27 @@ phase('dashboard module imported');
 let tabs = [{ tabId: '11', title: 'first' }, { tabId: '22', title: 'second' }];
 const listeners = [];
 const select = new El('select');
-const api = { get: async () => tabs };
+// The one path `bindTabSelector` reads, refused and recorded like an
+// unplanned fetch: `api.get` taking no argument answered every path with
+// the tab list, so a call the module invented was served (#1238). The
+// seam is an injected object rather than `globalThis.fetch`, so the
+// refusal takes the shape `api.js` itself produces there -- a REJECTED
+// promise carrying `HTTP 599` -- rather than the 599 response, which is
+// what a fetch returns one layer below and what an `api.get` caller
+// would iterate as if it were the list. `populate()` wraps this call in
+// its own catch, so the module's error path runs; the record is the half
+// that survives it.
+const asked = [];
+const api = {
+  get: async (path) => {
+    asked.push(String(path));
+    if (String(path) !== '/tabs') {
+      refuse(String(path));
+      throw new Error('HTTP 599: unplanned request');
+    }
+    return tabs;
+  },
+};
 const bus = { on: (fn) => listeners.push(fn) };
 function emit(type) {
   for (const fn of listeners) fn({ type });
@@ -370,7 +399,8 @@ await bounded(
 const afterSync = select.options.map((o) => o.value);
 phase('dashboard call settled');
 process.stdout.write(JSON.stringify({
-  initial, afterUpdate, afterUnregister, afterSync,
+  initial, afterUpdate, afterUnregister, afterSync, asked,
+  unplanned: UNPLANNED,
 }));
 phase('dashboard harness finished');
 })().catch(leave);
@@ -385,6 +415,8 @@ def _run_tab_selector_harness():
 
 def test_a_tab_selector_follows_every_lifecycle_event(_tmp):
     seen = _run_tab_selector_harness()
+    assert seen['unplanned'] == [], seen
+    assert seen['asked'] and set(seen['asked']) == {'/tabs'}, seen
     assert seen['initial'] == ['', '11', '22'], seen
     assert '11  RETITLED' not in seen['afterUpdate']['labels'], seen
     assert any('RETITLED' in label
@@ -427,147 +459,14 @@ def test_no_dashboard_export_is_unreferenced(_tmp):
     assert not unused, f'exported but referenced nowhere: {unused}'
 
 
-class _ControlledReader:
-    def __init__(self, name, native_id, events, *, finished=False,
-                 stuck=False, pending_buffer=None, install_buffer=None):
-        self.name, self.native_id, self.events = name, native_id, events
-        self.cancelled, self.finished = threading.Event(), threading.Event()
-        self.stuck = stuck
-        self.pending_buffer = pending_buffer
-        self.install_buffer = install_buffer
-        if finished:
-            self.finished.set()
-
-    def cancel(self):
-        self.events.append(('reader-cancel', self.name))
-        self.cancelled.set()
-
-    def is_alive(self):
-        return not self.finished.is_set()
-
-    def join(self, timeout):
-        self.events.append(('reader-join', self.name, timeout))
-        if self.cancelled.is_set() and not self.stuck:
-            self.finished.set()
-            if self.pending_buffer is not None:
-                self.install_buffer(self.pending_buffer)
-
-
-class _ControlledPipe:
-    def __init__(self, name, reader, events):
-        self.name, self.reader, self.events = name, reader, events
-
-    def close(self):
-        self.events.append(('pipe-close', self.name))
-        assert not self.reader.is_alive(), (
-            f'{self.name} closed before its reader finished')
-
-
-class _LiveReaderBuffer:
-    def __init__(self, name, events):
-        self.name, self.events = name, events
-
-    def __bool__(self):
-        self.events.append(('buffer-read', self.name))
-        return False
-
-
-class _ControlledProcess:
-    def __init__(self, pid, command, outcomes, events, *, wait_succeeds=False,
-                 held_readers=False, reader_buffers=None, stuck_reader=None,
-                 late_buffers=None):
-        self.pid, self.command = pid, command
-        self.outcomes, self.events = list(outcomes), events
-        self.wait_succeeds = wait_succeeds
-        self.returncode = self.stdout = self.stderr = None
-        held_readers |= reader_buffers is not None or late_buffers is not None
-        if held_readers:
-            buffers = reader_buffers or {}
-            late = late_buffers or {}
-
-            def reader(name, native_id):
-                return _ControlledReader(
-                    name, native_id, events, finished=name in buffers,
-                    stuck=stuck_reader == name,
-                    pending_buffer=late.get(name),
-                    install_buffer=lambda chunks, name=name: setattr(
-                        self, f'_{name}_buff', [chunks]))
-            self.stdout_thread = reader('stdout', pid * 2)
-            self.stderr_thread = reader('stderr', pid * 2 + 1)
-            self.stdout = _ControlledPipe('stdout', self.stdout_thread, events)
-            self.stderr = _ControlledPipe('stderr', self.stderr_thread, events)
-            if reader_buffers is not None or late_buffers is not None:
-                for name in ('stdout', 'stderr'):
-                    value = ([buffers[name]] if name in buffers
-                             else _LiveReaderBuffer(name, events))
-                    setattr(self, f'_{name}_buff', value)
-
-    def communicate(self, timeout):
-        self.events.append(('communicate', self.pid, timeout))
-        outcome = self.outcomes.pop(0)
-        if callable(outcome):
-            return outcome(self)
-        kind, self.returncode, stdout, stderr = outcome
-        if kind == 'timeout':
-            raise subprocess.TimeoutExpired(
-                self.command, timeout, output=stdout, stderr=stderr)
-        return stdout, stderr
-
-    def kill(self):
-        self.events.append(('kill', self.pid))
-        self.returncode = -9
-
-    def wait(self, timeout):
-        self.events.append(('wait', self.pid, timeout))
-        if self.wait_succeeds:
-            return self.returncode
-        raise subprocess.TimeoutExpired(self.command, timeout)
-
-
-def _controlled_run(platform, *specs, before_popen=None):
-    pending, events, diagnostic = list(specs), [], StringIO()
-    clock = iter(value / 10 for value in range(100))
-
-    def popen(command, **_options):
-        pid, outcomes, *wait_options = pending.pop(0)
-        options = wait_options[0] if wait_options else {}
-        if before_popen:
-            before_popen(pid, events)
-        events.append(('popen', pid, tuple(command)))
-        return _ControlledProcess(pid, command, outcomes, events, **options)
-
-    def cancel_reader(thread):
-        thread.cancel()
-
-    with patch.object(sys, 'platform', platform), \
-            patch.object(_dashnode.shutil, 'which', return_value='/node'), \
-            patch.object(_dashnode.subprocess, 'Popen', popen), \
-            patch.object(_dashnode, '_dashboard_child_gate',
-                         contextlib.nullcontext), \
-            patch.object(_dashnode, '_cancel_windows_synchronous_io',
-                         cancel_reader, create=True), \
-            patch.object(_dashnode.time, 'monotonic', lambda: next(clock)), \
-            redirect_stderr(diagnostic):
-        try:
-            outcome = _dashnode.run_dashboard_node(
-                _dashnode.DashboardNodeHarness('', 0))
-        except AssertionError as failure:
-            outcome = str(failure)
-    return outcome, events, diagnostic.getvalue()
-
-
-def _timeout(stdout='', stderr=''):
-    return 'timeout', None, stdout, stderr
-
-
-def _result(code, stdout='', stderr=''):
-    return 'result', code, stdout, stderr
-
-
+# The process-boundary cases read the doubles in
+# `tests/_dashnode_retry_control.py`; a `test_` function in a
+# non-suite module never runs, so the cases stay here.
 def test_windows_retries_one_outer_timeout_then_returns_success(_tmp):
-    result, events, diagnostic = _controlled_run(
-        'win32', (101, [_timeout(), _result(-9, 'first', 'error')]),
-        (202, [_result(0, 'second success', 'second stderr')]))
+    result, events, diagnostic = retry._controlled_run(
+        'win32', (101, [retry._timeout(),
+                        retry._outcome(-9, 'first', 'error')]),
+        (202, [retry._outcome(0, 'second success', 'second stderr')]))
     assert result.stdout == 'second success', result
     assert [event[:2] for event in events] == [
         ('popen', 101), ('communicate', 101), ('kill', 101),
@@ -578,10 +477,10 @@ def test_windows_retries_one_outer_timeout_then_returns_success(_tmp):
 
 
 def test_two_windows_outer_timeouts_keep_both_attempt_records(_tmp):
-    failure, events, _ = _controlled_run(
-        'win32', (301, [_timeout(), _result(
+    failure, events, _ = retry._controlled_run(
+        'win32', (301, [retry._timeout(), retry._outcome(
             -9, 'complete one', '[phase] dashboard module imported\n')]),
-        (302, [_timeout(), _result(
+        (302, [retry._timeout(), retry._outcome(
             -9, 'complete two', '[phase] dashboard call settled\n')]))
     expected = ('after 2 attempts', 'attempt 1:', 'attempt 2:', 'pid: 301',
                 'pid: 302', "executable: '/node'", "argv: ('/node',",
@@ -595,19 +494,19 @@ def test_two_windows_outer_timeouts_keep_both_attempt_records(_tmp):
 
 
 def test_cumulative_byte_timeout_output_is_decoded_once(_tmp):
-    failure, _, _ = _controlled_run('linux', (402, [
-        _timeout(b'A\xe2'), _timeout(b'A\xe2\x82\xacB')]))
+    failure, _, _ = retry._controlled_run('linux', (402, [
+        retry._timeout(b'A\xe2'), retry._timeout(b'A\xe2\x82\xacB')]))
     assert "stdout: 'A€B'; stderr: ''" in failure and '�' not in failure
-    invalid, _, _ = _controlled_run('linux', (403, [
-        _timeout(b'A\xff'), _timeout(b'A\xffB')]))
+    invalid, _, _ = retry._controlled_run('linux', (403, [
+        retry._timeout(b'A\xff'), retry._timeout(b'A\xffB')]))
     assert "stdout: 'A�B'; stderr: ''" in invalid, invalid
 
 
 def test_windows_deterministic_failure_after_retry_does_not_retry(_tmp):
-    failure, events, _ = _controlled_run(
-        'win32', (501, [_result(
+    failure, events, _ = retry._controlled_run(
+        'win32', (501, [retry._outcome(
             7, 'deterministic output', 'deterministic error')]),
-        (502, [_result(0, 'wrong retry')]))
+        (502, [retry._outcome(0, 'wrong retry')]))
     assert isinstance(failure, str), failure
     assert all(part in failure for part in (
         'deterministic output', 'deterministic error')), failure
@@ -624,18 +523,18 @@ def test_retry_launch_waits_for_first_child_cleanup(_tmp):
         if pid == 602:
             assert ('drain-complete', 601) in events, events
 
-    result, events, _ = _controlled_run(
-        'win32', (601, [_timeout(), finish]),
-        (602, [_result(0, 'success')]), before_popen=before_popen)
+    result, events, _ = retry._controlled_run(
+        'win32', (601, [retry._timeout(), finish]),
+        (602, [retry._outcome(0, 'success')]), before_popen=before_popen)
     assert result.stdout == 'success', result
     assert events.index(('drain-complete', 601)) < next(
         i for i, event in enumerate(events) if event[:2] == ('popen', 602))
 
 
 def test_windows_does_not_retry_when_child_cleanup_cannot_finish(_tmp):
-    failure, events, _ = _controlled_run(
-        'win32', (701, [_timeout(), _timeout('partial', 'error')]),
-        (702, [_result(0, 'wrong overlap')]))
+    failure, events, _ = retry._controlled_run(
+        'win32', (701, [retry._timeout(), retry._timeout('partial', 'error')]),
+        (702, [retry._outcome(0, 'wrong overlap')]))
     assert isinstance(failure, str), failure
     assert 'drain outcome: timed out' in failure, failure
     assert [event[0] for event in events].count('popen') == 1, events
@@ -645,10 +544,10 @@ def test_windows_retries_when_timed_out_drain_is_reaped(_tmp):
     # The first child was fully cleaned up, so the "second child beside an
     # uncleaned first one" rationale for declining no longer holds and the
     # platform's one transient-stall retry must still be available.
-    result, events, diagnostic = _controlled_run(
-        'win32', (801, [_timeout(), _timeout('partial', 'error')],
+    result, events, diagnostic = retry._controlled_run(
+        'win32', (801, [retry._timeout(), retry._timeout('partial', 'error')],
                   {'wait_succeeds': True}),
-        (802, [_result(0, 'recovered')]))
+        (802, [retry._outcome(0, 'recovered')]))
     assert [event[0] for event in events].count('popen') == 2, (result, events)
     assert [event[0] for event in events].count('wait') == 1, events
     assert result.stdout == 'recovered', result
@@ -659,10 +558,10 @@ def test_windows_retries_when_timed_out_drain_is_reaped(_tmp):
 def test_windows_reader_cleanup_settles_before_pipe_close_and_reap(_tmp):
     # Cleanup settling now enables the retry instead of declining it, so the
     # ordering pin rides on the retried run and the second launch waits for it.
-    result, events, _ = _controlled_run(
-        'win32', (901, [_timeout(), _timeout('partial', 'error')],
+    result, events, _ = retry._controlled_run(
+        'win32', (901, [retry._timeout(), retry._timeout('partial', 'error')],
                   {'wait_succeeds': True, 'held_readers': True}),
-        (902, [_result(0, 'recovered')]))
+        (902, [retry._outcome(0, 'recovered')]))
     assert [event[0] for event in events].count('popen') == 2, (result, events)
     steps = [event[:2] for event in events]
     required = [
