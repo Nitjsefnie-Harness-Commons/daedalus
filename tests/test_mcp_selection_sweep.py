@@ -35,7 +35,7 @@ def _write_tree(directory, files):
         path.write_text(source, encoding='utf-8')
 
 
-def _scan(_tmp, callee):
+def _callee_scan(_tmp, callee):
     """`resolved`, `refused`, or `silent` for one callee, with a resolvable
     `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
     _write_tree(Path(_tmp), {
@@ -86,16 +86,19 @@ def test_a_dict_display_reads_the_last_of_two_equal_keys(_tmp):
     for earlier, later, lookup in _DUPLICATE_KEYS:
         kept = _repeated(earlier, later, 'print', 'importlib.import_module')
         lost = _repeated(earlier, later, 'importlib.import_module', 'print')
-        assert _scan(_tmp, f'{kept}[{lookup}]') == 'resolved', earlier
-        assert _scan(_tmp, f'{lost}[{lookup}]') == 'silent', earlier
-    assert _scan(_tmp, '{0: [0], 0: importlib.import_module}[0]') \
+        assert _callee_scan(_tmp, f'{kept}[{lookup}]') == 'resolved', earlier
+        assert _callee_scan(_tmp, f'{lost}[{lookup}]') == 'silent', earlier
+    assert _callee_scan(_tmp, '{0: [0], 0: importlib.import_module}[0]') \
         == 'resolved'
-    assert _scan(_tmp, '{0: importlib.import_module, 0: [0]}[0]') == 'silent'
+    assert _callee_scan(
+        _tmp, '{0: importlib.import_module, 0: [0]}[0]') == 'silent'
     # A projection reads the same value, and a key the display does not
     # carry is still the `KeyError` the runtime raises.
-    assert _scan(_tmp, '{0: print, 0: importlib.import_module}[0].__call__') \
+    assert _callee_scan(
+        _tmp, '{0: print, 0: importlib.import_module}[0].__call__') \
         == 'resolved'
-    assert _scan(_tmp, '{0: print, 0: importlib.import_module}[1]') == 'silent'
+    assert _callee_scan(
+        _tmp, '{0: print, 0: importlib.import_module}[1]') == 'silent'
 
 
 def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
@@ -138,7 +141,7 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
                    '(lambda a, *, b: importlib.import_module)(1, b=2)',
                    '(lambda *, b=0: importlib.import_module)()',
                    '[(lambda a: importlib.import_module)][0](1)'):
-        assert _scan(_tmp, callee) == 'resolved', callee
+        assert _callee_scan(_tmp, callee) == 'resolved', callee
     for callee in ('(lambda a: importlib.import_module)()',
                    '(lambda a, b: importlib.import_module)(1)',
                    '(lambda a: print)(1)',
@@ -149,7 +152,7 @@ def test_a_lambda_produces_its_return_wherever_it_was_reached(_tmp):
                    # A function's value is a FUNCTION, so the projection of
                    # a lambda is not the lambda's return.
                    '[(lambda: importlib.import_module)][0].__call__'):
-        assert _scan(_tmp, callee) == 'silent', callee
+        assert _callee_scan(_tmp, callee) == 'silent', callee
 
 
 def test_every_class_of_the_property_has_a_discriminating_row(_tmp):

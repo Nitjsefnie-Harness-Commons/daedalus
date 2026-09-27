@@ -116,7 +116,7 @@ def _computable(value):
     return True
 
 
-def _ask(operation, *operands):
+def _operator_settled(operation, *operands):
     """What an operator settles, `UNREAD` when this walk will not ask it,
     and `UNREACHABLE` when the runtime's own settlement is to RAISE.
 
@@ -132,7 +132,7 @@ def _ask(operation, *operands):
         return UNREACHABLE
 
 
-def _settled(node, bound):
+def _runtime_settled(node, bound):
     """The value a form the runtime has already SETTLED produces, `UNREAD`
     when this walk will not compute it, and `UNREACHABLE` when the runtime
     raises before the value exists.
@@ -149,25 +149,27 @@ def _settled(node, bound):
     if isinstance(node, ast.UnaryOp):
         unary = _UNARY.get(type(node.op))
         return (UNREAD if unary is None
-                else _ask(unary, _settled(node.operand, bound)))
+                else _operator_settled(
+                    unary, _runtime_settled(node.operand, bound)))
     if isinstance(node, ast.BinOp):
         arithmetic = _ARITHMETIC.get(type(node.op))
         return (UNREAD if arithmetic is None
-                else _ask(arithmetic, _settled(node.left, bound),
-                          _settled(node.right, bound)))
+                else _operator_settled(
+                    arithmetic, _runtime_settled(node.left, bound),
+                    _runtime_settled(node.right, bound)))
     if isinstance(node, ast.NamedExpr):
-        return _settled(node.value, bound)
+        return _runtime_settled(node.value, bound)
     if isinstance(node, ast.IfExp):
         # The branch is a runtime value, so a conditional settles only when
         # BOTH arms do and they agree: the value is then the same whichever
         # one the runtime picks.
-        body = _settled(node.body, bound)
-        other = _settled(node.orelse, bound)
+        body = _runtime_settled(node.body, bound)
+        other = _runtime_settled(node.orelse, bound)
         if not _computable(body) or not _computable(other) or body != other:
             return UNREAD
         return body
     if _is_the_bool_call(node, bound):
-        value = _settled(node.args[0], bound)
+        value = _runtime_settled(node.args[0], bound)
         return UNREAD if not _computable(value) else int(bool(value))
     return UNREAD
 
@@ -236,7 +238,7 @@ def _fills(func: ast.Lambda, call: ast.Call) -> bool:
     return args.kwarg is not None or named >= required
 
 
-def _elements(base):
+def _expanded_elts(base):
     """A literal container's elements, every starred literal expanded in
     place.
 
@@ -255,7 +257,7 @@ def _elements(base):
             continue
         if not isinstance(element.value, (ast.List, ast.Tuple)):
             return None
-        inner = _elements(element.value)
+        inner = _expanded_elts(element.value)
         if inner is None:
             return None
         elements.extend(inner)
@@ -361,7 +363,7 @@ def static_value(node, bound):
     # A form the runtime has already settled. Read as a position or a key
     # it is the value itself, and a settlement that RAISES is a value
     # nothing can be.
-    settled = _settled(node, bound)
+    settled = _runtime_settled(node, bound)
     if settled is not UNREAD:
         return ((UNREACHABLE, True) if settled is UNREACHABLE
                 else (settled, True))
@@ -392,7 +394,7 @@ def static_value(node, bound):
         return _keyed(node, base, bound)
     if not isinstance(base, (ast.Tuple, ast.List)):
         return node, False
-    elements = _elements(base)
+    elements = _expanded_elts(base)
     if elements is None:
         return node, False
     position = _settled_position(node.slice, bound)

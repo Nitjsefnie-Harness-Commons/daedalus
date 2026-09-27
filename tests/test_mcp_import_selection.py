@@ -131,7 +131,7 @@ def test_a_callee_read_out_of_a_value_is_resolved_or_refused(_tmp):
 
 def _scan_source(_tmp, source):
     """The scan's own verdict for a whole composition source: the files it
-    closed over, or the refusal it raised. `_scan` always supplies an
+    closed over, or the refusal it raised. `_callee_scan` always supplies an
     argument, and a call of the operation is a question about that argument.
     """
     _write_tree(Path(_tmp), {'composition.py': source})
@@ -144,7 +144,7 @@ def _scan_source(_tmp, source):
         return str(raised)
 
 
-def _scan(_tmp, callee):
+def _callee_scan(_tmp, callee):
     """`resolved`, `refused`, or `silent` for one callee, with a resolvable
     `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
     _write_tree(Path(_tmp), {
@@ -171,7 +171,7 @@ def test_a_callee_whose_value_is_a_lambda_is_not_refused(_tmp):
     for callee in ('(lambda: importlib.import_module)',
                    '[(lambda: 1), (lambda: importlib.import_module)][1]',
                    '[[(lambda: importlib.import_module)]][0][0]'):
-        assert _scan(_tmp, callee) == 'silent', callee
+        assert _callee_scan(_tmp, callee) == 'silent', callee
 
 
 def test_a_constant_negative_position_is_folded(_tmp):
@@ -181,8 +181,9 @@ def test_a_constant_negative_position_is_folded(_tmp):
     The other half is the corpus's own rule: a position whose runtime value
     is clean is CLEAN, so the `0` the second case selects draws no refusal.
     """
-    assert _scan(_tmp, '[importlib.import_module][-1]') == 'resolved'
-    assert _scan(_tmp, '[0, importlib.import_module, 0][-1]') == 'silent'
+    assert _callee_scan(_tmp, '[importlib.import_module][-1]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '[0, importlib.import_module, 0][-1]') == 'silent'
 
 
 def test_an_index_the_runtime_settles_to_something_unusable_is_clean(_tmp):
@@ -200,12 +201,12 @@ def test_an_index_the_runtime_settles_to_something_unusable_is_clean(_tmp):
     for index in ("'a' * 0", "2 * 'a'", "b'a' + b'b'", '1 if c else 1',
                   '4 if c else 4', '10 ** 10', '2 ** (10 ** 10)'):
         want = 'refused' if index.count('**') == 2 else 'silent'
-        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[importlib.import_module][{index}]') \
             == want, index
     for index, want in (("'a' * 0", 'silent'), ('(0, 1)[0]', 'silent'),
                         ('(0, 1)[1]', 'resolved'), ('2 if c else 2', 'silent'),
                         ('1 if c else 2', 'refused'), ('len([0])', 'refused')):
-        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[0, importlib.import_module][{index}]') \
             == want, index
 
 
@@ -222,7 +223,7 @@ def test_a_slice_produces_a_new_container_and_so_names_nothing(_tmp):
                    '(0, importlib.import_module)[1:]',
                    '{"a": importlib.import_module}["a":"b"]',
                    '[importlib.import_module][0:1][0]'):
-        assert _scan(_tmp, callee) == 'silent', callee
+        assert _callee_scan(_tmp, callee) == 'silent', callee
 
 
 def test_a_starred_literal_is_folded_by_the_elements_it_carries(_tmp):
@@ -232,8 +233,8 @@ def test_a_starred_literal_is_folded_by_the_elements_it_carries(_tmp):
     A star over a value the literal does not carry is still undetermined, and
     still draws the refusal the fold declines to replace.
     """
-    assert _scan(_tmp, '(*[importlib.import_module], 0)[1]') == 'silent'
-    assert _scan(_tmp, '(*[importlib.import_module],)[0]') == 'resolved'
+    assert _callee_scan(_tmp, '(*[importlib.import_module], 0)[1]') == 'silent'
+    assert _callee_scan(_tmp, '(*[importlib.import_module],)[0]') == 'resolved'
     _refuses_the_callee(_tmp, '(*stars, importlib.import_module)[1]')
 
 
@@ -247,10 +248,12 @@ def test_a_star_is_a_star_wherever_it_is_nested(_tmp):
     comprehension's length is a runtime value. Declining those is the
     declared limit, not the rule the two above stand on.
     """
-    assert _scan(_tmp, '(*(importlib.import_module,),)[0]') == 'resolved'
-    assert _scan(_tmp, '(*(*[importlib.import_module],),)[0]') == 'resolved'
-    assert _scan(_tmp,
-                 '(*(*[importlib.import_module, 0],),)[1]') == 'silent'
+    assert _callee_scan(
+        _tmp, '(*(importlib.import_module,),)[0]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '(*(*[importlib.import_module],),)[0]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '(*(*[importlib.import_module, 0],),)[1]') == 'silent'
     _refuses_the_callee(_tmp, '(*{importlib.import_module},)[0]')
     _refuses_the_callee(
         _tmp, '(*(x for x in [0] if importlib.import_module), 0)[1]')
@@ -260,15 +263,17 @@ def test_a_container_element_that_is_itself_a_selection_is_folded(_tmp):
     """`([0, importlib.import_module][1],)[0]` is a one-element tuple whose
     ELEMENT is a selection, so folding the element and then the position is
     the recursion the fold already claims, read from the other direction."""
-    assert _scan(_tmp, '([0, importlib.import_module][1],)[0]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '([0, importlib.import_module][1],)[0]') == 'resolved'
 
 
 def test_a_constant_index_folded_from_a_binop_is_read(_tmp):
     """`[0 + 0]` is a position the fold reads, by the same fold that already
     reads a constant string concatenation, so the index axis does not decline
     a spelling whose value the runtime has already settled."""
-    assert _scan(_tmp, '[importlib.import_module][0 + 0]') == 'resolved'
-    assert _scan(_tmp, '[0, importlib.import_module][0 + 0]') == 'silent'
+    assert _callee_scan(_tmp, '[importlib.import_module][0 + 0]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '[0, importlib.import_module][0 + 0]') == 'silent'
 
 
 def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
@@ -287,17 +292,17 @@ def test_a_constant_index_folded_from_wider_arithmetic_is_read(_tmp):
     """
     for index in ('0 * 1', '1 - 1', '1 % 1', '0 ** 1', '(j := 0)',
                   'bool(0)', '+0', '-(-0)'):
-        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[importlib.import_module][{index}]') \
             == 'resolved', index
-        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[0, importlib.import_module][{index}]') \
             == 'silent', index
     for index in ('2 - 1', '1 + 0', '1 * 1', '1 ** 1', '1 // 1', 'bool(2)'):
-        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[importlib.import_module][{index}]') \
             == 'silent', index
-        assert _scan(_tmp, f'[0, importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[0, importlib.import_module][{index}]') \
             == 'resolved', index
-    assert _scan(_tmp, '[importlib.import_module][0 / 1]') == 'silent'
-    assert _scan(_tmp, '[importlib.import_module][1 // 0]') == 'silent'
+    assert _callee_scan(_tmp, '[importlib.import_module][0 / 1]') == 'silent'
+    assert _callee_scan(_tmp, '[importlib.import_module][1 // 0]') == 'silent'
 
 
 def test_a_position_the_runtime_cannot_reach_is_clean(_tmp):
@@ -313,16 +318,17 @@ def test_a_position_the_runtime_cannot_reach_is_clean(_tmp):
     """
     for index in ('4', '-4', 'None', "'x'", '1.5', '0 / 1', '1 // 1', 'True',
                   "-'a'", '-None', '-b"a"'):
-        assert _scan(_tmp, f'[importlib.import_module][{index}]') \
+        assert _callee_scan(_tmp, f'[importlib.import_module][{index}]') \
             == 'silent', index
-    assert _scan(_tmp, "{'a': importlib.import_module}['zzz']") == 'silent'
-    assert _scan(_tmp, '{0: importlib.import_module}[1]') == 'silent'
+    assert _callee_scan(
+        _tmp, "{'a': importlib.import_module}['zzz']") == 'silent'
+    assert _callee_scan(_tmp, '{0: importlib.import_module}[1]') == 'silent'
     # The ARGUMENT is the same question: an argument this walk can SEE is
     # not a name raises before the call imports anything, and one it cannot
     # read still may be a name, so that one stays refused.
-    assert _scan(_tmp, 'importlib.import_module(1)') == 'silent'
-    assert _scan(_tmp, 'importlib.import_module(0.0)') == 'silent'
-    assert _scan(_tmp, 'importlib.import_module(k)') == 'refused'
+    assert _callee_scan(_tmp, 'importlib.import_module(1)') == 'silent'
+    assert _callee_scan(_tmp, 'importlib.import_module(0.0)') == 'silent'
+    assert _callee_scan(_tmp, 'importlib.import_module(k)') == 'refused'
     assert _scan_source(_tmp, 'import importlib\n\n\ndef load():\n'
                         '    return importlib.import_module()\n') \
         == ['composition.py']
@@ -365,7 +371,7 @@ def test_a_callable_projection_of_the_operation_resolves_it(_tmp):
     and the route is named in the issue's own second comment.
     """
     for callee in PROJECTIONS:
-        assert _scan(_tmp, callee) == 'resolved', callee
+        assert _callee_scan(_tmp, callee) == 'resolved', callee
 
 
 def test_a_callable_projection_of_a_decided_value_is_clean(_tmp):
@@ -379,7 +385,7 @@ def test_a_callable_projection_of_a_decided_value_is_clean(_tmp):
     reaches anything.
     """
     for callee in PROJECTION_CLEAN:
-        assert _scan(_tmp, callee) == 'silent', callee
+        assert _callee_scan(_tmp, callee) == 'silent', callee
 
 
 def test_a_projection_delivered_to_a_name_refuses(_tmp):
@@ -426,7 +432,7 @@ def test_a_nullary_lambda_call_of_the_operation_resolves_it(_tmp):
     produced rather than named.
     """
     for callee in NULLARY_LAMBDAS:
-        assert _scan(_tmp, callee) == 'resolved', callee
+        assert _callee_scan(_tmp, callee) == 'resolved', callee
 
 
 def test_a_lambda_that_cannot_be_called_with_no_arguments_is_clean(_tmp):
@@ -437,8 +443,9 @@ def test_a_lambda_that_cannot_be_called_with_no_arguments_is_clean(_tmp):
     call-result limit and stays silent too, so the two halves of the lambda
     rule are pinned from both directions.
     """
-    assert _scan(_tmp, '(lambda a: importlib.import_module)()') == 'silent'
-    assert _scan(_tmp, '(lambda a=0: print)()') == 'silent'
+    assert _callee_scan(
+        _tmp, '(lambda a: importlib.import_module)()') == 'silent'
+    assert _callee_scan(_tmp, '(lambda a=0: print)()') == 'silent'
 
 
 def test_a_getattr_whose_key_the_walk_cannot_read_is_its_object(_tmp):
@@ -453,13 +460,15 @@ def test_a_getattr_whose_key_the_walk_cannot_read_is_its_object(_tmp):
     not the operation is left alone however its key is spelled.
     """
     _refuses_the_callee(_tmp, 'getattr(importlib.import_module, k)')
-    assert _scan(_tmp, "getattr(importlib.import_module, 'other')") == 'silent'
-    assert _scan(_tmp, 'getattr(importlib.util, k)') == 'silent'
-    assert _scan(_tmp, 'getattr(print, k)') == 'silent'
+    assert _callee_scan(
+        _tmp, "getattr(importlib.import_module, 'other')") == 'silent'
+    assert _callee_scan(_tmp, 'getattr(importlib.util, k)') == 'silent'
+    assert _callee_scan(_tmp, 'getattr(print, k)') == 'silent'
     # A third argument is a DEFAULT and never decides the key, so the pair
     # is the only thing that holds the two-argument test.
     _refuses_the_callee(_tmp, 'getattr(importlib.import_module, k, None)')
-    assert _scan(_tmp, "getattr(importlib.import_module, 'other', None)") \
+    assert _callee_scan(
+        _tmp, "getattr(importlib.import_module, 'other', None)") \
         == 'silent'
     # The REGISTRY axis shares this store grammar and a name the map tracks
     # is the case its own lookup helper exists for: `sys` is the one such
@@ -479,20 +488,23 @@ def test_a_keyed_selection_of_a_literal_dict_is_folded(_tmp):
     without the other proves nothing — a fold that declined every dict
     fails the first and passes the second.
     """
-    assert _scan(_tmp, "{'a': importlib.import_module}['a']") == 'resolved'
-    assert _scan(_tmp, "{'a': 0, 'b': importlib.import_module}['a']") \
+    assert _callee_scan(
+        _tmp, "{'a': importlib.import_module}['a']") == 'resolved'
+    assert _callee_scan(_tmp, "{'a': 0, 'b': importlib.import_module}['a']") \
         == 'silent'
-    assert _scan(_tmp, "{'b': 0, 'a': importlib.import_module}['a']") \
+    assert _callee_scan(_tmp, "{'b': 0, 'a': importlib.import_module}['a']") \
         == 'resolved'
-    assert _scan(_tmp, '{0: importlib.import_module}[0]') == 'resolved'
+    assert _callee_scan(_tmp, '{0: importlib.import_module}[0]') == 'resolved'
     # A key this walk CANNOT read is undetermined, and an expression the
     # walk can see is unhashable is the display's own `TypeError`. The two
     # are the cell a `**` unpack shares with an expression key, and the
     # assertion is what holds it: a reader that read either would resolve
     # or refuse the other.
     _refuses_the_callee(_tmp, '{importlib.import_module: 0}["a"]')
-    assert _scan(_tmp, '{[importlib.import_module]: 0}["a"]') == 'silent'
-    assert _scan(_tmp, "(lambda *a: {'a': importlib.import_module}['a'])") \
+    assert _callee_scan(
+        _tmp, '{[importlib.import_module]: 0}["a"]') == 'silent'
+    assert _callee_scan(
+        _tmp, "(lambda *a: {'a': importlib.import_module}['a'])") \
         == 'silent'
 
 
@@ -505,11 +517,15 @@ def test_a_unary_plus_and_a_bool_are_both_constant_positions(_tmp):
     the operator settles is not a position and the call raises on the
     expression before it reaches anything.
     """
-    assert _scan(_tmp, '[importlib.import_module][+0]') == 'resolved'
-    assert _scan(_tmp, '[0, 0, importlib.import_module][+1]') == 'silent'
-    assert _scan(_tmp, '[0, importlib.import_module][True]') == 'resolved'
-    assert _scan(_tmp, '[0, 0, importlib.import_module][True]') == 'silent'
-    assert _scan(_tmp, '[0, 0, importlib.import_module][False]') == 'silent'
+    assert _callee_scan(_tmp, '[importlib.import_module][+0]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '[0, 0, importlib.import_module][+1]') == 'silent'
+    assert _callee_scan(
+        _tmp, '[0, importlib.import_module][True]') == 'resolved'
+    assert _callee_scan(
+        _tmp, '[0, 0, importlib.import_module][True]') == 'silent'
+    assert _callee_scan(
+        _tmp, '[0, 0, importlib.import_module][False]') == 'silent'
 
 
 def test_a_callee_the_fold_decides_to_be_a_container_is_not_refused(_tmp):
@@ -536,7 +552,7 @@ def test_a_callee_the_fold_decides_to_be_a_container_is_not_refused(_tmp):
                    '{k: importlib.import_module for k in [0]}',
                    '{importlib.import_module for _ in [0]}.__call__',
                    '{k: importlib.import_module for k in [0]}.__call__'):
-        assert _scan(_tmp, f'{callee}("pkg.leaf")') == 'silent', callee
+        assert _callee_scan(_tmp, f'{callee}("pkg.leaf")') == 'silent', callee
     _refuses_the_callee(_tmp, '[[importlib.import_module]][i]')
 
 
