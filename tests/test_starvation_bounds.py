@@ -18,7 +18,8 @@ from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, assert_gate_clean, require_node, run_gate)
 from _worker_sources import (  # noqa: E402
-    chrome_stub, event_target_stub, import_scripts_stub)
+    DELAY_STUB, RESPONSE_STUB, chrome_stub, event_target_stub,
+    import_scripts_stub)
 
 # The starvation scenarios run with the freeze/thaw budget of their own.
 _ENV = _util.child_coverage('scrub')
@@ -67,17 +68,7 @@ async function sendCommand(_target, method, params) {
   }
   return {};
 }
-
-function response(status, data) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    body: null,
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  };
-}
-
+""" + RESPONSE_STUB + r"""
 const BRIDGE_URL = '__BRIDGE__';
 const streamFetches = [];
 const resultPosts = [];
@@ -118,12 +109,7 @@ const context = vm.createContext({
   clearInterval() {},
   console: { log() {}, warn() {}, error() {} },
 });
-""" + import_scripts_stub('context') + r"""
-
-function delay() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
+""" + import_scripts_stub('context') + DELAY_STUB + r"""
 // Read at write time, not at load time: the arrays are filled by the fetches
 // the drive below makes.
 function gateReport() {
