@@ -15,6 +15,60 @@ import _cmdqueue  # noqa: E402
 _RUNAWAY_ELAPSED = _cmdqueue.POLL_DELAY * 1000
 _RUNAWAY_WALL = 5.0
 _NO_PROGRESS_LIMIT = 200_000
+_POLL_HEADROOM = 4
+_QUEUE_PROBES = ('is_dir', 'glob')
+
+
+def _poll_budget(timeout):
+    """The poll ceiling a correct reader spends on `timeout`, with headroom.
+
+    A correct reader spends one `is_dir` and one `glob` per attempt and
+    rejects at ceil(timeout / POLL_DELAY) attempts; the ceiling is a
+    multiple of that, so headroom is never a red a correct reader causes.
+
+    A poll attempt costs no real time, so this decides nothing about
+    machine speed. It is the backstop for the one shape the virtual
+    clock's guards cannot see: each is consulted from inside a call into
+    that clock, so a reader that stops calling it — or never entered it —
+    is charged by none of them.
+    """
+    return _POLL_HEADROOM * math.ceil(timeout / _cmdqueue.POLL_DELAY)
+
+
+@contextlib.contextmanager
+def _bounded_polls(max_polls):
+    """Refuse the queue probe that would pass `max_polls` polls.
+
+    One reader pass is one `Path.is_dir` and, when the queue exists, one
+    `Path.glob`, so both are counted: a queue that does not exist is
+    probed by `is_dir` alone, and a bound counting globs alone would
+    never see a reader spinning on it.
+
+    The count needs no clock, so a control reading on the real time
+    module enters it exactly as one under `_virtual_cmdqueue_clock` does.
+    """
+    originals = {name: getattr(Path, name) for name in _QUEUE_PROBES}
+    spent = [0]
+
+    def counted(original):
+        def probe(candidate, *args, **kwargs):
+            if spent[0] >= max_polls:
+                raise AssertionError(
+                    'queue reader exceeded its poll ceiling of '
+                    f'{max_polls} queue probes: the reader polled '
+                    'without sleeping, so no clock guard on it is '
+                    'consulted')
+            spent[0] += 1
+            return original(candidate, *args, **kwargs)
+        return probe
+
+    for name, original in originals.items():
+        setattr(Path, name, counted(original))
+    try:
+        yield
+    finally:
+        for name, original in originals.items():
+            setattr(Path, name, original)
 
 
 class _ModuleDefault:
