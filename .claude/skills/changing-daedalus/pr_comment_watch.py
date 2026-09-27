@@ -46,9 +46,9 @@ STATE_KEY = ('state', 'pull-request')
 KINDS = ('review', 'inline', 'conversation')
 PULL = ('repository', 'pullRequest')
 # The poll index this watcher names for its own boundary, published where
-# the `gh` children inherit it. Nothing in production reads it back; real
-# `gh` ignores an environment variable it does not know, and the only
-# reader is the fake the suites measure through.
+# the `gh` children inherit it - real `gh` ignores an environment
+# variable it does not know, and only the fake the suites measure
+# through reads it back.
 POLL_MARK = 'DAEDALUS_WATCHER_POLL'
 
 PR_QUERY = f'''query WatchPull($owner: String!, $name: String!, $number: Int!,
