@@ -23,22 +23,25 @@ shape the grammar composes, and each is named beside the case that pins it.
 A `bool()` index was the sixth until the builtin builder took it: an index
 that is a call of the builtin is that builder's own construction, so it is
 generated in every container the fold reads an element out of, under both
-spellings a module binds the builtin, with the name replaced, and under a
-condition the module may not take. Three carriers rather than one, because a
+spellings a module binds the builtin, with the name replaced, with the name
+rebound from a nested scope under a `global` declaration, and under a
+condition the module may not take. Four carriers rather than one, because a
 builder whose rows differ only in whether ONE line was replaced cannot tell
-a rule that reads the binding from a rule that reads the line. Two carriers
-of the class are NOT expressible here — a name bound by a comprehension's
-own target, and a use in a scope the walk cannot line up with the resolver's
-— because the oracle evaluates a callee in a flat namespace, and those two
-are held by hand in `test_mcp_builtin_names.py`. A dict KEY that is an
-unhashable literal is not one of the five: the dict builder emits string
-keys, but `_repeats` carries a list literal in key position, so that class
-has sixteen generated rows of its own, pinned, decided and paid for.
+a rule that reads the binding from a rule that reads the line. The carriers
+of the class that are NOT expressible here are named in
+`_mcp_builtin_carriers.UNDECIDED_CARRIERS` with the reason each is out of the
+builder's reach, and held by hand in `test_mcp_builtin_names.py`, which holds
+the two tables against each other so a carrier in neither is a failure rather
+than a sentence. A dict KEY that is an unhashable literal is not one of the
+five: the dict builder emits string keys, but `_repeats` carries a list
+literal in key position, so that class has sixteen generated rows of its own,
+pinned, decided and paid for.
 """
 import json
 import subprocess
 import sys
 
+import _mcp_builtin_carriers
 import _mcp_import_closure
 import _mcp_lambda_sweep
 
@@ -213,6 +216,7 @@ PROPERTY_CLASSES = ('a repeated dict key', 'a lambda behind a selection',
                     _mcp_lambda_sweep.SIGNATURE_CLASS)
 _REPEATED, _LAMBDA, _BUILTIN = PROPERTY_CLASSES[:3]
 _form = _mcp_lambda_sweep._form
+_CARRIERS = _mcp_builtin_carriers.CARRIERS
 
 # The containers a fold reads an element out of, as the route the index is
 # written at. The set and the comprehension are absent for the reason they
@@ -230,27 +234,17 @@ _BUILTIN_ROUTES = (
     ('starred unpack', lambda e: '(*[' + ', '.join(e) + '],)'),
 )
 
-# The carriers a `bool` index can carry its value by, as (the step suffix,
-# the source the module is given, whether the name is replaced, and whether
-# the module is left to reach the store at all). Whether the module has RUN
-# the binding by the time the name is read is the second field: a statement
-# it may skip leaves the name unbound, so the alias is evidence of a builtin
-# and not a fact of one, and the row is decided the other way. `g` is false
-# in the oracle's own globals for exactly that — the condition is one the
-# runtime does not take, and the guard cannot read its value either. A name
-# the module REPLACED and a binding it may never have made do not compose:
-# a name that is never bound is not something a store can replace.
-_BUILTIN_CARRIERS = (('', '', False), (' and replaced', '', True),
-                     (' under a condition', 'if g:\n    ', False))
+# The carriers a `bool` index can carry its value by, and the ones the
+# builder cannot emit, are `_mcp_builtin_carriers`' two tables: the class's
+# disclosure belongs with the class, and this module was within a dozen lines
+# of its size ceiling.
 
-# How a module can NAME the builtin, and the store that takes the name back.
-# The second is a lambda rather than `print` because it RETURNS and says
-# nothing: `lambda v: None` makes the index a value no container is indexed
-# by, so the call raises before it imports anything, and it writes to the
-# oracle's own output pipe as `print` would not be permitted to.
-# The third field is whether the name IS the builtin's own, and it is what
-# makes a CONDITIONAL binding decidable for one spelling and not the other:
-# a name bound to itself is the builtin whether or not the statement ran.
+# How a module can NAME the builtin, as (what the step calls the binding, the
+# statement that makes it, the name it binds, and whether the name IS the
+# builtin's own). The last field is what makes a CONDITIONAL binding decidable
+# for one spelling and not the other: a name bound to itself is the builtin
+# whether or not the statement ran, and one bound under an alias is a name
+# this walk cannot account for until it has run.
 _BUILTIN_SPELLINGS = (
     ('under an alias', 'from builtins import bool as b', 'b', False),
     ('under its own name', 'from builtins import bool', 'bool', True),
@@ -361,8 +355,9 @@ def _builtins(imports, operation):
     carrier would measure a rule that reads any `b` as the builtin just as
     happily as one that reads none of them. So every row is generated from
     the same construction with the module's own source between the twins, and
-    the twins DISAGREE: a name REPLACED, and a binding the module may not
-    have RUN. A `bool` call settles — `b(0)` is `False` and names position
+    the twins DISAGREE: a name REPLACED, a name REPLACED from a nested scope
+    the symbol table does not report, and a binding the module may not have
+    RUN. A `bool` call settles — `b(0)` is `False` and names position
     zero, `b(2)` is `True` and names position one — so the first carrier
     decides, and the second does not, because `symtable` is a static grammar
     and says nothing about when a statement ran. Each row carries its own
@@ -379,18 +374,17 @@ def _builtins(imports, operation):
             elements[at] = operation
             container = route(elements)
             for spelling, binding, name, own in _BUILTIN_SPELLINGS:
-                for suffix, carrier, replaced in _BUILTIN_CARRIERS:
+                for suffix, before, after, replaced in _CARRIERS:
                     # The store comes AFTER the binding it takes back, and
                     # inside the condition when there is one, so the row says
                     # what it means whichever of the two is composed.
-                    source = (imports + carrier + binding
-                              + (f'\n{name} = lambda v: None\n' if replaced
-                                 else '') + '\n')
+                    source = (imports + before + binding
+                              + after.format(name=name) + '\n')
                     yield _form(
                         f'a {kind} index', f'bound {spelling}{suffix}',
                         f'{container}[{name}({argument})]', container,
                         True, True, (_BUILTIN,),
-                        pinned=not replaced and (own or not carrier),
+                        pinned=not replaced and (own or not before),
                         imports=source, setup=source)
 
 

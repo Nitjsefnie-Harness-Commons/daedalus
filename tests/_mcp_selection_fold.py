@@ -272,12 +272,15 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
     A parameter is supplied by POSITION or by NAME, and the two are one
     supply, so the call's arguments are bound to the signature the way
     Python binds them rather than counted against it. The call raises
-    wherever Python's own binding raises: a second value for one parameter
-    — BY POSITION, by name, or through a `**` the walk reads, which are
-    three spellings of one rule and are checked the same way — a name the
-    signature does not have and no `**kwargs` to catch it, or a name for a
-    POSITIONAL-ONLY parameter. What the call does not say is what a `*args`
-    unpacks to, so that is `UNREAD`, and the caller's own class.
+    wherever Python's own binding raises: a second value for one DECLARED
+    parameter — BY POSITION, by name, or through a `**` the walk reads, which
+    are three spellings of one rule and are checked the same way — a name
+    the signature does not have and no `**kwargs` to catch it, or a name for
+    a POSITIONAL-ONLY parameter. A name no parameter declares is one supply
+    too, and a `**kwargs` catches it rather than refusing it, so the catch-all
+    arm carries the same second-supply check the declared arms do. What the
+    call does not say is what a `*args` unpacks to, so that is `UNREAD`, and
+    the caller's own class.
     """
     args = func.args
     params = args.posonlyargs + args.args
@@ -297,6 +300,7 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
         return UNREAD
     filled = set()
     by_keyword = set()
+    by_catch_all = set()
     for position in range(len(call.args)):
         if position >= len(params):
             if args.vararg is None:
@@ -318,6 +322,13 @@ def _fills(func: ast.Lambda, call: ast.Call, bound, scopes):
             wanted.discard(name)
         elif args.kwarg is None:
             return False
+        elif name in by_catch_all:
+            # A name no parameter declares is supplied ONCE however many
+            # times, and a second supply is the same `TypeError` a second
+            # positional is. The catch-all is an arm like any other here.
+            return False
+        else:
+            by_catch_all.add(name)
     # A default is on the TAIL of the parameters, so the required ones are
     # the head. A `*args` is asked above, where the positionals it takes are
     # counted; it is not a licence to leave a REQUIRED parameter unfilled,
