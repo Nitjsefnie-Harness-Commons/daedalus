@@ -165,7 +165,7 @@ def _dynamic_callees(tree):
     return bound
 
 
-def _unresolved_callee_mentions(call, bound):
+def _unresolved_callee_mentions(call, bound, scopes):
     """Whether a call's callee mentions the operation AND is one the walk may
     still refuse.
 
@@ -174,9 +174,9 @@ def _unresolved_callee_mentions(call, bound):
     it reaches anything, and the mention the container carries is then a
     fact about the wrong value.
     """
-    value = _mcp_selection_fold.unresolvable_callee(call, bound)
+    value = _mcp_selection_fold.unresolvable_callee(call, bound, scopes)
     return value is not None and _mcp_selection_fold.yields_the_operation(
-        value, bound)
+        value, bound, scopes)
 
 
 def _store_leaves(target):
@@ -240,7 +240,7 @@ class _BindingWalk(ast.NodeVisitor):
         reach a store form another axis already reaches and be weaker there."""
         if any(value is not None
                and _mcp_selection_fold.yields_the_operation(
-                   value, self.bound, delivered=True)
+                   value, self.bound, self.scopes, delivered=True)
                for value in values):
             return 'operation'
         if any(value is not None and _yields_the_registry(value, self.bound)
@@ -378,7 +378,7 @@ class _BindingWalk(ast.NodeVisitor):
             return
         if node.type is not None \
                 and _mcp_selection_fold.yields_the_operation(
-                    node.type, self.bound, delivered=True):
+                    node.type, self.bound, self.scopes, delivered=True):
             self._alias(node)
         elif node.name in self.bound:
             self._rebind(node, node.name)
@@ -617,7 +617,8 @@ def _import_targets(path, root):
                     targets |= _resolve_name(name, base, root)
         elif isinstance(node, ast.Call) \
                 and _mcp_selection_fold.is_dynamic_import(
-                    _mcp_selection_fold.callee_value(node, bound), bound):
+                    _mcp_selection_fold.callee_value(
+                        node, bound, scopes), bound, scopes):
             argument = node.args[0] if node.args else None
             folded = _folded_string(argument)
             if folded is not None and not folded.startswith('.'):
@@ -634,7 +635,7 @@ def _import_targets(path, root):
                         'import_module/__import__ is called with a name '
                         'this scan cannot read statically')
         elif isinstance(node, ast.Call) and _unresolved_callee_mentions(
-                node, bound):
+                node, bound, scopes):
             _refuse(path, root, node,
                     f'{ast.unparse(node.func)} reaches the import-by-name '
                     'operation through a value this scan cannot resolve')

@@ -598,6 +598,7 @@
 !/tests/test_launch_path.py
 !/tests/test_line_lengths.py
 !/tests/test_mcp_auth.py
+!/tests/test_mcp_builtin_names.py
 !/tests/test_mcp_entry_point.py
 !/tests/test_mcp_guard_floor.py
 !/tests/test_mcp_hotfix_scope.py

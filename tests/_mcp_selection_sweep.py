@@ -14,16 +14,20 @@ own answer to the question it is checking, and none is a spelling proxy for
 a value property. The universe is the PROPERTY and not the builders that
 happen to exist, so a class the grammar cannot name has NO ROW and a class
 its builders spell one way has one row a fold can get wrong without it
-showing. The classes named in `PROPERTY_CLASSES` are the two that were
-members of the property and of no builder at all; six cells still have no
+showing. The classes named in `PROPERTY_CLASSES` are the three that were
+members of the property and of no builder at all; five cells still have no
 row and are held by hand cases instead — the `getattr` spelling of the
-projection, a star over a literal tuple, a nested star, a `bool()` index, a
-walrus index, and a dict with a `**` unpack. Each is a spelling someone
-typed rather than a shape the grammar composes, and each is named beside
-the case that pins it. A dict KEY that is an unhashable literal is not one
-of them: the dict builder emits string keys, but `_repeats` carries a list
-literal in key position, so that class has sixteen generated rows of its
-own, pinned, decided and paid for.
+projection, a star over a literal tuple, a nested star, a walrus index, and
+a dict with a `**` unpack. Each is a spelling someone typed rather than a
+shape the grammar composes, and each is named beside the case that pins it.
+A `bool()` index was the sixth until the builtin builder took it: an index
+that is a call of the builtin is that builder's own construction, so it is
+generated in every container the fold reads an element out of, under both
+spellings a module binds the builtin and with the name replaced in each. A
+dict KEY that is an unhashable literal is not one of the five: the dict
+builder emits string keys, but `_repeats` carries a list literal in key
+position, so that class has sixteen generated rows of its own, pinned,
+decided and paid for.
 """
 import json
 import subprocess
@@ -195,9 +199,37 @@ _FUNCTION = 'a subscript element'
 # keyed on what the CONSTRUCTION places in the form rather than on a
 # spelling. A class the marker cannot express has no row at all, which is
 # how a bypass survived a sweep that reported nothing unpaid: a dict
-# DISPLAY carrying one key twice, and a LAMBDA in a position a fold selects.
-PROPERTY_CLASSES = ('a repeated dict key', 'a lambda behind a selection')
-_REPEATED, _LAMBDA = PROPERTY_CLASSES
+# DISPLAY carrying one key twice, a LAMBDA in a position a fold selects, and
+# a BUILTIN behind a binding the module may or may not have made.
+PROPERTY_CLASSES = ('a repeated dict key', 'a lambda behind a selection',
+                    'a builtin behind a binding')
+_REPEATED, _LAMBDA, _BUILTIN = PROPERTY_CLASSES
+
+# The containers a fold reads an element out of, as the route the index is
+# written at. The set and the comprehension are absent for the reason they
+# are absent above: no subscript reaches either, so an index naming a
+# position in one raises whatever the index is.
+_BUILTIN_ROUTES = (
+    ('list literal', lambda e: '[' + ', '.join(e) + ']'),
+    ('tuple literal', lambda e: '(' + ', '.join(e) + ')'),
+    # Keyed on the POSITION rather than on a spelling: `bool` normalises, so
+    # the value the call produces is the int the display carries it under and
+    # `0` and `False` are one key to Python's own `==`.
+    ('dict literal', lambda e: '{' + ', '.join(
+        f'{n}: {item}' for n, item in enumerate(e)) + '}'),
+    ('nested literal', lambda e: '[[' + ', '.join(e) + ']][0]'),
+    ('starred unpack', lambda e: '(*[' + ', '.join(e) + '],)'),
+)
+
+# How a module can NAME the builtin, and the store that takes the name back.
+# The second is a lambda rather than `print` because it RETURNS and says
+# nothing: `lambda v: None` makes the index a value no container is indexed
+# by, so the call raises before it imports anything, and it writes to the
+# oracle's own output pipe as `print` would not be permitted to.
+_BUILTIN_SPELLINGS = (
+    ('under an alias', 'from builtins import bool as b', 'b'),
+    ('under its own name', 'from builtins import bool', 'bool'),
+)
 
 # The key classes Python's `==` makes equal, as (the earlier key, the later
 # key, the lookup that names both, the value the EARLIER entry carries). The
@@ -231,17 +263,24 @@ _LAMBDAS = (
 )
 
 
-def _form(kind, step, callee, container, mentions, carries, classes):
+def _form(kind, step, callee, container, mentions, carries, classes,
+          pinned=True, imports='', setup=''):
     """One generated form, in the shape `duty` and the marker read.
 
-    `pinned` is True for every form these two builders produce, and the
-    construction says why: a dict display settles its own entries and a
-    lambda's return is settled by the arguments the caller supplies, so
-    every one of them is a value both the oracle and the fold can decide.
+    `pinned` is True for every form the repeated-key and lambda builders
+    produce, and the construction says why: a dict display settles its own
+    entries and a lambda's return is settled by the arguments the caller
+    supplies, so every one of them is a value both the oracle and the fold
+    can decide. The builtin builder does not claim that for its REPLACED
+    rows — a call of a name this walk cannot follow produces no value at
+    all — and says so on each rather than only on the half that holds.
+    `setup` is what the oracle runs before the form, and is empty for every
+    builder that needs no binding of its own.
     """
     return {'kind': kind, 'step': step, 'depth': 1, 'callee': callee,
-            'container': container, 'mentions': mentions, 'pinned': True,
-            'carries': carries, 'classes': classes}
+            'container': container, 'mentions': mentions, 'pinned': pinned,
+            'carries': carries, 'classes': classes, 'imports': imports,
+            'setup': setup}
 
 
 def _repeats(operation):
@@ -295,6 +334,54 @@ def _lambdas(operation):
                         (_LAMBDA,))
         yield _form('a lambda selection', 'selected, not called', selected,
                     selected, True, False, (_LAMBDA,))
+
+
+def _identity(form):
+    """What makes a generated form a form of its own.
+
+    The spelling, for every builder whose rows differ only in it — and a
+    builder that brings BINDINGS of its own is identified by those as well,
+    because a row whose only difference from another is the module's own
+    source is a different row, not a duplicate of it.
+    """
+    setup = form.get('setup', '')
+    return (form['imports'], form['callee']) if setup else form['callee']
+
+
+def _builtins(imports, operation):
+    """A call of the builtin `bool` in every position a fold reads an
+    element out of, under both spellings a module binds it, and with the
+    name REPLACED in each.
+
+    The property is one name and two answers, and a builder that only ever
+    emitted the unshadowed half would measure a rule that reads any `b` as
+    the builtin just as happily as one that reads none of them. So the two
+    halves are generated from the same construction with one line of the
+    module's own source between them, and they DISAGREE: a `bool` call
+    settles — `b(0)` is `False` and names position zero, `b(2)` is `True`
+    and names position one — so the untouched rows are decided on both
+    sides and the replaced one is a call whose result nothing can settle.
+    """
+    for kind, route in _BUILTIN_ROUTES:
+        # Both the position the call NAMES and the one it misses: the
+        # argument normalises, so `0` selects the first and `2` the
+        # second, and the crossed pair is the near-miss a rule that
+        # reads the argument rather than the value would settle alike.
+        for at, argument in ((0, '0'), (1, '2'), (0, '2'), (1, '0')):
+            elements = [_FILLER, _FILLER]
+            elements[at] = operation
+            container = route(elements)
+            for spelling, binding, name in _BUILTIN_SPELLINGS:
+                for replaced in (False, True):
+                    source = imports + binding + (
+                        f'\n{name} = lambda v: None\n' if replaced else '\n')
+                    yield _form(
+                        f'a {kind} index',
+                        f'bound {spelling}'
+                        + (' and replaced' if replaced else ''),
+                        f'{container}[{name}({argument})]', container,
+                        True, True, (_BUILTIN,), pinned=not replaced,
+                        imports=source, setup=source)
 
 
 def _filled(template, at, far, beyond):
@@ -421,18 +508,27 @@ def generated():
         for kind, build in _CONTAINERS.items():
             for position, at, width in _POSITIONS:
                 for form in _forms(kind, build, at, width, operation):
-                    if form['callee'] in seen:
+                    key = _identity(form)
+                    if key in seen:
                         continue
-                    seen[form['callee']] = dict(
+                    seen[key] = dict(
                         form, binding=binding, position=position,
                         imports=imports)
         for build in (_repeats, _lambdas):
             for form in build(operation):
-                if form['callee'] in seen:
+                key = _identity(form)
+                if key in seen:
                     continue
-                seen[form['callee']] = dict(
+                seen[key] = dict(
                     form, binding=binding, position='a class of its own',
-                    imports=imports)
+                    imports=form.get('imports') or imports)
+        for form in _builtins(imports, operation):
+            key = _identity(form)
+            if key in seen:
+                continue
+            seen[key] = dict(
+                form, binding=binding, position='a class of its own',
+                imports=form['imports'])
     return list(seen.values())
 
 
@@ -456,10 +552,12 @@ def runs_the_operation(value):
 
 
 for line in sys.stdin:
-    assignment, source = json.loads(line)
+    setup, assignment, source = json.loads(line)
     env = {"c": True, "i": 0, "importlib": importlib,
            "im": importlib.import_module}
     try:
+        if setup:
+            exec(setup, env)
         if assignment:
             exec(assignment, env)
         value = eval(source, env)
@@ -479,7 +577,8 @@ def _assignment(form):
 def _oracle(forms, stored):
     """Classify every form by running it, once per process wave."""
     payload = ''.join(
-        json.dumps([_assignment(form) if stored else '', form['callee']])
+        json.dumps([form.get('setup', ''),
+                    _assignment(form) if stored else '', form['callee']])
         + '\n' for form in forms)
     child = subprocess.run([sys.executable, '-c', _ORACLE], input=payload,
                            capture_output=True, text=True, check=True)
@@ -514,7 +613,7 @@ _SWEEPED = {}
 
 def sweep(root, forms):
     """Classify and scan every form both ways, recording what each said."""
-    key = tuple(form['callee'] for form in forms)
+    key = tuple(_identity(form) for form in forms)
     if key not in _SWEEPED:
         for form, reached in zip(forms, _oracle(forms, False)):
             form['oracle'] = reached
