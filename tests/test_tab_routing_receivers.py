@@ -8,12 +8,15 @@ nothing, the deferred value it held was dropped, and a call that really does
 reach `ext_cmd` with a `tab` read clean. The owner's shape is the whole
 defect: each receiver here is the one spelling of it.
 """
+import ast
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from test_tab_routing import _tracked_focus_verdict  # noqa: E402
+from _pyroute_stores import base_owner, root_name  # noqa: E402
+from _tabroute_focus import _tracked_focus_verdict  # noqa: E402
 
 _CALL = 'send("_focus", "focus-tab", tab=args.chrome_tab)'
 _PRELUDE = (f'send = ordinary\n'
@@ -49,6 +52,9 @@ _DEFECTIVE = [
     ('subscript-dict-merge', 'box = {}\nbox["d"] = {"k": ordinary}\n'
                              'box["d"] |= {"j": relay()}\n'
                              'send = ext_cmd\nreturn box["d"]["j"]()'),
+    ('call-result-setdefault', f'd = {{}}\n{_D}'
+                               'x = getd().setdefault("k", relay())\n'
+                               'send = ext_cmd\nreturn x()'),
 ]
 
 # The other half of dropping the owner: a store the guard could not place it
@@ -98,6 +104,61 @@ _CONTROLS = [
      'box = {}\nbox["k"] = {quiet()}\n'
      'box["k"] |= {relay()}\n'
      'send = ext_cmd\nreturn [f() for f in box["k"]]', (1, 1)),
+    # These two cross the stored item with the default in both directions, so
+    # an unprovable mark, or a resolution that answered with the default
+    # whatever the mapping holds, fails one of them. Only resolving the
+    # stored-or-default item the `ast.Name` path resolves passes both.
+    ('setdefault-stored-clean-default-deferred',
+     f'd = {{"k": ordinary}}\n{_D}'
+     'x = getd().setdefault("k", relay())\n'
+     'send = ext_cmd\nreturn x()', (0, 0)),
+    ('setdefault-stored-deferred-default-clean',
+     f'd = {{"k": relay()}}\n{_D}'
+     'x = getd().setdefault("k", ordinary)\n'
+     'send = ext_cmd\nreturn x()', (1, 1)),
+    ('setdefault-call-clean', f'd = {{}}\n{_D}'
+                              'x = getd().setdefault("k", ordinary)\n'
+                              'send = ext_cmd\nreturn x()', (0, 0)),
+    # A receiver the model holds nothing for at all: the aggregate is created
+    # against the receiver's own base, so the root name keeps naming what it
+    # named and the value lands where a later read of the receiver looks.
+    ('seed-against-the-base', 'class C: pass\nc = C()\n'
+                              'c.d = dict()\nc.d["k"] = relay()\n'
+                              'send = ext_cmd\nreturn c.d["k"]()', (1, 1)),
+    ('seed-a-class-base', 'class K: pass\nK.d = dict()\n'
+                          'K.d["k"] = relay()\n'
+                          'send = ext_cmd\nreturn K.d["k"]()', (1, 1)),
+    ('clean-seed-a-class-base', 'class K: pass\nK.d = dict()\n'
+                                'K.d["k"] = ordinary\n'
+                                'send = ext_cmd\nreturn K.d["k"]()', (0, 0)),
+    # A receiver two attribute steps from its root name, so the root has to be
+    # found by walking the chain rather than by one step.
+    ('chain-of-two-receivers', 'class C: pass\nc = C()\n'
+                               'box = {"inner": c}\n'
+                               'box["inner"].d = dict()\n'
+                               'box["inner"].d["k"] = relay()\n'
+                               'send = ext_cmd\nreturn box["inner"].d["k"]()',
+     (1, 1)),
+    # The rewritten container is read inside a closure, so the cell that
+    # carries its name has to be snapshotted when the write lands.
+    ('cell-over-one-name',
+     'class C: pass\nc = C()\nc.d = dict()\nc.d["k"] = relay()\n'
+     'def reader():\n    return c.d["k"]()\n'
+     'send = ext_cmd\nreturn reader()', (1, 1)),
+    ('cell-over-an-alias',
+     'd = {}\ne = d\nd["k"] = relay()\n'
+     'def reader():\n    return e["k"]()\n'
+     'send = ext_cmd\nreturn reader()', (1, 1)),
+    ('clean-cell-over-an-alias',
+     'd = {}\ne = d\nd["k"] = ordinary\n'
+     'def reader():\n    return e["k"]()\n'
+     'send = ext_cmd\nreturn reader()', (0, 0)),
+    ('attribute-tuple-target',
+     'class C: pass\nc = C()\nc.fn, y = pair()\n'
+     'send = ext_cmd\nreturn c.fn()', (1, 1)),
+    ('subscript-tuple-target',
+     'box = {}\nbox["k"], y = pair()\n'
+     'send = ext_cmd\nreturn box["k"]()', (1, 1)),
 ]
 
 
@@ -122,6 +183,34 @@ def test_a_named_receiver_and_a_clean_body_are_unmoved(tmp):
         actual = _verdict(tmp, body)
         assert actual == expected, \
             f'{label}: expected {expected}, got {actual}'
+
+
+def test_root_name_walks_a_chain_and_stops_at_the_first_name(tmp):
+    """The handle a store through any spelling has, pinned directly.
+
+    Every verdict above is a consequence of this, but each reaches it
+    through a receiver the tree already holds, so a chain the store path
+    never has to walk is not something a verdict can distinguish."""
+    del tmp
+    chain = [node.value for node in ast.parse(
+        'outer.inner.d\nouter["inner"].d\nc\ngetd()').body
+        if isinstance(node, ast.Expr)]
+    assert [root_name(node) for node in chain[:2]] == ['outer', 'outer']
+    assert root_name(chain[2]) == 'c'
+    assert root_name(chain[3]) is None
+
+
+def test_base_owner_names_the_root_and_carries_the_value(tmp):
+    """A receiver that is not a name answers both halves, or the write path
+    has no handle to write through."""
+    del tmp
+    state = SimpleNamespace(callables={}, evaluated={})
+    name, attribute, call = [node.value for node
+                             in ast.parse('c\nc.d\ngetd()').body
+                             if isinstance(node, ast.Expr)]
+    assert base_owner(name, state) == ('c', None)
+    assert base_owner(attribute, state) == ('c', None)
+    assert base_owner(call, state) == (None, None)
 
 
 def main():

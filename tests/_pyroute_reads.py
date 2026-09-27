@@ -158,8 +158,7 @@ def _dict_call_value(node, state):
 
 def _setdefault_value(node, state):
     """The stored-or-existing item one setdefault call evaluates to."""
-    owner = _known_value(node.func.value, state) \
-        or _receiver_value(node.func.value, state)
+    owner = _known_value(node.func.value, state)
     key = _literal_key(node.args[0], state) if node.args else _UNRESOLVED_KEY
     default = _known_value(node.args[1], state) if len(node.args) > 1 else None
     if (not isinstance(owner, DeferredContainer)
@@ -256,8 +255,7 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if is_deferred_value(value) or sender_value(value) is not None:
             return SpreadContainer({DYNAMIC_KEY: value}, None, 'dict', node)
     if isinstance(node, ast.Subscript):
-        owner = _known_value(node.value, state) \
-            or _receiver_value(node.value, state)
+        owner = _known_value(node.value, state)
         value = static_slice_read(node, owner)
         if value is not None:
             return value
@@ -280,8 +278,7 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if isinstance(node.op, ast.BitOr):
             return _merge_or_value(node, state)
     if isinstance(node, ast.Attribute):
-        owner = _known_value(node.value, state) \
-            or _receiver_value(node.value, state)
+        owner = _known_value(node.value, state)
         value = merge_yielded(
             _selected_values(owner, node.attr, attribute=True))
         if value is not None:
@@ -431,6 +428,8 @@ def _receiver_value(receiver, state):
                 at_position(owner, _literal_key(receiver.slice, state)))
     if isinstance(receiver, ast.Attribute):
         owner = _receiver_value(receiver.value, state)
+        if isinstance(owner, DeferredClass):
+            return owner.methods.get(receiver.attr)
         if isinstance(owner, DeferredInstance):
             return owner.attributes.get(receiver.attr)
     return _known_value(receiver, state)
