@@ -13,9 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _drain  # noqa: E402
 import _util  # noqa: E402
-from _cli_helpers import cli_env  # noqa: E402
-
-CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
+from _cli_helpers import CLI, cli_env, run_cli  # noqa: E402
 
 # The result header's marker is whichever glyph the console can encode, so
 # what is pinned is that a marker immediately precedes the id (see
@@ -23,12 +21,6 @@ CLI = [sys.executable, '-c', 'from daedalus_cli.cli import main; main()']
 IN_MARKS = ('←', '<-')
 TOK = 'clitok'
 BRIDGE_ENV = {'DAEDALUS_TOKEN': TOK, 'TOKEN': ''}
-
-
-def run_cli(args, env):
-    return subprocess.run(CLI + args, cwd=str(_util.ROOT), env=env,
-                          capture_output=True, text=True, encoding='utf-8',
-                          timeout=60)
 
 
 def test_a_retried_exec_announces_and_reuses_the_live_delivery(tmp):

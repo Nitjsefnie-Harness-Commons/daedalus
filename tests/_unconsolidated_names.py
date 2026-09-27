@@ -172,19 +172,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_cli_waits.py', '_run'):
         'this runs one argv under a supplied environment with a 60s bound, '
         'where the shared _run boots a node scenario',
-    ('tests/test_cli_duplicate_admission.py', 'run_cli'):
-        'byte-identical to the row for tests/test_cli_error_reporting.py, '
-        'and neither is a copy of the owner: both spawn the real CLI as a '
-        'process against a live bridge, the half the owner deliberately is '
-        'not, since a retried delivery and a printed traceback both have to '
-        'survive a process boundary. The pair is a real duplicate and '
-        'consolidating it is deferred, not dismissed',
-    ('tests/test_cli_error_reporting.py', 'run_cli'):
-        'byte-identical to the row for tests/test_cli_duplicate_admission.'
-        'py, and neither is a copy of the owner: the owner captures stdout '
-        'from an in-process dispatch and never sees a traceback cross a '
-        'process, which is the whole point of these two. The pair is a real '
-        'duplicate and consolidating it is deferred, not dismissed',
     ('tests/test_cli_waits.py', 'run_cli'):
         'this runs a typed subcommand that enqueues a command and answers '
         'it afterwards, where the owner dispatches with the answer already '
