@@ -4,9 +4,12 @@
 The closure walk reads a CALLEE as a value and applies one rule to every
 value it reads: a value the runtime provably cannot reach through is CLEAN
 rather than suspicious. This file applies the same rule to POSITIONS, and
-every case here says what the RUNTIME does — each runs the composition in a
-fresh interpreter and reads `sys.modules` or the exception — so a control
-never compares two of the walk's own answers.
+every case here but the derived-domain row says what the RUNTIME does — each
+runs the composition in a fresh interpreter and reads `sys.modules` or the
+exception. That row asks what the rule answers for a STATEMENT TYPE, not
+what a program does with one, so it calls `_leaves` on a skeleton of each
+kind `ast.stmt` declares and expects what `_BARRIERS` predicts; a control
+still never compares two of the walk's own answers.
 
 The cases that carry the axis are the soundness ones: a `try`, a `with`, a
 loop, a `match` and a bare `if` all look like barriers to a reader that has

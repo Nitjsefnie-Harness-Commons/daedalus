@@ -24,10 +24,12 @@ _BARRIERS = (ast.Raise, ast.Return, ast.Break, ast.Continue)
 # Only those four, and two limits are declared here rather than answered
 # there. A call that provably raises — `sys.exit()`, `os._exit()`, `exit()` —
 # is not a barrier, so the code after it stays in the scan set; nor is a
-# `return` inside a `finally`, which really does leave the frame, so the
-# tail after that is dead and the rule does not find it. Both err the same
-# way, keeping a position the runtime cannot reach instead of dropping one
-# it can, and that is the direction this whole module is written to err in.
+# `return` inside a `finally`, which really does leave the frame — the tail
+# INSIDE the `finalbody` is a block like any other, so the rule does find
+# it, while the one after the whole `try` is dead and the rule does not.
+# Both err the same way, keeping a position the runtime cannot reach
+# instead of dropping one it can, and that is the direction this whole
+# module is written to err in.
 
 
 def dead_nodes(tree):
