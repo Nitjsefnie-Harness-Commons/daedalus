@@ -139,10 +139,9 @@ def _missing(runs):
 
     Read through the shared predicate, which applies the filter itself, so
     a superseded run's name cannot satisfy the gate on its own. The name
-    stays because the refusal this feeds is this tool's own question, and
-    `wait` therefore carries no predicate call of its own - it is the one
-    function here the extraction was allowed to change, and keeping it
-    that way is what the exit-code evidence rests on.
+    is this module's own for the question the exit-4 refusal asks, so
+    `wait` reads `_missing(runs)` and never the predicate, and a suite
+    asserts on that name rather than on the predicate's.
     """
     return ci_gate.missing_required(runs)
 
