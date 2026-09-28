@@ -103,15 +103,12 @@ from _branch_boundary import (  # noqa: E402
     js_digests, python_digests)
 from _helper_reimplementation import (  # noqa: E402
     _live, _live_js, js_declarations, reimplementations)
+from _mod_text import _mod_text  # noqa: E402
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
 from _unconsolidated_names import UNCONSOLIDATED_NAMES  # noqa: E402
 
 ROOT = _util.ROOT
-
-
-def _mod(*lines):
-    return ''.join(line + '\n' for line in lines)
 
 
 def test_no_tests_module_reimplements_a_shared_helper_name(tmp):
@@ -212,8 +209,8 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
                        env=_util.child_coverage('scrub'))
     (repo / 'tests').mkdir()
     (repo / 'tests' / '_owner.py').write_text(
-        _mod('def kept(value):', '    return 1'), encoding='utf-8')
-    base = _mod(
+        _mod_text('def kept(value):', '    return 1'), encoding='utf-8')
+    base = _mod_text(
         'def twin(value):', '    return 1', '',
         'def pair(value):', '    return 1', '',
         'HARNESS = r"""', 'function carried(l) {',
@@ -227,7 +224,7 @@ def test_the_boundary_says_which_declaration_the_branch_wrote(tmp):
                    env=_util.child_coverage('scrub'))
     # A new name, a second BYTE-IDENTICAL copy of a name the base
     # already carries, and a name nothing touched.
-    (repo / 'tests' / 'test_base.py').write_text(_mod(
+    (repo / 'tests' / 'test_base.py').write_text(_mod_text(
         'def twin(value):', '    return 1', '',
         'def twin(value):', '    return 1', '',
         'def pair(value):', '    return 1', '',
@@ -267,76 +264,77 @@ def test_the_detector_names_the_module_and_the_name(tmp):
         # The owning module defines three names: a helper two suites
         # re-implement, one nothing else touches, and one whose spelling
         # starts `test_`, which is not a boundary in either direction.
-        ('tests/_owner.py', _mod('def _trim(mask, left, right):',
-                                 '    return 1',
-                                 'def _solo():',
-                                 '    return 1',
-                                 'def test_collects():',
-                                 '    return 1'), ['test_collects']),
-        ('tests/_names.py', _mod('def test_collects():', '    return 1'),
+        ('tests/_owner.py', _mod_text('def _trim(mask, left, right):',
+                                      '    return 1',
+                                      'def _solo():',
+                                      '    return 1',
+                                      'def test_collects():',
+                                      '    return 1'), ['test_collects']),
+        ('tests/_names.py', _mod_text('def test_collects():', '    return 1'),
          ['test_collects']),
         # A helper-looking module outside the tests tree neither owns a
         # name nor is reported for one.
-        ('scripts/_outside.py', _mod('def _trim(mask, left, right):',
-                                     '    return 1'), []),
+        ('scripts/_outside.py', _mod_text('def _trim(mask, left, right):',
+                                          '    return 1'), []),
         # The three defining forms, each of them a re-implementation.
-        ('tests/test_def.py', _mod('def _trim(mask, left, right):',
-                                   '    return 1'), ['_trim']),
-        ('tests/test_asyncdef.py', _mod('async def _trim(mask, left, '
-                                        'right):', '    return 1'),
+        ('tests/test_def.py', _mod_text('def _trim(mask, left, right):',
+                                        '    return 1'), ['_trim']),
+        ('tests/test_asyncdef.py', _mod_text('async def _trim(mask, left, '
+                                             'right):', '    return 1'),
          ['_trim']),
-        ('tests/test_class.py', _mod('class _trim:', '    pass'),
+        ('tests/test_class.py', _mod_text('class _trim:', '    pass'),
          ['_trim']),
         # A definition nested under `if True:` still binds during module
         # execution, so it is still a second definition.
-        ('tests/test_nested.py', _mod('if True:', '    def _trim(mask):',
-                                      '        return 1'), ['_trim']),
+        ('tests/test_nested.py', _mod_text('if True:', '    def _trim(mask):',
+                                           '        return 1'), ['_trim']),
         # A `test_`-prefixed local, and a name no helper owns.
-        ('tests/test_prefix.py', _mod('def test_collects():', '    return 1'),
+        ('tests/test_prefix.py',
+         _mod_text('def test_collects():', '    return 1'),
          ['test_collects']),
-        ('tests/test_unowned.py', _mod('def _nobody_defines():', '    pass'),
-         []),
+        ('tests/test_unowned.py',
+         _mod_text('def _nobody_defines():', '    pass'), []),
         # Every module-execution bind that is not a definition.
-        ('tests/test_walrus.py', _mod('(_trim := 1)'), []),
-        ('tests/test_for.py', _mod('for _trim in [1]:', '    pass'), []),
-        ('tests/test_with.py', _mod('with open(__file__) as _trim:',
-                                    '    pass'), []),
-        ('tests/test_except.py', _mod('try:', '    pass',
-                                      'except OSError as _trim:',
-                                      '    pass'), []),
-        ('tests/test_match.py', _mod('match 1:', '    case _trim:',
-                                     '        pass'), []),
-        ('tests/test_orelse.py', _mod('if True:', '    pass', 'else:',
-                                      '    _trim = 1'), []),
-        ('tests/test_finalbody.py', _mod('try:', '    pass', 'finally:',
-                                         '    _trim = 1'), []),
+        ('tests/test_walrus.py', _mod_text('(_trim := 1)'), []),
+        ('tests/test_for.py', _mod_text('for _trim in [1]:', '    pass'), []),
+        ('tests/test_with.py', _mod_text('with open(__file__) as _trim:',
+                                         '    pass'), []),
+        ('tests/test_except.py', _mod_text('try:', '    pass',
+                                           'except OSError as _trim:',
+                                           '    pass'), []),
+        ('tests/test_match.py', _mod_text('match 1:', '    case _trim:',
+                                          '        pass'), []),
+        ('tests/test_orelse.py', _mod_text('if True:', '    pass', 'else:',
+                                           '    _trim = 1'), []),
+        ('tests/test_finalbody.py', _mod_text('try:', '    pass', 'finally:',
+                                              '    _trim = 1'), []),
         # The forms that bind no module name at all.
-        ('tests/test_attr.py', _mod('holder._trim = 1'), []),
-        ('tests/test_subscript.py', _mod("holder['trim'] = 1"), []),
-        ('tests/test_augassign.py', _mod('_trim = 1', '_trim += 1'), []),
-        ('tests/test_comp.py', _mod('[_trim for _trim in [1]]'), []),
-        ('tests/test_lambda.py', _mod('f = lambda: (_trim := 1)'), []),
+        ('tests/test_attr.py', _mod_text('holder._trim = 1'), []),
+        ('tests/test_subscript.py', _mod_text("holder['trim'] = 1"), []),
+        ('tests/test_augassign.py', _mod_text('_trim = 1', '_trim += 1'), []),
+        ('tests/test_comp.py', _mod_text('[_trim for _trim in [1]]'), []),
+        ('tests/test_lambda.py', _mod_text('f = lambda: (_trim := 1)'), []),
         # Limb three, over the three import spellings, the one that binds
         # no such name, and an import from outside the tests tree.
-        ('tests/test_from.py', _mod('from _owner import _trim',
-                                    'def _trim(mask, left, right):',
-                                    '    return 1'), []),
-        ('tests/test_import_as.py', _mod('import _owner as _trim',
+        ('tests/test_from.py', _mod_text('from _owner import _trim',
                                          'def _trim(mask, left, right):',
                                          '    return 1'), []),
-        ('tests/test_plain_import.py', _mod('import _owner',
+        ('tests/test_import_as.py', _mod_text('import _owner as _trim',
+                                              'def _trim(mask, left, right):',
+                                              '    return 1'), []),
+        ('tests/test_plain_import.py',
+         _mod_text('import _owner', 'def _trim(mask, left, right):',
+                   '    return 1'), ['_trim']),
+        ('tests/test_from_os.py', _mod_text('from os import _trim',
                                             'def _trim(mask, left, right):',
                                             '    return 1'), ['_trim']),
-        ('tests/test_from_os.py', _mod('from os import _trim',
-                                       'def _trim(mask, left, right):',
-                                       '    return 1'), ['_trim']),
         # Two owners: each is a re-implementation of the other, and a
         # third module binding the name is a third report.
-        ('tests/_pair.py', _mod('def _twice():', '    return 1'),
+        ('tests/_pair.py', _mod_text('def _twice():', '    return 1'),
          ['_twice']),
-        ('tests/_second.py', _mod('def _twice():', '    return 1'),
+        ('tests/_second.py', _mod_text('def _twice():', '    return 1'),
          ['_twice']),
-        ('tests/test_pair.py', _mod('def _twice():', '    return 1'),
+        ('tests/test_pair.py', _mod_text('def _twice():', '    return 1'),
          ['_twice']),
     ]
     expected = set()
@@ -358,16 +356,17 @@ def test_the_detector_names_the_module_and_the_name(tmp):
 def test_a_script_entry_point_is_not_a_shared_helper_name(tmp):
     del tmp
     sources = {
-        'tests/_entry.py': _mod('def main(argv):', '    return 0', '', '',
-                                "if __name__ == '__main__':", '    main([])'),
-        'tests/test_entry.py': _mod('def main(argv):', '    return 0', '',
-                                    '', "if __name__ == '__main__':",
-                                    '    main([])'),
-        'tests/_plain.py': _mod('def main(argv):', '    return 0'),
-        'tests/test_plain.py': _mod('def main(argv):', '    return 0'),
-        'tests/test_guarded.py': _mod('def main(argv):', '    return 0',
-                                      '', '', "if '__main__' == __name__:",
-                                      '    main([])'),
+        'tests/_entry.py': _mod_text(
+            'def main(argv):', '    return 0', '', '',
+            "if __name__ == '__main__':", '    main([])'),
+        'tests/test_entry.py': _mod_text('def main(argv):', '    return 0', '',
+                                         '', "if __name__ == '__main__':",
+                                         '    main([])'),
+        'tests/_plain.py': _mod_text('def main(argv):', '    return 0'),
+        'tests/test_plain.py': _mod_text('def main(argv):', '    return 0'),
+        'tests/test_guarded.py': _mod_text(
+            'def main(argv):', '    return 0', '', '',
+            "if '__main__' == __name__:", '    main([])'),
     }
     for path, text in sources.items():
         compile(text, path, 'exec')
@@ -394,20 +393,20 @@ def test_a_guard_excludes_a_name_it_CALLS_and_nothing_it_mentions(tmp):
     sources = {
         # The owner tests its own helper's name in the guard and never
         # calls it, so it keeps ownership and the offender is reported.
-        'tests/_owner.py': _mod(
+        'tests/_owner.py': _mod_text(
             'def _trim(mask, left, right):', '    return 1', '', '',
             "if __name__ == '__main__':",
             '    import sys', '    sys.exit(0 if _trim else 1)'),
-        'tests/test_offender.py': _mod(
+        'tests/test_offender.py': _mod_text(
             'def _trim(mask, left, right):', '    return 1'),
         # The offender mentions the name in its guard and does not call
         # it, so it is still a re-implementation.
-        'tests/test_mentions.py': _mod(
+        'tests/test_mentions.py': _mod_text(
             'def _trim(mask, left, right):', '    return 1', '', '',
             "if __name__ == '__main__':",
             '    import sys', '    sys.exit(0 if _trim else 1)'),
         # A guard that DOES call the name is a script running itself.
-        'tests/test_calls.py': _mod(
+        'tests/test_calls.py': _mod_text(
             'def _solver(value):', '    return 1', '', '',
             "if __name__ == '__main__':", '    _solver(1)'),
     }
@@ -421,9 +420,9 @@ def test_a_guard_excludes_a_name_it_CALLS_and_nothing_it_mentions(tmp):
 def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
     del tmp
     sources = {
-        'tests/_owner.py': _mod('def _trim(mask, left, right):',
-                                '    return 1'),
-        'tests/test_broken.py': _mod('def broken(:'),
+        'tests/_owner.py': _mod_text('def _trim(mask, left, right):',
+                                     '    return 1'),
+        'tests/test_broken.py': _mod_text('def broken(:'),
     }
     try:
         reimplementations(sources)
@@ -440,14 +439,14 @@ def test_each_limb_decides_a_site_of_its_own(tmp):
     """
     del tmp
     sources = {
-        'tests/_owner.py': _mod('def _trim(mask, left, right):',
-                                '    return 1'),
-        'tests/_second.py': _mod('def _twice():', '    return 1'),
-        'tests/_third.py': _mod('def _twice():', '    return 1'),
-        'tests/test_owner.py': _mod('def _trim(mask, left, right):',
-                                    '    return 1'),
-        'tests/test_twice.py': _mod('from _second import _twice',
-                                    'def _twice():', '    return 1'),
+        'tests/_owner.py': _mod_text('def _trim(mask, left, right):',
+                                     '    return 1'),
+        'tests/_second.py': _mod_text('def _twice():', '    return 1'),
+        'tests/_third.py': _mod_text('def _twice():', '    return 1'),
+        'tests/test_owner.py': _mod_text('def _trim(mask, left, right):',
+                                         '    return 1'),
+        'tests/test_twice.py': _mod_text('from _second import _twice',
+                                         'def _twice():', '    return 1'),
     }
 
     # Each call names the limb it drops rather than unpacking a mapping:

@@ -36,6 +36,7 @@ from _branch_boundary import (  # noqa: E402
 from _helper_reimplementation import (  # noqa: E402
     JS_FLOOR, _live_sources, js_declarations, js_reimplementations,
     reimplementations)
+from _mod_text import _mod_text  # noqa: E402
 from _unconsolidated_js_names import (  # noqa: E402
     UNCONSOLIDATED_JS_NAMES)
 
@@ -59,10 +60,6 @@ HEADS = (
     'var eventTarget = async (listener) => {',
     'const eventTarget = listener => {',
 )
-
-
-def _mod(*lines):
-    return ''.join(line + '\n' for line in lines)
 
 
 def _js_module(head, body=THREE_LINES, close='}'):
@@ -208,7 +205,7 @@ _LINES = [
         # A declaration inside an `if` or an object literal IS read:
         # nothing was open, so skipping it would be a reader stopping
         # where it did not have to.
-        ('inside an if block', _mod(
+        ('inside an if block', _mod_text(
             '_HARNESS = r"""', 'if (true) {', HEADS[0], THREE_LINES,
             '}', '}', '"""')),
     ]
@@ -238,14 +235,14 @@ def test_a_mismatched_bracket_is_refused_and_a_fragment_is_dropped(tmp):
     """
     del tmp
     fragments = {
-        'head only': _mod(
+        'head only': _mod_text(
             '_LINES = [',
             "    'function eventTarget(l) {',", ']'),
-        'head and one body line': _mod(
+        'head and one body line': _mod_text(
             '_LINES = [',
             "    'function eventTarget(l) {',",
             "    '  const seen = [];',", ']'),
-        'head, body and a later line': _mod(
+        'head, body and a later line': _mod_text(
             '_LINES = [',
             "    'function eventTarget(l) {',",
             "    '  const seen = [];',",
@@ -255,8 +252,8 @@ def test_a_mismatched_bracket_is_refused_and_a_fragment_is_dropped(tmp):
         path = f'tests/fragment-{label.replace(" ", "-")}.py'
         compile(text, path, 'exec')
         assert js_declarations({path: text}) == {}, label
-    mismatched = _mod('_HARNESS = r"""', HEADS[0], '  const seen = [];',
-                      '  return seen;', ') ;', '"""')
+    mismatched = _mod_text('_HARNESS = r"""', HEADS[0], '  const seen = [];',
+                           '  return seen;', ') ;', '"""')
     compile(mismatched, 'mismatched', 'exec')
     try:
         js_declarations({'tests/mismatched.py': mismatched})
@@ -319,7 +316,7 @@ def test_the_two_recognisers_do_not_read_each_other(tmp):
     this rule exists.
     """
     del tmp
-    python_only = _mod(
+    python_only = _mod_text(
         'def eventTarget(listener):',
         '    """A Python binding of the same name."""',
         '    return [listener]')
@@ -327,7 +324,7 @@ def test_the_two_recognisers_do_not_read_each_other(tmp):
     sources = {
         # The owner carries both languages' half of the name, so each
         # control has an owner to find and neither can borrow the other.
-        'tests/_owner.py': _mod(
+        'tests/_owner.py': _mod_text(
             'def eventTarget(listener):', '    return 1', '', 'HARNESS = r"""',
             'function eventTarget(listener) {', '  const seen = [];',
             '  return seen;', '}', '"""'),
@@ -446,7 +443,7 @@ def test_the_size_floor_holds_the_class_and_lets_the_one_liners_through(tmp):
         ('tests/test_two.py', 'a two-line block',
          _js_module(HEADS[0], body='')),
         ('tests/test_one.py', 'a one-line block',
-         _mod('HARNESS = r"""', 'const eventTarget = () => 1;', '"""')),
+         _mod_text('HARNESS = r"""', 'const eventTarget = () => 1;', '"""')),
     ])
     at_floor = _found(sources)
     assert at_floor == {
@@ -474,7 +471,7 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
     the JavaScript's.
     """
     del tmp
-    split = _mod(
+    split = _mod_text(
         '_HARNESS = (',
         '    r"""',
         HEADS[0],
@@ -484,14 +481,14 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
         THREE_LINES,
         '}',
         '""")')
-    prose = _mod(
+    prose = _mod_text(
         '"""A module docstring with an unbalanced brace: {"""',
         'HARNESS = r"""',
         'function other(listener) {',
         THREE_LINES,
         '}',
         '"""')
-    braces = _mod(
+    braces = _mod_text(
         'def _harness(stall):',
         '    return f"""',
         # Doubled for the f-string; the reader undoes that, so what the
@@ -503,7 +500,7 @@ def test_the_document_is_the_concatenation_not_the_module(tmp):
         '  return 1;',
         '}}',
         '"""')
-    interpolated = _mod(
+    interpolated = _mod_text(
         'def _harness(n):',
         '    return f"""',
         HEADS[0].replace('{', '{{'),
@@ -563,8 +560,8 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
         subprocess.run(argv, cwd=repo, check=True,
                        env=_util.child_coverage('scrub'))
     (repo / 'tests').mkdir()
-    kept = _mod('HARNESS = r"""', 'function kept(listener) {',
-                '  const seen = [];', '  return seen;', '}', '"""')
+    kept = _mod_text('HARNESS = r"""', 'function kept(listener) {',
+                     '  const seen = [];', '  return seen;', '}', '"""')
     (repo / 'tests' / 'test_base.py').write_text(kept, encoding='utf-8')
     subprocess.run(['git', 'add', '-A'], cwd=repo, check=True,
                    env=_util.child_coverage('scrub'))
@@ -575,7 +572,7 @@ def test_the_javascript_boundary_decides_a_row_it_is_asked_about(tmp):
     # The branch MOVES nothing it inherited and ADDS one declaration of
     # a name an older row already covers: the row for the older
     # declaration stays, the new one has no row.
-    (repo / 'tests' / 'test_base.py').write_text(_mod(
+    (repo / 'tests' / 'test_base.py').write_text(_mod_text(
         kept, '', 'HARNESS2 = r"""', 'function added(listener) {',
         '  const other = [];', '  return other;', '}', '"""'),
         encoding='utf-8')
