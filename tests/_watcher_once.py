@@ -42,8 +42,8 @@ SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
 # is judged on is its third.
 POLLS = 3
 
-# One fresh log path per measurement, so two measurements on one fake
-# never hand the same next subject the same log.
+# One fresh log path per hand-out, so no two measurements on one fake, and
+# no two subjects in one measurement, are ever named by the same path.
 _LOGS = itertools.count()
 
 
@@ -134,13 +134,23 @@ def polls_in(calls):
 def measure(script, args, fake, interval, polls=POLLS):
     """`(calls per poll, those polls' calls)`, read from the running loop.
 
-    It also hands the next subject a call log of its own, so the figure
-    is read before the log is re-pointed: the tree cancelled above still
-    holds this log, so anything in it that outlived the cancellation
-    keeps appending for as long as it runs, and the caller reads the
-    next subject's calls from the same place. A path that did not exist
-    until this moment is one no process of that tree has been given.
+    The loop runs on a log of its own, and the next subject is handed
+    another: the tree this cancels still holds the log the loop ran on, so
+    anything in it that outlived the cancellation keeps appending for as
+    long as it runs, and the caller reads the next subject's calls from
+    the same place. A path that did not exist until this moment is one no
+    process of that tree has been given. Taking one at each end is what
+    closes a SECOND `FakeGh` over the same directory, which would name
+    the very `calls.jsonl` this loop would otherwise be writing.
+
+    The trap for the next caller: once this returns, `fake.calls()` reads
+    the log handed to whatever runs next, not the loop's. The figure is
+    `per_poll` and `seen`, and those are where it lives.
     """
+    # `_fake_gh.py` is another branch's, and handing out a log is its
+    # whole contract. `env()` and `calls()` both read this at call time,
+    # so each subject writes and reads where it now points.
+    fake.log = fake.dir / f'next-{next(_LOGS)}.jsonl'
     child = Child(script, args + ['--interval', str(interval)], fake)
     try:
         # One marker more than the window needs, because a poll is only
@@ -152,8 +162,5 @@ def measure(script, args, fake, interval, polls=POLLS):
     in_flight = windows[-1][0]
     per_poll = max(width for _, width in windows[:-1])
     seen = [call for call in fake.calls() if call.get('poll') != in_flight]
-    # `_fake_gh.py` is another branch's, and handing out a log is its
-    # whole contract. `env()` and `calls()` both read this at call time,
-    # so the next subject writes and reads where it now points.
-    fake.log = fake.dir / f'next-{next(_LOGS)}'
+    fake.log = fake.dir / f'next-{next(_LOGS)}.jsonl'
     return per_poll, seen
