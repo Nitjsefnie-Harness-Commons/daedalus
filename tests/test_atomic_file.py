@@ -138,5 +138,82 @@ def test_the_recorder_accepts_the_keyword_call_form(tmp):
     assert dst.read_bytes() == payload
 
 
+def test_a_refusal_that_never_clears_costs_the_whole_attempt_budget(tmp):
+    module = _fresh_module()
+    src = Path(tmp) / 'incoming'
+    dst = Path(tmp) / 'live.json'
+    src.write_bytes(b'never published')
+    attempts = []
+
+    def always_refused(src, dst):
+        attempts.append((src, dst))
+        raise PermissionError(13, 'injected sharing violation')
+
+    module.os = _PublishSpy(always_refused)
+    raised = None
+    try:
+        module.replace_atomically(src, dst)
+    except PermissionError as error:
+        raised = error
+
+    assert isinstance(raised, PermissionError), raised
+    assert len(attempts) == module._RETRY_ATTEMPTS, (
+        len(attempts), module._RETRY_ATTEMPTS)
+    assert not dst.exists()
+
+
+def test_unlink_retries_a_transient_refusal_then_removes_the_file(tmp):
+    module = _fresh_module()
+    victim = Path(tmp) / 'stale.json'
+    victim.write_text('about to be collected', encoding='utf-8')
+    real_unlink = Path.unlink
+    attempts = []
+
+    def refuse_then_unlink(self, *args, **kwargs):
+        attempts.append(self)
+        if len(attempts) < 3:
+            raise PermissionError(13, 'injected sharing violation')
+        return real_unlink(self, *args, **kwargs)
+
+    Path.unlink = refuse_then_unlink
+    try:
+        module.unlink_retrying(victim)
+    finally:
+        Path.unlink = real_unlink
+
+    assert attempts == [victim, victim, victim], attempts
+    assert not victim.exists()
+
+
+def test_unlink_of_a_name_already_gone_is_not_a_refusal(tmp):
+    module = _fresh_module()
+    module.unlink_retrying(Path(tmp) / 'never-existed.json')
+    assert not (Path(tmp) / 'never-existed.json').exists()
+
+
+def test_read_retries_a_transient_refusal_then_returns_the_text(tmp):
+    module = _fresh_module()
+    record = Path(tmp) / 'record.txt'
+    payload = 'the record the sweep published'
+    record.write_text(payload, encoding='utf-8')
+    real_read_text = Path.read_text
+    attempts = []
+
+    def refuse_then_read(self, *args, **kwargs):
+        attempts.append(self)
+        if len(attempts) < 3:
+            raise PermissionError(13, 'injected sharing violation')
+        return real_read_text(self, *args, **kwargs)
+
+    Path.read_text = refuse_then_read
+    try:
+        text = module.read_text_retrying(record, 'utf-8')
+    finally:
+        Path.read_text = real_read_text
+
+    assert attempts == [record, record, record], attempts
+    assert text == payload, text
+
+
 if __name__ == '__main__':
     raise SystemExit(_util.runner(_util.collect(globals())))
