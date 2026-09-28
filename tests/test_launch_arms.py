@@ -53,6 +53,14 @@ ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
 CONTROL_LABELS = {label for label, _, _, _ in ARM_CONTROLS}
 
+# The arms bound to the step ceiling, derived from the table so the fact
+# is written once. `STEP_CEILING_HELD_BY` is the record of what holds
+# each of them, and the step-ceiling test checks this derivation against
+# it -- so a third ceiling arm has to be given a holding test there
+# rather than added silently to a literal here.
+CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
+                if arm[EVIDENCE] == STEP_CEILING_CONTROL}
+
 # One arm per state, and one of the two the row files cannot hold, so the
 # sweep is replayed in every shape the table claims for it.
 SWEEP_SAMPLE = ('ch.namedexpr-in-bound', 'res.call-attribute-subprocess',
@@ -173,24 +181,21 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
     assert not unknown, f'controlled arms naming no row or control: {unknown}'
     unused = sorted(CONTROL_LABELS - {arm[EVIDENCE] for arm in LAUNCH_ARMS})
     assert not unused, f'controls no arm names: {unused}'
-    stepped = sorted(arm[ID] for arm in LAUNCH_ARMS
-                     if arm[EVIDENCE] == STEP_CEILING_CONTROL)
-    assert set(stepped) == {'fx.skip-registered', 'mr.while-guard'}, stepped
 
 
 def test_every_step_ceiling_arm_names_the_test_that_holds_it(tmp):
     """The step ceiling is not a row, so the record must name a real test.
 
     What holds these two arms bounds a STEP COUNT rather than a
-    verdict, so the record names that test and this resolves it.
+    verdict, so the record names that test and this resolves it. The
+    names themselves are derived from the table, so a third ceiling arm
+    is a decision this forces: the record has to gain a holder for it.
     """
     del tmp
     by_name = {arm[ID]: arm for arm in LAUNCH_ARMS}
-    ceiling = {arm[ID] for arm in LAUNCH_ARMS
-               if arm[EVIDENCE] == STEP_CEILING_CONTROL}
-    assert set(STEP_CEILING_HELD_BY) == ceiling, (
+    assert set(STEP_CEILING_HELD_BY) == CEILING_ARMS, (
         'STEP_CEILING_HELD_BY and the arms bound to the ceiling disagree: '
-        f'{sorted(set(STEP_CEILING_HELD_BY) ^ ceiling)}')
+        f'{sorted(set(STEP_CEILING_HELD_BY) ^ CEILING_ARMS)}')
     for name, holders in STEP_CEILING_HELD_BY.items():
         assert name in by_name, f'a holder recorded for no arm: {name}'
         assert by_name[name][STATE] == 'CONTROLLED', name
