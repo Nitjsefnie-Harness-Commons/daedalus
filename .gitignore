@@ -323,6 +323,7 @@
 !/tests/_deliveries.py
 !/tests/_drain.py
 !/tests/_drain_scan.py
+!/tests/_durations_compare.py
 !/tests/_evalpages.py
 !/tests/_fake_gh.py
 !/tests/_fanout.py

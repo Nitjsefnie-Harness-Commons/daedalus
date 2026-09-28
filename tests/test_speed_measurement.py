@@ -14,26 +14,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _durations_compare import (  # noqa: E402
+    _durations_comparator, _durations_tree)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-
-
-def _durations_tree(tmp, side, rounds):
-    """Write one summary directory per round, as run_tests.py would."""
-    dirs = []
-    for index, tests in enumerate(rounds, start=1):
-        d = Path(tmp) / f'{side}-{index}'
-        d.mkdir(parents=True)
-        (d / 'test_suite.json').write_text(json.dumps({
-            'total': len(tests), 'passed': len(tests),
-            'skipped': 0, 'failed': 0, 'tests': tests,
-        }), encoding='utf-8')
-        dirs.append(str(d))
-    return dirs
-
-
-def _compare_durations():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
 
 def _speed_summary():
@@ -75,7 +59,7 @@ def test_speed_comparison_pairs_whole_rounds_rather_than_per_test_minima(tmp):
     Here each side is noisy on a different test in each round, so per-test
     minima would report 2.00s for a side whose every round took 11.00s.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'slow': 10.0, 'fast': 1.0},
                                          {'slow': 1.0, 'fast': 10.0}])
     head = _durations_tree(tmp, 'head', [{'slow': 11.0, 'fast': 1.0},
@@ -95,7 +79,7 @@ def test_speed_comparison_gates_on_the_median_of_the_pairs(tmp):
     round, so gating on any single pair would be a coin toss. The median only
     moves once most of the pairs agree.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'a': 1.0}, {'a': 1.0}, {'a': 1.0}])
     spoiled = _durations_tree(tmp, 'spoiled',
                               [{'a': 1.0}, {'a': 5.0}, {'a': 1.0}])
@@ -112,7 +96,7 @@ def test_speed_comparison_refuses_to_pair_unequal_round_counts(tmp):
     Pairing the first N and dropping the rest would answer with a comparison
     narrower than the one that was asked for, and say nothing about it.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'a': 1.0}, {'a': 1.0}])
     head = _durations_tree(tmp, 'head', [{'a': 1.0}])
     summary = Path(tmp) / 'summary.md'
@@ -129,7 +113,7 @@ def test_speed_comparison_ignores_a_test_only_one_side_ran(tmp):
     total: a release that grew three tests would otherwise read as a
     regression, and one that deleted three as an improvement.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'shared': 1.0, 'gone': 50.0}])
     head = _durations_tree(tmp, 'head', [{'shared': 1.0, 'added': 50.0}])
     shared, pairs, _moves = compare.compare(compare.side_rounds(base),
@@ -141,7 +125,7 @@ def test_speed_comparison_ignores_a_test_only_one_side_ran(tmp):
 
 def test_speed_comparison_fails_only_past_its_budget(tmp):
     """A slowdown inside the budget passes; one past it fails."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'a': 1.0}])
     within = _durations_tree(tmp, 'within', [{'a': 1.2}])
     past = _durations_tree(tmp, 'past', [{'a': 1.4}])
@@ -167,8 +151,8 @@ def test_speed_comparison_can_refuse_an_unmeasurable_run(tmp):
     summary = Path(tmp) / 'summary.md'
     argv = ['--base', str(empty_base), '--head', str(empty_head),
             '--base-label', 'baseline', '--summary-file', str(summary)]
-    assert _compare_durations().main(argv) == 0
-    assert _compare_durations().main(argv + ['--require-measurements']) == 1
+    assert _durations_comparator().main(argv) == 0
+    assert _durations_comparator().main(argv + ['--require-measurements']) == 1
 
     # A baseline that measured something, against a head that shares nothing
     # with it, is the second no-data path and answers the same way.
@@ -176,8 +160,8 @@ def test_speed_comparison_can_refuse_an_unmeasurable_run(tmp):
         json.dumps({'tests': {'only_on_base': 1.0}}), encoding='utf-8')
     (empty_head / 'suite.json').write_text(
         json.dumps({'tests': {'only_on_head': 1.0}}), encoding='utf-8')
-    assert _compare_durations().main(argv) == 0
-    assert _compare_durations().main(argv + ['--require-measurements']) == 1
+    assert _durations_comparator().main(argv) == 0
+    assert _durations_comparator().main(argv + ['--require-measurements']) == 1
 
 
 def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
@@ -187,7 +171,7 @@ def test_speed_comparison_passes_when_a_side_was_never_measured(tmp):
     checkout, so an empty side means its timing step failed. A comparator that
     treated that as zero seconds would report an infinite speedup.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     old = Path(tmp) / 'base-1'
     old.mkdir(parents=True)
     (old / 'test_suite.json').write_text(json.dumps({
@@ -227,7 +211,7 @@ def test_speed_comparison_fails_when_a_suite_times_zero_on_both_sides(tmp):
     that is exactly how a cell whose virtualenv was missing a dependency
     still reported a verdict over 131 tests while 41 more sat unmeasured.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_broken': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
@@ -243,7 +227,7 @@ def test_speed_comparison_fails_when_a_suite_times_zero_on_both_sides(tmp):
 
 def test_speed_comparison_allows_a_suite_that_times_zero_on_one_side(tmp):
     """Zero on one side alone is a legitimate feature gap, not a lost suite."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_feature': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
@@ -261,7 +245,7 @@ def test_speed_comparison_allows_a_suite_absent_from_one_side(tmp):
     test_nothing.py is the live shape: it exists on the baseline alone, so
     the head side has no report for it and nothing is silently dropped.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_nothing': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0}})
@@ -277,7 +261,7 @@ def test_speed_comparison_zero_on_one_side_alone_is_not_a_loss(tmp):
     than something it silently lost. Both sides ran both rounds, so the
     verdict comes from this shape and not from an unpaired round.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     rounds = [{'test_suite': {'shared': 1.0}, 'test_flaky': {}},
               {'test_suite': {'shared': 1.0},
                'test_flaky': {'recovered': 1.0}}]
@@ -300,7 +284,7 @@ def test_speed_comparison_fails_when_a_report_is_absent_from_both_rounds(tmp):
     the first, so the intersection drops its tests from every total even
     though a run that recorded them happened on both sides.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0}},
                                      {'test_suite': {'shared': 1.0},
                                       'test_gap': {'lost_a': 1.0,
@@ -324,7 +308,7 @@ def test_speed_comparison_a_report_that_records_nothing_does_not_ship(tmp):
     absence is the feature-gap carve-out rather than a lost round. This is
     the shape that pins _ships against counting reports instead of tests.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
                                       'test_gap': {'lost': 1.0}},
                                      {'test_suite': {'shared': 1.0},
@@ -344,7 +328,7 @@ def test_speed_comparison_fails_when_a_report_is_absent_from_one_round(tmp):
     workflow reports and carries on from. The suite is present in this
     side's other round, so the side ships it and the absence is emptiness.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     tests = {'lost_a': 1.0, 'lost_b': 2.0}
     base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
                                       'test_gap': tests},
@@ -367,7 +351,7 @@ def test_speed_comparison_allows_a_suite_absent_from_a_whole_side(tmp):
     suite in both rounds and this commit has it in neither, so nothing the
     comparison could have measured is silently dropped.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _round_tree(tmp, 'base', [{'test_suite': {'shared': 1.0},
                                       'test_nothing': {}},
                                      {'test_suite': {'shared': 1.0},
@@ -384,7 +368,7 @@ def test_speed_comparison_fails_when_a_suite_is_empty_in_a_round_on_both(tmp):
     that recorded nothing for a suite drops its tests from the covered set
     however much that suite's other rounds recorded.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     rounds = [{'test_suite': {'shared': 1.0}, 'test_partial': {}},
               {'test_suite': {'shared': 1.0}, 'test_partial': {'later': 2.0}}]
     base = _round_tree(tmp, 'base', rounds)
@@ -403,7 +387,7 @@ def test_speed_comparison_fails_when_a_report_is_corrupt_on_both_sides(tmp):
     mid-write truncation leaves a file the completeness check still counts
     and the comparison silently reads as nothing.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_corrupt': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
@@ -416,7 +400,7 @@ def test_speed_comparison_fails_when_a_report_is_corrupt_on_both_sides(tmp):
 
 def test_speed_comparison_fails_when_a_report_holds_no_test_map(tmp):
     """A report that parses but records no test map is empty, not absent."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_shapeless': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
@@ -434,7 +418,7 @@ def test_speed_comparison_fails_when_a_report_is_not_an_object(tmp):
     the comparison would accept nothing from it, so it is emptiness in that
     round and the guard has to be able to say so.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_flat': {}})
     head = _suite_tree(tmp, 'head', {'test_suite': {'shared': 1.0},
@@ -451,7 +435,7 @@ def test_speed_comparison_counts_only_tests_the_comparison_accepts(tmp):
     duration is a value the covered set would refuse is a suite that
     contributes nothing to it.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     tests = {'lost_a': 'oops', 'lost_b': None, 'lost_c': True}
     base = _suite_tree(tmp, 'base', {'test_suite': {'shared': 1.0},
                                      'test_unread': tests})
@@ -493,7 +477,7 @@ def test_speed_summary_longest_table_orders_head_medians_and_applies_limit(
 
 def test_speed_summary_longest_table_shows_head_median_column(tmp):
     """The duration column is the current commit's median, even when faster."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'test': 1.0, 'improving': 9.0}])
     head = _durations_tree(tmp, 'head', [{'test': 9.0, 'improving': 3.0}])
     shared, pairs, movements = compare.compare(
@@ -508,7 +492,7 @@ def test_speed_summary_longest_table_shows_head_median_column(tmp):
 
 def test_speed_summary_longest_table_shares_only_the_covered_set(tmp):
     """Shares use every covered head median, not round or displayed totals."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [
         {'shared_alpha': 1.0, 'shared_beta': 1.0, 'shared_gamma': 1.0,
          'base_only': 50.0},
@@ -537,7 +521,7 @@ def test_speed_summary_longest_table_shares_only_the_covered_set(tmp):
 
 def test_speed_summary_longest_table_renders_zero_head_share(tmp):
     """A covered set with no head time renders a guarded zero share."""
-    compare = _compare_durations()
+    compare = _durations_comparator()
     base = _durations_tree(tmp, 'base', [{'zero': 1.0}])
     head = _durations_tree(tmp, 'head', [{'zero': 0.0}])
     shared, pairs, movements = compare.compare(
@@ -568,7 +552,7 @@ def test_speed_summary_movement_table_orders_by_absolute_delta(tmp):
     ordered by duration would lead with it; the block is pinned whole so the
     limit's cut tail is part of the assertion too.
     """
-    compare = _compare_durations()
+    compare = _durations_comparator()
     small_names = [f'small_{index}' for index in range(1, 12)]
     base_tests = {name: 1.00 for name in small_names}
     base_tests['speedup'] = 43.12
