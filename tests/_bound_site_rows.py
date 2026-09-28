@@ -360,4 +360,239 @@ BOUND_SITE_ROWS = (
      "def probe():\n"
      "    return subprocess.run(['git', 'status'], check=True, cwd='/tmp')\n",
      []),
+    # Rows for the arms issue #1144 swept and found live and
+    # undriven: each shape reaches the arm its label names, and
+    # deleting that arm turns this row red.
+    ('annotated-assignment-target-is-a-binding',
+     ('import subprocess\n'
+      'def f():\n'
+      '    mod: object = subprocess\n'
+      "    return mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('class-name-is-a-defined-name',
+     ('import subprocess\n'
+      'class Runner:\n'
+      '    pass\n'
+      'Runner(timeout=1)\n'
+      "subprocess.run(['git', 'status'], check=True)"),
+     [(4, 'unreadable', 'unplaced')]),
+    ('class-body-assignment-binds-under-the-class',
+     ('import subprocess\n'
+      'class Runner:\n'
+      '    mod = subprocess\n'
+      'def f():\n'
+      '    return Runner(timeout=1)'),
+     [(5, 'unreadable', 'timeout')]),
+    ('positional-default-binds-its-parameter',
+     ('import subprocess\n'
+      'def f(mod=subprocess):\n'
+      "    return mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(3, 'git', 'timeout')]),
+    ('keyword-only-default-binds-its-parameter',
+     ('import subprocess\n'
+      'def f(*, mod=subprocess):\n'
+      "    return mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(3, 'git', 'timeout')]),
+    ('yielded-value-registers-a-module-factory',
+     ('import subprocess\n'
+      'def get():\n'
+      '    yield subprocess\n'
+      "get().run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('walrus-target-is-a-binding',
+     ('import subprocess\n'
+      'def f():\n'
+      '    if (sp := subprocess):\n'
+      "        return sp.run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('with-target-name-binds-its-context',
+     ('import subprocess\n'
+      'with (m := subprocess) as go:\n'
+      "    go.run(['git', 'status'], check=True, timeout=30)"),
+     [(3, 'git', 'timeout')]),
+    ('method-on-a-module-factory-call-is-a-placed-launch',
+     ('import subprocess\n'
+      'def get():\n'
+      '    return subprocess\n'
+      "get().run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('walrus-target-in-bound-is-a-placed-launch',
+     ('import subprocess\n'
+      'alias = subprocess\n'
+      "(x := alias)(['git', 'status'], check=True, timeout=30)"),
+     [(3, 'git', 'timeout')]),
+    ('method-call-derives-as-its-receiver',
+     ('import subprocess\n'
+      'import contextlib\n'
+      'with contextlib.nullcontext(subprocess) as mod:\n'
+      "    mod.run(['git', 'status'], check=True, timeout=30)"),
+     []),
+    ('module-shadows-getattr-and-an-argument-derives',
+     ('import subprocess\n'
+      'def getattr(x, y):\n'
+      '    return None\n'
+      "mod = getattr(subprocess, 'run')\n"
+      "mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(5, 'git', 'timeout')]),
+    ('call-on-a-name-this-module-defines-is-not',
+     ('import subprocess\n'
+      'def get():\n'
+      '    return subprocess\n'
+      'mod = get(subprocess)\n'
+      "mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(5, 'unreadable', 'unplaced')]),
+    ('subscript-callee-derives-on-its-arguments',
+     ('import subprocess\n'
+      'handlers = {}\n'
+      "mod = handlers['x'](subprocess)\n"
+      "mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('partial-of-a-derived-value-derives',
+     ('import functools\n'
+      'import subprocess\n'
+      'go = functools.partial(subprocess.run)\n'
+      "go(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('generator-expression-receiver-is-placed',
+     ('import subprocess\n'
+      'def f():\n'
+      '    return list(x for x in subprocess).pop(timeout=30)'),
+     [(3, 'unreadable', 'timeout')]),
+    ('dict-value-receiver-is-placed',
+     ('import subprocess\n'
+      'def f():\n'
+      "    return {'a': subprocess}['a'].run(['git', 'status'],\n"
+      '                                      check=True, timeout=30)'),
+     [(3, 'git', 'timeout')]),
+    ('dict-comprehension-receiver-is-placed',
+     ('import subprocess\n'
+      '({key: v for key, v in subprocess}).get(timeout=30)'),
+     [(2, 'unreadable', 'timeout')]),
+    ('method-on-a-conditional-expression-is-a-placed-launch',
+     ('import subprocess\n'
+      'def f(flag):\n'
+      '    return (subprocess if flag else sorted).run(\n'
+      "        ['git', 'status'], check=True, timeout=30)"),
+     [(3, 'git', 'timeout')]),
+    ('lambda-factory-receiver-is-placed',
+     ('import subprocess\n'
+      'go = lambda: subprocess\n'
+      'def f():\n'
+      "    return go.run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('walrus-value-derives-into-a-placed-launch',
+     ('import subprocess\n'
+      'alias = subprocess\n'
+      'mod = (m := alias)\n'
+      'def f():\n'
+      "    return mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(5, 'git', 'timeout')]),
+    ('method-on-a-subscript-of-a-derived-name',
+     ('import subprocess\n'
+      'def f():\n'
+      "    return (subprocess,)['x'].run(['git', 'status'],\n"
+      '                                  check=True, timeout=30)'),
+     [(3, 'git', 'timeout')]),
+    ('sys-modules-blanket-bound-to-a-name-is-placed',
+     ('import sys\n'
+      'import subprocess\n'
+      "mod = sys.modules['json']\n"
+      "mod.run(['git', 'status'], check=True, timeout=30)"),
+     [(4, 'git', 'timeout')]),
+    ('argv-with-no-elements-is-a-non-git-head',
+     ('import subprocess\n'
+      'subprocess.run([], check=True, timeout=30)'),
+     [(2, 'non-git', 'timeout')]),
+    ('sys-executable-head-is-a-non-git-head',
+     ('import subprocess\n'
+      'import sys\n'
+      "subprocess.run([sys.executable, 'x'], check=True, timeout=30)"),
+     [(3, 'non-git', 'timeout')]),
+    ('a-concat-into-the-ambiguity-walk-is-ambiguous',
+     ('import subprocess\n'
+      "argv = ['node', 'x']\n"
+      "argv = ['git', 'status']\n"
+      'subprocess.run(argv + [], check=True, timeout=30)'),
+     [(4, 'ambiguous', 'timeout')]),
+    ('an-unheld-argv-name-ends-the-ambiguity-walk',
+     ('import subprocess\n'
+      'def f(argv):\n'
+      '    subprocess.run(argv, check=True, timeout=30)'),
+     [(3, 'unreadable', 'timeout')]),
+    ('a-dotted-import-contributes-its-top-level-name',
+     ('import os.path\n'
+      'import subprocess\n'
+      'def f():\n'
+      '    return os.getcwd(timeout=30)'),
+     []),
+    ('a-from-import-name-is-accounted',
+     ('import json\n'
+      'import subprocess\n'
+      'from json import dumps\n'
+      'def f():\n'
+      '    return dumps(timeout=30)'),
+     []),
+    ('machinery-through-a-bare-alias-is-unproved',
+     ('import subprocess\n'
+      'def f(argument):\n'
+      '    mod = __import__(argument)\n'
+      '    return mod(timeout=1)'),
+     [(4, 'unreadable', 'unplaced')]),
+    ('machinery-base-bound-to-a-call-is-not-machinery',
+     ('import importlib\n'
+      'import subprocess\n'
+      'il = dir(importlib)\n'
+      "mod = il.import_module('subprocess')\n"
+      'def f():\n'
+      '    return mod(timeout=1)'),
+     []),
+    ('getattr-held-receiver-is-unproved',
+     ('import os\n'
+      'import subprocess\n'
+      "mod = getattr(os, 'getcwd')\n"
+      '\n'
+      '\n'
+      'def f():\n'
+      '    return mod(timeout=1)'),
+     [(7, 'unreadable', 'unplaced')]),
+    ('a-concat-argv-is-unwrapped-from-the-left',
+     ('import subprocess\n'
+      "subprocess.run(['git'] + ['status'], check=True, timeout=30)"),
+     [(2, 'git', 'timeout')]),
+    ('attribute-chain-over-a-bound-name-is-unresolved',
+     ('import subprocess\n'
+      'sp = subprocess\n'
+      "sp.x.y(['git', 'status'], check=True, timeout=30)"),
+     [(3, 'unreadable', 'unplaced')]),
+    ('method-on-a-call-whose-base-is-safe-and-bound',
+     ('from factory import sp\n'
+      'import subprocess\n'
+      'sp = subprocess\n'
+      "sp.run(['git', 'status'], check=True).wait(timeout=30)"),
+     [(4, 'unreadable', 'unplaced')]),
+    ('a-bare-name-receiver-over-a-bound-name',
+     ('import subprocess\n'
+      'ns = {}\n'
+      "subprocess.run(['git', 'status'], check=True)\n"
+      'sp = subprocess\n'
+      "sp['x'].run(['git', 'status'], check=True, timeout=30)"),
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-subscript-over-a-bound-name-resolves-as-base',
+     ('import subprocess\n'
+      'ns = {}\n'
+      "subprocess.run(['git', 'status'], check=True)\n"
+      'sp = subprocess\n'
+      "sp['x'].run(['git', 'status'], check=True, timeout=30)"),
+     [(5, 'unreadable', 'unplaced')]),
+    ('another-receiver-shape-resolves-safe',
+     ('import subprocess\n'
+      'def f():\n'
+      '    return (lambda: 1).x(timeout=30)'),
+     [(3, 'unreadable', 'unplaced')]),
+    ('a-bare-name-call-receiver-resolves-safe',
+     ('import subprocess\n'
+      'def f():\n'
+      "    return next(iter({subprocess})).run(['git', 'status'],\n"
+      '                                      check=True, timeout=30)'),
+     [(3, 'git', 'timeout')]),
 )
