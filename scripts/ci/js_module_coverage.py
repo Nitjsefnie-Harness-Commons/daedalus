@@ -6,9 +6,13 @@ The mutable policy state is the ``js_coverage_baseline`` member of
 tracked JavaScript file still carries, counted from the same V8 dumps and
 the same physical code-line detection the tree-wide total uses. A recorded
 number is never raised by hand and no entry is ever added by hand: cover the
-uncovered lines. A stale entry goes away rather than being kept: --tighten
-drops one whose file is fully covered, and an entry naming a file that is
-gone is deleted by hand.
+uncovered lines. A module the record does not name enters it the way the seed
+did: at its measured uncovered count, in the reviewed diff that introduces
+the module, and the ordinary ratchet applies from then on -- --tighten only
+lowers, so it never adds one. Or cover the uncovered lines and the module
+needs no record at all. A stale entry goes away rather than being kept:
+--tighten drops one whose file is fully covered, and an entry naming a file
+that is gone is deleted by hand.
 
   python3 scripts/ci/js_module_coverage.py "$NODE_V8_COVERAGE"
   python3 scripts/ci/js_module_coverage.py --tighten \
@@ -33,19 +37,25 @@ ROOT = Path(__file__).resolve().parents[2]
 UNCOVERED_REMEDY = (
     'A recorded number is never raised by hand and no entry is ever added '
     'by hand: cover the uncovered lines.')
+UNRECORDED_REMEDY = (
+    'A module the record does not name enters it the way the seed did: at '
+    'its measured uncovered count, in the reviewed diff that introduces the '
+    'module, and the ordinary ratchet applies from then on -- --tighten '
+    'only lowers, so it never adds one. Or cover the uncovered lines and '
+    'the module needs no record at all.')
 STALE_ENTRY_REMEDY = (
     'A stale entry goes away rather than being kept: --tighten drops one '
     'whose file is fully covered, and an entry naming a file that is gone '
     'is deleted by hand.')
 REMEDY_FOR = {
     'grown': UNCOVERED_REMEDY,
-    'unrecorded': UNCOVERED_REMEDY,
+    'unrecorded': UNRECORDED_REMEDY,
     'missing': STALE_ENTRY_REMEDY,
     'graduated': STALE_ENTRY_REMEDY,
 }
 
 
-def uncovered_counts(coverage_dir, root=ROOT):
+def tracked_uncovered_counts(coverage_dir, root=ROOT):
     """Return the uncovered executable line count of every tracked file."""
     report = js_coverage.collect_coverage(coverage_dir, root)
     return {rel: len(item.executable_lines) - len(item.covered_lines)
@@ -60,8 +70,8 @@ def violations(counts, baseline):
         'unrecorded': {rel: count for rel, count in counts.items()
                        if rel not in baseline and count > 0},
         'missing': sorted(rel for rel in baseline if rel not in counts),
-        'graduated': sorted(rel for rel in baseline
-                            if rel in counts and counts[rel] == 0),
+        'graduated': {rel: counts[rel] for rel in baseline
+                      if rel in counts and counts[rel] == 0},
     }
 
 
@@ -98,7 +108,7 @@ def main(argv=None):
     try:
         data = thresholds.load(args.thresholds)
         baseline = thresholds.js_coverage_baseline(data)
-        counts = uncovered_counts(args.coverage_dir, args.root)
+        counts = tracked_uncovered_counts(args.coverage_dir, args.root)
         if args.tighten:
             updated = tightened(baseline, counts)
             if updated is None:
