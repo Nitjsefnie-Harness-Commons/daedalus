@@ -10,11 +10,20 @@ Neither is keyed on a name the source could spell another way. The
 network arm resolves a callee to a live OBJECT and asks whether that
 object is a member of a stdlib network module, so `urlopen`, an aliased
 import of it, a module aliased at the import and a local bound from it
-are ONE receiver; the reachability arm asks what OPERATION the number is
-handed to, never whether the signature looks like a launcher's and never
-whether the receiver happened to resolve — an unresolved receiver is the
-case the unconditional refusal existed for, and reading it as a proof of
-safety is what silenced three real bounds in the first version of it.
+are ONE receiver. The reachability arm asks for a PROOF that the number
+reaches no child and discharges only on one: the number reaching no call
+at all, every call it reaching having a receiver the tree binds to a
+literal, or every one of them only building what a `raise` raises.
+
+That is the whole of the rule, and it is a proof rather than a guess on
+purpose. Two earlier versions each substituted a guess, from opposite
+sides — discharging when the receiver did not resolve, and discharging
+when the operation's name was not one the census held — and each silenced
+a different set of shapes that reap a real child. Neither "the receiver
+did not resolve" nor "the operation is not one I know" is a statement
+about the number. `deadline_reaches_a_child` is where that reasoning
+lives and `literal_bindings` is what the second proof is read off; this
+is the map, not the argument.
 """
 import ast
 import importlib
@@ -79,15 +88,16 @@ def _dotted_bindings(tree):
     is module-wide rather than scope-aware, which over-approximates, and
     over-approximating here refuses.
 
-    The assignment pass runs to a fixpoint of THREE rounds, and the bound
-    is deliberate. Source order does the work in a single pass for a
-    forward-declared chain; a REVERSED chain needs one round per link, and
-    a chain four links deep written back to front stops short at three
-    with its tail unresolved. That failure direction is a false red and
-    never a false green — an unresolved callee is not a network read —
-    and a cycle converges rather than running, because the table only
-    ever grows.
+    The assignment pass runs to a fixpoint of THREE rounds, and that count
+    is the whole of the termination argument: the loop is `for _ in
+    range(3)`, so a cycle cannot run and a chain longer than the rounds
+    stops where the budget runs out. Source order does the work in a
+    single pass for a forward-declared chain; a REVERSED chain needs one
+    round per link, and a three-link chain written back to front stops
+    short with its tail unresolved. That failure direction is a false red
+    and never a false green — an unresolved callee is not a network read.
     """
+    scoped = _scoped_assignments(tree)
     bound = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -107,15 +117,68 @@ def _dotted_bindings(tree):
             if not targets:
                 continue
             resolved = _resolve_dotted(node.value, bound)
-            for target in targets:
-                if resolved is None:
-                    bound.pop(target.id, None)
-                else:
+            if resolved is not None:
+                # An ADD is safe module-wide: the binding it records is
+                # what the source says, and a function-local
+                # `_open = urllib.request.urlopen` is still the read it
+                # was written as for every caller in the module.
+                for target in targets:
                     bound[target.id] = resolved
-    for node in ast.walk(tree):
-        if isinstance(node, ast.arg):
-            bound.pop(node.arg, None)
+            elif node not in scoped:
+                # A DISCARD is a shadow claim, and it needs the scope that
+                # can reach the call: `urlopen = object()` inside one
+                # helper shadows the import there, not in the module.
+                for target in targets:
+                    bound.pop(target.id, None)
     return bound
+
+
+def _function_nodes(tree):
+    """Every function and lambda body in the tree, as a set of objects."""
+    return {node for node in ast.walk(tree)
+            if path._is_def(node) or isinstance(node, ast.Lambda)}
+
+
+def _scoped_assignments(tree):
+    """The assignments inside a function body rather than the module."""
+    inside = set()
+    for node in _function_nodes(tree):
+        inside.update(id(child) for child in ast.walk(node))
+    return {node for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and id(node) in inside}
+
+
+def _shadowed_parameters(tree):
+    """`function ->` the parameter names that shadow an import inside it.
+
+    The module table cannot carry this. A parameter named after a
+    from-import is a shadow in the function that declares it and nowhere
+    else, so popping the name from the module table over-refused every
+    read in the file that declared it: one `urlopen` parameter in an
+    unrelated helper turned a real network read into a fault, measured on
+    five shapes and one of five.
+
+    The key is the function NODE rather than its name, because names are
+    not unique across a module and this file already meets that.
+    """
+    shadows = {}
+    for node in ast.walk(tree):
+        if not path._is_def(node):
+            continue
+        args = node.args
+        names = {arg.arg for arg in list(args.posonlyargs) + list(args.args)
+                 + list(args.kwonlyargs)}
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Assign) or child.value is None:
+                continue
+            if _resolve_dotted(child.value, {}) is not None:
+                continue
+            names.update(target.id for target in child.targets
+                         if isinstance(target, ast.Name))
+        if names:
+            shadows[node] = frozenset(names)
+    return shadows
 
 
 _LITERALS = (ast.List, ast.Dict, ast.Set, ast.Tuple, ast.Constant,
@@ -131,6 +194,11 @@ def literal_bindings(tree):
     binding the census needs is usually not in the function: a test
     double's recorder is bound in `__init__` and a fixture's list in the
     test body, while the deadline-carrying call sits in a third scope.
+
+    A literal is a STARTING state, and the table is last-write-wins: a
+    name bound to `[]` and then rebound to a real child is a child, and a
+    set that only ever added kept reading it as a container. The discard
+    below is the same move `_dotted_bindings` makes for the same reason.
     """
     bound = set()
     for node in ast.walk(tree):
@@ -140,12 +208,14 @@ def literal_bindings(tree):
             targets, value = [node.target], node.value
         else:
             continue
-        if not isinstance(value, _LITERALS):
-            continue
         for target in targets:
             key = path._dotted_key(target)
-            if key:
+            if not key:
+                continue
+            if isinstance(value, _LITERALS):
                 bound.add(key)
+            else:
+                bound.discard(key)
     return frozenset(bound)
 
 
@@ -198,7 +268,7 @@ def _live_object(dotted):
     return value
 
 
-def is_network_read(func, bound):
+def is_network_read(func, bound, shadowed=frozenset()):
     """Whether a callee IS a network read, resolved rather than spelled.
 
     The receiver question `_is_launch` asks for a launch, asked here for
@@ -214,6 +284,9 @@ def is_network_read(func, bound):
     reads = _network_reads()
     dotted = _resolve_dotted(func, bound)
     if dotted is None:
+        return False
+    written = path._dotted_key(func)
+    if written and written.partition('.')[0] in shadowed:
         return False
     value = _live_object(dotted)
     return value is not None and id(value) in reads
@@ -241,10 +314,15 @@ def _raised_exceptions(function, bound):
 
     Constructing the exception is not ending a child, and the deadline
     reaching nothing else is the same proof as the arithmetic case. The
-    callee is resolved to a live object and asked what it IS, so a local
-    `class Refused(Exception)` is read the same as the stdlib's, and a
-    call that merely looks like one is not — which is the mistake the
-    two-name operation test made from the other direction.
+    callee is resolved to a live live object and asked what it IS, so a
+    call that merely looks like an exception is not cleared — the mistake
+    the two-name operation test made from the other direction.
+
+    IMPORTED, specifically. A local `class Refused(Exception)` does not
+    fire this arm: the resolver reads imports, and a class the module
+    defines is not one it can reach. That is a false red on a fixture
+    that raises its own error with the deadline in hand, and it is
+    disclosed with the control beside it rather than left to be found.
     """
     raised = set()
     for node in ast.walk(function):
@@ -271,10 +349,10 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
     from it, to a call the census cannot show is harmless.
 
     The second half is a POSITIVE proof in the discharge direction, and
-    that is the whole of the difference. The deadline reaching no call at
-    all is a proof: arithmetic and comparison invoke nothing. A call whose
-    receiver the tree binds to a LITERAL is a proof: a container literal
-    is not a process, so it cannot be ended.
+    that is the whole of the difference. There are two of them, and
+    `literal_bindings` carries the second: the deadline reaching no call
+    at all, and a call whose receiver is in that set. Neither is a guess
+    about what the census does not know.
 
     Everything else is refused, and the reason is that each earlier
     version substituted a guess for the proof. Discharging when the
@@ -323,4 +401,13 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
         if isinstance(func, ast.Attribute):
             if path._dotted_key(func.value) not in literals:
                 return True
+            continue
+        # A callee that is neither a name nor an attribute has no
+        # receiver to ask about and nothing the walk can resolve, so
+        # there is no proof to offer and the shape is a refusal. Without
+        # this the loop fell through and returned the narrowing verdict,
+        # which is silence: a subscript, a call and a lambda each reached
+        # the end and were discharged, and one of them hands a real child
+        # to a real `wait`.
+        return True
     return False
