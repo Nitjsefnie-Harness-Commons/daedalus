@@ -1027,7 +1027,10 @@ jobs:
           paths='.github/ci-thresholds.json'
           if git diff --quiet -- $paths; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            printf '%s %s %s\n' \
+            # Two specifiers, two arguments. Splitting the second message
+            # across a continuation would concatenate the halves with no
+            # space between them, which is how this line lost one once.
+            printf '%s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
               "${javascript_measured}% justified no raise; no module shrank, no file lost an over-limit line and no module lost an uncovered JavaScript line." \
               >> "$GITHUB_STEP_SUMMARY"
