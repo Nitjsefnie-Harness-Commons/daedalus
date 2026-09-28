@@ -151,6 +151,53 @@ def test_a_file_bounded_at_one_cell_takes_a_one_cell_measurement(tmp):
     assert 'one cell' not in err, err
 
 
+def test_a_one_cell_candidate_that_lost_its_reference_is_stepped_over(tmp):
+    """Counting a collapsed run's suites must not read its references.
+
+    The collapsed-run rule needs a candidate's suite count before it
+    knows whether that candidate is the partition, and it got the count
+    by reading the whole run. A cell that lost its `reference.json` is
+    a REFUSAL in that path, so a run that would have been filed
+    `incomplete` and stepped over -- which is what the base does with
+    it, and what the two dispositions agree is right -- instead
+    aborted the entire refresh, including the good two-cell run behind
+    it. Same input, same root, two different answers from the two
+    versions of this code.
+    """
+    root = Path(tmp) / 'runs'
+    _write_run(root, 200, {'cell-01': {'test_a.py': 4.0},
+                           'cell-02': {'test_b.py': 4.0}})
+    _write_run(root, 199, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 4.0}},
+               reference=None)
+    text, code, err = _drive(tmp, root, {'test_a.py': 2.0, 'test_b.py': 1.0})
+    assert code == 0, err
+    assert json.loads(text)['measured_from'] == '200', text
+    assert '199' in err and 'incomplete' in err, err
+
+
+def test_a_multi_cell_run_that_measured_less_is_carried_not_refused(tmp):
+    """Limb one of the collapsed rule, on its own: two cells is a matrix.
+
+    The rule is a conjunction of three, and the two that read the FILE
+    have controls of their own. The one that reads the RUN -- a single
+    cell against a multi-cell bound -- did not, and a mutation that
+    dropped it left every other control green. Here the newest run has
+    TWO cells and measured one of the two suites the file records: a
+    partial matrix, which the file carries forward by the union, and
+    not the collapse the rule exists to stop.
+    """
+    root = Path(tmp) / 'runs'
+    _write_run(root, 210, {'cell-01': {'test_a.py': 4.0},
+                           'cell-02': {'test_c.py': 2.0}})
+    text, _code, err = _drive(tmp, root, {'test_a.py': 2.0, 'test_b.py': 1.0,
+                                          'test_d.py': 3.0}, runs=1)
+    assert 'carried forward' in err, err
+    assert 'one cell' not in err, err
+    assert json.loads(text)['suite_weights'] == {
+        'test_a.py': 2.0, 'test_b.py': 1.0, 'test_c.py': 1.0,
+        'test_d.py': 3.0}, text
+
+
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
     """The other half of the tripwire, and the half that was missing.
 
