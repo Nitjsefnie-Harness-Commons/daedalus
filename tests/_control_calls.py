@@ -38,8 +38,9 @@ _PURE_IMPORTS = frozenset({
     ('_workflow_cache_boundary', '_direct_cache_run'),
     ('_workflow_cache_boundary', '_insert_wheel_step'),
     ('_workflow_cache_boundary', '_real_step'),
-    # The opened-set scan reads `tests/*.py` and returns two counts of the
-    # phrase it is handed; it writes nothing and only reads text.
+    # The opened-set scan reads every `tests/*.py` and returns (the files
+    # stating the phrase, how many times between them), sparing one copy
+    # per file where the phrase is assigned to a name. It writes nothing.
     ('_coverage_authority_scan', 'phrase_holders'),
 })
 _PURE_METHODS = frozenset({
@@ -48,6 +49,9 @@ _PURE_METHODS = frozenset({
     'startswith'})
 _PURE_MODULE_CALLS = frozenset({
     '_util.child_coverage', '_util.collect', '_util.runner',
+    # Reaching the assignment that defines a search key is a read of
+    # text already read, not a new way to write.
+    'ast.parse', 'ast.walk',
     'os.path.join', 'sys.path.insert'})
 # Writers, with where the written path arrives as (keyword, position);
 # (None, None) is the receiver. A child runs where its cwd points and a
