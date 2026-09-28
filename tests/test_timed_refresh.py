@@ -19,6 +19,7 @@ import _util  # noqa: E402
 from _repo import ROOT, git_index  # noqa: E402
 from _timed_basis import (  # noqa: E402
     assert_the_generator_wrote_the_basis, verify_recorded_count,
+    verify_unmeasured_list,
     write_run as _write_run)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
@@ -397,10 +398,16 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
     """Seed mode: raw seconds, a derived target, a derived bound."""
     refresh = _refresh()
     planner = _planner()
-    suites = {f'test_s{index:02d}.py': seconds for index, seconds in
-              enumerate([60.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0])}
-    cells = {'cell-01': dict(list(suites.items())[:4]),
-             'cell-02': dict(list(suites.items())[4:])}
+    # Eighteen measured over a nineteen-suite tree, so the one suite the
+    # run did not measure is under a tenth: a seed is refused now unless
+    # the run it seeds from measured the tree, and this fixture is about
+    # the units, the target and the bound rather than about that.
+    shape = ([60.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0] * 2
+             + [5.0, 4.0])
+    suites = {f'test_s{index:02d}.py': seconds
+              for index, seconds in enumerate(shape)}
+    cells = {'cell-01': dict(list(suites.items())[:9]),
+             'cell-02': dict(list(suites.items())[9:])}
     tree = _tree(tmp, sorted(suites) + ['test_unmeasured.py'])
     root = Path(tmp) / 'runs'
     _write_run(root, 36054336022, cells)
@@ -425,7 +432,7 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
     # The seed says which tree suites the numbers do not cover, so a
     # reader of the file alone knows the remainder is estimated.
     assert 'test_unmeasured.py' in written['basis'], written['basis']
-    assert "1 of the tree's 9 suites" in written['basis'], written['basis']
+    assert "1 of the tree's 19 suites" in written['basis'], written['basis']
 
 
 def _smallest_balancing_target(planner, tree, weights, max_cells):
@@ -463,11 +470,10 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     The cell count INSIDE the `max_cells` clause is the one exception, and
     it is an INPUT rather than a derivation: the refresher supplies the
     cells the selected run measured (`refresh_timings.py:389`, and the
-    `max_cells` it derived from that same run on a seed, `:427`). The file
+    `max_cells` it derived from that run on a seed, `:427`). The file
     records the number only in that prose, so the compare covers every
     other clause and the PROSE of that one -- the wording, its position,
-    the `1 cell`/`N cells` plural, the sentence around it -- and not the
-    truth of the count.
+    the `1 cell`/`N cells` plural -- and not the truth of the count.
 
     WHAT CHECKS THE COUNT. `verify_recorded_count` re-derives it through
     the refresher's own `discover_runs` and `read_run`, from the run
@@ -477,41 +483,41 @@ def test_the_shipped_basis_is_what_this_generator_writes(tmp):
     file was never written from. It reads `<repo>/runs`, where the
     refresher is pointed, so it is live in exactly one place:
     `timed-timings.yml` downloads the runs there and its "Verify the
-    change" step runs this suite in the same job with them on disk, so
-    the number is pinned at the step that writes it. The pull-request
-    `suites` job has no artifacts, so there the check cannot run; it
-    says so on stderr rather than passing silently.
+    change" step runs this suite in the same job with them on disk. The
+    pull-request `suites` job has no artifacts, so there the check
+    cannot run; it says so on stderr rather than passing silently.
 
     The boundary is not where it first looks. The target clause's cell
-    count, heaviest cell and median come from `plan_matrix`, and the plan
-    packs the tree's ESTIMATED suites in at the median recorded weight, so
-    those figures move when the live tree gains an unmeasured suite -- on a
-    merge-tree checkout this file's median moved 61.47 -> 61.52. They are
+    count, heaviest cell and median come from `plan_matrix`, which packs
+    the tree's ESTIMATED suites in at the median recorded weight, so they
+    move when the live tree gains an unmeasured suite -- on a merge-tree
+    checkout this file's median moved 61.47 -> 61.52. They are
     file-owned only relative to the file's OWN suite set, so the control
-    derives that set FROM the file -- the recorded weights plus the
-    estimated names the file's own clause lists -- and compares the whole
-    sentence to the generator byte for byte over it. Recomputing over the
-    working tree is the defect: the file describes its HEAD, the `suites`
-    job checks out `refs/pull/N/merge`, and every time `main` gained a
-    suite the merge tree disagreed with a committed artifact. Never reading
-    the live tree makes a moved-on tree green by construction.
+    derives that set FROM the file and compares the whole sentence to the
+    generator byte for byte over it. Recomputing over the working tree is
+    the defect: the file describes its HEAD, the `suites` job checks out
+    `refs/pull/N/merge`, and every time `main` gained a suite the merge
+    tree disagreed with a committed artifact.
 
     This keeps the original protection: a sentence the shipped generator
-    cannot emit stayed in the committed file once -- the phrase equating the
-    bound with the measured cells -- and nothing went red, since the stale
-    text was still true of the seed that produced it. That phrase is in the
-    file-owned `max_cells` clause, so a planted `the bound is that number`
-    fails the byte-for-byte compare. That helper also checks the tree-owned
-    clause structurally, from the file alone: its count equals the names it
-    lists, and its total is the recorded weights plus that count.
+    cannot emit stayed in the committed file once -- the phrase equating
+    the bound with the measured cells -- and nothing went red, since the
+    stale text was still true of the seed that produced it. It is in the
+    file-owned `max_cells` clause, so a planted `the bound is that
+    number` fails the byte-for-byte compare. That helper also checks the
+    tree-owned clause structurally: its count equals the names it lists,
+    and its two halves -- carried against estimated -- sum to it.
+
+    Both cross-checks below read their subject out of that prose, so a
+    file and a generator wrong together would compare equal. The RUN is
+    the only independent witness, and it is on disk in the
+    timed-timings job alone, so both are printed on every run.
     """
     planner = _planner()
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
     assert_the_generator_wrote_the_basis(tmp, data)
-    # The count is read out of the file, so nothing else checks it. This
-    # prints what the cross-check did or could not do, on every run: a
-    # skip that says nothing is indistinguishable from a pass.
     print(verify_recorded_count(data, ROOT / 'runs'), file=sys.stderr)
+    print(verify_unmeasured_list(data, ROOT / 'runs'), file=sys.stderr)
 
 
 def test_the_shipped_file_satisfies_the_margin_it_names(tmp):
@@ -566,17 +572,22 @@ def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     the units, both bounds and the tree suites still estimated.
     """
     refresh = _refresh()
-    tree = _tree(tmp, ['test_a.py', 'test_b.py', 'test_unmeasured.py'])
+    # Eleven measured over twelve, for the seed's coverage bound.
+    measured = ['test_a.py', 'test_b.py'] + [f'test_x{i}.py' for i in range(9)]
+    tree = _tree(tmp, measured + ['test_unmeasured.py'])
     seed_root = Path(tmp) / 'seed-runs'
-    _write_run(seed_root, 1, {'cell-01': {'test_a.py': 40.0,
-                                          'test_b.py': 4.0}},
+    _write_run(seed_root, 1,
+               {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0,
+                            **{name: 4.0 for name in measured[2:]}}},
                reference=None)
     out = _file(tmp, _data({}, units='seconds'), name='seed.json')
     _run(refresh, _refresh_args(tmp, seed_root, out, seed=True, tree=tree))
     assert 'raw seconds' in json.loads(
         out.read_text(encoding='utf-8'))['basis']
     root = Path(tmp) / 'runs'
-    _write_run(root, 2, {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0}},
+    _write_run(root, 2,
+               {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0,
+                            **{name: 4.0 for name in measured[2:]}}},
                reference=2.0)
     _run(refresh, _refresh_args(tmp, root, out, tree=tree))
     written = json.loads(out.read_text(encoding='utf-8'))
