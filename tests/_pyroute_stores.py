@@ -12,7 +12,7 @@ from _pyroute_keys import _UNRESOLVED_KEY, _literal_key
 from _pyroute_positions import position_key
 from _pyroute_reads import _receiver_value
 from _pyroute_storage import (container_copy, fold_dynamic,
-                              replace_deferred_storage)
+                              replace_deferred_storage, stale_after_store)
 from _pyroute_values import (UNPROVABLE_SENDER, DeferredClass,
                              DeferredContainer, DeferredInstance,
                              is_deferred_value, sync_cells)
@@ -27,10 +27,10 @@ def _rebuilt(state, owner, replacement, owner_name):
         sync_cells(state, {owner_name})
 
 
-def replace_container(state, owner_name, owner,
-                      items, unknown_length=False):
-    _rebuilt(state, owner, container_copy(owner, items, unknown_length),
-             owner_name)
+def replace_container(state, owner_name, owner, items, unknown_length=False,
+                      stale=None):
+    copied = container_copy(owner, items, unknown_length, stale)
+    _rebuilt(state, owner, copied, owner_name)
 
 
 def replace_slots(state, owner_name, owner, slots):
@@ -86,8 +86,10 @@ def _seed_receiver(state, base, value):
             and isinstance(owner, DeferredContainer):
         key = _literal_key(base.slice, state)
         if key is not _UNRESOLVED_KEY:
-            replace_container(state, name, owner,
-                              {**owner.items, cast(Hashable, key): value})
+            replace_container(
+                state, name, owner,
+                {**owner.items, cast(Hashable, key): value},
+                stale=stale_after_store(owner, (key,)))
             return True
     return False
 
@@ -159,10 +161,17 @@ def _subscript_store(state, target, value, owner, owner_name, removing,
         items.pop(literal, None)
     else:
         items[literal] = None
-    # A computed key may add or remove an entry: the count is unknown.
+    # A computed key may add or remove an entry: the count is unknown, and
+    # on a mapping it may also have named an entry the container already
+    # held. It does NOT retire them: the value the model just read went to
+    # the unknown-key slot, and every read arm already joins that slot, so
+    # the answer accounts for the computed key with the value the model
+    # knows rather than with the unprovable one retirement would add.
     replace_container(
         state, owner_name, owner, items,
-        unknown_length=dynamic and mapping)
+        unknown_length=dynamic and mapping,
+        stale=stale_after_store(
+            owner, () if dynamic else (literal,)))
 
 
 def store_deferred_target(

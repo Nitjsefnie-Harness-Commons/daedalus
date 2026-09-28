@@ -158,7 +158,8 @@ def _bind_mapping(pattern, value, state):
                     if all(k != _literal_key(key, state)
                            for key in pattern.keys)}
             rests.append(DeferredContainer(rest, len(rest), 'dict',
-                                           branch.identity))
+                                           branch.identity,
+                                           stale=branch.stale & set(rest)))
         _merge_bind(ast.MatchAs(name=pattern.rest), rests, state)
 
 

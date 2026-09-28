@@ -1763,6 +1763,7 @@
     "spent_limit_response": {"python": ["tests/_watcher_fixtures.py"]},
     "split_flow_collection": {"python": ["tests/_yamlscalar.py"]},
     "split_flow_items": {"python": ["tests/_yamlscalar.py"]},
+    "stale_after_store": {"python": ["tests/_pyroute_storage.py"]},
     "stalled_request": {"python": ["tests/_bridge.py"]},
     "start": {"python": ["tests/_netcapture_harness.py"]},
     "startup_timeout": {"python": ["tests/_util.py"]},

@@ -9,14 +9,34 @@ def dict_length(items, counted=True):
     return len(items) if counted and DYNAMIC_KEY not in items else None
 
 
-def container_copy(owner, items, unknown_length=False):
-    """A copy of owner holding items; a dict's length is recounted."""
+def stale_after_store(owner, written=(), unreadable=False):
+    """The keys a store leaves holding a value it may have replaced.
+
+    An unreadable store folded in a source whose keys the model could not
+    read, and such a source may name any key the container already held, so
+    every entry it carried in is a candidate from there on. A key the store
+    wrote from a value the model DID read is exact, and a key an earlier
+    unreadable store retired stays retired unless this one wrote it. The
+    unknown-key slot is not one of these: it names no key, and the read
+    arms consult it themselves.
+    """
+    if unreadable:
+        return (owner.stale | (set(owner.items) - {DYNAMIC_KEY})) \
+            - set(written)
+    return owner.stale - set(written)
+
+
+def container_copy(owner, items, unknown_length=False, stale=None):
+    """A copy of owner holding items; a dict's length is recounted, and
+    the keys an earlier unreadable store retired carry over unless this
+    copy says which of them are current again."""
     length = owner.length
     if owner.kind == 'dict':
         length = dict_length(
             items, owner.length is not None and not unknown_length)
     return DeferredContainer(items, length, owner.kind, owner.identity,
-                             owner.star_display)
+                             owner.star_display,
+                             owner.stale if stale is None else stale)
 
 
 def fold_dynamic(target, value):
@@ -105,6 +125,6 @@ def join_clean_occupancy(kept, other):
         if joined is kept:
             joined = kept.copy()
         replace_deferred_storage(joined, owner, DeferredContainer(
-            items, length, owner.kind, owner.identity, star))
+            items, length, owner.kind, owner.identity, star, owner.stale))
         sync_cells(joined, {name})
     return joined

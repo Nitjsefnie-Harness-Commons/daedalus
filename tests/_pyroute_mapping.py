@@ -8,7 +8,8 @@ from _pyroute_positions import alias_target_pairs, drop_shifted_positions
 from _pyroute_reads import (_apply_pop, _fold_items, _literal_pair_items,
                             _source_items)
 from _pyroute_setops import fold_set_operation, set_operands
-from _pyroute_storage import container_copy, replace_deferred_storage
+from _pyroute_storage import (container_copy, replace_deferred_storage,
+                              stale_after_store)
 from _pyroute_stores import (base_owner, clear_owner, replace_container,
                              root_name, store_deferred_target)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
@@ -130,12 +131,17 @@ def _mark_unprovable(state, owner, owner_name):
     `owner_name` is None for a receiver reached through an attribute or a
     subscript, and the name-keyed storage has no entry to mark then; the
     container's own facts go instead, so a read of it answers with everything
-    it could hold rather than with one key from before the operation."""
+    it could hold rather than with one key from before the operation.
+
+    The store that reached here folded in a source whose keys the model
+    could not read, so it may have named any key the container already
+    held: every recorded value is retired along with the count."""
     if owner_name:
         state.aliases[owner_name] = UNPROVABLE_SENDER
     if isinstance(owner, DeferredContainer) and owner.kind == 'dict':
         replace_container(state, owner_name, owner,
-                          dict(owner.items), unknown_length=True)
+                          dict(owner.items), unknown_length=True,
+                          stale=stale_after_store(owner, unreadable=True))
 
 
 def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
@@ -144,7 +150,10 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
     A `**mapping` argument is a source like any other, and claiming the
     call without folding it would leave the owner holding a key set the
     model never computed, which is the shape a later constant-key read
-    cannot account for."""
+    cannot account for. A source whose keys the model could not all count
+    reaches the owner the same way, and retires the entries the container
+    already held; the keys this call wrote from what the model DID read
+    stay exact."""
     items = {}
     counted = True
     for source in sources:
@@ -177,7 +186,9 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
         combined = dict(owner.items)
         _fold_items(combined, items)
         replace_container(state, owner_name, owner, combined,
-                          unknown_length=not counted)
+                          unknown_length=not counted,
+                          stale=stale_after_store(owner, items,
+                                                  unreadable=not counted))
 
 
 def _apply_setdefault(state, call, owner, owner_name):
@@ -199,7 +210,8 @@ def _apply_setdefault(state, call, owner, owner_name):
         if literal not in owner.items:
             items = dict(owner.items)
             items[literal] = default
-            replace_container(state, owner_name, owner, items)
+            replace_container(state, owner_name, owner, items,
+                              stale=stale_after_store(owner, (literal,)))
         return
     if isinstance(owner, DeferredContainer):
         value = merge_yielded((owner.items.get(DYNAMIC_KEY), default))
