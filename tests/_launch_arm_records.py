@@ -86,7 +86,7 @@ SECONDARY_CONTROLLED = {
 # The closure claim is a GRANULARITY claim, so it is stated with one. The
 # spelling-independent marker is every `if`/`elif`/`while`/`return` header
 # plus each disjunct of a multi-line condition (the granularity the table
-# already uses for :530 and :554), and a clause inside a listed arm's
+# already uses for :529 and :553), and a clause inside a listed arm's
 # SPAN is that arm. `return` is in it because the table treats one as a
 # member (`pf.fallthrough` is `drop_stmt` on one).
 #
@@ -98,9 +98,9 @@ SECONDARY_CONTROLLED = {
 # (seven): a last statement, or one only caller reads for membership
 # or truthiness.
 #
-# The two finer clauses sit INSIDE a listed arm: :572 is the `**`-unpack
-# operand of `ub.not-bounded` (:571) and _argv_read.py:212 the `seen`
-# operand of `rs.guard` (:203). The table splits :530 and :554 per
+# The two finer clauses sit INSIDE a listed arm: :569 is the `**`-unpack
+# operand of `ub.not-bounded` (:568) and _argv_read.py:212 the `seen`
+# operand of `rs.guard` (:203). The table splits :529 and :553 per
 # operand and leaves these whole, a spelling difference, not a gap.
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
@@ -133,28 +133,28 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 392, 'MERGED',
      'the head of a one-member chain; :394 ch.machinery-member is its '
      'only member and is listed'),
-    ('_launch_audit.py', 577, 'INERT',
+    ('_launch_audit.py', 574, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 596, 'CONTROLLED',
+    ('_launch_audit.py', 593, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 663, 'CONTROLLED',
+    ('_launch_audit.py', 660, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 680, 'CONTROLLED',
+    ('_launch_audit.py', 677, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     # The chain limb and the root predicate it reads, recorded here
     # rather than in the enumeration for the reason above.
-    ('_launch_audit.py', 511, 'CONTROLLED',
+    ('_launch_audit.py', 510, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 513, 'CONTROLLED',
+    ('_launch_audit.py', 512, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 694, 'CONTROLLED',
+    ('_launch_audit.py', 691, 'CONTROLLED',
+     'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
+    ('_launch_audit.py', 693, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 696, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 699, 'CONTROLLED',
-     'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 700, 'INERT',
+    ('_launch_audit.py', 697, 'INERT',
      "the None closing _dotted_stdlib_root; deleting its last "
      'statement returns the same value'),
     ('_argv_read.py', 65, 'INERT',

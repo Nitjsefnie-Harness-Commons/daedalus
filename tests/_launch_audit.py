@@ -451,8 +451,8 @@ def launch_refusals(source, here, bound_sink=None):
 
         `import importlib as il` and `il = importlib` differ in the
         spelling the callee carries, so the base is followed through the
-        bindings first: a name bound to the module and used to call a
-        member of it is the same machinery call.
+        bindings: a name bound to the module, used to call a member of
+        it, is the same machinery call.
         """
         if not isinstance(held, ast.Call):
             return False
@@ -491,8 +491,7 @@ def launch_refusals(source, here, bound_sink=None):
         is a binding it cannot read and so the same unreadable name.
 
         A name the module binds to some OTHER call is proved, because
-        the call itself is then the fixed value. A receiver the analyser
-        cannot prove is one it must not pass over.
+        the call itself is then the fixed value.
 
         The family that is NOT closed is the same shape stated without
         the spellings: a module reached through a name the analyser
@@ -561,11 +560,9 @@ def launch_refusals(source, here, bound_sink=None):
         bounded call, whatever it calls and whatever the timeout reads.
         That is the whole of the second arm of the launch policy, and it
         is what makes the policy decidable rather than a list of
-        spellings. A receiver reached
-        through an import name held in a variable, through a class
-        attribute, or through a run-time namespace is not proved, so it is
-        reported at `unreadable` — the rule then demands a refusal or an
-        allowance row for it.
+        spellings. A receiver `proved_fixed` declines is reported at
+        `unreadable`, so the rule demands a refusal or an allowance row
+        for it.
         """
         func = node.func
         if not any(keyword.arg == 'timeout' or keyword.arg is None
