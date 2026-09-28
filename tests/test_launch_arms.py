@@ -23,7 +23,7 @@ from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _arm_sweep import arm_sweep, cut_arm, cut_span  # noqa: E402
+from _arm_sweep import CUT_KIND, arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
                                 MARKER_NON_MEMBERS, ROW_UNCLAIMED,
@@ -289,6 +289,42 @@ def test_every_arm_is_uniquely_addressed(tmp):
     assert shared == [('_launch_audit.py', 526), ('_launch_audit.py', 549)], (
         'the same-line pairs the table carries, each two operands of one '
         f'disjunction; a new one is a decision, not an accident: {shared}')
+
+
+def test_a_spec_whose_op_does_not_match_its_node_is_refused(tmp):
+    """The op names a kind of clause, and any other kind is refused.
+
+    `_locate` answers the node that CARRIES a line, not the one the op
+    names, so a spec keyed one line off is not a wrong answer from the
+    sweep but a wrong MUTATION: a `drop_if` on a `for` cut the whole
+    loop and reported a plausible `removed`, and a `drop_stmt` on a
+    decorator cut the decorator. Both are the module's own refusal now,
+    naming the kind it found.
+
+    The three probes are lines of `tests/_argv_read.py`, which is held
+    byte-identical to base, so the node at each is fixed: a `for`, a
+    `def` and a bare decorator. Each is asserted to be a kind the op
+    does not cut before the refusal is read, so this cannot go on
+    passing once the lines mean something else.
+    """
+    del tmp
+    source = (TESTS / '_argv_read.py').read_text(encoding='utf-8')
+    stmts = {node.lineno: node for node in ast.walk(ast.parse(source))
+             if isinstance(node, ast.stmt)}
+    for line, op in ((84, 'drop_if'), (125, 'drop_if'), (131, 'drop_stmt')):
+        assert not isinstance(stmts.get(line), CUT_KIND[op]), (
+            f'_argv_read.py:{line} is now a '
+            f'{type(stmts.get(line)).__name__}, which {op} does cut, so '
+            'this probe no longer reads an op and node that disagree')
+        try:
+            cut_arm(source, f'{op}:{line}')
+            refused = ''
+        except ValueError as error:
+            refused = str(error)
+        assert refused, (
+            f'{op}:{line} was cut rather than refused, so a spec keyed off '
+            'by one line still mutates whatever clause landed there')
+        assert op in refused and 'found a' in refused, refused
 
 
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
