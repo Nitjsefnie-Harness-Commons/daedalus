@@ -39,7 +39,7 @@ one-line pointer to the note at each arm it names.
 # The suite checks each name here really crashes, and that the set
 # partitions the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
 # crash-held -- needs the whole sweep, which
-# `scripts/launch_arm_sweep.py` re-derives and checks both ways.
+# `tests/_launch_arm_sweep.py` re-derives and checks both ways.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',

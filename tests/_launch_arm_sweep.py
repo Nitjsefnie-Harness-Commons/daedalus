@@ -7,20 +7,21 @@ covers the 136 arms it does NOT name, and "no other arm is crash-held"
 needs every one of them, so the sweep is the only place it can be
 checked.
 
-    python3 scripts/launch_arm_sweep.py
+It lives here, beside the modules it imports, because it is a driver
+over the test tree and not a repository script: under `scripts/` the
+type checker's default scope put it on the root path, where the three
+test-tree imports it is built on did not resolve.
+
+    python3 tests/_launch_arm_sweep.py
 """
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'tests'))
-
-from _arm_sweep import arm_sweep  # noqa: E402
-from _launch_arm_records import (CRASH_CONTROLLED,  # noqa: E402
-                                SECONDARY_CONTROLLED)
-from _launch_arms import (CONTROLLED, LAUNCH_ARMS,  # noqa: E402
-                          REDUNDANT, STATES, STEP_CEILING_CONTROL)
+from _arm_sweep import arm_sweep
+from _launch_arm_records import CRASH_CONTROLLED, SECONDARY_CONTROLLED
+from _launch_arms import (CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES,
+                          STEP_CEILING_CONTROL)
 
 # The arm table's own column order, named so nothing here reads a bare 6.
 ID, STATE, EVIDENCE = 0, 6, 7
@@ -37,7 +38,7 @@ def _by_value(found):
                   if label not in found['crash'])
 
 
-def _report(findings):
+def _counters(findings):
     """Print every counter, and return the checks that did not agree."""
     states = {state: sum(1 for arm in LAUNCH_ARMS if arm[STATE] == state)
               for state in STATES}
@@ -104,7 +105,7 @@ def main():
     """Sweep the whole table, and exit nonzero on any failed check."""
     with tempfile.TemporaryDirectory(prefix='launch-arm-sweep-') as name:
         findings = arm_sweep(Path(name), LAUNCH_ARMS)
-    failed = _report(findings)
+    failed = _counters(findings)
     if failed:
         for line in failed:
             print(f'FAIL {line}')
