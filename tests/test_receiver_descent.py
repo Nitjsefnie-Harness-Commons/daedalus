@@ -123,6 +123,111 @@ go = [subprocess].pop
     )
 
 
+def _for_iterable_carrier_cases():
+    """A loop's iterable is decomposed, so its receiver arrives in a target.
+
+    `{'sp': subprocess}.values()` is the row that decides this arm, and
+    the discrimination is the use site rather than the call. The same
+    receiver in a binding position is the clean row `{"a": subprocess}
+    .values().pop()` above: an assignment reads nothing out of what the
+    call returns, while a loop binds a launcher out of it and the next
+    statement launches. `_carried_parts` alone judges neither, because a
+    non-launch attribute's receiver is a constant read to it.
+
+    The last two rows are the arm's own bound. A loop over a call built
+    on a bare name carries its launcher in the arguments, which the walk
+    already reaches, and a loop over something that is not a call is
+    judged by the walk with no help from here.
+    """
+    return (
+        ('dict values as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'sp': subprocess}.values():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('subscripted dict as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'outer': {'sp': subprocess}}['outer'].values():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('indexed list as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in [{'sp': subprocess}][0].values():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('twice indexed tuple as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in ([{'sp': subprocess}],)[0][0].values():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('async loop over dict values', """import os
+import subprocess
+os.chdir(tmp)
+async def go():
+    for launcher in {'sp': subprocess}.values():
+        launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('iterable call on a bare name', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in list(subprocess):
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('iterable that is not a call', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'sp': subprocess}:
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+    )
+
+
+def _binding_position_cases():
+    """A binding that puts the module in a container is a launcher.
+
+    Three rows issue #1239 read as false positives, and none of them is
+    one. They are refused by the BINDING arm and never reach the receiver
+    descent: the assigned value is itself a call, and `_carried_parts`
+    descends a call-based callee — `Attribute(attr, Call(...))` unwinds to
+    the `Call` — down to the argument holding the module. By the issue's
+    own criterion they are correct, and they reproduce as refused on
+    `8babe1ae` with `_carried_parts` untouched, so releasing them is not
+    this descent's business.
+
+    The third row was filed under MUST STAY CLEAN on the argument that
+    `dict().get(subprocess)` evaluates to the module and `.upper()` on a
+    module is an `AttributeError`, so there is no launcher anywhere. That
+    is a runtime fact the walk deliberately does not model — an attribute
+    outside `_LAUNCH_READS` is a constant read to it — and it is the same
+    mechanism as the first two rows, which are correctly refused. One
+    family cannot be both, and `_carried_parts` is not this branch's to
+    open. It is recorded here so the next reader does not re-open it
+    against the receiver tables, and because the release of those tables
+    is what made all three look wrong.
+    """
+    return (
+        ('list then a method', """import os
+import subprocess
+os.chdir(tmp)
+go = list(subprocess).count(1)
+""", 'go = '),
+        ('sorted then index', """import os
+import subprocess
+os.chdir(tmp)
+go = sorted(subprocess).index(1)
+""", 'go = '),
+        ('module as a receiver argument', """import os
+import subprocess
+os.chdir(tmp)
+go = dict().get(subprocess).upper()
+""", 'go = '),
+    )
+
+
 def _intermediate_call_carrier_cases():
     """A call inside the chain, and the launch read that makes it matter.
 
@@ -184,6 +289,16 @@ def test_a_receiver_reading_no_launch_method_stays_clean(tmp):
 def test_a_receiver_reached_through_an_intermediate_call_is_refused(tmp):
     del tmp
     _one_verdict_each(_intermediate_call_carrier_cases())
+
+
+def test_a_loop_reading_a_launcher_out_of_its_iterable_is_refused(tmp):
+    del tmp
+    _one_verdict_each(_for_iterable_carrier_cases())
+
+
+def test_a_binding_putting_the_module_in_a_container_is_refused(tmp):
+    del tmp
+    _one_verdict_each(_binding_position_cases())
 
 
 if __name__ == '__main__':
