@@ -71,10 +71,11 @@ SECONDARY_CONTROLLED = {
 #
 # Twenty-two clauses fall outside every arm, each named with what covers
 # it: MERGED is a chain head whose every member IS a listed arm (five),
-# CONTROLLED stands alone with a row holding it (ten, measured to
-# move a label: six to a value, four by a raise), and INERT is one
-# whose deletion moves nothing (seven): a last statement, or one only
-# caller reads for membership or truthiness.
+# CONTROLLED stands alone with a row holding it (ten, each measured to
+# move a label and split between a changed value and a raise by
+# NON_MEMBER_CRASH_HELD), and INERT is one whose deletion moves nothing
+# (seven): a last statement, or one only caller reads for membership
+# or truthiness.
 #
 # The two finer clauses sit INSIDE a listed arm: :567 is the `**`-unpack
 # operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
@@ -142,6 +143,22 @@ MARKER_NON_MEMBERS = (
      "the None closing resolve_string's recursion; deleting its "
      'last statement returns the same value'),
 )
+
+# The CONTROLLED non-members whose evidence goes red by RAISING rather
+# than to another value; the other six of the ten are held by a value.
+# This is the same split CRASH_CONTROLLED records for the arms, and it
+# is a MEASUREMENT rather than something the table yields: the same
+# evidence row is crash-held at one clause and value-held at another --
+# `kwarg-receiver-shadowing-a-module-import-is-unproved` raises at
+# `_launch_audit.py:53` but moves a value at :303, and
+# `a-clean-launch-emits-nothing` raises at :68 and `_argv_read.py:153`
+# but moves a value at :675 -- so inferring it from the table gets four
+# of the ten wrong. `tests/test_launch_arms.py` sweeps all ten
+# non-members and re-derives this set.
+NON_MEMBER_CRASH_HELD = frozenset({
+    '_argv_read.py:153', '_launch_audit.py:53', '_launch_audit.py:68',
+    '_launch_audit.py:383',
+})
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
 # forward direction -- every CONTROLLED arm names a real row -- is the

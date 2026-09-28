@@ -26,8 +26,9 @@ import _util  # noqa: E402
 from _arm_sweep import CUT_KIND, arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
-                                MARKER_NON_MEMBERS, ROW_UNCLAIMED,
-                                SECONDARY_CONTROLLED, STEP_CEILING_HELD_BY)
+                                MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD,
+                                ROW_UNCLAIMED, SECONDARY_CONTROLLED,
+                                STEP_CEILING_HELD_BY)
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
                           REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
@@ -570,6 +571,61 @@ def _enclosing(spans, line):
     holding = [name for name, (start, end) in spans.items()
                if start <= line <= end]
     return max(holding, key=lambda name: spans[name][0], default='')
+
+
+def _non_member_arms():
+    """One arm per CONTROLLED non-member, in the shape `arm_sweep` takes.
+
+    A non-member is a clause no arm covers, so it has no cut of its own
+    to borrow: the op it needs is the one that names the clause the
+    record already gives a line for, and nothing else is invented here.
+    """
+    return [(f'{name}:{line}', name, line, f'drop_stmt:{line}', '', '',
+             state, why)
+            for name, line, state, why in MARKER_NON_MEMBERS
+            if state == 'CONTROLLED']
+
+
+def test_every_controlled_non_member_is_controlled_by_its_evidence(tmp):
+    """The CONTROLLED non-members are swept, not recorded and believed.
+
+    `MARKER_NON_MEMBERS` carries a state and an evidence row in the same
+    shape an arm carries them, for 22 clauses that are in no arm at all
+    -- so nothing re-derived either: they sit outside the 150-arm
+    sweep, outside the crash/value partition and outside the
+    `uncontrolled` count. `_launch_audit.py:300` is the sharpest case,
+    because its evidence row is named by no arm whatsoever, so that
+    clause's only recorded state lived in the one structure nothing
+    measures.
+
+    So each is swept the way an arm is, and two claims are derived
+    rather than read: its own evidence row really controls it, and
+    `NON_MEMBER_CRASH_HELD` still names exactly the non-members held by
+    a raise. The split is the part no gate could reconstruct -- it is a
+    measurement, and inferring it from the table gets four of the ten
+    wrong.
+    """
+    arms = _non_member_arms()
+    findings = arm_sweep(Path(tmp), arms)
+    by_raise = set()
+    for arm in arms:
+        name, evidence = arm[ID], arm[EVIDENCE]
+        found = findings[name]
+        assert 'refused' not in found, f'{name}: {found["refused"]}'
+        assert 'timed_out' not in found, (
+            f'{name}: the child did not answer, so this run says nothing '
+            'about the clause')
+        assert evidence in found['moved'] or evidence in found['crash'], (
+            f'{name}: deleting it left every verdict alone, so its own '
+            f'evidence {evidence!r} does not control it; it moved '
+            f'{len(found["moved"])} verdicts and crashed '
+            f'{found["crash"]}')
+        if evidence in found['crash']:
+            by_raise.add(name)
+    assert by_raise == set(NON_MEMBER_CRASH_HELD), (
+        'the CONTROLLED non-members held by a raise are not the ones '
+        f'NON_MEMBER_CRASH_HELD names: sweep {sorted(by_raise)}, recorded '
+        f'{sorted(NON_MEMBER_CRASH_HELD)}')
 
 
 def test_every_named_non_member_reason_names_the_function_it_is_in(tmp):
