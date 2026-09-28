@@ -129,8 +129,8 @@ def _weight_refusal(weights, estimated, share):
         f'{share:.0%} of this plan\'s weight is estimated, over the '
         f'{MAX_ESTIMATED_WEIGHT_SHARE:.0%} bound: '
         f'{_recorded_clause(weights, estimated)} ({measured:.4g} measured '
-        f'against {unmeasured:.4g} '
-        f'estimated at the median recorded weight), so the cell count and '
+        f'against {unmeasured:.4g} estimated at the median recorded '
+        f'weight), so the cell count and '
         f'the balance guarantee are computed over a total the file does '
         f'not measure; {_REMEDY}')
 
@@ -141,10 +141,10 @@ def _suite_refusal(weights, estimated, share):
         f'{share:.0%} of this plan\'s suites are estimated, over the '
         f'{MAX_ESTIMATED_SUITE_SHARE:.0%} bound: '
         f'{_recorded_clause(weights, estimated)}, so the majority of the '
-        f'plan is a single borrowed median rather '
-        f'than a measurement, and the weight share cannot see it -- the '
-        f'median comes from the recorded weights, so one heavy suite '
-        f'among them hides the shortfall from the weight share entirely; '
+        f'plan is a single borrowed median rather than a measurement, and '
+        f'the weight share cannot see it: the median comes from the '
+        f'recorded weights, so one heavy suite among them hides the '
+        f'shortfall from the weight share entirely; '
         f'{_REMEDY}')
 
 
