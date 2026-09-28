@@ -15,11 +15,14 @@ a filesystem that lies, so no run reaches it, and a check on the source's
 spelling is satisfied by `payload = written`. That check is gone rather
 than kept, and the claim it guarded went with it.
 """
+import contextlib
+import io
 import os
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -65,6 +68,17 @@ def _say(result):
     return result.stdout + result.stderr
 
 
+def _reported_state(output):
+    """The state word the helper reported, not a word in its paths.
+
+    The suite names each temp directory after its test function, so the
+    path a test about a dirty target prints is full of the word "dirty"
+    whatever the program says. Slicing the state out is what keeps these
+    assertions about what was reported rather than about what was printed.
+    """
+    return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
+
+
 def _only_entry(store):
     entries = [item for item in Path(store).iterdir() if item.is_dir()]
     assert len(entries) == 1, entries
@@ -74,9 +88,11 @@ def _only_entry(store):
 def _unreadable_as_bytes(entry):
     """Make a stored copy unreadable as bytes, on every platform.
 
-    A directory where a file is expected raises IsADirectoryError on
-    every platform, so this needs no privilege drop and no Windows
-    carve-out. That is a claim about the OPEN, so it holds only where the
+    A directory where a file is expected refuses the open on every
+    platform - IsADirectoryError on POSIX, PermissionError on Windows -
+    so this needs no privilege drop and no Windows carve-out. The class
+    is the platform's; what the caller can rely on is that it is an
+    OSError. That is a claim about the OPEN, so it holds only where the
     open is reached: the advice path has no presence guard in front of
     it, and the restore path does and answers the directory as "nothing
     is stored" before any read.
@@ -118,16 +134,15 @@ def _hand_to_nobody(path):
 
 
 def _open_the_entry(store, target):
-    """Hand the child every directory and file it walks to publish.
-
-    A suite's own temporary root is created 0700, so without the traverse
-    bit the child reads a refusal where the route should have run.
-    """
+    """Hand the child every directory and file it walks to publish: a
+    suite's temporary root is created 0700, and without the traverse bit
+    the child reads a refusal where the route should have run."""
     entry = _only_entry(store)
     for directory in (target.parent, store, entry):
         for ancestor in (directory, *directory.parents):
             os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
-    for owned in (target.parent, store, entry, *entry.iterdir()):
+    for owned in (target.parent.parent, target.parent, store, entry,
+                  *entry.iterdir()):
         _hand_to_nobody(owned)
 
 
@@ -281,13 +296,9 @@ def _states_while_restoring(plant, target, store):
 
 
 def _helper_that_publishes_in_place(tmp):
-    """A copy of the real helper whose _publish truncates the target.
-
-    The copy is what makes the non-vacuity proof part of the suite: the
-    sampler is run against it below and must go red, so a sampler that
-    never caught the write window fails here rather than passing quietly
-    on every leg.
-    """
+    """A copy of the real helper whose _publish truncates the target, so
+    the non-vacuity proof below runs on every leg rather than being a
+    claim in a report."""
     source = PLANT.read_text(encoding='utf-8')
     old = '        os.replace(temp, target)'
     new = ("        with open(temp, 'rb') as staged:\n"
@@ -297,6 +308,76 @@ def _helper_that_publishes_in_place(tmp):
     broken = Path(tmp) / 'plant_in_place.py'
     broken.write_text(source.replace(old, new), encoding='utf-8')
     return broken
+
+
+def _a_directory_on_another_device(store):
+    """A writable directory on another device from the store's - os.replace
+    is atomic only within one filesystem."""
+    wanted = os.stat(store).st_dev
+    for candidate in ('/dev/shm', tempfile.gettempdir()):
+        try:
+            probe = Path(candidate)
+            if not probe.is_dir() or os.stat(probe).st_dev == wanted:
+                continue
+            made = probe / f'plantrestore-otherdev-{os.getpid()}'
+            made.mkdir(exist_ok=True)
+            os.chmod(made, 0o777)
+            return made
+        except OSError:
+            continue
+    return None
+
+
+def test_a_target_on_another_device_still_restores(tmp):
+    store = Path(tmp) / 'store'
+    store.mkdir(parents=True)
+    elsewhere = _a_directory_on_another_device(store)
+    if elsewhere is None:
+        _util.skip('no writable directory on a second device here')
+    try:
+        target = elsewhere / 'target.py'
+        target.write_bytes(_COMMITTED)
+        assert _plant('save', str(target), '--store',
+                      str(store)).returncode == 0
+        target.write_bytes(_PLANTED)
+        restored = _plant('restore', str(target), '--store', str(store))
+        assert restored.returncode == 0, _say(restored)
+        assert target.read_bytes() == _COMMITTED
+    finally:
+        for leftover in elsewhere.glob('*'):
+            leftover.unlink()
+        elsewhere.rmdir()
+
+
+def test_a_racing_save_is_refused_and_not_traced(tmp):
+    # The guard is check-then-act, so a second save can pass it and reach
+    # an entry that now exists: a refusal, not a traceback.
+    plant = _util.load(PLANT, 'plant_racing_save')
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert plant.save(str(target), str(store)) == 0
+    entry = str(_only_entry(store))
+    real_exists = os.path.exists
+    state = {'raced': False}
+
+    def racing(path):
+        if str(path) == entry and not state['raced']:
+            state['raced'] = True
+            return False
+        return real_exists(path)
+
+    err, out = io.StringIO(), io.StringIO()
+    try:
+        os.path.exists = racing
+        with contextlib.redirect_stderr(err), \
+                contextlib.redirect_stdout(out):
+            status = plant.save(str(target), str(store))
+    finally:
+        os.path.exists = real_exists
+    assert state['raced'], 'the race was never reached'
+    assert status == 1, status
+    assert str(target) in err.getvalue(), err.getvalue()
 
 
 def _planted_publish_fixture(tmp):
@@ -311,8 +392,9 @@ def _planted_publish_fixture(tmp):
 
 def test_a_reader_never_sees_a_third_state_while_a_restore_publishes(tmp):
     target, store = _planted_publish_fixture(tmp)
-    assert _states_while_restoring(PLANT, target, store) <= {
-        len(_PAYLOAD), len(_PLANTED)}
+    seen = _states_while_restoring(PLANT, target, store)
+    assert seen, 'the sampler observed nothing, so this run asserts nothing'
+    assert seen <= {len(_PAYLOAD), len(_PLANTED)}, sorted(seen)
 
 
 def test_the_sampler_catches_a_publish_that_is_not_atomic(tmp):
@@ -498,7 +580,7 @@ def test_save_reports_a_dirty_target_against_head(tmp):
     target.write_bytes(_FIXED)
     dirty = _plant('save', str(target), '--store', str(store))
     assert dirty.returncode == 0, _say(dirty)
-    assert 'dirty' in dirty.stdout.lower(), _say(dirty)
+    assert _reported_state(dirty.stdout) == 'dirty', _say(dirty)
 
 
 def test_save_reports_unknown_outside_a_git_work_tree(tmp):
@@ -517,7 +599,7 @@ def test_save_reports_unknown_outside_a_git_work_tree(tmp):
     store = Path(tmp) / 'store'
     other = _plant('save', str(outside), '--store', str(store))
     assert other.returncode == 0, _say(other)
-    assert 'unknown' in other.stdout.lower(), _say(other)
+    assert _reported_state(other.stdout) == 'unknown', _say(other)
 
 
 _PARAGRAPH_ANCHORS = ('have not watched fail', 'plant the defect',
