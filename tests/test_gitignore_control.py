@@ -8,17 +8,6 @@ against and asserts a verdict for each shape.
 Every fixture runs the shipped generator in its own throwaway repository
 and commits what it wrote, so no base artifact is ever a literal the
 fixture wrote itself.
-
-What a test here defends, and what it does not, so the next reader is not
-misled about where the placement claim is enforced. This suite pins that a
-branch carrying an un-regenerated tracked file is RED **on its own head** —
-that is the half placement governs. It does NOT pin that the control runs
-on the pull request. The merge fixture below is placement-independent: it
-builds its repositories in process and touches no CI configuration, so
-moved to a post-merge step it would still pass. The placement is therefore
-a claim of the control's docstring and of the workflow, not of a test here,
-and moving the control off the PR path is a change that has to argue with
-a reader.
 """
 import subprocess
 import sys
@@ -214,12 +203,18 @@ def test_a_file_added_with_force_and_no_regeneration_is_red(tmp):
     branch's own head and on its own merge ref, the required check holds
     the merge, and the default branch never sees it.
 
-    It is a fixture about a BRANCH, and that is the point. The merge
-    fixture below builds its repositories in process and touches no CI
+    What a test in this suite defends, and what it does not, is stated
+    HERE rather than in a module docstring: a reader debugging this
+    fixture is looking at this docstring, and the claim belongs where the
+    fixture is.
+
+    This one pins that a branch carrying an un-regenerated tracked file is
+    RED **on its own head** — that is the half placement governs. It does
+    NOT pin that the control runs on the pull request. The merge fixture
+    further down builds its repositories in process and touches no CI
     configuration, so it would still pass if the control were moved to a
-    post-merge step — which is why this one cannot be read as a test that
-    defends where the control runs. What it pins is the premise; the
-    placement is the control's docstring and the workflow's.
+    post-merge step. The placement is therefore a claim of the control
+    module's docstring and of the workflow, not of a test here.
     """
     repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
     _write(repo, 'forced.py')
