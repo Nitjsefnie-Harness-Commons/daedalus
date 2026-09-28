@@ -17,9 +17,19 @@ first file is seeded from raw seconds of one run, which `units` says
 (`seconds` before the reference workload exists, then
 `reference-multiples`); `units` is the only place that fact is recorded,
 because a second spelling of it is a second thing to disagree with
-itself. `measured_from` names the run the numbers came from and `runs`
+itself. `measured_from` names the runs THIS WRITE measured and `runs`
 says how many, so a weight with no run behind it is a number no refresh
-can check. The one optional field, `basis`, is the PROSE the refresher
+can check. It does not claim to name every run any weight in the file came
+from, and it cannot: the refresh is a union, so after a partial run most
+of the weights are carried forward from older runs and the field's own
+subject is the sample, not the file. The `basis` clause is where the split
+is recorded -- it names every suite the named runs did not measure, and of
+each whether this file already recorded it or the planner is estimating it
+-- so the answer is in the file, and a control reads it back out of the
+prose. A second machine-readable field carrying the same split would be a
+third thing to keep in step with the union, and the schema is closed:
+`read_timings` refuses a field it does not own. The one optional field,
+`basis`, is the PROSE the refresher
 writes beside the two policy numbers on every write, seed or refresh
 (which run, which units, why the target and the cell bound, and which
 tree suites the measurements do not cover); its content is rebuilt from
@@ -32,12 +42,10 @@ where it admits every name), so the planner and the instrument run the
 same rule today; the call is the seam, not a filter. The set comes from
 `git ls-files` rather than a directory listing, for the same reason
 `scripts/ci/size_baseline.py` reads the index: a file no commit
-contains is not a suite of this repository, and a scratch
-`tests/test_*.py` a neighbouring run left in the working tree would
-otherwise be allocated a cell and named in the data file's basis
-sentence. A missing `git`, or a tree that is not a checkout, is a
-refusal with a named reason rather than an empty plan: an empty plan
-times nothing.
+contains is not a suite, and a scratch `tests/test_*.py` left in the
+working tree would be allocated a cell and named in the basis. A
+missing `git`, or a tree that is not a checkout, is a refusal with a
+named reason rather than an empty plan: an empty plan times nothing.
 
 PACKING. `N = ceil(total / target)`, capped at `max_cells` and at the
 number of suites; a suite heavier than the target takes a cell to itself
@@ -48,50 +56,37 @@ including under a uniform rescale of every weight, which is what
 `--scale` simulates.
 
 Four arithmetics the brief does not spell out, each named by the run
-summary when it bites. A suite heavier than the target would otherwise
-be placed into a shared cell and overweight it, so the heavy ones open
-cells of their own; when they outnumber the cells, the least of them
-joins the lightest cell, because `max_cells` is the bound on what runs
-at once and the matrix never carries more cells than the bound allows --
-a heavy suite that gets no cell of its own is still a named split
-candidate, and the summary says which ones. A count larger than the
-suites would leave a cell holding nothing, which the instrument reads
-as "time every suite", so the count is capped at the suite count. And
-when the heaviest cell sits more than the margin above the median, the
-summary names the smallest target that would satisfy it.
+summary when it bites. A suite heavier than the target takes a cell of
+its own rather than overweighing a shared one; when the heavy ones
+outnumber the cells the least of them joins the lightest, because
+`max_cells` bounds what runs at once -- one that gets no cell of its own
+is still a named split candidate. A count above the suite count would
+leave a cell holding nothing, which the instrument reads as "time every
+suite". And when the heaviest cell sits past the margin above the
+median, the summary names the smallest target that would satisfy it.
 
 BALANCE GUARANTEE. `CELL_WEIGHT_MARGIN` is the share a cell may sit
-above the median cell the issue asks the planner to guarantee. Measured
-on this tree with the per-suite head-round medians of run 36070301583
-(237 suites, 816.9 s in total, heavy tail led by
-`test_watcher_budget.py` at 76.2 s). There are two numbers, and the
-margin has to cover the larger. The SHARED cells -- every cell packing
-more than one suite -- come out within 0.3% of their own median at
-every target from 20 to 1000, so the packer is balanced; that is the
-packer's own behaviour. The ALL-cell ratio is `heaviest / median`, and
-it is 1.000 above a target of 85 (no suite is over the target, every
-cell is shared), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a
-suite heavier than the target is alone in its cell by the rule above
-and the median falls as the target does. The margin is `0.35`: the
-round number at or above the ratio at 60 on that run (1.34x a 57 s
-median). The SHIPPED file's target is 25, and its own numbers are
-measured rather than assumed: over the tree's 327 suites (346.9
-reference multiples) it plans 14 cells, a 24.78 heaviest cell against a
-24.78 median, so the ALL-cell ratio is 1.000 -- its weights are a
-re-derivation of one run's own cell readings, so they are uniform by
-construction. The step comes from the planner itself
-(`scripts/ci/timings_bounds.derive_target`) and is verified against the
-margin before every write by `scripts/ci/refresh_timings.py`, the one
-owner of the data file: this module NAMES a target the margin forbids,
-in the summary and in the exit-0 matrix it still prints, and the
-refresher refuses to write one. Below a target the margin admits the
-guarantee does not hold, and the summary says so, naming the smallest
-target that would (heaviest / 1.35); the alternative is a lower median,
-which is what splitting `test_watcher_budget.py` would give. The
-guard's other job is catching a packer that stops packing, and the
-shortest-first order reaches 2.1x on the same weights, well past it.
-Re-derive both numbers with `python3 scripts/ci/plan_timed_matrix.py
---summary` against the data file at each target.
+above the median cell. Measured on this tree with the per-suite
+head-round medians of run 36070301583 (237 suites, 816.9 s, heavy tail
+led by `test_watcher_budget.py` at 76.2 s). Two numbers, and the margin
+has to cover the larger. SHARED cells -- every cell packing more than
+one suite -- come out within 0.3% of their own median at every target
+from 20 to 1000, so the packer is balanced. The ALL-cell ratio
+`heaviest / median` is 1.000 above a target of 85 (no suite over the
+target), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a suite
+heavier than the target is alone in its cell and the median falls as
+the target does. The margin is `0.35`: the round number at or above the
+ratio at 60. The SHIPPED file's target is 25 and its own numbers are
+measured, not assumed: over the tree's 327 suites (346.9 reference
+multiples) it plans 14 cells, 24.78 against a 24.78 median, so the
+ALL-cell ratio is 1.000. The step comes from the planner itself
+(`timings_bounds.derive_target`) and is verified before every write by
+`refresh_timings.py`, the data file's one owner: this module NAMES a
+target the margin forbids, in the summary and in the exit-0 matrix it
+still prints, and the refresher refuses to write one. The guard's other
+job is a packer that stops packing; shortest-first reaches 2.1x on the
+same weights. Re-derive both with `python3
+scripts/ci/plan_timed_matrix.py --summary` at each target.
 
 MEASUREMENT COVERAGE, and why a mostly-estimated plan is a refusal:
 `scripts/ci/timings_coverage.py`, whose `verify_measured` `main` calls.
