@@ -19,8 +19,8 @@ from _repo import ROOT  # noqa: E402
 
 # Holding the keys here is what lets the scan run, and it is not a
 # second statement of the rule: this file counts, it does not claim.
-# What keeps that true is the exemption below, which spares the
-# definition of a key and nothing else in the file.
+# What keeps that true is the exemption below, which spares a key this
+# module declares at its top level and nothing else in the file.
 _AUTHORITY_HALF = 'whose `attr` is in `_LAUNCH_READS`'
 _AUTHORITY_REST = 'attribute outside that set is a'
 # The one phrase the control asserts no scanned file carries. It is a
@@ -29,17 +29,27 @@ _AUTHORITY_REST = 'attribute outside that set is a'
 # The assignment is this phrase's own definition, so it is exempt too.
 _STALE_UNIVERSAL = 'every other attribute is a constant read'
 _AUTHORITY_FILE = '_coverage_bindings.py'
+# The only module whose top-level declaration of a key is a definition
+# rather than a statement. The file itself is read whole, like any other.
+_KEY_HOLDER = Path(__file__).name
 
 
 def _defines(text, squeezed, key):
-    """True when a plain assignment binds the phrase to a name.
+    """True when this module's top level declares the phrase as a key.
 
-    One definition, and only that shape: a single target that is a
-    `Name`, and a value that is a string constant. A concatenation or an
-    f-string is not a definition, so it stays counted — the exemption is
-    a key naming itself, not a way of writing a key.
+    One shape, and only that one: a statement in the module body whose
+    single target is a `Name` and whose value is a string `Constant`.
+    An explicit `+` is a `BinOp` and an f-string a `JoinedStr`, so
+    neither is a definition. Adjacent literals are a case the parser
+    settles before this sees them — it folds them into one `Constant` —
+    so they are a definition, and the suite pins that rather than
+    leaving it to the reader.
+
+    The module body and not the whole tree, because a nested assignment
+    sits inside some other scope and is a statement wherever it is
+    written, and an `if`-guarded one is guarded on something.
     """
-    for node in ast.walk(ast.parse(text)):
+    for node in ast.parse(text).body:
         if isinstance(node, ast.Assign):
             targets = node.targets
         elif isinstance(node, ast.AnnAssign):
@@ -63,10 +73,11 @@ def phrase_holders(phrase, directory=None):
 
     Every file in the directory is read and none is excluded by name,
     this module among them, so a second statement here is counted like a
-    second statement anywhere else. The one exemption is the key's own
-    definition, where it is defined rather than which file holds it, and
-    only one is ever exempted: a second definition site stays counted,
-    so the exemption cannot become the blind spot it replaced.
+    second statement anywhere else. The one exemption is this module's
+    own declaration of a key at its top level, and it is reached only
+    there: the same assignment in any other file, under any name, at any
+    depth, is a statement like any other. One is ever exempted, so a
+    second declaration beside the first is still a second statement.
     """
     def squeezed(text):
         """The text with a rewrap's marks gone, so wrapping cannot hide it."""
@@ -78,8 +89,9 @@ def phrase_holders(phrase, directory=None):
     for path in sorted((directory or ROOT / 'tests').glob('*.py')):
         text = path.read_text(encoding='utf-8')
         count = squeezed(text).count(key)
-        if count and _defines(text, squeezed, key):
-            count -= 1
+        if count and path.name == _KEY_HOLDER:
+            if _defines(text, squeezed, key):
+                count -= 1
         if count:
             stated.append(path.name)
         total += count

@@ -146,19 +146,19 @@ def test_recognises_compile_as_a_pure_call(tmp):
     assert _violations(source) == []
 
 
-def test_recognises_ast_parse_and_walk_as_pure_calls(tmp):
+def test_recognises_ast_parse_as_a_pure_call(tmp):
     """A control parsing the text it read is not a writer.
 
-    The opened-set scan parses a file to find the assignment that
-    defines its own search key, so without these entries every call the
-    exemption makes reads as an unmodelled call.
+    The opened-set scan parses a file to find the module-level
+    assignment that declares its own search key, so without this entry
+    every call the exemption makes reads as an unmodelled call.
     """
     source = Path(tmp) / 'pure-ast-parse.py'
     source.write_text(
         "import ast\n"
         "def test_control(tmp):\n"
         "    tree = ast.parse((Path(tmp) / 'case.py').read_text())\n"
-        "    list(ast.walk(tree))\n",
+        "    list(tree.body)\n",
         encoding='utf-8')
     assert _violations(source) == []
 
