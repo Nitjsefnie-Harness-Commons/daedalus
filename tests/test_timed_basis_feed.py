@@ -30,7 +30,7 @@ import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _timed_basis import (  # noqa: E402
     assert_the_generator_wrote_the_basis, fixture_tree, verify_recorded_count,
-    write_run)
+    verify_unmeasured_list, write_run)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -243,6 +243,83 @@ def test_the_count_goes_unchecked_where_there_is_nothing_to_check(tmp):
     cannot = verify_recorded_count(
         _timings(tmp, 'c', '100', _SUITES, 2), unreadable)
     assert 'run 100' in cannot and 'UNCHECKED' in cannot, cannot
+
+
+def _file_naming(tmp, name, measured_from, recorded, unmeasured, max_cells=5):
+    """A data file whose basis NAMES `unmeasured` rather than deriving it.
+
+    Written through `basis_sentence` from an explicit list, because the
+    point of the control is the run's answer against the prose's, and a
+    list the file derived from its own weights would be the thing under
+    test.
+    """
+    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                        'timings_bounds')
+    data = _data(recorded, max_cells=max_cells, measured_from=measured_from)
+    tree = fixture_tree(Path(tmp) / f'tree-{name}',
+                        sorted(set(recorded) | set(unmeasured)))
+    data['basis'] = bounds.basis_sentence(tree, data, 2, unmeasured)
+    return _planner().read_timings(_file(tmp, data, name=f'{name}.json'))
+
+
+def test_the_unmeasured_list_is_checked_against_the_run(tmp):
+    """The half of the clause no byte compare can settle.
+
+    `assert_the_generator_wrote_the_basis` reads the unmeasured list out
+    of the prose and hands it back to the generator, so a file and a
+    generator that are wrong together compare equal. The run is the only
+    independent witness, and this suite exists because the arm that asks
+    it runs only where the downloaded runs are on disk.
+
+    Run 100 measures `test_a.py` and `test_b.py` and never saw
+    `test_c.py`, so a file that names `test_c.py` unmeasured agrees with
+    it, and a file that names `test_b.py` -- which the run did measure
+    -- does not.
+    """
+    root = Path(tmp) / 'runs'
+    write_run(root, 100, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 4.0}})
+    honest = _file_naming(
+        tmp, 'honest', '100', {'test_a.py': 1.0, 'test_b.py': 1.0},
+        ['test_c.py'])
+    report = verify_unmeasured_list(honest, root)
+    assert '100 measured 2' in report, report
+    assert 'UNCHECKED' not in report, report
+    lying = _file_naming(
+        tmp, 'lying', '100', {'test_a.py': 1.0, 'test_c.py': 1.0},
+        ['test_b.py'])
+    try:
+        verify_unmeasured_list(lying, root)
+    except AssertionError as error:
+        said = str(error)
+        assert 'test_b.py' in said, said
+        assert 'did not measure' in said, said
+    else:
+        raise AssertionError(
+            'a basis naming a measured suite unmeasured was accepted against '
+            'the run 100 that measured it')
+
+
+def test_the_unmeasured_list_declines_visibly(tmp):
+    """Every way the run-side check does nothing, asserted to say so.
+
+    The same three shapes the cell-count control declines, applied to
+    this one, because a control that compares nothing and reports
+    nothing is indistinguishable from one that compared and agreed.
+    """
+    root = Path(tmp) / 'runs'
+    write_run(root, 100, _TWO_CELLS)
+    data = _file_naming(tmp, 'd', '100', {'test_a.py': 1.0}, ['test_c.py'])
+    no_root = verify_unmeasured_list(data, Path(tmp) / 'nowhere')
+    assert 'no runs root' in no_root and 'UNCHECKED' in no_root, no_root
+    other = _file_naming(tmp, 'e', '999', {'test_a.py': 1.0}, ['test_c.py'])
+    not_there = verify_unmeasured_list(other, root)
+    assert '999' in not_there and 'UNCHECKED' in not_there, not_there
+    unreadable = Path(tmp) / 'unreadable'
+    write_run(unreadable, 100, _TWO_CELLS)
+    (unreadable / '100' / 'cell-01' / 'head-1' / 'test_b.json').write_text(
+        'not json', encoding='utf-8')
+    cannot = verify_unmeasured_list(data, unreadable)
+    assert 'cannot be read' in cannot and 'UNCHECKED' in cannot, cannot
 
 
 def main():
