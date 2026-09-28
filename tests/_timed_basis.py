@@ -151,18 +151,18 @@ def verify_recorded_count(data, runs_root):
         return (f'no runs root at {runs_root}: the recorded cell count went '
                 f'UNCHECKED here')
     named = data['measured_from'].split(',')[0].strip()
-    refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
-                         'refresh_timings')
+    runs = _util.load(ROOT / 'scripts' / 'ci' / 'timings_runs.py',
+                      'timings_runs')
     found = [(run_id, path)
-             for run_id, path in refresh.discover_runs(runs_root)
+             for run_id, path in runs.discover_runs(runs_root)
              if str(run_id) == named]
     if not found:
         return (f'{runs_root} does not carry run {named}, the one the file '
                 f'names: the recorded cell count went UNCHECKED here')
     run_id, path = found[0]
     try:
-        _weights, references = refresh.read_run(path, run_id)
-    except refresh.RefreshError as error:
+        _weights, references = runs.read_run(path, run_id)
+    except runs.RefreshError as error:
         return (f'run {run_id} under {runs_root} cannot be read ({error}): '
                 f'the recorded cell count went UNCHECKED here')
     measured = len(references)

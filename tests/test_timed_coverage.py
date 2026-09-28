@@ -38,55 +38,37 @@ from _timed_basis import write_run as _write_run  # noqa: E402
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 
-def _refresh():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
-                      'refresh_timings')
-
-
 def _planner():
     return _util.load(ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py',
                       'plan_timed_matrix')
 
 
-def _data(weights, units='reference-multiples', target=10.0, max_cells=15,
-          **fields):
-    data = {
-        'schema_version': _planner().SCHEMA_VERSION,
-        'target_cell_weight': target,
-        'max_cells': max_cells,
-        'units': units,
-        'measured_from': 'tests run 1',
-        'runs': 1,
-        'suite_weights': weights,
-    }
-    data.update(fields)
-    return data
+def _drive(tmp, root, weights, runs=3, max_cells=15, **flags):
+    """Refresh `weights` from `root` and report what the command did.
 
-
-def _file(tmp, data, name='suite-timings.json'):
-    path = Path(tmp) / name
-    path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-    return path
-
-
-def _refreshed(refresh, args, expect=0):
-    """Run main() with both streams captured; return (code, out, err)."""
-    out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = refresh.main(args)
-    assert code == expect, (code, out.getvalue(), err.getvalue())
-    return out.getvalue(), err.getvalue()
-
-
-def _refresh_args(tmp, root, out, runs=3, seed=False, tree=None):
-    args = ['--runs-root', str(root), '--out', str(out)]
-    if tree is not None:
-        args += ['--tree', str(tree)]
-    if runs is not None:
-        args += ['--runs', str(runs)]
-    if seed:
-        args += ['--seed']
-    return args
+    One shape because every test here is the same three steps with
+    different numbers: seed a data file, run the refresher over a runs
+    root, read the file back. `flags` are the refresher's own options by
+    name, so a test that needs `--message-file` says so and one that
+    needs nothing says nothing. Returns the file's TEXT, the exit code
+    and stderr -- a test that wants the weights parses the text, and one
+    that wants to prove the file is untouched compares it verbatim.
+    """
+    path = Path(tmp) / 'suite-timings.json'
+    seed = {'schema_version': _planner().SCHEMA_VERSION,
+            'target_cell_weight': 10.0, 'max_cells': max_cells,
+            'units': 'reference-multiples', 'measured_from': 'tests run 1',
+            'runs': 1, 'suite_weights': weights}
+    path.write_text(json.dumps(seed, indent=2) + '\n', encoding='utf-8')
+    argv = ['--runs-root', str(root), '--out', str(path),
+            '--runs', str(runs)]
+    argv += [item for name in sorted(flags)
+             for item in (f'--{name.replace("_", "-")}', str(flags[name]))]
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                          'refresh_timings').main(argv)
+    return path.read_text(encoding='utf-8'), code, err.getvalue()
 
 
 def test_a_one_cell_run_is_not_the_partition_when_an_older_measured_more(
@@ -102,16 +84,13 @@ def test_a_one_cell_run_is_not_the_partition_when_an_older_measured_more(
     the two suites the file records; the two behind it measured two
     cells and both suites, and the sample must come from those.
     """
-    refresh = _refresh()
     root = Path(tmp) / 'runs'
     _write_run(root, 140, {'cell-01': {'test_a.py': 4.0}})
     for run_id in (139, 138):
         _write_run(root, run_id, {'cell-01': {'test_a.py': 8.0},
                                   'cell-02': {'test_b.py': 2.0}})
-    out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}),
-                name='timings.json')
-    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out, runs=3))
-    written = json.loads(out.read_text(encoding='utf-8'))
+    text, _code, err = _drive(tmp, root, {'test_a.py': 2.0, 'test_b.py': 1.0})
+    written = json.loads(text)
     assert written['measured_from'] == '139, 138', written
     assert written['suite_weights'] == {'test_a.py': 4.0,
                                         'test_b.py': 1.0}, written
@@ -127,16 +106,14 @@ def test_a_refresh_with_only_a_collapsed_matrix_to_choose_from_is_refused(
     bounds at fifteen cells. The file must come back byte-identical
     rather than narrowed to whatever that run happened to measure.
     """
-    refresh = _refresh()
     root = Path(tmp) / 'runs'
     _write_run(root, 150, {'cell-01': {'test_a.py': 4.0}})
-    out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}))
-    before = out.read_text(encoding='utf-8')
-    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
+    weights = {'test_a.py': 2.0, 'test_b.py': 1.0}
+    text, _code, err = _drive(tmp, root, weights)
     assert 'wrote nothing' in err, err
     assert '150' in err and 'one cell' in err, err
     assert 'max_cells bound of 15' in err, err
-    assert out.read_text(encoding='utf-8') == before
+    assert json.loads(text)['suite_weights'] == weights, text
 
 
 def test_a_one_cell_run_that_measured_everything_is_not_a_collapse(tmp):
@@ -149,15 +126,13 @@ def test_a_one_cell_run_that_measured_everything_is_not_a_collapse(tmp):
     here would stop the refresher on every hand-built runs root, and the
     two conditions exist so that it does not.
     """
-    refresh = _refresh()
     root = Path(tmp) / 'runs'
     _write_run(root, 160, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 2.0}})
-    out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}))
-    before = out.read_text(encoding='utf-8')
-    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
+    weights = {'test_a.py': 2.0, 'test_b.py': 1.0}
+    text, _code, err = _drive(tmp, root, weights)
     assert 'wrote nothing' in err, err
     assert 'one cell' not in err, err
-    assert out.read_text(encoding='utf-8') == before
+    assert json.loads(text)['suite_weights'] == weights, text
 
 
 def test_a_file_bounded_at_one_cell_takes_a_one_cell_measurement(tmp):
@@ -168,11 +143,10 @@ def test_a_file_bounded_at_one_cell_takes_a_one_cell_measurement(tmp):
     to expect, and refusing it would stop the refresher on every small
     tree.
     """
-    refresh = _refresh()
     root = Path(tmp) / 'runs'
     _write_run(root, 170, {'cell-01': {'test_a.py': 4.0}})
-    out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}, max_cells=1))
-    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
+    _text, _code, err = _drive(tmp, root, {'test_a.py': 2.0,
+                                           'test_b.py': 1.0}, max_cells=1)
     assert 'carried forward' in err, err
     assert 'one cell' not in err, err
 
@@ -228,19 +202,18 @@ def test_the_commit_message_names_the_runs_the_file_records(tmp):
     agreeing, over a THREE-run sample, because a one-run sample cannot
     tell a shared rendering from a coincidence.
     """
-    refresh = _refresh()
     root = Path(tmp) / 'runs'
     for run_id, seconds in ((30, 4.0), (29, 6.0), (28, 8.0)):
         _write_run(root, run_id, {'cell-01': {'test_a.py': seconds}})
-    out = _file(tmp, _data({'test_a.py': 2.0}))
     message = Path(tmp) / 'subject.txt'
-    args = _refresh_args(tmp, root, out, runs=3)
-    args += ['--message-file', str(message)]
-    _out, err = _refreshed(refresh, args)
-    written = json.loads(out.read_text(encoding='utf-8'))
+    text, _code, err = _drive(tmp, root, {'test_a.py': 2.0},
+                              message_file=message)
+    written = json.loads(text)
     assert written['measured_from'] == '30, 29, 28', written
     subject = message.read_text(encoding='utf-8')
-    assert subject.strip() == refresh.commit_message([30, 29, 28]), subject
+    refresher = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                           'refresh_timings')
+    assert subject.strip() == refresher.commit_message([30, 29, 28]), subject
     # The property, not the spelling: every run the file records is
     # named in the subject, and nothing else is.
     for run_id in written['measured_from'].split(', '):
