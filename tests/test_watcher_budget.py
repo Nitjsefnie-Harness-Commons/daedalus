@@ -64,7 +64,6 @@ def _announces_failure(line):
 
 
 def _reports_a_failed_poll(line):
-    """The watcher's own report that a poll raised rather than answered."""
     return 'poll failed' in line
 
 
@@ -84,12 +83,10 @@ def _watcher(name, args, fake):
 def _watcher_on_a_pinned_clock(name, args, fake, now):
     """A watcher child whose `time.time` reads `now` from its first line.
 
-    The patch lands on the `time` module object itself, which the
-    `gh_client` the script imports shares, so the instant the pause reads
-    and the instant the refusal's reset was measured against are one
-    reading by construction. Only `time()` is pinned: `sleep` and
-    `monotonic` stay real, so the pause is a real sleep and nothing
-    deadline-shaped is disturbed.
+    Patching the `time` module object itself is what makes it one reading:
+    the `gh_client` the script imports shares it, so the reset the refusal
+    carries and the instant the pause reads cannot disagree. `sleep` and
+    `monotonic` stay real, so the pause is a real sleep.
     """
     script = SKILL / name
     preamble = ('import runpy, sys, time;'
@@ -339,10 +336,8 @@ def test_the_children_die_with_their_parent(tmp):
 
 
 def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
-    # One reading supplies the instant the child is pinned to and the reset
-    # the fixture names, so the six seconds between them is a value this
-    # test chose. A reset stamped from a reading of its own is nameable by
-    # the pause only while a cold child start has not already overtaken it.
+    # One reading supplies both the instant the child is pinned to and the
+    # reset the fixture names, so the six between them is a value chosen here.
     now = int(time.time())
     reset = now + 6
     answers = dict(idle_answers())
@@ -362,25 +357,21 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         assert 'waiting 6s' in pause, pause
         waits.await_lines(child.out, _reports_state, 1,
                           'the resumed poll to report what it found')
-        # Raising is the one give-up the watcher announces rather than
-        # swallows, so it is caught here as soon as the poll reports. It is
-        # not what tells a resumed poll from an abandoned one - the indexes
-        # below are - and it is kept for the message it gives.
+        # The one give-up the watcher announces rather than swallows; the
+        # indexes below are what tell a resume from a give-up.
         assert not [line for line in child.err.lines
                     if _reports_a_failed_poll(line)], child.err.lines
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
         assert calls[1]['t'] >= reset, (calls[1]['t'], reset)
-        # The second query belongs to the SAME poll as the first, which is
-        # what resuming means. The watcher publishes the index of the poll
-        # it is in where the `gh` children inherit it, and the pause
-        # reissues the query inside that one poll; a poll that returns,
-        # breaks, falls off the end or ends the process ends the poll, and
-        # the script's next iteration publishes the next index. The index is
-        # therefore the property and not a correlate of it - and no wall
-        # clock is consulted, so this holds however long either took.
-        # The first index is checked for presence, or an unwired seam would
-        # pass the comparison below without saying anything.
+        # Each query carries the index of the poll that issued it. The pause
+        # reissues inside that one poll; a poll that returns, breaks, falls
+        # off the end or ends the process ends the poll, and the next
+        # iteration publishes the next index. No wall clock is read, so this
+        # holds however long either took - and since both values come from
+        # the same poll it says which poll issued the query, not that the
+        # index advances; that is issue #1279, open. The presence check is
+        # the other failure, an unwired seam rather than a frozen index.
         assert calls[0]['poll'] is not None, calls[0]
         assert calls[1]['poll'] == calls[0]['poll'], [c['poll'] for c in calls]
         # One line for the whole wait, not one per poll inside it.

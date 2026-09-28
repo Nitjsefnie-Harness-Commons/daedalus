@@ -542,11 +542,8 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     del tmp
     mod = _client()
     out = io.StringIO()
-    # One reading of the real clock supplies both the instant the client
-    # sees and the reset it is asked to name, so the delay the pause
-    # computes is a value this test chose. A reset stamped from a reading
-    # of its own would be nameable only while the wall clock stayed inside
-    # a window opened a moment earlier.
+    # One reading supplies both the instant the client sees and the reset it
+    # is asked to name, so the pause's delay is a value this test chose.
     now = float(int(time.time()))
     reset = now + 5
     clock = _Clock([mod.RateLimited('rate limited', reset)])
@@ -556,10 +553,8 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 1, lines
     assert 'rate limit' in lines[0]
-    # The stamp says which instant; the duration says how long the line claims
-    # to wait for it, and the two are separate claims of one pause. Pinned, the
-    # delay is the five seconds between `now` and `reset` and not a value
-    # rounded out of a clock the runner was hurrying past.
+    # The stamp names the instant; the duration is a second claim of the same
+    # pause, and pinned it is exactly the five between `now` and `reset`.
     assert 'waiting 5s' in lines[0], lines[0]
     stamp = lines[0].rsplit(' ', 1)[-1]
     wanted = datetime.fromtimestamp(reset, timezone.utc).strftime(
