@@ -32,11 +32,11 @@ export function mount(container, bus) {
   };
   const logEl = root.querySelector('[data-role=log]');
   const sessionStart = Date.now();
-  let events = [];
+  let hasEvents = false;
   let rateWindow = [];
 
   function clearLog() {
-    events = [];
+    hasEvents = false;
     logEl.textContent = '';
     logEl.appendChild(h('div', { class: 'dim italic small' }, 'cleared.'));
   }
@@ -59,16 +59,15 @@ export function mount(container, bus) {
   }
 
   function push(ev) {
-    if (events.length === 0) logEl.textContent = '';
+    if (!hasEvents) logEl.textContent = '';
     const row = h('div', { class: 'ev new-row' },
       h('span', { class: 'ev-ts' }, fmtTime(Date.now())),
       h('span', { class: 'ev-type ' + ev.type }, ev.type),
       h('span', { class: 'ev-body' }, fmtBody(ev)),
     );
-    events.unshift(ev);
+    hasEvents = true;
     logEl.insertBefore(row, logEl.firstChild);
     while (logEl.children.length > MAX_EVENTS) logEl.removeChild(logEl.lastChild);
-    if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
   }
 
   function bumpRate() {

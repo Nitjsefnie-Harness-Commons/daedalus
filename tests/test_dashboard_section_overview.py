@@ -214,7 +214,7 @@ def test_a_tab_update_names_its_title_then_its_url_then_neither(_tmp):
 
 def test_the_first_event_clears_the_placeholder_and_stacks_newest_first(
         _tmp):
-    """`events.length === 0` is the only signal that the placeholder is
+    """`!hasEvents` is the only signal that the placeholder is
     still there. An unnamed type falls through to `JSON.stringify` of the
     event, which is what keeps a later bus section readable here first."""
     report = _run('const before = { rows: logEl.children.length,\n'
