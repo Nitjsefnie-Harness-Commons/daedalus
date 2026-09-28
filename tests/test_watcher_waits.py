@@ -28,11 +28,12 @@ a tolerance and not a promise: a poll wider than it is refused by name,
 with the idle bound as the other refusal, and `gh_client.Watcher.poll`
 re-entering its own body on a rate-limit refusal can spend more under
 one marker than any single poll is expected to. What the arm cannot
-settle on its own, it does not claim to: the refusal renders the markers
-in the order the run published them and names the `READINGS` row that
-order falls in, and a rendering it cannot separate is named as such.
-`await_lines` and `await_calls` take no such bound, and the trade they
-take is unchanged.
+settle on its own, it does not claim to: the refusal names the `READINGS`
+row the rendered order falls in, and TWO of those three rows are
+ambiguities the row states rather than resolves. Marking one row
+unresolvable says nothing about the others - so the hedge names the
+count, not a single case. `await_lines` and `await_calls` take no such
+bound, and the trade they take is unchanged.
 """
 import os
 import sys
@@ -273,8 +274,9 @@ def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
         message)
     assert 'sequence 1,' in message, message
     assert f'over the {POLL_WIDTH} call(s) per marker' in message, message
-    assert ('reads alike as an index stuck where it started and as one wide '
-            'first poll' in message), message
+    assert ('a single value and nothing after it, which is both an index '
+            'stuck where it started and one wide first poll' in message), (
+        message)
     assert 'IDLE_POLL_BOUND' in message, message
 
 
@@ -285,17 +287,17 @@ def _log_of(rows):
             for call in range(calls)]
 
 
-# One log per REMAINING row of `READINGS`, each shaped so the wait ends on
-# the bound with that row's rendering: a run of new values and then a
-# repeat, a run longer than the window with every value new, and a run of
-# new values that stops. One control per row, each asserting its own
-# clause, so a fifth cause is a fifth row here with nothing over it.
+# One log per row of `READINGS`, each shaped so the wait ends on the bound
+# with that row's rendering: a value that comes back after a different one
+# has been published, a run of new values over the bound, and a single
+# value. One control per row, each asserting its own clause, so a fourth
+# cause is a fourth row here with nothing over it.
 _REUSED_LOG = _log_of([('1', POLL_WIDTH), ('2', 1), ('1', POLL_WIDTH)])
-_STILL_RUNNING_LOG = _log_of(
+_OVER_LOG = _log_of(
     [(str(marker), POLL_WIDTH) for marker in range(1, SEQUENCE + 1)]
     + [(str(SEQUENCE + 1), POLL_WIDTH + 1)])
-_STOPPED_LOG = _log_of([('1', POLL_WIDTH + 1), ('2', POLL_WIDTH + 1),
-                        ('3', POLL_WIDTH + 1)])
+_WIDE_LOG = _log_of([('1', POLL_WIDTH + 1), ('2', POLL_WIDTH + 1),
+                     ('3', POLL_WIDTH + 1)])
 
 
 def _refusal_for(entries, polls, what):
@@ -310,54 +312,81 @@ def _refusal_for(entries, polls, what):
 
 
 def test_a_repeated_boundary_is_named_as_a_re_used_index(tmp):
+    """The one row the payload settles, and the control that keeps it so.
+
+    A value that comes back after a DIFFERENT one has been published in
+    between cannot be produced by a wide poll and cannot be produced by a
+    sticky index: both of those leave the current value current. So this
+    row carries a cause, and the two rows below it do not.
+    """
     del tmp
     message = _refusal_for(_REUSED_LOG, 3, '3 poll(s)')
     assert message is not None, 'a re-used boundary did not fail'
     assert 'sequence 1, 2, 1,' in message, message
-    assert 'a value that comes round again is a re-used index' in message, (
-        message)
-
-
-def test_a_run_longer_than_the_window_is_named_as_a_wide_poll(tmp):
-    del tmp
-    message = _refusal_for(_STILL_RUNNING_LOG, SEQUENCE + 4, '16 poll(s)')
-    assert message is not None, 'a wide poll did not fail'
-    assert ', ... 1 more' in message, message
-    assert ('a run still going, of new values only, is a poll that cost more '
-            'than the tolerance' in message), message
-
-
-def test_a_run_that_stops_is_named_as_a_stopped_index(tmp):
-    """The row the collapse CREATES, and the one a rule written over what
-    the collapse SHOWS omits: new values, and then nothing. Read as a
-    wide poll it would send a reader after a poll that made one call."""
-    del tmp
-    message = _refusal_for(_STOPPED_LOG, 4, '4 poll(s)')
-    assert message is not None, 'a stopped index did not fail'
-    assert 'sequence 1, 2, 3,' in message, message
-    assert ('a run that has stopped is a run that stopped advancing: '
-            'something published a new boundary and then nothing did'
+    assert ('a value came round again, so a poll published one it had '
+            'published before and then another: a re-used index'
             in message), message
-    assert 'wide first poll' not in message, message
+
+
+def test_a_run_of_new_values_names_both_candidates(tmp):
+    """New values over the bound, and the two things that can mean.
+
+    A control per row proves each row in isolation, which is exactly how
+    an over-claiming row got a green suite: this subject alone cannot
+    tell a wide poll from a sticky index, so the clause has to name both.
+    The control beside this one, in the poll-index suite, drives two
+    plants with OPPOSITE causes through the real loop and shows they earn
+    the same honest answer - this one says what the answer is.
+    """
+    del tmp
+    message = _refusal_for(_OVER_LOG, SEQUENCE + 4, '16 poll(s)')
+    assert message is not None, 'a run over the bound did not fail'
+    assert ', ... 1 more' in message, message
+    assert 'no value came round again' in message, message
+    assert 'some poll cost more than that' in message, message
+    assert 'republished the value already current' in message, message
+    assert ('but which of two things that is, this log cannot say'
+            in message), message
+
+
+def test_a_run_of_wide_polls_names_both_candidates(tmp):
+    """The same row from a three-poll subject, which is what a real wide
+    poll looks like: three boundaries and no repetition anywhere."""
+    del tmp
+    message = _refusal_for(_WIDE_LOG, 4, '4 poll(s)')
+    assert message is not None, 'a run of wide polls did not fail'
+    assert 'sequence 1, 2, 3,' in message, message
+    assert 'some poll cost more than that' in message, message
+    assert 'republished the value already current' in message, message
 
 
 def test_the_reading_covers_every_rendering_the_renderer_can_produce(tmp):
-    """The four rows are a function, not a sentence: every rendering the
-    collapse can produce maps to a cause, and this is the check that a
-    new row arrives with a control over its own clause.
+    """The rows are a function and this reads the mapping it is.
 
-    It is deliberately a CHECK on the table rather than a fourth copy of
-    the shapes above: it reads the shape back out of `_reading` for every
-    sequence it can be given, and requires that no input falls through
-    without a row.
+    The previous version of this control carried a `row` column it never
+    asserted, so collapsing two rows left it passing - a totality check
+    wearing a mapping's clothes. It asserts the row now, so the fixture
+    says what the control checks.
+
+    The long-run case is the one that matters here: a cycle longer than
+    the window repeats only outside the window, and a reading that tested
+    the window put it in the no-repetition row. Reading the whole run is
+    what keeps it on the re-use row. Every sequence in the fixture is
+    one `poll_sequence` can actually emit, which is a bound the previous
+    version of this control did not respect.
     """
     del tmp
-    for sequence, row in ((['1'], 3), (['1', '1', '2'], 2),
-                          (['1', '2', '1'], 0), (['1', '2', '3', '1'], 0),
-                          (['1'] * (SEQUENCE + 1), 1),
-                          (['1', '2', '3'], 2), ([], 3)):
-        assert 0 <= _reading(sequence) < len(READINGS), (sequence, row)
-    assert len(READINGS) == 4, READINGS
+    new_run = [str(n) for n in range(1, SEQUENCE + 2)]
+    for sequence, row in ((['1'], 2), (['1', '2'], 1), (['1', '2', '1'], 0),
+                          (['1', '2', '3', '1'], 0),
+                          (new_run, 1), (new_run + ['1'], 0),
+                          (['1', '2', '3'], 1),
+                          # No calls at all: no refusal can carry it, but
+                          # `_reading` is given it here rather than
+                          # excused, because totality is the claim.
+                          ([], 1)):
+        assert _reading(sequence) == row, (sequence, row)
+    assert len(READINGS) == 3, READINGS
     assert all(clause and clause[0].islower() for clause in READINGS), (
         READINGS)
 

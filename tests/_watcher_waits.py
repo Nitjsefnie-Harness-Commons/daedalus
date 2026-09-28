@@ -29,9 +29,8 @@ POLL = 0.05
 CANCEL_BOUND = 60
 # The widest poll, in gh calls, a healthy run may spend and still be
 # tolerated by `await_polls` - which is exactly what the code enforces: a
-# run is only over the bound once its logged calls exceed this many PER
-# PUBLISHED MARKER, and a healthy run of this width never does, because
-# `m` markers have been published by a poll making at most `m` of them.
+# run is over the bound once its logged calls exceed this many PER
+# PUBLISHED MARKER.
 #
 # It is a TOLERANCE and not a cap, and nothing in the domain caps it: one
 # poll of `pr_comment_watch.poll` spends
@@ -47,47 +46,55 @@ CANCEL_BOUND = 60
 # boundary is a run and not an argument.
 POLL_WIDTH = 8
 # How many published boundaries a refusal renders before it says how many
-# more there are. A re-use shows inside the first cycle, and a run longer
-# than the bound is itself evidence: a healthy run's are all new.
+# more there are. The rendered window is for a READER; every judgement
+# below is made over the whole run, so a longer window changes what a
+# refusal shows and nothing it concludes.
 SEQUENCE = 12
-# The four renderings `poll_sequence` can produce, and what each means. A
-# rule written over a COLLAPSED rendering has to enumerate what the
-# collapse HIDES as well as what it shows, and what it hides is a form of
-# its own: a run of new values that has STOPPED looks exactly like a run
-# of new values that is merely short, and reading it as anything else
-# sends a reader after a wide poll in a watcher whose index is stuck. So
-# a fifth cause is a fifth row here, and `test_watcher_waits.py` has one
-# control per row asserting the clause's own text - which is what makes
-# the space reviewable rather than a sentence nobody can diff.
+# The three renderings `poll_sequence` can produce, and what each settles.
+# A rule written over a COLLAPSED rendering has to enumerate what the
+# collapse HIDES as well as what it shows - and here the collapse hides a
+# poll that republished the value already current, because every one of
+# them is one more run of the same value and a run is what the collapse
+# merges. So rows 1 and 2 are AMBIGUITIES and say so: they name both
+# candidates rather than choosing, and the control beside them drives two
+# plants with opposite causes through the real loop and shows both earn
+# the same honest answer.
+#
+# Row 0 is the one the payload separates, and it is separated by
+# something the collapse cannot hide: a value that comes back after a
+# DIFFERENT one has been published in between.
 READINGS = (
-    'a value that comes round again is a re-used index',
-    'a run still going, of new values only, is a poll that cost more than '
-    'the tolerance',
-    'a run that has stopped is a run that stopped advancing: something '
-    'published a new boundary and then nothing did',
-    'a single value and nothing after it reads alike as an index stuck '
-    'where it started and as one wide first poll, and this log cannot '
-    f'say which - IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses the '
-    'second on a healthy watcher',
+    'a value came round again, so a poll published one it had published '
+    'before and then another: a re-used index',
+    'no value came round again, and the calls over markers are over the '
+    f'{POLL_WIDTH} a poll may spend - but which of two things that is, '
+    'this log cannot say: some poll cost more than that, or polls '
+    'republished the value already current, which is a sticky index and '
+    'which the collapse folds into the one boundary it shows',
+    'a single value and nothing after it, which is both an index stuck '
+    'where it started and one wide first poll, and this log cannot say '
+    'which',
 )
 
 
 def _reading(sequence):
     """Which row of `READINGS` a rendered sequence is, by its own shape.
 
-    The index, not the clause, so the clause is written once. The order is
-    the order the rows are tested in and a control asserts the clause's
-    TEXT rather than its position, so adding or reordering a row cannot
-    silently re-point a control at a different cause.
+    The index, not the clause, so the clause is written once, and a
+    control asserts the clause's TEXT rather than its position, so adding
+    or reordering a row cannot silently re-point a control at a different
+    cause.
+
+    The repetition test reads the WHOLE run, not the window: a cycle
+    longer than `SEQUENCE` repeats outside the window and is a re-use all
+    the same, and testing the window put a run whose first repeat fell
+    past it into the row that says no value came round again.
     """
-    shown = sequence[:SEQUENCE]
-    if len(set(shown)) != len(shown):
-        return 0                      # a value comes round again
-    if len(sequence) > SEQUENCE:
-        return 1                      # more boundaries than fit, all new
-    if len(shown) == 1:
-        return 3                      # one value, and nothing after it
-    return 2                          # new values, and then it stopped
+    if len(set(sequence)) != len(sequence):
+        return 0                      # a value came round again
+    if len(sequence) == 1:
+        return 2                      # one value, and nothing after it
+    return 1                          # new values, and over the bound
 
 
 class Stream:
@@ -315,7 +322,10 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
             # The SEQUENCE, not the set: a set is sorted, and sorting both
             # throws on a seam wired below the first request (a sequence
             # mixing a marker with none) and throws away the order, which
-            # is the part every reading below is made of.
+            # is the part the first reading below is made of. The window
+            # is rendered for a reader and is NOT what the reading is made
+            # from: `_reading` takes the whole run, so a cycle longer than
+            # `SEQUENCE` is still a re-use.
             sequence = poll_sequence(calls)
             shown = ', '.join(str(marker) for marker in sequence[:SEQUENCE])
             if len(sequence) > SEQUENCE:
@@ -324,12 +334,13 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
                 f'{what}: the poll markers did not reach {polls} within '
                 f'{len(calls)} gh call(s): {len(markers)} distinct, sequence '
                 f'{shown}, over the {width} call(s) per marker one poll may '
-                f'spend. A run whose polls are no wider than that spends '
-                f'about {width} call(s) per marker however long it runs. '
-                f'The sequence reads as one of four - a value coming round '
-                f'again, a run still going of new values, a run that has '
-                f'stopped, or a single value and nothing after it - and '
-                f'this one is: {READINGS[_reading(sequence)]}.')
+                f'spend. It reads as one of three - a value that came '
+                f'round again, a run of new values over that bound, or a '
+                f'single value and nothing after it - and which of the two '
+                f'ways a run of new values got there, this log does not '
+                f'say. IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses '
+                f'a poll wider than an idle one on a healthy watcher. This '
+                f'one is: {READINGS[_reading(sequence)]}.')
         time.sleep(POLL)
 
 

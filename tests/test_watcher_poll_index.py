@@ -87,6 +87,33 @@ _UNWIRED = (_TRY, '        if poll_index != 1:\n'
                   '            os.environ.pop(POLL_MARK, None)\n')
 
 
+def _indented(block, depth=1):
+    """The plant block indented `depth` levels past its own."""
+    pad = '    ' * depth
+    return ''.join(f'{pad}{line}' if line.strip() else line
+                   for line in block.splitlines(keepends=True))
+
+
+_MARK_LINE = "POLL_MARK = 'DAEDALUS_WATCHER_POLL'\n"
+# A HEALTHY run that grows: its first two polls spend `POLL_WIDTH` calls
+# and its third spends one more. The counter lives at module scope
+# because `poll()` cannot see the loop's `poll_index`, and it is
+# incremented inside `poll()` because that is called once per poll.
+_GROWING = [
+    (_MARK_LINE, '_GROWING_POLLS = 0\n'),
+    (_PULL_PAGE, '    global _GROWING_POLLS\n    _GROWING_POLLS += 1\n'
+     + '    if _GROWING_POLLS <= 2:\n'
+     + _indented(_IDENTICAL_POLL) * (POLL_WIDTH - 1)
+     + '    elif _GROWING_POLLS == 3:\n'
+     + _indented(_IDENTICAL_POLL) * POLL_WIDTH),
+]
+# The other half of the pair: an index that sticks AT 3, every poll one
+# call, so both halves refuse on the same 25 calls over the same three
+# boundaries - which is the whole claim the pair control makes.
+_STICKY = (_PUBLISH, '        if poll_index > 3:\n'
+                     '            poll_index = 3\n')
+
+
 def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK):
     """Every call a real loop run logged, read off its own log whole.
 
@@ -270,8 +297,9 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
     assert '1 distinct, sequence 1,' in refused, refused
     assert 'sequence 1, 1,' not in refused, refused
     assert f'over the {POLL_WIDTH} call(s) per marker' in refused, refused
-    assert 'reads alike as an index stuck where it started' in refused, (
-        refused)
+    assert ('a single value and nothing after it, which is both an index '
+            'stuck where it started and one wide first poll'
+            in refused), refused
     assert 'IDLE_POLL_BOUND' in refused, refused
     assert 'did not advance' not in refused, refused
 
@@ -294,8 +322,9 @@ def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
     script, fake = _mutant_watcher(Path(tmp) / 'cycling', _CYCLING)
     refused = _refusal('a cycling poll index', script, fake)
     assert 'sequence 1, 2, 3, 4, 1,' in refused, refused
-    assert 'a value that comes round again is a re-used index' in refused, (
-        refused)
+    assert ('a value came round again, so a poll published one it had '
+            'published before and then another: a re-used index'
+            in refused), refused
     assert 'did not advance' not in refused, refused
     logged = sorted({call.get('poll') for call in fake.calls()}, key=repr)
     assert logged == ['1', '2', '3', '4'], (
@@ -349,10 +378,48 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
         f'the mutant published {logged} rather than two markers it then '
         f'froze on, so this control is not exercising a stall')
     assert 'sequence 1, 2, over' in refused, refused
-    assert ('a run that has stopped is a run that stopped advancing: '
-            'something published a new boundary and then nothing did'
-            in refused), refused
-    assert 'wide first poll' not in refused, refused
+    assert ('no value came round again' in refused
+            and 'republished the value already current' in refused), refused
+    assert 'some poll cost more than that' in refused, refused
+
+
+def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
+    """The non-discrimination proof, driven side by side.
+
+    A control per row proves each row in isolation, and that is exactly
+    how a row claiming more than the payload carries got a green suite:
+    every control drove a subject that could only be read one way. This
+    one drives two plants with OPPOSITE causes - a healthy run whose
+    third poll is one call wider than the tolerance, and an index that
+    sticks at 2 with every poll costing one call - and requires that both
+    earn the same honest answer naming both candidates.
+
+    They must: the collapse folds every poll republishing the current
+    value into the one boundary it shows, so the sticky index and the
+    growing run are one observation. The assertion is the ORDER of them
+    too, because the proof is that the two causes really are the same
+    reading and not merely similar ones.
+    """
+    pair = _refusal_of_pair(tmp)
+    for label, refused in pair:
+        assert refused is not None, f'the {label} run was measured anyway'
+        assert ('no value came round again' in refused
+                and 'some poll cost more than that' in refused
+                and 'republished the value already current' in refused), (
+            label, refused)
+        assert 'this log cannot say' in refused, (label, refused)
+        assert 'stopped advancing' not in refused, (label, refused)
+    heads = [refused.split('over the')[0] for _, refused in pair]
+    assert heads[0] == heads[1], heads
+
+
+def _refusal_of_pair(tmp):
+    """`(label, refusal)` for each half of the growing/sticky pair."""
+    out = []
+    for name, splices in (('growing', _GROWING), ('sticky', [_STICKY])):
+        script, fake = _mutant_watcher(Path(tmp) / name, *splices)
+        out.append((name, _refusal(f'the {name} run', script, fake)))
+    return out
 
 
 def test_a_reused_poll_index_is_refused_by_name(tmp):
