@@ -75,6 +75,16 @@ _FIXTURES = (
     'def _refusal(call, *args, contains=None):\n'
     '    return call(*args)\n')
 
+# A committed set drifted by hand, in the shape the reader accepts, so the
+# tests planting it reach the drift rather than a schema refusal. The
+# planted name is owned by a module both fixture trees carry and both
+# list as covered, so the drift is one the verdict is asked about: a
+# document claiming a module it never read is a different edit, and the
+# scoping is what forgives that one.
+_HAND_TYPED = ('{"schema_version": 2, "modules": ["tests/_owner.py",'
+               ' "tests/_wffixtures.py"], "names":'
+               ' {"made_up": {"python": ["tests/_owner.py"]}}}\n')
+
 
 def _planted_tree(modules):
     """A source map carrying the two owner modules, plus what is planted.
@@ -297,10 +307,16 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
     A name added to or dropped from a shared helper changes what a module
     may bind, and nothing reads the artifact until a control does, so a
     hand-typed one is a rule nobody enforces.
+
+    The verdict is scoped to the modules the document says it covered,
+    so the tree that scope is measured against is named here rather than
+    read from inside the check: `document()` with no argument derives
+    over the same live tree `_live_sources()` returns.
     """
     del tmp
     policy = _contract()
-    found = policy.violations(policy.load(), policy.document())
+    found = policy.violations(policy.load(), policy.document(),
+                              set(_live_sources()))
     detail = '\n'.join(f'{kind}: {rows}' for kind, rows in found.items()
                        if rows)
     assert not any(found.values()), (
@@ -330,8 +346,7 @@ def test_the_generator_writes_exactly_a_fresh_derivation_gives(tmp):
     assert str(len(policy.load(artifact)['names'])) in result.stdout
 
     # A hand edit is overwritten rather than kept: the file is an output.
-    artifact.write_text('{"schema_version": 1, "names": {"made_up": {}}}\n',
-                        encoding='utf-8')
+    artifact.write_text(_HAND_TYPED, encoding='utf-8')
     result = _run_generator(tree, artifact)
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert 'STALE' not in result.stderr, result.stderr
@@ -371,7 +386,8 @@ def test_a_noop_tighten_writes_nothing(tmp):
     assert checked.returncode == 0, (checked.stdout, checked.stderr)
     assert checked.stderr == '', checked.stderr
     assert len(policy.violations(policy.load(artifact),
-                                 policy.document(_live_sources_of(tree)))) == 3
+                                 policy.document(_live_sources_of(tree)),
+                                 set(_live_sources_of(tree)))) == 4
 
 
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
@@ -393,8 +409,7 @@ def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
     modes = ['--tree', str(tree), '--artifact', str(target)]
     # Drifted, so `--tighten` takes the write path rather than reporting
     # the set already current and returning before any of this.
-    target.write_text('{"schema_version": 1, "names": {"made_up": {}}}\n',
-                      encoding='utf-8')
+    target.write_text(_HAND_TYPED, encoding='utf-8')
     stale = target.read_bytes()
     with mock.patch.object(thresholds.os, 'replace',
                            side_effect=OSError('publish refused')):
@@ -407,6 +422,16 @@ def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
 
 
 def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
+    """Every kind, each on its own line, and none of them forgiven.
+
+    The three drift kinds are what a hand edit looks like: a name the
+    tree derives and the document lacks, one it no longer derives, and
+    one whose owners moved. `scope` is the fourth and it is the hole
+    the scoping opens -- an entry the document records against a module
+    it does not list as covered could be exempted from every other kind
+    by the same hand that added it, so the structural check refuses it
+    whatever else the document says.
+    """
     policy = _contract()
     tree = _fixture_checkout(tmp, {
         'tests/_owner.py': _OWNER,
@@ -415,25 +440,29 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     artifact = tree / '.github' / 'reserved-test-names.json'
     assert _run_generator(tree, artifact, '--tighten').returncode == 0
     derived = policy.load(artifact)
-    planted = {'schema_version': derived['schema_version'], 'names': {}}
-    for name, entry in derived['names'].items():
-        planted['names'][name] = entry
+    planted = json.loads(json.dumps(derived))
     dropped = sorted(planted['names'])[0]
     del planted['names'][dropped]
+    # The moved owner is a COVERED module that does not own the name
+    # today, so the entry is inside the scope the verdict is asked
+    # about and a different owner set is a real disagreement.
     moved = sorted(planted['names'])[0]
-    planted['names'][moved] = {limb: ['tests/test_planted.py']
+    taken = {owner for one in planted['names'][moved].values()
+             for owner in one}
+    other = sorted(set(planted['modules']) - taken)[0]
+    planted['names'][moved] = {limb: [other]
                                for limb in planted['names'][moved]}
     planted['names']['invented_name'] = {'python': ['tests/_owner.py']}
+    planted['names']['out_of_scope'] = {'python': ['tests/test_planted.py']}
     artifact.write_text(json.dumps(planted) + '\n', encoding='utf-8')
     result = _run_generator(tree, artifact)
     assert result.returncode == 1, (result.stdout, result.stderr)
     assert result.stdout == '', result.stdout
-    # Three kinds, each its own line: a name the tree derives and the
-    # committed set lacks, one it no longer derives, and one whose owners
-    # moved -- which is what a renamed module or a second owner looks like.
+    # Each kind, each its own line.
     assert f'absent: [{dropped!r}]' in result.stderr, result.stderr
     assert "stale: ['invented_name']" in result.stderr, result.stderr
     assert f'owners: [{moved!r}]' in result.stderr, result.stderr
+    assert "scope: ['tests/test_planted.py']" in result.stderr, result.stderr
     assert result.stderr.rstrip().endswith(policy.STALE_REMEDY), result.stderr
     assert 'Traceback' not in result.stderr
 
@@ -443,20 +472,29 @@ def test_a_document_that_is_not_the_generated_form_is_refused_by_name(tmp):
     failures = (
         ('{', 'invalid reserved names JSON'),
         ('[]', 'reserved names must be an object'),
-        ('{"schema_version": 2, "names": {}}', 'unsupported schema_version'),
-        ('{"schema_version": 1}', 'missing field: names'),
-        ('{"schema_version": 1, "names": [], "extra": 1}', 'unknown field'),
-        ('{"schema_version": 1, "names": []}', 'names must be an object'),
-        ('{"schema_version": 1, "names": {"": ["x"]}}',
+        ('{"schema_version": 3, "names": {}, "modules": []}',
+         'unsupported schema_version'),
+        ('{"schema_version": 2}', 'missing field: names'),
+        ('{"schema_version": 2, "names": {}}', 'missing field: modules'),
+        ('{"schema_version": 2, "names": [], "extra": 1}', 'unknown field'),
+        ('{"schema_version": 2, "names": [], "modules": []}',
+         'names must be an object'),
+        ('{"schema_version": 2, "names": {"": ["x"]}, "modules": []}',
          'a name must be a nonempty string'),
-        ('{"schema_version": 1, "names": {"a": []}}',
+        ('{"schema_version": 2, "names": {"a": []}, "modules": []}',
          'a name must map to an object of limbs'),
-        ('{"schema_version": 1, "names": {"a": {"python": "x"}}}',
-         'owners must be module paths'),
-        ('{"schema_version": 1, "names": {"a": {"cobol": ["x"]}}}',
-         'unknown limb: cobol'),
-        ('{"schema_version": 1, "names": {"a": {"python": [1]}}}',
-         'owners must be module paths'),
+        ('{"schema_version": 2, "names": {"a": {"python": "x"}},'
+         ' "modules": []}', 'owners must be module paths'),
+        ('{"schema_version": 2, "names": {"a": {"cobol": ["x"]}},'
+         ' "modules": []}', 'unknown limb: cobol'),
+        ('{"schema_version": 2, "names": {"a": {"python": [1]}},'
+         ' "modules": []}', 'owners must be module paths'),
+        ('{"schema_version": 2, "names": {}, "modules": "x"}',
+         'modules must be a list of module paths'),
+        ('{"schema_version": 2, "names": {}, "modules": [""]}',
+         'a covered module must be a nonempty string'),
+        ('{"schema_version": 2, "names": {}, "modules": ["a", "a"]}',
+         'a module is covered twice'),
     )
     for text, marker in failures:
         path = Path(tmp) / 'reserved.json'
@@ -629,8 +667,13 @@ def test_the_script_docstring_carries_the_printed_remedy(tmp):
                    '.github/reserved-test-names.json'):
         assert phrase in doc, phrase
     assert ' '.join(policy.STALE_REMEDY.split()) in doc, policy.STALE_REMEDY
-    assert sorted(policy.violations({'names': {}}, {'names': {}})) == [
-        'absent', 'owners', 'stale']
+    # The kinds a refusal prints, and the shape it reads them from: the
+    # document states the scope the verdict is asked about, and a caller
+    # states the tree that scope is measured against.
+    assert sorted(policy.violations({'names': {}, 'modules': []},
+                                    {'names': {}, 'modules': []},
+                                    set())) == [
+        'absent', 'owners', 'scope', 'stale']
 
 
 def main():
