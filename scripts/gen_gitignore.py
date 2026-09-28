@@ -123,13 +123,13 @@ def derive(tracked):
     tests/test_gitignore_control.py — so a change to the rendering
     moves both at once instead of leaving a second copy to rot.
 
-    The input is a set of paths and not a verdict about which of them ship,
-    and no path is named that was not handed in. What a caller leaves out
-    lands in the output as an absence, which is the caller's decision to
-    make and not this function's to close: the control hands it the paths
-    tracked at BOTH the head and the commit that last wrote the file, so a
-    file added since then is missing from the derivation by construction
-    and it is the comparison that tolerates that, not this rendering.
+    The input is the whole set of tracked paths and not a verdict about
+    which of them ship, and no path is named that was not handed in: the
+    control hands this every path `git ls-files` reports, so nothing can
+    be absent from the derivation by construction. The deny rule is not
+    the caller's to supply either — the `*` below is part of this
+    function's own output, which is what makes the rule checkable
+    independently of anything derived from this same text.
     """
     by_dir = defaultdict(list)
     for path in sorted(tracked):

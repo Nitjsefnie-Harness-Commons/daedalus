@@ -23,9 +23,12 @@ is the whole reason the rule can be this strict:
     merge. A branch that adds a tracked file and does not regenerate is
     RED on its own head and RED on its own merge ref, before it can
     merge at all;
-  * `tests` is a required check, and base-branch policy holds a merge
-    while it is red — so that red lands on the pull request, where a
-    human is already looking;
+  * the `suites` job runs this file, `Aggregate workflow checks` is a
+    required context under the `main requires green checks` ruleset, and
+    base-branch policy holds a merge while it is red — so that red lands
+    on the pull request, where a human is already looking. The job is
+    `suites`, not `tests`: a reader grepping the workflow for a `tests:`
+    job finds `suites:`, and the aggregate above it;
   * therefore a branch cannot contribute a red main, because it cannot
     merge while carrying one.
 
@@ -44,21 +47,36 @@ main, or as a hook that runs only on the default branch, the exact same
 comparison turns the "branch added a file and forgot" case into "main is
 red and nobody is looking" — the failure this rule's predecessor was
 built to survive. Nothing about the rule changes; only the place it runs
-does, and that is the whole of the margin. `tests/test_gitignore_control.py`
-pins the composition property as well as the rule, so moving the control
-off the PR path is a change that has to argue with a test rather than
-with a docstring.
+does, and that is the whole of the margin.
+
+What a test defends here, and what it does not, stated so the next reader
+is not misled. `tests/test_gitignore_control.py` pins that a branch
+carrying an un-regenerated tracked file is RED **on its own head** — that
+is the half placement governs. It does NOT pin that the control runs on the
+pull request. The merge fixture beside it is placement-independent: it
+builds its repositories in process and touches no CI configuration, so
+moved to a post-merge step it would still pass. The placement is therefore
+a claim of this docstring and of the workflow, not of a test, and moving
+the control off the PR path is a change that has to argue with a reader.
 
 WHAT IT CATCHES, because a strict comparison catches all of it: a
 hand-deleted entry for a still-tracked file, an invented `!<path>` line
 for a path nothing tracks, two entries or two whole blocks reordered, a
 mangled block header, the `*` deny rule removed or altered, a stray blank
 line, a trailing space on an entry, and a dropped `!/dir/` re-open line
-that would leave a directory unreopened. The `*` deny rule is the one
-that matters most and the control is blind to it by construction — with
-the rule deleted every path falls back to ignored — so the generator's
-own `check-ignore` postcondition covers the consequence and this control
-covers the file.
+that would leave a directory unreopened.
+
+The `*` deny rule is the one that matters most, and NEITHER this control
+nor the generator's `check-ignore` postcondition covers it. With the
+rule deleted every path falls back to ignored, and the postcondition
+rejects only paths that ARE ignored — with nothing denied nothing is
+ignored, so it answers `ok`. This control compares the committed file
+against the derivation, and when both come from the same `HEAD` constant
+they agree on a file that denies nothing. The rule is pinned instead as a
+literal by `tests/test_gitignore_generator.py`'s
+`test_the_derivation_always_carries_the_deny_rule`, which shares no state
+with the text it checks; removing `*` from `HEAD` turns that one test red
+and nothing else.
 
 Both sides are enumerated by the SAME call. The tracked set is
 `git ls-files`, which reads the INDEX, and that is exactly the call
@@ -207,7 +225,12 @@ def _decide(root):
                   'nothing re-admits the tracked paths\n'
                   f'repair: {REMEDY}')
         return Verdict('red', detail, frozenset(tracked))
-    actual = normalise(path.read_text(encoding='utf-8'))
+    # surrogateescape for the reason scripts/gen_gitignore.py documents
+    # twice: a file holding a byte no decoder can read must not kill the
+    # run. A raw UnicodeDecodeError here would escape the entry point,
+    # which catches only OSError and SubprocessError.
+    actual = normalise(path.read_text(encoding='utf-8',
+                                      errors='surrogateescape'))
     expected = generator().derive(tracked)
     if actual == expected:
         return Verdict('green', summary, frozenset(tracked))

@@ -203,6 +203,62 @@ def test_a_missing_ignore_file_is_red(tmp):
     assert 'no .gitignore' in verdict.detail, verdict.detail
 
 
+def test_a_file_added_with_force_and_no_regeneration_is_red(tmp):
+    """The pre-merge half: the branch is red on its OWN head.
+
+    This is the property that makes strictness safe here, and it is a
+    property of PLACEMENT rather than of the comparison. `git add -f`
+    bypasses the deny rule completely, so a branch can carry a tracked
+    file its ignore file does not name; the control is red on that
+    branch's own head and on its own merge ref, the required check holds
+    the merge, and the default branch never sees it.
+
+    It is a fixture about a BRANCH, and that is the point. The merge
+    fixture below builds its repositories in process and touches no CI
+    configuration, so it would still pass if the control were moved to a
+    post-merge step — which is why this one cannot be read as a test that
+    defends where the control runs. What it pins is the premise; the
+    placement is the control's docstring and the workflow's.
+    """
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
+    _write(repo, 'forced.py')
+    _git_of(repo, 'add', '-f', 'forced.py')
+    _git_of(repo, 'commit', '-q', '-m', 'add with -f and do not regenerate')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+    assert 'tracked but not named' in verdict.detail, verdict.detail
+    assert 'forced.py' in verdict.detail, verdict.detail
+
+
+def test_a_nested_directory_reports_no_ghost(tmp):
+    """A `!/dir/` re-open is not an entry, and must not read as one.
+
+    The path classifier takes `!/d/e.py` as naming a file and `!/d/` as
+    naming a directory, and the second is the arm that is easy to drop:
+    without it every re-open line is reported as `named but not tracked`,
+    so a perfectly correct file diagnoses as full of ghosts. The only
+    thing that can fail this is a fixture with a nested directory, which
+    is why the flat fixtures cannot see it.
+    """
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'd/e.py', 'f/g.py'))
+    assert control(repo).status == 'green'
+    # The ghost list is only built on a RED, so asserting it on a green
+    # tree would be vacuous. Delete a real entry to force the diagnosis,
+    # and the re-opens for `d` and `f` must stay out of it.
+    _edit_ignore(repo, (f'{PREFIX}a.py\n', ''), 'hand-delete the a entry')
+    verdict = control(repo)
+    assert verdict.status == 'red', verdict.detail
+    assert 'tracked but not named: a.py' in verdict.detail, verdict.detail
+    assert 'named but not tracked' not in verdict.detail, verdict.detail
+    # And the same holds when a re-open is MISSING rather than present: the
+    # ghost list is built from the lines that are there, so deleting
+    # `!/f/` must not conjure an entry for the directory.
+    _edit_ignore(repo, (f'{PREFIX}f/\n', ''), 'drop the f re-open')
+    dropped = control(repo)
+    assert dropped.status == 'red', dropped.detail
+    assert 'named but not tracked' not in dropped.detail, dropped.detail
+
+
 # ── the composition property, which is what the rule leans on ──────────
 
 def _two_branches(tmp, name, left_adds, right_adds):
@@ -286,6 +342,30 @@ def test_a_union_resolution_is_order_sensitive_and_regenerating_is_not(tmp):
         _regenerate(repo, 'resolve by regenerating instead')
         assert control(repo).status == 'green', f'{order}: {control(repo)}'
     assert sorted(set(verdicts.values())) == ['green', 'red'], verdicts
+
+
+def test_an_undecodable_byte_in_the_ignore_file_does_not_crash(tmp):
+    """A byte no decoder can read is a verdict, not a traceback.
+
+    The artifact is read from the working tree, and a filename or a
+    hand-edit can leave a byte no decoder will read. `git_read` one
+    function up already decodes with surrogateescape for exactly this
+    reason, and scripts/gen_gitignore.py documents it twice; reading the
+    file without it raises UnicodeDecodeError, which the public entry
+    point does not catch — it catches OSError and SubprocessError — so
+    the raw traceback escapes and the suite reports a crash instead of a
+    difference. The file is written as raw bytes because a fixture cannot
+    rely on the platform's own encoding.
+    """
+    repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py'))
+    path = Path(repo) / ARTIFACT
+    path.write_bytes(path.read_bytes() + b'\n!/\xff.py\n')
+    verdict = control(repo)
+    assert verdict.status in ('green', 'red'), verdict
+    # The undecodable entry is a path git never tracked, so it is named
+    # but not tracked, and the control says so instead of raising.
+    assert verdict.status == 'red', verdict.detail
+    assert 'named but not tracked' in verdict.detail, verdict.detail
 
 
 # ── the refusals ───────────────────────────────────────────────────────
