@@ -28,8 +28,8 @@ import _util  # noqa: E402
 from _arm_sweep import arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (  # noqa: E402
-    ARM_NOTES, CRASH_CONTROLLED, CUT, EVIDENCE, FILE, ID, LINE,
-    MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD, ROW_UNCLAIMED,
+    ARM_NOTES, CEILING_ARMS, CRASH_CONTROLLED, CUT, EVIDENCE, FILE, ID,
+    LINE, MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD, ROW_UNCLAIMED,
     SECONDARY_CONTROLLED, STATE, STEP_CEILING_HELD_BY, WHAT)
 from _launch_arm_pinning import (  # noqa: E402
     anchor, collapsed, from_line, unpinnable)
@@ -44,12 +44,6 @@ TESTS = Path(__file__).resolve().parent
 ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
 CONTROL_LABELS = {label for label, _, _, _ in ARM_CONTROLS}
-
-# The arms bound to the step ceiling, derived from the table so the
-# fact is written once. `STEP_CEILING_HELD_BY` is the record of what
-# holds each, and the ceiling test checks this derivation against it.
-CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
-                if arm[EVIDENCE] == STEP_CEILING_CONTROL}
 
 # One arm per state, and one of the two the row files cannot hold, so the
 # sweep is replayed in every shape the table claims for it.

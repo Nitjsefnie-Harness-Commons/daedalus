@@ -14,16 +14,19 @@ ceiling.
     MARKER_NON_MEMBERS    marker clauses outside every listed arm, and
                           what covers each
     ROW_UNCLAIMED         rows this branch added that no arm records
+    CEILING_ARMS          the arms bound to the step ceiling
     STEP_CEILING_HELD_BY  the test holding each step-ceiling arm
     ARM_NOTES             why a particular verdict is what it is
 
-`tests/test_launch_arms.py` checks all seven, and the table carries a
+`tests/test_launch_arms.py` checks all eight, and the table carries a
 one-line pointer to the note at each arm it names.
 
 The arm row's column order is here rather than beside the table, which
 is at its size ceiling; `tests/_launch_arms.py` states it in prose.
 """
 from typing import Final
+
+from _launch_arms import LAUNCH_ARMS, STEP_CEILING_CONTROL
 
 # (id, file, line, cut, anchor, what, state, evidence). Final keeps each
 # a literal, so an arm read through one is that column's own type.
@@ -231,3 +234,9 @@ STEP_CEILING_HELD_BY = {
         'tests/test_repo_layout.py:'
         'test_a_cyclic_machinery_base_terminates_within_a_step_ceiling',),
 }
+
+# The arms bound to the step ceiling, derived from the table so the
+# fact is written once. `STEP_CEILING_HELD_BY` is the record of what
+# holds each, and the ceiling test checks this derivation against it.
+CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
+                if arm[EVIDENCE] == STEP_CEILING_CONTROL}
