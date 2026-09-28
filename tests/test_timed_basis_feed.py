@@ -86,7 +86,7 @@ def _timings(tmp, name, measured_from, suites, measured, max_cells=5):
 
 # Two cells carrying THREE suites, and never one suite per cell. A cell
 # artifact is a directory of one JSON per suite stem
-# (`_suite_seconds` globs `round_dir.glob('*.json')`), and the planner
+# (`suite_seconds` globs `round_dir.glob('*.json')`), and the planner
 # packs several suites into a cell -- the shipped file records 273
 # suites over 13 cells. A fixture of one suite per cell would make the
 # suite count and the cell count coincide, and a guard counting the
