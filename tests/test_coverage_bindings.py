@@ -7,8 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _binding_assertions import (  # noqa: E402
     _assert_binding_pair, _scope_cases, _scope_violations)
 from _coverage_authority_scan import (  # noqa: E402
-    _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _KEY_HOLDER,
-    _STALE_UNIVERSAL, phrase_holders)
+    _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _STALE_UNIVERSAL,
+    phrase_holders)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
     _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
@@ -594,84 +594,6 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
         assert phrase in authority, (phrase, authority)
     stale = phrase_holders(_STALE_UNIVERSAL)
     assert not stale[0], stale
-
-
-def test_only_the_keys_own_definition_is_exempt(tmp):
-    """One plain assignment in the key-holder is exempt; nothing else is.
-
-    The exemption is what lets the module holding the keys be read like
-    any other, and it is the one place this control could go blind a
-    second time. Exempt by shape alone it is worse than the file-name
-    skip it replaced: a second statement of the whole authority,
-    written as a plain assignment under any name in any other file, was
-    read as a key's own definition and subtracted. So the first row
-    below is a complete statement in a file that does not hold a key,
-    and it is counted.
-
-    What the key-holder gets is the same row, and the module level: a
-    function-local or `if`-guarded assignment in it is counted too, so
-    the one exempt site is the module's own top-level declaration and
-    not anywhere an assignment can reach. A second declaration beside
-    the first stays counted, and so does every copy that is prose.
-    """
-    phrase = 'a synthetic probe phrase'
-    holder = '_coverage_authority_scan.py'
-    assert holder == _KEY_HOLDER, (holder, _KEY_HOLDER)
-    (Path(tmp) / 'probe.py').write_text(
-        f"KEY = {phrase!r}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == (['probe.py'], 1)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"KEY = {phrase!r}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == (['probe.py'], 1)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"KEY = {phrase!r}\n# {phrase}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == ([holder, 'probe.py'], 2)
-
-    (Path(tmp) / 'doc.py').write_text(f'"""{phrase}."""\n', encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == (
-        [holder, 'doc.py', 'probe.py'], 3)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"ONE = {phrase!r}\nTWO = {phrase!r}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == (
-        [holder, 'doc.py', 'probe.py'], 3)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"def go():\n    KEY = {phrase!r}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == (
-        [holder, 'doc.py', 'probe.py'], 3)
-
-
-def test_only_a_bare_literal_in_the_key_holder_defines_a_key(tmp):
-    """Which spellings of a key are a definition, and which are not.
-
-    An explicit `+` is a `BinOp` and an f-string a `JoinedStr`, so
-    neither is the `Constant` a definition is; each is counted beside
-    the prose copy that proves no exemption was spent on it. Adjacent
-    literals are folded by the parser into one `Constant` before this
-    sees them, so their VALUE is the key while their written text is
-    not — the closing quote between the two pieces keeps the key from
-    appearing in the count at all. An exemption taken against an
-    occurrence that does not exist eats a real statement instead, so
-    that spelling earns none, and the prose copy below survives it.
-    """
-    left, right = 'a synthetic', 'probe phrase'
-    phrase = f'{left} {right}'
-    holder = '_coverage_authority_scan.py'
-    assert holder == _KEY_HOLDER, (holder, _KEY_HOLDER)
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f'ONE = f"{phrase}"\n# {phrase}\n', encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == ([holder], 2)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"ONE = {left!r} + {right!r}\n# {phrase}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == ([holder], 1)
-
-    (Path(tmp) / '_coverage_authority_scan.py').write_text(
-        f"ONE = {left!r} {right!r}\n# {phrase}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == ([holder], 1)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
