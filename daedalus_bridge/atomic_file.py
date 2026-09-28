@@ -1,13 +1,16 @@
 """Atomic filesystem replacement shared by bridge storage owners."""
 import os
 import time
+from typing import Callable, TypeVar
 
 
 _RETRY_ATTEMPTS = 5
 _RETRY_DELAY = 0.02
 
+_Result = TypeVar('_Result')
 
-def _retrying(perform):
+
+def _retrying(perform: 'Callable[[], _Result]') -> _Result:
     """Run `perform`, retrying a transient Windows sharing violation.
 
     Windows refuses an open, write or replace while any handle is open on
@@ -24,15 +27,15 @@ def _retrying(perform):
 
     The sleeps run while the caller holds whatever locks it holds, so the
     wait is bounded at roughly `_RETRY_ATTEMPTS * _RETRY_DELAY` (80 ms) per
-    retrying call.
+    retrying call. The last attempt stands outside the loop because a
+    refusal to it is the answer, not another wait.
     """
-    for remaining in range(_RETRY_ATTEMPTS - 1, -1, -1):
+    for _ in range(_RETRY_ATTEMPTS - 1):
         try:
             return perform()
         except PermissionError:
-            if not remaining:
-                raise
             time.sleep(_RETRY_DELAY)
+    return perform()
 
 
 def replace_atomically(src, dst):
