@@ -186,6 +186,7 @@ _GC_PREFIX = '.gc-'
 # Deliberately outside the prefix, so a refusal the injector raises can still
 # be logged and the injector cannot refuse its own bookkeeping.
 _GC_REFUSED_PARENT = 'gc-refused-parent.txt'
+_GC_REFUSED_CHILD = 'gc-refused-child.txt'
 
 # No queue or command name in this tree begins with the marker prefix -- they
 # are `<token>_<tab>` and `<token>.json` -- so filtering on it cannot hide a
@@ -197,7 +198,59 @@ _GC_REFUSED_PARENT = 'gc-refused-parent.txt'
 _STAMP_LEASH = 3600
 
 
-def _on_demand_command_gc(fault_dir):
+def _child_refusal_source(attempts):
+    """The child's copy of the injector, empty unless a count is asked for.
+
+    Composed apart from the base so a zero-attempt fixture writes the bytes
+    it always did. `os` is imported here rather than in the base because
+    only the patched `os.replace` needs it. The log name carries no marker
+    prefix, so a refusal can still be logged and the injector cannot refuse
+    its own bookkeeping.
+    """
+    if not attempts:
+        return ''
+    return (
+        'import os\n'
+        f'_ATTEMPTS = {attempts!r}\n'
+        f'_PREFIX = {_GC_PREFIX!r}\n'
+        f'_LOGNAME = {_GC_REFUSED_CHILD!r}\n'
+        '_spent = {}\n'
+        '_real = {"replace": os.replace,\n'
+        '         "unlink": pathlib.Path.unlink,\n'
+        '         "read_text": pathlib.Path.read_text,\n'
+        '         "write_text": pathlib.Path.write_text}\n'
+        'def _refuse(op, target):\n'
+        '    _spent[op] = _spent.get(op, 0) + 1\n'
+        '    if _spent[op] > _ATTEMPTS:\n'
+        '        return\n'
+        '    name = os.path.basename(target)\n'
+        '    try:\n'
+        '        log = os.path.join(os.path.dirname(target), _LOGNAME)\n'
+        '        with open(log, "a", encoding="utf-8") as _handle:\n'
+        '            _handle.write(op + " " + name + "\\n")\n'
+        '    except OSError:\n'
+        '        pass\n'
+        '    raise PermissionError(13, "Permission denied")\n'
+        'def _wrap(op, real_call, name_of):\n'
+        '    def call(*args, **kwargs):\n'
+        '        target = name_of(args, kwargs)\n'
+        '        if (isinstance(target, str)\n'
+        '                and os.path.basename(target).startswith(_PREFIX)):\n'
+        '            _refuse(op, target)\n'
+        '        return real_call(*args, **kwargs)\n'
+        '    return call\n'
+        'os.replace = _wrap("replace", _real["replace"],\n'
+        '                   lambda a, k: str(a[1] if len(a) > 1 else\n'
+        '                                        k.get("dst", "")))\n'
+        'pathlib.Path.unlink = _wrap("unlink", _real["unlink"],\n'
+        '                            lambda a, k: str(a[0]))\n'
+        'pathlib.Path.read_text = _wrap("read_text", _real["read_text"],\n'
+        '                               lambda a, k: str(a[0]))\n'
+        'pathlib.Path.write_text = _wrap("write_text", _real["write_text"],\n'
+        '                                lambda a, k: str(a[0]))\n')
+
+
+def _on_demand_command_gc(fault_dir, refusals=0):
     """Install a collector the test sweeps on demand, and return its path.
 
     A collector on a wall clock spends the TTL while the test is still
@@ -230,7 +283,8 @@ def _on_demand_command_gc(fault_dir):
         '        atomic_file.write_text_retrying(\n'
         '            temp, "\\n".join(left), encoding="utf-8")\n'
         '        atomic_file.replace_atomically(temp, done)\n'
-        'command_queue.gc_loop = gc_loop\n',
+        + _child_refusal_source(refusals)
+        + 'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
     return str(fault_dir)
 
