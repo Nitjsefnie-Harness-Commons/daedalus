@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _hotfixharness import run_hotfix_case  # noqa: E402
+from _hotfix_outcome import _delivered, _errors  # noqa: E402
 
 SITE = 'https://shop.example.com/cart'
 # A page where `crypto.randomUUID` is [SecureContext] and absent.
@@ -45,15 +46,6 @@ HTTP_PAGE = 'http://shop.example.com/cart'
 # received it, so `delivered` answers "which document got it" rather than
 # "which call was made".
 FIX = "daedalusHits.push('fix1')"
-
-
-def _errors(outcome):
-    return [entry['text'] for entry in outcome['replay']
-            if entry['level'] == 'error']
-
-
-def _delivered(outcome):
-    return {doc: hits for doc, hits in outcome['delivered'].items() if hits}
 
 
 def test_a_cdp_routed_fix_does_not_reach_a_twin_document_in_the_same_tab(tmp):
