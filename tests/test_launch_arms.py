@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import arm_sweep  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
-from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
-                          REDUNDANT, SECONDARY_CONTROLLED,
+from _launch_arms import (ARM_CONTROLS, CRASH_CONTROLLED, DEAD,  # noqa: E402
+                          LAUNCH_ARMS, REDUNDANT, SECONDARY_CONTROLLED,
                           STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
@@ -198,11 +198,79 @@ def test_the_sweep_reproduces_each_state_it_claims(tmp):
                 f'{name}: deleting it left every verdict alone, so its own '
                 f'evidence {evidence!r} does not control it; moved '
                 f'{found["moved"]}')
+            # The reverse of `CRASH_CONTROLLED`, over the arms this test
+            # sweeps anyway: a sample is a sample, and this is the half
+            # of the split a completeness claim would rest on.
+            assert evidence not in found['crash'], (
+                f'{name}: its evidence raised, so it belongs in '
+                'CRASH_CONTROLLED and was left out of it')
         else:
             assert state in (REDUNDANT, DEAD), name
             assert not found['moved'], (
                 f'{name}: recorded {state} but deleting it moved '
                 f'{found["moved"]}')
+
+
+def test_every_recorded_crash_is_the_one_the_sweep_reproduces(tmp):
+    """A crash is a control, and a weaker one than a changed value.
+
+    `CRASH_CONTROLLED` says which CONTROLLED arms go red because the
+    analyser RAISED rather than because its own clause changed the
+    answer, and this is the forward half of that: every name in it
+    really does crash, on its own evidence, in the real tree. Without
+    the check the set is a claim; with it, a control that stops being
+    crash-held has to be taken out deliberately, which is the only way
+    a reader learns the split moved.
+    """
+    arms = [_arm(name) for name in sorted(CRASH_CONTROLLED)]
+    findings = arm_sweep(Path(tmp), arms)
+    for arm in arms:
+        name, evidence = arm[ID], arm[EVIDENCE]
+        found = findings[name]
+        assert 'refused' not in found, f'{name}: {found["refused"]}'
+        assert 'timed_out' not in found, (
+            f'{name}: the child did not answer, so its control is neither '
+            'a changed value nor a crash and the recorded set is stale')
+        assert evidence in found['crash'], (
+            f'{name}: recorded as held by a raise, but its evidence '
+            f'{evidence!r} did not raise; crash {found["crash"]}, moved '
+            f'{found["moved"]}')
+        # An arm can be held by a raise AND isolated by a control that
+        # changes a value. Where it is, the value-changing one is named
+        # in SECONDARY_CONTROLLED, so the crash set never reads as "this
+        # arm has no control that isolates it" when it has one.
+        by_value = sorted(label for label in found['moved']
+                          if label not in found['crash'])
+        unrecorded = sorted(set(by_value)
+                            - set(SECONDARY_CONTROLLED.get(name, ())))
+        assert not unrecorded, (
+            f'{name}: it is also held by {by_value}, and {unrecorded} '
+            'are not named in SECONDARY_CONTROLLED')
+
+
+def test_the_crash_set_names_only_arms_that_are_controlled(tmp):
+    """The set is a partition of the CONTROLLED arms, not a list.
+
+    A REDUNDANT or DEAD arm in the set would claim a control for a
+    verdict that is supposed to have none, and a name that is not in
+    `LAUNCH_ARMS` at all would be a control nothing can re-derive.
+    """
+    del tmp
+    by_name = {arm[ID]: arm for arm in LAUNCH_ARMS}
+    unknown = sorted(CRASH_CONTROLLED - set(by_name))
+    assert not unknown, f'crash set naming no arm: {unknown}'
+    not_controlled = sorted(name for name in CRASH_CONTROLLED
+                            if by_name[name][STATE] != 'CONTROLLED')
+    assert not not_controlled, f'crash set naming a non-CONTROLLED arm: {not_controlled}'
+    known = ROW_LABELS | CONTROL_LABELS | {STEP_CEILING_CONTROL}
+    for name, labels in SECONDARY_CONTROLLED.items():
+        assert name in by_name, f'secondary control for no arm: {name}'
+        assert by_name[name][STATE] == 'CONTROLLED', name
+        assert by_name[name][EVIDENCE] not in labels, (
+            f'{name}: its second control is the one already recorded as '
+            'its evidence, so nothing is being added')
+        missing = sorted(set(labels) - known)
+        assert not missing, f'{name}: second control names nothing: {missing}'
 
 
 def test_the_fixpoint_stops_on_a_factory_it_has_already_registered(tmp):
