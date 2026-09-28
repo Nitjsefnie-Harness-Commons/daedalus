@@ -1,9 +1,20 @@
-"""Which launcher a fixed-unit-of-work Node child is started with.
+"""Which bound a fixed-unit-of-work Node child is started with.
 
-A Node child whose real cost is a fixed unit of work is bounded by the
-shared hang detector in `tests/_noderun.py`, not by a number typed at its
-call site: a wall-clock literal measures the runner's busyness and nothing
-else, and that is what failed correct children on a loaded CI runner.
+A Node child whose real cost is a fixed unit of work gets a HANG DETECTOR,
+and there are two shapes of one here. A site that launches through
+`tests/_noderun.py` is bounded by that module's `CHILD_DEADLINE_S`, and
+that is the default. A site that does not — a real-browser capability
+probe, a GM storage harness over the shipped scripts — keeps its bound at
+its own call site, because reaching the shared launcher puts the module
+and everything it calls inside `tests/_launch_census.py`'s audited path
+(`path_functions`, below), and a site that pulls that in inherits the
+audit of nineteen modules it never asked for.
+
+What neither shape may be is a wall-clock literal. A bare `10` measures
+the runner's busyness and nothing about the child, and that is what failed
+correct children on a loaded CI runner. A call-site bound is a detector of
+exactly the same form: a table of what the child really costs, the
+slowest sample taken from it, and a multiple above that.
 
 This is a shared helper rather than a suite because two suites need the
 walk and neither owns it: one holds the rule enforced over the real tree,
@@ -29,6 +40,82 @@ import _launch_census as census  # noqa: E402
 from _command_type_readers import _parents  # noqa: E402
 
 _TESTS_DIR = Path(__file__).resolve().parent
+
+# --- the bound a site keeps at its own call site ----------------------------
+#
+# The same three-step chain `tests/_noderun.py` composes, with the multiple
+# named here rather than retyped per site: five modules scaling five numbers
+# by five literals is five numbers a fix has to reach.
+#
+#   SITE_HANG_MULTIPLE  5   a wedged child, not a slow one
+#
+# The samples a site composes its figure from are measured with the machine
+# BUSY, not idle, and that is the whole difference between this and the
+# literal it replaces. A wall-clock bound is two margins — the child's real
+# cost, and the runner's busyness — and only the second is what a bare number
+# measures. A table of idle samples hides that margin in the multiple, where
+# it is an assumption; measuring under load puts it in the table, where it is
+# evidence. At 2 the literals these replace were already inside two multiples
+# of a busy run, which is the measurement of why they flaked correct children.
+SITE_HANG_MULTIPLE = 5
+
+
+class NodeBoundExceeded(AssertionError):
+    """A Node child did not finish inside the bound its own site composed.
+
+    An `AssertionError`, so it reads as the test failure it is, and named
+    because a bare `subprocess.TimeoutExpired` is the other half of the
+    defect: it names a figure nobody can re-derive, and it carries the
+    child's output as BYTES even when the launch asked for text. Carries
+    the child, the deadline and that output, because a child which stopped
+    answering is exactly the case where its partial output is all there is.
+    """
+
+    def __init__(self, command, deadline_s, stdout, stderr):
+        self.command = command
+        self.deadline_s = deadline_s
+        self.stdout = stdout
+        self.stderr = stderr
+        # Each argv element is bounded too: a source handed to `node -e` is
+        # arbitrarily long, and the child line is the one a reader reads
+        # first.
+        child = ' '.join(str(part)[:60] for part in command or ())
+        super().__init__(
+            f'a Node child did not finish within {deadline_s}s and was '
+            f'killed; this bound is a hang detector, not a health margin, '
+            f'so nothing correct reaches it.\n'
+            f'  child: {child}\n'
+            f'  deadline: {deadline_s}s\n'
+            f'  stdout: {stdout[:2000]!r}\n'
+            f'  stderr: {stderr[:2000]!r}')
+
+
+def _as_text(stream):
+    """A `TimeoutExpired` stream as text, whatever the launch asked for.
+
+    `subprocess.run` hands the bytes it read straight to the exception, so a
+    launch with `text=True` still raises one carrying `bytes`, and a report
+    printing `b'partial\\n'` where the child wrote text has lost the one
+    thing a reader needs. Undecodable bytes are replaced rather than raised,
+    because this is built on the failure path.
+    """
+    if stream is None:
+        return ''
+    return stream.decode('utf-8', 'replace')
+
+
+def node_bound_expiry(why, deadline_s):
+    """A site's `TimeoutExpired` as this module's named failure.
+
+    The figure beside `why` is the composed deadline that actually fired, so
+    the report names the number a maintainer re-derives rather than the one
+    the call site happened to pass.
+    """
+    return NodeBoundExceeded(
+        getattr(why, 'cmd', None), deadline_s,
+        _as_text(getattr(why, 'stdout', None)),
+        _as_text(getattr(why, 'stderr', None)))
+
 
 # The modules the sweep does not walk, each for its own reason rather than
 # one rule applied to all of them.
