@@ -158,14 +158,14 @@ their child processes inherit. It also needs one piece of context.
 `sections/settings.js` over `api.js`, `sse.js` and the shared
 `sections/_util.js` helper; `tests/test_dashboard_sections.py` mounts
 `sections/screenshot.js`, `sections/tabs.js` and `sections/uploads.js`
-over `api.js` and `_util.js`; the six
+over `api.js` and `_util.js`; the seven
 `tests/test_dashboard_section_*.py` suites each mount one of
 `sections/block-rules.js`, `cdp.js`, `cookies.js`, `css-injector.js`,
-`fetch-timings.js` and `net-capture.js` over the same two modules, and
-`tests/test_dashboard_hotfixes.py` mounts `sections/hotfixes.js`;
+`fetch-timings.js`, `net-capture.js` and `overview.js` over the same two
+modules, and `tests/test_dashboard_hotfixes.py` mounts
+`sections/hotfixes.js`;
 `tests/test_dashboard_app_shell.py` and `tests/test_dashshell_harness.py`
-mount `dashboard/app.js` itself, which is the only route to
-`sections/overview.js` — no suite names that module;
+mount `dashboard/app.js` itself;
 `tests/test_dashboard_behaviour.py`
 and `tests/test_dashboard_harness.py` drive `api.js` and `_util.js`
 beside `extension/content.js`; and the extension's background, worker,
