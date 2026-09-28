@@ -352,30 +352,10 @@ UNCONSOLIDATED_NAMES = {
     ('tests/_util.py', 'request'):
         'this is the client-side request the whole suite shares, where '
         'the recorder in _netcapture_harness is one capture own request',
-    ('tests/test_cli_browser_commands.py', '_ext'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_tabs.py, test_cli_content_css.py and '
-        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
-        'is a copy of the owner, whose own digest is 8d27de7d6',
-    ('tests/test_cli_browser_tabs.py', '_ext'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_tabs.py, test_cli_content_css.py and '
-        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
-        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_content_capture.py', '_ext'):
         'this one differs from the other four _ext sites (digest '
         '04c21b05e5), and the owner builds the answer tuple for the whole '
         'tool surface',
-    ('tests/test_cli_content_css.py', '_ext'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_tabs.py, test_cli_content_css.py and '
-        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
-        'is a copy of the owner, whose own digest is 8d27de7d6',
-    ('tests/test_cli_content_hotfixes.py', '_ext'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_tabs.py, test_cli_content_css.py and '
-        'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
-        'is a copy of the owner, whose own digest is 8d27de7d6',
     ('tests/test_cli_content_hotfixes.py', '_stored'):
         'this is the stored-hotfix record this suite reads back, where '
         'the owner store key is the one the route answers with',

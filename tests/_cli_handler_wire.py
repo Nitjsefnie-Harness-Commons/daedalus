@@ -38,3 +38,7 @@ def _answered_result(**over):
 def _wait_result(cmd_id, delivery, timeout, interval=0.5):
     return {'via': 'wait_for_result', 'id': cmd_id, 'tab': 'extension',
             'delivery': delivery, 'timeout': timeout, 'interval': interval}
+
+def _ext_cmd(cmd_id, cmd_type, fields, timeout=10):
+    return {'via': 'ext_cmd', 'id': cmd_id, 'type': cmd_type,
+            'fields': fields, 'timeout': timeout}

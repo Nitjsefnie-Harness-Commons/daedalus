@@ -364,6 +364,7 @@
     "_expanded_elts": {"python": ["tests/_mcp_selection_fold.py"]},
     "_expected_refusal_counts": {"python": ["tests/_gc_handshake.py"]},
     "_ext": {"python": ["tests/_mcp_tool_commands.py"]},
+    "_ext_cmd": {"python": ["tests/_cli_handler_wire.py"]},
     "_failures": {"python": ["tests/_coverage_comment_publication.py"]},
     "_fake": {"python": ["tests/_cli_dispatch.py"]},
     "_faults": {"python": ["tests/_launch_census.py"]},
