@@ -111,9 +111,14 @@ def test_a_foreign_repository_without_a_named_gate_is_told_the_default(tmp):
         _green('gate freshness', 'CodeQL'))
     assert code == 4, text
     assert 'so this head is not certified' in text, text
-    assert 'only' in text and '--required' in text, text
-    # The names are rendered from the constant rather than spelled beside
-    # it, so a rename of the default gate moves this line with it.
+    # The whole line, not a couple of its words: a control searching for
+    # `'--required'` finds it in the flag's own help text and would pass on
+    # a note that had stopped saying what it is for.
+    note = ('  only tests is checked by default; --required NAME states '
+            'the workflow that gates another repository\n')
+    assert text.endswith(note), text
+    # And the gate's name is rendered from the constant rather than spelled
+    # beside it, so a rename of the default gate moves this line with it.
     for name in mod.REQUIRED_WORKFLOWS:
         assert name in text, (name, text)
 
@@ -207,12 +212,19 @@ def test_the_bound_report_carries_the_note_too(tmp):
 def test_the_trial_call_reads_the_named_gate_too(tmp):
     """--once prints a state rather than a verdict, but it prints THE state
     the named gate gives: a trial reporting the default's state would send
-    a caller into a wait whose answer it had already contradicted."""
+    a caller into a wait whose answer it had already contradicted.
+
+    Named on another repository, because that is where a name REPLACES the
+    default. On this repository the names are unioned, so `--required ci`
+    alone still waits on the gate this tool knows - and that half of the
+    rule is held by the controls above.
+    """
     del tmp
     mod = _ci_wait()
     err = io.StringIO()
     code, _ = _run_main(mod, _Clock(),
-                        ['f' * 40, '--once', '--required', 'ci'],
+                        ['f' * 40, '--repo', OTHER_REPO, '--once',
+                         '--required', 'ci'],
                         _green('ci'), err=err)
     assert code == 0, (code, err.getvalue())
     assert 'state: acceptable' in err.getvalue(), err.getvalue()
@@ -266,6 +278,163 @@ def test_a_blank_required_value_is_a_rejected_invocation(tmp):
     assert code == 3, (code, text, err.getvalue())
     assert '--required' in err.getvalue(), err.getvalue()
     assert text == '', text
+
+
+# ---- the flag may only tighten, where this tool knows the gate (issue #1217)
+
+def test_the_flag_cannot_drop_this_repositories_own_gate(tmp):
+    """The false green #1217 exists to remove, reopened through this
+    branch's own flag. A head with no `tests` run at all is `acceptable`
+    the moment a caller names a workflow that DID run, because on this
+    repository the caller's names replaced the default instead of adding
+    to it - and nothing on the output says the gating matrix never ran.
+
+    The refusal names `tests` and not the caller's name, because the
+    caller's workflow is present and only the gate is missing; a control
+    asserting both would be asserting a report that misstates the runs.
+    """
+    del tmp
+    mod = _ci_wait()
+    code, text = _run_main(mod, _Clock(),
+                           ['6' * 40, '--required', 'CodeQL'],
+                           _green('gate freshness', 'CodeQL'))
+    assert code == 4, text
+    assert 'no tests run on' in text, text
+    assert 'acceptable' not in text, text
+
+
+def test_a_named_gate_that_did_not_run_still_refuses_naming_both(tmp):
+    """The other direction of the same rule, and the two-name refusal it
+    makes reachable: on this repository a caller's names are UNIONED with
+    the default, so a workflow that never ran is missing alongside the
+    gate, and the report names both rather than the one the caller asked
+    about.
+
+    The absence of the note is half of what is asserted. The union rule
+    and the note's condition answer the same question - is this the
+    repository the tool knows - and a control that pinned only the union
+    would let them drift into disagreeing, which is how a caller gets the
+    foreign-repository note on this repository's own gate.
+    """
+    del tmp
+    mod = _ci_wait()
+    code, text = _run_main(mod, _Clock(),
+                           ['7' * 40, '--required', 'ci',
+                            '--grace', '1', '--interval', '1'],
+                           _green('gate freshness', 'CodeQL'))
+    assert code == 4, text
+    assert 'no ci or tests run on' in text, text
+    assert '--required' not in text, text
+
+
+def test_naming_this_repositories_own_gate_is_unaffected(tmp):
+    """A caller who names the gate this tool already knows asks for what
+    it was given, and gets it: the union of the default with a name it
+    already carries is the default. This is the no-op the direction rule
+    has to have, and it is true on the base too - it is a regression
+    control, not a RED."""
+    del tmp
+    mod = _ci_wait()
+    code, text = _run_main(mod, _Clock(),
+                           ['8' * 40, '--required', 'tests'],
+                           _green('tests', 'gate freshness'))
+    assert code == 0, text
+    assert 'acceptable' in text, text
+
+
+def test_every_spelling_of_this_repository_is_still_the_default(tmp):
+    """The protection is a property of WHICH repository this is, not of
+    what the caller typed. Spelling this repository out in full is the
+    same repository, and so is a case variant of that spelling; both take
+    the union path and both get no foreign-repository note. Compared
+    case-sensitively, the long spelling and its case variant both fell
+    through to the replace path and the #1217 false green came back
+    through them.
+
+    One control, two rows, and the rows are what make it worth folding:
+    a rule that handled only the exact spelling passes row one and fails
+    row two, so a single case-insensitive comparison has to exist for
+    this to stay green.
+    """
+    del tmp
+    mod = _ci_wait()
+    for spelled in ('Nitjsefnie-Harness-Commons/daedalus',
+                    'nitjsefnie-harness-commons/daedalus'):
+        code, text = _run_main(mod, _Clock(),
+                               ['9' * 40, '--repo', spelled,
+                                '--required', 'CodeQL'],
+                               _green('gate freshness', 'CodeQL'))
+        assert code == 4, (spelled, text)
+        assert 'no tests run on' in text, (spelled, text)
+        assert '--required' not in text, (spelled, text)
+
+
+def test_a_padded_required_name_is_the_name_it_pads(tmp):
+    """A name that is whitespace AROUND something is the third spelling of
+    #1320. `not name.strip()` refuses a name that is only whitespace, but
+    `' ci '` survives it and builds a requirement no run carries - and
+    the refusal renders the padding into the name slot, so it reads
+    `no  ci  run on <sha>` and names a workflow nobody can supply.
+
+    Exit 0 here and exit 3 for the two blank controls, so the three
+    spellings cannot be mistaken for one another.
+    """
+    del tmp
+    mod = _ci_wait()
+    code, text = _run_main(mod, _Clock(),
+                           ['a' * 40, '--repo', OTHER_REPO,
+                            '--required', ' ci ', '--grace', '1',
+                            '--interval', '1'],
+                           _green('ci'))
+    assert code == 0, text
+    clock = _Clock()
+    code, text = _run_main(mod, clock,
+                           ['b' * 40, '--repo', OTHER_REPO,
+                            '--required', ' ci ', '--grace', '1',
+                            '--interval', '1'],
+                           _green('gate freshness'))
+    assert code == 4, text
+    assert 'no ci run on' in text, text
+
+
+# The refusal with no flags at all, pinned. A control comparing two runs
+# of THIS code would pass on a change that moved both, and this sentence
+# is the branch's strongest claim: naming the gate it already knows
+# changes nothing it prints.
+_DEFAULT_REFUSAL = (
+    '555555555555 2 run(s)\n'
+    '  gate freshness: completed/success\n'
+    '  CodeQL: completed/success\n'
+) * 2 + (
+    'no tests run on 555555555555 after the 1s grace, so this head is not '
+    'certified: the 2 run(s) on this SHA are gate freshness, CodeQL\n'
+)
+
+
+def test_naming_this_repositories_own_gate_prints_identically(tmp):
+    """`ci_wait`'s `_gate_note` claims the reports print exactly what they
+    printed before the flag existed on this repository. The claim is
+    pinned to the literal above, not to a comparison between two runs of
+    this code: the plain run is the reference AND the assertion, so an
+    edit that moved both would otherwise pass.
+
+    Every spelling of this repository's name, because the comparison that
+    decides it is case-insensitive over the resolved value - a caller who
+    typed the name out in full, or changed its case, has named the same
+    repository and must get the same bytes. One row would have held the
+    claim for the spelling it happened to use.
+    """
+    del tmp
+    mod = _ci_wait()
+    argv = ['5' * 40, '--grace', '1', '--interval', '1']
+    runs = _green('gate freshness', 'CodeQL')
+    plain = _run_main(mod, _Clock(), argv, runs)
+    assert plain == (4, _DEFAULT_REFUSAL), plain
+    for spelled in ([], ['--repo', 'Nitjsefnie-Harness-Commons/daedalus'],
+                    ['--repo', 'nitjsefnie-harness-commons/daedalus']):
+        got = _run_main(mod, _Clock(),
+                        argv + spelled + ['--required', 'tests'], runs)
+        assert got == plain, (spelled, got)
 
 
 def main():

@@ -33,14 +33,21 @@ Two unrelated short workflows conclude, the tool says acceptable and exits
 
 The expectation is a constant, and stays the DEFAULT: a caller who names
 nothing gets exactly the exit-4 refusal below, so a reader cannot switch
-it off by waiting. A caller naming ANOTHER repository may also name that
-repository's gate with --required NAME (repeatable, and all of them must
-be present). That is the only way out, and it is deliberate: `tests` is
-this repository's gate and is not another one's, so without it an
-all-green head on a differently-named gate refused at 4 with a line
-reading as "the gate never started" (issue #1318). A caller who names
-another repository and no gate is told, on the refusal itself, which name
-is the only one checked.
+it off by waiting. --required NAME (repeatable, and all of them must be
+present) states a gate, and what it may DO depends on which repository
+this is: the tool KNOWS this one's gate and is only GUESSING about
+another's. Here the names may only make it stricter - they are unioned
+with the default, so the `tests` protection is unreachable by argument.
+Elsewhere they REPLACE it, which is what a caller needs there, because
+`tests` is not another repository's gate and an all-green head on a
+differently-named one refused at 4 reading as "the gate never started"
+(issue #1318). A caller naming another repository and no gate is told, on
+the refusal itself, which name is the only one checked.
+
+"This is" is decided from the RESOLVED name, case-insensitively, so
+spelling this repository out in full names this repository. Each name is
+stripped before it is required, and one left blank by that is refused as
+the invocation it is (issue #1320).
 
 An incomplete set is answered, never waited on forever. If the open pull
 request for this head reports itself CONFLICTING or DIRTY the run is never
@@ -156,19 +163,55 @@ def _missing(runs, *, required=REQUIRED_WORKFLOWS):
     return ci_gate.missing_required(runs, required=required)
 
 
+def _is_default_repo(repo):
+    """Whether `repo` names the repository whose gate this tool knows.
+
+    Case-insensitive over the whole `owner/name`, and asked of the RESOLVED
+    value rather than of whether `--repo` was passed: spelling this
+    repository out in full names the same repository, and so does changing
+    the case of either half of it. Only the comparison is normalised, so
+    the query still goes out spelled as the caller spelled it.
+    """
+    return repo.lower() == DEFAULT_REPO.lower()
+
+
+def _required_set(repo, named):
+    """The workflow names this invocation is held to.
+
+    A direction, and deliberately not a symmetric one: the flag may only
+    make this tool STRICTER where it already knows the gate, and may only
+    REPLACE a requirement where it was guessing for a repository it was
+    not told about. So here the caller's names are UNIONED with
+    `REQUIRED_WORKFLOWS` - which puts the `tests` protection out of reach
+    of any argument, and with it the false green of issue #1217 - while on
+    another repository they replace a default that was only ever a guess.
+
+    Each name is stripped, so `' ci '` is the requirement `ci` rather than a
+    name no run carries and no report can spell legibly (issue #1320).
+    """
+    if not named:
+        return REQUIRED_WORKFLOWS
+    names = frozenset(name.strip() for name in named)
+    if _is_default_repo(repo):
+        return REQUIRED_WORKFLOWS | names
+    return names
+
+
 def _gate_note(repo, named):
     """The note a missing-gate report carries, or nothing at all.
 
-    Both facts it turns on are the caller's - which `--repo` was named,
-    and whether `--required` was - and only `main` holds them. It is
-    empty on this repository and empty for a caller who stated their own
-    gate, so on both of those the reports print exactly what they printed
-    before the flag existed.
+    Both facts it turns on are the caller's - which repository, and
+    whether `--required` was - and only `main` holds them. It is empty
+    whenever `--required` was given, because a caller who has stated a
+    gate is not asking what this tool checks by default; and empty on this
+    repository under every spelling, because there the answer is not a
+    guess. `_is_default_repo` answers the repository half for this and for
+    `_required_set`, so the note and the set cannot drift apart.
 
     The names are rendered from the constant rather than spelled here, so
     the line cannot drift from the gate the tool actually checks.
     """
-    if named or repo == DEFAULT_REPO:
+    if named or _is_default_repo(repo):
         return ''
     names = ', '.join(sorted(REQUIRED_WORKFLOWS))
     return (f'  only {names} is checked by default; --required NAME states '
@@ -333,10 +376,13 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
         print_matrix(runs, sha, out)
         if state == 'acceptable':
             discarded = [run for run in runs if superseded(run, runs)]
-            note = (f' ({len(discarded)} superseded run(s) ignored)'
-                    if discarded else '')
+            # Not `note`: that name is the caller's gate note, passed down
+            # to the refusals below, and one function holding two things
+            # under one name is a trap the moment either branch grows.
+            suffix = (f' ({len(discarded)} superseded run(s) ignored)'
+                      if discarded else '')
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
-                  f' acceptable{note}', file=out, flush=True)
+                  f' acceptable{suffix}', file=out, flush=True)
             # The count above is this loop's length, so the two cannot
             # disagree; a dropped run never enters `judged`, so exit 1 has
             # no offender to disclose, and the run id rides on these lines.
@@ -423,8 +469,7 @@ def main(argv=None):
         print('--required must name a workflow, got a blank value',
               file=sys.stderr)
         return 3
-    required = (frozenset(args.required) if args.required
-                else REQUIRED_WORKFLOWS)
+    required = _required_set(args.repo, args.required)
     note = _gate_note(args.repo, args.required)
     try:
         if not args.once:
