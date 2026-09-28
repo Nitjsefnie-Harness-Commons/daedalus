@@ -34,3 +34,7 @@ def _api_get(path):
 def _answered_result(**over):
     base = {'id': 'job1', 'result': 'ok', 'error': None, 'ts': 1}
     return dict(base, **over)
+
+def _wait_result(cmd_id, delivery, timeout, interval=0.5):
+    return {'via': 'wait_for_result', 'id': cmd_id, 'tab': 'extension',
+            'delivery': delivery, 'timeout': timeout, 'interval': interval}
