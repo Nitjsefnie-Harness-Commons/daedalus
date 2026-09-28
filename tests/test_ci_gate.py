@@ -137,8 +137,8 @@ def test_the_expectation_has_exactly_one_definition(tmp):
     the one form that sees a copy written under a definition's name, and
     an alias bound to the authority is not a copy.
 
-    Read from source with `ast`, not by importing: an import would collapse
-    the very thing being counted.
+    Read from source with `symtable`, not by importing: an import would
+    collapse the very thing being counted.
 
     And the control's own premise is asserted rather than assumed: a rename
     of either name would leave this filtering for a name nothing defines,
@@ -233,10 +233,9 @@ def _module_assigns(statements):
     it: a plain alias lives in an `ast.Assign`, so a binding form this does
     not match cannot be one. The recursion stops at a `def` or a `class`,
     whose bodies are not the module's scope - a class-body alias must not
-    exempt a module-scope definition - and does not descend into a value,
-    where no `ast.Assign` statement can appear. That is why `ast.Lambda`
-    is absent: a walrus in a lambda body is a `NamedExpr`, and nothing
-    under a lambda holds an assignment statement.
+    exempt a module-scope definition - and nowhere else can an assignment
+    statement sit, so descending finds nothing more. That is why
+    `ast.Lambda` is absent: a walrus in a lambda body is a `NamedExpr`.
     """
     scopes = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
     for node in statements:
@@ -370,11 +369,11 @@ def test_every_reader_answers_over_the_judged_set(tmp):
         _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness'),
     ]
     assert mod.missing_required(runs) == ['tests']
-    assert [run['id'] for run in mod._judged(runs)] == [2]
+    assert [run['id'] for run in mod.judged(runs)] == [2]
     # Asked of the raw list and of the set the filter left, the predicate
     # answers alike: a caller that pre-filters cannot move the answer, and
     # one that does not cannot either.
-    assert mod.missing_required(mod._judged(runs)) == ['tests']
+    assert mod.missing_required(mod.judged(runs)) == ['tests']
     assert wait.verdict(runs) == ('incomplete', [])
     assert wait._missing(runs) == ['tests']
     absent = hold._settled(runs)
@@ -388,7 +387,7 @@ def test_every_reader_answers_over_the_judged_set(tmp):
 
 
 FILTER_NAMES = frozenset(
-    {'_judged', '_superseded', '_workflow_of', '_started_key'})
+    {'judged', 'superseded', '_workflow_of', '_started_key'})
 
 
 def test_no_caller_declares_a_filter_of_its_own(tmp):
@@ -396,19 +395,27 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
 
     A copy pasted back into a caller is the drift this branch exists to
     end, and it survives every other control: a behaviourally identical
-    private `_judged` in `ci_wait.py` leaves every other test in the four
-    suites that read these modules green.
+    `judged` in `ci_wait.py` leaves every other test in the four suites
+    that read these modules green.
 
-    The first half refuses a module-scope definition of any of the four
-    names outside `ci_gate`, whatever nests it and in every binding form
-    the symbol table reports, and accepts an alias bound to the authority
-    - the pattern `ci_wait.py` already uses for `REQUIRED_WORKFLOWS`, and
-    what `_is_an_alias` is for. The one binding it does not refuse is an
-    import-form alias (`import os as _judged`), which is someone else's
-    object under a misleading name rather than a second filter, and the
-    second half is what catches that - in `ci_wait.py`, which is the
-    caller that binds the names at all. `watch_all.py` imports none of
-    them, so a filter name bound there to a foreign object is green here.
+    The searched domain is this skill's own directory and nothing wider:
+    a `*.py` module beside `ci_gate.py`. Two of the four have a second home
+    outside it - `scripts/ci/aggregate_gate.py` carries `_workflow_of` and
+    `_started_key` with bodies identical to `ci_gate.py`'s - and a copy
+    pasted there is green. That is issue #1260, which this branch leaves
+    open on purpose: `scripts/ci/` is gate-defining, and an edit there
+    turns every open pull request's `gate freshness` check red on merge.
+
+    Within that domain the first half refuses a module-scope definition of
+    any of the four names outside `ci_gate`, whatever nests it, and
+    accepts an alias bound to the authority - the pattern `ci_wait.py`
+    already uses for `REQUIRED_WORKFLOWS`, and what `_is_an_alias` is
+    for. The one binding it does not refuse is an import-form alias
+    (`import os as judged`), which is someone else's object under a
+    misleading name rather than a second filter, and the second half is
+    what catches that - in `ci_wait.py`, which is the caller that binds
+    the names at all. `watch_all.py` imports none of them, so a filter
+    name bound there to a foreign object is green too.
 
     What it does not establish: that a caller REACHES the filter.
     Deleting the filter import and leaving the call sites dangling is
@@ -427,7 +434,9 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
             continue
         for file, name in _module_declarations(path, FILTER_NAMES):
             owners.setdefault(file, []).append(name)
-    assert sorted(owners) == ['ci_gate.py'], owners
+    assert sorted(owners) == ['ci_gate.py'], (
+        f'only ci_gate.py may declare a filter name; searched every *.py in '
+        f'{skill.name} and found them declared in {sorted(owners)}')
     assert sorted(owners['ci_gate.py']) == sorted(FILTER_NAMES), owners
     for name in sorted(FILTER_NAMES):
         owned = getattr(wait.ci_gate, name)
@@ -440,10 +449,10 @@ def test_both_waiters_read_this_one_predicate(tmp):
 
     These assertions hold for any two modules that import the name, so
     they cannot see a caller that grew a copy or stopped calling the
-    predicate - the three controls above are the ones that do. What is
-    left here is the weaker property, still worth pinning: both callers
-    reach the same module object rather than each resolving `ci_gate`
-    somewhere of its own.
+    predicate - the controls above are the ones that do. What is left
+    here is the weaker property, still worth pinning: both callers reach
+    the same module object rather than each resolving `ci_gate` somewhere
+    of its own.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'

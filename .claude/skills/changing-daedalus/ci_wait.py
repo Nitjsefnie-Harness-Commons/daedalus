@@ -96,7 +96,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_gate  # noqa: E402
 # The newest-run-per-workflow filter is ci_gate's, beside the predicate it
 # defines the set for, so there is one filter rather than one per caller.
-from ci_gate import _judged, _superseded  # noqa: E402
+from ci_gate import judged, superseded  # noqa: E402
 import gh_client  # noqa: E402
 import gh_head_prs  # noqa: E402
 
@@ -134,13 +134,17 @@ def prs_on(repo, sha):
     return gh_head_prs.head_pull_requests(owner, name, sha)
 
 
-def _missing(runs, required=REQUIRED_WORKFLOWS):
+def _missing(runs):
     """The required workflow names no run the filter kept carries.
 
     Read through the shared predicate, which applies the filter itself, so
-    a superseded run's name cannot satisfy the gate on its own.
+    a superseded run's name cannot satisfy the gate on its own. The name
+    stays because the refusal this feeds is this tool's own question, and
+    `wait` therefore carries no predicate call of its own - it is the one
+    function here the extraction was allowed to change, and keeping it
+    that way is what the exit-code evidence rests on.
     """
-    return ci_gate.missing_required(runs, required=required)
+    return ci_gate.missing_required(runs)
 
 
 def verdict(runs, *, required=REQUIRED_WORKFLOWS):
@@ -169,7 +173,7 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     question, which is why the check sits after the conclusion has already
     been judged above.
     """
-    runs = _judged(runs)
+    runs = judged(runs)
     if not runs:
         return 'waiting', []
     if any(run.get('status') != 'completed' for run in runs):
@@ -285,13 +289,13 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
-            discarded = [run for run in runs if _superseded(run, runs)]
+            discarded = [run for run in runs if superseded(run, runs)]
             note = (f' ({len(discarded)} superseded run(s) ignored)'
                     if discarded else '')
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
                   f' acceptable{note}', file=out, flush=True)
             # The count above is this loop's length, so the two cannot
-            # disagree; a dropped run never enters `_judged`, so exit 1 has
+            # disagree; a dropped run never enters `judged`, so exit 1 has
             # no offender to disclose, and the run id rides on these lines.
             for run in discarded:
                 print(f'  {run.get("name")} (run {run.get("id")}): '
