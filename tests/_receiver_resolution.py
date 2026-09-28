@@ -114,10 +114,13 @@ def type_param_names(node):
 def _rebindings(tree):
     """`(node, name)` for every name a module binds except an import.
 
-    The set is the list in the Python Language Reference, Execution model,
-    §4.2.1 "Binding of names" — a claim a reader checks against that page
-    rather than against this file, which is what stopped a per-statement
-    enumeration from being falsified a sixth time.
+    The set is the Python Language Reference §4.2.1 binding list, cited so
+    a reader can diff this against the reference. Checkable is not closed:
+    the first diff after the citation was installed found two of §4.2.1's
+    own bullets uncollected — `type_params`, unreachable because the
+    `FunctionDef`/`ClassDef` branch precedes the `else` that collected them,
+    and `ast.Lambda` parameters, invisible because `_is_def` excludes
+    `Lambda`.
 
     Names come from ONE rule: every `ast.Name` whose `ctx` is `Store` or
     `Del`, whatever statement holds it. The binders that are not `Name`
@@ -148,6 +151,7 @@ def _rebindings(tree):
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
                                ast.ClassDef)):
             found.append((node, node.name))
+            found.extend((node, name) for name in type_param_names(node))
         elif isinstance(node, ast.ExceptHandler) and node.name:
             found.append((node, node.name))
         elif isinstance(node, ast.MatchAs) and node.name:
@@ -160,6 +164,7 @@ def _rebindings(tree):
             alias = getattr(node, 'name', None)  # `type X = ...`, 3.12
             if alias:
                 found.append((node, alias))
+            found.extend((node, name) for name in type_param_names(node))
         else:
             found.extend((node, name) for name in type_param_names(node))
     return found
