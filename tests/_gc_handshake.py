@@ -76,7 +76,14 @@ def _child_refusal_source(attempts):
         'pathlib.Path.read_text = _wrap("read_text", _real["read_text"],\n'
         '                               lambda a, k: str(a[0]))\n'
         'pathlib.Path.write_text = _wrap("write_text", _real["write_text"],\n'
-        '                                lambda a, k: str(a[0]))\n')
+        '                                lambda a, k: str(a[0]))\n'
+        '_real_collect = command_queue.collect_expired\n'
+        'def _collect_then_rearm(cmd_dir, ttl):\n'
+        '    try:\n'
+        '        return _real_collect(cmd_dir, ttl)\n'
+        '    finally:\n'
+        '        _spent.clear()\n'
+        'command_queue.collect_expired = _collect_then_rearm\n')
 
 
 def _on_demand_command_gc(fault_dir, refusals=0):
@@ -118,6 +125,27 @@ def _on_demand_command_gc(fault_dir, refusals=0):
     return str(fault_dir)
 
 
+def _routed_marker_operations():
+    """Every marker operation the handshake routes, as (side, op, name)."""
+    return {
+        ('parent', 'unlink', _GC_DONE),
+        ('parent', 'write_text', _GC_TRIGGER),
+        ('parent', 'read_text', _GC_DONE),
+        ('child', 'unlink', _GC_TRIGGER),
+        ('child', 'write_text', _GC_DONE_TEMP),
+        ('child', 'replace', _GC_DONE),
+    }
+
+
+def _refusals_logged(log, side):
+    """The (side, operation, name) triples one refusal log carries."""
+    read = []
+    for line in log.read_text(encoding='utf-8').splitlines():
+        operation, name = line.split()
+        read.append((side, operation, name))
+    return read
+
+
 @contextlib.contextmanager
 def _refuse_marker_operations(command_root, attempts):
     """Refuse the marker's own filesystem operations, `attempts` times each.
@@ -133,6 +161,7 @@ def _refuse_marker_operations(command_root, attempts):
         'unlink': Path.unlink,
         'read_text': Path.read_text,
         'write_text': Path.write_text,
+        'touch': Path.touch,
     }
     spent = {}
     log = command_root / _GC_REFUSED_PARENT
@@ -168,6 +197,8 @@ def _refuse_marker_operations(command_root, attempts):
                              lambda args, kwargs: str(args[0]))
     Path.write_text = patched('write_text', real['write_text'],
                               lambda args, kwargs: str(args[0]))
+    Path.touch = patched('touch', real['touch'],
+                         lambda args, kwargs: str(args[0]))
     try:
         yield log
     finally:
@@ -175,3 +206,4 @@ def _refuse_marker_operations(command_root, attempts):
         Path.unlink = real['unlink']
         Path.read_text = real['read_text']
         Path.write_text = real['write_text']
+        Path.touch = real['touch']
