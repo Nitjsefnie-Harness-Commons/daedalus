@@ -210,6 +210,7 @@
     "_chain": {"python": ["tests/_coverage_scopes.py"]},
     "_chain_base": {"python": ["tests/_control_calls.py"]},
     "_chained_member": {"python": ["tests/_jsroute_calls.py"]},
+    "_check_kind": {"python": ["tests/_arm_sweep.py"]},
     "_check_launch": {"python": ["tests/_bash_resolver_scan.py", "tests/_coverage_guard.py"]},
     "_checker": {"python": ["tests/_version_contract_scanners.py"]},
     "_child_cpu_at_timeout": {"python": ["tests/_dashnode.py"]},
