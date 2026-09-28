@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read a downloaded `timed` run: its cell artifacts, and its weights.
 
-The reading half of the timings refresher, split from the writing
-half. One downloaded run is a directory of cell artifacts:
+The reading half of the refresher, split from the writing half. One
+downloaded run is a directory of cell artifacts:
 
     <runs-root>/<run-id>/<cell>/reference.json
     <runs-root>/<run-id>/<cell>/head-<n>/<suite-stem>.json
@@ -10,54 +10,48 @@ half. One downloaded run is a directory of cell artifacts:
 and each suite file is what `time_tests.py` writes: `{"tests": {test
 name: seconds}}`. A suite's seconds in a run are the mean of its
 per-round totals over the rounds that carried it -- the MEASURED head
-rounds only. The warm-up round is discarded by the timed job's design
-and the base side is a different tree; neither is a head round and
-neither is read here. Nothing else under a cell (`base-<n>/`,
-`warmup/`, `verdict.json`, `ratio.txt`) is read. Cell NAMES are read
-from the directory names and never from a list: the planner generates
-them, and a name this file knew would be a name the next packing
-renames.
+rounds only. The warm-up round is discarded by the timed job's design and
+the base side is a different tree; neither is a head round and neither is
+read here. Nothing else under a cell (`base-<n>/`, `warmup/`,
+`verdict.json`, `ratio.txt`) is read. Cell NAMES come from the directory
+names and never from a list: the planner generates them, and a name this
+file knew would be a name the next packing renames.
 
-WHICH RUNS. `select` takes the most recent runs that produced a
-COMPLETE set of cell artifacts -- the same cell set as the newest run
-that produced any -- regardless of whether the run concluded green. A
-run's overall conclusion is not evidence about its durations: `timed`
-lists `aggregate` in `needs:`, so one red correctness leg (a flaky
-Windows `suites` leg reds often enough) skips the whole measuring
-matrix, and selecting only green runs would leave the file unrefreshed
-for exactly as long as the staleness the refresher exists to fix goes
-unnoticed. A run with a DIFFERENT cell set is a different partition of
-the tree, so its numbers are not comparable and it is skipped, and the
-report says how far back the search reached and why. A cell directory
-with no reference reading is a REFUSAL naming the cell and the suites
-it carried: a run that produced the full set of cells and lost one
-unit's reading is a broken measurement, and stepping over it here is
-the silence the maintainer ruled out. The workflow's walk is the gate
-in front of this one, and it reaches the opposite disposition for that
-same run -- it steps over a candidate whose cells lack
-`reference.json`, and releases the reference cell set while nothing
-has been kept yet, so a run from before the cells measured the
-reference workload cannot block the search. The two are not in
-conflict, and neither is a fallback for the other: the walk narrows
-the candidate list, and this refusal is what a TREE the walk did not
-narrow -- a hand-built runs root, an operator's own download -- gets
-instead of a silent skip. `tests/test_timed_workflow.py` pins the
-walk's half by executing it.
+WHICH RUNS. `select` takes the most recent runs that produced a COMPLETE
+set of cell artifacts -- the same cell set as the newest run that
+produced any -- regardless of whether the run concluded green. A run's
+overall conclusion is not evidence about its durations: `timed` lists
+`aggregate` in `needs:`, so one red correctness leg skips the whole
+measuring matrix, and selecting only green runs would leave the file
+unrefreshed for exactly as long as the staleness exists to fix goes
+unnoticed. A run with a DIFFERENT cell set is a different partition, so
+it is skipped and the report says how far back the search reached. A
+cell directory with no reference reading is a REFUSAL naming the cell and
+the suites it carried: a run that produced the full set of cells and
+lost one unit's reading is a broken measurement, and stepping over it
+here is the silence the maintainer ruled out. The workflow's walk is the
+gate in front of this one and reaches the opposite disposition for that
+same run -- it steps over a candidate whose cells lack `reference.json`,
+and releases the reference cell set while nothing has been kept yet, so a
+run from before the cells measured the reference workload cannot block
+the search. The two are not in conflict, and neither is a fallback for
+the other: the walk narrows the candidate list, and this refusal is what
+a TREE the walk did not narrow -- a hand-built runs root, an operator's
+own download -- gets instead of a silent skip.
+`tests/test_timed_workflow.py` pins the walk's half by executing it.
 
-`select` also decides which runs are not evidence at all, which is
-where a refresh that would narrow the file is stopped; the reasoning
-is in its own docstring, and it is the one place in this module that
-looks at a bound the artifacts themselves do not carry -- it is handed
-the count of recorded suites the TREE still holds, because the write
-is a union and a deleted suite's weight is carried forever.
+`select` also decides which runs are not evidence at all, which is where
+a refresh that would narrow the file is stopped; the reasoning is in its
+own docstring, and it is handed the count of recorded suites the TREE
+still holds, because the write is a union and a deleted suite's weight
+is carried forever.
 
 WHAT THIS MODULE DOES NOT OWN. The median over a run SAMPLE and the
 conversion between the file's two units are not facts about a run
 directory, so they live in the writing half beside the write that uses
-them. What it owns is everything a reader has to know about the
-artifacts, and `suite_seconds` is public for the same reason `resolve`
-is public in the planner: a second implementation of the round walk is
-a second rule for what a measurement is.
+them. `suite_seconds` is public for the same reason `resolve` is public
+in the planner: a second implementation of the round walk is a second
+rule for what a measurement is.
 """
 import json
 import math
@@ -192,13 +186,20 @@ def measured_suites(run_dir, run_id):
     return names
 
 
-def select(runs, wanted, max_cells=1, recorded=0):
+def select(runs, wanted, max_cells, recorded):
     """The most recent `wanted` runs with a complete cell set, and a report.
 
     Completeness is judged against the newest run that produced any cell
     at all: its cell set is the partition these numbers are about. An
     older run with a different set is a different partition; it is
     skipped, and the skip is reported rather than absorbed.
+
+    `max_cells` and `recorded` are REQUIRED, because both of them
+    disable the collapsed-run rule when they are left out: the rule
+    fires on a one-cell run against a multi-cell bound that measured
+    fewer suites than the file records, and a caller who supplies
+    neither gets a run-selection function that cannot express the shape
+    it exists to refuse. One caller passes both.
 
     A COLLAPSED RUN IS NOT THE PARTITION. A run that produced a single
     cell while the file bounds the matrix at more than one, AND that
@@ -222,19 +223,22 @@ def select(runs, wanted, max_cells=1, recorded=0):
     AND A TWO-CELL RUN STILL TAKES THE PARTITION, which is a decision
     rather than an oversight. A run that produced two cells of a
     fourteen-cell matrix becomes `expected`, and every richer run behind
-    it is filed `incomplete`. The file it writes is honest about it --
-    the `basis` names the suites the run did not measure and says that
-    the run is not the matrix this file plans -- and the planner refuses
-    to plan a file whose content is mostly invented
-    (`timings_coverage`), so nothing wrong is published and nothing
-    wrong is committed. Widening the rule above to "fewer cells than
-    the bound" would fire on an ordinary PARTIAL matrix, which is the
-    case the union exists for, and it would leave `expected` set by an
-    older run: a re-plan that legitimately takes a matrix from fourteen
-    cells to thirteen would then be read as a collapse and the file
-    would be planned against last week's partition. Recovery needs
-    nothing: the next full matrix is newer, becomes `expected` on its
-    own, and carries the file the rest of the way.
+    it is filed `incomplete`. What keeps that honest is the UNION and
+    the disclosure beside it: the file keeps recording everything it
+    recorded, so a partial run's write is never mostly invented and the
+    planner's coverage guard sees a share near zero and stays silent --
+    which is exactly why that guard is not the safety net for this
+    shape. The `basis` is where a reader learns it: it names the suites
+    the run did not measure, says whether each is carried at a recorded
+    weight or estimated, and says the run is not the matrix this file
+    plans. Widening the rule above to "fewer cells than the bound" would
+    fire on an ordinary PARTIAL matrix, which is the case the union
+    exists for, and it would leave `expected` set by an older run: a
+    re-plan that legitimately takes a matrix from fourteen cells to
+    thirteen would then be read as a collapse and the file would be
+    planned against last week's partition. Recovery needs nothing: the
+    next full matrix is newer, becomes `expected` on its own, and
+    carries the file the rest of the way.
     """
     selected = []
     expected = None
