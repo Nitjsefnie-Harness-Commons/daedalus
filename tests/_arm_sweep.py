@@ -295,14 +295,10 @@ def arm_sweep(tmp, arms):
     `timed_out` is a child that did not answer at all, which is neither:
     it moves nothing and proves nothing, so every consumer has to reject
     it rather than read the empty `moved` as an answer. `refused` is a
-    cut the analyser could not be asked to make, which is the fourth
-    answerable outcome and not an error in the sweep: a `cut` spec whose
-    line no longer names the clause it was written for lands on whatever
-    is there instead, and the shape of the node it then finds decides
-    whether the walk refuses, raises, or -- worst -- succeeds on the
-    wrong clause. All of those are a finding naming the arm and the
-    spec, because the alternative is a sweep that dies on the first
-    mis-keyed row and says nothing about the 149 after it.
+    cut the analyser could not be asked to make: a spec whose line no
+    longer names its clause lands on whatever is there, and that node
+    decides whether the walk refuses, raises, or succeeds on the wrong
+    clause -- all three a finding naming the arm and the spec.
     """
     from _owned_writes import clear_bytecode, copy_test_tree
 
@@ -317,9 +313,8 @@ def arm_sweep(tmp, arms):
         original = path.read_text(encoding='utf-8')
         try:
             mutated, removed, promoted = cut_arm(original, spec)
-        # Which node a mis-keyed line lands on decides how the cut fails,
-        # and the shape is not enumerable, so the type is named in the
-        # refusal rather than left to be one a reader has to guess at.
+        # Which node a mis-keyed line lands on decides how the cut fails
+        # and the shape is not enumerable, so the refusal names the type.
         except Exception as error:  # pylint: disable=broad-except
             findings[arm_id] = {
                 'removed': '', 'promoted': '', 'moved': [], 'crash': [],
