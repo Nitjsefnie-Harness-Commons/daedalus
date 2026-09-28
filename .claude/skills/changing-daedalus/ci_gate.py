@@ -6,8 +6,10 @@ it: was the workflow that gates the merge dispatched on this commit at all?
 `watch_all.py` keeps its hold rather than releasing a batch whose gating
 matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate, the
-set the predicate is asked of and the answer an absent gate gets live here
-and both callers reach them through it.
+set the predicate is asked of and the answer an absent gate gets live here.
+Each caller reaches what it uses through this module, and neither reaches
+all four: `ci_wait` binds the expectation and the filter and calls the
+predicate, the hold calls the predicate and names the answer.
 
 They are meant to AGREE, and until issue #1262 they did not: `ci_wait` asked
 the question of the set the newest-run-per-workflow filter left, and
