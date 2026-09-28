@@ -75,7 +75,7 @@ try:
         BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
     from timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
-        plan_is_balanced, verify_target)
+        live_recorded, plan_is_balanced, verify_target)
     from timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
         _unit_scale, discover_runs, select)
@@ -84,7 +84,7 @@ except ImportError:  # pragma: no cover - the script-directory import path
         BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
     from scripts.ci.timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
-        plan_is_balanced, verify_target)
+        live_recorded, plan_is_balanced, verify_target)
     from scripts.ci.timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
         _unit_scale, discover_runs, select)
@@ -231,7 +231,7 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
     existing = read_timings(out)
     runs = discover_runs(runs_root)
     selected, report = select(runs, wanted, existing['max_cells'],
-                              len(existing['suite_weights']))
+                              live_recorded(tree, existing))
     if not selected:
         return (f'no run under {runs_root} produced a complete set of cell '
                 f'artifacts ({report["empty"]} with none, '
