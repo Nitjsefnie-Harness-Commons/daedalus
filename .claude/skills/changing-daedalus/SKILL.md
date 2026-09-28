@@ -245,6 +245,14 @@ Re-running the same SHA and watching it pass is what makes intermittency a
 fact - and it earns its own issue. "Probably the known flake" is how a real
 regression gets merged.
 
+**A verdict names the SHA it was measured on and binds only that SHA.** A gate
+run before your last edit has not run on your last edit, whatever a report says
+about it: state the SHA each verdict in a report was taken against, and re-run
+the gates a task names after that task's last edit. A check that is in the
+batch only sometimes is a sample, not a gate - its agreeing with the last run
+is not evidence, and a suite that happened to be in that batch is verified no
+more than one that was not.
+
 **Read the diff-coverage comment line by line.** It names the added lines no
 test executed, and it is informational precisely so that nobody can point at a
 threshold and stop thinking. For each line named, write down why its absence of
