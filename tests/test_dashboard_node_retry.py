@@ -211,9 +211,9 @@ def test_windows_retry_escalates_inner_and_outer_timeout_budgets(tmp):
         [call(timeout=10), call(timeout=1)],
         [call(timeout=20), call(timeout=1)],
     ]
-    # The escalation is the `timeout_s` pair above, and is better witnessed
-    # there: 10 then 20 can only come from 5 s then 10 s. The program used to
-    # be read out of argv as a second witness; it reaches node by file now.
+    # The CHILD-side half is held in test_dashboard_command_line.py, not
+    # here: `timeout_s` is attempt * (step + grace) and is not injective in
+    # step, so 10 then 20 proves nothing about what the child was told.
 
 
 def test_non_windows_declines_even_when_close_and_reap_settle(tmp):
