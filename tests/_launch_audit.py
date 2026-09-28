@@ -11,10 +11,10 @@ analyser can place, with a head that reads as the constant `git`, is
 refused. Any OTHER call carrying a `timeout=` or a `**`-unpacked mapping
 is reported as an `unplaced` site at an unreadable head unless its
 receiver is PROVED a fixed, non-launch value — a bare name this module
-binds and the analyser read, and nothing else. A receiver the analyser
-cannot prove is never passed over, so a bounded git launch cannot reach
-the tree however the module was obtained or reached, without a refusal or
-an allowance row.
+binds and the analyser read, or an attribute chain spelled from a dotted
+import of a stdlib root. A receiver the analyser cannot prove is never
+passed over, so a bounded git launch cannot reach the tree however the
+module was obtained or reached, without a refusal or an allowance row.
 
 Only the argv and head reading lives in `_argv_read.py`. It binds no
 configuration of its own.
@@ -22,6 +22,7 @@ configuration of its own.
 import ast
 import inspect
 import subprocess
+import sys
 
 from _argv_read import ArgvReader
 
@@ -83,6 +84,7 @@ def launch_refusals(source, here, bound_sink=None):
     machinery = {'functools': {'partial': partial_aliases},
                  'importlib': {'import_module': import_module_aliases}}
     module_aliases = {}
+    dotted_roots = set()
 
     def normalize(called):
         """Map a machinery alias's member to its canonical spelling."""
@@ -218,7 +220,8 @@ def launch_refusals(source, here, bound_sink=None):
                 elif alias.name in machinery and '.' not in alias.name:
                     module_aliases[alias.asname or alias.name] = alias.name
                 elif '.' in alias.name and not alias.asname:
-                    safe_names.add(alias.name.split('.')[0])
+                    dotted_roots.add(root := alias.name.split('.')[0])
+                    safe_names.add(root)
                 else:
                     safe_names.add(alias.asname or alias.name)
         elif isinstance(node, ast.ImportFrom):
@@ -480,17 +483,14 @@ def launch_refusals(source, here, bound_sink=None):
     def proved_fixed(receiver):
         """Is this receiver PROVED a fixed, non-launch value?
 
-        Proof is the whole standard and it is deliberately narrow: a bare
-        name this module binds and the analyser read, and nothing else. Four
-        things are named and each is unreadable rather than unknown: a
-        PARAMETER, which is a different binding from a module-level
-        import of the same name in a different scope; an attribute or a
-        subscript, because the analyser cannot know what `self.mod` or
-        `ns[key]` holds; a name bound to a call the IMPORT MACHINERY
-        makes, by any route that reaches it — `import importlib as il`,
-        `il = importlib`, and the callee's base is followed through the
-        bindings precisely so the two spellings are one case; and a name
-        bound to `getattr`, which hands back whatever the module holds.
+        Proof is the whole standard and it is deliberately narrow. Each
+        thing it names is unreadable rather than unknown: a PARAMETER
+        (a different binding from a module import of the same name), an
+        attribute or subscript (`self.mod`, `ns[key]`), a name bound to
+        a call the IMPORT MACHINERY makes by any route, and a name bound
+        to `getattr`. An attribute chain spelled from a dotted import of a
+        stdlib root is the interpreter's own code, and is the one shape
+        proved without being a bare name.
 
         A name the module binds to some OTHER call is proved, because
         the call itself is then the fixed value. A receiver the analyser
@@ -505,6 +505,11 @@ def launch_refusals(source, here, bound_sink=None):
         list names the family rather than the members it has been seen
         in.
         """
+        # An attribute chain: a dotted stdlib root, unless it can launch.
+        root = _dotted_stdlib_root(receiver, dotted_roots)
+        if root is not None and root not in parameter_names.get(
+                id(function_scopes.get(id(receiver))), ()):
+            return True
         if not isinstance(receiver, ast.Name):
             return False
         # Three limbs are load-bearing and `bound` is DEAD, and a
@@ -673,3 +678,23 @@ def bound_sites(source, here):
     sink = []
     launch_refusals(source, here, bound_sink=sink)
     return sink
+
+
+# The stdlib roots an attribute chain is refused on: each reaches a
+# launch or a child wait (asyncio.subprocess, concurrent.futures,
+# multiprocessing.connection, os.popen, pty.spawn, and shutil, whose
+# entry points are all os calls). `subprocess` is not one: a plain
+# import of it is not a dotted import, so the limb never reaches it.
+_STDLIB_LAUNCH_ROOTS = frozenset(
+    {'asyncio', 'concurrent', 'multiprocessing', 'os', 'pty', 'shutil'})
+
+
+def _dotted_stdlib_root(receiver, dotted_roots):
+    """The stdlib root this attribute chain is spelled from, or None."""
+    while isinstance(receiver, ast.Attribute):
+        receiver = receiver.value
+    if isinstance(receiver, ast.Name) and receiver.id in dotted_roots \
+            and receiver.id in sys.stdlib_module_names \
+            and receiver.id not in _STDLIB_LAUNCH_ROOTS:
+        return receiver.id
+    return None

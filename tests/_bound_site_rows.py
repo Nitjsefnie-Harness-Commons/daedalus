@@ -621,4 +621,47 @@ BOUND_SITE_ROWS = (
       "x = subprocess.run(['git', 'status'], check=True)\n"
       "x(['git', 'status'], check=True, timeout=30)\n"),
      [(5, 'unreadable', 'unplaced')]),
+    # An attribute chain is the one receiver shape no bare-Name limb can
+    # judge, and a member of a standard-library module is the
+    # interpreter's own code rather than this repository's launch. The
+    # positive row is the extension; the six after it are the attacks it
+    # has to survive, and the last two are the boundaries — a repository
+    # module reached the same way, and a bare Name the limb never sees.
+    ('a-stdlib-dotted-import-member-is-a-proved-fixed-value',
+     "import http.client\n"
+     "http.client.HTTPConnection(timeout=30)\n",
+     []),
+    ('excluded-stdlib-root-asyncio-is-refused',
+     "import asyncio.subprocess\n"
+     "asyncio.subprocess.run(argv, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-concurrent-is-refused',
+     "import concurrent.futures\n"
+     "concurrent.futures.wait(futures, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-multiprocessing-is-refused',
+     "import multiprocessing.connection\n"
+     "multiprocessing.connection.wait(children, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-os-is-refused',
+     "import os.path\n"
+     "os.path.commonpath(paths, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-pty-is-refused',
+     "import pty.spawn\n"
+     "pty.spawn.spawn(argv, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('a-repository-dotted-import-is-not-a-stdlib-root',
+     "import daedalus_bridge.config\n"
+     "daedalus_bridge.config.startup_paths(timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('a-parameter-shadowing-a-stdlib-root-is-refused',
+     "import http.client\n"
+     "def probe(http):\n"
+     "    return http.client.HTTPConnection(timeout=30)\n",
+     [(3, 'unreadable', 'unplaced')]),
+    ('a-bare-name-receiver-is-unaffected-by-the-stdlib-limb',
+     "import os\n"
+     "os(timeout=30)\n",
+     []),
 )
