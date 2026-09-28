@@ -362,6 +362,83 @@ LAMBDA_ROWS = {
 }
 
 
+SINGLE_BINDING_ROWS = {
+    # A clobber: the function-local add is applied LAST because the walk
+    # is breadth-first, so it won over the live module binding and the
+    # call was read as a network read. A live `subprocess.Popen` carrying
+    # a deadline, skipped — the only fault-LOSING defect on this branch.
+    'the clobber, refused': (
+        'import subprocess\nimport urllib.request\n\n\n'
+        'def g():\n    urlopen = urllib.request.urlopen\n\n\n'
+        'urlopen = subprocess.Popen\n\n\n'
+        'def run_gate(cmd):\n    return urlopen(cmd, timeout=10)\n',
+        'REFUSED'),
+    # The same statements in the other source order. The defect is
+    # breadth-first ordering, so a row at one order proves one traversal.
+    'the clobber reversed, refused': (
+        'import subprocess\nimport urllib.request\n\n\n'
+        'urlopen = subprocess.Popen\n\n\n'
+        'def g():\n    urlopen = urllib.request.urlopen\n\n\n'
+        'def run_gate(cmd):\n    return urlopen(cmd, timeout=10)\n',
+        'REFUSED'),
+    # The case the ADD exists for, and the row that stops the check
+    # becoming a blanket refusal.
+    'a lone function-local add, DISCHARGED': (
+        'import urllib.request\n\n\n'
+        'def run_gate(url):\n'
+        '    _open = urllib.request.urlopen\n'
+        '    return _open(url, timeout=10)\n',
+        'DISCHARGED'),
+    # Two adds of one name. Proving they name the same object is a design
+    # and refusing is a line, so the answer is refusing.
+    'two adds of one name, refused': (
+        'import urllib.request\n\n\n'
+        '_open = urllib.request.urlopen\n\n\n'
+        'def g(url):\n    _open = urllib.request.urlopen\n'
+        '    return _open(url, timeout=10)\n',
+        'REFUSED'),
+    # A refused add POPS the name, so the IMPORT that resolved it to a
+    # network read goes with it and the call is refused. The
+    # over-refusal, named rather than implied: it is safe only because
+    # it errs toward refusal, and this row is what makes that a
+    # measurement instead of a claim. Two module-level adds so the add is
+    # the thing that is refused, and the import is the thing popped.
+    'a refused add pops a resolving name, REFUSED (the over-refusal)': (
+        'import urllib.request\nfrom urllib.request import urlopen\n\n\n'
+        'urlopen = urllib.request.urlopen\n'
+        'urlopen = urllib.request.urlopen\n\n\n'
+        'def run_gate(url):\n    return urlopen(url, timeout=10)\n',
+        'REFUSED'),
+}
+
+
+def test_an_add_is_honoured_only_when_it_is_the_only_binding(tmp):
+    """The check the ADD's own justification claimed and nothing performed.
+
+    A dotted right-hand side was added module-wide on the strength of
+    "still the read it was written as for every caller in the module",
+    which holds only while the name has ONE binding, counted across every
+    scope and including the import and the pops' forms. The walk is
+    breadth-first, so a function-local add is applied last and wins
+    whatever the source order, and at runtime the call was on a
+    `subprocess.Popen` read as a network read and skipped.
+
+    The fifth row is the over-refusal, pinned rather than argued: a
+    refused add pops the name, so a read that resolved before now is
+    refused. The third row is the direction that must not move.
+    """
+    del tmp
+    for label, (source, expected) in SINGLE_BINDING_ROWS.items():
+        tree = ast.parse(source)
+        in_path = frozenset(
+            n.name for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
+        rows = sorted((r[1], r[2]) for r in
+                      _faults('p.py', tree, in_path))
+        got = 'REFUSED' if rows else 'DISCHARGED'
+        assert got == expected, (label, got, rows)
+
+
 def test_a_lambda_parameter_shadows_as_a_def_parameter_does(tmp):
     """§4.2.1's first bullet, and a lambda is a function.
 
