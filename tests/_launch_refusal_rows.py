@@ -305,4 +305,23 @@ LAUNCH_REFUSAL_ROWS = (
      "def probe():\n"
      "    subprocess.run(['git', 'status'], check=True, timout=30)\n",
      'which this subprocess does not take'),
+    # Rows for the arms issue #1144 swept and found live and
+    # undriven: each shape reaches the arm its label names, and
+    # deleting that arm turns this row red.
+    ('a-run-result-receiver-without-a-plain-import',
+     ("subprocess.run(['git', 'status'], check=True).wait(timeout=30)"),
+     ('declares no plain "import subprocess"; the launch audit cannot vouch '
+      'for any launch')),
+    ('an-attribute-chain-receiver-is-unresolved',
+     ('import json\n'
+      'import subprocess\n'
+      'def f():\n'
+      '    return json.decoder.JSONDecoder().decode(timeout=30)'),
+     ('declares no launch the audit can see through "subprocess" or a binding '
+      'derived from it')),
+    ('a-method-on-an-undefined-base-is-unresolved',
+     ('import subprocess\n'
+      "subprocess.run(['git', 'status'], check=True)\n"
+      'undefined_thing.method().other(timeout=30)'),
+     'calls through a receiver the audit cannot resolve'),
 )
