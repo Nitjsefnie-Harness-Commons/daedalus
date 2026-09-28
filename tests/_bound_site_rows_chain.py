@@ -1,0 +1,88 @@
+"""The receiver-resolution rows: what the unplaced arm is PROVED is not.
+
+`tests/_bound_site_rows.py` holds the red-exercise for the launch
+analyser's own structured sink, and this holds the block that judges a
+RECEIVER rather than a launch: the attribute chain spelled from a dotted
+import of a standard-library root, the roots that reach a launch anyway,
+and the names that stop the chain from being a proof at all.
+
+The rows live apart because the table they came from is at its size
+ceiling, and a control that cannot be added is a defect left unfixed.
+
+Each row here is (label, source, expected sites), the shape
+`BOUND_SITE_ROWS` is built from, so every consumer of that tuple sees
+them unchanged.
+"""
+
+CHAIN_LIMB_ROWS = (
+    # An attribute chain is the one receiver shape no bare-Name limb can
+    # judge, and a member of a standard-library module is the
+    # interpreter's own code rather than this repository's launch. The
+    # positive row is the extension; the six after it are the roots that
+    # reach a launch anyway, and the last two are the boundaries — a
+    # repository module reached the same way, and a bare Name the limb
+    # never sees.
+    ('a-stdlib-dotted-import-member-is-a-proved-fixed-value',
+     "import http.client\n"
+     "http.client.HTTPConnection(timeout=30)\n",
+     []),
+    ('excluded-stdlib-root-asyncio-is-refused',
+     "import asyncio.subprocess\n"
+     "asyncio.subprocess.run(argv, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-concurrent-is-refused',
+     "import concurrent.futures\n"
+     "concurrent.futures.wait(futures, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-multiprocessing-is-refused',
+     "import multiprocessing.connection\n"
+     "multiprocessing.connection.wait(children, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-os-is-refused',
+     "import os.path\n"
+     "os.path.commonpath(paths, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('excluded-stdlib-root-pty-is-refused',
+     "import pty.spawn\n"
+     "pty.spawn.spawn(argv, timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('a-repository-dotted-import-is-not-a-stdlib-root',
+     "import daedalus_bridge.config\n"
+     "daedalus_bridge.config.startup_paths(timeout=30)\n",
+     [(2, 'unreadable', 'unplaced')]),
+    ('a-parameter-shadowing-a-stdlib-root-is-refused',
+     "import http.client\n"
+     "def probe(http):\n"
+     "    return http.client.HTTPConnection(timeout=30)\n",
+     [(3, 'unreadable', 'unplaced')]),
+    ('a-bare-name-receiver-is-unaffected-by-the-stdlib-limb',
+     "import os\n"
+     "os(timeout=30)\n",
+     []),
+    # The limb reads the root off the IMPORT's spelling, so a name the
+    # module has since bound is not the one the import put there. Two
+    # receiver shapes, because the bare name and the chain are the two it
+    # proves; and the negative, because a name SOME OTHER binding took
+    # must not cost an intact root its proof.
+    ('a-rebound-dotted-root-is-not-proved',
+     "import subprocess\n"
+     "import http.client\n"
+     "http = getattr(cfg, 'client')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "http.request(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-rebound-dotted-root-blocks-the-chain-limb',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "email = getattr(cfg, 'mail')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('another-bindings-name-leaves-the-dotted-root-proved',
+     "import subprocess\n"
+     "import http.client\n"
+     "other = getattr(cfg, 'x')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "http.client.HTTPSConnection('h', timeout=30)\n",
+     []),
+)
