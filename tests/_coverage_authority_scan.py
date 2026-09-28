@@ -4,10 +4,10 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Split out of tests/test_coverage_bindings.py, whose opened-set control
 carried the search keys, the squeeze and the holder count in a file that
-was six lines under the tests ceiling, where one unrelated row would have
-failed the size gate for a change that did not touch it. The control
-stays in that suite under the test name the rule is recorded by; the
-mechanism it calls came here.
+was six lines under the tests ceiling, so a concurrent branch's unrelated
+row would have been what decided the size gate. The control stays in that
+suite under the test name the rule is recorded by; the mechanism it calls
+came here.
 """
 import sys
 from pathlib import Path
