@@ -10,9 +10,9 @@ reader's, and this only produces the evidence for it.
 
 The cut is AST-located and the exact text it removed is returned, so a
 reader can see which clause the verdict depended on rather than trust
-that the right one went -- and `tests/test_launch_arms.py` checks that
-claim against the source rather than taking it: the text has to be a
-real region of the file and carry the line its own arm names. A chain
+that the right one went -- and `tests/test_launch_arm_cuts.py` checks
+that claim against the source: the text must be a real region of the
+file carrying the line its own arm names. A chain
 head is the one case where the span that is cut and the clause that goes
 differ: the head's `end_lineno` runs down the whole elif chain, and the
 promotion re-supplies that chain, so `removed` stops at the head's own
@@ -38,11 +38,9 @@ MAX_UPWARD = 8
 
 # What kind of node each op is cut for. `_locate` answers the node that
 # CARRIES the line, not the one the op names, so a spec keyed one line
-# off lands on a neighbour: a `drop_if` on a `for` cut the whole loop
-# and reported a plausible `removed`, and a `drop_stmt` on a decorator
-# cut the decorator. The op says what it needs and a node of another
-# kind is refused, so a mis-keyed spec is a finding naming the arm
-# rather than a mutation of the wrong clause.
+# off lands on a neighbour -- a `drop_if` on a `for` cut the whole loop
+# and reported a plausible `removed`. The op says what it needs and a
+# node of another kind is refused by name.
 CUT_KIND = {
     'drop_if': ast.If,
     'drop_stmt': ast.stmt,
@@ -130,13 +128,11 @@ def _disjunction(tree, line):
 
 
 def _check_kind(op, node, line):
-    """Refuse a spec whose op and the node it found are not the same kind.
+    """The refusal that puts a mis-keyed spec in the `refused` channel.
 
-    A `while` carries no orelse, so promoting one is not a smaller
-    failure than an `AttributeError` on it: both are a spec whose line
-    no longer names its clause. Naming the kind turns the pair into the
-    `refused` channel the sweep already reports, and keeps the refusal
-    the module's own `ValueError` rather than an internal one.
+    `CUT_KIND` above says what each op needs; this names what was found,
+    so a `drop_if` on a `for` and a `drop_stmt` on a decorator are two
+    readable findings rather than a silent cut and an `AttributeError`.
     """
     wanted = CUT_KIND.get(op)
     if wanted is None or isinstance(node, wanted):
@@ -350,12 +346,9 @@ def arm_sweep(tmp, arms):
     `timed_out` is a child that did not answer at all, which is neither:
     it moves nothing and proves nothing, so every consumer has to reject
     it rather than read the empty `moved` as an answer. `refused` is a
-    cut the analyser could not be asked to make: a spec whose line no
-    longer names its clause lands on whatever is there, and `cut_arm`
-    refuses the op that does not match the node it found -- so a
-    mis-keyed `drop_if` is reported rather than cutting a `for` -- and
-    the walk refuses a cut that leaves no parseable file behind. Both
-    are a finding naming the arm and the spec.
+    cut the analyser could not be asked to make: `cut_arm` refuses the
+    op that does not match the node its line landed on, and the walk
+    refuses a cut leaving no parseable file. Both name the arm.
     """
     from _owned_writes import clear_bytecode, copy_test_tree
 

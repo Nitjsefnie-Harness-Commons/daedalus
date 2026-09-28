@@ -19,8 +19,8 @@ import tempfile
 from pathlib import Path
 
 from _arm_sweep import arm_sweep
-from _launch_arm_records import (CRASH_CONTROLLED, EVIDENCE, ID,
-                                SECONDARY_CONTROLLED, STATE)
+from _launch_arm_records import (
+    CRASH_CONTROLLED, EVIDENCE, ID, SECONDARY_CONTROLLED, STATE)
 from _launch_arms import (CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES,
                           STEP_CEILING_CONTROL)
 
@@ -97,11 +97,9 @@ def _counters(findings):
                       f'the {sorted(CEILING_ARMS)} the step ceiling is '
                       'bound to')
     if failed:
-        # `removed` and `promoted` exist so a reader can see which clause
-        # a verdict depended on, and this is the only place a human is
-        # handed one. An arm named in a failure is exactly where that
-        # text is wanted, so it is printed there rather than on every one
-        # of 150 green arms.
+        # `removed` and `promoted` exist so a reader can see which
+        # clause a verdict depended on, and an arm named in a failure is
+        # exactly where that text is wanted.
         for name in sorted({*refused, *uncontrolled, *only_recorded,
                             *only_derived, *unrecorded, *silent}):
             found = findings.get(name, {})

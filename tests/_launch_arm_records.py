@@ -19,16 +19,13 @@ ceiling.
 `tests/test_launch_arms.py` checks all six, and the table carries a
 one-line pointer to the note at each arm it names.
 
-The arm row's own column order is here rather than beside the table,
-because the table is at its size ceiling and a successor who extracts
-from it can move these back. `tests/_launch_arms.py` states the order
-in prose; both consumers read these rather than holding their own copy.
+The arm row's column order is here rather than beside the table, which
+is at its size ceiling; `tests/_launch_arms.py` states it in prose.
 """
 from typing import Final
 
 # (id, file, line, cut, anchor, what, state, evidence). Final keeps each
-# a literal, so an arm read through one is that column's own type; bound
-# to a plain int it reads as the union of the row's, `str | int`.
+# a literal, so an arm read through one is that column's own type.
 ID: Final = 0
 FILE: Final = 1
 LINE: Final = 2
@@ -57,13 +54,9 @@ EVIDENCE: Final = 7
 # The suite checks each name here really crashes, and that the set
 # partitions the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
 # crash-held -- is AUDITABLE, not enforced: it needs the whole 150-arm
-# sweep, and the only thing that runs one is a human running
-# `python3 tests/_launch_arm_sweep.py`, which no suite and no CI job
-# invokes. So a CONTROLLED arm whose own evidence quietly stops
-# controlling it is caught by nothing in CI, and this split is a state
-# a reviewer chooses to re-derive rather than one CI re-checks. Adding
-# a gate for a five-minute sweep is a decision worth making on its own
-# merits, not a way to close a wording problem.
+# sweep, and only a human running `python3 tests/_launch_arm_sweep.py`
+# runs one. So a CONTROLLED arm whose evidence quietly stops controlling
+# it is caught by nothing in CI.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
@@ -169,16 +162,10 @@ MARKER_NON_MEMBERS = (
 )
 
 # The CONTROLLED non-members whose evidence goes red by RAISING rather
-# than to another value; the other six of the ten are held by a value.
-# This is the same split CRASH_CONTROLLED records for the arms, and it
-# is a MEASUREMENT rather than something the table yields: the same
-# evidence row is crash-held at one clause and value-held at another --
-# `kwarg-receiver-shadowing-a-module-import-is-unproved` raises at
-# `_launch_audit.py:53` but moves a value at :303, and
-# `a-clean-launch-emits-nothing` raises at :68 and `_argv_read.py:153`
-# but moves a value at :675 -- so inferring it from the table gets four
-# of the ten wrong. `tests/test_launch_arms.py` sweeps all ten
-# non-members and re-derives this set.
+# than to another value; the other six are held by a value. A
+# MEASUREMENT, not something the table yields: one evidence row is
+# crash-held at one clause and value-held at another. The suite sweeps
+# all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
     '_argv_read.py:153', '_launch_audit.py:53', '_launch_audit.py:68',
     '_launch_audit.py:383',
