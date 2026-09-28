@@ -529,6 +529,7 @@
 !/tests/test_command_queue_candidates.py
 !/tests/test_command_queue_ordering.py
 !/tests/test_command_queue_unit.py
+!/tests/test_commit_step_seam.py
 !/tests/test_config_boot_generation.py
 !/tests/test_control_writes.py
 !/tests/test_coverage_bindings.py
