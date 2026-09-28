@@ -243,17 +243,21 @@ def _dotted_bindings(tree):
                 total = binds.get(name, 0) + (1 if name in bound else 0)
                 if resolved is not None and (total == 1
                                              or (same and total == 2)):
-                    # `total` counts what `_rebindings` collected plus
-                    # the import pass's entry, which lives in THIS table
-                    # and not in `_rebindings`, so an import of the same
-                    # name is a second binding. The add is honoured at one
-                    # binding, or at two when the other is an import
-                    # resolving to the same dotted path. Any other second
-                    # binding refuses, because the walk is breadth-first
-                    # and a function-local add is applied last and wins
-                    # whatever the source order. A refused add falls
-                    # through to the POP below, which errs toward
-                    # refusing.
+                    # `total` is `binds.get(name, 0)`, the entries
+                    # `_rebindings` collected, PLUS `1 if name in bound
+                    # else 0`, which counts the import pass's entry —
+                    # imports are not in `_rebindings` because the
+                    # import pass keeps them in `bound`. So an import of
+                    # the same name is a second binding, and this loop
+                    # writes `bound[name] = resolved` below, so `total`
+                    # can also count THIS GUARD'S OWN earlier entry: for
+                    # a lone add with no import it reads 1 on round 1 and
+                    # 2 on rounds 2 and 3, and `same` then compares the
+                    # add with itself. The add is honoured when
+                    # `total == 1`, or when `same and total == 2` — the
+                    # other binding resolving to the same dotted path.
+                    # Any other second binding falls through to the POP
+                    # below, and the pop removes the name.
                     bound[name] = resolved
                     continue
             if node not in scoped or id(node) in globals_:
