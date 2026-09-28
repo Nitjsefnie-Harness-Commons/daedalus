@@ -193,8 +193,10 @@ def main(repo):
 
 
 # One spelling, two callers, so the help line and the no-argument line
-# cannot drift: the second is pinned byte for byte by
-# tests/test_gitignore_generator.py.
+# cannot drift — that is true by construction, not by a control. What
+# tests/test_gitignore_generator.py pins is the bare invocation's exit
+# status, its stream, and the word `usage`; a rewritten string here still
+# passes every assertion in the tree.
 USAGE = 'usage: {script} <repo> [<repo> ...]'
 HELP_FLAGS = ('--help', '-h')
 

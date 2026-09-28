@@ -446,8 +446,9 @@ def test_the_derivation_always_carries_the_deny_rule(tmp):
         rendered = generator.derive(tracked)
         assert '\n*\n' in rendered, repr(rendered[-40:])
         assert rendered.count('\n*\n') == 1, repr(rendered[-40:])
-    # The rule is the first thing after the preamble and everything below
-    # it is a re-admission, so a second `*` would be a re-deny.
+    # Narrower than it looks: the only-one-rule half is the count above.
+    # This checks the rule is not the very first line, which is what keeps
+    # a rendered file that opens with a bare `*` from passing.
     assert generator.derive(['a.py']).split('\n')[0] != '*'
 
 
