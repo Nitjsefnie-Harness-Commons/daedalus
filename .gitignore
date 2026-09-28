@@ -530,6 +530,7 @@
 !/tests/test_command_queue_unit.py
 !/tests/test_config_boot_generation.py
 !/tests/test_control_writes.py
+!/tests/test_coverage_authority_scan.py
 !/tests/test_coverage_bindings.py
 !/tests/test_coverage_combine.py
 !/tests/test_coverage_comment_boundary.py
