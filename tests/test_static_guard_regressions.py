@@ -469,10 +469,10 @@ def test_real_tree_applies_python_evaluation_scopes(tmp):
 def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
     """No suite bounds the mutation sweep's child with a wall clock.
 
-    That child runs at least 132 mutation rows, one individually-bounded
+    That child runs at least 142 mutation rows, one individually-bounded
     grandchild each, so an outer bound on it decides a verdict its own
-    work does not own: 134 x 30s = 4020s is the work a runaway backstop
-    would have to cover, and 120s truncates it about thirty-three times
+    work does not own: 142 x 30s = 4260s is the work a runaway backstop
+    would have to cover, and 120s truncates it about thirty-five times
     over. The worst case is the one that has to be safe on every
     interpreter, and the larger count 3.12 and later run grows as main
     adds coverage rows, so it is deliberately not pinned here. The rows
@@ -582,7 +582,7 @@ def test_a_sweep_launch_carries_no_wall_clock_bound(tmp):
 # makes, so the inequality is not the weaker check. Which version is checked
 # how is stated once, in the sweep-bound test's docstring, which is the text
 # the disclosure assertion below is keyed on.
-_SWEEP_FLOOR_3_11 = 134
+_SWEEP_FLOOR_3_11 = 142
 _CHILD_BOUND_S = 30
 _TRUNCATED_BY_S = 120
 
@@ -671,9 +671,9 @@ def test_the_sweep_disclosure_numbers_are_derived_not_carried(tmp):
     # failure and a reword still is.
     disclosure = ' '.join(_guard_disclosure().split())
     assert f'{floor} x {child_bound}s = {worst}s' in disclosure, worst
-    assert 'about thirty-three times over' in disclosure
+    assert 'about thirty-five times over' in disclosure
     assert 'deliberately not pinned' in disclosure
-    assert 32 <= worst / _TRUNCATED_BY_S < 34, worst
+    assert 35 <= worst / _TRUNCATED_BY_S < 36, worst
     # The REASON, not only the number: a disclosure that got the count
     # right for the wrong reason would pass everything above, and a
     # reader would go looking for a missing needle in the wrong module.
