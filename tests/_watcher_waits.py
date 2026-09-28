@@ -27,14 +27,25 @@ BACKSTOP = 90
 POLL = 0.05
 # The bound on the reap that follows a cancel, and on the cancel itself.
 CANCEL_BOUND = 60
-# How many gh calls one poll may log before `await_polls` gives up on the
-# index not advancing. Generous by construction: the budget suite's own
-# bound on one idle poll is IDLE_POLL_BOUND (1), and the widest loop any
-# control measures costs 2 requests a poll
-# (test_a_loop_that_repeats_its_last_request_costs_two), so 4 leaves
-# headroom above every measured poll - and a poll that did exceed it would
-# already have been refused by the idle bound.
-POLL_WIDTH = 4
+# The widest poll, in gh calls, a healthy run may spend and still be
+# tolerated by `await_polls` - which is exactly what the code enforces: a
+# run is only over the bound once its logged calls exceed this many PER
+# PUBLISHED MARKER, and a healthy run of this width never does, because
+# `m` markers have been published by a poll making at most `m` of them.
+#
+# It is a TOLERANCE and not a cap, and nothing in the domain caps it: one
+# poll of `pr_comment_watch.poll` spends
+# `max(pages the reviews connection needs, pages the comments connection
+# needs)` plus one follow-up per review carrying more than PAGE_SIZE
+# inline comments, every term of it data-dependent, and a poll of
+# `ci_watch` spends one call per page of check contexts. The measured
+# floor is 2 - the widest poll any control in this tree measures
+# (test_a_loop_that_repeats_its_last_request_costs_two) - so the headroom
+# is for the pagination and follow-up queries a real pull request adds on
+# top. The two controls in tests/test_watcher_poll_index.py drive a poll
+# of exactly this width and of one more, so the margin either side of the
+# boundary is a run and not an argument.
+POLL_WIDTH = 8
 
 
 class Stream:
@@ -211,28 +222,38 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
     The last marker seen names a poll that may still be in flight, so the
     caller reads the ones before it.
 
-    The ceiling is in CALLS, not in seconds, and that is the whole reason it
-    can exist. A bound in time would fail a slow or loaded runner that is
-    making progress; this one is monotone in evidence, so a slow runner
-    reaches it later or not at all. What it does catch is the shape no other
-    arm can: a child that stays up, healthy, and republishes the same index
-    forever, which neither the distinct count nor `child.alive` can end.
+    The bound is on CALLS PER PUBLISHED MARKER, and that is what makes it
+    both safe and prompt. `m` markers have been published by a poll making
+    at most `m` of them, so a healthy run never exceeds `width` per marker
+    however wide its polls are and however long it takes - there is no
+    clock in it, and a loaded runner reaches it later or not at all. A run
+    that is not healthy exceeds it as soon as the evidence says so: after
+    `width` calls when the index has not moved at all, and after
+    `m * width` when it moved `m` times and stopped. What it catches is the
+    shape no other arm can: a child that stays up, healthy, and keeps
+    logging calls without publishing a new boundary, which neither the
+    distinct count nor `child.alive` can end.
     """
-    ceiling = polls * width
     while True:
         calls = fake.calls()
         markers = {call.get('poll') for call in calls}
         if len(markers) >= polls:
             return calls
         assert child.alive(), f'{what}:\n' + child.captured()
-        if len(calls) >= ceiling:
+        if len(calls) > len(markers) * width:
+            # `key=repr` so a seam wired below the first request - a set
+            # mixing a marker with no marker - renders as the observation
+            # it is instead of raising out of the refusal.
+            seen = sorted(markers, key=repr)
             raise AssertionError(
-                f'{what}: the poll index did not advance - {len(calls)} gh '
-                f'call(s) logged, markers seen {sorted(markers)}, {polls} '
-                f'advancing marker(s) expected within {ceiling} call(s). '
-                f'This log cannot tell a frozen index from one very wide '
-                f'poll; IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses a '
-                f'poll wider than an idle one.')
+                f'{what}: the poll markers did not reach {polls} within '
+                f'{len(calls)} gh call(s): {len(markers)} seen ({seen}), over '
+                f'the {width} call(s) per marker one poll may spend. Either '
+                f'the index is stuck and this run will never reach {polls} '
+                f'markers, or every poll here spent more than {width} '
+                f'call(s), which no measured poll does. This log cannot '
+                f'tell the two apart; IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) '
+                f'is what refuses a poll wider than an idle one.')
         time.sleep(POLL)
 
 

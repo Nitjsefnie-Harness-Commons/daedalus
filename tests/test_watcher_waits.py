@@ -20,13 +20,14 @@ One arm of `await_polls` does end on that shape, and it is the one that
 needed it. A marker assignment no-opped in either watcher leaves the loop
 child up, healthy and publishing nothing new, and the three budget
 controls waiting on one would spin until the job's own limit ended the run
-nameless. The arm is a ceiling on the CALLS a run may log before the index
-advances, not a bound in seconds: it is monotone in evidence, so a loaded
-runner reaches it later or not at all and cannot be failed by it, where a
-timeout buys an early failure with a flaky leg. It names what it saw and
-says plainly that one very wide poll reads the same as a frozen index,
-with the idle bound as the other refusal. `await_lines` and `await_calls`
-take no such bound, and the trade they take is unchanged.
+nameless. The arm bounds CALLS PER PUBLISHED MARKER, not seconds: `m`
+markers are published by a poll making at most `m` of them, so a healthy
+run clears it however wide its polls are and however slowly the runner
+gets there, and a loaded runner reaches it later or not at all where a
+timeout buys an early failure with a flaky leg. What it cannot separate -
+a stuck index from a poll wider than any measured - it says so, and names
+the idle bound as the other refusal. `await_lines` and `await_calls` take
+no such bound, and the trade they take is unchanged.
 """
 import os
 import sys
@@ -236,16 +237,19 @@ _FROZEN_LOG = [{'poll': '1', 'request': f'query {index}'}
 
 
 def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
-    """The call ceiling, on the one shape no other arm of this wait reaches.
+    """The bound on calls per marker, on the shape no other arm reaches.
 
     A child that stays up and keeps logging the same marker is a frozen
     poll index: it is not silent, and it is not dead, so neither the
-    marker count nor `child.alive` can end the wait. Without the ceiling
+    marker count nor `child.alive` can end the wait. Without the bound
     this control ends on the log double's own runaway guard, which names
-    the double rather than the defect. The refusal has to carry what a
-    reader needs - the markers, the calls logged, the polls expected - and
-    to say that this log cannot tell a frozen index from one very wide
-    poll, because it cannot.
+    the double rather than the defect.
+
+    The refusal is an OBSERVATION, and the control holds it to that: the
+    headline states what was measured and the two explanations follow it,
+    because a verdict that names a cause its own payload contradicts sends
+    a reader after the wrong thing - and the payload here is one marker,
+    so a headline claiming the index had advanced would be equally wrong.
     """
     del tmp
     log = _GrowingLog(_FROZEN_LOG)
@@ -256,12 +260,49 @@ def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
     except AssertionError as exc:
         message = str(exc)
     assert message is not None, 'a frozen poll index did not fail'
-    assert "markers seen ['1']" in message, message
-    assert f'{len(_FROZEN_LOG)} gh call(s) logged' in message, message
-    assert '2 advancing marker(s) expected' in message, message
-    assert 'cannot tell a frozen index from one very wide poll' in message, (
-        message)
+    assert (f'2 poll(s): the poll markers did not reach {_FROZEN_POLLS}'
+            in message), message
+    assert f'within {len(_FROZEN_LOG)} gh call(s): 1 seen ' in message, message
+    assert "(['1'])" in message, message
+    assert f'over the {POLL_WIDTH} call(s) per marker' in message, message
+    assert ('Either the index is stuck and this run will never reach 2 '
+            'markers, or every poll here spent more than '
+            f'{POLL_WIDTH} call(s)') in message, message
+    assert 'This log cannot tell the two apart' in message, message
     assert 'IDLE_POLL_BOUND' in message, message
+
+
+# A seam wired below the first request: the first entry carries a marker
+# and every one after it carries none, which is what a real partial
+# wiring produces. Rendering that set by sorting it raises, so the wait
+# still ends - but by a traceback that names the renderer instead of the
+# seam, and carries no marker, no call count and no `what`.
+_UNWIRED_LOG = ([{'poll': '1', 'request': 'query one'}]
+                + [{'poll': None, 'request': f'query {index}'}
+                   for index in range(2, 2 * POLL_WIDTH + 3)])
+
+
+def test_the_poll_wait_names_a_partially_wired_seam(tmp):
+    """A set mixing a marker with no marker is a verdict, not a `TypeError`.
+
+    Both marks have to be in the message, because which is which is what
+    tells a reader whether the watcher published once or never - a
+    difference the call count cannot show. The wait is asked for three
+    markers and the log carries two, so this ends on the bound rather than
+    on a count the two-marker log would satisfy.
+    """
+    del tmp
+    log = _GrowingLog(_UNWIRED_LOG)
+    child = _ScriptedChild(alive=True)
+    message = None
+    try:
+        await_polls(log, 3, child, '3 poll(s)')
+    except AssertionError as exc:
+        message = str(exc)
+    assert message is not None, 'a partially wired seam did not fail'
+    assert "3 poll(s): the poll markers did not reach 3" in message, message
+    assert "2 seen (['1', None])" in message, message
+    assert f'within {len(_UNWIRED_LOG)} gh call(s)' in message, message
 
 
 def test_the_death_wait_ends_when_the_pids_are_gone(tmp):
