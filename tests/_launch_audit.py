@@ -412,11 +412,11 @@ def launch_refusals(source, here, bound_sink=None):
             launches.append(node)
         elif isinstance(func, ast.Name) and func.id in bound:
             launches.append(node)
-        # LIVE and driven by no row: the WALRUS TARGET is what the arm
-        # reads, so `(go := go)(...)` after `go = subprocess.run` is a
-        # placed launch here and an `unplaced` report without the arm.
-        # Outside the classified set in tests/_bound_site_rows.py on
-        # purpose, and tracked at #1144 with the other unpinned arms.
+        # LOAD-BEARING: the WALRUS TARGET is what the arm reads, so
+        # `(go := go)(...)` after `go = subprocess.run` is a placed
+        # launch here and an `unplaced` report without the arm. Row
+        # `walrus-target-in-bound-is-a-placed-launch` drives it, and
+        # pins the arm's own line.
         elif isinstance(func, ast.NamedExpr) and func.target.id in bound:
             launches.append(node)
         elif isinstance(func, ast.Attribute) \

@@ -424,7 +424,6 @@ LAUNCH_ARMS = (
      'elif isinstance(func, ast.Name) and func.id in bound:...',
      'a bare name in bound is a placed launch', 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    # ch.namedexpr-in-bound: see ARM_NOTES in _launch_arm_records.
     ('ch.namedexpr-in-bound', '_launch_audit.py', 420, 'drop_if:420',
      'elif isinstance(func, ast.NamedExpr) and func.target.id in bound:...',
      'a walrus target in bound is a placed launch', 'CONTROLLED',

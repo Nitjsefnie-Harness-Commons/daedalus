@@ -153,12 +153,4 @@ ARM_NOTES = {
 # which the step ceiling enters and the row does not. The row still
 # holds the arm; SECONDARY_CONTROLLED says so.
     ''',
-    'ch.namedexpr-in-bound': '''
-# The analyser's own comment at _launch_audit.py:415-419 calls this
-# arm "LIVE and driven by no row ... tracked at #1144 with the other
-# unpinned arms". True when written, FALSE now: deleting :420 makes
-# `test_repo_layout.py` go red naming this row. The analysers are
-# byte-identical to the base by constraint, so the correction is
-# recorded here, at the arm.
-    ''',
 }
