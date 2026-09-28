@@ -11,6 +11,12 @@ state, so the table's own method is exercised.
 It also carries what the two row files cannot express: three controls
 asserting sites AND refusals, and the step ceiling for an arm whose
 mutant does not stop.
+
+What it deliberately does NOT carry is the controls on the mechanism
+that performs the cut, `tests/_arm_sweep.py`: those are in
+`tests/test_launch_arm_cuts.py`, because every claim in this file is
+read through that cut and the table and its mechanism are separable
+things to break.
 """
 import ast
 import hashlib
@@ -22,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _arm_sweep import CUT_KIND, arm_sweep, cut_arm, cut_span  # noqa: E402
+from _arm_sweep import arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (  # noqa: E402
     ANCHOR, ARM_NOTES, CRASH_CONTROLLED, CUT, EVIDENCE, FILE, ID, LINE,
@@ -282,88 +288,6 @@ def test_every_arm_is_uniquely_addressed(tmp):
     assert shared == [('_launch_audit.py', 526), ('_launch_audit.py', 549)], (
         'the same-line pairs the table carries, each two operands of one '
         f'disjunction; a new one is a decision, not an accident: {shared}')
-
-
-def test_a_spec_whose_op_does_not_match_its_node_is_refused(tmp):
-    """The op names a kind of clause, and any other kind is refused.
-
-    `_locate` answers the node that CARRIES a line, not the one the op
-    names, so a spec keyed one line off is not a wrong answer from the
-    sweep but a wrong MUTATION: a `drop_if` on a `for` cut the whole
-    loop and reported a plausible `removed`, and a `drop_stmt` on a
-    decorator cut the decorator. Both are the module's own refusal now,
-    naming the kind it found.
-
-    The three probes are lines of `tests/_argv_read.py`, which is held
-    byte-identical to base, so the node at each is fixed: a `for`, a
-    `def` and a bare decorator. Each is asserted to be a kind the op
-    does not cut before the refusal is read, so this cannot go on
-    passing once the lines mean something else.
-    """
-    del tmp
-    source = (TESTS / '_argv_read.py').read_text(encoding='utf-8')
-    stmts = {node.lineno: node for node in ast.walk(ast.parse(source))
-             if isinstance(node, ast.stmt)}
-    for line, op in ((84, 'drop_if'), (125, 'drop_if'), (131, 'drop_stmt')):
-        assert not isinstance(stmts.get(line), CUT_KIND[op]), (
-            f'_argv_read.py:{line} is now a '
-            f'{type(stmts.get(line)).__name__}, which {op} does cut, so '
-            'this probe no longer reads an op and node that disagree')
-        try:
-            cut_arm(source, f'{op}:{line}')
-            refused = ''
-        except ValueError as error:
-            refused = str(error)
-        assert refused, (
-            f'{op}:{line} was cut rather than refused, so a spec keyed off '
-            'by one line still mutates whatever clause landed there')
-        assert op in refused and 'found a' in refused, refused
-
-
-def test_the_removed_text_is_the_text_the_cut_took(tmp):
-    """`removed` is the text, which is the claim nothing else checked.
-
-    The mechanism's reason for existing is that a reader can see WHICH
-    clause a verdict depended on, and the only consumer of the field
-    asked whether it was non-empty -- so a constant satisfied every
-    control. Four relations close it, and each is read off the source
-    and the mutation rather than out of the mechanism that reported
-    them: the cut changed the file, the text it reported is a real
-    region of the source, that text carries the line this arm is
-    addressed at, and where the cut only deletes, the file is shorter
-    by exactly the length of the text reported. `promoted` gets the
-    matching relation -- it is in the mutated file -- so the field
-    saying what took the clause's place is watched too.
-    """
-    del tmp
-    sources = {arm[FILE]: (TESTS / arm[FILE]).read_text(encoding='utf-8')
-               for arm in LAUNCH_ARMS}
-    for arm in LAUNCH_ARMS:
-        name, line, spec = arm[ID], arm[LINE], arm[CUT]
-        source, op = sources[arm[FILE]], spec.split(':')[0]
-        mutated, removed, promoted = cut_arm(source, spec)
-        where = f'{name} {spec}'
-        assert mutated != source, f'{where}: the cut changed nothing'
-        assert removed.strip() and removed in source, (
-            f'{where}: the text reported is not a region of the source: '
-            f'{removed[:60]!r}')
-        assert source.splitlines(keepends=True)[line - 1] in removed, (
-            f'{where}: the text reported does not carry the line this arm '
-            f'is addressed at, so it cannot show which clause the verdict '
-            f'depended on: {removed[:60]!r}')
-        assert promoted in mutated, (
-            f"{where}: what took the clause's place is not in the mutated "
-            f'file: {promoted[:60]!r}')
-        if op in ('drop_stmt', 'drop_span') or (op == 'drop_if'
-                                                and not promoted):
-            # The ops that only delete. `replace` re-renders a header, a
-            # promoted `drop_if` re-supplies the chain below the head's
-            # own body, and a `boolop` re-renders the whole enclosing
-            # statement -- so none of the three leaves the file merely
-            # shorter by the text it reported.
-            assert len(source) - len(mutated) == len(removed), (
-                f'{where}: the file is {len(source) - len(mutated)} '
-                f'characters shorter and {len(removed)} were reported')
 
 
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
