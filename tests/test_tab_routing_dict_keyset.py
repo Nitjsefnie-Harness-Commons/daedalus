@@ -454,7 +454,17 @@ def test_the_mapping_read_joins_a_key_an_unreadable_store_replaced(tmp):
 # about the values the source recorded, so it has to travel with them: the
 # destination cannot claim at a key the source has disowned that its own
 # value there is current.
-_STALE_SOURCE = 'd = {"k": ordinary}\nd.update(zip(["j"], [1]))\n'
+#
+# The end-to-end control below needs the source to retire the key the
+# RUNTIME also replaces, or nothing routes through the destination and the
+# read reads clean for a reason that has nothing to do with the marker: a
+# `zip` over a different key leaves the recorded value standing, and the
+# control then measures a false positive where the defect lives.
+_RETIRED_SOURCE = 'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))\n'
+_DESTINATION_FOLDS = ('o = {}\no.update(d)', 'o = {}\no |= d',
+                      'o = dict(d)', 'o = {**d}')
+_DESTINATION_READS = {'subscript': 'o["k"]', 'get': 'o.get("k")',
+                      'setdefault': 'o.setdefault("k")'}
 _FOLDS = ('update', 'update-star', 'ior', 'display', 'or-value', 'dict-call')
 
 
@@ -528,23 +538,26 @@ def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
 
 
 def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):
-    """The shape the lead ruled in scope, end to end, as a control.
+    """The retirement travels with the items, over a runtime that routes.
 
-    `o = {}; o.update(d)` and `o |= d` over a source that has retired the
-    key: the read must not read clean, on all three forms and both
-    prefixes. It measures `(0, 1)` on each of the six cells on this tree,
-    with or without the propagation, because the folded value at the key is
-    an ordinary one the model records as occupancy and the conservative
-    rule reports the unresolvable read that follows. So the invariant here
-    is "not clean" rather than a count, and the proof that the retirement
-    travels is the store-side test above.
+    The fold builds a DESTINATION and the read is on the DESTINATION: a
+    control that reads the source instead measures a key the source
+    already reported on, which is a false positive standing exactly where
+    the defect lives. And the source has to retire the key the RUNTIME
+    replaces, so a routed `relay()` really does reach the call through the
+    destination and the guard has to report it -- twelve cells, four fold
+    spellings by three read forms, `(1, 1)` routed and `(0, 1)` clean.
+
+    With the propagation removed from the real code these read `(1, 0)`, so
+    this is the control that has an opinion; the store-side test above is
+    the one that says where the fact is dropped.
     """
-    for store in ('o = {}\no.update(d)', 'o = {}\no |= d'):
-        body = f'{_STALE_SOURCE}{store}'
-        for read, source in sorted(_READS.items()):
-            for prefix, tag in ((_PRE, 'routed'), (_CLEAN, 'clean')):
-                assert _verdict(tmp, body, source, prefix)[1] >= 1, (
-                    store, read, tag)
+    for fold in _DESTINATION_FOLDS:
+        body = f'{_RETIRED_SOURCE}{fold}'
+        for read, source in sorted(_DESTINATION_READS.items()):
+            assert _verdict(tmp, body, source) == (1, 1), (fold, read)
+            assert _verdict(tmp, body, source, _CLEAN) == (0, 1), (
+                fold, read)
 
 
 def test_a_key_written_after_an_unreadable_store_keeps_its_value(tmp):
