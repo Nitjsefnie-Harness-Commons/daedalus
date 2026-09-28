@@ -31,6 +31,98 @@ BOUNDED_GIT_LAUNCHES = {
          'a standalone skill script an operator runs by hand; no'
          'enclosing bound sits above it, so a wedged git hangs an'
          'operator',
+    ('daedalus_cli/transport.py', 'wait_for_result', '_query_path()', 1):
+         'a path builder over `urllib.parse.urlencode`; the timeout'
+         'belongs to the poll loop that calls it, and no process is behind'
+         'it',
+    ('daedalus_mcp/tools_cookies.py', 'clear_cookies', 'bridge.ext_cmd()', 1):
+         'the clear-cookies tool; the mapping is empty here and the'
+         'tool\'s own deadline is the only bound',
+    ('daedalus_mcp/tools_cookies.py', 'get_cookies', 'bridge.ext_cmd()', 1):
+         'the cookie-listing tool; the mapping is its domain and URL'
+         'filter, and the deadline is the tool\'s',
+    ('daedalus_mcp/tools_cookies.py', 'set_cookie', 'bridge.ext_cmd()', 1):
+         'the set-cookie tool; the mapping is the cookie, and nothing it'
+         'names starts a process',
+    ('daedalus_mcp/tools_css.py', 'block_requests', 'bridge.ext_cmd()', 1):
+         'the block-requests tool; the mapping is the pattern list the'
+         'extension matches on',
+    ('daedalus_mcp/tools_css.py', 'inject_css', 'bridge.ext_cmd()', 1):
+         'the inject-css tool; the stylesheet rides in the mapping and is'
+         'applied by the extension, not by a process here',
+    ('daedalus_mcp/tools_css.py', 'remove_css', 'bridge.ext_cmd()', 1):
+         'the remove-css tool, the counterpart of the inject row; the'
+         'mapping names the rule to drop',
+    ('daedalus_mcp/tools_css.py', 'unblock_requests', 'bridge.ext_cmd()', 1):
+         'the unblock-requests tool; the mapping names the pattern to'
+         'release, and the deadline is the tool\'s',
+    ('daedalus_mcp/tools_eval.py', 'navigate', '_send_eval(timeout, wait)', 1):
+         'a navigation submitted as an eval; `wait=False` asks for the id'
+         'alone, and the timeout is the round trip the tool applies',
+    ('daedalus_mcp/tools_eval.py', 'reload', '_send_eval(timeout, wait)', 1):
+         'a reload submitted as an eval; the page does the work and the'
+         'timeout bounds the round trip, not a process',
+    ('daedalus_mcp/tools_eval.py', 'result', 'bridge.get()', 1):
+         'the result tool peeking at a result slot over HTTP; the params'
+         'are its selector, not a deadline',
+    ('daedalus_mcp/tools_eval.py', 'title', '_send_eval(timeout, wait)', 1):
+         'reading `document.title` from a tab; a 10s round trip over the'
+         'bridge, and no child is behind it',
+    ('daedalus_mcp/tools_eval.py', 'url', '_send_eval(timeout, wait)', 1):
+         'reading `location.href` from a tab; the same 10s round trip, and'
+         'nothing here can wedge a git command',
+    ('daedalus_mcp/tools_hotfixes.py', 'store_hotfix', 'bridge.ext_cmd()', 1):
+         'the store-hotfix tool; the source and its scope ride in the'
+         'mapping, and the extension is what evaluates them',
+    ('daedalus_mcp/tools_media.py', 'screenshot', 'bridge.ext_cmd(timeout)',
+     1):
+         'asking the extension for a capture; the timeout is the'
+         'capture\'s own deadline, and the call returns the payload',
+    ('daedalus_mcp/tools_media.py', 'screenshot', 'bridge.get_raw()', 1):
+         'the same tool downloading the capture it just took: an HTTP GET'
+         'over the stored path, and a socket is not a git process',
+    ('daedalus_mcp/tools_media.py', 'uploads', 'bridge.get()', 1):
+         'listing stored uploads; the params are the page selector the'
+         'listing route takes',
+    ('daedalus_mcp/tools_network.py', 'cdp', 'bridge.ext_cmd(timeout)', 1):
+         'issuing a CDP command through the extension; a 30s round trip,'
+         'and the debugger attach is the extension\'s own',
+    ('daedalus_mcp/tools_network.py', 'fetch_timings', 'bridge.ext_cmd()', 1):
+         'the fetch-timings tool; the mapping is its selector and names no'
+         'deadline, so `ext_cmd`\'s own 10s default bounds the wait',
+    ('daedalus_mcp/tools_network.py', 'net_capture', 'bridge.ext_cmd(timeout)',
+     1):
+         'starting a capture in the service worker; a 15s round trip, and'
+         'the buffer it fills lives in the worker',
+    ('daedalus_mcp/tools_network.py', 'net_capture_get',
+     'bridge.ext_cmd(timeout)', 1):
+         'reading the capture buffer back; a 30s round trip over the'
+         'extension, bounded by the tool itself',
+    ('daedalus_mcp/tools_network.py', 'net_capture_stop',
+     'bridge.ext_cmd(timeout)', 1):
+         'stopping that capture; a 30s round trip, and the stop is what'
+         'releases the buffer rather than a child process',
+    ('daedalus_mcp/tools_tabs.py', 'close_tab', 'bridge.ext_cmd()', 1):
+         'the close-tab tool; the mapping names the tab and the tool\'s'
+         'deadline bounds the round trip',
+    ('daedalus_mcp/tools_tabs.py', 'ext_navigate', 'bridge.ext_cmd()', 1):
+         'a typed navigate command; the URL rides in the mapping and the'
+         'extension performs it',
+    ('daedalus_mcp/tools_tabs.py', 'ext_reload', 'bridge.ext_cmd()', 1):
+         'a typed reload command; the mapping names the tab and nothing'
+         'here waits on a process',
+    ('daedalus_mcp/tools_tabs.py', 'open_tab',
+     'bridge.ext_cmd(include_roundtrip)', 1):
+         'opening one tab and reporting how long the round trip took; the'
+         'flag is a measurement, not a wait',
+    ('daedalus_mcp/tools_tabs.py', 'open_tabs',
+     'bridge.ext_cmd(include_roundtrip, timeout)', 1):
+         'opening every URL in order and waiting for each; a 30s round'
+         'trip per tab, and a wedged tab fails the call rather than a'
+         'process',
+    ('daedalus_mcp/transport.py', 'poll_result', 'self.http_client()', 1):
+         'the transport handing out its HTTP client; it returns a client'
+         'object and starts no request, let alone a child',
     ('run_tests.py', '_terminate_and_reap', 'process.wait(timeout)', 1):
          'a child wait while tearing the suite down; the runner is'
          'the bound',
@@ -46,13 +138,149 @@ BOUNDED_GIT_LAUNCHES = {
          'a standalone generator an operator runs by hand; no suite'
          'or CI bound sits above it, so a wedged git hangs an'
          'operator',
+    ('tests/_bridge.py', 'frame', 'next_stream_data()', 1):
+         'the same frame reader called with the test\'s own deadline,'
+         'which is a bound on a socket and not on a process',
+    ('tests/_bridge.py', 'read_stream_data', 'next_stream_data(timeout)', 1):
+         'reading the next SSE data frame off an open response; the helper'
+         'ends on a monotonic deadline, so it cannot hang',
+    ('tests/_cli_arg_audit_support.py', 'add_storage_probe', 'dest.replace()',
+     1):
+         'spelling an option\'s flag from its destination string;'
+         '`str.replace` cannot launch anything',
+    ('tests/_cli_arg_audit_support.py', 'add_storage_probe',
+     'parser.add_argument()', 1):
+         'argparse registering one probe option; the mapping is its'
+         'configuration and no process sits behind it',
+    ('tests/_cli_arg_audit_support.py', 'add_storage_probe',
+     'parser.add_argument(nargs)', 1):
+         'the same registration for the shapes that take an `nargs`;'
+         'argparse builds a parser, it does not run one',
+    ('tests/_cli_dispatch.py', '_dispatch', 'RecordingExtCmd(plan)', 1):
+         'the same double built by the driver itself, so the options and'
+         'the plan reach the handler that reads them',
+    ('tests/_cli_dispatch.py', 'drive', 'RecordingExtCmd(plan)', 1):
+         'constructing the recorder double the CLI handler calls in place'
+         'of the bridge; the plan is what it asserts against',
+    ('tests/_cli_dispatch.py', 'run_cli', '_dispatch()', 1):
+         'the driver\'s own dispatch helper; the options are the'
+         'recorder\'s, and it returns before any handler runs',
+    ('tests/_cli_dispatch.py', 'run_cli_exit', '_dispatch()', 1):
+         'the same helper for the arm that exits; it returns an exit code'
+         'and stdout, never a child',
+    ('tests/_cmdqueue_faults.py', '_native_read_handle', 'original()', 1):
+         'the uninstrumented open the injector wraps, called with the'
+         'candidate path so the handle can be classified',
+    ('tests/_cmdqueue_faults.py', '_path_open_failure', 'path.open()', 1):
+         'opening the caller\'s Path so the failure can be caught; a file'
+         'open blocks on the filesystem, not on a child',
     ('tests/_dashnode_retry_control.py', 'popen', '_ControlledProcess()', 1):
          'a test double constructed with a keyword mapping; it'
          'records, it does not launch',
+    ('tests/_dashsection.py', '_run', 'scenario(answers, plan, setup)', 1):
+         'the dashboard-section harness running one scenario body with the'
+         'test\'s answers and plan; it renders, it does not launch',
     ('tests/_drain.py', 'kill_and_drain', 'process.communicate(timeout)', 1):
          'a drain of an already-killed process: it can only return',
     ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1):
          'the reap that follows that drain, on the same dead process',
+    ('tests/_gc_handshake.py', 'call', 'real_call()', 1):
+         'the captured operation the generated wrapper reaches after its'
+         'refusal check; the wrapper is a fixture for a filesystem call',
+    ('tests/_jsroute_sweep.py', 'render', 'r.tmpl.format(**fields).split()',
+     1):
+         'a grammar template rendered and split into lines; the mapping is'
+         'the point\'s fields and the result is source text',
+    ('tests/_mcp_load.py', '_start_mcp_in_process', 'mod._bound.wait(timeout)',
+     1):
+         'a threading event the in-process server sets once it is'
+         'listening; 50ms is a startup poll, not a process wait',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(active, include_roundtrip, pinned, timeout, urls)', 1):
+         'the same fixture with the background and pinned flags added; the'
+         'builder is what the recorder is compared against',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(bodies, filter, tabId, timeout)', 1):
+         'the read fixture with a filter and bodies, so the tool has to'
+         'pass the selector through unchanged',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(bodies, tabId, timeout)',
+     1):
+         'the stop fixture asking for bodies as well; a flag, not a bound,'
+         'and the recorder compares the whole mapping',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout)', 1):
+         'the screenshot fixture at a mid quality, so the tool must pass'
+         'it through rather than drop or clamp it',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout)', 2):
+         'the same fixture at the floor quality; one row per boundary'
+         'value, and each is a dict the recorder reads',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(format, quality, tabId, timeout)', 3):
+         'the same fixture at the ceiling quality, closing the triple the'
+         'quality bounds are read from',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout)', 1):
+         'the screenshot fixture naming only a format; the builder'
+         'launches nothing and the timeout is the capture field',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(format, timeout)', 2):
+         'the format-only fixture at a second call site, so both'
+         'screenshots the tool can send are spelled out',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(include_roundtrip, timeout, urls)', 1):
+         'a fixture naming the ext_cmd the open-tabs tool should send; the'
+         'timeout and the flag are the fields under test',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(keep_session, method, params, tabId, timeout)', 1):
+         'the cdp fixture asking for a kept session; the flag decides'
+         'whether the attachment survives, and this row is the dict',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(maxRequests, tabId, timeout)', 1):
+         'the same capture fixture aimed at one tab; the maxRequests floor'
+         'the tool refuses is what the row reads',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(maxRequests, timeout)',
+     1):
+         'the net-capture fixture at the default request ceiling; the'
+         'field is the bound the tool advertises',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(maxRequests, timeout)',
+     2):
+         'the capture fixture at the ceiling, closing the pair the'
+         'maxRequests bounds are read from',
+    ('tests/_mcp_tool_commands.py', '<module>',
+     '_ext(method, params, timeout)', 1):
+         'the cdp fixture naming a method and its params; the timeout is'
+         'the round trip, and the attach is the extension\'s',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 1):
+         'the bare screenshot fixture; only the id, the type and the'
+         'timeout are named',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 2):
+         'the net-capture-stop fixture; the only field is the deadline the'
+         'tool applies to the stop',
+    ('tests/_mcp_tool_commands.py', '<module>', '_ext(timeout)', 3):
+         'the net-capture-get fixture; the deadline is the read the tool'
+         'waits for and nothing here launches',
+    ('tests/_mcp_tools_helpers.py', 'checked_timeout', 'self.record(timeout)',
+     1):
+         'the probe recording that the transport was asked for a client;'
+         'it appends to a list and returns None',
+    ('tests/_netcapture_harness.py', 'buffered', 'read()', 1):
+         'appending the read step to a plan and returning the entries the'
+         'capture holds; the plan is data the harness replays',
+    ('tests/_netcapture_harness.py', 'finished', 'event(requestId)', 1):
+         'the matching loading-finished event; the request id is the only'
+         'field and it names a buffered entry',
+    ('tests/_netcapture_harness.py', 'read', 'cmd(tabId)', 1):
+         'the read command dict; it names a tab and a type, and the worker'
+         'answers it rather than a process',
+    ('tests/_netcapture_harness.py', 'request', 'event(request, requestId)',
+     1):
+         'building one `Network.requestWillBeSent` event; the fields are'
+         'the event the harness feeds the worker',
+    ('tests/_netcapture_harness.py', 'start', 'cmd(tabId)', 1):
+         'building one net-capture command dict; the fields are the'
+         'command the harness posts, not arguments to a process',
+    ('tests/_netcapture_harness.py', 'stop', 'cmd(tabId)', 1):
+         'the stop command dict, the counterpart of the start row; the id'
+         'is minted here and the command is posted by the harness',
     ('tests/_realbrowser_workers.py', '_retire_browser',
      'process.wait(timeout)', 1):
          'a browser-process wait while retiring it',
@@ -88,6 +316,75 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_aggregate_gate.py',
      'test_two_dependencies_are_decided_jointly', 'zip()', 1):
          'the same table builder, keyed from a zipped mapping',
+    ('tests/test_atomic_file.py', 'replace', 'self._publish()', 1):
+         'the replacement the fake `os.replace` was constructed with; it'
+         'writes a temp file into place and spawns nothing',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_prints_only_a_count_when_nothing_opened',
+     '_ext(timeout)', 1):
+         'the expectation for the count-only output; the call is the same'
+         'and what differs is what the handler prints',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error',
+     '_ext(timeout)', 1):
+         'the expectation for the refusal arm, where the handler must not'
+         'echo the url the fixture still carries',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line',
+     '_ext(timeout)', 1):
+         'the expectation beside the partial-failure case, where the same'
+         'call is made and two lines of output are read',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_sends_active_false_only_with_background',
+     '_ext(timeout)', 1):
+         'the expectation where the active flag is refused; the fixture is'
+         'what the handler is checked against',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_sends_every_url_in_order_and_waits_thirty',
+     '_ext(timeout)', 1):
+         'the recorder expectation for the in-order case; the fixture'
+         'names the 30s the test asserts the tool waited for',
+    ('tests/test_cli_browser_tabs.py',
+     'test_do_open_tabs_sends_pinned_only_with_the_flag', '_ext(timeout)', 1):
+         'the expectation where pinning is refused; the same call,'
+         'compared field by field against the sent mapping',
+    ('tests/test_client_credentials.py', '_eval', 'getattr(mod, name)()', 1):
+         'the loaded MCP tool reached by name, called with the arguments'
+         'under test; the getattr is a lookup, not a launch',
+    ('tests/test_client_credentials.py', '_mcp_preserves_application_paths',
+     'mod.mcp.registered[name]()', 1):
+         'the same loaded tool through the registry mapping; the envelope'
+         'it returns is what the assertion reads',
+    ('tests/test_cmdqueue_injectors.py', 'open_outcome', 'opener()', 1):
+         'the queue\'s own opener called with the receiver and arguments'
+         'under test; it opens a path and records its mode',
+    ('tests/test_cmdqueue_injectors.py', 'open_outcome', 'opener(mode)', 1):
+         'the same opener in each mode the loop tries; a queued path is'
+         'opened, and the outcome is the state tuple it returns',
+    ('tests/test_cmdqueue_injectors.py', 'path_failure',
+     'getattr(Path, operation)()', 1):
+         '`Path.<operation>` reached by name on the receiver the test'
+         'passes; the point is the failure it catches, not a process',
+    ('tests/test_cmdqueue_injectors.py',
+     'test_injectors_preserve_target_failures_and_untargeted_create',
+     'path_failure()', 1):
+         'the injector\'s own failure probe with the open arguments; it'
+         'returns the caught type, and the loop asserts on it',
+    ('tests/test_cmdqueue_injectors.py',
+     'test_injectors_preserve_target_failures_and_untargeted_create',
+     'path_failure()', 2):
+         'the same probe against the exploding receiver, which is what the'
+         'first of these two rows is compared with',
+    ('tests/test_cmdqueue_injectors.py',
+     'test_injectors_preserve_target_failures_and_untargeted_create',
+     'path_failure()', 3):
+         'the exploding receiver again, on the untargeted half of the'
+         'pair; the probe is what proves the target was preserved',
+    ('tests/test_cmdqueue_injectors.py',
+     'test_injectors_preserve_target_failures_and_untargeted_create',
+     'path_failure()', 4):
+         'the refusing receiver closing the pair, so the two halves are'
+         'read beside each other rather than alone',
     ('tests/test_dashboard_gate.py',
      'test_gate_is_released_by_the_os_when_the_holder_is_killed',
      'holder.wait(timeout)', 1):
@@ -104,6 +401,13 @@ BOUNDED_GIT_LAUNCHES = {
      'worker.communicate(timeout)', 1):
          'a wait on the two gate children this test started;'
          ' the timeout is the bound itself',
+    ('tests/test_gate_freshness_run.py', '_process_capturing_stderr',
+     'm.process()', 1):
+         'the gate module\'s own step runner, called with the stubbed'
+         'reader this test installs instead of a real git',
+    ('tests/test_gate_freshness_run.py', '_writing_read', '_flow_read()', 1):
+         'building a reader double whose recorded writes carry the head'
+         'sha; the flow is data the fake reader replays',
     ('tests/test_mcp_entry_point.py', '_cleanup_mcp', 'proc.wait(timeout)', 1):
          'an MCP process wait while the test tears it down',
     ('tests/test_mcp_entry_point.py', '_cleanup_mcp', 'proc.wait(timeout)', 2):
@@ -124,6 +428,12 @@ BOUNDED_GIT_LAUNCHES = {
      'mod._bound.wait(timeout)', 1):
          'an assertion on a bound event the module sets; the wait IS'
          'the assertion',
+    ('tests/test_mcp_tools.py', '_bridge_interactions', 'tool()', 1):
+         'the recorded tool the bridge probe dispatches; the arguments are'
+         'the tool\'s, and the probe answers them',
+    ('tests/test_mcp_transport_close.py', 'exercise', 'ClosingClient()', 1):
+         'the double standing in for the HTTP client, constructed with the'
+         'factories and close bookkeeping the test asserts on',
     ('tests/test_parent_watch.py',
      'test_bounded_wait_reports_live_child_port_and_watch_state',
      '_wait_for_exit(timeout)', 1):
@@ -154,9 +464,31 @@ BOUNDED_GIT_LAUNCHES = {
      'test_unreadable_control_answer_polls_again_instead_of_settling',
      'process.wait.assert_called_once_with(timeout)', 1):
          'the same mock assertion, on the unreadable control',
+    ('tests/test_segment_mint.py',
+     'test_allow_refuses_anything_but_an_http_origin', '_command()', 1):
+         'building a typed allow-segment-origin command; the fields are'
+         'the origin under test and the dict is posted by the harness',
+    ('tests/test_segment_mint.py',
+     'test_allow_refuses_anything_but_an_http_origin', '_command()', 2):
+         'the same builder wrapped in the list form, so the refusal is'
+         'read from a batched dispatch as well as a single one',
+    ('tests/test_segment_mint.py', 'test_revoke_refuses_an_invalid_origin',
+     '_command()', 1):
+         'the revoke counterpart; the command dict is the subject the test'
+         'dispatches and the mint route answers',
     ('tests/test_segment_routes.py', 'refusing', 'real()', 1):
          'a test double delegating with its arguments; it launches'
          'nothing of its own',
+    ('tests/test_segment_storage.py',
+     'test_concurrent_segment_writes_share_one_quota_snapshot',
+     'future.result(timeout)', 1):
+         'a future this test\'s own thread pool submitted; the 10s bounds'
+         'the assertion, and the suite bounds the process above it',
+    ('tests/test_speed_gate.py',
+     'test_a_malformed_payload_sha_fails_before_any_api_call',
+     '_find_baseline(EVENT)', 1):
+         'the speed gate\'s baseline step against a stubbed `gh`; the'
+         'environment mapping is the test\'s, and the stub records calls',
     ('tests/test_suite_runner.py',
      'test_output_close_failure_reaps_the_spawned_suite',
      'spawned[0].wait(timeout)', 1):
