@@ -99,7 +99,7 @@ SECONDARY_CONTROLLED = {
 # or truthiness.
 #
 # The two finer clauses sit INSIDE a listed arm: :572 is the `**`-unpack
-# operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
+# operand of `ub.not-bounded` (:571) and _argv_read.py:212 the `seen`
 # operand of `rs.guard` (:203). The table splits :529 and :554 per
 # operand and leaves these whole, a spelling difference, not a gap.
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
@@ -135,7 +135,12 @@ MARKER_NON_MEMBERS = (
      'only member and is listed'),
     # The chain limb and the root predicate it reads. They sit here
     # rather than in `tests/_launch_arms.py`, which is at its size
-    # ceiling; each names the row that moves when it is dropped.
+    # ceiling; each names the row that moves when it is dropped, and
+    # the sweep in `test_launch_arms.py` measures that rather than
+    # believing it. The three conditions of the one `if` below share a
+    # clause, so the exclusion set has no row of its own here: the five
+    # `excluded-stdlib-root-*` rows in `_bound_site_rows.py` are what
+    # hold it, and emptying the set turns all five.
     ('_launch_audit.py', 510, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 512, 'CONTROLLED',
@@ -144,14 +149,11 @@ MARKER_NON_MEMBERS = (
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 696, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 697, 'CONTROLLED',
-     'a-repository-dotted-import-is-not-a-stdlib-root'),
-    ('_launch_audit.py', 698, 'CONTROLLED',
-     'excluded-stdlib-root-os-is-refused'),
     ('_launch_audit.py', 699, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 700, 'CONTROLLED',
-     'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
+    ('_launch_audit.py', 700, 'INERT',
+     "the None closing _dotted_stdlib_root; deleting its last "
+     'statement returns the same value'),
     ('_launch_audit.py', 577, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
@@ -190,8 +192,8 @@ MARKER_NON_MEMBERS = (
 # crash-held at one clause and value-held at another. The suite sweeps
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
-    '_argv_read.py:153', '_launch_audit.py:53', '_launch_audit.py:68',
-    '_launch_audit.py:383',
+    '_argv_read.py:153', '_launch_audit.py:54', '_launch_audit.py:69',
+    '_launch_audit.py:386',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
