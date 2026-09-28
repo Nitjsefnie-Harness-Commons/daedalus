@@ -323,6 +323,7 @@
 !/tests/_frontend.py
 !/tests/_gc_handshake.py
 !/tests/_ghexpr.py
+!/tests/_gitignore_control.py
 !/tests/_gm_harness.py
 !/tests/_gm_two_origin.py
 !/tests/_helper_binds.py
