@@ -273,15 +273,17 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         # `--out` and `--tree` default to this checkout. The refresher writes
-        # only when a weight moved beyond its margin, a suite appeared or
-        # disappeared, or the target no longer satisfies the margin; the
-        # message it prints (to stderr) says which, and a scheduled refresh
-        # that finds nothing to say is a no-op, not a commit.
+        # only when a weight moved beyond its margin, a suite appeared, or the
+        # target no longer satisfies the margin; the message it prints (to
+        # stderr) says which, and a scheduled refresh that finds nothing to
+        # say is a no-op, not a commit. `--message-file` is the commit subject,
+        # rendered from the same runs the file records in `measured_from`.
         run: |
           # stderr, not through a pipe: `… | tee` would report tee's exit
           # status, so a refusal the refresher named on stderr would be a
           # green step. The redirect keeps the script's own status.
           python3 scripts/ci/refresh_timings.py --runs-root runs \
+            --message-file refreshed-subject.txt \
             2>> "$GITHUB_STEP_SUMMARY"
           # A diff of a path that does not exist is a usage error on stdout
           # and a nonzero exit, so an unstaged rename or a checkout that
@@ -299,6 +301,7 @@ jobs:
         run: |
           python3 tests/test_timed_planner.py
           python3 tests/test_timed_refresh.py
+          python3 tests/test_timed_coverage.py
 
       - name: Commit the refresh
         # A deploy key, not the built-in token, and the difference is not a
@@ -315,11 +318,6 @@ jobs:
         env:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}
           REPO: ${{ github.repository }}
-          # The run that measured, for the commit message: a `${{ }}` in the
-          # message would be expanded by GitHub, but an env value is the
-          # repository's own identifier read the same way the baseline step
-          # reads its payload SHAs.
-          RUN_ID: ${{ github.run_id }}
         run: |
           if git diff --quiet -- .github/suite-timings.json; then
             echo "No weight moved; nothing to commit."
@@ -337,8 +335,15 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .github/suite-timings.json
+          # The subject is the file the refresher wrote it, not one
+          # assembled here. The expression this step used to interpolate
+          # is this workflow's OWN run id, while the file records the
+          # `tests` run the weights were measured in, so the subject
+          # named a different run than the commit it described (commit
+          # eed3ae9e). The workspace file is never staged: only the data
+          # file is.
           # No co-author trailer: no model authored this commit.
-          git commit -m "ci: refresh suite timings from run $RUN_ID"
+          git commit -F refreshed-subject.txt
           # HEAD:main, never a force: `main history is append-only` carries
           # deletion and non_fast_forward with no bypass actors at all, so
           # overwriting someone's commit to record a duration is both
