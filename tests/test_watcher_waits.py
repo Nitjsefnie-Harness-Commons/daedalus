@@ -30,9 +30,9 @@ re-entering its own body on a rate-limit refusal can spend more under
 one marker than any single poll is expected to. What the arm cannot
 settle on its own it does not claim to, and it says how many rows are
 ambiguous rather than marking one: two of the four. Marking one row
-unresolvable says nothing about the others, so the hedge names the count
-and not a single case. `await_lines` and `await_calls` take no such
-bound, and the trade they take is unchanged.
+unresolvable says nothing about the others, so the count is named rather
+than one row flagged. `await_lines` and `await_calls` take no such bound,
+and the trade they take is unchanged.
 """
 import os
 import sys
