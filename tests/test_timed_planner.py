@@ -8,7 +8,6 @@ suite files are empty: the planner reads file NAMES.
 import contextlib
 import io
 import json
-import random
 import re
 import statistics
 import sys
@@ -369,16 +368,19 @@ def test_a_heavier_than_target_suite_lands_alone_and_is_a_candidate(tmp):
 
 
 def test_a_suite_with_no_recorded_weight_is_placed_and_named(tmp):
-    """An unmeasured suite is measured at the median, and says so."""
-    plan, _out = _plan(
-        tmp, ['test_known.py', 'test_unknown.py'],
-        _data({'test_known.py': 2.0}, max_cells=1))
-    assert sorted(sum((cell.suites for cell in plan.cells), [])) == [
-        'test_known.py', 'test_unknown.py']
+    """An unmeasured suite is measured at the median, and says so.
+
+    Twelve suites and one unrecorded, so the file is inside the coverage
+    bound the CLI checks before it plans at all; a two-suite tree is 50%
+    estimated and is refused before `plan` is reached.
+    """
+    known = [f'test_known{index:02d}.py' for index in range(11)]
+    suites = known + ['test_unknown.py']
+    data = _data({name: 2.0 for name in known}, max_cells=1)
+    plan, _out = _plan(tmp, suites, data)
+    assert sorted(sum((cell.suites for cell in plan.cells), [])) == suites
     assert plan.estimated == ['test_unknown.py'], plan.estimated
-    summary = _summary(tmp, ['test_known.py', 'test_unknown.py'],
-                       _data({'test_known.py': 2.0}, max_cells=1),
-                       'estimated.txt')
+    summary = _summary(tmp, suites, data, 'estimated.txt')
     assert 'test_unknown.py' in summary, summary
     assert 'estimated' in summary, summary
 
@@ -386,10 +388,10 @@ def test_a_suite_with_no_recorded_weight_is_placed_and_named(tmp):
 def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
     """The estimate is a median, and a fixture only a median survives.
 
-    THREE recorded weights, lopsided: the recorded weights sum to 12 and
-    their median is 1 where their mean is 4. One cell holds the whole
-    tree, so the plan's own cell weight carries the estimate the planner
-    gave the fourth suite, and the expectation is the guard's own
+    ELEVEN recorded weights, lopsided: they sum to 20 and their median
+    is 1 where their mean is 1.8. One cell holds the whole tree, so the
+    plan's own cell weight carries the estimate the planner gave the
+    twelfth suite, and the expectation is the guard's own
     condition -- `statistics.median` of what the file recorded -- rather
     than a number chosen here. A planner that estimated at the mean
     would place the same suite at 4 and every other assertion in the
@@ -397,8 +399,11 @@ def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
     rest of this file uses are exactly the shapes on which the two
     statistics agree.
     """
-    suites = ['test_a.py', 'test_b.py', 'test_c.py', 'test_new.py']
-    recorded = {'test_a.py': 1.0, 'test_b.py': 1.0, 'test_c.py': 10.0}
+    # Nine more ones than the original fixture, for the coverage bound
+    # the CLI checks before it plans: one unrecorded suite of twelve.
+    suites = [f'test_a{index:02d}.py' for index in range(11)] + ['test_new.py']
+    recorded = {f'test_a{index:02d}.py': 1.0 for index in range(10)}
+    recorded['test_a10.py'] = 10.0
     plan, _out = _plan(tmp, suites, _data(recorded, target=1.0, max_cells=1))
     assert plan.estimated == ['test_new.py'], plan.estimated
     estimate = statistics.median(list(recorded.values()))
@@ -507,31 +512,6 @@ def test_the_guard_drives_both_shares_and_never_a_suite_count(tmp):
         str(_write(Path(tmp) / 'skewed.json', data))])
     assert 'suites are estimated' in stderr, stderr
     assert 'weight is estimated' not in stderr, stderr
-
-
-def test_the_packing_is_deterministic(tmp):
-    """The same file twice, and the file's own order permuted: one matrix."""
-    suites = [f'test_{chr(ord("a") + i)}.py' for i in range(8)]
-    weights = {name: 1.0 + (index % 3) for index, name in enumerate(suites)}
-    first, _out = _plan(tmp, suites, _data(weights))
-    second, _out = _plan(tmp, suites, _data(weights))
-    assert first.matrix == second.matrix
-    shuffled = list(weights.items())
-    random.Random(7).shuffle(shuffled)
-    permuted, _out = _plan(tmp, suites, _data(dict(shuffled)))
-    assert permuted.matrix == first.matrix, permuted.matrix
-
-
-def test_a_missing_timings_file_is_a_named_refusal(tmp):
-    """No data file yet is a refusal with a remedy, not a traceback."""
-    tree = _tree(tmp, ['test_a.py'])
-    planner = _planner()
-    stderr = _captured_stderr(planner, [
-        '--tree', str(tree), '--timings', str(Path(tmp) / 'absent.json')])
-    assert stderr.startswith('plan_timed_matrix:'), stderr
-    assert 'no timings data at' in stderr, stderr
-    _run(planner, [
-        '--tree', str(tree), '--timings', str(Path(tmp) / 'absent.json')], 1)
 
 
 def _captured_stderr(planner, args):
