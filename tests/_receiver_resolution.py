@@ -6,16 +6,6 @@ and a parameter both NAME a receiver, and a rule cannot say whether the
 number in front of it reaches a child until it has said what the thing it
 is in front of IS.
 
-Two questions live here, both of them #1299's:
-
-  - `is_network_read` — the complementary statement to `_is_launch`. That
-    one proves a call IS a launch; this one proves a callee is NOT a
-    child, and a network read is the receiver this tree actually writes a
-    `timeout` on that is not a child.
-  - `deadline_reaches_a_child` — whether a `timeout` PARAMETER can reach a
-    child from inside the function that takes it, which is what a
-    signature-only refusal was standing in for.
-
 Neither is keyed on a name the source could spell another way. The
 network arm resolves a callee to a live OBJECT and asks whether that
 object is a member of a stdlib network module, so `urlopen`, an aliased
@@ -47,9 +37,7 @@ def _resolve_dotted(node, bound):
     """The canonical path a Name or an Attribute spells, or None.
 
     The root of the spelling is the module's own binding and the rest is
-    what the source wrote after it, so `urlr.urlopen` resolves under a
-    module bound to `urllib.request` without this walk knowing what a URL
-    is.
+    what the source wrote after it.
     """
     key = path._dotted_key(node)
     if not key:
@@ -67,9 +55,27 @@ def _dotted_bindings(tree):
     What a NAME is bound to, which is the question `_imported` asks for a
     launch and this asks for anything: `import a.b`, `import a.b as x`,
     `from a.b import c`, `from a.b import c as x`, and a local bound from
-    any of them, run to a small fixpoint. A callee is a RECEIVER before it
-    is a spelling, and a rule that has to answer "what is this a call on"
-    cannot answer it from the text of the call.
+    any of them. A callee is a RECEIVER before it is a spelling, and a
+    rule that has to answer "what is this a call on" cannot answer it from
+    the text of the call.
+
+    It sits beside `_launch_path.py`'s `_imported` rather than inside it
+    for two reasons, and the second is the one that closed the question.
+    `_imported` answers a different question — it records the imported
+    NAME and drops the module, where this head-splits `import a.b` and
+    qualifies `from a.b import c` as `a.b.c` — and
+    `tests/_launch_path.py` is at 638 of its 700-line ceiling, so moving
+    the reader here rather than adding it there is what kept that file off
+    the wall.
+
+    The assignment pass runs to a fixpoint of THREE rounds, and the bound
+    is deliberate. Source order does the work in a single pass for a
+    forward-declared chain; a REVERSED chain (`_a3 = _a2` written before
+    `_a2` resolves) needs one round per link and stops short at three,
+    leaving the name unresolved. That failure direction is a false red
+    and never a false green — an unresolved callee is not a network read
+    — and a cycle converges rather than running, because the table only
+    ever grows.
     """
     bound = {}
     for node in ast.walk(tree):
@@ -96,7 +102,6 @@ def _dotted_bindings(tree):
 
 
 def _takes_a_timeout(value):
-    """Whether a live object's own signature names a `timeout`."""
     try:
         return 'timeout' in inspect.signature(value).parameters
     except (TypeError, ValueError):
@@ -127,9 +132,9 @@ def _network_reads():
 def _live_object(dotted):
     """The live object a canonical dotted path names, or None.
 
-    Only a stdlib head is imported, and only a name the module's own
-    source already binds is resolved, so asking what a call is a call on
-    never reaches a third-party import to find out.
+    Only a name the module's own source already binds is resolved, so
+    asking what a call is a call on never reaches a third-party import to
+    find out.
     """
     head, _, rest = dotted.partition('.')
     if head not in sys.stdlib_module_names:
@@ -167,32 +172,56 @@ def is_network_read(func, bound):
 
 
 def _mentions(node, names):
-    """Whether any of `names` appears anywhere inside `node`."""
     return any(isinstance(inner, ast.Name) and inner.id in names
                for inner in ast.walk(node))
 
 
+def _hands_to_a_child_slot(node, derived, slots):
+    """Whether the call puts the deadline into a child's wait slot.
+
+    The OPERATION is the question, not whose object it is called on. A
+    call into `Popen.wait` or `Popen.communicate` ends a child whether
+    the census resolved the receiver or not, so a receiver the walk could
+    not follow is a reason the census cannot PROVE the number is safe —
+    never a reason it is. The positions come from the live signatures, so
+    this is the same vocabulary R3 reads and a signature change moves it.
+    """
+    func = node.func
+    if not isinstance(func, ast.Attribute) or func.attr not in slots:
+        return False
+    for keyword in node.keywords:
+        if keyword.arg == 'timeout' and _mentions(keyword.value, derived):
+            return True
+    index = slots[func.attr]
+    return (len(node.args) > index
+            and _mentions(node.args[index], derived))
+
+
 def deadline_reaches_a_child(function, name, callees, receivers, direct,
-                             aliases, parameters):
+                             aliases):
     """Whether the deadline this signature takes can reach a child.
 
     Two ways, and both are the census's own question asked of a parameter
     instead of a call. The function PLACES a launch, so a caller has an
     undeclared way to bound the child it owns and the signature is the
     only place that shows. Or it HANDS the parameter — or a name computed
-    from it — to a call the census has resolved to a child, or to another
-    path function, which is the shape the concept's reachability takes.
+    from it — into a child-ending slot, or to another path function,
+    which is the shape the concept's reachability takes.
 
     A METHOD is not a path function here however its name is spelled: the
     receiver is the subject of a method call, and the question for a
-    receiver is the one above, not whether some class in the same file
-    happens to define a method of that name.
+    method is whether the operation ends a child, not whether some class
+    in the same file happens to define a method of that name.
 
-    A function that does none of this cannot put the number it was given
-    on a child, which is the whole of what the signature refusal stood in
-    for. A parameter the CALLER fills is a third thing and not this one:
-    that number is the caller's, and `_parameter_bound_faults` reads it
-    at the caller's line.
+    What is NOT a discharge is failing to follow the number. A receiver
+    the walk could not resolve is the case the unconditional refusal this
+    arm replaced existed for, and treating it as a proof of safety
+    silenced three real bound shapes on the lead's measurement; so the
+    second route asks what the number is handed TO, and only a positive
+    answer either way — a launch, a child-ending slot, a path function —
+    counts. A parameter the CALLER fills is a fourth thing and not this
+    one: that number is the caller's, and `_parameter_bound_faults` reads
+    it at the caller's line.
     """
     if any(path._is_launch(call, receivers, direct, aliases)
            for call in ast.walk(function) if path._is_call(call)):
@@ -204,8 +233,6 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
                     and _mentions(node.value, derived)):
                 derived.update(target.id for target in node.targets
                                if isinstance(target, ast.Name))
-    launched = path._launch_bound_names(function, receivers, direct, aliases)
-    launched |= {'<launch>', *parameters}
     slots = path._child_wait_slots()
     for node in ast.walk(function):
         if not path._is_call(node) or not _mentions(node, derived):
@@ -215,7 +242,6 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
             if func.id in callees:
                 return True
             continue
-        if (isinstance(func, ast.Attribute) and func.attr in slots
-                and path._dotted_key(func.value) in launched):
+        if _hands_to_a_child_slot(node, derived, slots):
             return True
     return False
