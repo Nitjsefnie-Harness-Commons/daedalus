@@ -231,6 +231,7 @@
 !/scripts/ci/
 !/scripts/ci/accepted_speed_changes.json
 !/scripts/ci/aggregate_gate.py
+!/scripts/ci/artifact_base.py
 !/scripts/ci/cache_action_releases.py
 !/scripts/ci/classify_changes.py
 !/scripts/ci/compare_durations.py
@@ -456,6 +457,7 @@
 !/tests/_yamlsteps.py
 !/tests/test_aggregate_gate.py
 !/tests/test_aggregate_needs.py
+!/tests/test_artifact_base.py
 !/tests/test_atomic_file.py
 !/tests/test_bash_resolver_scan.py
 !/tests/test_bridge_credentials.py
@@ -647,7 +649,6 @@
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
 !/tests/test_reserved_name_base.py
-!/tests/test_reserved_name_scope.py
 !/tests/test_reserved_test_names.py
 !/tests/test_result_command_write_retry.py
 !/tests/test_result_routes.py
