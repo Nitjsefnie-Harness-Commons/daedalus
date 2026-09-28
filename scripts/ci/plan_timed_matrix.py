@@ -77,9 +77,11 @@ target), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a suite
 heavier than the target is alone in its cell and the median falls as
 the target does. The margin is `0.35`: the round number at or above the
 ratio at 60. The SHIPPED file's target is 25 and its own numbers are
-measured, not assumed: over the tree's 327 suites (346.9 reference
-multiples) it plans 14 cells, 24.78 against a 24.78 median, so the
-ALL-cell ratio is 1.000. The step comes from the planner itself
+measured, not assumed, over the live tree at 2026-09-28: 332 suites, 328
+recorded and 4 the planner estimates, 357.2 reference multiples in all,
+packed into 15 cells at a target of 25 against a bound of 15. The
+heaviest cell is 23.83 against a 23.81 median, so the ALL-cell ratio is
+1.001. The step comes from the planner itself
 (`timings_bounds.derive_target`) and is verified before every write by
 `refresh_timings.py`, the data file's one owner: this module NAMES a
 target the margin forbids, in the summary and in the exit-0 matrix it

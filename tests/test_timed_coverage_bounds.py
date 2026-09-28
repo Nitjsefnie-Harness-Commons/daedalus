@@ -129,11 +129,18 @@ def _note_boundary(recorded_count):
 
     The note fires at a tenth and not above it, so the boundary is the
     smallest `k` with `k / (n + k) >= 1/10`, which in integers is
-    `9k >= n`. Derived from the tree rather than written down: at 19
-    arrivals a day, "two days of drift" stops reaching a tenth once the
-    recorded set passes 342, and the fixture would have failed on that
-    day with nothing about the guard having changed.
+    `9k >= n`. Derived from the tree rather than written down: at the
+    module's slowest measured growth, "two days of drift" stops
+    reaching a tenth once the recorded set passes 342, and the fixture
+    would have failed on that day with nothing about the guard having
+    changed.
+
+    `0` is refused rather than answered: no tree of zero recorded suites
+    reaches a tenth by any number of arrivals, so the ceiling division
+    would return `0` and every caller would read a boundary that is not
+    one.
     """
+    assert recorded_count > 0, recorded_count
     return -(-recorded_count // 9)
 
 
@@ -145,6 +152,23 @@ def _refusal_boundary(recorded_count):
     publishes at exactly `n // 2` estimated and is refused at one more.
     """
     return recorded_count // 2 + 1
+
+
+def _day_range_appears(coverage, count, summary):
+    """The note's day range, from the module's OWN rate rather than a copy.
+
+    The note quotes an estimated count as a span of days at this tree's
+    measured growth, and the span's endpoints are the module's two
+    measured rates. A control that computed the span from a constant of
+    its own would be reading back a fixture value, so this asks the
+    module for the span and asks the summary to carry it -- the
+    operator-facing sentence and the constant cannot then disagree.
+    """
+    fewest, most = coverage.growth_days(count)
+    return (f'{count} estimated suites is between {fewest:.1f} and '
+            f'{most:.1f} days' in summary
+            and f'{coverage.SUITES_PER_DAY[0]} to {coverage.SUITES_PER_DAY[1]}'
+            ' tracked suites a day' in summary)
 
 
 def _verdict(tree, tmp, data, *flags, name='timings.json'):
@@ -223,13 +247,12 @@ def test_the_fewest_arrivals_that_reach_the_note_publish_with_it_named(tmp):
         assert (f'the file records {recorded_count} of the tree\'s '
                 f'{recorded_count + gain} suites') in summary, summary
         assert 'Every suite in the tree is still in a cell' in summary, summary
-        days = gain / coverage.SUITES_PER_DAY
-        assert f'{days:.1f} days' in summary, summary
+        assert _day_range_appears(coverage, gain, summary), summary
         assert 'refresh_timings.py' in summary, summary
 
 
 def test_the_shipped_files_own_coverage_quotes_no_note(tmp):
-    """The operating point stays quiet: 9 of 328 is 2.7%, under a tenth."""
+    """The operating point stays quiet: 4 of 332 is 1.2%, under a tenth."""
     data, _recorded = _shipped_weights()
     _code, _err, summary, _out = _verdict(ROOT, tmp, data, name='shipped.json')
     assert 'of this plan\'s suites are estimated' not in summary, summary
@@ -283,8 +306,7 @@ def test_the_refusal_waits_for_a_file_that_is_not_a_description_of_its_tree(
             assert share <= coverage.MAX_ESTIMATED_SUITE_SHARE, share
             assert 'cell-01' in published, published
             assert f'{share:.1%} of this plan' in summary, summary
-            days = gain / coverage.SUITES_PER_DAY
-            assert f'{days:.1f} days' in summary, summary
+            assert _day_range_appears(coverage, gain, summary), summary
 
 
 def test_both_drift_boundaries_hold_at_every_recorded_set_size(tmp):
@@ -528,6 +550,22 @@ def test_the_two_shares_are_different_quantities_and_one_is_nested(tmp):
     assert heavy_tail < coverage.MAX_ESTIMATED_WEIGHT_SHARE, heavy_tail
 
 
+def _measured(count):
+    """`count` recorded weights shaped like a measurement's.
+
+    Equal low weights and one heavy one, because the guard's THIRD
+    condition reads the recorded set's own skew and a file of `count`
+    identical numbers is not a shape a measurement produces: its mean
+    is its median and the ratio is 1. The heavy value is `count + 2`, so
+    the mean is `2 + 1/count` times the median at every size -- over the
+    bound, with a margin that does not depend on the count. The MEDIAN,
+    which is what the planner lends an unmeasured suite, is 1.0 at every
+    size, so a control parked here is still parked on the same price.
+    """
+    return {f'test_{index:02d}.py': 1.0 for index in range(count - 1)} | {
+        f'test_{count - 1:02d}.py': float(count + 2)}
+
+
 def test_a_fixture_parked_at_each_tier_moves_with_it(tmp):
     """Both comparisons are pinned to a couple of points, not twenty.
 
@@ -543,16 +581,20 @@ def test_a_fixture_parked_at_each_tier_moves_with_it(tmp):
     it is the one that has to be loud: ten suites with one unrecorded is
     10.0% and quotes the share, twenty with one is 5.0% and does not.
     Each verdict names the statistic that decided it.
+
+    Every recorded set here is `_measured`, not a run of equal ones: the
+    third condition reads their skew, and this control is about the
+    SHARE tiers, so the sets have to look like a measurement for those
+    to be the tiers that decide.
     """
     coverage = _coverage()
-    unit = [f'test_{index:02d}.py' for index in range(20)]
-    above = {name: 1.0 for name in unit[:13]}
+    above = _measured(13)
     weight_share, suite_share, refused = _skewed_shares(
         tmp, above, 20, 'above')
     assert 0.3 < suite_share < 0.4, suite_share
     assert weight_share < coverage.MAX_ESTIMATED_WEIGHT_SHARE, weight_share
     assert refused and 'suites are estimated' in refused, refused
-    below = {name: 1.0 for name in unit[:14]}
+    below = _measured(14)
     weight_share, suite_share, published = _skewed_shares(
         tmp, below, 20, 'below')
     assert 0.25 < suite_share < 0.35, suite_share
@@ -565,17 +607,13 @@ def test_a_fixture_parked_at_each_tier_moves_with_it(tmp):
     # The note's own edge, which is what makes it loud rather than
     # decorative: exactly a tenth of the tree is quoted, half of that is
     # not, and a file that measures the whole tree says nothing at all.
-    twenty = [f'test_{index:02d}.py' for index in range(20)]
-    loud = _fixture_shares(
-        tmp, {name: 1.0 for name in twenty[:18]}, 20, 'loud')
+    loud = _fixture_shares(tmp, _measured(18), 20, 'loud')
     assert loud[1] == 0.1, loud[1]
     assert coverage.coverage_note(loud[0], loud[2]) is not None
-    quiet = _fixture_shares(
-        tmp, {name: 1.0 for name in twenty[:19]}, 20, 'quiet')
+    quiet = _fixture_shares(tmp, _measured(19), 20, 'quiet')
     assert quiet[1] == 0.05, quiet[1]
     assert coverage.coverage_note(quiet[0], quiet[2]) is None
-    whole = _fixture_shares(
-        tmp, {name: 1.0 for name in twenty}, 20, 'whole')
+    whole = _fixture_shares(tmp, _measured(20), 20, 'whole')
     assert coverage.coverage_note(whole[0], whole[2]) is None
 
 

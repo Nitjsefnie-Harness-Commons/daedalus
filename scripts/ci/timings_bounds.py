@@ -43,6 +43,16 @@ except ImportError:  # pragma: no cover - the script-directory import path
 
 # The step between candidate targets, in the file's own units.
 TARGET_STEP = 5
+# The most candidate targets `derive_target` will ask the planner about.
+# `read_timings` accepts any positive finite weight, so the count of
+# steps a total spans is a function of the total's MAGNITUDE and not of
+# the tree: one suite recorded at 1e300 puts 2e299 candidates between
+# the planner and a return, each a full `plan()` with its own
+# `git ls-files`. 256 steps is 1280 multiples, against 356.4 for the
+# shipped file -- a real tree of this size is under half the bound --
+# and past it the weights are not runtimes, which is a refusal with a
+# reason rather than a number to spend a cron job's 30 minutes on.
+MAX_TARGET_PROBES = 256
 
 
 class BoundsError(Exception):
@@ -100,11 +110,29 @@ def derive_target(tree, recorded, max_cells):
     raising the target lets more suites share cells and the median rises
     under the heavy one. Scoped to the tree before anything is summed,
     because a weight for a deleted suite is never placed.
+
+    The candidates run from one step to the whole total, so their
+    COUNT is the total's magnitude and not the tree's size, and every
+    one of them is a `plan()` with its own `git ls-files`. A total past
+    `MAX_TARGET_PROBES` steps is a `BoundsError`: it is a file whose
+    weights are not runtimes, which is a hand-edit or a bad merge
+    rather than a measurement, and the alternative is a refresh that
+    spends the job's whole timeout deciding nothing.
     """
     weights = tree_weights(tree, recorded)
     total = sum(weights.values())
     if total <= 0 or max_cells < 1:
         return float(TARGET_STEP)
+    if total / TARGET_STEP > MAX_TARGET_PROBES:
+        raise BoundsError(
+            f'these weights total {total:.4g} over the tree, which is '
+            f'{total / TARGET_STEP:.3g} candidate targets of {TARGET_STEP:g} '
+            f'against the {MAX_TARGET_PROBES} this derivation will ask the '
+            f'planner about: a suite recorded at a magnitude like that is '
+            f'not a runtime. Re-derive the file with '
+            f'`python3 scripts/ci/refresh_timings.py --runs-root '
+            f'<downloaded runs> --out .github/suite-timings.json`, or raise '
+            f'TARGET_STEP if the step is genuinely coarser than the data')
     for target in range(TARGET_STEP, int(total) + TARGET_STEP, TARGET_STEP):
         if math.ceil(total / target) > max_cells:
             continue
