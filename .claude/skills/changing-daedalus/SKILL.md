@@ -386,7 +386,8 @@ always did.
 Waiting on one commit's CI is `ci_wait.py`, beside this file:
 
 ```
-python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha>
+python3 -u .claude/skills/changing-daedalus/ci_wait.py <sha> \
+    [--repo OWNER/REPO] [--required NAME]
 ```
 
 Its exit code is the verdict, so a caller never has to read the loop: 0 every
@@ -413,8 +414,9 @@ conclude `success`; the tool reported `all 2 run(s) acceptable` and exited
 same false green appears on a mergeable head in the first minutes of a
 push, while the short workflows have concluded and the matrix is still being
 created. So an absent required workflow is `REQUIRED_WORKFLOWS`
-(`ci_wait.py`'s constant, not a flag - a caller who may switch the
-expectation off is the reader this tool exists to protect), and it is
+(`ci_wait.py`'s constant, which is also its default: a caller who names
+nothing cannot switch the expectation off, and the reader this tool exists
+to protect is one who never says otherwise), and it is
 answered rather than waited on forever: a conflicting pull request for the
 head refuses at once, and anything else is given `--grace` seconds
 (default 300) from the first observation before it refuses, naming the
@@ -423,6 +425,23 @@ lookup is a disambiguation, not this tool's subject, so its failure is said
 once on stderr and the wait continues to the grace - a slower correct
 answer, never a green. A present-but-red `tests` run is exit 1, not exit 4:
 the conclusion is judged before the set is.
+
+**`--required NAME` is how a caller states a DIFFERENT repository's gate**
+(issue #1318). It is repeatable and all-of: `--required ci --required lint`
+needs both, the same reading `verdict` has always given. Absent, the
+expectation is `REQUIRED_WORKFLOWS` exactly as before - nothing about the
+exit-4 refusal above moves, and a caller who names no gate still cannot
+switch it off. What it exists for is `--repo`: `tests` is THIS
+repository's gate and is not any other one's, so on a repository whose
+gating workflow is named something else an all-green head used to exit 4
+with a line reading as "the gate never started" when in fact the gate was
+never what this tool looked for. A caller who names another repository and
+no gate is told that on the refusal itself - which name is the only one
+checked, and that `--required` is how to state a different one - rather
+than left to read a missing workflow as a head nobody verified. Both facts
+are the caller's, so the note is empty on this repository and empty for a
+caller who stated their own gate, and those reports print byte for byte
+what they printed before the flag existed.
 
 **A workflow's verdict is the run GitHub's required-check status reports for
 it, which is that workflow's NEWEST run on the SHA.** Every older run of the
