@@ -344,6 +344,43 @@ def test_gitignore_log_safe_never_raises_and_stays_useful(tmp):
     assert generator._log_safe('héllo — 世界') == 'héllo — 世界'
 
 
+def test_the_shared_log_safe_contract_table_is_complete(tmp):
+    """The table all three consumers iterate must not be silently short.
+
+    Every consumer loops over it and asserts each row, so a table truncated
+    to one row leaves all of them green while they verify almost nothing —
+    a re-export that returns a slice is exactly the mistake a simplifier
+    makes, and nothing in the tree noticed.
+
+    The universe is derived from the property the table's own docstring
+    states, not from a count: it carries three classes of value — pass
+    through in full, backslash-escaped, and the fixed fallback — so every
+    row must fall in one of them and none of them may be empty. The shapes
+    that reach the fallback are then named outright, because that class is
+    the reason the table exists and a row dropped from it is the one loss a
+    class count cannot see.
+    """
+    del tmp
+    fallback = '<unprintable value>'
+    buckets = {'through': [], 'escaped': [], 'fallback': []}
+    for value, expected in _util.log_safe_cases():
+        name = type(value).__name__
+        # The expected rendering says which class the row is in, and reading
+        # it costs no `str(value)` — calling that is what the table exists to
+        # make survivable, so a control must not do it either.
+        if expected == fallback:
+            key = 'fallback'
+        elif '\\' in expected:
+            key = 'escaped'
+        else:
+            key = 'through'
+        buckets[key].append(name)
+    assert all(buckets.values()), (
+        f'a class the table declares has no row left in it: {buckets}')
+    assert buckets['fallback'] == [
+        'int', 'BrokenStr', 'EvilStr', 'HostileChain', 'EvilRepr'], buckets
+
+
 def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
     """No repo argument used to reach `max()` on an empty generator and raise
     ValueError instead of telling the caller what the script needs (#215)."""
