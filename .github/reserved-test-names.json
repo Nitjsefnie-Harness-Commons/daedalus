@@ -921,6 +921,7 @@
     "_wait_for_delivery_health": {"python": ["tests/_bridge.py"]},
     "_wait_for_devtools": {"python": ["tests/_realbrowser.py"]},
     "_wait_for_mcp": {"python": ["tests/_mcp_load.py"]},
+    "_wait_result": {"python": ["tests/_cli_handler_wire.py"]},
     "_wait_slot": {"python": ["tests/_launch_path.py"]},
     "_waited": {"python": ["tests/_mcp_tool_commands.py"]},
     "_wanted": {"python": ["tests/_dashfield.py"]},

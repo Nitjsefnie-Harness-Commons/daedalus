@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_put  # noqa: E402
+from _cli_handler_wire import _api_put, _wait_result  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -33,11 +33,6 @@ run_cli = _cli_dispatch.run_cli
 run_cli_exit = _cli_dispatch.run_cli_exit
 
 TOK = 'clitok'
-
-
-def _wait(cmd_id, delivery, timeout, interval=0.5):
-    return {'via': 'wait_for_result', 'id': cmd_id, 'tab': 'extension',
-            'delivery': delivery, 'timeout': timeout, 'interval': interval}
 
 
 def _envelope(**over):
@@ -58,7 +53,7 @@ def test_do_cookies_asks_with_no_filter_and_sends_neither_field(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     recorded, out = run_cli(
         ['cookies'], [{'did': 'd1'},
                       _envelope(id='_cookies', result=[
@@ -81,7 +76,7 @@ def test_do_cookies_carries_the_domain_only_when_it_was_given(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     recorded, out = run_cli(
         ['cookies', '-d', 'example.com'],
         [{'did': 'd1'}, _envelope(id='_cookies', result=[])],
@@ -96,7 +91,7 @@ def test_do_cookies_carries_the_url_only_when_it_was_given(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     _recorded, out = run_cli(
         ['cookies', '-u', 'https://example.com/'],
         [{'did': 'd1'}, _envelope(id='_cookies', result=[])],
@@ -110,7 +105,7 @@ def test_do_cookies_carries_both_filters_when_both_were_given(tmp):
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com',
             'url': 'https://example.com/'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     recorded, out = run_cli(
         ['cookies', '-d', 'example.com', '-u', 'https://example.com/'],
         [{'did': 'd1'}, _envelope(id='_cookies', result=[])],
@@ -130,7 +125,7 @@ def test_do_cookies_prints_the_whole_cookie_list_as_json_when_raw(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     _recorded, out = run_cli(
         ['cookies', '--raw'],
         [{'did': 'd1'},
@@ -158,7 +153,7 @@ def test_do_cookies_renders_a_cookie_carrying_none_of_its_three(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     _recorded, out = run_cli(
         ['cookies'], [{'did': 'd1'}, _envelope(id='_cookies', result=[{}])],
         module=commands_browser, plan=plan, token=TOK)
@@ -171,7 +166,7 @@ def test_do_cookies_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     code, out = run_cli_exit(['cookies'], [{'did': 'd1'}, None],
                              module=commands_browser, plan=plan, token=TOK)
 
@@ -189,7 +184,7 @@ def test_do_cookies_waits_the_bound_it_was_given(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 7)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 7)]
     code, out = run_cli_exit(['cookies', '-t', '7'], [{'did': 'd1'}, None],
                              module=commands_browser, plan=plan, token=TOK)
 
@@ -202,7 +197,7 @@ def test_do_cookies_exits_with_the_error_the_extension_reported(tmp):
     del tmp
     body = {'id': '_cookies', 'type': 'cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cookies', 'd1', 10)]
+    plan = [_api_put(body), _wait_result('_cookies', 'd1', 10)]
     code, out = run_cli_exit(
         ['cookies'], [{'did': 'd1'},
                       {'id': '_cookies', 'error': 'no such tab', 'ts': 1}],
@@ -222,7 +217,7 @@ def test_do_set_cookie_sends_the_three_required_fields_and_nothing_else(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123'}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123'],
         [{'did': 'd2'}, _envelope(id='_set_cookie', result={})],
@@ -248,7 +243,7 @@ def test_do_set_cookie_sends_every_option_it_was_given(tmp):
             'value': 'abc123', 'domain': 'example.com', 'path': '/app',
             'httpOnly': True, 'secure': True, 'sameSite': 'lax',
             'expirationDate': 1800000000.0}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123',
          '-d', 'example.com', '--path', '/app', '--http-only', '--secure',
@@ -280,7 +275,7 @@ def test_do_set_cookie_sends_an_expiry_of_zero_because_it_is_not_unset(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123', 'expirationDate': 0.0}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123',
          '--expires', '0'],
@@ -298,7 +293,7 @@ def test_do_set_cookie_sends_the_secure_flag_on_its_own(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123', 'secure': True}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123', '--secure'],
         [{'did': 'd2'}, _envelope(id='_set_cookie', result={})],
@@ -320,7 +315,7 @@ def test_do_set_cookie_truncates_the_value_it_echoes_at_sixty_columns(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': long_value}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     recorded, out = run_cli(
         ['set-cookie', 'https://example.com/', 'sid', long_value],
         [{'did': 'd2'}, _envelope(id='_set_cookie', result={})],
@@ -338,7 +333,7 @@ def test_do_set_cookie_exits_when_no_result_arrives(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123'}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     code, out = run_cli_exit(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123'],
         [{'did': 'd2'}, None],
@@ -354,7 +349,7 @@ def test_do_set_cookie_exits_with_the_error_the_extension_reported(tmp):
     body = {'id': '_set_cookie', 'type': 'set-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid',
             'value': 'abc123'}
-    plan = [_api_put(body), _wait('_set_cookie', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_set_cookie', 'd2', 10)]
     code, out = run_cli_exit(
         ['set-cookie', 'https://example.com/', 'sid', 'abc123'],
         [{'did': 'd2'},
@@ -372,7 +367,7 @@ def test_do_remove_cookie_names_the_url_and_the_cookie_it_removes(tmp):
     del tmp
     body = {'id': '_rm_cookie', 'type': 'remove-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid'}
-    plan = [_api_put(body), _wait('_rm_cookie', 'd3', 10)]
+    plan = [_api_put(body), _wait_result('_rm_cookie', 'd3', 10)]
     recorded, out = run_cli(
         ['remove-cookie', 'https://example.com/', 'sid'],
         [{'did': 'd3'}, _envelope(id='_rm_cookie', result={})],
@@ -389,7 +384,7 @@ def test_do_remove_cookie_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'id': '_rm_cookie', 'type': 'remove-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid'}
-    plan = [_api_put(body), _wait('_rm_cookie', 'd3', 10)]
+    plan = [_api_put(body), _wait_result('_rm_cookie', 'd3', 10)]
     code, out = run_cli_exit(
         ['remove-cookie', 'https://example.com/', 'sid'],
         [{'did': 'd3'}, None],
@@ -404,7 +399,7 @@ def test_do_remove_cookie_exits_with_the_error_the_extension_reported(tmp):
     del tmp
     body = {'id': '_rm_cookie', 'type': 'remove-cookie', 'token': TOK,
             'tab': 'extension', 'url': 'https://example.com/', 'name': 'sid'}
-    plan = [_api_put(body), _wait('_rm_cookie', 'd3', 10)]
+    plan = [_api_put(body), _wait_result('_rm_cookie', 'd3', 10)]
     code, out = run_cli_exit(
         ['remove-cookie', 'https://example.com/', 'sid'],
         [{'did': 'd3'},
@@ -422,7 +417,7 @@ def test_do_clear_cookies_sends_neither_filter_when_none_was_given(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     recorded, out = run_cli(
         ['clear-cookies'],
         [{'did': 'd4'}, _envelope(id='_clear_cookies', result={})],
@@ -441,7 +436,7 @@ def test_do_clear_cookies_carries_both_filters_when_both_were_given(tmp):
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com',
             'url': 'https://example.com/'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     recorded, out = run_cli(
         ['clear-cookies', '-d', 'example.com', '-u', 'https://example.com/'],
         [{'did': 'd4'},
@@ -463,7 +458,7 @@ def test_do_clear_cookies_reports_the_cookies_it_could_not_remove(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     answer = {'removed': 1,
               'failed': ['a.example.com', 'b.example.com']}
     _recorded, out = run_cli(
@@ -486,7 +481,7 @@ def test_do_clear_cookies_prints_no_second_line_when_nothing_failed(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension', 'domain': 'example.com'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     _recorded, out = run_cli(
         ['clear-cookies', '-d', 'example.com'],
         [{'did': 'd4'},
@@ -501,7 +496,7 @@ def test_do_clear_cookies_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     code, out = run_cli_exit(['clear-cookies'], [{'did': 'd4'}, None],
                              module=commands_browser, plan=plan, token=TOK)
 
@@ -514,7 +509,7 @@ def test_do_clear_cookies_waits_the_bound_it_was_given(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 4)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 4)]
     code, out = run_cli_exit(['clear-cookies', '-t', '4'],
                              [{'did': 'd4'}, None],
                              module=commands_browser, plan=plan, token=TOK)
@@ -528,7 +523,7 @@ def test_do_clear_cookies_exits_with_the_error_the_extension_reported(tmp):
     del tmp
     body = {'id': '_clear_cookies', 'type': 'clear-cookies', 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_clear_cookies', 'd4', 10)]
+    plan = [_api_put(body), _wait_result('_clear_cookies', 'd4', 10)]
     code, out = run_cli_exit(
         ['clear-cookies'], [{'did': 'd4'},
                             {'id': '_clear_cookies',

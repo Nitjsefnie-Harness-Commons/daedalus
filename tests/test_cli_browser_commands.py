@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_put  # noqa: E402
+from _cli_handler_wire import _api_put, _wait_result  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -45,11 +45,6 @@ def _rendered(out):
     untouched and every whole-string comparison here fails.
     """
     return out.replace('<-', IN)
-
-
-def _wait(cmd_id, delivery, timeout, interval=0.5):
-    return {'via': 'wait_for_result', 'id': cmd_id, 'tab': 'extension',
-            'delivery': delivery, 'timeout': timeout, 'interval': interval}
 
 
 def _ext(cmd_id, cmd_type, fields, timeout=10):
@@ -74,7 +69,7 @@ def test_do_cdp_sends_empty_params_and_neither_option_when_none_given(tmp):
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.captureScreenshot',
             'params': {}, 'token': TOK, 'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     recorded, out = run_cli(
         ['cdp', 'Page.captureScreenshot'],
         [{'did': 'd1'},
@@ -93,7 +88,7 @@ def test_do_cdp_sends_the_params_it_was_given(tmp):
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.navigate',
             'params': {'url': 'https://example.com/'}, 'token': TOK,
             'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     recorded, out = run_cli(
         ['cdp', 'Page.navigate', '-p', '{"url": "https://example.com/"}'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
@@ -113,7 +108,7 @@ def test_do_cdp_carries_the_chrome_tab_only_when_it_was_given(tmp):
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
             'token': TOK, 'tab': 'extension', 'tabId': 0}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     recorded, out = run_cli(
         ['cdp', 'Page.enable', '--chrome-tab', '0'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
@@ -129,7 +124,7 @@ def test_do_cdp_carries_the_keep_session_flag_only_when_it_was_given(tmp):
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Profiler.enable',
             'params': {}, 'token': TOK, 'tab': 'extension',
             'keep_session': True}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     recorded, out = run_cli(
         ['cdp', 'Profiler.enable', '--keep-session'],
         [{'did': 'd1'}, _envelope(id='_cdp', result={})],
@@ -144,7 +139,7 @@ def test_do_cdp_renders_the_header_cells_the_result_carries(tmp):
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Runtime.evaluate',
             'params': {}, 'token': TOK, 'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     _recorded, out = run_cli(
         ['cdp', 'Runtime.evaluate'],
         [{'did': 'd1'},
@@ -160,7 +155,7 @@ def test_do_cdp_prints_the_whole_envelope_as_json_when_raw(tmp):
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
             'token': TOK, 'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     _recorded, out = run_cli(
         ['cdp', 'Page.enable', '--raw'],
         [{'did': 'd1'},
@@ -183,7 +178,7 @@ def test_do_cdp_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'id': '_cdp', 'type': 'cdp', 'method': 'Page.enable', 'params': {},
             'token': TOK, 'tab': 'extension'}
-    plan = [_api_put(body), _wait('_cdp', 'd1', 30)]
+    plan = [_api_put(body), _wait_result('_cdp', 'd1', 30)]
     code, out = run_cli_exit(['cdp', 'Page.enable'], [{'did': 'd1'}, None],
                              module=commands_browser, plan=plan, token=TOK)
 
@@ -203,7 +198,7 @@ def test_do_close_tab_sends_one_id_as_tab_id(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     recorded, out = run_cli(
         ['close-tab', '101'],
         [{'did': 'd2'},
@@ -220,7 +215,7 @@ def test_do_close_tab_sends_several_ids_as_a_list(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabIds': [101, 102, 103]}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     recorded, out = run_cli(
         ['close-tab', '101', '102', '103'],
         [{'did': 'd2'},
@@ -244,7 +239,7 @@ def test_do_close_tab_reports_each_tab_the_extension_could_not_close(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabIds': [101, 102]}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     answer = {'errors': [{'id': 102, 'error': 'no such tab'},
                          {'id': 101, 'error': 'busy'}]}
     _recorded, out = run_cli(
@@ -266,7 +261,7 @@ def test_do_close_tab_reports_a_partial_close_as_both_lines(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabIds': [101, 102]}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     answer = {'closed': [101], 'errors': [{'id': 102, 'error': 'busy'}]}
     _recorded, out = run_cli(
         ['close-tab', '101', '102'],
@@ -288,7 +283,7 @@ def test_do_close_tab_says_so_when_no_tab_was_affected(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     _recorded, out = run_cli(
         ['close-tab', '101'],
         [{'did': 'd2'}, _envelope(id='_close_tab', result={})],
@@ -306,7 +301,7 @@ def test_do_close_tab_renders_a_failure_carrying_neither_field(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     _recorded, out = run_cli(
         ['close-tab', '101'],
         [{'did': 'd2'},
@@ -321,7 +316,7 @@ def test_do_close_tab_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     code, out = run_cli_exit(['close-tab', '101'], [{'did': 'd2'}, None],
                              module=commands_browser, plan=plan, token=TOK)
 
@@ -334,7 +329,7 @@ def test_do_close_tab_exits_with_the_error_the_extension_reported(tmp):
     del tmp
     body = {'id': '_close_tab', 'type': 'close-tab', 'token': TOK,
             'tab': 'extension', 'tabId': 101}
-    plan = [_api_put(body), _wait('_close_tab', 'd2', 10)]
+    plan = [_api_put(body), _wait_result('_close_tab', 'd2', 10)]
     code, out = run_cli_exit(
         ['close-tab', '101'],
         [{'did': 'd2'},
