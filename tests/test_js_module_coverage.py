@@ -72,11 +72,47 @@ def test_refused_kinds_carry_the_cover_or_stale_entry_remedy(tmp):
     del tmp
     policy = _policy()
     assert policy.REMEDY_FOR['grown'] == policy.UNCOVERED_REMEDY
-    assert policy.REMEDY_FOR['unrecorded'] == policy.UNCOVERED_REMEDY
     assert policy.REMEDY_FOR['missing'] == policy.STALE_ENTRY_REMEDY
     assert policy.REMEDY_FOR['graduated'] == policy.STALE_ENTRY_REMEDY
     assert 'never raised by hand' in policy.UNCOVERED_REMEDY
     assert 'cover the uncovered lines' in policy.UNCOVERED_REMEDY
+
+
+def test_unrecorded_carries_its_own_remedy_naming_both_actions(tmp):
+    """A file with no record cannot be told to cover its lines and stop.
+
+    `unrecorded` is the one kind whose subject is a module the record has
+    never seen, and the only one with no entry to lower: `tightened()`
+    iterates the record, so --tighten provably cannot create the entry
+    the refusal demands. Sharing `grown`'s remedy there would print a bar
+    no reader can meet at admission time -- 100% line coverage on a brand
+    new module, which this repository's own norm is far below -- and
+    would contradict the bootstrap the seed itself used. So the remedy
+    must name the reviewed hand edit, and it must be its own constant so
+    that editing one cannot silently edit the other.
+    """
+    del tmp
+    policy = _policy()
+    assert policy.REMEDY_FOR['unrecorded'] == policy.UNRECORDED_REMEDY
+    assert policy.UNRECORDED_REMEDY != policy.UNCOVERED_REMEDY
+    assert 'at its measured uncovered count' in policy.UNRECORDED_REMEDY
+    assert 'reviewed diff' in policy.UNRECORDED_REMEDY
+    assert 'never adds one' in policy.UNRECORDED_REMEDY
+    assert 'cover the uncovered lines' in policy.UNRECORDED_REMEDY
+
+
+def test_tightening_still_cannot_add_the_entry_the_remedy_names(tmp):
+    """The remedy says a reviewer adds the entry, not that --tighten does.
+
+    Both halves have to hold: the prose may tell a reader to add the
+    entry in their diff, and the tool must still be incapable of adding
+    it on its own. If tightening could add, a run on main would admit
+    whatever coverage happened to be measured that day.
+    """
+    del tmp
+    policy = _policy()
+    assert policy.tightened({}, {'new.js': 4}) is None
+    assert policy.tightened({'a.js': 2}, {'a.js': 2, 'new.js': 4}) is None
 
 
 def test_the_gate_reuses_the_totals_gate_attribution(tmp):
@@ -85,7 +121,7 @@ def test_the_gate_reuses_the_totals_gate_attribution(tmp):
     With no dump at all every tracked file is wholly uncovered, so the
     counts are exactly the totals gate's executable-line set.
     """
-    counts = _policy().uncovered_counts(Path(tmp) / 'absent')
+    counts = _policy().tracked_uncovered_counts(Path(tmp) / 'absent')
     assert set(counts) == set(js_coverage.tracked_sources(ROOT))
     assert counts['dashboard/sections/tabs.js'] > 0, counts
 
@@ -111,7 +147,7 @@ def test_violations_reports_each_kind_and_nothing_on_a_clean_pair(tmp):
         'grown': {'a.js': (3, 2)},
         'unrecorded': {'new.js': 1},
         'missing': ['gone.js'],
-        'graduated': ['done.js'],
+        'graduated': {'done.js': 0},
     }, found
     clean = policy.violations({'a.js': 2, 'b.js': 0}, {'a.js': 2})
     assert not any(clean.values()), clean
@@ -124,21 +160,31 @@ def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
     A suite run has no V8 dump, so the count each file carries here is
     read back from the record: a recorded file stands at its recorded
     number, and a file with no record stands at 0, which is what a run
-    that covered it completely measured. That is the policy's own
-    invariant made concrete — a file needs a record exactly when it has
-    an uncovered line — and running it over the real thirty-eight files
-    is what puts the fifteen fully covered modules into the negative
-    space of `unrecorded` as fifteen zero-count entries with no record,
-    the cell a fixture of four invented names never reaches.
+    that covered it completely measured. Running it over the real
+    thirty-eight files is what puts the fifteen fully covered modules
+    into the negative space of `unrecorded` as fifteen zero-count entries
+    with no record — the cell a fixture of four invented names never
+    reaches, and the one that decides whether `unrecorded` still
+    distinguishes 0 from a missing record. That is what these four
+    assertions earn here, and the `code_lines` loop below earns the rest:
+    every tracked module has an executable line, so a file nothing can
+    cover is never quietly treated as a file that needs no record.
 
-    What this does not claim is that the recorded numbers are right: the
-    measurement belongs to the coverage job, which is the only place the
-    dumps exist. It claims the record and the tracked tree agree, so an
-    entry naming a file the tree does not ship (`missing`), a recorded
-    file that can hold no count at all (`graduated`), a tracked module
-    with no executable line to cover, and a counted file above its own
-    record (`grown`) are all refused by the test job rather than waiting
-    for a push.
+    What they do NOT establish is anything about the record's own
+    content, and the construction is why: `counts` is the record unioned
+    with the tracked set, so every recorded key is present (nothing can
+    be `missing`), every recorded file stands at its own recorded number
+    (nothing can be `grown`), and `_baseline` refuses a zero count (so
+    nothing can be `graduated`). Those three still discriminate a
+    mutation of the filters themselves — `>` against `>=`, `not in`
+    against `in` — which is why they stay. The refusals against real
+    record content belong to the other two tests and are not duplicated
+    here: an entry naming a file the tree does not ship is caught by
+    `test_the_seed_names_only_tracked_javascript_that_still_has_code`,
+    and each kind's own shape is caught by the whole-dict assertion
+    above. A recorded count that is merely wrong is not catchable here at
+    all; the measurement lives in the coverage job, which is the only
+    place the dumps exist.
     """
     del tmp
     policy = _policy()
@@ -194,7 +240,8 @@ def test_main_refuses_and_names_the_file_and_the_remedy(tmp):
     data = _document()
     data[MEMBER] = {'tabs.js': 1}
     thresholds.write(target, data)
-    setattr(policy, 'uncovered_counts', lambda *a, **kw: {'tabs.js': 9})
+    setattr(policy, 'tracked_uncovered_counts',
+            lambda *a, **kw: {'tabs.js': 9})
     status, stdout, stderr = _main(
         policy, [str(Path(tmp) / 'absent'), '--thresholds', str(target)])
     assert status == 1
@@ -212,7 +259,8 @@ def test_main_reports_a_clean_tree_on_stdout_only(tmp):
     data = _document()
     data[MEMBER] = {'tabs.js': 9}
     thresholds.write(target, data)
-    setattr(policy, 'uncovered_counts', lambda *a, **kw: {'tabs.js': 9})
+    setattr(policy, 'tracked_uncovered_counts',
+            lambda *a, **kw: {'tabs.js': 9})
     status, stdout, stderr = _main(
         policy, [str(Path(tmp) / 'absent'), '--thresholds', str(target)])
     assert status == 0
@@ -341,11 +389,15 @@ def _skill_decisions(path=SKILL_SOURCE):
         'command': ('python3 scripts/ci/js_module_coverage.py --tighten'
                     in text),
         'remedy': 'uncovered' in paragraph and 'never raised' in paragraph,
+        'admission': 'at its measured uncovered count' in paragraph
+        and 'reviewed diff' in paragraph
+        and 'never add one' in paragraph
+        and 'it will not' in paragraph,
         'reads_skill': 'tests/test_js_module_coverage.py' in text,
     }
 
 
-def test_skill_names_owner_command_remedy_and_reader(tmp):
+def test_skill_names_owner_command_remedy_admission_and_reader(tmp):
     del tmp
     decisions = _skill_decisions()
     assert all(decisions.values()), decisions
@@ -361,6 +413,10 @@ def test_skill_mutations_are_caught_independently(tmp):
         ('reads_skill', 'tests/test_js_module_coverage.py', 'no suite'),
         ('remedy', 'never raised by hand',
          'raised by hand when a test is slow'),
+        ('admission', 'at its measured',
+         'at whatever count the next run measures'),
+        ('admission', 'never add one', 'adds one on the next run'),
+        ('admission', 'pick it up; it will not', 'pick it up; it will'),
     )
     for name, old, new in mutations:
         path = Path(tmp) / f'{name}.md'
