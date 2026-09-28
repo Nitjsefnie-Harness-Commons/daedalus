@@ -330,6 +330,58 @@ TYPE_PARAM_SHAPES = {
 }
 
 
+LAMBDA_ROWS = {
+    # B13 as the case file writes it: a module-level import, and the
+    # lambda NESTED INSIDE the path function that calls it.
+    'B13 refused':
+        ('def run_gate(url):\n'
+         '    f = lambda urlopen: urlopen(url, timeout=10)\n'
+         '    return f\n', 'REFUSED'),
+    'a lambda nested one level deeper refused':
+        ('def run_gate(url):\n'
+         '    def inner(u):\n'
+         '        f = lambda urlopen: urlopen(u, timeout=10)\n'
+         '        return f\n'
+         '    return inner(url)\n', 'REFUSED'),
+    # The over-refusal, and it is the price of the route: the lambda's
+    # parameter is merged into the ENCLOSING function's shadow set, so a
+    # same-named call in that function is refused even where the lambda is
+    # not what is called. More names in the shadow set means more
+    # refusals, which is why this route cannot make the head refuse less
+    # than `main`.
+    'an unrelated same-named call, REFUSED (the over-refusal)':
+        ('def run_gate(url):\n'
+         '    f = lambda urlopen: urlopen(url, timeout=10)\n'
+         '    return urlopen(url, timeout=10)\n', 'REFUSED'),
+    # The direction the fix must NOT move: a lambda that shadows nothing
+    # leaves a real network read discharged, which is the issue's intent.
+    'a lambda that does not shadow, DISCHARGED':
+        ('def run_gate(url):\n'
+         '    f = lambda u: urlopen(u, timeout=10)\n'
+         '    return f\n', 'DISCHARGED'),
+}
+
+
+def test_a_lambda_parameter_shadows_as_a_def_parameter_does(tmp):
+    """§4.2.1's first bullet, and a lambda is a function.
+
+    `_is_def` matched `FunctionDef` and `AsyncFunctionDef` only, and a
+    lambda's parameters are `ast.arg` rather than `Name`, so no reader saw
+    them and the keyword arm entered the enclosing function and read a
+    shadow set that had never held them. B13 was discharged while its
+    `def` twin was refused.
+
+    Every row runs with the import PRESENT, so a `REFUSED` is a real
+    verdict and not an artefact of there being nothing to discharge.
+    """
+    del tmp
+    for label, (body, expected) in LAMBDA_ROWS.items():
+        source = 'from urllib.request import urlopen\n\n\n' + body
+        rows = _rows(source, ('run_gate',))
+        got = 'REFUSED' if rows else 'DISCHARGED'
+        assert got == expected, (label, got, rows)
+
+
 def test_every_type_parameter_list_is_collected(tmp):
     """§4.2.1's last bullet, for all four kinds and not only the fallback.
 
