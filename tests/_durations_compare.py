@@ -27,15 +27,13 @@ from _repo import ROOT  # noqa: E402
 
 
 def _durations_tree(tmp, side, rounds):
-    """Write one summary directory per round, as run_tests.py would."""
+    """Write one round's duration report, as time_tests.py records one."""
     dirs = []
     for index, tests in enumerate(rounds, start=1):
         d = Path(tmp) / f'{side}-{index}'
         d.mkdir(parents=True)
-        (d / 'test_suite.json').write_text(json.dumps({
-            'total': len(tests), 'passed': len(tests),
-            'skipped': 0, 'failed': 0, 'tests': tests,
-        }), encoding='utf-8')
+        (d / 'test_suite.json').write_text(json.dumps({'tests': tests}),
+                                           encoding='utf-8')
         dirs.append(str(d))
     return dirs
 
