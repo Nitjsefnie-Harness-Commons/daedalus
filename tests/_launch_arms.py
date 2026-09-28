@@ -371,7 +371,7 @@ LAUNCH_ARMS = (
      'if isinstance(value, ast.Name): module_factories.add(name)',
      'a factory returning a bare Name is a module factory', 'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
-    ('fx.launcher-factory', '_launch_audit.py', 344, 'drop_span:344:343',
+    ('fx.launcher-factory', '_launch_audit.py', 344, 'drop_span:344:346',
      'launcher_factories.add(name)',
      'a factory returning a non-Name is a launcher factory and is bound',
      'CONTROLLED',
