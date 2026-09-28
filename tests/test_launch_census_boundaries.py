@@ -253,11 +253,6 @@ OVER_REFUSAL = {
         '    urlopen = object()\n    return urlopen\n\n\n'
         'def run_gate(url):\n'
         '    return urlopen(url, timeout=10)\n'),
-    'a-module-for-target': (
-        'from urllib.request import urlopen\n\n\n'
-        'for urlopen in []:\n    pass\n\n\n'
-        'def run_gate(url):\n'
-        '    return urlopen(url, timeout=10)\n'),
     'a-module-with-target': (
         'from urllib.request import urlopen\n\n\n'
         'def _go():\n'
@@ -281,6 +276,43 @@ OVER_REFUSAL = {
 }
 
 
+# A rebinding of an imported name, in every form the reader collects.
+# Each is followed by a call that must KEEP its `timeout= keyword` row:
+# the name is no longer the stdlib object, so the read is refused.
+REBINDINGS = {
+    'a-plain-assignment': 'urlopen = object()\n',
+    'an-augmented-assignment': 'urlopen += 1\n',
+    'a-walrus': 'if (urlopen := object()):\n    pass\n',
+    'a-del': 'del urlopen\n',
+    'a-tuple-target': 'urlopen, other = object(), 1\n',
+    'a-for-target': 'for urlopen in ():\n    pass\n',
+    'a-comprehension-target': 'x = [1 for urlopen in ()]\n',
+}
+
+
+def test_a_rebinding_in_any_form_stops_the_read_discharging(tmp):
+    """Every binding form pops the name, and the read is refused.
+
+    The reader collected one form — a bare-name `Assign` — and left an
+    import standing through six others, so a callee that was no longer the
+    stdlib object was DISCHARGED. That is this arm's own named failure
+    direction, and in the network arm it is a false green.
+
+    These are POSITIVE rows: each shape keeps its `timeout= keyword`,
+    which is what a closed class looks like. The plain `Assign` is the
+    control that caught it before and is here so the widening cannot have
+    quietly replaced the pop rather than added to it.
+    """
+    del tmp
+    for label, rebinding in REBINDINGS.items():
+        source = ('from urllib.request import urlopen\n\n'
+                  f'{rebinding}\n\n'
+                  'def run_gate(url):\n'
+                  '    return urlopen(url, timeout=10)\n')
+        rows = _rows(source)
+        assert rows and rows[0][1] == 'timeout= keyword', (label, rows)
+
+
 def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
     """H6.4: the pop is function-local, and the class is empty by that.
 
@@ -296,7 +328,9 @@ def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
     measured on: a class body, a `global` and a rebind, and module-level
     `for` / `with` / `except` / annotated targets. A class body binds no
     name in any scope this reader tracks, so it must not pop a module
-    import, and the other five reach the module table by no path at all.
+    import. A module-level `for` target is not in this set: it really
+    does rebind the name, so the read is refused, and that row belongs in
+    `test_a_rebinding_in_any_form_stops_the_read_discharging`.
     """
     del tmp
     for label, source in OVER_REFUSAL.items():

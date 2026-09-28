@@ -56,6 +56,47 @@ def _resolve_dotted(node, bound):
     return f'{base}.{rest}' if rest else base
 
 
+def _names_a_target_binds(target):
+    """Every NAME a target node binds, through a tuple or a star."""
+    if isinstance(target, ast.Name):
+        return (target.id,)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return tuple(name for child in target.elts
+                     for name in _names_a_target_binds(child))
+    if isinstance(target, ast.Starred):
+        return _names_a_target_binds(target.value)
+    return ()
+
+
+def _rebindings(tree):
+    """`(node, name)` for every binding a module can make besides an import.
+
+    One pop per name, whatever form made it: a plain or tuple assignment,
+    an augmented one, a walrus, a `del`, a `for` target, a comprehension
+    target. Those forms differ in syntax and not in what they do to the
+    name, and reading only the first of them left an import standing
+    through five others — a DISCHARGE, which is this arm's own named
+    failure direction. An `ast.Assign` is the one form with a right-hand
+    side the reader resolves, and the caller is what uses that.
+    """
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AugAssign, ast.NamedExpr)):
+            targets = [node.target]
+        elif isinstance(node, ast.Delete):
+            targets = node.targets
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            found.extend((node, name)
+                         for name in _names_a_target_binds(target))
+    return found
+
+
 def _dotted_bindings(tree):
     """`local name -> canonical dotted path` for everything a module binds.
 
@@ -78,11 +119,22 @@ def _dotted_bindings(tree):
     the import standing. `urlopen = lambda u: u` is not `urlopen` any
     more, and a binding that outlives the name it was read from discharges
     a call that is not a read at runtime — this arm's failure direction is
-    a DISCHARGE, so the miss had to be closed rather than written down. A
-    parameter is a binding the reader cannot resolve either and is the
-    likeliest thing to be named like an import, so it pops too; the table
-    is module-wide rather than scope-aware, which over-approximates, and
-    over-approximating here refuses.
+    a DISCHARGE, so the miss had to be closed rather than written down.
+
+    A pop applies to every binding form the reader can see — a plain or
+    tuple or starred assignment, an augmented one, a walrus, a `del`, a
+    `for` target, a comprehension target — and to ALL of a form's targets
+    rather than its first, because those forms differ in syntax and not in
+    what they do to the name. A pop is also gated on the node sitting
+    OUTSIDE every function and class body, so a rebind inside one function
+    shadows the import there and not in the module.
+
+    A parameter is NOT a pop here, and used to be claimed as one. It is
+    carried per function by `_shadowed_parameters`, which is why a
+    function's own `urlopen` parameter does not refuse a read in another
+    function of the same file. The control beside this is
+    `test_a_rebinding_in_any_form_stops_the_read_discharging`: one row per
+    form, and every row is a read the reader now REFUSES.
 
     The assignment pass runs to a fixpoint of THREE rounds, and that count
     is the whole of the termination argument: the loop is `for _ in
@@ -107,26 +159,21 @@ def _dotted_bindings(tree):
                 bound[alias.asname or alias.name] = (
                     f'{node.module}.{alias.name}')
     for _ in range(3):
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign) or node.value is None:
-                continue
-            targets = [t for t in node.targets if isinstance(t, ast.Name)]
-            if not targets:
-                continue
-            resolved = _resolve_dotted(node.value, bound)
-            if resolved is not None:
-                # An ADD is safe module-wide: the binding it records is
-                # what the source says, and a function-local
-                # `_open = urllib.request.urlopen` is still the read it
-                # was written as for every caller in the module.
-                for target in targets:
-                    bound[target.id] = resolved
-            elif node not in scoped:
-                # A DISCARD is a shadow claim, and it needs the scope that
+        for node, name in _rebindings(tree):
+            if isinstance(node, ast.Assign):
+                resolved = _resolve_dotted(node.value, bound)
+                if resolved is not None:
+                    # An ADD is safe module-wide: the binding it records
+                    # is what the source says, and a function-local
+                    # `_open = urllib.request.urlopen` is still the read
+                    # it was written as for every caller in the module.
+                    bound[name] = resolved
+                    continue
+            if node not in scoped:
+                # A POP is a shadow claim, and it needs the scope that
                 # can reach the call: `urlopen = object()` inside one
                 # helper shadows the import there, not in the module.
-                for target in targets:
-                    bound.pop(target.id, None)
+                bound.pop(name, None)
     return bound
 
 
@@ -148,7 +195,9 @@ def _scoped_assignments(tree):
     for node in _function_nodes(tree):
         inside.update(id(child) for child in ast.walk(node))
     return {node for node in ast.walk(tree)
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign,
+                                 ast.NamedExpr, ast.Delete, ast.For,
+                                 ast.comprehension))
             and id(node) in inside}
 
 
