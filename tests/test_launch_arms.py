@@ -19,16 +19,16 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import CUT_KIND, arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
-from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
+from _launch_arm_records import (ANCHOR, ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402,E501
+                                CUT, EVIDENCE, FILE, ID, LINE,
                                 MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD,
-                                ROW_UNCLAIMED, SECONDARY_CONTROLLED,
-                                STEP_CEILING_HELD_BY)
+                                ROW_UNCLAIMED, SECONDARY_CONTROLLED, STATE,
+                                STEP_CEILING_HELD_BY, WHAT)
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
                           REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
@@ -36,18 +36,6 @@ from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
-
-# (id, file, line, cut, anchor, what, state, evidence). Final keeps each a
-# literal, so an arm read through one is that column's own type; bound to a
-# plain int it reads as the union of the row's, `str | int`.
-ID: Final = 0
-FILE: Final = 1
-LINE: Final = 2
-CUT: Final = 3
-ANCHOR: Final = 4
-WHAT: Final = 5
-STATE: Final = 6
-EVIDENCE: Final = 7
 
 ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
