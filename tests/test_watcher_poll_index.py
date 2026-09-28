@@ -256,22 +256,22 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
     for a cause it had not met, which is how the two-cause sentence it
     was written against came to be false for a re-used index.
 
-    The observation is sharp enough on its own. A wide first poll leaves
-    one boundary and no more, so the sequence is a single value; a
-    re-used index leaves the same value a second time, and the control
-    beside this one is what pins that difference. The idle bound is the
-    pointer either way: a poll over its tolerance on a healthy watcher is
-    what IDLE_POLL_BOUND refuses.
+    The reading is pinned here too, and it is the ONE-VALUE row - the
+    same row the frozen control earns, because a wide first poll and a
+    frozen index really are the same payload. That is not a gap in the
+    message, it is the one rendering the log cannot separate, and saying
+    so is what a reader needs; the idle bound is the pointer out of it.
     """
-    script, fake = _mutant_watcher(Path(tmp) / 'wider',
-                                   *_wide(POLL_WIDTH + 1))
+    over = POLL_WIDTH + 1
+    script, fake = _mutant_watcher(Path(tmp) / 'wider', *_wide(over))
     refused = _refusal('a poll wider than the tolerance', script, fake)
-    assert (f'did not reach {BOUNDARIES} within {POLL_WIDTH + 1} gh call(s)'
+    assert (f'did not reach {BOUNDARIES} within {over} gh call(s)'
             in refused), refused
     assert '1 distinct, sequence 1,' in refused, refused
     assert 'sequence 1, 1,' not in refused, refused
     assert f'over the {POLL_WIDTH} call(s) per marker' in refused, refused
-    assert 'a poll WIDER than the tolerance' in refused, refused
+    assert 'reads alike as an index stuck where it started' in refused, (
+        refused)
     assert 'IDLE_POLL_BOUND' in refused, refused
     assert 'did not advance' not in refused, refused
 
@@ -279,14 +279,17 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
 def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
     """An index that comes round again, and the message that shows it.
 
-    A cycle of period 4 never publishes `BOUNDARIES` distinct markers, so
-    this mutant cannot reach the invariant assertion at all - `_run_loop`
-    waits for a marker count a cycle will not produce, and the call bound
-    is what ends the run. The control is written for that: it asserts on
-    the MESSAGE, so it holds whichever arm catches the mutant, and the
-    sequence the refusal renders is the part that settles the cause -
-    a value that comes round again is a re-used index, and no two
-    explanations in between can both be false over a sequence like this.
+    A cycle of period 4 publishes four distinct markers and then repeats
+    them, so it never reaches `BOUNDARIES` of them: `_run_loop` waits for
+    a count this mutant will not produce and the CALL BOUND is the arm
+    that ends the run. So this control is not written to tolerate either
+    arm - if the invariant arm ever started to catch it, `_refusal`
+    would report the mutant as measured and the control would fail, which
+    is the point of a control that names a defect.
+
+    What it does check is the message's own reading, because that is what
+    distinguishes a cycle from a stall: a value that comes round again
+    cannot be a run that merely stopped.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'cycling', _CYCLING)
     refused = _refusal('a cycling poll index', script, fake)
@@ -331,7 +334,12 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
     the calls keep coming, which is the case a bound read from progress
     rather than from a total has to answer. The rendered sequence is
     `1, 2` and then nothing: the collapse is by position, so a stall
-    reads as a sequence that stops rather than as one that repeats.
+    reads as a sequence that STOPS rather than as one that repeats.
+
+    That stop is the rendering a rule written over what the collapse
+    SHOWS gets wrong - new values, and then nothing, reads as a run of
+    new ones - so the control asserts the message's READING and not only
+    the sequence it is read off.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'stalled', _STALLED)
     refused = _refusal('a poll index frozen at two', script, fake)
@@ -341,6 +349,10 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
         f'the mutant published {logged} rather than two markers it then '
         f'froze on, so this control is not exercising a stall')
     assert 'sequence 1, 2, over' in refused, refused
+    assert ('a run that has stopped is a run that stopped advancing: '
+            'something published a new boundary and then nothing did'
+            in refused), refused
+    assert 'wide first poll' not in refused, refused
 
 
 def test_a_reused_poll_index_is_refused_by_name(tmp):

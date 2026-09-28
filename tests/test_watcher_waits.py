@@ -28,10 +28,11 @@ a tolerance and not a promise: a poll wider than it is refused by name,
 with the idle bound as the other refusal, and `gh_client.Watcher.poll`
 re-entering its own body on a rate-limit refusal can spend more under
 one marker than any single poll is expected to. What the arm cannot
-settle on its own, it does not claim to - the refusal renders the markers
-in the order the run published them, which is what separates a re-used
-index from a wide poll. `await_lines` and `await_calls` take no such
-bound, and the trade they take is unchanged.
+settle on its own, it does not claim to: the refusal renders the markers
+in the order the run published them and names the `READINGS` row that
+order falls in, and a rendering it cannot separate is named as such.
+`await_lines` and `await_calls` take no such bound, and the trade they
+take is unchanged.
 """
 import os
 import sys
@@ -42,8 +43,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _watcher_waits  # noqa: E402
+from _watcher_waits import _reading  # noqa: E402
 from _watcher_waits import (  # noqa: E402
     POLL_WIDTH,
+    READINGS,
+    SEQUENCE,
     ChildProcess,
     Stream,
     await_calls,
@@ -249,12 +253,10 @@ def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
     this control ends on the log double's own runaway guard, which names
     the double rather than the defect.
 
-    The refusal is an OBSERVATION, and this control holds it to that: the
-    headline states what was measured, and the two readings that follow
-    are the two a payload of one marker actually admits. A control
-    requiring either reading to be named would pin a cause the evidence
-    does not carry - here the run is one marker over `width` calls, which
-    is a stuck index and a wide first poll at once.
+    This is the ONE-VALUE row of `READINGS`, and it is the row that
+    cannot be settled: a single marker over `width + 1` calls is an index
+    stuck where it started and one wide first poll at once. The control
+    holds the refusal to naming that, rather than to either cause.
     """
     del tmp
     log = _GrowingLog(_FROZEN_LOG)
@@ -271,9 +273,93 @@ def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
         message)
     assert 'sequence 1,' in message, message
     assert f'over the {POLL_WIDTH} call(s) per marker' in message, message
-    assert ('this is a poll WIDER than the tolerance, or an index not '
-            'advancing once per poll' in message), message
+    assert ('reads alike as an index stuck where it started and as one wide '
+            'first poll' in message), message
     assert 'IDLE_POLL_BOUND' in message, message
+
+
+def _log_of(rows):
+    """One call-log entry per call, `rows` carrying how many each marker."""
+    return [{'poll': marker, 'request': f'query {marker} {call}'}
+            for marker, calls in rows
+            for call in range(calls)]
+
+
+# One log per REMAINING row of `READINGS`, each shaped so the wait ends on
+# the bound with that row's rendering: a run of new values and then a
+# repeat, a run longer than the window with every value new, and a run of
+# new values that stops. One control per row, each asserting its own
+# clause, so a fifth cause is a fifth row here with nothing over it.
+_REUSED_LOG = _log_of([('1', POLL_WIDTH), ('2', 1), ('1', POLL_WIDTH)])
+_STILL_RUNNING_LOG = _log_of(
+    [(str(marker), POLL_WIDTH) for marker in range(1, SEQUENCE + 1)]
+    + [(str(SEQUENCE + 1), POLL_WIDTH + 1)])
+_STOPPED_LOG = _log_of([('1', POLL_WIDTH + 1), ('2', POLL_WIDTH + 1),
+                        ('3', POLL_WIDTH + 1)])
+
+
+def _refusal_for(entries, polls, what):
+    """The message a synthetic log earns, or None if the wait succeeded."""
+    message = None
+    try:
+        await_polls(_GrowingLog(entries), polls, _ScriptedChild(alive=True),
+                    what)
+    except AssertionError as exc:
+        message = str(exc)
+    return message
+
+
+def test_a_repeated_boundary_is_named_as_a_re_used_index(tmp):
+    del tmp
+    message = _refusal_for(_REUSED_LOG, 3, '3 poll(s)')
+    assert message is not None, 'a re-used boundary did not fail'
+    assert 'sequence 1, 2, 1,' in message, message
+    assert 'a value that comes round again is a re-used index' in message, (
+        message)
+
+
+def test_a_run_longer_than_the_window_is_named_as_a_wide_poll(tmp):
+    del tmp
+    message = _refusal_for(_STILL_RUNNING_LOG, SEQUENCE + 4, '16 poll(s)')
+    assert message is not None, 'a wide poll did not fail'
+    assert ', ... 1 more' in message, message
+    assert ('a run still going, of new values only, is a poll that cost more '
+            'than the tolerance' in message), message
+
+
+def test_a_run_that_stops_is_named_as_a_stopped_index(tmp):
+    """The row the collapse CREATES, and the one a rule written over what
+    the collapse SHOWS omits: new values, and then nothing. Read as a
+    wide poll it would send a reader after a poll that made one call."""
+    del tmp
+    message = _refusal_for(_STOPPED_LOG, 4, '4 poll(s)')
+    assert message is not None, 'a stopped index did not fail'
+    assert 'sequence 1, 2, 3,' in message, message
+    assert ('a run that has stopped is a run that stopped advancing: '
+            'something published a new boundary and then nothing did'
+            in message), message
+    assert 'wide first poll' not in message, message
+
+
+def test_the_reading_covers_every_rendering_the_renderer_can_produce(tmp):
+    """The four rows are a function, not a sentence: every rendering the
+    collapse can produce maps to a cause, and this is the check that a
+    new row arrives with a control over its own clause.
+
+    It is deliberately a CHECK on the table rather than a fourth copy of
+    the shapes above: it reads the shape back out of `_reading` for every
+    sequence it can be given, and requires that no input falls through
+    without a row.
+    """
+    del tmp
+    for sequence, row in ((['1'], 3), (['1', '1', '2'], 2),
+                          (['1', '2', '1'], 0), (['1', '2', '3', '1'], 0),
+                          (['1'] * (SEQUENCE + 1), 1),
+                          (['1', '2', '3'], 2), ([], 3)):
+        assert 0 <= _reading(sequence) < len(READINGS), (sequence, row)
+    assert len(READINGS) == 4, READINGS
+    assert all(clause and clause[0].islower() for clause in READINGS), (
+        READINGS)
 
 
 # A seam wired below the first request: the first entry carries a marker
