@@ -38,8 +38,14 @@ one-line pointer to the note at each arm it names.
 #
 # The suite checks each name here really crashes, and that the set
 # partitions the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
-# crash-held -- needs the whole sweep, which
-# `tests/_launch_arm_sweep.py` re-derives and checks both ways.
+# crash-held -- is AUDITABLE, not enforced: it needs the whole 150-arm
+# sweep, and the only thing that runs one is a human running
+# `python3 tests/_launch_arm_sweep.py`, which no suite and no CI job
+# invokes. So a CONTROLLED arm whose own evidence quietly stops
+# controlling it is caught by nothing in CI, and this split is a state
+# a reviewer chooses to re-derive rather than one CI re-checks. Adding
+# a gate for a five-minute sweep is a decision worth making on its own
+# merits, not a way to close a wording problem.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
