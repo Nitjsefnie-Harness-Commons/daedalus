@@ -424,6 +424,17 @@ LAUNCH_ARMS = (
      'elif isinstance(func, ast.Name) and func.id in bound:...',
      'a bare name in bound is a placed launch', 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
+    # The analyser's own comment above this arm, at _launch_audit.py:
+    # 415-419, says the walrus arm is "LIVE and driven by no row ...
+    # Outside the classified set in tests/_bound_site_rows.py on
+    # purpose, and tracked at #1144 with the other unpinned arms." That
+    # was true when it was written and is FALSE now: this branch pins
+    # the arm on `walrus-target-in-bound-is-a-placed-launch`, and
+    # deleting :420 makes `test_repo_layout.py` go red naming that row.
+    # The analysers are byte-identical to the base by constraint, so the
+    # correction is recorded here, at the arm, rather than in the
+    # comment the constraint forbids editing. A reader of the analyser
+    # is told the arm is unpinned; a reader of this table is not.
     ('ch.namedexpr-in-bound', '_launch_audit.py', 420, 'drop_if:420',
      'elif isinstance(func, ast.NamedExpr) and func.target.id in bound:...',
      'a walrus target in bound is a placed launch', 'CONTROLLED',
@@ -764,4 +775,90 @@ CRASH_CONTROLLED = frozenset({
 SECONDARY_CONTROLLED = {
     'mr.while-guard': ('machinery-reached-by-assignment-is-unproved',),
     'rs.guard': ('import-module-name-bound-twice',),
+    'pf.origin-not-bound': (
+        'rebound-module-name-from-import-module-is-unplaced',),
 }
+
+# The closure claim is a GRANULARITY claim, so it is stated with its
+# granularity. "Every arm of both analysers" is every `if`/`elif`/`while`
+# header the table lists; against the spelling-independent marker
+# (those headers, and each disjunct of a multi-line condition, which is
+# the granularity the table already uses for :524 and :549) a reader
+# would find clauses at lines the table does not list. Each is named
+# here with what covers it, so the marker is answered rather than left
+# open: MERGED clauses are a chain head whose every member IS a listed
+# arm, and a CONTROLLED clause is one that stands alone, with the row
+# that holds it. `tests/test_launch_arms.py` re-derives the marker and
+# refuses a non-member that is not in this tuple, so the set cannot
+# quietly fall behind the analysers.
+#
+# The two the marker finds INSIDE a listed arm's span are the finer
+# half: `_launch_audit.py:567` is the `**`-unpack operand of
+# `ub.not-bounded` (:566), and `_argv_read.py:212` is the `seen`
+# operand of `rs.guard` (:203). The table splits :524 and :549 per
+# operand and leaves these two whole, which is a spelling difference
+# rather than a gap: each is inside the arm that covers it.
+#
+# Measured per clause by cutting it and re-asking every row: all ten
+# are CONTROLLED, and nine of the ten move a label to another VALUE
+# rather than to a raise. The exception is :383, which moves 130 labels
+# to a raise and 3 to a value, and so is named by a value-changing one.
+MARKER_NON_MEMBERS = (
+    ('_launch_audit.py', 211, 'MERGED',
+     'the ast.Import chain head; every member is listed, at :213 '
+     'imp.subprocess-alias, :218 imp.machinery, :220 imp.dotted and '
+     ':223 imp.plain'),
+    ('_launch_audit.py', 224, 'MERGED',
+     'the ast.ImportFrom chain head; every member is listed, at :225 '
+     'imp.from-subprocess, :233 imp.from-partial and :236 '
+     'imp.from-import-module, and its else branch is inside its span'),
+    ('_launch_audit.py', 300, 'CONTROLLED',
+     'parameter-shadows-a-module-import-is-unproved'),
+    ('_launch_audit.py', 303, 'CONTROLLED',
+     'kwarg-receiver-shadowing-a-module-import-is-unproved'),
+    ('_launch_audit.py', 324, 'CONTROLLED',
+     'bound-name-called-bare-is-a-placed-launch'),
+    ('_launch_audit.py', 383, 'CONTROLLED',
+     'call-func-receiver-is-unresolved'),
+    ('_launch_audit.py', 392, 'MERGED',
+     'the head of a one-member chain; :394 ch.machinery-member is its '
+     'only member and is listed'),
+    ('_launch_audit.py', 591, 'CONTROLLED',
+     'ambiguous-name'),
+    ('_argv_read.py', 88, 'MERGED',
+     'the ast.Name chain head of head_is_ambiguous; every member is '
+     'listed, at :90 ha.name-guard, :93 ha.follow, :96 ha.list and '
+     ':98 ha.else'),
+    ('_argv_read.py', 114, 'MERGED',
+     'the ast.Name chain head of resolve_string; every member is '
+     'listed, at :115 rs.guard, :117 rs.ambiguous and :119 rs.follow'),
+)
+
+# The rows THIS BRANCH added that no arm RECORDS as its evidence.
+# `test_every_controlled_arm_names_a_row_or_a_control_that_exists`
+# checks one direction -- every CONTROLLED arm names a real row -- and a
+# row meeting the table with no arm behind it is a gap in the table's
+# own guard. Each entry says which arms hold it, MEASURED by sweeping
+# every arm and reading which sweep moved the label, so a reader is not
+# asked to guess.
+#
+# The holders are several and none of them records the row, which is
+# the honest shape: these are not rows nothing reaches, they are rows
+# that happen to be a second control for an arm whose recorded evidence
+# is something else. Neither claim in the review that they are held by
+# `bind.class` and `res.fallthrough` reproduces -- cutting those two
+# moves one and four labels respectively, and neither of these two.
+#
+# Rows that predate the table are not listed: many of them serve the
+# tree-wide rule directly rather than through an arm, and the forward
+# direction is the one the table is load-bearing on. This list covers
+# what the branch added, and a suite asserts every name in it is still a
+# real row that still no arm records, so naming one retires it here
+# rather than leaving the record stale.
+ROW_UNCLAIMED = (
+    ('class-name-is-a-defined-name',
+     ('fw.resolve', 'norm.no-dot', 'pf.not-safe', 'sink.gate',
+      'ub.unproved')),
+    ('another-receiver-shape-resolves-safe',
+     ('norm.no-dot', 'pf.not-a-name', 'sink.gate', 'ub.unproved')),
+)

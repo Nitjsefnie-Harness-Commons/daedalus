@@ -14,6 +14,7 @@ controls asserting sites AND refusals where a `LAUNCH_REFUSAL_ROW` is
 built to hold exactly one refusal, and one step ceiling for the arm
 whose mutant does not answer wrong but does not stop.
 """
+import ast
 import os
 import sys
 from pathlib import Path
@@ -23,9 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import arm_sweep  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
-from _launch_arms import (ARM_CONTROLS, CRASH_CONTROLLED, DEAD,  # noqa: E402
-                          LAUNCH_ARMS, REDUNDANT, SECONDARY_CONTROLLED,
-                          STEP_CEILING_CONTROL, STATES)
+from _launch_arms import (ARM_CONTROLS,  # noqa: E402
+                          CRASH_CONTROLLED, DEAD, LAUNCH_ARMS,
+                          MARKER_NON_MEMBERS, REDUNDANT, ROW_UNCLAIMED,
+                          SECONDARY_CONTROLLED, STEP_CEILING_CONTROL,
+                          STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
@@ -261,7 +264,8 @@ def test_the_crash_set_names_only_arms_that_are_controlled(tmp):
     assert not unknown, f'crash set naming no arm: {unknown}'
     not_controlled = sorted(name for name in CRASH_CONTROLLED
                             if by_name[name][STATE] != 'CONTROLLED')
-    assert not not_controlled, f'crash set naming a non-CONTROLLED arm: {not_controlled}'
+    assert not not_controlled, (
+        f'crash set naming a non-CONTROLLED arm: {not_controlled}')
     known = ROW_LABELS | CONTROL_LABELS | {STEP_CEILING_CONTROL}
     for name, labels in SECONDARY_CONTROLLED.items():
         assert name in by_name, f'secondary control for no arm: {name}'
@@ -271,6 +275,101 @@ def test_the_crash_set_names_only_arms_that_are_controlled(tmp):
             'its evidence, so nothing is being added')
         missing = sorted(set(labels) - known)
         assert not missing, f'{name}: second control names nothing: {missing}'
+    for label, holders in ROW_UNCLAIMED:
+        assert label in ROW_LABELS, f'ROW_UNCLAIMED names no row: {label}'
+        recorded = {arm[EVIDENCE] for arm in LAUNCH_ARMS}
+        assert label not in recorded, (
+            f'{label} is now some arm\'s recorded evidence, so it is not '
+            'unclaimed and should be retired from ROW_UNCLAIMED')
+        unknown = sorted(set(holders) - set(by_name))
+        assert not unknown, f'{label}: holders name no arm: {unknown}'
+        assert holders == tuple(sorted(holders)), (
+            f'{label}: holders are not in the order a reader scans them')
+
+
+def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
+    """The closure claim is a granularity claim, so its granularity is checked.
+
+    "Every arm of both analysers" reads as "every guard clause", and the
+    spelling-independent marker for that is every `if`/`elif`/`while`
+    header plus each disjunct of a multi-line condition. A reader who
+    takes that marker and finds a clause at a line the table does not
+    list has found an unstated hole in the one claim the table exists to
+    make. `MARKER_NON_MEMBERS` is the answer, one line per clause, and
+    this re-derives the marker so the answer cannot fall behind the
+    analysers.
+    """
+    del tmp
+    named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
+    for name in ('_launch_audit.py', '_argv_read.py'):
+        clauses, spans = _marker(name)
+        listed = {arm[LINE] for arm in LAUNCH_ARMS if arm[FILE] == name}
+        for line, _kind in clauses:
+            inside = any(start <= line <= end for start, end in spans)
+            if line in listed or inside:
+                continue
+            assert (name, line) in named, (
+                f'{name}:{line} is a guard clause the marker finds outside '
+                f'every arm, and MARKER_NON_MEMBERS does not name it; '
+                'non-members named: '
+                f'{sorted(n for n in named if n[0] == name)}')
+    known = ROW_LABELS | CONTROL_LABELS | {STEP_CEILING_CONTROL}
+    for name, line, state, why in MARKER_NON_MEMBERS:
+        clauses, spans = _marker(name)
+        assert line in {c for c, _ in clauses}, (
+            f'{name}:{line} is not a marker clause any more')
+        assert not any(s <= line <= e for s, e in spans), (
+            f'{name}:{line} is named a non-member but sits inside a listed '
+            "arm's span, so it is that arm and not an exception")
+        if state == 'CONTROLLED':
+            assert why in known, (
+                f'{name}:{line} is CONTROLLED and names nothing: {why}')
+        else:
+            assert state == 'MERGED', f'{name}:{line}: state {state!r}'
+            assert len(why) > 40, f'{name}:{line}: a merge reason, not a shrug'
+
+
+def _marker(name):
+    """`([(line, kind)], [(arm line, span end)])` for one analyser.
+
+    Spans come from the AST rather than the table, because the table
+    records where an arm was classified and not how far it reaches.
+    """
+    tree = ast.parse((TESTS / name).read_text(encoding='utf-8'))
+    ends = {}
+    for node in ast.walk(tree):
+        line = getattr(node, 'lineno', None)
+        if line is not None:
+            ends[line] = max(ends.get(line, 0),
+                             getattr(node, 'end_lineno', None) or line)
+    parent_of = {}
+    for parent in ast.walk(tree):
+        for field, value in ast.iter_fields(parent):
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if isinstance(item, ast.AST):
+                    parent_of[id(item)] = (parent, field)
+    clauses = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.If, ast.While)):
+            continue
+        parent, field = parent_of.get(id(node), (None, None))
+        kind = ('elif' if field == 'orelse' and isinstance(parent, ast.If)
+                else type(node).__name__.lower())
+        clauses.append((node.lineno, kind))
+        clauses.extend((operand.lineno, 'disjunct')
+                       for sub in ast.walk(node)
+                       if isinstance(sub, (ast.BoolOp, ast.Compare))
+                       for operand in (list(sub.values)
+                                       if isinstance(sub, ast.BoolOp)
+                                       else [sub.left, *sub.comparators])
+                       if getattr(operand, 'lineno', None)
+                       and getattr(operand, 'end_lineno', None)
+                       and operand.lineno != operand.end_lineno)
+    arms = [arm for arm in LAUNCH_ARMS if arm[FILE] == name]
+    return sorted(set(clauses)), [(arm[LINE],
+                                   ends.get(arm[LINE], arm[LINE]))
+                                  for arm in arms]
 
 
 def test_the_fixpoint_stops_on_a_factory_it_has_already_registered(tmp):
