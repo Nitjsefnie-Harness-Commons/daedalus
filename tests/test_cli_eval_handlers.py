@@ -34,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+from _cli_handler_wire import _api_put  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -56,11 +57,6 @@ def _rendered(out):
     below untouched and every whole-string comparison here fails.
     """
     return out.replace('<-', IN).replace('->', OUT)
-
-
-def _put(body):
-    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
-            'timeout': 30}
 
 
 def _get(path):
@@ -204,7 +200,7 @@ def test_do_put_sends_the_file_it_read_and_waits_for_the_result(tmp):
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('job1', 'tab0', 'd1', 15)]
+    plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 15)]
     recorded, out = run_cli(
         ['put', 'job1', path], [{'target': 'tab0', 'did': 'd1'},
                                 _result(tabId='tab0', world='page:cdp',
@@ -227,7 +223,7 @@ def test_do_put_strips_the_code_it_read_from_a_file(tmp):
             'tab': 'tab0'}
     recorded, out = run_cli(
         ['put', 'job1', path, '--no-result'], [{'target': 'tab0'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0',
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
         token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
@@ -242,7 +238,7 @@ def test_do_put_reads_the_dash_standard_input(tmp):
     with _stdin('window.x = 1\n'):
         recorded, out = run_cli(
             ['put', 'job1', '-', '--no-result'], [{'target': 'tab0'}],
-            module=commands_eval, plan=[_put(body)], target_tab='tab0',
+            module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
             token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
@@ -282,7 +278,7 @@ def test_do_put_broadcast_leaves_the_tab_field_off_the_body(tmp):
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title'}
     recorded, out = run_cli(
         ['put', 'job1', path, '-b', '--no-result'], [{'target': 'bcast'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0',
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
         token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
@@ -299,7 +295,7 @@ def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('job1', 'tab0', 'd1', 15)]
+    plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 15)]
     recorded, out = run_cli(
         ['put', 'job1', path, '-t', '0'],
         [{'target': 'tab0', 'did': 'd1'}, _result()],
@@ -316,7 +312,7 @@ def test_do_put_carries_an_explicit_timeout_through_unchanged(tmp):
     path = _source(tmp)
     body = {'token': TOK, 'id': 'job1', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('job1', 'tab0', 'd1', 7)]
+    plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 7)]
     recorded, out = run_cli(
         ['put', 'job1', path, '--timeout', '7'],
         [{'target': 'tab0', 'did': 'd1'}, _result()],
@@ -334,7 +330,7 @@ def test_do_exec_sends_the_inline_code_stripped(tmp):
     """Inline code is stripped exactly as a file's is, and waits by default.
     """
     body = {'token': TOK, 'id': 'job5', 'code': '1+1', 'tab': 'tab0'}
-    plan = [_put(body), _wait('job5', 'tab0', 'd2', 15)]
+    plan = [_api_put(body), _wait('job5', 'tab0', 'd2', 15)]
     recorded, out = run_cli(
         ['exec', 'job5', '  1+1  '],
         [{'target': 'tab0', 'did': 'd2'},
@@ -354,7 +350,7 @@ def test_do_exec_broadcast_leaves_the_tab_field_off_the_body(tmp):
     body = {'token': TOK, 'id': 'job5', 'code': '1+1'}
     recorded, out = run_cli(
         ['exec', 'job5', '1+1', '-b', '--no-result'], [{'target': 'bcast'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0',
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
         token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
@@ -374,7 +370,8 @@ def test_do_exec_without_a_result_never_waits(tmp):
     body = {'token': TOK, 'id': 'job5', 'code': '1+1', 'tab': 'tab0'}
     recorded, out = run_cli(
         ['exec', 'job5', '1+1', '--no-result'], [{'target': 'tab0'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0', token=TOK)
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
+        token=TOK)
 
     assert recorded.waits == [], recorded.waits
     assert _rendered(out) == f'{OUT} job5 {OUT} tab0  (3 bytes)\n', repr(out)
@@ -392,7 +389,7 @@ def test_do_ping_reports_the_round_trip_in_the_tab_it_named(tmp):
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
+    plan = [_api_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
     pong = {'id': '_ping', 'result': 'Hello', 'error': None, 'ts': 1,
             'world': 'page:main'}
     recorded, out = run_cli(
@@ -411,7 +408,7 @@ def test_do_ping_leaves_the_tab_field_off_when_none_is_set(tmp):
     broadcast slot — the same absent-not-empty contract as `-b`."""
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title'}
-    plan = [_put(body), _wait('_ping', '', 'd9', 10, interval=0.3)]
+    plan = [_api_put(body), _wait('_ping', '', 'd9', 10, interval=0.3)]
     pong = {'id': '_ping', 'result': 'Hello', 'error': None, 'ts': 1}
     recorded, out = run_cli(
         ['ping'], [{'did': 'd9'}, pong],
@@ -435,7 +432,7 @@ def test_do_ping_exits_when_no_result_arrives(tmp):
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
+    plan = [_api_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
     code, out = run_cli_exit(['ping'], [{'did': 'd9'}, None],
                              module=commands_eval, plan=plan,
                              target_tab='tab0', token=TOK)
@@ -454,7 +451,7 @@ def test_do_ping_exits_with_the_error_the_page_raised(tmp):
     del tmp
     body = {'token': TOK, 'id': '_ping', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
+    plan = [_api_put(body), _wait('_ping', 'tab0', 'd9', 10, interval=0.3)]
     failed = {'id': '_ping', 'result': None, 'ts': 1,
               'error': 'ReferenceError: x'}
     code, out = run_cli_exit(['ping'], [{'did': 'd9'}, failed],
@@ -479,7 +476,8 @@ def test_do_navigate_sends_a_location_assignment_and_never_waits(tmp):
             'code': 'location.href = "https://example.com/"', 'tab': 'tab0'}
     recorded, out = run_cli(
         ['navigate', 'https://example.com/'], [{'target': 'tab0'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0', token=TOK)
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
+        token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -502,7 +500,8 @@ def test_do_navigate_json_encodes_a_url_carrying_a_quote(tmp):
             'tab': 'tab0'}
     recorded, out = run_cli(
         ['navigate', 'https://example.com/a"b?x=1&y=2'], [{'target': 'tab0'}],
-        module=commands_eval, plan=[_put(body)], target_tab='tab0', token=TOK)
+        module=commands_eval, plan=[_api_put(body)], target_tab='tab0',
+        token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -517,7 +516,7 @@ def test_do_reload_sends_the_reload_expression_to_the_tab(tmp):
             'tab': 'tab0'}
     recorded, out = run_cli(
         ['reload'], [{'target': 'tab0'}], module=commands_eval,
-        plan=[_put(body)], target_tab='tab0', token=TOK)
+        plan=[_api_put(body)], target_tab='tab0', token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -532,7 +531,7 @@ def test_do_reload_broadcast_carries_no_tab(tmp):
     body = {'token': TOK, 'id': '_reload', 'code': 'location.reload()'}
     recorded, out = run_cli(
         ['reload', '-b'], [{'target': 'bcast'}], module=commands_eval,
-        plan=[_put(body)], target_tab='tab0', token=TOK)
+        plan=[_api_put(body)], target_tab='tab0', token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -551,7 +550,7 @@ def test_do_title_asks_the_page_for_its_title_in_the_tab(tmp):
     del tmp
     body = {'token': TOK, 'id': '_title', 'code': 'document.title',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('_title', 'tab0', 'd3', 10)]
+    plan = [_api_put(body), _wait('_title', 'tab0', 'd3', 10)]
     recorded, out = run_cli(
         ['title'], [{'target': 'tab0', 'did': 'd3'},
                     {'id': '_title', 'result': 'A page', 'error': None,
@@ -576,7 +575,7 @@ def test_do_title_leaves_the_tab_field_off_when_none_is_set(tmp):
     """
     del tmp
     body = {'token': TOK, 'id': '_title', 'code': 'document.title'}
-    plan = [_put(body), _wait('_title', '', 'd3', 10)]
+    plan = [_api_put(body), _wait('_title', '', 'd3', 10)]
     recorded, out = run_cli(
         ['title'], [{'target': 'bcast', 'did': 'd3'},
                     {'id': '_title', 'result': 'A page', 'error': None,
@@ -596,7 +595,7 @@ def test_do_url_asks_the_page_for_its_location_in_the_tab(tmp):
     del tmp
     body = {'token': TOK, 'id': '_url', 'code': 'location.href',
             'tab': 'tab0'}
-    plan = [_put(body), _wait('_url', 'tab0', 'd4', 10)]
+    plan = [_api_put(body), _wait('_url', 'tab0', 'd4', 10)]
     recorded, out = run_cli(
         ['url'], [{'target': 'tab0', 'did': 'd4'},
                   {'id': '_url', 'result': 'https://example.com/a',
@@ -615,7 +614,7 @@ def test_do_url_leaves_the_tab_field_off_when_none_is_set(tmp):
     """The absent-tab arm of `url`, pinned separately from `title`'s."""
     del tmp
     body = {'token': TOK, 'id': '_url', 'code': 'location.href'}
-    plan = [_put(body), _wait('_url', '', 'd4', 10)]
+    plan = [_api_put(body), _wait('_url', '', 'd4', 10)]
     recorded, out = run_cli(
         ['url'], [{'target': 'bcast', 'did': 'd4'},
                   {'id': '_url', 'result': 'https://example.com/a',
