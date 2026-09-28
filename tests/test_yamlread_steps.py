@@ -583,6 +583,8 @@ def test_a_step_scalar_stops_where_its_own_field_stops(tmp):
         (tests_yml, 'coverage', 'JavaScript coverage summary', 'if',
          measured),
         (tests_yml, 'coverage', 'JavaScript coverage gate', 'if', measured),
+        (tests_yml, 'coverage', 'JavaScript per-module coverage gate', 'if',
+         measured),
         (tests_yml, 'coverage', 'Work out the raise this run justifies', 'if',
          "${{ !cancelled() && steps.measure.conclusion == 'success'"
          " && github.event_name == 'push'"
