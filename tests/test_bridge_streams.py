@@ -15,7 +15,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _util  # noqa: E402
+from daedalus_bridge import atomic_file  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
                      _wait_for_delivery_health,
                      assert_oversize_stream_matches_enqueue,
@@ -198,11 +200,11 @@ def _on_demand_command_gc(fault_dir):
     """
     fault_dir.mkdir()
     (fault_dir / 'sitecustomize.py').write_text(
-        'import os\n'
         'import pathlib\n'
         'import sys\n'
         'import time\n'
         f'sys.path.insert(0, {str(_util.ROOT)!r})\n'
+        'from daedalus_bridge import atomic_file\n'
         'from daedalus_bridge import command_queue\n'
         'def gc_loop(cmd_dir, ttl):\n'
         '    root = pathlib.Path(cmd_dir)\n'
@@ -212,14 +214,15 @@ def _on_demand_command_gc(fault_dir):
         '    while True:\n'
         '        while not trigger.exists():\n'
         '            time.sleep(0.01)\n'
-        '        trigger.unlink()\n'
+        '        atomic_file.unlink_retrying(trigger)\n'
         '        command_queue.collect_expired(cmd_dir, ttl)\n'
         f'        left = sorted(p.name for p in root.iterdir()\n'
         f'                      if p.name not in ("{_GC_TRIGGER}",\n'
         f'                                         "{_GC_DONE}",\n'
         f'                                         "{_GC_DONE_TEMP}"))\n'
-        '        temp.write_text("\\n".join(left), encoding="utf-8")\n'
-        '        os.replace(temp, done)\n'
+        '        atomic_file.write_text_retrying(\n'
+        '            temp, "\\n".join(left), encoding="utf-8")\n'
+        '        atomic_file.replace_atomically(temp, done)\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
     return str(fault_dir)
@@ -233,14 +236,15 @@ def _sweep(command_root, served):
     """
     done = command_root / _GC_DONE
     if done.exists():
-        done.unlink()
-    (command_root / _GC_TRIGGER).touch()
+        atomic_file.unlink_retrying(done)
+    atomic_file.write_text_retrying(command_root / _GC_TRIGGER, '')
     deadline = time.time() + 10
     while not done.exists() and time.time() < deadline:
         time.sleep(0.01)
     assert done.exists(), (
         'the controlled command sweep did not finish: ' + ''.join(served))
-    return done.read_text(encoding='utf-8').split()
+    return atomic_file.read_text_retrying(
+        done, encoding='utf-8').split()
 
 
 def _root_names(command_root):
