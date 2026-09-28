@@ -396,9 +396,8 @@ Promise.all(settled).then(() => {
 #   cover is a WEDGED child, never a slow one. The samples are measured
 #   with the machine busy, because a wall-clock bound is two margins and a
 #   bare 90 measured only the second. This one call site serves three
-#   harnesses, and the table is the SLOWEST child's: the other two cost
-#   a fraction of it, so one figure covers all three and quoting their
-#   numbers here would put figures in a comment that no table records.
+#   harnesses, and the table is the SLOWEST child's: the other two cost a
+#   fraction of it, so one figure covers all three.
 #
 #   GM_CHILD_SAMPLES_S   the eight slowest-child runs, idle then busy
 #   GM_CHILD_SLOWEST_S   18.015  max of those
@@ -406,12 +405,22 @@ Promise.all(settled).then(() => {
 #   GM_CHILD_DEADLINE_S  90      round(18.015 * 5)
 #
 # The composed figure lands on the 90 this wrote by hand, which is a
-# coincidence worth stating rather than hiding: the number was about right
-# for the child that actually costs something and roughly 300x too loose
-# for the two that do not. What changed is that it is now re-derivable from
-# five lines a reader can check, and that the expiry is a named failure
-# carrying the child's own output instead of a `TimeoutExpired` that
-# reaches the suite as an error naming the whole command.
+# coincidence worth stating rather than hiding. What changed is that the
+# number is now re-derivable from the four lines above, and that the expiry
+# is a named failure carrying the child's own output instead of a
+# `TimeoutExpired` that reaches the suite as an error naming the whole
+# command.
+#
+# One DEVIATION is on the record here, because the argument above concludes
+# the child is a fixed unit of work and the branch's own rule says such a
+# child carries no call-site `timeout=`. It keeps one anyway, and the reason
+# is architectural rather than behavioural: routing this site through
+# `tests/_noderun.py` puts this module and everything it calls inside
+# `tests/_launch_census.py`'s audited path, which this branch has already
+# grown from 48 modules to 58. The figure is composed from a recorded table
+# rather than typed, the expiry is the named failure the rule asks for, and
+# `tests/test_node_launch_routing.py` reads all three of those — so the
+# deviation is from where the bound lives, never from what it is.
 GM_CHILD_SAMPLES_S = (3.713, 3.810, 2.981, 4.005,
                       16.873, 7.637, 18.015, 7.419)
 GM_CHILD_SLOWEST_S = max(GM_CHILD_SAMPLES_S)
