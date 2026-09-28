@@ -52,6 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _helper_binds import scan as _scan  # noqa: E402
+from _mod_text import _mod_text  # noqa: E402
 
 ROOT = _util.ROOT
 
@@ -85,10 +86,6 @@ def _shadow_findings(sources):
     return findings
 
 
-def _mod(*lines):
-    return ''.join(line + '\n' for line in lines)
-
-
 def test_no_tests_module_shadows_a_shared_helper_import(tmp):
     del tmp
     listed = subprocess.run(
@@ -115,16 +112,16 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         sources[relpath] = target.read_text(encoding='utf-8')
 
     def suite(*body):
-        return _mod('from _command_candidates import _load_queue', *body)
+        return _mod_text('from _command_candidates import _load_queue', *body)
 
     write('tests/_command_candidates.py',
-          _mod('def _load_queue(name):', '    return 1'))
-    write('tests/_cmdqueue.py', _mod(
+          _mod_text('def _load_queue(name):', '    return 1'))
+    write('tests/_cmdqueue.py', _mod_text(
         'POLL_DELAY = 0.5', '', '',
         'def _poll_queue_reads():', '    return 1'))
     write('tests/_pyroute_core.py',
-          _mod('def dict_assignments():', '    return 1'))
-    alias = _mod(
+          _mod_text('def dict_assignments():', '    return 1'))
+    alias = _mod_text(
         'from _cmdqueue import (POLL_DELAY as _SHARED_POLL_DELAY,',
         '                       _poll_queue_reads)')
     cases = [
@@ -134,7 +131,7 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
         ('test_b.py', suite('(_load_queue := 1)'), '_load_queue'),
         ('test_c.py', suite(
             'for _load_queue in [1]:', '    pass'), '_load_queue'),
-        ('test_d.py', _mod(
+        ('test_d.py', _mod_text(
             'try:',
             '    from _command_candidates import _load_queue',
             'except ImportError:',
@@ -168,7 +165,7 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
             'match 1:', '    case _load_queue:', '        pass'),
          '_load_queue'),
         # A module import, not only a from-import, is a shadow source.
-        ('test_import_as.py', _mod(
+        ('test_import_as.py', _mod_text(
             'import _command_candidates as _load_queue',
             '_load_queue = 1'), '_load_queue'),
         # An import binds the LOCAL name it brings in, so rebinding the
@@ -179,17 +176,17 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
          alias + 'POLL_DELAY = _SHARED_POLL_DELAY\n', None),
         ('test_alias_rebind.py',
          alias + '_poll_queue_reads = None\n', '_poll_queue_reads'),
-        ('test_pyroute_clean.py', _mod(
+        ('test_pyroute_clean.py', _mod_text(
             'from _pyroute_core import dict_assignments as _dict_assignments',
             'dict_assignments = _dict_assignments'), None),
-        ('test_from_os.py', _mod(
+        ('test_from_os.py', _mod_text(
             'from os import _load_queue', '_load_queue = 1'), None),
-        ('test_plain_import.py', _mod(
+        ('test_plain_import.py', _mod_text(
             'import json as _load_queue', '_load_queue = 1'), None),
-        ('test_plain_in_tree.py', _mod(
+        ('test_plain_in_tree.py', _mod_text(
             'import _command_candidates', '_command_candidates = 1'),
          '_command_candidates'),
-        ('test_no_import.py', _mod(
+        ('test_no_import.py', _mod_text(
             'def _load_queue():', '    pass'), None),
         # A comprehension and a generator expression are NOT scopes for
         # an assignment expression: a walrus anywhere inside one binds
@@ -258,8 +255,8 @@ def test_the_detector_names_the_shadowing_file_and_name(tmp):
 def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
     del tmp
     sources = {
-        'tests/_cand.py': _mod('def helper():', '    return 1'),
-        'tests/test_broken.py': _mod('def broken(:'),
+        'tests/_cand.py': _mod_text('def helper():', '    return 1'),
+        'tests/test_broken.py': _mod_text('def broken(:'),
     }
     try:
         _shadow_findings(sources)
