@@ -353,6 +353,7 @@
 !/tests/_jsroute_tab.py
 !/tests/_jsroute_target.py
 !/tests/_jsroute_timeline.py
+!/tests/_launch_arm_records.py
 !/tests/_launch_arms.py
 !/tests/_launch_audit.py
 !/tests/_launch_census.py
