@@ -66,17 +66,26 @@ def _dotted_bindings(tree):
     `_imported` answers a different question — it records the imported
     NAME and drops the module, where this head-splits `import a.b` and
     qualifies `from a.b import c` as `a.b.c` — and
-    `tests/_launch_path.py` is at 638 of its 700-line ceiling, so moving
-    the reader here rather than adding it there is what kept that file off
-    the wall.
+    `tests/_launch_path.py` sits under its 700-line ceiling, so the reader
+    lives here rather than pushing that file to the wall.
+
+    A binding the reader cannot resolve POPS the name rather than leaving
+    the import standing. `urlopen = lambda u: u` is not `urlopen` any
+    more, and a binding that outlives the name it was read from discharges
+    a call that is not a read at runtime — this arm's failure direction is
+    a DISCHARGE, so the miss had to be closed rather than written down. A
+    parameter is a binding the reader cannot resolve either and is the
+    likeliest thing to be named like an import, so it pops too; the table
+    is module-wide rather than scope-aware, which over-approximates, and
+    over-approximating here refuses.
 
     The assignment pass runs to a fixpoint of THREE rounds, and the bound
     is deliberate. Source order does the work in a single pass for a
-    forward-declared chain; a REVERSED chain (`_a3 = _a2` written before
-    `_a2` resolves) needs one round per link and stops short at three,
-    leaving the name unresolved. That failure direction is a false red
-    and never a false green — an unresolved callee is not a network read
-    — and a cycle converges rather than running, because the table only
+    forward-declared chain; a REVERSED chain needs one round per link, and
+    a chain four links deep written back to front stops short at three
+    with its tail unresolved. That failure direction is a false red and
+    never a false green — an unresolved callee is not a network read —
+    and a cycle converges rather than running, because the table only
     ever grows.
     """
     bound = {}
@@ -94,13 +103,50 @@ def _dotted_bindings(tree):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign) or node.value is None:
                 continue
-            resolved = _resolve_dotted(node.value, bound)
-            if resolved is None:
+            targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            if not targets:
                 continue
-            for target in node.targets:
-                if isinstance(target, ast.Name):
+            resolved = _resolve_dotted(node.value, bound)
+            for target in targets:
+                if resolved is None:
+                    bound.pop(target.id, None)
+                else:
                     bound[target.id] = resolved
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            bound.pop(node.arg, None)
     return bound
+
+
+_LITERALS = (ast.List, ast.Dict, ast.Set, ast.Tuple, ast.Constant,
+             ast.JoinedStr, ast.ListComp, ast.DictComp, ast.SetComp)
+
+
+def literal_bindings(tree):
+    """`dotted name` for every name bound to a LITERAL, tree-wide.
+
+    The discharge's proof, and the reason it is one: a container literal
+    is not a process, so a call whose receiver is one cannot end a child.
+    The scan is the whole tree rather than the function because the
+    binding the census needs is usually not in the function: a test
+    double's recorder is bound in `__init__` and a fixture's list in the
+    test body, while the deadline-carrying call sits in a third scope.
+    """
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and node.value is not None:
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if not isinstance(value, _LITERALS):
+            continue
+        for target in targets:
+            key = path._dotted_key(target)
+            if key:
+                bound.add(key)
+    return frozenset(bound)
 
 
 def _takes_a_timeout(value):
@@ -178,52 +224,81 @@ def _mentions(node, names):
                for inner in ast.walk(node))
 
 
-def _hands_to_a_child_slot(node, derived, slots):
-    """Whether the call puts the deadline into a child's wait slot.
+def _deadline_sinks(function, derived):
+    """Every call the deadline, or a name computed from it, reaches.
 
-    The OPERATION is the question, not whose object it is called on. A
-    call into `Popen.wait` or `Popen.communicate` ends a child whether
-    the census resolved the receiver or not, so a receiver the walk could
-    not follow is a reason the census cannot PROVE the number is safe —
-    never a reason it is. The positions come from the live signatures, so
-    this is the same vocabulary R3 reads and a signature change moves it.
+    The whole call, so a `*spread` in front of the argument is read like
+    any other element: an index into `node.args` lands on the spread
+    instead of the number behind it, and the deadline the spread stands
+    for is then never examined.
     """
-    func = node.func
-    if not isinstance(func, ast.Attribute) or func.attr not in slots:
-        return False
-    for keyword in node.keywords:
-        if keyword.arg == 'timeout' and _mentions(keyword.value, derived):
-            return True
-    index = slots[func.attr]
-    return (len(node.args) > index
-            and _mentions(node.args[index], derived))
+    return [call for call in ast.walk(function)
+            if path._is_call(call) and _mentions(call, derived)]
+
+
+def _raised_exceptions(function, bound):
+    """`dotted callee` for every call that builds what a `raise` raises.
+
+    Constructing the exception is not ending a child, and the deadline
+    reaching nothing else is the same proof as the arithmetic case. The
+    callee is resolved to a live object and asked what it IS, so a local
+    `class Refused(Exception)` is read the same as the stdlib's, and a
+    call that merely looks like one is not — which is the mistake the
+    two-name operation test made from the other direction.
+    """
+    raised = set()
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        target = node.exc
+        if not isinstance(target, ast.Call):
+            continue
+        dotted = _resolve_dotted(target.func, bound)
+        value = _live_object(dotted) if dotted is not None else None
+        if isinstance(value, type) and issubclass(value, BaseException):
+            raised.add(path._dotted_key(target.func))
+    return frozenset(raised)
 
 
 def deadline_reaches_a_child(function, name, callees, receivers, direct,
-                             aliases):
+                             aliases, literals, bound):
     """Whether the deadline this signature takes can reach a child.
 
     Two ways, and both are the census's own question asked of a parameter
     instead of a call. The function PLACES a launch, so a caller has an
     undeclared way to bound the child it owns and the signature is the
-    only place that shows. Or it HANDS the parameter — or a name computed
-    from it — into a child-ending slot, or to another path function,
-    which is the shape the concept's reachability takes.
+    only place that shows. Or it HANDS the parameter, or a name computed
+    from it, to a call the census cannot show is harmless.
 
-    A METHOD is not a path function here however its name is spelled: the
-    receiver is the subject of a method call, and the question for a
-    method is whether the operation ends a child, not whether some class
-    in the same file happens to define a method of that name.
+    The second half is a POSITIVE proof in the discharge direction, and
+    that is the whole of the difference. The deadline reaching no call at
+    all is a proof: arithmetic and comparison invoke nothing. A call whose
+    receiver the tree binds to a LITERAL is a proof: a container literal
+    is not a process, so it cannot be ended.
 
-    What is NOT a discharge is failing to follow the number. A receiver
-    the walk could not resolve is the case the unconditional refusal this
-    arm replaced existed for, and treating it as a proof of safety
-    silenced three real bound shapes on the lead's measurement; so the
-    second route asks what the number is handed TO, and only a positive
-    answer either way — a launch, a child-ending slot, a path function —
-    counts. A parameter the CALLER fills is a fourth thing and not this
-    one: that number is the caller's, and `_parameter_bound_faults` reads
-    it at the caller's line.
+    Everything else is refused, and the reason is that each earlier
+    version substituted a guess for the proof. Discharging when the
+    RECEIVER did not resolve silenced three shapes that reap a real child
+    through an unresolved receiver. Reading the OPERATION instead, and
+    discharging when its name was neither `wait` nor `communicate`,
+    silenced the same class from the other side: those are two names off
+    one stdlib class, and a rule built on them does not read the class, so
+    `wait_procs`, a pool's `reap_all` and a spread in front of the
+    argument all went unrefused. Measured against `origin/main`, both are
+    the same mistake. An unresolved receiver and an unrecognised operation
+    are each the census saying it does not know, and "does not know" is
+    not a proof in either direction.
+
+    The bound this leaves is the false red. A function that hands its
+    deadline to a receiver the tree BUILDS rather than writes, a list from
+    a call or an attribute filled from a parameter, is refused; so is a
+    bare-name call to a function the walk did not resolve. That is the
+    price of a discharge that is a proof rather than a guess, and it is
+    in the direction that cannot end a child silently.
+
+    A parameter the CALLER fills is a third thing and not this one: that
+    number is the caller's, and `_parameter_bound_faults` reads it at the
+    caller's line.
     """
     if any(path._is_launch(call, receivers, direct, aliases)
            for call in ast.walk(function) if path._is_call(call)):
@@ -235,15 +310,17 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
                     and _mentions(node.value, derived)):
                 derived.update(target.id for target in node.targets
                                if isinstance(target, ast.Name))
-    slots = path._child_wait_slots()
-    for node in ast.walk(function):
-        if not path._is_call(node) or not _mentions(node, derived):
+    sinks = _deadline_sinks(function, derived)
+    if not sinks:
+        return False
+    raised = _raised_exceptions(function, bound)
+    for call in sinks:
+        func = call.func
+        if path._dotted_key(func) in raised:
             continue
-        func = node.func
         if isinstance(func, ast.Name):
-            if func.id in callees:
-                return True
-            continue
-        if _hands_to_a_child_slot(node, derived, slots):
             return True
+        if isinstance(func, ast.Attribute):
+            if path._dotted_key(func.value) not in literals:
+                return True
     return False
