@@ -8,6 +8,7 @@ reader would otherwise take on trust. The enumeration has a size
 ceiling.
 
     CRASH_CONTROLLED      arms whose evidence goes red by RAISING
+    NON_MEMBER_CRASH_HELD the CONTROLLED non-members held by a raise
     SECONDARY_CONTROLLED  a control holding an arm that is not its
                           recorded evidence
     MARKER_NON_MEMBERS    marker clauses outside every listed arm, and
@@ -16,7 +17,7 @@ ceiling.
     STEP_CEILING_HELD_BY  the test holding each step-ceiling arm
     ARM_NOTES             why a particular verdict is what it is
 
-`tests/test_launch_arms.py` checks all six, and the table carries a
+`tests/test_launch_arms.py` checks all seven, and the table carries a
 one-line pointer to the note at each arm it names.
 
 The arm row's column order is here rather than beside the table, which

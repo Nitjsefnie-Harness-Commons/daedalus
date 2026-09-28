@@ -238,10 +238,11 @@ def test_every_arm_is_uniquely_addressed(tmp):
 
     `test_every_arm_is_still_in_the_analyser_it_was_classified_in`
     reads the text at an arm's recorded line and asks whether it starts
-    with that arm's anchor. Twenty anchors match at a second arm's line
-    and twelve are shared outright, so re-pointing an arm at a line
-    carrying a byte-identical anchor satisfies the check while its cut
-    removes a neighbour's clause in another function.
+    with that arm's anchor. Twenty-five of the 150 arms carry an anchor
+    that matches at a second arm's line, and twelve anchor strings are
+    shared outright, so re-pointing an arm at a line carrying a
+    byte-identical anchor satisfies the check while its cut removes a
+    neighbour's clause in another function.
 
     Two things close that. The identity the check runs on —
     (file, line, anchor, cut) — is asserted unique over the real table,
