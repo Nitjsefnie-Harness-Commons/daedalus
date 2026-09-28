@@ -7,7 +7,7 @@ it: was the workflow that gates the merge dispatched on this commit at all?
 matrix was never created (issue #1223). Two copies of the expectation would
 be two mechanisms wearing one name, so the expectation, the predicate, the
 set the predicate is asked of and the answer an absent gate gets live here
-and both callers import them.
+and both callers reach them through it.
 
 They are meant to AGREE, and until issue #1262 they did not: `ci_wait` asked
 the question of the set the newest-run-per-workflow filter left, and
@@ -29,9 +29,12 @@ from.
 A run satisfies a requirement by its `name`, exactly. `Tests` and `test` are
 different workflows, and treating either as the gate would reinstate the
 false green this exists to remove. A conclusion is irrelevant to the
-predicate: both callers judge conclusions against rules of their own, over
-the set below and by rules that differ, and a required workflow that is
-present and red is a failure, not an absence.
+predicate: both callers judge conclusions against rules of their own, and a
+required workflow that is present and red is a failure, not an absence.
+Those rules are the two callers' alone, and they do not agree. Both ask the
+gate question of the set below; the wait judges the conclusion question over
+that set, while the hold judges it over the raw runs - which is what
+`watch_all.py`'s own docstring says is deliberately not shared.
 """
 
 from datetime import datetime, timezone
@@ -59,7 +62,7 @@ def _started_key(run):
     return stamp, int(run.get('id') or 0)
 
 
-def _superseded(run, runs):
+def superseded(run, runs):
     """True when a strictly newer run of the same workflow exists.
 
     A run naming no workflow - neither an id nor a path, which `gh_client`
@@ -75,7 +78,7 @@ def _superseded(run, runs):
                for other in runs)
 
 
-def _judged(runs):
+def judged(runs):
     """The runs a verdict reads: each workflow's newest run, and no other.
 
     A workflow's verdict is the one GitHub's required-check status reports
@@ -84,7 +87,7 @@ def _judged(runs):
     grouping is by workflow id with the path standing in, never by the
     run's name.
     """
-    return [run for run in runs if not _superseded(run, runs)]
+    return [run for run in runs if not superseded(run, runs)]
 
 
 def missing_required(runs, *, required=REQUIRED_WORKFLOWS):
@@ -99,7 +102,7 @@ def missing_required(runs, *, required=REQUIRED_WORKFLOWS):
     An empty `required` is satisfied by every run list, which is what makes
     the argument a no-op rather than a rule that refuses everything.
     """
-    return sorted(required - {run.get('name') for run in _judged(runs)})
+    return sorted(required - {run.get('name') for run in judged(runs)})
 
 
 class GateAbsent:
