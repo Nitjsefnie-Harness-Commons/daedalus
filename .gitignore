@@ -656,6 +656,7 @@
 !/tests/test_parent_watch.py
 !/tests/test_path_containment.py
 !/tests/test_path_safety.py
+!/tests/test_planner_determinism.py
 !/tests/test_plant_restore.py
 !/tests/test_pr_gate.py
 !/tests/test_pyright_scope.py
@@ -749,6 +750,7 @@
 !/tests/test_timed_basis_feed.py
 !/tests/test_timed_coverage.py
 !/tests/test_timed_coverage_bounds.py
+!/tests/test_timed_coverage_shapes.py
 !/tests/test_timed_matrix_shape.py
 !/tests/test_timed_planner.py
 !/tests/test_timed_refresh.py
