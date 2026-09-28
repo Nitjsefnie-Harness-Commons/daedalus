@@ -926,6 +926,7 @@
     "_write_summary": {"python": ["tests/_util.py"]},
     "_write_target": {"python": ["tests/_jsroute_tab.py"]},
     "_writer_target": {"python": ["tests/_control_calls.py"]},
+    "_written": {"python": ["tests/_coverage_authority_scan.py"]},
     "_yields_the_registry": {"python": ["tests/_mcp_import_closure.py"]},
     "abortError": {"javascript": ["tests/_dashshell.py"]},
     "accepted": {"python": ["tests/_cli_parse.py"]},
