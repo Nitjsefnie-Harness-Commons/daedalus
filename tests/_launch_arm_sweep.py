@@ -20,9 +20,8 @@ from pathlib import Path
 
 from _arm_sweep import arm_sweep
 from _launch_arm_records import (
-    CRASH_CONTROLLED, EVIDENCE, ID, SECONDARY_CONTROLLED, STATE)
+    CEILING_ARMS, CRASH_CONTROLLED, EVIDENCE, ID, SECONDARY_CONTROLLED, STATE)
 from _launch_arms import CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES
-from test_launch_arms import CEILING_ARMS
 
 EVIDENCE_OF = {arm[ID]: arm[EVIDENCE] for arm in LAUNCH_ARMS}
 
