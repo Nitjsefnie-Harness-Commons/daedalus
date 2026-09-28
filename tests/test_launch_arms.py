@@ -485,12 +485,9 @@ def _functions(name):
 
 
 def _enclosing(spans, line):
-    for name, (start, end) in sorted(spans.items(),
-                                    key=lambda item: item[1][0],
-                                    reverse=True):
-        if start <= line <= end:
-            return name
-    return ''
+    holding = [name for name, (start, end) in spans.items()
+               if start <= line <= end]
+    return max(holding, key=lambda name: spans[name][0], default='')
 
 
 def test_every_named_non_member_reason_names_the_function_it_is_in(tmp):
