@@ -586,6 +586,7 @@
 !/tests/test_gh_client.py
 !/tests/test_gh_head_prs.py
 !/tests/test_ghexpr.py
+!/tests/test_gitignore_control.py
 !/tests/test_gitignore_generator.py
 !/tests/test_gm_relay_authority.py
 !/tests/test_gm_segment_job.py
