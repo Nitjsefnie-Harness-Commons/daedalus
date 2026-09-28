@@ -259,16 +259,6 @@ OVER_REFUSAL = {
         '    with open("x") as urlopen:\n        pass\n\n\n'
         'def run_gate(url):\n'
         '    return urlopen(url, timeout=10)\n'),
-    'a-module-except-target': (
-        'from urllib.request import urlopen\n\n\n'
-        'try:\n    pass\nexcept ValueError as urlopen:\n    pass\n\n\n'
-        'def run_gate(url):\n'
-        '    return urlopen(url, timeout=10)\n'),
-    'a-module-annotated-assignment': (
-        'from urllib.request import urlopen\n'
-        'urlopen: object = []\n\n\n'
-        'def run_gate(url):\n'
-        '    return urlopen(url, timeout=10)\n'),
     'no-shadow-at-all':
         ('from urllib.request import urlopen\n\n\n'
          'def run_gate(url):\n'
@@ -287,30 +277,65 @@ REBINDINGS = {
     'a-tuple-target': 'urlopen, other = object(), 1\n',
     'a-for-target': 'for urlopen in ():\n    pass\n',
     'a-comprehension-target': 'x = [1 for urlopen in ()]\n',
+    'an-except-target': ('try:\n    pass\n'
+                         'except ValueError as urlopen:\n    pass\n'),
+    'an-annotated-assignment': 'urlopen: object = []\n',
+    'a-with-target': 'with open("x") as urlopen:\n    pass\n',
 }
 
 
-def test_a_rebinding_in_any_form_stops_the_read_discharging(tmp):
-    """Every binding form pops the name, and the read is refused.
+def test_a_rebinding_in_any_form_stops_the_read_at_both_scopes(tmp):
+    """Ten rows: one per form per scope, every one a read now REFUSED.
 
-    The reader collected one form — a bare-name `Assign` — and left an
-    import standing through six others, so a callee that was no longer the
-    stdlib object was DISCHARGED. That is this arm's own named failure
-    direction, and in the network arm it is a false green.
+    Module scope and function scope are two axes and only their
+    intersection was closed: the pop is gated on a node sitting outside
+    every function body, and the plain `Assign` survived at function
+    scope only because a different reader already collected
+    function-local assignment targets for the parameter-shadow question.
+    The rebinding forms reached neither. This is the pair.
 
-    These are POSITIVE rows: each shape keeps its `timeout= keyword`,
-    which is what a closed class looks like. The plain `Assign` is the
-    control that caught it before and is here so the widening cannot have
-    quietly replaced the pop rather than added to it.
+    A literal is not in this table and never should be: a function that
+    makes its own container and puts the deadline in it discharges, which
+    is the receivers module's
+    `test_a_doubles_modelled_signature_is_not_a_launchers_deadline` and
+    the reason the two tables are not one.
     """
     del tmp
-    for label, rebinding in REBINDINGS.items():
-        source = ('from urllib.request import urlopen\n\n'
-                  f'{rebinding}\n\n'
-                  'def run_gate(url):\n'
-                  '    return urlopen(url, timeout=10)\n')
-        rows = _rows(source)
-        assert rows and rows[0][1] == 'timeout= keyword', (label, rows)
+    for label, form in REBINDINGS.items():
+        at_module = ('from urllib.request import urlopen\n'
+                     + form
+                     + '\n\ndef run_gate(url):\n'
+                     '    return urlopen(url, timeout=10)\n')
+        body = ''.join(f'    {line}\n' if line.strip() else '\n'
+                       for line in form.splitlines())
+        in_function = ('from urllib.request import urlopen\n'
+                       '\n\ndef run_gate(url):\n'
+                       + body
+                       + '    return urlopen(url, timeout=10)\n')
+        for scope, source in (('module', at_module),
+                              ('function', in_function)):
+            rows = _rows(source)
+            assert rows and rows[0][1] == 'timeout= keyword', (
+                f'{label} at {scope} scope', rows)
+
+
+def test_a_rebinding_in_one_function_does_not_reach_another(tmp):
+    """The negative half: the function-scope pop is not a module-wide one.
+
+    A rebinding inside one helper must not refuse a real read in a
+    different function of the same file. Without this the ten rows above
+    would pass with a pop wide enough to break every network read in a
+    module that rebinds a name anywhere, and the measurement that
+    mattered most in wave 3 was exactly that failure: one `urlopen`
+    parameter in an unrelated helper turned a real read into a fault.
+    """
+    del tmp
+    source = ('from urllib.request import urlopen\n\n\n'
+              'def other():\n    urlopen = object()\n    return urlopen\n'
+              '\n\n'
+              'def run_gate(url):\n'
+              '    return urlopen(url, timeout=10)\n')
+    assert _rows(source) == [], _rows(source)
 
 
 def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):

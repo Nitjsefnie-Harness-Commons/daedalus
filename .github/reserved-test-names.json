@@ -424,6 +424,7 @@
     "_function_bodies": {"python": ["tests/_launch_path.py"]},
     "_function_body": {"python": ["tests/_command_type_readers.py"]},
     "_function_nodes": {"python": ["tests/_receiver_resolution.py"]},
+    "_function_parameters": {"python": ["tests/_receiver_resolution.py"]},
     "_functions_in": {"python": ["tests/_launch_census.py"]},
     "_generator_operand_yields": {"python": ["tests/_pyroute_live.py"]},
     "_get": {"python": ["tests/_mcp_tool_commands.py"]},

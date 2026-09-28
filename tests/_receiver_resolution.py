@@ -89,6 +89,14 @@ def _rebindings(tree):
             targets = node.targets
         elif isinstance(node, (ast.For, ast.comprehension)):
             targets = [node.target]
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.ExceptHandler):
+            # `except E as urlopen` binds the name as TEXT, not a node.
+            found.extend(((node, node.name),) if node.name else ())
+            continue
+        elif isinstance(node, ast.withitem):
+            targets = [node.optional_vars] if node.optional_vars else []
         else:
             continue
         for target in targets:
@@ -197,47 +205,82 @@ def _scoped_assignments(tree):
     return {node for node in ast.walk(tree)
             if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign,
                                  ast.NamedExpr, ast.Delete, ast.For,
-                                 ast.comprehension))
+                                 ast.comprehension, ast.ExceptHandler,
+                                 ast.withitem))
             and id(node) in inside}
 
 
-def _shadowed_parameters(tree):
-    """`function ->` what shadows a name inside it: PARAMETERS, and the
-    targets of assignments to something the walk cannot resolve.
+def _function_parameters(tree):
+    """`function ->` its PARAMETERS, and nothing else.
 
-    The module table cannot carry this. A parameter named after a
-    from-import is a shadow in the function that declares it and nowhere
-    else, so popping the name from the module table over-refused every
-    read in the file that declared it: one `urlopen` parameter in an
-    unrelated helper turned a real network read into a fault, measured on
-    five shapes and one of five.
-
-    The key is the function NODE rather than its name, because names are
-    not unique across a module and this file already meets that.
+    A parameter and a rebinding are different questions and the two arms
+    ask different ones. A parameter is a shadow of the name whatever the
+    caller passes, so it decides both. A rebinding says the name is no
+    longer the import, which is the network arm's question alone: a
+    function that assigns a LITERAL to it has both rebound the import and
+    made a container, and the container is the discharge the reachability
+    arm is allowed to take.
     """
-    shadows = {}
+    names = {}
     for node in ast.walk(tree):
         if not path._is_def(node):
             continue
         args = node.args
+        found = {arg.arg for arg in list(args.posonlyargs) + list(args.args)
+                 + list(args.kwonlyargs)}
+        if found:
+            names[node] = frozenset(found)
+    return names
+
+
+def _shadowed_parameters(tree):
+    """`function ->` what shadows a name inside it: its PARAMETERS, and
+    every binding in its own body that is not a literal.
+
+    The module table cannot carry either. A parameter named after a
+    from-import is a shadow in the function that declares it and nowhere
+    else, so popping it from the module table over-refused every read in
+    the file that declared it: one `urlopen` parameter in an unrelated
+    helper turned a real network read into a fault, measured on five
+    shapes and one of five. A function-local rebinding is the same
+    argument one form wider, and it is the reason the plain `Assign` was
+    the only form caught at function scope before this.
+
+    The gate is the function's OWN body, keyed on the function NODE. That
+    is what keeps the pop from becoming a module-wide one: a rebinding in
+    function A does not reach a sink in function B, and the control
+    `test_a_rebinding_in_one_function_does_not_reach_another` is what says
+    so. It is also the gate's limit, and the limit is a measured one: a
+    rebinding in an ENCLOSING function read by a sink in a nested one is
+    NOT caught, because catching it needs a scope chain rather than a
+    body.
+
+    This map answers the REBOUNDING question and `_function_parameters` answers
+    the PARAMETER one, because they are different: `urlopen: object = []`
+    has both rebound the import and made a container, and only the first
+    of those is this arm's business.
+    """
+    shadows = {}
+    every = _rebindings(tree)
+    for node in ast.walk(tree):
+        if not path._is_def(node):
+            continue
+        inside = {id(child) for child in ast.walk(node)}
+        args = node.args
         names = {arg.arg for arg in list(args.posonlyargs) + list(args.args)
                  + list(args.kwonlyargs)}
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Assign) or child.value is None:
+        for bound, name in every:
+            if id(bound) not in inside:
                 continue
-            # A literal is NOT a shadow. The function supplies the value,
-            # and `literal_bindings` has already asked whether EVERY
-            # writing of the name is one; asking this table again with a
-            # cruder rule made the cruder one win, and a function that
-            # made its own container and put the deadline in it stopped
-            # discharging while the same code with the container bound
-            # one scope out kept discharging.
-            if isinstance(child.value, _LITERALS):
+            value = getattr(bound, 'value', None)
+            # The literal question is only about a form that BINDS that
+            # value. An `AugAssign` or a walrus carries an operand, not a
+            # binding, so `urlopen += 1` is a shadow and not a container.
+            if isinstance(bound, ast.Assign) and (
+                    value is not None
+                    and _resolve_dotted(value, {}) is not None):
                 continue
-            if _resolve_dotted(child.value, {}) is not None:
-                continue
-            names.update(target.id for target in child.targets
-                         if isinstance(target, ast.Name))
+            names.add(name)
         if names:
             shadows[node] = frozenset(names)
     return shadows
