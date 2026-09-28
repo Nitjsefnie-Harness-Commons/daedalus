@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""The shapes the census discharges and refuses at its own BOUNDARY.
+
+`tests/test_launch_census_receivers.py` holds the four shapes issue #1299
+names and the routes the branch must not weaken. This module holds the
+boundary cases found after that suite existed: a receiver that was a
+container at one point in the module and a real child at another, a callee
+the walk cannot resolve at all, and the two claims about this rule that
+were written down and then went out of date.
+
+Every expected row set is `origin/main`'s, measured there. A shape that
+`main` refuses and this branch does not is a bound that ended silently,
+which is the one failure the narrowing must not have.
+"""
+import ast
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _receiver_resolution as receiver  # noqa: E402
+from _launch_census import _faults  # noqa: E402
+import _util  # noqa: E402
+
+TESTS = Path(__file__).resolve().parent
+
+
+def _rows(source, in_path=('run_gate',)):
+    """Census rows for a planted module with EVERY function in path."""
+    tree = ast.parse(source)
+    forced = frozenset(
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    return sorted((line, route) for _, line, route, _ in
+                  _faults('planted.py', tree, forced or frozenset(in_path)))
+
+
+# A container literal is a STARTING state. These are the shapes where the
+# name the deadline reaches was a literal when the walk first saw it and a
+# real child by the time the call is made.
+REBOUND = {
+    'the-same-class-rebinds-it':
+        ('import subprocess\n\n\n'
+         'class Runner:\n'
+         '    def __init__(self):\n'
+         '        self._child = []\n\n'
+         '    def start(self, argv):\n'
+         '        self._child = subprocess.Popen(argv)\n\n'
+         '    def wait(self, timeout=None):\n'
+         '        return self._child.wait(timeout)\n',
+         (11, 'timeout parameter')),
+    'a-later-class-rebinds-it':
+        ('import subprocess\n\n\n'
+         'class Decoy:\n'
+         '    def __init__(self):\n'
+         '        self.procs = []\n\n\n'
+         'class Pool:\n'
+         '    def __init__(self):\n'
+         '        self.procs = []\n\n'
+         '    def start(self, argv):\n'
+         '        self.procs = subprocess.Popen(argv)\n\n'
+         '    def wait(self, timeout=None):\n'
+         '        return self.procs.wait(timeout)\n',
+         (16, 'timeout parameter')),
+    'a-name-rebound-in-one-scope':
+        ('import subprocess\n\n\n'
+         'class Runner:\n'
+         '    def wait(self, proc, timeout=None):\n'
+         '        child = []\n'
+         '        child = proc\n'
+         '        return child.wait(timeout)\n',
+         (5, 'timeout parameter')),
+}
+
+
+def test_a_literal_binding_rebound_to_a_child_is_refused(tmp):
+    """H1: the set only ever ADDED, so a rebound name stayed a container.
+
+    `literal_bindings` recorded the NAME and never forgot it, so a
+    receiver that was a list at `__init__` and a real child by the time the
+    deadline call is made read as a container, and the whole shape went
+    silent with no other route picking it up. The last binding wins, which
+    is the move `_dotted_bindings` was already taught to make.
+
+    The first two are the reproduced shapes. The third is the same fault
+    inside one scope rather than across classes, and it is here so a fix
+    that only handles `self.` attributes is red.
+    """
+    del tmp
+    for label, (source, expected) in REBOUND.items():
+        assert _rows(source) == [expected], (label, _rows(source))
+
+
+# A callee the walk can neither name nor see a receiver on. The census has
+# no receiver to ask, so there is nothing to prove and the shape is a
+# refusal; the last two hand a real child to a real `wait` through it.
+DYNAMIC_CALLEES = {
+    'a-subscript-callee':
+        ('def run_gate(table, timeout=None):\n'
+         '    return table["reap"](timeout)\n',
+         (1, 'timeout parameter')),
+    'a-call-callee':
+        ('def run_gate(g, timeout=None):\n'
+         '    return g()(timeout)\n',
+         (1, 'timeout parameter')),
+    'a-lambda-callee':
+        ('def run_gate(timeout=None):\n'
+         '    return (lambda t: t)(timeout)\n',
+         (1, 'timeout parameter')),
+    'a-lambda-handing-a-real-child':
+        ('import subprocess\n\n\n'
+         'def _start(argv):\n'
+         '    return subprocess.Popen(argv)\n\n\n'
+         'def run_gate(argv, *, timeout=None):\n'
+         '    child = _start(argv)\n'
+         '    return (lambda p, t: p.wait(t))(child, timeout)\n',
+         (8, 'timeout parameter')),
+    'a-dict-index-callee':
+        ('import subprocess\n\n\n'
+         'def _start(argv):\n'
+         '    return subprocess.Popen(argv)\n\n\n'
+         'def run_gate(argv, *, timeout=None):\n'
+         '    child = _start(argv)\n'
+         '    return {"reap": child.wait}["reap"](timeout)\n',
+         (8, 'timeout parameter')),
+}
+
+
+def test_a_callee_the_walk_cannot_resolve_is_refused(tmp):
+    """H2: a callee matching neither arm fell through to the verdict.
+
+    The loop refused a bare name, discharged a literal-bound receiver, and
+    had no `else` for a callee that is neither — a subscript, a call, a
+    lambda. Those reached the end of the loop and returned the NARROWING
+    verdict, which is silence, and silence on a shape `main` refuses is a
+    bound that ended with nobody reporting it.
+
+    The last two are what make this a boundary pin rather than a discharge
+    pin: each hands a real `Popen` to a real `wait` with the number
+    through a callee the walk cannot see, so a fix that discharges
+    "unknown callee" re-opens a live bound.
+    """
+    del tmp
+    for label, (source, expected) in DYNAMIC_CALLEES.items():
+        assert _rows(source) == [expected], (label, _rows(source))
+
+
+def test_a_raise_carrying_the_deadline_is_discharged_when_imported(tmp):
+    """H3: the raise arm reads an IMPORTED exception, and only that.
+
+    The docstring said a local `class Refused(Exception)` is read the same
+    as the stdlib's. It is not: the resolver reads imports, so a class the
+    module defines cannot be reached and the arm does not fire. The
+    behaviour is right — refusing would be a false red on a fixture that
+    raises its own error — and the sentence was the opposite of it.
+
+    The two directions are pinned together, so neither can move alone.
+    """
+    del tmp
+    imported = ('import subprocess\n\n'
+                'def outer_timeout(args, timeout=None):\n'
+                '    raise subprocess.TimeoutExpired(args, timeout)\n')
+    assert _rows(imported) == [], _rows(imported)
+    local = ('class Refused(Exception):\n'
+             '    pass\n\n\n'
+             'def outer_timeout(args, timeout=None):\n'
+             '    raise Refused(args, timeout)\n')
+    assert _rows(local) == [(5, 'timeout parameter')], _rows(local)
+
+
+def test_the_module_docstring_describes_the_arm_that_is_there(tmp):
+    """H4: the file's own map must match the code under it.
+
+    The module docstring described an operation test for a wave after the
+    operation test was deleted, so two docstrings in one file described
+    the same function differently and nothing pinned either. This fails
+    if the map names the rule that is not there, or drops the two
+    functions the rule is actually read from.
+    """
+    del tmp
+    text = receiver.__doc__ or ''
+    assert 'PROOF' in text, 'the map no longer says the rule is a proof'
+    for absent in ('asks what OPERATION', 'never whether the receiver'):
+        assert absent not in text, (absent, text)
+    for present in ('literal_bindings', 'deadline_reaches_a_child'):
+        assert present in text, (present, text)
+
+
+# H6.4: the pop that fixes H1 was module-wide, and a module-wide pop turns
+# a real network read into a fault when anything in the file shadows the
+# imported name. Measured on five shapes, one of five at the wave's head
+# and NONE once `_shadowed_parameters` made the shadow function-local.
+OVER_REFUSAL = {
+    'an-unrelated-parameter-shadows-the-import':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n'
+         '    return urlopen(url, timeout=10)\n\n\n'
+         'def other(urlopen, x):\n'
+         '    return urlopen(x)\n'),
+    'an-unrelated-lambda':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n'
+         '    return urlopen(url, timeout=10)\n\n\n'
+         'def other():\n'
+         '    fetch = lambda u: u\n'
+         '    return fetch\n'),
+    'a-class-attribute':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n'
+         '    return urlopen(url, timeout=10)\n\n\n'
+         'class Other:\n'
+         '    def __init__(self):\n'
+         '        self.urlopen = []\n'),
+    'a-rebind-to-a-call-result':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n'
+         '    return urlopen(url, timeout=10)\n\n\n'
+         'def other():\n'
+         '    urlopen = object()\n'
+         '    return urlopen\n'),
+    'no-shadow-at-all':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n'
+         '    return urlopen(url, timeout=10)\n'),
+}
+
+
+def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
+    """H6.4: the pop is function-local, and the class is empty by that.
+
+    `_dotted_bindings` is a module table, so popping an import a parameter
+    shadows from it over-refused every read in the file that declared the
+    parameter. `_shadowed_parameters` carries the shadow per function and
+    the read is discharged again — which is the difference between a
+    false red measured at one of five and one measured at none.
+
+    A control that only checked the happy direction would have passed
+    with the module-wide pop, so every shape here carries a shadow.
+    """
+    del tmp
+    for label, source in OVER_REFUSAL.items():
+        assert _rows(source) == [], (label, _rows(source))
+
+
+def main():
+    return _util.runner(
+        _util.collect(globals()), tmp_prefix='launchcensusboundaries_')
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
