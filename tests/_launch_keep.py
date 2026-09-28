@@ -16,11 +16,22 @@ making that one edit.
 def in_launch_population(name, source):
     """Does the bounded-launch control read this file at all?
 
-    This is the prefilter the issue calls unsound, which is why it is named
-    rather than left as a literal at each walk: a skipped site is gone, not
+    Every tracked Python file, with no filter. The control inspects calls
+    carrying `timeout=` or a `**`-unpacked mapping whatever they call, so
+    the population is the tracked tree: a filter narrower than that is a
+    second guess at what the control inspects, and it is a guess that
+    fails silently. The `'subprocess' in source` test this replaces
+    skipped 440 of the 628 tracked files, and the analyser reports 103
+    `unplaced` sites in them, so a bounded launch that reached a module
+    by any route other than a `subprocess` spelling was gone rather than
     checked-and-passed.
+
+    `source` is still the second argument because both consumers already
+    read the file to hand it over, and a parameter nothing reads is a
+    signature that lies about what the control costs.
     """
-    return name.endswith('.py') and 'subprocess' in source
+    del source
+    return name.endswith('.py')
 
 
 def control_keeps(head, kind):
