@@ -6,6 +6,7 @@ delivers it exactly once, so these tests drive both halves together: what the
 enqueue writes, what the stream frames, what it does with an entry it cannot
 read, and what the queue does with one nobody claimed.
 """
+import contextlib
 import http.client
 import json
 import os
@@ -181,6 +182,14 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
 _GC_TRIGGER = '.gc-trigger'
 _GC_DONE = '.gc-done'
 _GC_DONE_TEMP = '.gc-done.tmp'
+_GC_PREFIX = '.gc-'
+# Deliberately outside the prefix, so a refusal the injector raises can still
+# be logged and the injector cannot refuse its own bookkeeping.
+_GC_REFUSED_PARENT = 'gc-refused-parent.txt'
+
+# No queue or command name in this tree begins with the marker prefix -- they
+# are `<token>_<tab>` and `<token>.json` -- so filtering on it cannot hide a
+# real entry, and it covers whatever state a sweep leaves beside the record.
 
 # How far outside the TTL window each arm stamps, on opposite sides. A stall
 # in the handshake has to exceed this before it can move either verdict, so
@@ -217,15 +226,70 @@ def _on_demand_command_gc(fault_dir):
         '        atomic_file.unlink_retrying(trigger)\n'
         '        command_queue.collect_expired(cmd_dir, ttl)\n'
         f'        left = sorted(p.name for p in root.iterdir()\n'
-        f'                      if p.name not in ("{_GC_TRIGGER}",\n'
-        f'                                         "{_GC_DONE}",\n'
-        f'                                         "{_GC_DONE_TEMP}"))\n'
+        f'                      if not p.name.startswith("{_GC_PREFIX}"))\n'
         '        atomic_file.write_text_retrying(\n'
         '            temp, "\\n".join(left), encoding="utf-8")\n'
         '        atomic_file.replace_atomically(temp, done)\n'
         'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
     return str(fault_dir)
+
+
+@contextlib.contextmanager
+def _refuse_marker_operations(command_root, attempts):
+    """Refuse the marker's own filesystem operations, `attempts` times each.
+
+    The refusal comes out of `os.replace`, `Path.unlink`, `Path.read_text`
+    and `Path.write_text` themselves rather than out of a stand-in, so what
+    the handshake meets is the refusal the bridge is meant to survive. Each
+    operation counts separately, and a path outside the marker prefix goes
+    straight through, so nothing else in the tree sees a fault.
+    """
+    real = {
+        'replace': os.replace,
+        'unlink': Path.unlink,
+        'read_text': Path.read_text,
+        'write_text': Path.write_text,
+    }
+    spent = {}
+    log = command_root / _GC_REFUSED_PARENT
+
+    def refuse(operation, name):
+        spent[operation] = spent.get(operation, 0) + 1
+        if spent[operation] > attempts:
+            return False
+        try:
+            with log.open('a', encoding='utf-8') as handle:
+                handle.write(f'{operation} {name}\n')
+        except OSError:
+            pass  # a lost log line must not mask the refusal itself
+        raise PermissionError(13, 'Permission denied')
+
+    def patched(operation, real_call, name_of):
+        def call(*args, **kwargs):
+            name = name_of(args, kwargs)
+            if isinstance(name, str) and name.startswith(_GC_PREFIX):
+                refuse(operation, name)
+            return real_call(*args, **kwargs)
+        return call
+
+    os.replace = patched(
+        'replace', real['replace'],
+        lambda args, kwargs: os.path.basename(
+            args[1] if len(args) > 1 else kwargs.get('dst', '')))
+    Path.unlink = patched('unlink', real['unlink'],
+                          lambda args, kwargs: args[0].name)
+    Path.read_text = patched('read_text', real['read_text'],
+                             lambda args, kwargs: args[0].name)
+    Path.write_text = patched('write_text', real['write_text'],
+                              lambda args, kwargs: args[0].name)
+    try:
+        yield log
+    finally:
+        os.replace = real['replace']
+        Path.unlink = real['unlink']
+        Path.read_text = real['read_text']
+        Path.write_text = real['write_text']
 
 
 def _sweep(command_root, served):
@@ -250,7 +314,7 @@ def _sweep(command_root, served):
 def _root_names(command_root):
     """Every entry in the command root but the fixture's sweep markers."""
     return sorted(p.name for p in command_root.iterdir()
-                  if p.name not in (_GC_TRIGGER, _GC_DONE))
+                  if not p.name.startswith(_GC_PREFIX))
 
 
 def _stamp(queues, when):
