@@ -48,20 +48,39 @@ def _conflicting(number):
             'mergeStateStatus': 'DIRTY'}
 
 
-def _run_main(mod, clock, argv, runs, pulls=()):
+def _run_main(mod, clock, argv, runs, pulls=(), err=None):
     """(exit code, stdout) for one `ci_wait.main` invocation.
 
     Driven through `main` rather than through `wait` because both facts
     the note turns on are caller-level: which `--repo` was named and
     whether `--required` was. A control that called `wait` could not tell
     a caller who named their own gate from one who did not.
+
+    `err` is filled when a caller needs stderr, which is where an
+    argument refusal is written.
+
+    A `SystemExit` from `main` is caught here and re-raised as an
+    `AssertionError` carrying its code and the refusal it printed. The
+    suite runner catches `Exception`, and `SystemExit` is a
+    `BaseException`, so one escaping a test ends the FILE: every result
+    after it is never printed, and the file exits with the SUBJECT's
+    status rather than the runner's (#1321, filed, and a change to
+    shared harness behaviour rather than to this flag). Converted here,
+    the same regression is an ordinary FAIL inside a run that completes
+    and reports every test in it.
     """
     setattr(mod, 'runs_on', lambda repo, sha: list(runs))
     setattr(mod, 'prs_on', lambda repo, sha: list(pulls))
     out = io.StringIO()
+    err = err if err is not None else io.StringIO()
     with _frozen_wait_clock(mod, clock), contextlib.redirect_stderr(
-            io.StringIO()), contextlib.redirect_stdout(out):
-        code = mod.main(argv)
+            err), contextlib.redirect_stdout(out):
+        try:
+            code = mod.main(argv)
+        except SystemExit as refusal:
+            raise AssertionError(
+                f'main() ended the interpreter with {refusal.code} instead '
+                f'of returning: {err.getvalue()}') from None
     return code, out.getvalue()
 
 
@@ -191,12 +210,39 @@ def test_the_trial_call_reads_the_named_gate_too(tmp):
     a caller into a wait whose answer it had already contradicted."""
     del tmp
     mod = _ci_wait()
-    setattr(mod, 'runs_on', lambda repo, sha: _green('ci'))
     err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        code = mod.main(['f' * 40, '--once', '--required', 'ci'])
-    assert code == 0, err.getvalue()
+    code, _ = _run_main(mod, _Clock(),
+                        ['f' * 40, '--once', '--required', 'ci'],
+                        _green('ci'), err=err)
+    assert code == 0, (code, err.getvalue())
     assert 'state: acceptable' in err.getvalue(), err.getvalue()
+
+
+def test_an_empty_required_value_is_a_rejected_invocation(tmp):
+    """Issue #1320: the set an empty value builds holds a name no run can
+    ever carry, so every head refused - and the missing name is empty, so
+    the refusal rendered `no  run on <sha>`, its doubled space the only
+    evidence the caller had that the argument was the problem.
+
+    Refused the way this tool already refuses a malformed SHA and a
+    non-positive bound: named on stderr, exit 3, and nothing at all on
+    stdout. The last half is the half a guard written as an ordinary wait
+    would get wrong, and it is the half that told the caller a head was
+    uncertified when the head was never judged.
+
+    A conflicting pull request is what makes the unfixed path terminate
+    on this fixture rather than reach for the network: the gate can never
+    be dispatched, so the refusal is immediate instead of a grace away.
+    """
+    del tmp
+    mod = _ci_wait()
+    err = io.StringIO()
+    code, text = _run_main(mod, _Clock(),
+                           ['3' * 40, '--repo', OTHER_REPO, '--required', ''],
+                           _green('ci'), pulls=[_conflicting(7)], err=err)
+    assert code == 3, (code, text, err.getvalue())
+    assert '--required' in err.getvalue(), err.getvalue()
+    assert text == '', text
 
 
 def main():

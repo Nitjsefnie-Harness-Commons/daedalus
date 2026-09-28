@@ -400,9 +400,6 @@ def main(argv=None):
                         help='one trial evaluation: print the matrix to '
                              'stderr, exit 0 unless the query failed')
     args = parser.parse_args(argv)
-    required = (frozenset(args.required) if args.required
-                else REQUIRED_WORKFLOWS)
-    note = _gate_note(args.repo, args.required)
     if not SHA_RE.fullmatch(args.sha):
         print(f'not a 40-character commit SHA: {args.sha!r}', file=sys.stderr)
         return 3
@@ -418,6 +415,16 @@ def main(argv=None):
         print(f'--grace must be positive, got {args.grace}',
               file=sys.stderr)
         return 3
+    # An empty name builds a requirement no run can satisfy, and the
+    # refusal then names nothing: `no  run on <sha>` (issue #1320). Refuse
+    # the argument instead, with the arguments this tool already refuses.
+    if any(not name for name in args.required or ()):
+        print('--required must name a workflow, got an empty value',
+              file=sys.stderr)
+        return 3
+    required = (frozenset(args.required) if args.required
+                else REQUIRED_WORKFLOWS)
+    note = _gate_note(args.repo, args.required)
     try:
         if not args.once:
             return wait(args.repo, args.sha, args.interval, args.timeout,
