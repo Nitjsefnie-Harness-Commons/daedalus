@@ -198,6 +198,46 @@ def test_quoted_and_escaped_permissions_fields_are_refused(tmp):
         _assert_permissions_mutation_refused(mutated)
 
 
+def test_a_step_that_pushes_to_main_is_gated_by_the_steps_before_it(
+        tmp):
+    """A status function in `if:` suppresses GitHub's implicit success().
+
+    `timed-timings.yml` runs the planner's and the refresher's suites in
+    a step named "Verify the change", and its own comment says why:
+    "a commit to main that no gate would have admitted is the one
+    outcome this workflow must not produce". The commit step's
+    condition named `!cancelled()`, which is a status function, and
+    GitHub applies `success()` to a step only when its condition names
+    no status function of its own -- so the guard was decoration. The
+    step it gates has since gained a suite of its own, and a red one
+    there would not have stopped the push.
+
+    The condition is therefore about the step and nothing else: the
+    download produced runs, the key is present, and every step above
+    succeeded. Nothing is lost by dropping `!cancelled()` -- a
+    cancelled job should not push a file its own measurement never
+    finished writing.
+    """
+    source = (ROOT / '.github' / 'workflows' / 'timed-timings.yml')
+    section = '\n'.join(_job_section(source.read_text(encoding='utf-8'),
+                                      'refresh'))
+    _seen, verify, after = section.partition('- name: Verify the change\n')
+    assert verify, 'the workflow has no "Verify the change" step'
+    _seen, commit, rest = after.partition('- name: Commit the refresh\n')
+    assert commit, 'the workflow has no "Commit the refresh" step'
+    found = re.search(r'^\s+if:\s*\$\{\{(.*?)\}\}', rest,
+                      re.S | re.M)
+    assert found, rest
+    condition = found.group(1)
+    for status in ('cancelled()', 'failure()', 'always()', 'success()'):
+        assert status not in condition, (status, condition)
+    assert "steps.download.outputs.count != '0'" in condition, condition
+    assert 'RATCHET_SSH_KEY' in condition, condition
+    # The gate this branch added runs in the step before the commit.
+    verify_block = after[:after.index('- name: Commit the refresh\n')]
+    assert 'test_timed_coverage.py' in verify_block, verify_block
+
+
 def test_permission_values_and_unknown_keys_fail_closed(tmp):
     del tmp
     workflow = _tests_yml()
