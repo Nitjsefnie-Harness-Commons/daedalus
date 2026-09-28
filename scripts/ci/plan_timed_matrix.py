@@ -298,11 +298,18 @@ def suite_names(tree):
     return names
 
 
-def _resolve(recorded, names, scale):
+def resolve(recorded, names, scale):
     """Every tree suite's weight, and which names were estimated or stale.
 
     A weight for a suite the tree no longer holds is stale -- a deleted
     suite -- and is reported and dropped, so it can never consume a cell.
+
+    PUBLIC, because every reader of the data file has to scope it the
+    same way. The union write carries a weight forward for every suite
+    the runs did not measure, and a suite the tree has since deleted can
+    never be measured by any run, so its weight is permanent: three
+    consumers outside the planner read the file's raw dict and read
+    those dead weights as live ones.
     """
     recorded = {name: _number(weight, name) * scale
                 for name, weight in recorded.items()}
@@ -329,7 +336,7 @@ def verify_measured(tree, timings, scale=1.0):
     refresher in the state it exists to repair.
     """
     names = suite_names(tree)
-    weights, estimated, _stale = _resolve(
+    weights, estimated, _stale = resolve(
         timings['suite_weights'], names, scale)
     refusal = coverage_refusal(weights, estimated)
     if refusal:
@@ -401,7 +408,7 @@ def _cell_name(index):
 
 def plan(tree, timings, scale=1.0):
     names = suite_names(tree)
-    weights, estimated, stale = _resolve(
+    weights, estimated, stale = resolve(
         timings['suite_weights'], names, scale)
     target = _number(
         timings['target_cell_weight'], 'target_cell_weight') * scale
