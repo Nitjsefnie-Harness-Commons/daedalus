@@ -239,18 +239,21 @@ def _dotted_bindings(tree):
         for node, name in _rebindings(tree):
             if isinstance(node, ast.Assign):
                 resolved = _resolve_dotted(node.value, bound)
-                if resolved is not None and binds.get(name) == 1:
-                    # An ADD is honoured only when it is the name's ONLY
-                    # binding in the module, counted across every scope
-                    # and including the import and the pops' forms. A
-                    # second binding means the add does not describe
-                    # what the call reaches — the walk is breadth-first,
-                    # so a function-local add is applied last and wins
-                    # whatever the source order — and TWO adds are
-                    # refused rather than compared, because comparing
-                    # them is a design and refusing is a line. A refused
-                    # add falls through to the POP below, which is the
-                    # direction that errs toward refusing.
+                same = bound.get(name) == resolved
+                total = binds.get(name, 0) + (1 if name in bound else 0)
+                if resolved is not None and (total == 1
+                                             or (same and total == 2)):
+                    # `total` counts what `_rebindings` collected plus
+                    # the import pass's entry, which lives in THIS table
+                    # and not in `_rebindings`, so an import of the same
+                    # name is a second binding. The add is honoured at one
+                    # binding, or at two when the other is an import
+                    # resolving to the same dotted path. Any other second
+                    # binding refuses, because the walk is breadth-first
+                    # and a function-local add is applied last and wins
+                    # whatever the source order. A refused add falls
+                    # through to the POP below, which errs toward
+                    # refusing.
                     bound[name] = resolved
                     continue
             if node not in scoped or id(node) in globals_:
