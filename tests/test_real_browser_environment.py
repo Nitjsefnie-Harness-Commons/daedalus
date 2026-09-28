@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
+from _node_launch_routing import (  # noqa: E402
+    SITE_HANG_MULTIPLE, node_bound_expiry)
 from _realbrowser_fixture_controls import _enter_fixture  # noqa: E402
 
 
@@ -20,6 +22,38 @@ def _which_with(node):
                 'chromium': '/controlled/chromium'}.get(name)
 
     return which
+
+
+# The two children this suite launches, and a bound composed for each. Both
+# programs are literals below — one exits on a global, one is function
+# declarations and a single write — so neither can reach outside the suite
+# and a bound here is for a WEDGED child, never a slow one. The samples are
+# measured with the machine BUSY, because a bare 10 was measuring the
+# runner's busyness and nothing else.
+#
+#   REPO_PROBE_SAMPLES_S     idle then busy, the capability probe
+#   REPO_PROBE_SLOWEST_S     4.081  max of those
+#   REPO_PROBE_DEADLINE_S    20     round(4.081 * 5)
+#
+#   WORKER_PROBE_SAMPLES_S   idle then busy, the worker probe
+#   WORKER_PROBE_SLOWEST_S   2.574  max of those
+#   WORKER_PROBE_DEADLINE_S  13     round(2.574 * 5)
+#
+# Neither site has a runtime stall control, and that is a stated limit rather
+# than an oversight: each program is a literal inside the test function, so
+# the only lever that could wedge the child is the `node` executable itself,
+# and a `#!` stand-in is not runnable on the Windows legs. What covers them
+# instead is `tests/_node_launch_routing.py`, which re-derives the whole
+# site population on every run and names any child launched outside the
+# shared detector.
+REPO_PROBE_SAMPLES_S = (0.635, 0.326, 0.309, 0.312,
+                        3.633, 4.081, 1.533, 0.238)
+REPO_PROBE_SLOWEST_S = max(REPO_PROBE_SAMPLES_S)
+REPO_PROBE_DEADLINE_S = round(REPO_PROBE_SLOWEST_S * SITE_HANG_MULTIPLE)
+WORKER_PROBE_SAMPLES_S = (0.084, 0.108, 0.115, 0.201,
+                          1.089, 1.174, 0.201, 2.574)
+WORKER_PROBE_SLOWEST_S = max(WORKER_PROBE_SAMPLES_S)
+WORKER_PROBE_DEADLINE_S = round(WORKER_PROBE_SLOWEST_S * SITE_HANG_MULTIPLE)
 
 
 def test_browser_environment_skip_has_runner_identity(tmp):
@@ -50,10 +84,13 @@ def test_repository_node_probe_starts_and_terminates(tmp):
     if not node:
         _realbrowser_controls.control_requirement_missing(
             'Node is absent, so its repository probe cannot be checked')
-    capability = subprocess.run(
-        [node, '-e',
-         "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
-        capture_output=True, text=True, timeout=10)
+    try:
+        capability = subprocess.run(
+            [node, '-e',
+             "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+            capture_output=True, text=True, timeout=REPO_PROBE_DEADLINE_S)
+    except subprocess.TimeoutExpired as why:
+        raise node_bound_expiry(why, REPO_PROBE_DEADLINE_S) from why
     assert capability.returncode in (0, 1), (
         capability.returncode, capability.stdout, capability.stderr)
     requirements = None
@@ -84,8 +121,12 @@ def test_repository_worker_probe_matches_declared_functions(tmp):
         program = (
             declarations + '\nprocess.stdout.write(String('
             + _realbrowser._WORKER_READY_PROBE + '));')
-        result = subprocess.run(
-            [node, '-e', program], capture_output=True, text=True, timeout=10)
+        try:
+            result = subprocess.run(
+                [node, '-e', program], capture_output=True, text=True,
+                timeout=WORKER_PROBE_DEADLINE_S)
+        except subprocess.TimeoutExpired as why:
+            raise node_bound_expiry(why, WORKER_PROBE_DEADLINE_S) from why
         assert result.returncode == 0, (
             node, result.returncode, result.stdout, result.stderr)
         return result.stdout
@@ -192,22 +233,47 @@ def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
+    """A wedged capability probe is the site's OWN named failure, with output.
+
+    The interpreter started, so its fixed program failing to terminate is
+    the harness's defect rather than a missing machine capability — and the
+    distinction decides whether `BrowserEnvironmentSkipped` skips the whole
+    real-browser surface, so the failure has to stay a test failure.
+
+    It also has to say WHAT happened. A bare `TimeoutExpired` names the
+    whole command and carries the child's output as bytes, and a child that
+    stopped answering is exactly the case where its partial output is the
+    only evidence there is. So the control plants a real stalling child at
+    the real call site, at the site's own composed deadline — a shortened
+    one would be proving a different number — and reads the line back.
+    """
+    from _node_launch_routing import NodeBoundExceeded
     del tmp
     node = shutil.which('node')
     assert node, 'Node is required to execute the probe control'
+    stalling = ("process.stdout.write('the probe spoke before it wedged\\n');"
+                " setInterval(() => {}, 1000);")
     failure = None
     with mock.patch.object(
             _realbrowser.shutil, 'which', _which_with(node)), \
             mock.patch.object(
-                _realbrowser, 'NODE_WEBSOCKET_PROBE', 'while (true) {}'), \
-            mock.patch.object(_realbrowser, 'NODE_PROBE_TIMEOUT', 0.05):
+                _realbrowser, 'NODE_WEBSOCKET_PROBE', stalling):
         try:
             _realbrowser.browser_requirements()
-        except Exception as why:  # noqa: BLE001
+        except NodeBoundExceeded as why:
             failure = why
-    assert failure.__class__ is AssertionError, failure
-    assert isinstance(
-        failure.__cause__, subprocess.TimeoutExpired), failure.__cause__
+        except Exception as why:  # noqa: BLE001
+            # A site that reported its expiry as anything else still fails
+            # HERE, where the reader is told what it was, rather than
+            # escaping as the suite's own error.
+            failure = why
+    assert failure.__class__ is NodeBoundExceeded, (
+        type(failure).__name__, failure)
+    assert failure.deadline_s == _realbrowser.NODE_PROBE_DEADLINE_S, (
+        failure.deadline_s)
+    assert 'the probe spoke before it wedged' in failure.stdout, (
+        failure.stdout)
+    assert isinstance(failure.stdout, str), type(failure.stdout)
 
 
 def test_browser_interpreter_start_failure_is_environment_skip(tmp):

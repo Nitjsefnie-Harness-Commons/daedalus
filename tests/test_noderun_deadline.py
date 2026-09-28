@@ -550,6 +550,46 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
     assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
 
 
+def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
+    """The OTHER shape of hang detector, at a site that keeps its bound.
+
+    Everything above drives the shared launcher. This drives
+    `tests/_gm_harness.py`'s real `_run_node`, which keeps its own bound
+    because reaching that launcher would put the module inside the census's
+    audited path — and no suite owns this call site either, so the control
+    lives here beside the one it answers.
+
+    Its child is the case a bound was hardest to judge: it loads the
+    SHIPPED `extension/content.js` and `page.js` into a fake window. The
+    verdict is still fixed work, and the reasoning is recorded in
+    `_gm_harness.py` beside the figure. What this asserts is the property
+    the verdict bought — a wedged child is reported by the site's own named
+    failure carrying the line it wrote before it stopped, not by a bare
+    `TimeoutExpired` that names a figure nobody can re-derive.
+
+    It costs the site's real composed budget, which is what the two controls
+    above already do: the figure a maintainer re-derives is the one the
+    expiry has to fire at, and a control that shortened it would be proving
+    a different number.
+    """
+    from _gm_harness import _run_node  # noqa: E402
+    from _node_launch_routing import NodeBoundExceeded  # noqa: E402
+
+    stalling = ("process.stdout.write('the storage child spoke before it "
+                "wedged\\n'); setInterval(() => {}, 1000);")
+    caught = None
+    try:
+        _run_node(stalling)
+    except NodeBoundExceeded as failure:
+        caught = failure
+    finally:
+        del tmp
+    assert caught is not None, 'the storage child that never settles finished'
+    assert 'the storage child spoke before it wedged' in caught.stdout, (
+        caught.stdout)
+    assert caught.deadline_s > 0, caught.deadline_s
+
+
 def test_an_environment_the_caller_built_reaches_the_child(tmp):
     """`environment` is threaded, and a value only the caller holds arrives.
 
