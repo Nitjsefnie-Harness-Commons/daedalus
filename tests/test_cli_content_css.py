@@ -85,7 +85,7 @@ def test_do_inject_css_names_the_tab_chrome_numbered_zero(tmp):
         ['inject-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'injected': 3, 'tabId': 0}],
         plan=[_ext_cmd('_inject_css', 'inject-css',
-                      {'css': 'a{}', 'tabId': 0})],
+                       {'css': 'a{}', 'tabId': 0})],
         token=TOK)
 
     assert recorded.calls == [('_inject_css', 'inject-css',
@@ -100,7 +100,7 @@ def test_do_inject_css_carries_all_frames_only_when_it_was_asked_for(tmp):
         ['inject-css', '--css', 'a{}', '--all-frames'],
         [{'injected': 3, 'tabId': 2}],
         plan=[_ext_cmd('_inject_css', 'inject-css',
-                   {'css': 'a{}', 'allFrames': True})],
+                       {'css': 'a{}', 'allFrames': True})],
         token=TOK)
 
     assert recorded.calls == [('_inject_css', 'inject-css',
@@ -164,7 +164,7 @@ def test_do_remove_css_names_the_tab_chrome_numbered_zero(tmp):
         ['remove-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'removed': 3, 'tabId': 0}],
         plan=[_ext_cmd('_remove_css', 'remove-css',
-                      {'css': 'a{}', 'tabId': 0})],
+                       {'css': 'a{}', 'tabId': 0})],
         token=TOK)
 
     assert recorded.calls == [('_remove_css', 'remove-css',
@@ -179,7 +179,7 @@ def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
         ['remove-css', '--css', 'a{}', '--all-frames'],
         [{'removed': 3, 'tabId': 2}],
         plan=[_ext_cmd('_remove_css', 'remove-css',
-                   {'css': 'a{}', 'allFrames': True})],
+                       {'css': 'a{}', 'allFrames': True})],
         token=TOK)
 
     assert recorded.calls == [('_remove_css', 'remove-css',

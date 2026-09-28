@@ -164,7 +164,7 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
 def test_do_open_tabs_prints_only_a_count_when_nothing_opened(tmp):
     del tmp
     plan = [_ext_cmd('_open_tabs', 'open-tabs',
-                 {'urls': ['https://a.example.com/']}, timeout=30)]
+                     {'urls': ['https://a.example.com/']}, timeout=30)]
     _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/'], [{}],
         module=commands_browser, plan=plan, token=TOK)
@@ -216,7 +216,7 @@ def test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error(tmp):
     """
     del tmp
     plan = [_ext_cmd('_open_tabs', 'open-tabs',
-                 {'urls': ['https://a.example.com/']}, timeout=30)]
+                     {'urls': ['https://a.example.com/']}, timeout=30)]
     _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/'], [{'errors': [{}]}],
         module=commands_browser, plan=plan, token=TOK)
