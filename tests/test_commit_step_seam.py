@@ -35,8 +35,6 @@ first: a pin that could not reach the control it pins would be a
 comment. It is wired into `timed-timings.yml`'s "Verify the change"
 step, which is the workflow whose subject it is.
 """
-import contextlib
-import io
 import json
 import os
 import re
