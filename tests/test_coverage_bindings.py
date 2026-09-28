@@ -12,9 +12,10 @@ from _coverage_authority_scan import (  # noqa: E402
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
     _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
-    _DEST_MUTATIONS, _INLINE_INVOKE, _RECEIVER_MUTATIONS,
+    _DEST_MUTATIONS, _INLINE_INVOKE,
     _SCOPE_INVOKE as _SHARED_SCOPE_INVOKE, _SCOPE_MUTATIONS,
     _UNFOLLOWABLE_MUTATIONS)
+from _receiver_mutation_specs import _RECEIVER_MUTATIONS  # noqa: E402
 from _mutation_sweep import mutation_sweep  # noqa: E402
 
 
@@ -85,9 +86,9 @@ def _mutation_specs():
         "        return [(node.lineno, node.value, _BIND)]\n",
         "")
     for_target = (
-        "        return [(node.lineno, node.iter, _BIND),\n"
+        "                (node.lineno, node.iter, _ITERABLE),\n"
         "                (node.lineno, node.target, _TARGET)]",
-        "        return [(node.lineno, node.iter, _BIND)]")
+        "                (node.lineno, node.iter, _ITERABLE)]")
     with_target = (
         "                for part, position in ((item.context_expr, _BIND),\n"
         "                                       (item.optional_vars,\n"

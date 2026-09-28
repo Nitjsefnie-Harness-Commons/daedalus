@@ -90,8 +90,9 @@ _LEAVES = _ATOMS + _TRANSFORMED
 # What a form in neither class yields, so every arm refuses it.
 _UNRECOGNISED = object()
 
-# The two positions a bound value can sit in, which read differently.
+# The positions a bound value can sit in, which read differently.
 _BIND = 'bind'
+_ITERABLE = 'iterable'
 _TARGET = 'target'
 
 
@@ -126,11 +127,15 @@ def _header_values(node):
 def _bound_values(node, facts):
     """Every (statement line, value, position) the statement binds unreadably.
 
-    `position` says what the statement does with the value. `bind` is a
-    value it carries somewhere — a default, a decorator, a match subject
-    — and `target` is a name it binds, which reads differently: a target
-    may shadow a name that already spells a module rather than carry a
-    launcher, and the Assign arm exempts exactly that shape.
+    `position` says what the statement does with the value, and each one
+    is read by the reader `_POSITION_PARTS` names. `bind` is a value it
+    carries somewhere — a default, a decorator, a match subject — and
+    `target` is a name it binds, which reads differently: a target may
+    shadow a name that already spells a module rather than carry a
+    launcher, and the Assign arm exempts exactly that shape. `iterable`
+    is a loop's iterable, which is decomposed rather than carried, so it
+    is judged a second time by `_iterable_parts`; that second reading is
+    the For arm's own business and no other statement's.
     """
     if isinstance(node, ast.Assign):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
@@ -150,6 +155,7 @@ def _bound_values(node, facts):
         return [(node.lineno, node.value, _BIND)]
     if isinstance(node, (ast.For, ast.AsyncFor)):
         return [(node.lineno, node.iter, _BIND),
+                (node.lineno, node.iter, _ITERABLE),
                 (node.lineno, node.target, _TARGET)]
     if isinstance(node, ast.comprehension):
         return [(node.target.lineno, node.iter, _BIND),
@@ -423,13 +429,53 @@ def _carries_launch_value(parts, facts):
                for part in parts)
 
 
+def _iterable_parts(value):
+    """The base a loop's iterable rests on, when the iterable is a call.
+
+    A `for` iterable is decomposed into targets, so whatever the call
+    reads off its receiver is what the loop binds and the next statement
+    launches. `_carried_parts` opens a call's arguments and a call-based
+    callee, but it leaves a non-launch attribute's receiver alone, so
+    `{'sp': subprocess}.values()` carries nothing at all and the module
+    inside the mapping arrives at the target unbound.
+
+    This hands the base over instead, and it is scoped to the iterable
+    on purpose. The same call in a binding position reads nothing out of
+    what it returns, so `go = {'a': subprocess}.values().pop()` stays
+    clean while `for launcher in {'sp': subprocess}.values():` does not:
+    the discriminator is the use site, not the call.
+
+    The arm is one-way on purpose. It cannot tell a method that yields
+    the container's own values from one that computes a number off it,
+    so a loop over `{'sp': subprocess}.index(1)` is refused where the
+    guard would rather refuse than miss. Everything else is left to
+    `_carried_parts`, which already judges an iterable that is not a
+    call and a call that is built on a bare name.
+    """
+    if not isinstance(value, ast.Call):
+        return
+    callee = value.func
+    while isinstance(callee, (ast.Attribute, ast.Subscript)):
+        callee = callee.value
+    if not isinstance(callee, _ATOMS):
+        yield from _carried_parts(callee)
+
+
+# The reader each position is judged by. `bind` is the walk itself and
+# carries no entry, so a position this table does not name is read the
+# way `_carried_parts` reads everything else.
+_POSITION_PARTS = {
+    _ITERABLE: _iterable_parts,
+    _TARGET: _target_parts,
+}
+
+
 def _unfollowable_launcher_bindings(tree, facts):
     """Lines binding or calling a launcher the alias walk cannot follow."""
     lines = []
     for node in memo_nodes(tree):
         for line, value, position in _bound_values(node, facts):
-            parts = (_target_parts(value) if position == _TARGET
-                     else _carried_parts(value))
+            parts = _POSITION_PARTS.get(position, _carried_parts)(value)
             if _carries_launcher(parts, facts):
                 lines.append(line)
         if (isinstance(node, ast.Call)
