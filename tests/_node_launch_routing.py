@@ -30,15 +30,23 @@ from _command_type_readers import _parents  # noqa: E402
 
 _TESTS_DIR = Path(__file__).resolve().parent
 
-# The modules the sweep does not walk, and each for its own reason.
+# The modules the sweep does not walk, each for its own reason rather than
+# one rule applied to all of them.
+#
 # `_noderun.py` holds the launcher's own `Popen`, so it is the subject
-# rather than a site of the rule. This module and the two suites that read
-# it are named because a control cannot be a site of the rule it states —
-# deliberately, for all three. The shapes suite contributes nothing today
-# (every plant in it is a string literal, which `ast.walk` never sees a
-# `Call` inside), and it is named anyway: a suite that happens to be
-# harmless is not the same as one that is meant to be, and the difference
-# only shows up after someone adds a real launch to it.
+# rather than a site. This module and the routing suite are the walk and
+# the control that runs it: a control cannot be a site of the rule it
+# states, and this module is the rule.
+#
+# The shapes suite is a different case and is named for it: it contributes
+# zero launches today, because every plant in it is a string literal and
+# `ast.walk` never sees a `Call` inside one. That is a fact about how it
+# is WRITTEN, not a property of it, so the entry fails OPEN — a real launch
+# added to a shapes test would be suppressed rather than reported. It is
+# named anyway, because the alternative is a suite whose correctness
+# depends on a property of a file nobody is thinking about when they edit
+# it, and the honest direction to fail is stated here rather than left for
+# a reader to infer.
 NOT_SITES = ('_noderun.py', '_node_launch_routing.py',
              'test_node_launch_routing.py',
              'test_node_launch_routing_shapes.py')
@@ -49,9 +57,7 @@ NOT_SITES = ('_noderun.py', '_node_launch_routing.py',
 # separately required to still bound its own child.
 CLASSIFYING_MODULES = {
     '_dashnode.py': 'scales its own bound per retry attempt',
-    '_gm_harness.py': 'a real-browser storage boundary (task 3)',
     '_overlap.py': 'its expiry is already classified by the harness',
-    '_realbrowser.py': 'a real-browser probe with a composed bound (task 3)',
     # Its executable is a function PARAMETER named `node`, so the walk
     # admits it without binding it — a name spelled `node` is in scope
     # whether or not it resolves, because admitting a site only makes the
@@ -59,10 +65,7 @@ CLASSIFYING_MODULES = {
     # that keeps it honest is the one every member carries.
     '_realbrowser_workers.py': 'a CDP call whose bound IS the response '
                                'deadline it asserts, classified into '
-                               'CDPTimeout by the module (task 3)',
-    'test_real_browser_classification.py': 'a real-browser probe (task 3)',
-    'test_real_browser_environment.py': 'a real-browser probe (task 3)',
-    'test_real_browser_harness.py': 'a real-browser probe (task 3)',
+                               'CDPTimeout by the module',
 }
 
 # A launch whose executable this walk cannot resolve is a FINDING, not a
@@ -87,7 +90,7 @@ UNRESOLVED_LAUNCHES = {
     ('_realbrowser.py', '_launch_and_reach', 'subprocess.Popen'):
         'a sys.executable child',
     ('_realbrowser_workers.py', '_browser_version', 'subprocess.run'):
-        "a VERDICT_NODE child: the executable is this function's `browser` "
+        "a NODE child: the executable is this function's `browser` "
         "parameter, which no walk of one module can bind. The census "
         "reads the file, and the child is a real browser rather than a "
         "fixed unit of work.",
@@ -145,18 +148,11 @@ UNRESOLVED_LAUNCHES = {
         "a bash child behind `_util.workflow_bash()`, the thing under test",
 }
 
-# A `node` verdict can be a FALSE one: a control that plants its own stub
+# A `node` verdict can be a FALSE one — a control that plants its own stub
 # executable to prove routing writes a function whose parameter is named
-# `node` and launches it, and the walk admits that spelling for exactly the
-# reason it admits `_realbrowser_workers.py`. Such a site is named here
-# rather than being a finding its author cannot answer — a control that
-# cries wolf is one whose findings stop being read.
-#
-# The rows are keyed on the call's shape exactly as `UNRESOLVED_LAUNCHES`
-# is, and the unused-row check covers this class too. **A row here may only
-# excuse a `node` verdict the walk could not BIND.** A launch that resolves
-# to a real `shutil.which('node')` is never exempteable, so a row written
-# to silence a control's own stub cannot become the place a real one hides.
+# `node` — and a finding its author cannot answer is a finding they stop
+# reading. Such a site is named here. What a row may and may not excuse is
+# the `bound`/`spelled` asymmetry, stated once in `_executable_verdict`.
 NOT_FIXED_WORK = {}
 
 VERDICT_NODE = 'node'
@@ -520,20 +516,27 @@ def _bounds(value):
     """Whether this `timeout=` value is a deadline that can actually expire.
 
     A keyword that is present is not a bound. `timeout=None` waits forever,
-    `timeout=0` expires before the child is launched, and `timeout=False`
-    is `0` — each is the stdlib's own "no deadline" spelling, and reading
-    them off the printed form reported all three as a bound. A composed
-    name is a deadline; a constant is only one if it is a positive number.
+    `timeout=0` expires before the child is launched, `timeout=False` is
+    `0`, and `timeout=-1` is a negative one that expires the same way —
+    the last is a `UnaryOp` rather than a `Constant`, which is why this
+    folds the expression instead of reading the node's type. Reading any of
+    them off the printed form reported all of them as a bound. A composed
+    name is a deadline; a foldable literal is only one if it is positive.
     """
     if value is None:
         return False
-    if isinstance(value, ast.Constant):
-        number = value.value
-        if number is None or number is False:
-            return False
-        if isinstance(number, (int, float)) and number <= 0:
-            return False
+    if isinstance(value, (ast.Name, ast.Attribute)):
         return True
+    try:
+        folded = ast.literal_eval(value)
+    except (ValueError, SyntaxError, TypeError):
+        # A computation this walk cannot fold — `round(30 * 2)`, a ternary.
+        # Refusing it would refuse every real bound in the tree.
+        return True
+    if folded is None or isinstance(folded, bool):
+        return False
+    if isinstance(folded, (int, float)):
+        return folded > 0
     return True
 
 
@@ -552,11 +555,9 @@ def _child_name(tree, launch):
 def _exempt(shape, launch):
     """Whether a `node` verdict this table excuses.
 
-    Keyed on the call's shape, exactly as `UNRESOLVED_LAUNCHES` is, so a
-    row is as auditable as the rows it joins. And restricted to a verdict
-    the walk could not BIND: a launch that resolves to a real
-    `shutil.which('node')` is never exempteable, so a row written to
-    silence a control's own stub cannot become the place a real one hides.
+    Keyed on the call's shape, exactly as `UNRESOLVED_LAUNCHES` is, and
+    restricted by the `bound`/`spelled` asymmetry stated in
+    `_executable_verdict`, which is where that rule is written down.
     """
     return shape in NOT_FIXED_WORK and launch['verdict'][1] == 'spelled'
 
@@ -589,8 +590,13 @@ def _routing_sweep():
             if _exempt(shape, launch):
                 used.add(shape)
                 continue
-            unrouted.append(f'{path.name}:{launch["line"]} '
-                            f'(timeout={ast.unparse(launch["deadline"])})')
+            # A `Popen` carries no `timeout=` to print, and that is the most
+            # likely real finding this control exists to report, so the
+            # message names the child rather than raising on the way there.
+            shown = launch['deadline']
+            unrouted.append(
+                f'{path.name}:{launch["line"]} (timeout='
+                f'{ast.unparse(shown) if shown is not None else "none"})')
     unused = [(table, row) for table, rows in (
         ('UNRESOLVED_LAUNCHES', UNRESOLVED_LAUNCHES),
         ('NOT_FIXED_WORK', NOT_FIXED_WORK))
