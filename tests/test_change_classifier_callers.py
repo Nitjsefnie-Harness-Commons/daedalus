@@ -16,27 +16,12 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _classifier_calls import _event, _recording_run  # noqa: E402
 
 
 def _classifier():
     return _util.load(ROOT / 'scripts' / 'ci' / 'classify_changes.py',
                       'classify_callers_mod')
-
-
-def _event(name='pull_request', repository='octo/daedalus',
-           sha='a' * 40, pull_request='248', before='b' * 40):
-    return {'name': name, 'repository': repository, 'sha': sha,
-            'pull_request': pull_request, 'before': before}
-
-
-def _recorder(stdout):
-    calls = []
-
-    def run(argv):
-        calls.append(argv)
-        return stdout
-
-    return calls, run
 
 
 def _assert_value_error(call, message):
@@ -104,7 +89,7 @@ def test_classify_refuses_unsupported_documentation_pattern_in_mixed_paths(
         tmp):
     del tmp
     mod = _classifier()
-    _calls, run = _recorder('README.md\nsrc/server.py\n')
+    _calls, run = _recording_run('README.md\nsrc/server.py\n')
     patterns = ('docs?', '**/*.md')
     with mock.patch.object(mod, 'DOCUMENTATION_PATTERNS', patterns):
         _assert_value_error(
@@ -115,7 +100,7 @@ def test_classify_refuses_unsupported_documentation_pattern_in_mixed_paths(
 def test_classify_reports_mixed_paths_through_outside_fallback(tmp):
     del tmp
     mod = _classifier()
-    _calls, run = _recorder('README.md\nsrc/server.py\n')
+    _calls, run = _recording_run('README.md\nsrc/server.py\n')
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
     assert matrix == mod.FULL_MATRIX, matrix
