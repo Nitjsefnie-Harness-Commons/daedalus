@@ -232,7 +232,7 @@ def _readback_items(owner, pair):
     items = {index: entry(stored) for index, stored in enumerate(
         value for key, value in owner.items.items() if key is not DYNAMIC_KEY)}
     if DYNAMIC_KEY in owner.items:
-        items[DYNAMIC_KEY] = entry(owner.items[DYNAMIC_KEY])
+        fold_dynamic(items, entry(owner.items[DYNAMIC_KEY]))
     return DeferredContainer(items, dict_length(items), 'list')
 
 
