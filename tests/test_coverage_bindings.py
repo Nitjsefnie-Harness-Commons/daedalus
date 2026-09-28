@@ -8,7 +8,7 @@ from _binding_assertions import (  # noqa: E402
     _assert_binding_pair, _scope_cases, _scope_violations)
 from _coverage_authority_scan import (  # noqa: E402
     _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _STALE_UNIVERSAL,
-    holders)
+    phrase_holders)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
     _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _DEST_MUTATIONS,
@@ -631,8 +631,8 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     earlier versions missed their own mutants. The squeeze uses `str.replace`
     because the control-write policy already models it, and widening that
     policy so this control passes would be the mistake the wave is about. A
-    restatement in different words is not detectable here. This suite and the
-    helper holding its search keys are both excluded from its own scan: a file
+    restatement in different words is not detectable here. The scan skips two
+    files: this suite, and the helper that holds the search keys. A file
     holding the keys cannot be one of the files searched for them, and a
     checker is not a second authority.
     """
@@ -640,13 +640,13 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
 
     del tmp
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
-        stated, total = holders(phrase, Path(__file__).name)
+        stated, total = phrase_holders(phrase, Path(__file__).name)
         assert stated == [_AUTHORITY_FILE], (phrase, stated)
         assert total == 1, (phrase, stated, total)
     authority = _carried_parts.__doc__ or ''
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
         assert phrase in authority, (phrase, authority)
-    stale = holders(_STALE_UNIVERSAL, Path(__file__).name)
+    stale = phrase_holders(_STALE_UNIVERSAL, Path(__file__).name)
     assert not stale[0], stale
 
 
