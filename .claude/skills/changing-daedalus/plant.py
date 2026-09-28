@@ -74,6 +74,9 @@ def _publish(target, payload):
                 os.chmod(target, stat.S_IMODE(os.stat(target).st_mode)
                          | stat.S_IWRITE)
             except OSError:
+                # A file we may not chmod is not necessarily one we may
+                # not replace, and raising here would replace the error
+                # that explains what happened with one about a flag.
                 pass
         os.replace(temp, target)
     except OSError:
@@ -141,8 +144,6 @@ def save(path, store):
         with open(path, 'rb') as handle:
             payload = handle.read()
         mode = stat.S_IMODE(os.stat(path).st_mode)
-        # In the try: the guard is check-then-act, so a racing save lands
-        # here and must refuse, not traceback.
         os.makedirs(entry)
         _publish(os.path.join(entry, 'bytes'), payload)
         _publish(os.path.join(entry, 'mode'), f'{mode:o}\n'.encode('ascii'))
