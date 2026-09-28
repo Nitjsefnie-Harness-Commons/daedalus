@@ -29,35 +29,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_builtin_carriers  # noqa: E402
-import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import (  # noqa: E402
+    _callee_scan, _write_tree)
 import _mcp_lambda_sweep  # noqa: E402
 import _mcp_selection_sweep  # noqa: E402
 import _util  # noqa: E402
 
 PROPERTY_CLASSES = _mcp_selection_sweep.PROPERTY_CLASSES
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
-
-
-def _callee_scan(_tmp, callee):
-    """`resolved`, `refused`, or `silent` for one callee, with a resolvable
-    `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
-    _write_tree(Path(_tmp), {
-        'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n',
-        'composition.py': ('\nimport importlib\n\n\ndef load(c, i):\n'
-                           f'    return {callee}("pkg.leaf")\n')})
-    try:
-        scanned = _mcp_import_closure.composition_scan_set(
-            Path(_tmp) / 'composition.py', _tmp)
-    except AssertionError:
-        return 'refused'
-    names = {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
-    return 'resolved' if 'pkg/leaf.py' in names else 'silent'
 
 
 def _swept(_tmp):
