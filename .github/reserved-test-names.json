@@ -439,6 +439,7 @@
     "_handler_is_expiry": {"python": ["tests/_launch_census.py"]},
     "_handles_expiry": {"python": ["tests/_launch_census.py"]},
     "_hands_back": {"python": ["tests/_jsroute_net_read.py"]},
+    "_hands_to_a_child_slot": {"python": ["tests/_receiver_resolution.py"]},
     "_hard_link": {"python": ["tests/_command_candidates.py"]},
     "_harness_failure": {"python": ["tests/_overlap.py"]},
     "_has_cwd_control": {"python": ["tests/_coverage_bindings.py"]},

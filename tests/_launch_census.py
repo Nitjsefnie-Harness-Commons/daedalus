@@ -103,24 +103,43 @@ assignment rather than a gap: one control, one owner, and a control in
     negative space is untouched by construction rather than by a table: a
     child-ending call resolves to a `Popen` method or a `subprocess`
     member, and none of those is a member of the three modules;
-  - `socket.socket` is a CLASS, so no member of the modules above
-    resolves a receiver to one and `sock.settimeout(timeout=5)` is STILL
-    refused. That is a known false red, named here rather than left to be
-    found, and the control beside it is
-    `test_a_call_that_is_not_a_read_keeps_its_timeout_fault`, which goes
-    red if a narrowing ever starts discharging it;
+  - `sock.settimeout(timeout=5)` is STILL refused, and it is a known false
+    red named here rather than left to be found. The reason is the
+    filter and NOT that `socket.socket` is a class: three of the five
+    members the derivation admits ARE classes, and a call resolves to
+    one — `http.client.HTTPConnection(host, timeout=5)` is discharged, as
+    is the constructor of a connection class. `socket.socket` is out
+    because `inspect.signature(socket.socket)` names no `timeout`, and a
+    future socket or connection class that does name one enters the set
+    and its call sites discharge with it. The control beside this is
+    `test_a_call_that_is_not_a_read_keeps_its_timeout_fault`, which pins
+    the outcome and goes red if a narrowing starts discharging it;
+  - a name the module IMPORTS stays bound when a later assignment
+    rebinds it to something the walk cannot resolve — a parameter, a
+    lambda, a call result, a subscript. `_dotted_bindings` records an
+    assignment only when its right-hand side is a dotted name, so
+    `urlopen = lambda u: u` under `from urllib.request import urlopen`
+    leaves the import standing and the call below it is DISCHARGED. That
+    is a false green and it is this arm's failure direction, so it is
+    named: none of the four shapes occurs in the three real files, and
+    `test_a_shadowed_import_binding_is_still_a_fault` pins the current
+    behaviour so that fixing it turns that control red and this sentence
+    has to be rewritten rather than quietly falsified;
   - a `timeout` PARAMETER on a function that cannot put it on a child: it
-    neither places a launch nor hands the parameter, or a name computed
-    from it, to a receiver the census has resolved to a child or to a
-    path function called by BARE NAME. A test double's modelled signature
-    and a helper that applies its own number are both that, and the
+    neither places a launch, nor hands the parameter — or a name computed
+    from it — into a child-ending slot, nor to a path function called by
+    BARE NAME. A test double's modelled signature and a helper that
+    applies its own number are both that. What is NOT a discharge is
+    failing to follow the number: a receiver the walk could not resolve is
+    the case the unconditional signature refusal existed for, and the
+    question is what the number is handed TO rather than whose object. The
     number a CALLER fills is still read at the caller's line by
     `_parameter_bound_faults`, which is the mechanism the hand-off has
-    always used. Four controls in
+    always used. Six controls in
     `tests/test_launch_census_receivers.py` hold it, in both directions:
-    the two doubles and the helper, and a double that forwards its
-    deadline to a child either by owning it or by handing it to a path
-    function;
+    the two doubles, the helper, a double that forwards its deadline to a
+    child by owning it or by handing it to a path function, and a
+    deadline the census cannot trace at all;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
@@ -533,13 +552,13 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
     because judging it here would refuse the shipped cleanup's own bounded
     reap.
     """
-    callees, bound, receivers, direct, aliases, parameters = context
+    callees, bound, receivers, direct, aliases = context
     faults = []
     if (function is scope and 'timeout' in _parameter_names(function)
             and 'timeout' not in handed
             and receiver.deadline_reaches_a_child(
-                function, 'timeout', callees, receivers, direct, aliases,
-                parameters)):
+                function, 'timeout', callees, receivers, direct,
+                aliases)):
         faults.append((relative, function.lineno, 'timeout parameter',
                        'a path function takes a deadline parameter, so a '
                        'bound reaches the child through the signature'))
@@ -583,7 +602,7 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     callees = set(in_path) | set(callable_names)
     constants = _module_constants(tree)
     context = (callees, receiver._dotted_bindings(tree), receivers, direct,
-               aliases, parameters)
+               aliases)
     faults = []
     handed = frozenset(_CHILD_PARAMETERS.get(relative, {}))
     for scope in _bodies_in_scope(tree, in_path):
