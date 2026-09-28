@@ -47,7 +47,17 @@ walk's half by executing it.
 `select` also decides which runs are not evidence at all, which is
 where a refresh that would narrow the file is stopped; the reasoning
 is in its own docstring, and it is the one place in this module that
-looks at a bound the artifacts themselves do not carry.
+looks at a bound the artifacts themselves do not carry -- it is handed
+the count of recorded suites the TREE still holds, because the write
+is a union and a deleted suite's weight is carried forever.
+
+WHAT THIS MODULE DOES NOT OWN. The median over a run SAMPLE and the
+conversion between the file's two units are not facts about a run
+directory, so they live in the writing half beside the write that uses
+them. What it owns is everything a reader has to know about the
+artifacts, and `suite_seconds` is public for the same reason `resolve`
+is public in the planner: a second implementation of the round walk is
+a second rule for what a measurement is.
 """
 import json
 import math
@@ -79,7 +89,7 @@ def _head_rounds(cell):
                   if path.is_dir() and path.name.startswith(_ROUND_PREFIX))
 
 
-def _suite_seconds(cell, run_id):
+def suite_seconds(cell, run_id):
     """Every suite the cell's head rounds carry, and its per-round total.
 
     A suite missing from one round is averaged over the rounds that
@@ -141,7 +151,7 @@ def read_run(run_dir, run_id):
     weights = {}
     references = {}
     for name, cell in cells.items():
-        seconds = _suite_seconds(cell, run_id)
+        seconds = suite_seconds(cell, run_id)
         reading = _reference(cell, run_id, seconds)
         references[name] = reading
         for suite, value in seconds.items():
@@ -179,7 +189,7 @@ def measured_suites(run_dir, run_id):
     """
     names = set()
     for cell in cell_dirs(run_dir).values():
-        names.update(_suite_seconds(cell, run_id))
+        names.update(suite_seconds(cell, run_id))
     return names
 
 
@@ -240,26 +250,3 @@ def select(runs, wanted, max_cells=1, recorded=0):
               'incomplete': incomplete, 'degenerate': degenerate,
               'empty': empty}
     return selected, report
-
-
-def _median_weights(selected):
-    """Every suite's median weight, and the median reference seconds."""
-    by_suite = {}
-    references = []
-    for _run_id, weights, readings in selected:
-        for suite, weight in weights.items():
-            by_suite.setdefault(suite, []).append(weight)
-        references.extend(readings.values())
-    medians = {suite: statistics.median(values)
-               for suite, values in by_suite.items()}
-    return medians, statistics.median(references)
-
-
-def _unit_scale(old_units, reference):
-    """What a number recorded in `old_units` is worth in the new units."""
-    if old_units == 'reference-multiples':
-        return 1.0
-    if old_units == 'seconds':
-        return 1.0 / reference
-    raise RefreshError(f'cannot convert units {old_units!r} into '
-                       'reference-multiples')
