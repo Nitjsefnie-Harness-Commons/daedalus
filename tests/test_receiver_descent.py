@@ -139,13 +139,15 @@ def _for_iterable_carrier_cases():
     already reaches, and a loop over something that is not a call is
     judged by the walk with no help from here.
 
-    The five rows between those bounds and the four above enumerate the
+    The five rows between those bounds and the five above enumerate the
     FAMILY the arm cannot separate, because its condition is structural
-    — the callee chain bottoms on something other than a name — and not
-    a property of what the call returns. The four above are detections:
-    every one of them yields the module, and a launch method read off
-    the module launches. The five below are NOT, and are refused anyway.
-    Measured at runtime and recorded here so the trade is stated once:
+    — the callee chain bottoms on something other than an atom — and not
+    a property of what the call returns. The five above are detections:
+    every one of them binds the module, and a launch method read off the
+    module launches. They are the four shapes `_iterable_parts.__doc__`
+    names, the async row being the flat one again under `async def`. The
+    five between are NOT, and are refused anyway. Measured at runtime and
+    recorded here so the trade is stated once:
 
     | row | what the loop actually receives |
     |---|---|
@@ -247,11 +249,14 @@ def _comprehension_iterable_cases():
     statement and not for the `comprehension`, which is the arm's own
     sibling and nothing else.
 
-    The last three are the family the table above enumerates, carried into
-    the expression form: `.keys()` and `.items()` are among the members
-    that are not detections, and the f-string method is another. The
-    third row is a `Popen` rather than a `run` and the second a dict
-    comprehension, so neither is the first row with a name changed.
+    The three above are detections and the four below are the family the
+    for-loop table enumerates, carried into the expression form. None of
+    the four reaches a launch read: `.keys()` and `.items()` bind a
+    string and a tuple, a list `pop()` hands the loop a module that is
+    not iterable, and an f-string method binds a string. The third row
+    is a `Popen` rather than a `run` and the second a dict comprehension
+    whose key is the launcher, so neither is the first row with a name
+    changed.
 
     The comprehension's own conditions are a different path and are
     unaffected: `_CARRIED_FIELDS[ast.comprehension]` is `('ifs',)`, and
@@ -267,9 +272,9 @@ go = [launcher.run(['python3', 'child.py'])
         ('dict comprehension over dict values', """import os
 import subprocess
 os.chdir(tmp)
-go = {k: launcher.run(['python3', 'child.py'])
-      for k, launcher in {'sp': subprocess}.values()}
-""", 'for k, launcher in'),
+go = {launcher: launcher.run(['python3', 'child.py'])
+      for launcher in {'sp': subprocess}.values()}
+""", 'for launcher in'),
         ('list comprehension over a Popen', """import os
 import subprocess
 os.chdir(tmp)

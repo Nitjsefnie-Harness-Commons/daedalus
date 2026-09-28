@@ -32,10 +32,9 @@ _COMPREHENSION_ITERABLE_INVOKE = (
     'descent_suite.test_a_comprehension_reading_a_launcher_is_refused('
     'None)')
 # The base the descent hands over, and what it is handed over on. The gate
-# is a narrowing in two directions, and each has a row: widening it hands
-# the base of `f"{subprocess}".upper()` to the walk, which finds the bare
-# module name inside the string and calls it a launcher in the receiver
-# position, and dropping it loses the base the
+# narrows two ways and each has a row: widening it hands the base of
+# `f"{subprocess}".upper()` to the walk, which finds the bare module name
+# inside the string and calls it a launcher; dropping it loses the base the
 # `{'sp': subprocess}['sp'].run(...)` rows are decided on.
 _RECEIVER_BASE = (
     "    direct = callee is value.func\n"
