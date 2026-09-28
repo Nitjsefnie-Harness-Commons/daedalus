@@ -332,6 +332,38 @@ def test_every_reader_answers_over_the_judged_set(tmp):
     assert 'no tests run on' in printed, printed
 
 
+FILTER_NAMES = frozenset(
+    {'_judged', '_superseded', '_workflow_of', '_started_key'})
+
+
+def test_the_filter_is_reached_through_ci_gate(tmp):
+    """One filter, and the edge that reaches it - not its behaviour.
+
+    A copy pasted back into a caller is the drift this branch exists to
+    end, and it survives every other control: a behaviourally identical
+    private `_judged` in `ci_wait.py` leaves the 81 pre-existing tests in
+    the four suites that read these modules green. The two halves below
+    are the tripwire the chokepoint needs. The first refuses a second
+    definition anywhere in the skill, counting only definitions - the
+    import that IS the edge is not one, which is why a correct tree lists
+    one holder. The second pins the binding, because `wait.ci_gate` is the
+    module `ci_wait` imported, so this compares the filter in use with the
+    filter owned rather than two separately loaded copies of one file.
+
+    What it does not see: a copy pasted under a name none of these four
+    carries. That is the standing limit of a control that watches names.
+    """
+    del tmp
+    skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
+    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_one_filter')
+    holders = [path.name for path in sorted(skill.iterdir())
+               if path.suffix == '.py'
+               and FILTER_NAMES & _declared_names(path)]
+    assert holders == ['ci_gate.py'], holders
+    assert wait._judged is wait.ci_gate._judged
+    assert wait._superseded is wait.ci_gate._superseded
+
+
 def test_both_waiters_read_this_one_predicate(tmp):
     """Kept, and no longer the control that carries the weight.
 
