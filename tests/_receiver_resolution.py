@@ -155,8 +155,11 @@ def is_network_read(func, bound):
     from any of them are one object, and anything else that calls itself
     `urlopen` is not a member of it.
     """
-    dotted = _resolve_dotted(func, bound)
+    # The set is read FIRST because deriving it imports the three modules,
+    # and a `getattr` on `urllib` for a name the package has not been
+    # asked for yet is a miss the resolver would report as "not a read".
     reads = _network_reads()
+    dotted = _resolve_dotted(func, bound)
     if dotted is None:
         return False
     value = _live_object(dotted)
