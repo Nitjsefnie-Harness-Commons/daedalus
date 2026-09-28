@@ -40,7 +40,8 @@ _PURE_IMPORTS = frozenset({
     ('_workflow_cache_boundary', '_real_step'),
     # The opened-set scan reads every `tests/*.py` and returns (the files
     # stating the phrase, how many times between them), sparing one copy
-    # per file where the phrase is assigned to a name. It writes nothing.
+    # in exactly one of them: the key-holder, where the phrase is assigned
+    # to a name at the module's top level. It writes nothing.
     ('_coverage_authority_scan', 'phrase_holders'),
 })
 _PURE_METHODS = frozenset({

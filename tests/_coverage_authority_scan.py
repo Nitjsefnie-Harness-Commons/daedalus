@@ -39,17 +39,12 @@ def _written(text, node):
 
     A literal the parser folded from adjacent pieces is one `Constant`
     whose written text still carries the quote between them, so only
-    the source tells that spelling from a whole literal. Offsets are
-    byte offsets, so the text is cut as bytes rather than characters.
+    the source tells that spelling from a whole literal. That is why
+    this is read at all; `ast.get_source_segment` does the reading,
+    and its byte-offset handling is the reason to use it rather than a
+    character-indexed slice.
     """
-    raw = text.encode('utf-8')
-    starts, at = [0], 0
-    for line in raw.splitlines(keepends=True):
-        at += len(line)
-        starts.append(at)
-    return raw[starts[node.lineno - 1] + node.col_offset:
-               starts[node.end_lineno - 1] + node.end_col_offset
-               ].decode('utf-8')
+    return ast.get_source_segment(text, node) or ''
 
 
 def _defines(text, squeezed, key):
@@ -106,6 +101,11 @@ def phrase_holders(phrase, directory=None):
     depth, is a statement like any other. One is ever exempted, and only
     against an occurrence the count actually found, so a declaration
     beside the first is still a second statement.
+
+    The one file parsed is this one, which cannot fail to parse: it has
+    already been imported to be running. That is why reading all of
+    `tests/` costs one read each and a parse of one, and why no parse
+    here is guarded.
     """
     def squeezed(text):
         """The text with a rewrap's marks gone, so wrapping cannot hide it."""
