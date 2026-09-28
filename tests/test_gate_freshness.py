@@ -91,6 +91,7 @@ def test_the_carried_by_the_branch_exclusion_is_declared_and_small(tmp):
     m = _mod()
     assert m.CARRIED_BY_THE_BRANCH == (
         '.github/ci-thresholds.json',
+        'tests/test_commit_step_seam.py',
         'tests/test_timed_coverage.py',
         'tests/test_timed_coverage_bounds.py',
         'tests/test_timed_planner.py',

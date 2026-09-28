@@ -75,6 +75,65 @@ def stub_path(workdir):
     return bin_dir
 
 
+# A workflow `run:` block may set a POSIX mode -- the timings refresh
+# opens its push key with `install -d -m 700 ~/.ssh`. That works on the
+# ubuntu runner the workflow uses and cannot work on a filesystem with
+# no mode to hold: NTFS creates the directory and reports that it
+# cannot change its permissions. So a control that REPLAYS such a step
+# needs to know whether the filesystem it is standing on can, and the
+# question has to be asked of the filesystem rather than of the
+# platform name -- a Linux runner on a filesystem that cannot set the
+# mode is in exactly the same position as a Windows one, and a Windows
+# runner on a filesystem that can is fine.
+_MODE_PROBE = 'install -d -m 700 "$HOME/.daedalus-mode-probe"\n'
+_MODE_RESOLVE = 'command -v install > /dev/null || exit 127\n'
+
+
+def filesystem_holds_a_mode(workdir, environment, timeout=120):
+    """`(holds, detail)` for a filesystem's ability to hold a POSIX mode.
+
+    Asked by running the step's OWN command against a scratch directory
+    under the same HOME, through the same resolved bash and the same
+    environment the step would run under -- so the answer is about this
+    filesystem and this machine, not about a name.
+
+    A MISSING `install` is deliberately not a filesystem fact and does
+    not report `holds=False`: a machine that cannot run the step at all
+    should have its control say so in one line, not skip quietly over a
+    problem it could have reported.
+    """
+    done = run_workflow_script(
+        workdir, _MODE_RESOLVE + _MODE_PROBE, environment, timeout)
+    if done.returncode == 0:
+        return True, ''
+    if done.returncode == 127:
+        return True, ('install cannot be resolved on this PATH, so the '
+                      'mode was never attempted')
+    detail = (done.stderr.strip() or done.stdout.strip()
+              or f'install exited {done.returncode}')
+    return False, detail
+
+
+def skip_unless_a_mode_can_be_set(workdir, environment, measure=None):
+    """Skip a step's replay on a filesystem that cannot hold its mode.
+
+    `measure` is the seam the pin reaches through: the default is the
+    measurement above, and a caller may supply its own so a control can
+    drive BOTH branches of this without a machine that happens to be
+    unable. Everything else -- what the reason says, that the refusal
+    is quoted, that a capable filesystem grants nothing -- is in
+    `test_commit_step_seam.py`, beside the control it governs.
+    """
+    holds, detail = (measure or filesystem_holds_a_mode)(workdir, environment)
+    if holds:
+        return
+    _util.skip(
+        'this filesystem cannot hold a POSIX mode, so the step that sets '
+        f'one was not replayed here ({detail}); the step itself is '
+        'unchanged and the structural half of its control ran on this '
+        'machine regardless')
+
+
 def run_workflow_script(workdir, script, environment, timeout=120):
     """Run one workflow run block with the stubs and no coverage collector.
 
