@@ -357,6 +357,107 @@ def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
     assert 'usage' in result.stderr.lower(), result.stderr
 
 
+# The block layout, written out here rather than read back from the
+# generator. A literal is the only expectation the subject cannot produce by
+# accident, and the HEAD preamble above it is a frozen constant rather than
+# something this control recomputes.
+_LITERAL_TAIL = (
+    '\n'
+    '\n'
+    '# ─── root ───\n'
+    '!/a.py\n'
+    '\n'
+    '# ─── d ───\n'
+    '!/d/\n'
+    '!/d/e.py\n'
+)
+
+
+def test_the_derivation_renders_the_literal_block_layout(tmp):
+    """The derivation's own output, pinned to a line the test wrote out.
+
+    Everything else here compares the generator against itself, so this is
+    the one assertion that can fail when the derivation is wrong rather than
+    when the two copies of it disagree.
+    """
+    del tmp
+    generator = _util.load(
+        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_literal')
+    # Unsorted, and in a nested directory beside a root file: the literal
+    # carries the sort order, the block header and the directory re-open.
+    text = generator.derive(['d/e.py', 'a.py'])
+    assert text.endswith(_LITERAL_TAIL), repr(text[-120:])
+
+
+def test_the_derivation_launches_nothing_and_ignores_its_input_order(tmp):
+    """The derivation consumes the list it is handed, and nothing else."""
+    generator = _util.load(
+        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_pure')
+    launched = []
+
+    def refuse(*args, **kwargs):
+        launched.append(args)
+        raise AssertionError('the derivation launched a process')
+
+    real_run = generator.subprocess.run
+    generator.subprocess.run = refuse
+    elsewhere = Path(tmp) / 'elsewhere'
+    elsewhere.mkdir()
+    real_cwd = os.getcwd()
+    os.chdir(elsewhere)
+    try:
+        from_list = generator.derive(['b.py', 'a.py'])
+        from_tuple = generator.derive(('b.py', 'a.py'))
+        from_set = generator.derive({'b.py', 'a.py'})
+    finally:
+        os.chdir(real_cwd)
+        generator.subprocess.run = real_run
+    assert not launched, launched
+    assert from_list == from_tuple == from_set, (
+        'the derivation depends on the order or the type it was handed')
+
+
+def test_main_writes_exactly_what_the_shared_derivation_returns(tmp):
+    """`main` must ship the shared derivation's text, not a second copy.
+
+    Two callers now need the file this generator writes, and a second copy
+    of the rendering is one nobody keeps correct. Swapping `derive` for a
+    stub is what makes the hand-off observable: the stub names one path,
+    and the file `main` leaves behind has to be that stub's text.
+    """
+    repo = Path(tmp) / 'repo'
+    repo.mkdir()
+    subprocess.run(['git', '-C', str(repo), 'init', '-q'], check=True)
+    (repo / 'tracked.txt').write_text('published\n', encoding='utf-8')
+    subprocess.run(
+        ['git', '-C', str(repo), 'add', '-f', 'tracked.txt'], check=True)
+
+    generator = _util.load(
+        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_shared')
+    real_derive = generator.derive
+    handed = []
+    # The stub's text has to name the tracked path, or main's own
+    # postcondition refuses the run and the file it leaves behind is
+    # reported as a failure rather than read. The second line is the marker:
+    # nothing the real rendering produces names a path that is not tracked.
+    stub_text = '*\n!/tracked.txt\n!/stub-marker.txt\n'
+
+    def named_only(paths):
+        handed.append(sorted(paths))
+        return stub_text
+
+    generator.derive = named_only
+    try:
+        result = generator.main(repo)
+    finally:
+        generator.derive = real_derive
+
+    assert result == 0, result
+    assert handed == [['tracked.txt']], handed
+    assert (repo / '.gitignore').read_text(encoding='utf-8') == stub_text, (
+        'main wrote a file the derivation did not')
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='gitignoregen_')
 
