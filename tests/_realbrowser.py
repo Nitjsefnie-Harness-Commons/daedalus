@@ -57,21 +57,25 @@ NODE_WEBSOCKET_PROBE = (
     f'{json.dumps(WEBSOCKET_ABSENT_TOKEN)})')
 WINDOWS_COMMAND_TOO_LONG = 206
 
-# The two children this module launches, and a bound composed for each. They
-# are hang detectors, not health margins: `NODE_WEBSOCKET_PROBE` starts Node,
-# reads one global and writes one of two tokens, and the E2BIG diagnostic runs
-# the interpreter on an empty program. Neither can reach outside the suite, so
-# a bound here is for a WEDGED child, never a slow one.
+# The two children this module keeps a bound at, and the bound composed for
+# each. The module launches a third — the browser itself, through
+# `subprocess.Popen` in `_launch_and_reach`, with no `timeout=` at its call
+# site. These two are hang detectors, not health margins:
+# `NODE_WEBSOCKET_PROBE` starts Node, reads one global and writes one of two
+# tokens, and the E2BIG diagnostic runs the interpreter on an empty program.
+# Neither can reach outside the suite, so a bound here is for a WEDGED child,
+# never a slow one.
 #
 # The samples are measured with the machine BUSY, because a wall-clock bound is
 # two margins — the child's real cost, and the runner's busyness — and only the
 # second is what a bare number measures. A sample that cannot express the
 # second is a sample of the first, which is what the literal was: the bare `10`
-# this replaces sat at 3.4x `NODE_PROBE`'s own slowest busy sample, and at
-# 2.8x `MINIMAL_SPAWN`'s, which is the site that record does not belong to.
-# Both are tight, and a ratio that thin is the argument for not typing a
-# number. No run in either band crossed the literal, so nothing here claims
-# one did; that is the edge this change cuts at, and the ratio is its width.
+# this replaces sat at 3.4x `NODE_PROBE`'s slowest sample and at 0.63x
+# `MINIMAL_SPAWN`'s — ONE `NODE_PROBE_TIMEOUT` served both before this
+# branch, so the two ratios are 10/2.944 and 10/15.904. The first is
+# tight, which is the argument for not typing a number. The second is the
+# stronger one: that literal sat UNDER the child it was guarding, which is
+# the edge this change cuts at and the one its table records a crossing on.
 #
 # The band is one busy process per core on a 12-core host. `MINIMAL_SPAWN` also
 # records an oversubscribed band, and that is where the one real crossing in
@@ -85,11 +89,13 @@ WINDOWS_COMMAND_TOO_LONG = 206
 #   MINIMAL_SPAWN_SAMPLES_S   15.904 max, idle then busy then oversubscribed
 #   MINIMAL_SPAWN_DEADLINE_S  80     round(15.904 * 5)
 #
-# `MINIMAL_SPAWN` is also the one site here with no runtime stall control, and
-# that is a stated limit rather than an oversight: it only runs when a launch
-# fails with E2BIG, which no suite produces, so no control in the tree can
-# watch its child, which is why a stand-in it can be driven with is the whole
-# of what covers it. What holds its FIGURE is two rules in
+# `MINIMAL_SPAWN` has no stall control at its COMPOSED figure — its site is
+# reached only through a launch that failed with E2BIG, and the only suites
+# that reach it construct that failure themselves, so nothing ever waits 80s
+# for this child. Its expiry is covered twice over: a stand-in in
+# `tests/test_real_browser_environment.py` for the classification, and a
+# real-expiry control beside it that lowers the deadline to 1ms and lets a
+# real `python -c ''` be outrun. What holds its FIGURE is two rules in
 # `tests/test_node_launch_routing.py`: one refuses a deadline that is not
 # `round()`ed from a recorded table and the shared multiple, and the other
 # refuses a table whose slowest sample would compose a deadline under a

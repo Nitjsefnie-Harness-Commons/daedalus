@@ -7,17 +7,104 @@ used to get wrong in the direction that loses a site, and each is checked
 against the decision the walk makes rather than against a restatement of
 it. The rationale for what each one is for lives beside the code it
 constrains, not here.
+
+Two kinds of plant live here and they answer different questions. A SHAPE is
+a string handed to the reader, and it settles what the walk thinks of a
+form. A TARGET is a real module's own bytes with one change appended, read
+back off disk and walked whole, and it settles the only question a shape
+cannot: whether the walk and the module the rule is written about agree.
+A suite of shapes alone would have passed while the walk sat next to a
+`subprocess.run(..., timeout=30)` in a real harness, which is the gap the
+targets close.
 """
 import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _node_launch_routing as routing  # noqa: E402
 import _util  # noqa: E402
 from _command_type_readers import _parents  # noqa: E402
 from _node_launch_routing import (  # noqa: E402
     NOT_FIXED_WORK, VERDICT_NODE, VERDICT_OTHER, VERDICT_UNRESOLVED, _bounds,
     _bounds_its_own_child, _exempt, _launches)
+
+# The body this branch removed from the real `tests/_jsroute_harness.py`:
+# a Node child launched at a hand-typed `timeout=30`, outside the shared
+# hang detector. It is the defect the whole control exists to catch, in the
+# module the branch routed, so a planted copy of that module is the target
+# that answers whether the control still catches it.
+_TYPED_LAUNCH = (
+    'def _planted_direct_launch(path):\n'
+    "    node = shutil.which('node')\n"
+    '    return subprocess.run([node, str(path)], capture_output=True,\n'
+    '                          text=True, timeout=30)\n')
+
+
+def test_the_walk_reports_a_routed_module_reverted_to_a_typed_bound(tmp):
+    """The control's own defect, planted in the module it was written about.
+
+    Every plant in this file used to be a string literal, so nothing proved
+    the walk would have caught the defect returning to the tree it was
+    added for. This is that evidence: the real `tests/_jsroute_harness.py`
+    with the launch this branch removed appended to it, walked whole, and
+    the `unrouted` class must name it. A suite of shapes could not have
+    answered it — a string `ast.parse`d in this file is not a module
+    anything else in the repository reads.
+    """
+    root = Path(tmp) / 'planted'
+    routing._planted_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
+    planted = (root / '_jsroute_harness.py').read_text(encoding='utf-8')
+    assert planted.count('timeout=30') == 1, (
+        'the plant did not reach the real module')
+    line = planted.splitlines().index(
+        '    return subprocess.run([node, str(path)], capture_output=True,'
+    ) + 1
+    unrouted, _, unclassified, _, _ = routing._routing_sweep(root)
+    assert not unclassified, unclassified
+    assert unrouted == [f'_jsroute_harness.py:{line} (timeout=30)'], (
+        'a Node child at a hand-typed bound was walked and not reported: '
+        f'{unrouted}')
+
+
+def test_a_carve_out_that_hides_a_site_is_reported_by_the_walk(tmp):
+    """`NOT_SITES` cannot take a member whose own launches are findings.
+
+    A skip list keyed on a filename with nothing else in it is a list whose
+    next member is added to make a red go away, and the red goes away: the
+    module is skipped whole, so the launch nobody was shown is not reported
+    and no row goes stale. Adding `tests/_jsroute_harness.py` to the table
+    beside the plant above left every control green before this — the same
+    reversion, one table entry away from being invisible.
+
+    So the table is asked the question it exists to defer: each member is
+    walked anyway, and one that carries a launch the sweep would have
+    reported is a finding about the exemption rather than about the launch.
+    """
+    root = Path(tmp) / 'planted'
+    routing._planted_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
+    line = (root / '_jsroute_harness.py').read_text(
+        encoding='utf-8').splitlines().index(
+            '    return subprocess.run([node, str(path)], '
+            'capture_output=True,') + 1
+    original = dict(routing.NOT_SITES)
+    routing.NOT_SITES['_jsroute_harness.py'] = 'planted'
+    try:
+        _, _, _, carved, _ = routing._routing_sweep(root)
+        assert carved == [
+            f'_jsroute_harness.py _jsroute_harness.py:{line} (timeout=30)'
+        ], carved
+    finally:
+        routing.NOT_SITES.clear()
+        routing.NOT_SITES.update(original)
+    assert routing.NOT_SITES == original, 'the table did not restore'
+    # And the same module, unplanted, is clean — so the check discriminates
+    # rather than refusing every member, and the exemption is a no-op on
+    # the tree as it stands.
+    clean = Path(tmp) / 'clean'
+    routing._planted_copy(clean, '_jsroute_harness.py', 'VALUE = 1')
+    _, _, _, not_carved, _ = routing._routing_sweep(clean)
+    assert not not_carved, not_carved
 
 
 def test_a_deadline_that_cannot_expire_is_not_a_deadline(tmp):
@@ -53,7 +140,7 @@ def test_a_deadline_that_cannot_expire_is_not_a_deadline(tmp):
         "    process = subprocess.Popen(['node', 'c.js'])\n"
         '    return process.communicate(timeout=None)\n')
     launch = _launches(tree)[0]
-    assert not _bounds_its_own_child(tree, launch, _parents(tree)), (
+    assert not _bounds_its_own_child(launch, _parents(tree)), (
         'timeout=None was read as a bound on the child')
 
 
@@ -246,13 +333,13 @@ def test_a_wait_inside_an_expiry_handler_is_not_the_bounds_of_the_child(tmp):
     tree = ast.parse(source)
     parents = _parents(tree)
     launch = _launches(tree)[0]
-    assert _bounds_its_own_child(tree, launch, parents), 'the real wait missed'
+    assert _bounds_its_own_child(launch, parents), 'the real wait missed'
     dropped = source.replace('out = process.communicate(timeout=30)',
                              'out = process.communicate()')
     assert dropped != source, 'the plant did not reach the real code'
     tree = ast.parse(dropped)
     assert not _bounds_its_own_child(
-        tree, _launches(tree)[0], _parents(tree)), (
+        _launches(tree)[0], _parents(tree)), (
         'a drain of a killed child satisfied the child\'s own bound')
     # A bound at the launch itself needs no later wait.
     inline = ('import subprocess\n'
@@ -260,7 +347,7 @@ def test_a_wait_inside_an_expiry_handler_is_not_the_bounds_of_the_child(tmp):
               "    return subprocess.run(['node', 'child.js'], timeout=30)\n")
     tree = ast.parse(inline)
     assert _bounds_its_own_child(
-        tree, _launches(tree)[0], _parents(tree))
+        _launches(tree)[0], _parents(tree))
 
 
 def test_the_boundary_direction_can_still_tell_bounded_from_unbounded(tmp):
@@ -275,13 +362,13 @@ def test_the_boundary_direction_can_still_tell_bounded_from_unbounded(tmp):
                      "    return subprocess.run(['node', 'c.js'],\n"
                      '                          timeout=30)\n')
     tree = ast.parse(on_the_launch)
-    assert _bounds_its_own_child(tree, _launches(tree)[0], _parents(tree))
+    assert _bounds_its_own_child(_launches(tree)[0], _parents(tree))
     with_nothing = ('import subprocess\n'
                     'def launch():\n'
                     "    return subprocess.run(['node', 'c.js'])\n")
     tree = ast.parse(with_nothing)
     assert not _bounds_its_own_child(
-        tree, _launches(tree)[0], _parents(tree))
+        _launches(tree)[0], _parents(tree))
     # A bound on a DIFFERENT process does not bound this one.
     other_process = ('import subprocess\n'
                      'def launch():\n'
@@ -291,7 +378,7 @@ def test_the_boundary_direction_can_still_tell_bounded_from_unbounded(tmp):
                      '    return process.wait()\n')
     tree = ast.parse(other_process)
     assert not _bounds_its_own_child(
-        tree, _launches(tree)[0], _parents(tree))
+        _launches(tree)[0], _parents(tree))
 
 
 def main():
