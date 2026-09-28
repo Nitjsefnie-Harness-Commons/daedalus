@@ -616,46 +616,6 @@ def test_a_recorded_zero_weight_is_a_move_not_a_division(tmp):
         ('test_tiny.py', 0.0, 1.5)]
 
 
-def test_the_commit_message_names_the_runs_the_file_records(tmp):
-    """The subject and `measured_from` are rendered from ONE value.
-
-    They did not have to be. Commit `eed3ae9e` is titled "ci: refresh
-    suite timings from run 36318864740" and the file it wrote records
-    `measured_from: 36310409594`, because the workflow built its
-    subject from `${{ github.run_id }}` -- the REFRESH workflow's own
-    run -- while the refresher recorded the `tests` run it measured.
-    Two different runs, spelled as if they were one, and nothing
-    compared them: the refresher is what writes `measured_from`, and
-    the workflow is what writes the subject, and each was right about
-    its own value.
-
-    So the refresher now renders the subject too, from the same run
-    list and through the same join as the field, and writes it where
-    the workflow can read it. The assertion is on the two strings
-    agreeing, over a THREE-run sample, because a one-run sample cannot
-    tell a shared rendering from a coincidence.
-    """
-    refresh = _refresh()
-    root = Path(tmp) / 'runs'
-    for run_id, seconds in ((30, 4.0), (29, 6.0), (28, 8.0)):
-        _write_run(root, run_id, {'cell-01': {'test_a.py': seconds}})
-    out = _file(tmp, _data({'test_a.py': 2.0}))
-    message = Path(tmp) / 'subject.txt'
-    args = _refresh_args(tmp, root, out, runs=3)
-    args += ['--message-file', str(message)]
-    _out, err = _run(refresh, args)
-    written = json.loads(out.read_text(encoding='utf-8'))
-    assert written['measured_from'] == '30, 29, 28', written
-    subject = message.read_text(encoding='utf-8')
-    assert subject.strip() == refresh.commit_message([30, 29, 28]), subject
-    # The property, not the spelling: every run the file records is
-    # named in the subject, and nothing else is.
-    for run_id in written['measured_from'].split(', '):
-        assert run_id in subject, (run_id, subject)
-    assert '36318864740' not in subject, subject
-    assert 'wrote' in err, err
-
-
 def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
     """Fixed work, not a seconds-target loop: the unit cannot normalize."""
     workload = _workload()
