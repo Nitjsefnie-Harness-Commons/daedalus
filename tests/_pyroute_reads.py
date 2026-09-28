@@ -264,6 +264,15 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
     """A pop's and a popitem's removals are applied here, at evaluation, once
     per node per state; every other resolution leaves the state as it found
     it."""
+    # A read-back resolves before the cache is consulted, because the value
+    # the cache holds for a call whose receiver is a call result is the
+    # RECEIVER, and a read-back of that receiver is not what the call
+    # evaluates to. Every other resolution keeps the cache's answer, which
+    # is the whole point of consulting it.
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr in _MAPPING_READBACKS:
+        readback = _mapping_readback(node, state, node.func.attr)
+        if readback is not None: return readback
     known = _known_value(node, state)
     if known is not None: return known
     if isinstance(node, ast.GeneratorExp):
@@ -348,13 +357,6 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if (isinstance(node.func, ast.Attribute)
                 and node.func.attr == 'setdefault'):
             return _setdefault_value(node, state)
-        if isinstance(node.func, ast.Attribute) \
-                and node.func.attr in _MAPPING_READBACKS:
-            # Before the owner arms: a read-back names no key, so it reaches
-            # every value the mapping holds, where a lookup answers for one.
-            readback = _mapping_readback(node, state, node.func.attr)
-            if readback is not None:
-                return readback
         owner = mapping_lookup_owner(node, state)
         if owner is not None:
             value = _mapping_item_value(node, owner, state)
