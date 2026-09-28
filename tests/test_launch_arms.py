@@ -24,11 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import arm_sweep  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
-from _launch_arms import (ARM_CONTROLS,  # noqa: E402
-                          CRASH_CONTROLLED, DEAD, LAUNCH_ARMS,
-                          MARKER_NON_MEMBERS, REDUNDANT, ROW_UNCLAIMED,
-                          SECONDARY_CONTROLLED, STEP_CEILING_CONTROL,
-                          STATES)
+from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
+                                MARKER_NON_MEMBERS, ROW_UNCLAIMED,
+                                SECONDARY_CONTROLLED)
+from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
+                          REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
@@ -267,6 +267,10 @@ def test_the_crash_set_names_only_arms_that_are_controlled(tmp):
     assert not not_controlled, (
         f'crash set naming a non-CONTROLLED arm: {not_controlled}')
     known = ROW_LABELS | CONTROL_LABELS | {STEP_CEILING_CONTROL}
+    for name, note in ARM_NOTES.items():
+        assert name in by_name, f'a note for no arm: {name}'
+        assert len(note.split()) > 25, (
+            f'{name}: a pointer, not the mechanism: {note!r}')
     for name, labels in SECONDARY_CONTROLLED.items():
         assert name in by_name, f'secondary control for no arm: {name}'
         assert by_name[name][STATE] == 'CONTROLLED', name
