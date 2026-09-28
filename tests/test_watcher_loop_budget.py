@@ -106,10 +106,12 @@ def test_a_loop_that_repeats_its_last_request_costs_two(tmp):
 
 
 # One call, appended by a process of its own, in the shape the fake logs: a
-# `gh` child the cancellation did not reach writes exactly this much, and
-# writes it after the tree it belonged to is gone. The request travels in the
-# environment rather than in the program text or an argument, because one of
-# the shapes is a query with newlines in it and the suites run on Windows.
+# `gh` child the cancellation did not reach writes to the log after the tree
+# it belonged to is gone. Only `request` is read back; the other fields are
+# what a logged call looks like, not what a real child carries. The request
+# travels in the environment rather than in the program text or an argument,
+# because one of the shapes is a query with newlines in it and the suites
+# run on Windows.
 _LATE_ENV = 'DAEDALUS_FAKE_LATE_REQUEST'
 _LATE_REQUEST = 'query WatchPull { viewer }'
 _LATE_CALL = (
@@ -130,23 +132,47 @@ def _late_append(log, request):
     assert done.returncode == 0, (done.returncode, done.stderr)
 
 
-def _requests_at(log):
-    """The requests one call log holds; a torn last line is ignored.
+def _entries_at(log):
+    """Every call one log holds; a torn last line is ignored.
 
-    Read off the path rather than off the fake, because a survivor of
-    the cancellation is still writing to that path and the fake is no
-    longer the thing naming it.
+    The `ValueError` arm is what a survivor reaches: one that outlived
+    the cancellation is still appending to the log this reads, so its
+    last line can be half written. Read off the path rather than off the
+    fake, because the fake is no longer the thing naming that log.
+    `_fake_gh.py`'s `_entries` is the same walk; it is private to another
+    branch's file, and a control reaching into it would depend on that
+    branch's internals rather than on what the fake logs.
     """
-    # Another branch's `_entries` catches no KeyError; this except is wider.
     if not log.exists():
         return []
     found = []
     for line in log.read_text(encoding='utf-8').splitlines():
         try:
-            found.append(json.loads(line)['request'])
-        except (ValueError, KeyError):
+            found.append(json.loads(line))
+        except ValueError:
             continue
     return found
+
+
+def _requests_at(log):
+    """The requests one call log holds, in the order they were made."""
+    return [call['request'] for call in _entries_at(log)]
+
+
+def _measured_log(directory):
+    """The log one measurement wrote, found by the marker only it publishes.
+
+    A loop publishes a poll index its `gh` children inherit; a `--once`
+    trial publishes none and the stand-in plants none. So the log holding
+    marked entries is the measurement's, whichever end re-point is in
+    place and whatever the harness happens to name its logs - which is
+    what keeps this control modelling the bug rather than the fix's
+    spelling of it.
+    """
+    marked = [path for path in sorted(Path(directory).glob('*.jsonl'))
+              if any(call.get('poll') for call in _entries_at(path))]
+    assert len(marked) == 1, sorted(p.name for p in Path(directory).iterdir())
+    return marked[0]
 
 
 def _trial_query(directory, script):
@@ -164,28 +190,35 @@ def _trial_query(directory, script):
     return ran[0]['request']
 
 
-def _survivor_ignored(root, script, name, request):
-    """One shape, from the cancelled log to the figure the trial reports.
+def _survivor_row(root, script, name, request):
+    """One survivor shape, from the cancelled log to the trial's figure.
 
-    The old log is emptied the way the pre-fix suite emptied it, so what a
-    trial sharing it reads is this one entry and its own - the two entries
-    both CI sightings carried, which is what makes each shape reproduce its
-    own signature rather than a longer log's.
+    Reported rather than asserted, so every shape runs before anything is
+    judged: a sweep that stops on its first failing row cannot say which
+    of the rest were clean, and on a broken tree that is every one of them.
+
+    The measurement's own log is emptied the way the pre-fix suite emptied
+    it, so what a trial sharing it reads is this one entry and its own -
+    the two entries both CI sightings carried, which is what makes each
+    shape reproduce its own signature rather than a longer log's.
     """
     here = Path(root) / name
     here.mkdir(parents=True, exist_ok=True)
     fake = _fake_gh.FakeGh(here, idle_answers())
-    measured_log = fake.log
     once_run.measure(script, [PR], fake, TICK)
+    measured_log = _measured_log(here)
     measured_log.write_text('', encoding='utf-8')
     _late_append(measured_log, request)
-    late = _requests_at(measured_log)
-    assert request in late, (name, len(late))
+    held = _requests_at(measured_log)
     ran = once_run.trial(script, [PR, '--interval', str(TICK)], fake)
-    assert len(ran) == 1, (name, [call['request'][:80] for call in ran])
-    assert fake.log != measured_log, (name, fake.log, measured_log)
-    return f'{name}: the trial sees {len(ran)} call(s) of its own, ' \
-           f'the cancelled log holds {len(late)}'
+    return {'name': name, 'planted': request in held, 'held': len(held),
+            'seen': [call['request'] for call in ran],
+            'separate': fake.log != measured_log}
+
+
+def _summarise(row):
+    return (f'{row["name"]}: the trial sees {len(row["seen"])} call(s) of its '
+            f'own, the cancelled log holds {row["held"]}')
 
 
 def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
@@ -217,10 +250,17 @@ def test_a_trial_ignores_a_call_appended_after_the_measurement(tmp):
     script = once_run.planted(here, 'pr_comment_watch.py',
                               (_LOOP_TAIL, _repeat(12)))
     duplicate = _trial_query(here / 'capture', script)
-    lines = [_survivor_ignored(here, script, name, request)
-             for name, request in (('wide', duplicate), ('narrow', ''),
-                                   ('unrelated', _LATE_REQUEST))]
-    print('\n  a trial beside a late append - ' + '; '.join(lines))
+    rows = [_survivor_row(here, script, name, request)
+            for name, request in (('wide', duplicate), ('narrow', ''),
+                                  ('unrelated', _LATE_REQUEST))]
+    print('\n  a trial beside a late append - '
+          + '; '.join(map(_summarise, rows)))
+    assert all(row['planted'] for row in rows), [
+        (row['name'], row['planted'], row['held']) for row in rows]
+    assert all(len(row['seen']) == 1 for row in rows), [
+        (row['name'], [call[:80] for call in row['seen']]) for row in rows]
+    assert all(row['separate'] for row in rows), [
+        (row['name'], row['separate']) for row in rows]
 
 
 def test_two_measurements_on_one_fake_hand_out_different_logs(tmp):
@@ -245,6 +285,27 @@ def test_two_measurements_on_one_fake_hand_out_different_logs(tmp):
           f'{third.name}')
     assert second != first, (first, second)
     assert third != second, (second, third)
+
+
+def test_a_measurement_never_writes_the_log_two_fakes_share(tmp):
+    """The path a second `FakeGh` over this directory would also name.
+
+    Every `FakeGh.__init__` sets `<dir>/calls.jsonl` and truncates it, so
+    two of them over one directory name one path: a measurement writing
+    there would hand its own figure to whichever instance ran last. So
+    the measurement takes a fresh path before the loop starts, and the
+    shared one is never written - which an instance that never measures
+    cannot collide with, because nothing is left there to collide over.
+    """
+    here = Path(tmp) / 'shared'
+    here.mkdir(parents=True, exist_ok=True)
+    fake = _fake_gh.FakeGh(here, idle_answers())
+    _fake_gh.FakeGh(here, idle_answers())
+    script = once_run.SKILL / 'pr_comment_watch.py'
+    once_run.measure(script, [PR], fake, TICK)
+    shared = _entries_at(here / 'calls.jsonl')
+    assert not shared, [call['request'][:60] for call in shared]
+    assert fake.log != here / 'calls.jsonl', (fake.log, here)
 
 
 def test_a_trial_of_a_watcher_that_names_its_boundary_is_refused(tmp):
