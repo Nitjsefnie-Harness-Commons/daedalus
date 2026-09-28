@@ -12,11 +12,8 @@ It also carries what the two row files cannot express: three controls
 asserting sites AND refusals, and the step ceiling for an arm whose
 mutant does not stop.
 
-What it deliberately does NOT carry is the controls on the mechanism
-that performs the cut, `tests/_arm_sweep.py`: those are in
-`tests/test_launch_arm_cuts.py`, because every claim in this file is
-read through that cut and the table and its mechanism are separable
-things to break.
+The controls on the mechanism that performs the cut are in
+`tests/test_launch_arm_cuts.py`; every claim here is read through it.
 """
 import ast
 import hashlib
@@ -46,11 +43,9 @@ ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
 CONTROL_LABELS = {label for label, _, _, _ in ARM_CONTROLS}
 
-# The arms bound to the step ceiling, derived from the table so the fact
-# is written once. `STEP_CEILING_HELD_BY` is the record of what holds
-# each of them, and the step-ceiling test checks this derivation against
-# it -- so a third ceiling arm has to be given a holding test there
-# rather than added silently to a literal here.
+# The arms bound to the step ceiling, derived from the table so the
+# fact is written once. `STEP_CEILING_HELD_BY` is the record of what
+# holds each, and the ceiling test checks this derivation against it.
 CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
                 if arm[EVIDENCE] == STEP_CEILING_CONTROL}
 
@@ -181,8 +176,7 @@ def test_every_step_ceiling_arm_names_the_test_that_holds_it(tmp):
 
     What holds these two arms bounds a STEP COUNT rather than a
     verdict, so the record names that test and this resolves it. The
-    names themselves are derived from the table, so a third ceiling arm
-    is a decision this forces: the record has to gain a holder for it.
+    names are derived, so a third ceiling arm forces a holder for it.
     """
     del tmp
     by_name = {arm[ID]: arm for arm in LAUNCH_ARMS}
@@ -492,9 +486,8 @@ def _enclosing(spans, line):
 def _non_member_arms():
     """One arm per CONTROLLED non-member, in the shape `arm_sweep` takes.
 
-    A non-member is a clause no arm covers, so it has no cut of its own
-    to borrow: the op it needs is the one that names the clause the
-    record already gives a line for, and nothing else is invented here.
+    A non-member has no cut of its own to borrow, so the op is the one
+    naming the clause the record already gives a line for.
     """
     return [(f'{name}:{line}', name, line, f'drop_stmt:{line}', '', '',
              state, why)
@@ -505,21 +498,17 @@ def _non_member_arms():
 def test_every_controlled_non_member_is_controlled_by_its_evidence(tmp):
     """The CONTROLLED non-members are swept, not recorded and believed.
 
-    `MARKER_NON_MEMBERS` carries a state and an evidence row in the same
-    shape an arm carries them, for 22 clauses that are in no arm at all
-    -- so nothing re-derived either: they sit outside the 150-arm
-    sweep, outside the crash/value partition and outside the
-    `uncontrolled` count. `_launch_audit.py:300` is the sharpest case,
-    because its evidence row is named by no arm whatsoever, so that
-    clause's only recorded state lived in the one structure nothing
-    measures.
+    `MARKER_NON_MEMBERS` carries a state and an evidence row in the
+    shape an arm carries them, for 22 clauses in no arm at all -- so
+    they sit outside the 150-arm sweep, the crash/value partition and
+    the `uncontrolled` count, and nothing re-derived either.
+    `_launch_audit.py:300` is the sharpest case: its evidence row is
+    named by no arm, so that clause's only recorded state lived in the
+    one structure nothing measures.
 
-    So each is swept the way an arm is, and two claims are derived
-    rather than read: its own evidence row really controls it, and
-    `NON_MEMBER_CRASH_HELD` still names exactly the non-members held by
-    a raise. The split is the part no gate could reconstruct -- it is a
-    measurement, and inferring it from the table gets four of the ten
-    wrong.
+    So each is swept the way an arm is, and two claims are derived:
+    its evidence row really controls it, and `NON_MEMBER_CRASH_HELD`
+    names exactly the non-members held by a raise.
     """
     arms = _non_member_arms()
     findings = arm_sweep(Path(tmp), arms)
