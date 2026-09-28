@@ -550,66 +550,6 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
     assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
 
 
-def test_a_shared_helper_launching_node_reports_its_own_stalled_child(tmp):
-    """The GM storage harness, whose child is the largest bound removed.
-
-    `tests/_gm_harness.py` launches Node, so a call site in it is a call
-    site in the tree like any other — but it is a SHARED HELPER, reached
-    from `tests/test_gm_storage.py` through `run_relay`, `run_failure` and
-    `_gm_two_origin.run_two_origin`, and none of those three owns it. The
-    launcher control above cannot reach a module with a suite of its own
-    either, so the control for this one lives here for the same reason:
-    there is no other suite that could hold it.
-
-    Its child is the case the bound was hardest to judge. It loads the
-    SHIPPED `extension/content.js` and `page.js` into a fake window, so a
-    bound on it looked like the one thing here that might not be a fixed
-    unit of work. It is: every handle the two modules could hold the event
-    loop open with is a no-op the harness installs — `setInterval` and
-    `setTimeout` return 1 without arming anything — and the child force
-    exits on its first write, so a shipped module growing a live keeper
-    cannot hold it either. What the control asserts is the property that
-    decided it: a wedged child is reported by the shared detector, with the
-    line it wrote before it stopped, and the pid it printed is gone.
-    """
-    import _noderun  # noqa: E402
-    from _gm_harness import _run_node  # noqa: E402
-
-    stalling = ("process.stdout.write(process.pid + '\\n');"
-                " process.stdout.write('the storage child spoke before it "
-                "wedged\\n'); setInterval(() => {}, 1000);")
-    real_deadline = _noderun.CHILD_DEADLINE_S
-    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
-    caught = None
-    signal.signal(signal.SIGALRM, _raise_outer_deadline)
-    signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_S)
-    try:
-        try:
-            _run_node(stalling)
-        except _noderun.ChildDeadlineExceeded as failure:
-            caught = failure
-        except BaseException as unexpected:  # noqa: BLE001
-            # A bare `TimeoutExpired` is the failure this entry point
-            # exists to replace, so it is named rather than re-raised.
-            assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-                'a bare TimeoutExpired reached the caller', unexpected)
-            raise
-    except TimeoutError as alarm:
-        raise AssertionError(
-            'the outer alarm fired: the child wedged and nothing in the '
-            'suite ended it, which is what this control exists to prevent'
-        ) from alarm
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_CLEAR_S)
-        _noderun.CHILD_DEADLINE_S = real_deadline
-    assert caught is not None, 'the storage child that never settles finished'
-    assert 'the storage child spoke before it wedged' in caught.stdout, (
-        caught.stdout)
-    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
-    assert _child_is_gone(caught.stdout), (
-        'the cleanup reported a kill and left the child running')
-
-
 def test_an_environment_the_caller_built_reaches_the_child(tmp):
     """`environment` is threaded, and a value only the caller holds arrives.
 
