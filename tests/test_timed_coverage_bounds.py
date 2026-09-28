@@ -243,39 +243,43 @@ def _thinned_to_the_lightest(data, names, keep=30):
 
 
 def test_a_file_recording_half_the_tree_is_refused_not_published(tmp):
-    """164 recorded of the tree: a plan 9x out, and still refused.
+    """Half the tree recorded: a plan 9x out, and still refused.
 
     The shape a refresh leaves when it keeps the lightest recorded
     suites and the one heavy one, which is the shape that flatters the
     weight share -- the heavy weight is most of the denominator it is
-    divided by. Here 28.2% of the plan's weight is estimated (under a
-    half, so the weight bound cannot see it) and 50% of its SUITES, the
+    divided by. Here 28.3% of the plan's weight is estimated (under a
+    half, so the weight bound cannot see it) and 50.2% of its SUITES, the
     packer derives two cells where the tree's weights want fourteen,
-    and the plan's total is 38.6 reference multiples where the tree
-    holds 347.1. A file sitting between the two bounds is exactly what
+    and the plan's total is 38.7 reference multiples where the tree
+    holds 347.4. A file sitting between the two bounds is exactly what
     a coverage guard has to be worth something about.
 
-    The count is pinned at 164 rather than as a share because the tree
-    grows: at 327 suites this was 49.85% and the assertion read "under
-    a half", and the suite that made it 328 turned that into exactly a
-    half. The property under test is that a file holding HALF the tree
-    is caught, and it has to keep being caught as the tree grows, so
-    the band is written as the side of the two bounds rather than as a
-    number the tree's size can cross. Driven through the planner's own
-    CLI, so the verdict is the one the workflow would get.
+    The share is a HALF, so the count is derived from the tree rather
+    than written down. A hand-written `keep=164` looks stable and is
+    not: the tree grows and the count does not, so the estimated share
+    climbs -- 49.85% at 327 suites, exactly a half at 328, 50.15% at 329
+    -- and any upper cap written by hand is a number the tree's size
+    crosses again. Deriving the count makes the share `ceil(n/2)/n`,
+    which sits at a half and falls back toward it as the tree grows, so
+    the band below is a property of "half" that no tree size can cross.
+    Driven through the planner's own CLI, so the verdict is the one the
+    workflow would get.
     """
     planner = _planner()
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
     names = planner.suite_names(ROOT)
-    kept = _thinned_to_the_lightest(data, names, keep=164)
+    keep = len(names) // 2
+    kept = _thinned_to_the_lightest(data, names, keep=keep)
     coverage = _coverage()
     weights, estimated, _stale = planner.resolve(kept, names, 1.0)
     truth = sum(planner.resolve(
         data['suite_weights'], names, 1.0)[0].values())
-    assert len(kept) == 164 and len(estimated) == len(names) - 164
-    assert coverage.estimated_share(weights, estimated) < 0.5
+    assert len(kept) == keep and len(estimated) == len(names) - keep
+    weight_share = coverage.estimated_share(weights, estimated)
+    assert weight_share < 0.5, weight_share
     share = coverage.estimated_suite_share(weights, estimated)
-    assert 0.45 < share <= 0.5, share
+    assert 0.5 <= share < 0.55, share
     assert share > coverage.MAX_ESTIMATED_SUITE_SHARE, share
     plan = planner.plan(ROOT, dict(data, suite_weights=kept))
     assert len(plan.cells) == 2, [cell.suites for cell in plan.cells]
