@@ -79,10 +79,8 @@ _FIXTURES = (
 
 # A committed set drifted by hand, in the shape the reader accepts, so the
 # tests planting it reach the drift rather than a schema refusal. The
-# planted name is owned by a module both fixture trees carry and both
-# have ever committed, so it is inside the base the verdict is asked
-# about: a document claiming a module that base never had is a different
-# edit, and the scoping is what forgives that one.
+# planted name is owned by a module both fixture trees have committed, so
+# it is inside the base the verdict is asked about.
 _HAND_TYPED = ('{"schema_version": 1, "names":'
                ' {"made_up": {"python": ["tests/_owner.py"]}}}\n')
 
@@ -90,11 +88,9 @@ _HAND_TYPED = ('{"schema_version": 1, "names":'
 def _planted_tree(modules):
     """A source map carrying the two owner modules, plus what is planted.
 
-    A planted site is the liveness every absence assertion in this suite
-    needs: a recogniser that stopped reading the tree reports nothing
-    collides, and nothing collides is what a healthy tree looks like.
-    The extras arrive as one mapping rather than unpacked, because a
-    `**`-unpacked call is a launch the launch audit cannot place.
+    A planted site is the liveness every absence assertion here needs: a
+    recogniser that stopped reading the tree reports nothing collides,
+    and nothing collides is what a healthy tree looks like.
     """
     sources = {'tests/_owner.py': _OWNER,
                'tests/_wffixtures.py': _FIXTURES}
@@ -135,25 +131,13 @@ def test_every_name_carries_sorted_owners_within_the_tests_tree(tmp):
 def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
     """No reserved name is re-implemented without a row in its own table.
 
-    WHAT THIS ADDS, MEASURED AND STATED. Against this tree its sites are
-    set-equal to `reimplementations` union `js_reimplementations` -- a
-    set of 192, and each difference in both directions empty -- and the
-    reason is structural rather than incidental.
-    `tests/_wffixtures.py` IS a `tests/_*.py` module, so the three
-    fixture names that are definitions are already in the python limb,
-    and the two that are not (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are
-    `Assign` binds, which `definitions` never reports. While the fixture
-    module remains a shared helper, the union therefore adds nothing
-    HERE.
-
-    `len(residue_sites())` is 196, not 192, and both are worth knowing. The
-    residue tables are keyed `(path, name)`, and three modules declare a
-    reserved JavaScript name more than once, so the list carries four rows
-    the set does not: `tests/_gm_harness.py::makeStorage` twice,
-    `tests/test_gm_transfers.py::flushMessages` three times and
-    `tests/test_tab_routing_js_operations.py::run` twice. The equality is
-    about the set, because that is what the tables key on; the count is
-    about the list, because that is what a refusal prints.
+    The union adds nothing to the residue tables HERE, and the reason is
+    structural rather than incidental: `tests/_wffixtures.py` IS a
+    `tests/_*.py` module, so its three definition-shaped names are
+    already in the python limb, and the two that are not
+    (`BLOCK_NEEDS`, `BLOCK_OUTPUTS`) are `Assign` binds, which
+    `definitions` never reports. While the fixture module remains a
+    shared helper the union therefore adds no site.
 
     It is kept rather than deleted for the day that stops being true: a
     fixture module that is not a shared helper puts its names in the
@@ -175,11 +159,11 @@ def test_no_reserved_name_is_reimplemented_without_a_residue_row(tmp):
 def test_no_workflow_fixture_name_is_bound_outside_its_module(tmp):
     """The fixture limb has no residue table, so nothing excuses a shadow.
 
-    Every one of them is read from `tests/_wffixtures.py` rather than from
-    the names the boundary rule hardcodes, so a fixture added there is
-    covered by this statement on the day it is added — and a bind the
-    boundary rule's own walk cannot see is caught here, because `scan`
-    reads the walrus, the `for` target and the `except ... as` too.
+    Every one is read from `tests/_wffixtures.py` rather than from the
+    names the boundary rule hardcodes, so a fixture added there is
+    covered the day it is added -- and a bind the boundary rule's own
+    walk cannot see is caught here, because `scan` reads the walrus, the
+    `for` target and the `except ... as` too.
     """
     del tmp
     found = [f'{site.path}::{site.name}'
@@ -250,12 +234,11 @@ def test_a_planted_fixture_collision_is_reported(tmp):
 
 
 def test_this_suite_binds_no_reserved_name(tmp):
-    """Self-application: the suite is measured by the union it derives.
+    """Self-application: measured by the union it derives.
 
     A `tests/` module is bound by the same rules as any other, so a name
     this file binds that a `tests/_*.py` module already owns is a
-    collision this suite created. The entry point and no other name is
-    exempt, the guard the recogniser already applies.
+    collision this suite created. The entry point is the only exempt.
     """
     del tmp
     path = 'tests/test_reserved_test_names.py'
@@ -276,11 +259,9 @@ def _contract():
 def _fixture_checkout(tmp, files, name):
     """A committed git checkout carrying `files`, for the real generator.
 
-    A checkout rather than a directory, because the generator enumerates
-    the TRACKED tree: an index populated by `git add` is what `git
-    ls-files` reads. Committed as well, because the verdict is asked
-    about the tree of the commit that last wrote the committed set, and
-    a tree with no commits has no such commit to name.
+    An index populated by `git add` is what `git ls-files` reads, and the
+    verdict is asked about the tree of the commit that last wrote the
+    set -- so a tree with no commits has no base to name.
     """
     tree = Path(tmp) / name
     for rel, text in files.items():
@@ -324,10 +305,9 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
 
     A name added to or dropped from a shared helper changes what a module
     may bind, and nothing reads the artifact until a control does, so a
-    hand-typed one is a rule nobody enforces.
-
-    The verdict is scoped to the base -- the tree of the commit that
-    last wrote the document -- so it is read here and passed in.
+    hand-typed one is a rule nobody enforces. The verdict is scoped to
+    the base -- the tree of the commit that last wrote the document -- so
+    it is read here and passed in.
     """
     del tmp
     policy = _contract()
@@ -346,8 +326,7 @@ def test_the_generator_writes_exactly_a_fresh_derivation_gives(tmp):
     """`--tighten` regenerates; it never edits what it finds.
 
     The committed bytes are the renderer's over a tree the generator read
-    itself, so a hand edit in the file it is tightening cannot survive,
-    and a missing one is created rather than refused.
+    itself, so a hand edit in the file it is tightening cannot survive.
     """
     policy = _contract()
     tree = _fixture_checkout(tmp, {
@@ -411,56 +390,6 @@ def test_a_noop_tighten_writes_nothing(tmp):
                                  set(_live_sources_of(tree)))) == 3
 
 
-def test_the_success_line_names_what_was_compared_and_against_which_base(
-        tmp):
-    """The line a reader trusts, asserted.
-
-    This branch REMOVED the only assertion on the success line in the
-    same change that made it carry more, and added two printed lines
-    nothing read. A success line whose number came from a different set
-    than the one under comparison is the false-green shape the first
-    design died of, so the line this branch exists to improve is the one
-    surface that must not be prose.
-
-    Four things are pinned: that it names the base it compared against,
-    that it carries BOTH counts rather than one, that the tightening
-    line names its own coverage, and -- the reason the line was
-    rewritten -- that it cannot claim a match when the counts differ.
-    """
-    policy = _contract()
-    tree = _fixture_checkout(tmp, _planted_tree({}), 'line')
-    artifact = tree / '.github' / 'reserved-test-names.json'
-    modes = ['--tree', str(tree), '--artifact', str(artifact)]
-    tightened = _run_generator(tree, artifact, '--tighten')
-    assert tightened.returncode == 0, (tightened.stdout, tightened.stderr)
-    assert 'the committed set now covers all' in tightened.stdout, \
-        tightened.stdout
-    _commit(tree, 'the committed set')
-    base, _covered = artifact_base.base_files(
-        tree, '.github/reserved-test-names.json')
-    status, stdout, stderr = _generator(policy, modes)
-    assert (status, stderr) == (0, ''), (status, stderr)
-    assert 'no drift inside the base' in stdout, stdout
-    assert base[:12] in stdout, (base, stdout)
-    committed = len(policy.load(artifact)['names'])
-    derived = len(policy.document(_live_sources_of(tree))['names'])
-    assert f'{committed} committed names against the {derived} ' in stdout, \
-        stdout
-    assert 'match the committed set' not in stdout, stdout
-
-    # The line must not be able to claim a match it did not find: an
-    # emptied document is the case the first design got wrong, and the
-    # two counts are what make the difference visible rather than silent.
-    shipped = json.loads(artifact.read_text(encoding='utf-8'))
-    shipped['names'] = {}
-    artifact.write_text(json.dumps(shipped) + '\n', encoding='utf-8')
-    status, stdout, stderr = _generator(policy, modes)
-    assert (status, stdout) == (1, ''), (status, stdout)
-    assert 'no drift inside the base' not in stdout, stdout
-    assert 'match the committed set' not in stdout, stdout
-    assert 'absent:' in stderr, stderr
-
-
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
     """The artifact is replaced or left whole, never truncated in place.
 
@@ -498,8 +427,7 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     The three drift kinds are what a hand edit looks like: a name the
     tree derives and the document lacks, one it no longer derives, and
     one whose owners moved. Each is planted against a module the base's
-    tree really carries, so the scoping -- which forgives a name a module
-    outside the base brought -- is never the reason one of them passes.
+    tree carries, so the scoping is never why one of them passes.
     """
     policy = _contract()
     tree = _fixture_checkout(tmp, {
@@ -513,9 +441,8 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     planted = json.loads(json.dumps(derived))
     dropped = sorted(planted['names'])[0]
     del planted['names'][dropped]
-    # The moved owner is a module the base's tree carries that does not
-    # own the name today, so the entry is inside the scope the verdict
-    # is asked about and a different owner set is a real disagreement.
+    # A module the base's tree carries that does not own the name today,
+    # so the entry is inside the scope and a different owner set is real.
     moved = sorted(planted['names'])[0]
     taken = {owner for one in planted['names'][moved].values()
              for owner in one}
@@ -666,8 +593,29 @@ def test_main_reports_a_matching_set_then_refuses_and_tightens_it(tmp):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(fresh)
     _commit(tree, 'the committed set')
+    base, _covered = artifact_base.base_files(
+        tree, artifact_base.relative_to_tree(tree, target))
     matched = _generator(policy, modes)
     assert matched[0] == 0 and matched[2] == '', matched
+    # THE SUCCESS LINE, which this branch left unasserted while making it
+    # say more: it names the base, carries BOTH counts, and cannot claim
+    # a match when they differ. Planting the first design's line turns
+    # this red.
+    assert 'no drift inside the base' in matched[1], matched[1]
+    assert base[:12] in matched[1], (base, matched[1])
+    assert f'{count} committed names against the {count} ' in matched[1], \
+        matched[1]
+    assert 'match the committed set' not in matched[1], matched[1]
+    # And it is still there, unchanged, for a document it has emptied.
+    shipped = json.loads(fresh.decode('utf-8'))
+    shipped['names'] = {}
+    target.write_text(json.dumps(shipped), encoding='utf-8')
+    emptied = _generator(policy, modes)
+    assert (emptied[0], emptied[1]) == (1, ''), emptied
+    assert 'no drift inside the base' not in emptied[1], emptied[1]
+    assert 'match the committed set' not in emptied[1], emptied[1]
+    assert 'absent:' in emptied[2], emptied[2]
+    target.write_bytes(fresh)
 
     drifted = json.loads(fresh.decode('utf-8'))
     del drifted['names'][sorted(drifted['names'])[0]]
