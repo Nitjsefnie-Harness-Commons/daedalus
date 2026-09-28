@@ -293,6 +293,15 @@ def _log_of(rows):
 # value. One control per row, each asserting its own clause, so a fourth
 # cause is a fourth row here with nothing over it.
 _REUSED_LOG = _log_of([('1', POLL_WIDTH), ('2', 1), ('1', POLL_WIDTH)])
+# A cycle LONGER than the window: thirteen new values and then the first
+# again, so the repeat falls outside `SEQUENCE` and only a reading made
+# over the whole run can see it.
+_LONG_CYCLE_LOG = _log_of(
+    [(str(n), POLL_WIDTH) for n in range(1, SEQUENCE + 2)]
+    + [('1', 2)])
+# A seam that is not wired at all, and one wired on its first poll only.
+_UNWIRED_LOG = [{'poll': None, 'request': f'query {n}'}
+                for n in range(2 * POLL_WIDTH + 2)]
 _OVER_LOG = _log_of(
     [(str(marker), POLL_WIDTH) for marker in range(1, SEQUENCE + 1)]
     + [(str(SEQUENCE + 1), POLL_WIDTH + 1)])
@@ -326,6 +335,45 @@ def test_a_repeated_boundary_is_named_as_a_re_used_index(tmp):
     assert ('a value came round again, so a poll published one it had '
             'published before and then another: a re-used index'
             in message), message
+
+
+def test_a_cycle_longer_than_the_window_is_still_a_re_use(tmp):
+    """The CALL SITE, which is the subject here, not `_reading`.
+
+    `_reading` reads the whole run and the wait hands it the whole run;
+    those are two claims and only the second is what the reviewer planted
+    - `_reading(sequence[:SEQUENCE])` at the call site survives every
+    control that calls `_reading` itself, because a function-level
+    control cannot see what its caller passes. So this drives
+    `await_polls` with a cycle whose repeat falls OUTSIDE the window: the
+    window shows twelve new values and `... 2 more`, and a reading made
+    over the window would call that a run of new values.
+    """
+    del tmp
+    message = _refusal_for(_LONG_CYCLE_LOG, SEQUENCE + 4, '16 poll(s)')
+    assert message is not None, 'a long cycle did not fail'
+    assert ', ... 2 more' in message, message
+    assert ('a value came round again, so a poll published one it had '
+            'published before and then another: a re-used index'
+            in message), message
+    assert 'no value came round again' not in message, message
+
+
+def test_a_poll_that_published_no_marker_is_an_unwired_seam(tmp):
+    """The marker field is `os.environ.get(POLL_MARK)`, so it is `None` on
+    any call made while the seam is not wired - which is a fact no other
+    row can state, and one every other row was getting wrong. It is not
+    an index that stopped advancing, and it is not a wide poll: nothing
+    was ever published.
+    """
+    del tmp
+    message = _refusal_for(_UNWIRED_LOG, 3, '3 poll(s)')
+    assert message is not None, 'an unwired seam did not fail'
+    assert ('a boundary the log carries as no marker at all is a seam that '
+            'is not wired there' in message), message
+    assert 'stopped advancing, and not a poll that cost more' in message, (
+        message)
+    assert 're-used index' not in message, message
 
 
 def test_a_run_of_new_values_names_both_candidates(tmp):
@@ -363,32 +411,31 @@ def test_a_run_of_wide_polls_names_both_candidates(tmp):
 def test_the_reading_covers_every_rendering_the_renderer_can_produce(tmp):
     """The rows are a function and this reads the mapping it is.
 
-    The previous version of this control carried a `row` column it never
-    asserted, so collapsing two rows left it passing - a totality check
-    wearing a mapping's clothes. It asserts the row now, so the fixture
-    says what the control checks.
+    The previous version carried a `row` column it never asserted, so
+    collapsing two rows left it passing - a totality check wearing a
+    mapping's clothes. It asserts the row now, so the fixture says what
+    the control checks.
 
-    The long-run case is the one that matters here: a cycle longer than
-    the window repeats only outside the window, and a reading that tested
-    the window put it in the no-repetition row. Reading the whole run is
-    what keeps it on the re-use row. Every sequence in the fixture is
-    one `poll_sequence` can actually emit, which is a bound the previous
-    version of this control did not respect.
+    The long-run case is what the call-site control drives from outside:
+    a cycle longer than the window repeats only outside the window, and
+    a reading that tested the window put it in the no-repetition row.
+    Every sequence here is one `poll_sequence` can actually emit, which
+    the previous fixture was not, and the two `None` shapes are here as
+    well as in their own control because the row they take is the one a
+    reader would not guess.
     """
     del tmp
     new_run = [str(n) for n in range(1, SEQUENCE + 2)]
-    for sequence, row in ((['1'], 2), (['1', '2'], 1), (['1', '2', '1'], 0),
-                          (['1', '2', '3', '1'], 0),
-                          (new_run, 1), (new_run + ['1'], 0),
-                          (['1', '2', '3'], 1),
+    for sequence, row in (([None], 0), (['1', None], 0),
+                          (['1', '2', '1'], 1), (['1', '2', '3', '1'], 1),
+                          (new_run, 2), (new_run + ['1'], 1),
+                          (['1', '2', '3'], 2), (['1'], 3),
                           # No calls at all: no refusal can carry it, but
                           # `_reading` is given it here rather than
                           # excused, because totality is the claim.
-                          ([], 1)):
+                          ([], 2)):
         assert _reading(sequence) == row, (sequence, row)
-    assert len(READINGS) == 3, READINGS
-    assert all(clause and clause[0].islower() for clause in READINGS), (
-        READINGS)
+    assert len(READINGS) == 4, READINGS
 
 
 # A seam wired below the first request: the first entry carries a marker

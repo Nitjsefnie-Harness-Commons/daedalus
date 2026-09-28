@@ -32,6 +32,7 @@ from _watcher_fixtures import PR  # noqa: E402
 from _watcher_fixtures import TICK  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 from _watcher_waits import POLL_WIDTH  # noqa: E402
+from _watcher_waits import SEQUENCE  # noqa: E402
 from _watcher_waits import await_polls  # noqa: E402
 from _watcher_waits import poll_sequence  # noqa: E402
 
@@ -82,6 +83,10 @@ _REUSED = (_TRY, "        os.environ[POLL_MARK] = (\n"
                  '            else str(poll_index - 4))\n')
 _CYCLING = (_TRY, '        os.environ[POLL_MARK] = '
                   'str((poll_index - 1) % 4 + 1)\n')
+# One period longer than `SEQUENCE`, so the repeat falls OUTSIDE the
+# window a refusal renders and only a reading of the whole run sees it.
+_LONG = "        os.environ[POLL_MARK] = str((poll_index - 1) %% %d + 1)\n"
+_LONG_CYCLE = (_TRY, _LONG % (SEQUENCE + 1))
 _WORDED = (_TRY, "        os.environ[POLL_MARK] = 'poll-' + str(poll_index)\n")
 _UNWIRED = (_TRY, '        if poll_index != 1:\n'
                   '            os.environ.pop(POLL_MARK, None)\n')
@@ -215,11 +220,11 @@ def _verdict(subject, judge, note=''):
     assert False, f'{subject} was measured anyway{note}'
 
 
-def _refusal(subject, script, fake):
+def _refusal(subject, script, fake, boundaries=BOUNDARIES):
     """The named verdict a planted watcher earns for itself."""
     return _verdict(
-        subject, lambda: _run_loop(script, fake, interval=0),
-        f': it reached {BOUNDARIES} marker(s) and the wait found what it '
+        subject, lambda: _run_loop(script, fake, boundaries, interval=0),
+        f': it reached {boundaries} marker(s) and the wait found what it '
         f'was looking for')
 
 
@@ -230,23 +235,37 @@ def test_both_watchers_publish_a_new_larger_poll_index_each_poll(tmp):
     per poll" is the whole claim, and freezing 1 as the start would refuse
     a legitimate re-numbering. What is pinned is the ORDER, because a
     re-used or a reset index is a real defect - a result stamped with a
-    poll the reader has already consumed is mis-attributed - and neither
-    the distinct-marker count nor the call ceiling can see one.
+    poll the reader has already consumed is mis-attributed - and a
+    re-use that KEEPS producing new markers up to the boundary count is
+    one neither the distinct-marker count nor the call ceiling can see.
+    A reset that never leaves its first value is a different shape, and
+    the call ceiling sees that one: see
+    test_a_frozen_poll_index_is_refused_by_name below.
     """
     for name, args in (('pr_comment_watch.py', [PR]),
                        ('ci_watch.py', [BRANCH])):
         here = Path(tmp) / name
         here.parent.mkdir(parents=True, exist_ok=True)
         fake = _fake_gh.FakeGh(here, idle_answers())
-        child = once_run.Child(SKILL / name, [*args, '--interval', str(TICK)],
-                               fake)
+        # `--interval 0` for the same reason every ceiling control here
+        # uses it: the wait ends on CALLS, and this one's subject is what
+        # the watchers publish rather than how often.
+        child = once_run.Child(SKILL / name, [*args, '--interval', '0'], fake)
         try:
             await_polls(fake, BOUNDARIES, child,
                         f'{BOUNDARIES} marker(s)')
         finally:
             child.stop()
-        sequence = _boundaries(fake.calls())
+        calls = fake.calls()
+        sequence = _boundaries(calls)
         assert len(sequence) >= 2, (name, sequence)
+        # `POLL_WIDTH`'s premise, made consumable. Every other control
+        # here is symbolic in the constant, so nothing would notice the
+        # constant moving out from under the real watchers; this says the
+        # watchers' widest MEASURED poll is under it. It pins the
+        # premise, not the number and not the headroom above it.
+        assert _widest_poll(calls) < POLL_WIDTH, (
+            name, _widest_poll(calls), POLL_WIDTH)
         _refuses_a_reuse(name, _indexes(name, sequence))
 
 
@@ -264,7 +283,9 @@ def test_a_poll_spending_the_tolerated_width_still_reaches_its_markers(tmp):
     `POLL_WIDTH` calls a poll.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'wide', *_wide(POLL_WIDTH))
-    calls = _run_loop(script, fake)
+    # `--interval 0`: this is the ceiling's HEALTHY side, and the ceiling
+    # is in calls, so the tick buys nothing but wall time.
+    calls = _run_loop(script, fake, interval=0)
     sequence = _boundaries(calls)
     assert len(sequence) >= 2, sequence
     _refuses_a_reuse('a watcher with a wide poll',
@@ -301,6 +322,9 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
             'stuck where it started and one wide first poll'
             in refused), refused
     assert 'IDLE_POLL_BOUND' in refused, refused
+    # 'did not advance' is the round-2 headline this branch removed and
+    # no clause in `READINGS` can emit it: insurance against its return,
+    # not evidence - the phrase is the one a reader remembers.
     assert 'did not advance' not in refused, refused
 
 
@@ -325,11 +349,37 @@ def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
     assert ('a value came round again, so a poll published one it had '
             'published before and then another: a re-used index'
             in refused), refused
+    # Insurance, as at the wide-poll control above.
     assert 'did not advance' not in refused, refused
     logged = sorted({call.get('poll') for call in fake.calls()}, key=repr)
     assert logged == ['1', '2', '3', '4'], (
         f'the mutant published {logged} rather than one cycle of four, so '
         f'this control is not exercising a cycle')
+
+
+def test_a_cycle_longer_than_the_window_is_named_as_a_re_use(tmp):
+    """The call site, driven by a watcher whose cycle is longer than the
+    window a refusal renders.
+
+    `_reading` reads the whole run and `await_polls` hands it the whole
+    run; a reading of `sequence[:SEQUENCE]` at the call site survives
+    every control that calls `_reading` itself, because a function-level
+    control cannot see what its caller passes. The two markers below are
+    what it takes to reach that: a cycle of period 13, and a wait for
+    more markers than the cycle can produce - at `BOUNDARIES` the wait
+    RETURNS on the eighth distinct marker and never refuses, which is
+    why this control names its own boundary count.
+    """
+    boundaries = 2 * SEQUENCE
+    script, fake = _mutant_watcher(Path(tmp) / 'longcycle', _LONG_CYCLE)
+    refused = _refusal('a long cycle', script, fake, boundaries)
+    assert 'a value came round again' in refused, refused
+    assert 'no value came round again' not in refused, refused
+    cycle = sorted((str(n) for n in range(1, SEQUENCE + 2)), key=repr)
+    logged = sorted({call.get('poll') for call in fake.calls()}, key=repr)
+    assert logged == cycle, (
+        f'the mutant published {logged}, so the cycle is not the one this '
+        f'control names')
 
 
 def test_a_frozen_poll_index_is_refused_by_name(tmp):
@@ -417,6 +467,9 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
                 and 'republished the value already current' in refused), (
             label, refused)
         assert 'this log cannot say' in refused, (label, refused)
+        # 'stopped advancing' is the row round 4 replaced, and no clause
+        # can emit it now - the same insurance, on the round that removed
+        # it.
         assert 'stopped advancing' not in refused, (label, refused)
     # The pair's premise, not a check on the reading: see the docstring.
     heads = [refused.split('over the')[0] for _, refused in pair]
@@ -477,6 +530,14 @@ def test_a_partially_wired_poll_seam_is_refused_by_name(tmp):
     refused = _refusal('a partially wired poll seam', script, fake)
     assert 'sequence 1, None,' in refused, refused
     assert 'did not reach' in refused, refused
+    # The MIXED shape earns the same row as the all-absent one, and it
+    # should: a boundary the log carries as nothing is a seam not wired
+    # on that poll, and the rendering does not say which polls. What it
+    # must NOT earn is the row about a poll costing more than the
+    # tolerance, which is what it got before the row existed.
+    assert ('a boundary the log carries as no marker at all is a seam that '
+            'is not wired there' in refused), refused
+    assert 'no value came round again' not in refused, refused
     unwired = _verdict(
         'a partially wired poll seam',
         lambda: _indexes('a partially wired poll seam',
