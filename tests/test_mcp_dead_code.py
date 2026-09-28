@@ -362,8 +362,12 @@ def test_a_raising_try_body_with_no_handler_does_not_end_the_block(_tmp):
     exception leaves the frame, and the walk still reports the module,
     because a `try` is not a barrier and a rule that treated it as one
     would lose a module it may not refuse.
+
+    The first composition ends that exception, so it carries its own oracle
+    rather than the shared helper's, which is the shape where the call
+    completes.
     """
-    _a_raising_container_does_not_end_the_block(_tmp, """
+    _write_tree(Path(_tmp), _pkg(source="""
 import importlib
 
 
@@ -371,8 +375,10 @@ def load():
     try:
         raise ValueError('unhandled')
     finally:
-        return importlib.import_module('pkg.leaf')
-""")
+        importlib.import_module('pkg.leaf')
+""", leaf=''))
+    _scan_is(_tmp, {'composition.py', 'pkg/__init__.py', 'pkg/leaf.py'})
+    assert _runtime(_tmp) == {'raised': 'ValueError', 'loaded': ['pkg.leaf']}
     _write_tree(Path(_tmp), _pkg(source="""
 import importlib
 
@@ -393,8 +399,8 @@ def test_a_finally_body_tail_is_out_of_the_scan_set(_tmp):
     names without a row behind it.
 
     A `finally` runs whether or not the body raised, so a call inside one is
-    a call the runtime makes — the call after the `return` is not, because
-    that `return` leaves the frame. A block is a property of the field that
+    a call the runtime makes — the call after the `raise` is not, because
+    that `raise` leaves the frame. A block is a property of the field that
     holds it, and a read that skipped `finalbody` would keep a module the
     runtime cannot import, in the direction the walk is written to err in and
     does not here.
@@ -407,9 +413,9 @@ def load():
     try:
         pass
     finally:
-        return 1
+        raise ValueError('the barrier')
         importlib.import_module('pkg.leaf')
-""", {'raised': None, 'loaded': []})
+""", {'raised': 'ValueError', 'loaded': []})
 
 
 def test_every_statement_the_standard_library_declares_is_answered(_tmp):
