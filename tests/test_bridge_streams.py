@@ -17,16 +17,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _util  # noqa: E402
-from daedalus_bridge import atomic_file  # noqa: E402
 from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
                      _wait_for_delivery_health,
                      assert_oversize_stream_matches_enqueue,
                      framer, next_stream_data, put_command, queue_files,
                      read_stream_data, stream_response)
 from _gc_handshake import (  # noqa: E402
-    _GC_DONE, _GC_DONE_TEMP, _GC_PREFIX, _GC_REFUSED_CHILD,
-    _GC_REFUSED_PARENT, _GC_TRIGGER, _child_refusal_source,
+    _GC_DONE, _GC_PREFIX, _GC_REFUSED_CHILD, _GC_TRIGGER,
     _on_demand_command_gc, _refuse_marker_operations)
+from daedalus_bridge import atomic_file  # noqa: E402
 
 
 def test_put_command_broadcast_writes_queue_file(tmp):
