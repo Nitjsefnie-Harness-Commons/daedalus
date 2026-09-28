@@ -100,26 +100,32 @@ def _indented(block, depth=1):
 
 
 _MARK_LINE = "POLL_MARK = 'DAEDALUS_WATCHER_POLL'\n"
-# A HEALTHY run that grows: its first two polls spend `POLL_WIDTH` calls
-# and every poll after the second spends one more. The counter lives at
-# module scope because `poll()` cannot see the loop's `poll_index`, and
-# it is incremented inside `poll()` because that is called once per poll.
+# A HEALTHY run that costs the tolerance on its first poll and one call
+# more than that on every poll after, with the index still advancing once
+# per poll. Nothing about it is a defect the watcher would report. The
+# counter lives at module scope because `poll()` cannot see the loop's
+# `poll_index`, and it is incremented inside `poll()` because that is
+# called once per poll.
 #
-# It stays AT the tolerance for as long as a run can, and goes one call
-# over on the last poll before the wait's boundary count. That shape is
-# load-bearing rather than tidier. The wait checks its bound only at its
-# own sample points, and a run that is over the bound for five polls can
-# be stepped over in one stalled sample: the return arm fires at the
-# boundary count and the run is measured, unrefused, with the control
-# reporting the mutant as clean. Two CI legs and a local run did exactly
-# that. Crossing on the LAST call of the second-to-last poll leaves the
-# window the length of one `gh` call, which a stalled sampler has to beat
-# to escape - and the sticky half below, which never reaches the boundary
-# count at all, cannot escape however long the stall.
+# Every poll after the first being OVER the tolerance is the point, and it
+# is not tidiness. The wait checks its bound only at its own sample
+# points, so a run over the bound for a few polls can be stepped over in
+# one stalled sample - the return arm fires at the boundary count and the
+# run is measured, unrefused, with the control reporting the mutant as
+# clean. Two CI legs and a local run did exactly that. At the tolerance
+# with one spike near the end, the run can be caught at ONE sample in the
+# whole 64; this shape is over at 28 of them, the first at the second
+# marker, so escaping means stalling across a gap no longer than seven
+# calls. It survives sixty times the wait's own sample interval.
+#
+# The first poll is AT the tolerance, and that is not decoration. A run
+# over from its first call is refused at ONE marker, which is the
+# one-value row - not the row this half exists to reach, and the half that
+# lands there is a wide first poll, which the other control already drives.
 _GROWING = [
     (_MARK_LINE, '_GROWING_POLLS = 0\n'),
     (_PULL_PAGE, '    global _GROWING_POLLS\n    _GROWING_POLLS += 1\n'
-     + f'    if _GROWING_POLLS < {BOUNDARIES - 1}:\n'
+     + '    if _GROWING_POLLS == 1:\n'
      + _indented(_IDENTICAL_POLL) * (POLL_WIDTH - 1)
      + '    else:\n'
      + _indented(_IDENTICAL_POLL) * POLL_WIDTH),
@@ -492,7 +498,7 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
     """
     pair = _refusal_of_pair(tmp)
     clauses = []
-    for label, refused, published in pair:
+    for label, refused, _published in pair:
         assert refused is not None, f'the {label} run was measured anyway'
         assert ('no value came round again' in refused
                 and 'some poll cost more than that' in refused
@@ -501,14 +507,19 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
         assert 'this log cannot say' in refused, (label, refused)
         # Insurance, as above.
         assert 'stopped advancing' not in refused, (label, refused)
-        # The plant took: the growing run published past three, the sticky
-        # one published exactly three and no more, which is what a stuck
-        # index is. A plant that stopped taking fails here rather than
-        # passing on a refusal that no longer describes it.
-        assert published[:3] == ['1', '2', '3'], (label, published)
         clauses.append(refused.split('This one is: ', 1)[1])
+    assert len(pair) == 2, pair
+    growing = pair[0]
+    sticky = pair[1]
+    # The read-back, and what each plant does BY CONSTRUCTION rather than
+    # by sampling. The growing half needs a SECOND boundary for its
+    # refusal to reach the row this control is about; the sticky half must
+    # have stopped, which is publishing three and no more. Neither is the
+    # refusal's own count, which is why neither is asserted: a plant that
+    # stopped taking is caught by `_refusal` naming it measured anyway.
+    assert len(growing[2]) >= 2, growing[2]
+    assert sticky[2] == ['1', '2', '3'], sticky[2]
     assert clauses[0] == clauses[1], clauses
-    assert pair[1][2] == ['1', '2', '3'], pair[1][2]
 
 
 def _refusal_of_pair(tmp):
