@@ -19,21 +19,26 @@ union -- and `test_timed_planner.py` covers the guard on the other
 side of the file, which refuses a plan whose weight is mostly
 estimated.
 
-THE GUARD ON THE OTHER SIDE, `scripts/ci/timings_coverage.py`, is here
-too, and its two conditions are the subject of the last three tests.
-The weight share alone could not hold it: a file recording the
-twenty-nine LIGHTEST suites of the tree plus its heaviest is nine per
+Two more things live here because their subject is what a refresh
+RECORDS rather than what it packs. The guard on the other side of the
+file, `scripts/ci/timings_coverage.py`, has two conditions and the
+weight one alone could not hold it: a file recording the twenty-nine
+LIGHTEST suites of the tree plus its heaviest estimates ninety-one per
 cent of the plan's suites and, because that one heavy weight inflates
-the denominator the share is computed against, thirty-one per cent of
-its weight. That is under the weight bound, the planner published one
-cell for 327 suites, and the plan's total was 22.3 where the tree
-really holds 345.2 -- a 15.5x understatement, worse than the 3.15x the
-guard exists to stop.
+the denominator the weight share is divided by, only thirty-one per
+cent of its weight. That is under the weight bound, the planner
+published one cell for 327 suites, and the plan's total was 22.3 where
+the tree really holds 345.2 -- a 15.5x understatement, worse than the
+3.15x the guard exists to stop. And the commit seam is executed rather
+than grepped, in a real checkout, because a line planted in the commit
+step left every substring an earlier control asserted in place.
 
 The artifacts are fixtures under a temp tree: no API, no `gh`, no
 network. Each test builds a run the way the timed job leaves one --
 `<run>/<cell>/head-N/<suite>.json`, one JSON per suite, plus the cell's
-reference reading -- and drives `refresh_timings.main()` over it.
+reference reading -- and drives `refresh_timings.main()` over it. The
+two that are not about a run at all read the real shipped file and the
+real workflow.
 """
 import contextlib
 import io
