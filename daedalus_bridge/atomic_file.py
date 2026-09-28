@@ -10,7 +10,7 @@ _RETRY_DELAY = 0.02
 _Result = TypeVar('_Result')
 
 
-def _retrying(perform: 'Callable[[], _Result]') -> _Result:
+def _retrying(perform: Callable[[], _Result]) -> _Result:
     """Run `perform`, retrying a transient Windows sharing violation.
 
     Windows refuses an open, write or replace while any handle is open on
@@ -56,10 +56,8 @@ def write_text_retrying(path, data, encoding='utf-8'):
 def unlink_retrying(path):
     """Remove `path`, retrying a transient sharing violation.
 
-    `missing_ok=True` because a caller that guarded the removal with
-    `exists()` has still raced: the check and the removal are two calls,
-    and a marker already gone is the outcome the caller was after, not a
-    refusal worth retrying.
+    A path that is already gone is not an error: `missing_ok=True`, so the
+    removal stays idempotent for a caller that checked for the file first.
     """
     _retrying(lambda: path.unlink(missing_ok=True))
 

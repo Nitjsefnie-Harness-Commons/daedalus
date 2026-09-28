@@ -182,9 +182,6 @@ def test_command_enqueue_and_dashboard_read_errors_are_answered(tmp):
             status, body)
 
 
-# are `<token>_<tab>` and `<token>.json` -- so filtering on it cannot hide a
-# real entry, and it covers whatever state a sweep leaves beside the record.
-
 # How far outside the TTL window each arm stamps, on opposite sides. A stall
 # in the handshake has to exceed this before it can move either verdict, so
 # the shipped comparison is settled by the sign of its difference.
@@ -291,9 +288,8 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
 
 def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
     """The controlled sweep completes while both sides are refused."""
-    # _retrying makes _RETRY_ATTEMPTS (5) attempts at _RETRY_DELAY, so a
-    # count of 2 clears with two attempts still in hand, while an unfixed
-    # read or replace raises on attempt one and never reaches a second.
+    # A count of 2 clears the retry budget with attempts still in hand, while
+    # an unfixed read or replace raises on attempt one and reaches no second.
     refusals = 2
     fault_dir = Path(tmp) / 'refusing-command-gc'
     env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
