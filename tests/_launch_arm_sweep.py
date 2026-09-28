@@ -19,12 +19,10 @@ import tempfile
 from pathlib import Path
 
 from _arm_sweep import arm_sweep
-from _launch_arm_records import CRASH_CONTROLLED, SECONDARY_CONTROLLED
+from _launch_arm_records import (CRASH_CONTROLLED, EVIDENCE, ID,
+                                SECONDARY_CONTROLLED, STATE)
 from _launch_arms import (CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES,
                           STEP_CEILING_CONTROL)
-
-# The arm table's own column order, named so nothing here reads a bare 6.
-ID, STATE, EVIDENCE = 0, 6, 7
 
 # The arms bound to the step ceiling are exactly the arms whose child
 # produces no verdict: it is for a mutant that does not stop.

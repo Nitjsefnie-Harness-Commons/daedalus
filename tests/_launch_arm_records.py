@@ -18,7 +18,25 @@ ceiling.
 
 `tests/test_launch_arms.py` checks all six, and the table carries a
 one-line pointer to the note at each arm it names.
+
+The arm row's own column order is here rather than beside the table,
+because the table is at its size ceiling and a successor who extracts
+from it can move these back. `tests/_launch_arms.py` states the order
+in prose; both consumers read these rather than holding their own copy.
 """
+from typing import Final
+
+# (id, file, line, cut, anchor, what, state, evidence). Final keeps each
+# a literal, so an arm read through one is that column's own type; bound
+# to a plain int it reads as the union of the row's, `str | int`.
+ID: Final = 0
+FILE: Final = 1
+LINE: Final = 2
+CUT: Final = 3
+ANCHOR: Final = 4
+WHAT: Final = 5
+STATE: Final = 6
+EVIDENCE: Final = 7
 # The CONTROLLED arms whose `evidence` goes red by RAISING rather than
 # to another value. A crash is a real control, but a weaker one: it
 # pins "the analyser must not raise on this shape", which a robustness
