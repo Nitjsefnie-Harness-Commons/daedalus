@@ -415,11 +415,12 @@ def main(argv=None):
         print(f'--grace must be positive, got {args.grace}',
               file=sys.stderr)
         return 3
-    # An empty name builds a requirement no run can satisfy, and the
-    # refusal then names nothing: `no  run on <sha>` (issue #1320). Refuse
+    # A name with nothing in it builds a requirement no run can satisfy,
+    # and the refusal then names nothing legible: `no  run on <sha>`, or
+    # `no   run on <sha>` when the name was a space (issue #1320). Refuse
     # the argument instead, with the arguments this tool already refuses.
-    if any(not name for name in args.required or ()):
-        print('--required must name a workflow, got an empty value',
+    if any(not name.strip() for name in args.required or ()):
+        print('--required must name a workflow, got a blank value',
               file=sys.stderr)
         return 3
     required = (frozenset(args.required) if args.required
