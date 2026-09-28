@@ -575,23 +575,57 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     earlier versions missed their own mutants. The squeeze uses `str.replace`
     because the control-write policy already models it, and widening that
     policy so this control passes would be the mistake the wave is about. A
-    restatement in different words is not detectable here. The scan skips two
-    files: this suite, and the helper that holds the search keys. A file
-    holding the keys cannot be one of the files searched for them, and a
-    checker is not a second authority.
+    restatement in different words is not detectable here. Every file in the
+    package is read, this suite and the module holding the search keys
+    included, and the one exemption is a key's own definition: a plain
+    assignment of the phrase to a name, spared where it is defined rather
+    than by the name of the file that holds it. Only one is ever spared, so a
+    second definition beside the first is still a second statement.
     """
     from _coverage_bindings import _carried_parts
 
     del tmp
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
-        stated, total = phrase_holders(phrase, Path(__file__).name)
+        stated, total = phrase_holders(phrase)
         assert stated == [_AUTHORITY_FILE], (phrase, stated)
         assert total == 1, (phrase, stated, total)
     authority = _carried_parts.__doc__ or ''
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
         assert phrase in authority, (phrase, authority)
-    stale = phrase_holders(_STALE_UNIVERSAL, Path(__file__).name)
+    stale = phrase_holders(_STALE_UNIVERSAL)
     assert not stale[0], stale
+
+
+def test_only_the_keys_own_definition_is_exempt(tmp):
+    """One plain assignment is exempt, and nothing beside it is.
+
+    The exemption is what lets the module holding the keys be read like
+    any other, and it is the one place this control could go blind a
+    second time: exempted by file name, a whole module leaves the scan
+    with its keys still in view. The file the old skip named therefore
+    carries a copy in prose here, so a return to that skip loses this
+    row instead of passing quietly.
+    """
+    phrase = 'a synthetic probe phrase'
+    (Path(tmp) / 'own.py').write_text(f"KEY = {phrase!r}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == ([], 0)
+
+    (Path(tmp) / 'own.py').write_text(
+        f"KEY = {phrase!r}\n# {phrase}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (['own.py'], 1)
+
+    (Path(tmp) / 'doc.py').write_text(f'"""{phrase}."""\n', encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (['doc.py', 'own.py'], 2)
+
+    (Path(tmp) / 'twice.py').write_text(
+        f"ONE = {phrase!r}\nTWO = {phrase!r}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (
+        ['doc.py', 'own.py', 'twice.py'], 3)
+
+    (Path(tmp) / '_coverage_authority_scan.py').write_text(
+        f"# {phrase}\n", encoding='utf-8')
+    assert phrase_holders(phrase, Path(tmp)) == (
+        ['_coverage_authority_scan.py', 'doc.py', 'own.py', 'twice.py'], 4)
 
 
 def test_controls_never_write_inside_the_repository(tmp):
