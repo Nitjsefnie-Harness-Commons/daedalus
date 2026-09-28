@@ -755,6 +755,7 @@
 !/tests/test_watch_all.py
 !/tests/test_watcher_budget.py
 !/tests/test_watcher_loop_budget.py
+!/tests/test_watcher_poll_index.py
 !/tests/test_watcher_waits.py
 !/tests/test_wf_suite_boundaries.py
 !/tests/test_wfcheckout.py
