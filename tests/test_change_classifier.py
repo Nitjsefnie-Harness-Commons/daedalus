@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _classifier_calls import _event, _recording_run  # noqa: E402
 from _workflows import (  # noqa: E402
     _workflow_path_filters, _workflow_triggers)
 from _yamlread import YAMLReadError, job_mapping  # noqa: E402
@@ -32,22 +33,6 @@ from _wfgraph import (  # noqa: E402
 def _classifier():
     return _util.load(ROOT / 'scripts' / 'ci' / 'classify_changes.py',
                       'classify_mod')
-
-
-def _event(name='pull_request', repository='octo/daedalus',
-           sha='a' * 40, pull_request='248', before='b' * 40):
-    return {'name': name, 'repository': repository, 'sha': sha,
-            'pull_request': pull_request, 'before': before}
-
-
-def _recorder(stdout):
-    calls = []
-
-    def run(argv):
-        calls.append(argv)
-        return stdout
-
-    return calls, run
 
 
 def test_markdown_pattern_matches_at_any_depth(tmp):
@@ -153,14 +138,14 @@ def test_workflow_patterns_pin_the_actionlint_paths_filter(tmp):
 def test_documentation_paths_classify_to_the_reduced_matrix(tmp):
     del tmp
     mod = _classifier()
-    _calls, run = _recorder('README.md\ndocs/guide.md\nLICENSE\n')
+    _calls, run = _recording_run('README.md\ndocs/guide.md\nLICENSE\n')
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is True, reason
     assert workflows is False
     assert matrix == mod.DOCUMENTATION_MATRIX, matrix
     assert matrix == {'os': ['ubuntu-latest'], 'python': ['3.13']}, matrix
 
-    _calls, run = _recorder('README.md\nserver.py\ndocs/guide.md\n')
+    _calls, run = _recording_run('README.md\nserver.py\ndocs/guide.md\n')
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
     assert workflows is False
@@ -183,7 +168,7 @@ def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
     mod = _classifier()
     assert mod.documentation_only(()) is False
     assert mod.documentation_only(None) is False
-    _calls, run = _recorder('\n')
+    _calls, run = _recording_run('\n')
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
     assert workflows is True
@@ -193,7 +178,7 @@ def test_empty_and_missing_path_lists_run_the_full_matrix(tmp):
 def test_a_pull_request_reads_its_file_list(tmp):
     del tmp
     mod = _classifier()
-    calls, run = _recorder('README.md\n')
+    calls, run = _recording_run('README.md\n')
     mod.classify(_event(pull_request='247'), run)
     assert calls == [[
         'gh', 'api', '--paginate', '-H', 'Cache-Control: no-cache',
@@ -204,7 +189,7 @@ def test_a_push_reads_the_compare_between_before_and_sha(tmp):
     del tmp
     mod = _classifier()
     before, sha = 'b' * 40, 'a' * 40
-    calls, run = _recorder('docs/guide.md\n')
+    calls, run = _recording_run('docs/guide.md\n')
     mod.classify(_event(name='push', pull_request=None,
                         before=before, sha=sha), run)
     assert calls == [[
@@ -216,7 +201,7 @@ def test_a_push_reads_the_compare_between_before_and_sha(tmp):
 def test_unusable_events_never_call_the_api(tmp):
     del tmp
     mod = _classifier()
-    calls, run = _recorder('README.md\n')
+    calls, run = _recording_run('README.md\n')
     docs_only, matrix, workflows, _reason = mod.classify(
         _event(name='push', pull_request=None, before='0' * 40), run)
     assert (docs_only, matrix, workflows) == (False, mod.FULL_MATRIX, True)
@@ -255,7 +240,7 @@ def test_a_capped_push_file_list_falls_back_to_the_full_matrix(tmp):
     del tmp
     mod = _classifier()
     stdout = ''.join(f'docs/file{index}.md\n' for index in range(300))
-    _calls, run = _recorder(stdout)
+    _calls, run = _recording_run(stdout)
     docs_only, matrix, workflows, reason = mod.classify(
         _event(name='push', pull_request=None), run)
     assert docs_only is False, reason
@@ -273,7 +258,7 @@ def test_a_capped_pull_request_file_list_runs_the_full_matrix(tmp):
     del tmp
     mod = _classifier()
     stdout = ''.join(f'docs/file{index}.md\n' for index in range(3000))
-    _calls, run = _recorder(stdout)
+    _calls, run = _recording_run(stdout)
     docs_only, matrix, workflows, reason = mod.classify(_event(), run)
     assert docs_only is False, reason
     assert workflows is True
@@ -499,7 +484,7 @@ def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
     runs = []
     for event, paths in pushes:
         _docs, _matrix, workflows, _reason = mod.classify(
-            event, _recorder(paths)[1])
+            event, _recording_run(paths)[1])
         classifications.append(workflows)
         runs.append(_actionlint_runs(
             workflow, event['name'], 'true' if workflows else 'false'))
@@ -509,7 +494,7 @@ def test_actionlint_survives_a_replacement_push_and_keeps_pr_behavior(tmp):
     for paths, expected in (('.github/workflows/tests.yml\n', True),
                             ('README.md\n', False)):
         _docs, _matrix, workflows, _reason = mod.classify(
-            _event(name='pull_request'), _recorder(paths)[1])
+            _event(name='pull_request'), _recording_run(paths)[1])
         assert workflows is expected
         assert _actionlint_runs(
             workflow, 'pull_request', 'true' if workflows else 'false') is (
