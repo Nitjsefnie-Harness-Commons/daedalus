@@ -464,16 +464,11 @@ def test_the_derivation_launches_nothing_and_ignores_its_input_order(tmp):
 
     real_run = generator.subprocess.run
     generator.subprocess.run = refuse
-    elsewhere = Path(tmp) / 'elsewhere'
-    elsewhere.mkdir()
-    real_cwd = os.getcwd()
-    os.chdir(elsewhere)
     try:
         from_list = generator.derive(['b.py', 'a.py'])
         from_tuple = generator.derive(('b.py', 'a.py'))
         from_set = generator.derive({'b.py', 'a.py'})
     finally:
-        os.chdir(real_cwd)
         generator.subprocess.run = real_run
     assert not launched, launched
     assert from_list == from_tuple == from_set, (

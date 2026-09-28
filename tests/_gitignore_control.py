@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """The control `tests/test_gitignore_control.py` drives.
 
-This module is the control, not a suite: the fixtures and the verdicts
-they assert live in the suite beside it, and the rule is stated here.
-
 THE RULE, in full, with nothing scoped out of it:
 
     the committed `.gitignore` == derive(sorted(git ls-files))
 
 No base commit, no `git log -1`, no `ls-tree`, no blob id, no scope, no
-`fresh`/`stale` reduction, no directory-block clause. An earlier draft
-scoped the comparison to the paths tracked at both the head and the
-commit that last wrote the file, and that draft is gone; the reason is
-below and it is a measurement, not a preference.
+`fresh`/`stale` reduction, no directory-block clause.
 
 WHY IT COMPOSES, AND THE ONE THING IT DEPENDS ON. Main stays green after
 a merge whenever every branch in that merge was green. That is not a
@@ -32,15 +26,6 @@ is the whole reason the rule can be this strict:
   * therefore a branch cannot contribute a red main, because it cannot
     merge while carrying one.
 
-Measured on real two-branch merges, not argued: two branches that both
-regenerate merge green in every order, whether their entries are
-adjacent in the sorted list or not. Adjacent entries make git raise a
-CONFLICT, and the resolution that comes out green is regenerating — a
-"take both sides" union is order-sensitive, green when side one happens
-to precede side two in sort order and red when it does not, so a control
-that accepted the union would be accepting a coin flip. A branch that
-does not regenerate reds on its own CI and never reaches main.
-
 **A future reader who moves this check off the pull-request path must
 know why it was allowed to be this strict.** As a post-merge step on
 main, or as a hook that runs only on the default branch, the exact same
@@ -48,23 +33,6 @@ comparison turns the "branch added a file and forgot" case into "main is
 red and nobody is looking" — the failure this rule's predecessor was
 built to survive. Nothing about the rule changes; only the place it runs
 does, and that is the whole of the margin.
-
-What a test defends here, and what it does not, stated so the next reader
-is not misled. `tests/test_gitignore_control.py` pins that a branch
-carrying an un-regenerated tracked file is RED **on its own head** — that
-is the half placement governs. It does NOT pin that the control runs on the
-pull request. The merge fixture beside it is placement-independent: it
-builds its repositories in process and touches no CI configuration, so
-moved to a post-merge step it would still pass. The placement is therefore
-a claim of this docstring and of the workflow, not of a test, and moving
-the control off the PR path is a change that has to argue with a reader.
-
-WHAT IT CATCHES, because a strict comparison catches all of it: a
-hand-deleted entry for a still-tracked file, an invented `!<path>` line
-for a path nothing tracks, two entries or two whole blocks reordered, a
-mangled block header, the `*` deny rule removed or altered, a stray blank
-line, a trailing space on an entry, and a dropped `!/dir/` re-open line
-that would leave a directory unreopened.
 
 The `*` deny rule is the one that matters most, and NEITHER this control
 nor the generator's `check-ignore` postcondition covers it. With the
@@ -90,9 +58,6 @@ working tree, which in CI is the checked-out artifact; a working copy
 that was regenerated or hand-edited without being committed is RED here,
 not excused, because under this rule the working copy IS the subject.
 
-Every figure the verdict prints is computed over that one set, so the
-number the derivation saw and the number the comparison saw cannot drift
-apart.
 """
 import difflib
 import subprocess
@@ -173,7 +138,8 @@ def difference(actual, expected, tracked):
     lines = actual.split('\n')
     unlisted = [p for p in sorted(tracked) if f'{PREFIX}{p}' not in lines]
     named = {named_path(line) for line in lines}
-    ghosts = sorted(p for p in named if p and p not in set(tracked))
+    known = set(tracked)
+    ghosts = sorted(p for p in named if p and p not in known)
     body = list(difflib.unified_diff(
         lines, expected.split('\n'), fromfile='committed',
         tofile='derive(git ls-files)', lineterm='', n=1))[2:]
