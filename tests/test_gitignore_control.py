@@ -8,6 +8,17 @@ against and asserts a verdict for each shape.
 Every fixture runs the shipped generator in its own throwaway repository
 and commits what it wrote, so no base artifact is ever a literal the
 fixture wrote itself.
+
+What a test here defends, and what it does not, so the next reader is not
+misled about where the placement claim is enforced. This suite pins that a
+branch carrying an un-regenerated tracked file is RED **on its own head** —
+that is the half placement governs. It does NOT pin that the control runs
+on the pull request. The merge fixture below is placement-independent: it
+builds its repositories in process and touches no CI configuration, so
+moved to a post-merge step it would still pass. The placement is therefore
+a claim of the control's docstring and of the workflow, not of a test here,
+and moving the control off the PR path is a change that has to argue with
+a reader.
 """
 import subprocess
 import sys
