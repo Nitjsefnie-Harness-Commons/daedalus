@@ -566,6 +566,25 @@ def _report_safely():
             continue
 
 
+def _rendered_safely(value, render=repr):
+    """One value's rendering, or a type name when the value refuses it.
+
+    A report line that raises while formatting ends the run it is reporting
+    on, which is the one outcome a failure report must never produce. The
+    values are the subject's own — its exit code, its exception message — so
+    the rendering is subject-controlled too, and `tests/_log_safe_cases.py`
+    is the shared corpus of the shapes that refuse.
+
+    `except Exception` and not `BaseException`, deliberately: a hostile
+    `__repr__` is caught, and a real Ctrl-C raised by one still aborts rather
+    than being laundered into a report line.
+    """
+    try:
+        return render(value)
+    except Exception:  # noqa: BLE001
+        return f'<{type(value).__name__} that will not render>'
+
+
 def runner(tests, tmp_prefix='daedalustests_', requires=None):
     """Shared main(): run every callable, print PASS/FAIL, return exit code.
 
@@ -597,22 +616,24 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
                 print(f'  PASS  {t.__name__}')
             except Skipped as e:
                 skipped.append(t.__name__)
-                print(f'  SKIP  {t.__name__}: {e}')
+                print(f'  SKIP  {t.__name__}: {_rendered_safely(e, str)}')
             except AssertionError as e:
                 failed.append(t.__name__)
-                detail = str(e) or _assertion_site(e)
+                detail = _rendered_safely(e, str) or _assertion_site(e)
                 print(f'  FAIL  {t.__name__}: {detail}')
             except Exception as e:  # noqa: BLE001
                 failed.append(t.__name__)
-                print(f'  ERROR {t.__name__}: {type(e).__name__}: {e}')
+                print(f'  ERROR {t.__name__}: {type(e).__name__}: '
+                      f'{_rendered_safely(e, str)}')
             # Named, and not folded into the arms above: a wider catch would
             # take a real Ctrl-C and report it as a FAIL, then carry on. Every
             # code counts, 0 included — a subject that exits 0 is how a run
             # reads as green having verified nothing.
             except SystemExit as e:
                 failed.append(t.__name__)
-                print(f'  FAIL  {t.__name__}: SystemExit({e.code!r}) ended '
-                      f'the run from inside a test')
+                print(f'  FAIL  {t.__name__}: '
+                      f'SystemExit({_rendered_safely(e.code)}) ended the run '
+                      f'from inside a test')
     finally:
         if not settle(td.cleanup):
             print(f'  WARN  temporary tree left behind: {td.name}')
