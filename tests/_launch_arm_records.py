@@ -124,15 +124,15 @@ MARKER_NON_MEMBERS = (
      "the None closing resolve_constant's recursion; deleting its "
      'last statement returns the same value'),
     ('_argv_read.py', 88, 'MERGED',
-     'the ast.Name chain head of head_is_ambiguous; every member is '
-     'listed, at :90 ha.name-guard, :93 ha.follow, :96 ha.list and '
-     ':98 ha.else'),
+     'the ast.Name chain head of resolve_argv; every member is '
+     'listed, at :90 ra.name-guard, :93 ra.follow, :96 ra.list and '
+     ':98 ra.else'),
     ('_argv_read.py', 99, 'INERT',
-     "the None closing head_is_ambiguous's cap loop; deleting its "
+     "the None closing resolve_argv's cap loop; deleting its "
      'last statement returns the same value'),
     ('_argv_read.py', 114, 'MERGED',
-     'the ast.Name chain head of resolve_string; every member is '
-     'listed, at :115 rs.guard, :117 rs.ambiguous and :119 rs.follow'),
+     'the ast.Name chain head of head_is_ambiguous; every member is '
+     'listed, at :115 ha.name-guard, :117 ha.ambiguous and :119 ha.follow'),
     ('_argv_read.py', 123, 'INERT',
      'the False closing head_is_ambiguous; its one caller only '
      'tests it for truth'),
