@@ -466,7 +466,7 @@ _SITES = (
      '                drain_started = time.monotonic()\n'
      '                try:\n'
      '                    stdout, stderr = process.communicate()'
-    ),
+     ),
     ('tests/_drain.py',
      '    """\n'
      '    process.kill()\n'
