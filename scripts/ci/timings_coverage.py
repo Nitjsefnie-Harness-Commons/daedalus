@@ -61,6 +61,7 @@ and estimating the rest, over the 328-suite tree and a true total of
       10.4%                 173.7        2.00x
       15.6%                 126.2        2.75x  <- the historical defect
       26.8%                  74.7        4.65x
+      33.2%                  59.0        5.89x  <- the refusal
       50.0%                  38.6        8.98x
 
 A DRIFTED recorded set is a different thing. The write is a union, so a
@@ -98,7 +99,7 @@ where a recorded set stops being a sample of the tree and becomes a
 corner of it, and where the two suite bounds stop being redundant: the
 weight comparison can only fire above the same line. A drifted file at a
 third is 1.39x out, which is a slow matrix; a biased one at a third is
-4.65x out, which is a fiction, and the guard has to give the same answer
+5.9x out, which is a fiction, and the guard has to give the same answer
 to both.
 
 WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The tree grew 116 tracked suites
@@ -117,7 +118,7 @@ and the remedy.
 That band is the price of the tier, and it is a real one: a BIASED file
 at 10.6% is 2.0x out and is now published with a note instead of
 refused. Between the tiers the guard tolerates a biased plan being out by
-up to about 4.65x, in exchange for a fuse eight times longer. The
+up to about 5.9x, in exchange for a fuse eight times longer. The
 alternative -- refusing the drifted file too -- is not a stricter guard
 but a broken one, because the alternative to a wrong number is not a
 right number, it is no number. The sharper guard, which would remove the
