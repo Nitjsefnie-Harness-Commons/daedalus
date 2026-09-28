@@ -230,7 +230,7 @@ def _child_refusal_source(attempts):
         '            _handle.write(op + " " + name + "\\n")\n'
         '    except OSError:\n'
         '        pass\n'
-        '    raise PermissionError(13, "Permission denied")\n'
+        '    raise PermissionError(13, "Permission denied", target)\n'
         'def _wrap(op, real_call, name_of):\n'
         '    def call(*args, **kwargs):\n'
         '        target = name_of(args, kwargs)\n'
@@ -308,35 +308,37 @@ def _refuse_marker_operations(command_root, attempts):
     spent = {}
     log = command_root / _GC_REFUSED_PARENT
 
-    def refuse(operation, name):
+    def refuse(operation, target):
         spent[operation] = spent.get(operation, 0) + 1
         if spent[operation] > attempts:
             return False
+        name = os.path.basename(target)
         try:
             with log.open('a', encoding='utf-8') as handle:
                 handle.write(f'{operation} {name}\n')
         except OSError:
             pass  # a lost log line must not mask the refusal itself
-        raise PermissionError(13, 'Permission denied')
+        raise PermissionError(13, 'Permission denied', target)
 
-    def patched(operation, real_call, name_of):
+    def patched(operation, real_call, target_of):
         def call(*args, **kwargs):
-            name = name_of(args, kwargs)
-            if isinstance(name, str) and name.startswith(_GC_PREFIX):
-                refuse(operation, name)
+            target = target_of(args, kwargs)
+            if isinstance(target, str) and os.path.basename(
+                    target).startswith(_GC_PREFIX):
+                refuse(operation, target)
             return real_call(*args, **kwargs)
         return call
 
     os.replace = patched(
         'replace', real['replace'],
-        lambda args, kwargs: os.path.basename(
+        lambda args, kwargs: str(
             args[1] if len(args) > 1 else kwargs.get('dst', '')))
     Path.unlink = patched('unlink', real['unlink'],
-                          lambda args, kwargs: args[0].name)
+                          lambda args, kwargs: str(args[0]))
     Path.read_text = patched('read_text', real['read_text'],
-                             lambda args, kwargs: args[0].name)
+                             lambda args, kwargs: str(args[0]))
     Path.write_text = patched('write_text', real['write_text'],
-                              lambda args, kwargs: args[0].name)
+                              lambda args, kwargs: str(args[0]))
     try:
         yield log
     finally:
