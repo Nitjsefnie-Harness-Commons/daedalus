@@ -424,17 +424,12 @@ LAUNCH_ARMS = (
      'elif isinstance(func, ast.Name) and func.id in bound:...',
      'a bare name in bound is a placed launch', 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    # The analyser's own comment above this arm, at _launch_audit.py:
-    # 415-419, says the walrus arm is "LIVE and driven by no row ...
-    # Outside the classified set in tests/_bound_site_rows.py on
-    # purpose, and tracked at #1144 with the other unpinned arms." That
-    # was true when it was written and is FALSE now: this branch pins
-    # the arm on `walrus-target-in-bound-is-a-placed-launch`, and
-    # deleting :420 makes `test_repo_layout.py` go red naming that row.
-    # The analysers are byte-identical to the base by constraint, so the
-    # correction is recorded here, at the arm, rather than in the
-    # comment the constraint forbids editing. A reader of the analyser
-    # is told the arm is unpinned; a reader of this table is not.
+    # The analyser's own comment at _launch_audit.py:415-419 calls this
+    # arm "LIVE and driven by no row ... tracked at #1144 with the other
+    # unpinned arms". True when written, FALSE now: deleting :420 makes
+    # `test_repo_layout.py` go red naming this row. The analysers are
+    # byte-identical to the base by constraint, so the correction is
+    # recorded here, at the arm.
     ('ch.namedexpr-in-bound', '_launch_audit.py', 420, 'drop_if:420',
      'elif isinstance(func, ast.NamedExpr) and func.target.id in bound:...',
      'a walrus target in bound is a placed launch', 'CONTROLLED',
@@ -467,13 +462,10 @@ LAUNCH_ARMS = (
      'if not isinstance(func, ast.Attribute) \\ or not isinstance(func.va...',
      'anything but a method on a bare name is not machinery', 'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
-    # `evidence` is the step ceiling, not the row. The row enters this
-    # arm through a KeyError on the ordinary path, which pins "the
-    # analyser must not raise"; the guard is for the CYCLE, and only the
-    # step ceiling enters that -- with the cut the fixpoint runs past
-    # 100000 line events, which is what this arm does instead of
-    # answering wrong. The row still holds the arm, as SECONDARY_CONTROLLED
-    # says, and it is a control no other arm names.
+    # The step ceiling, not the row: the row enters this arm through a
+    # KeyError on the ordinary path, and the guard is for the CYCLE,
+    # which the step ceiling enters and the row does not. The row still
+    # holds the arm; SECONDARY_CONTROLLED says so.
     ('mr.while-guard', '_launch_audit.py', 471, 'replace:471:while True:',
      'while base in binding_map and base not in seen \\ and base not in a...',
      'the base-following loop stops on an unheld, seen or ambiguous base',
@@ -532,22 +524,20 @@ LAUNCH_ARMS = (
      'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
     # Recorded CONTROLLED, and the mechanism, because the two halves of
-    # this return are asked about DIFFERENT names. `proved_fixed` is
-    # asked about the receiver of the bounded call; `origin` is the
-    # top-level base of the callee of the value the receiver is bound
-    # to. So the `placed` bound `pf.in-bound` cites does not decide this
-    # one: :408 places a call whose RECEIVER is a name in `bound`, and
-    # never looks at what that name is bound to. The only name that can
-    # satisfy both `origin in safe_names` and `origin in bound` here is
-    # `subprocess` itself -- the plain import puts it in `safe_names` at
-    # :222-223, and rebinding it to a subprocess-derived value (which
-    # `derives` answers True for at :109) puts it in `bound` -- so
-    # `origin not in bound` is the only clause refusing. Deleting it
-    # makes a bounded call through an unproved receiver vanish instead
-    # of being reported, which is the fail-open direction on the
-    # fail-closed arm. The whole class: any module that rebinds a name
-    # it also imported to a subprocess-derived value, and then calls a
-    # result through a name.
+    # this return are asked about DIFFERENT names: `proved_fixed` is
+    # asked about the RECEIVER of the bounded call, `origin` about the
+    # top-level base of the callee of the value that receiver is bound
+    # to. So the `placed` bound `pf.in-bound` cites cannot decide it --
+    # :408 places a call whose receiver is a name in `bound` and never
+    # looks at what that name holds. The only name satisfying both
+    # `origin in safe_names` and `origin in bound` here is `subprocess`:
+    # the plain import puts it in `safe_names` (:222-223) and rebinding
+    # it to a subprocess-derived value (`derives` says yes at :109) puts
+    # it in `bound`, so this clause is the only thing refusing. Deleting
+    # it makes a bounded call through an unproved receiver vanish
+    # instead of being reported -- fail-open on the fail-closed arm. The
+    # class: any module that rebinds a name it also imported to a
+    # subprocess-derived value and then calls a result through a name.
     ('pf.origin-not-bound', '_launch_audit.py', 549, 'boolop:549:1',
      'return origin in safe_names and origin not in bound',
      'the `origin not in bound` half of that same return',
@@ -729,28 +719,23 @@ LAUNCH_ARMS = (
      'self-referential-concat-name'),
 )
 
-# The CONTROLLED arms whose `evidence` goes red by RAISING, not by
-# changing to another value. A crash is a real control -- the suite goes
-# red, so nothing here is a false green -- but a weaker one than it
-# looks: what it pins is "the analyser must not raise on this shape",
-# and a later robustness change can satisfy that while the arm's own
-# clause stops deciding the answer. So the subset is NAMED rather than
-# counted into `evidence-does-not-control`, which now means "the named
-# evidence's rendered verdict changes" and carries this set beside it.
+# The CONTROLLED arms whose `evidence` goes red by RAISING rather than
+# to another value. A crash is a real control -- the suite goes red --
+# but a weaker one: it pins "the analyser must not raise on this
+# shape", which a robustness change can satisfy while the arm's own
+# clause stops deciding. So the subset is NAMED beside the count rather
+# than folded into it: `evidence-does-not-control: 0` means the named
+# evidence's rendered verdict changes, and this set is the part of that
+# held by the absence of a crash.
 #
-# Derived by sweeping every arm and reading, per arm, whether its own
-# evidence label moved to a value or to a `RAISED ...` string: fourteen
-# of the CONTROLLED set, each of which moves NOTHING by value, so the
-# crash is the whole of its control. The derivation is the full sweep
-# (all 150 arms), not a sample; this suite re-proves every name below
-# and no other arm's crash is claimed.
-#
-# `mr.while-guard` is NOT here, and is the reason the set is not simply
-# "every arm that raises": its own evidence moves nothing, but the
-# mutant's child does not ANSWER (it does not stop, which is what its
-# `replace:471:while True:` cut is for), so there is no verdict to
-# classify. Its real control is the step ceiling, and the row this table
-# used to name is the second, weaker one -- see SECONDARY_CONTROLLED.
+# Derived by sweeping all 150 arms and reading, per arm, whether its own
+# evidence moved to a value or to a `RAISED ...` string. Fourteen, and
+# for every one the by-value set is empty -- the crash is the whole of
+# its control. `mr.while-guard` is NOT here and is why this is not
+# simply "every arm that raises": its mutant child does not ANSWER (the
+# cut is the fixpoint that does not stop), so there is no verdict to
+# classify. Its real control is the step ceiling and the row this table
+# used to name is the second, weaker one; see SECONDARY_CONTROLLED.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
@@ -759,19 +744,13 @@ CRASH_CONTROLLED = frozenset({
 })
 
 # A CONTROLLED arm's `evidence` names the control that enters the arm
-# that can actually FAIL. Where another control also holds the arm, it
-# is named here rather than left implicit in the gap: a reader of the
-# one line above it would not know it exists. Two arms need it.
-#
-#   mr.while-guard  the row reaches the guard through a KeyError on the
-#                   ordinary path; the step ceiling is the control that
-#                   enters the CYCLE, which is the shape the guard is
-#                   for, and the table's `evidence` now names that one.
-#   rs.guard        its `evidence` goes red by raising, but
-#                   `import-module-name-bound-twice` isolates the
-#                   clause by changing a value -- so this arm is held
-#                   by a control that pins the mechanism as well as by
-#                   one that only pins the absence of a crash.
+# that can actually FAIL. Where another control also holds the arm it is
+# named here, rather than left implicit in the gap a reader of that one
+# line would not know about. Three arms need it: `mr.while-guard`'s row
+# reaches the guard through a KeyError on the ordinary path where the
+# step ceiling enters the CYCLE the guard exists for; `rs.guard` is held
+# by a raise AND by a value-changing control; and `pf.origin-not-bound`
+# moves both of its rows, of which the table records one.
 SECONDARY_CONTROLLED = {
     'mr.while-guard': ('machinery-reached-by-assignment-is-unproved',),
     'rs.guard': ('import-module-name-bound-twice',),
@@ -779,30 +758,23 @@ SECONDARY_CONTROLLED = {
         'rebound-module-name-from-import-module-is-unplaced',),
 }
 
-# The closure claim is a GRANULARITY claim, so it is stated with its
-# granularity. "Every arm of both analysers" is every `if`/`elif`/`while`
-# header the table lists; against the spelling-independent marker
-# (those headers, and each disjunct of a multi-line condition, which is
-# the granularity the table already uses for :524 and :549) a reader
-# would find clauses at lines the table does not list. Each is named
-# here with what covers it, so the marker is answered rather than left
-# open: MERGED clauses are a chain head whose every member IS a listed
-# arm, and a CONTROLLED clause is one that stands alone, with the row
-# that holds it. `tests/test_launch_arms.py` re-derives the marker and
-# refuses a non-member that is not in this tuple, so the set cannot
-# quietly fall behind the analysers.
+# "Every arm of both analysers" is a GRANULARITY claim, so it is stated
+# with its granularity. The spelling-independent marker is every
+# `if`/`elif`/`while` header plus each disjunct of a multi-line condition
+# (which is the granularity the table already uses for :524 and :549),
+# and a clause inside a listed arm's SPAN is that arm rather than an
+# exception. Ten clauses fall outside every arm, and each is named here
+# with what covers it: MERGED is a chain head whose every member IS a
+# listed arm, CONTROLLED is one that stands alone, with the row holding
+# it. Measured by cutting each -- all ten move a label, nine of them to
+# a VALUE, and only :383 is crash-heavy (130 raise, 3 change).
 #
-# The two the marker finds INSIDE a listed arm's span are the finer
-# half: `_launch_audit.py:567` is the `**`-unpack operand of
-# `ub.not-bounded` (:566), and `_argv_read.py:212` is the `seen`
+# The two finer clauses sit INSIDE a listed arm: :567 is the `**`-unpack
+# operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
 # operand of `rs.guard` (:203). The table splits :524 and :549 per
-# operand and leaves these two whole, which is a spelling difference
-# rather than a gap: each is inside the arm that covers it.
-#
-# Measured per clause by cutting it and re-asking every row: all ten
-# are CONTROLLED, and nine of the ten move a label to another VALUE
-# rather than to a raise. The exception is :383, which moves 130 labels
-# to a raise and 3 to a value, and so is named by a value-changing one.
+# operand and leaves these whole, a spelling difference, not a gap.
+# `tests/test_launch_arms.py` re-derives the marker and refuses a
+# non-member this tuple does not name.
 MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 211, 'MERGED',
      'the ast.Import chain head; every member is listed, at :213 '
@@ -834,27 +806,17 @@ MARKER_NON_MEMBERS = (
      'listed, at :115 rs.guard, :117 rs.ambiguous and :119 rs.follow'),
 )
 
-# The rows THIS BRANCH added that no arm RECORDS as its evidence.
-# `test_every_controlled_arm_names_a_row_or_a_control_that_exists`
-# checks one direction -- every CONTROLLED arm names a real row -- and a
-# row meeting the table with no arm behind it is a gap in the table's
-# own guard. Each entry says which arms hold it, MEASURED by sweeping
-# every arm and reading which sweep moved the label, so a reader is not
-# asked to guess.
-#
-# The holders are several and none of them records the row, which is
-# the honest shape: these are not rows nothing reaches, they are rows
-# that happen to be a second control for an arm whose recorded evidence
-# is something else. Neither claim in the review that they are held by
-# `bind.class` and `res.fallthrough` reproduces -- cutting those two
-# moves one and four labels respectively, and neither of these two.
-#
-# Rows that predate the table are not listed: many of them serve the
-# tree-wide rule directly rather than through an arm, and the forward
-# direction is the one the table is load-bearing on. This list covers
-# what the branch added, and a suite asserts every name in it is still a
-# real row that still no arm records, so naming one retires it here
-# rather than leaving the record stale.
+# The rows THIS BRANCH added that no arm RECORDS as its evidence. The
+# forward direction -- every CONTROLLED arm names a real row -- is the
+# one the table is load-bearing on; this is the other one, so a row
+# meeting the table with no arm behind it is not left for a reader to
+# resolve by guess. Holders are MEASURED (sweeping every arm for which
+# sweep moved the label) and there are several, none of which records
+# the row: these are not rows nothing reaches, but rows that are a
+# second control for an arm whose recorded evidence is something else.
+# Rows predating the table are not listed -- many serve the tree-wide
+# rule directly. A suite asserts each name here is still a real row that
+# still no arm records, so naming one retires it here.
 ROW_UNCLAIMED = (
     ('class-name-is-a-defined-name',
      ('fw.resolve', 'norm.no-dot', 'pf.not-safe', 'sink.gate',
