@@ -10,12 +10,14 @@ reader's, and this only produces the evidence for it.
 
 The cut is AST-located and the exact text it removed is returned, so a
 reader can see which clause the verdict depended on rather than trust
-that the right one went. A chain head is the one case where the span
-that is cut and the clause that goes differ: the head's `end_lineno`
-runs down the whole elif chain, and the promotion re-supplies that
-chain, so `removed` stops at the head's own body and the text that took
-its place comes back separately in `promoted`. Five shapes of clause
-need five ops:
+that the right one went -- and `tests/test_launch_arms.py` checks that
+claim against the source rather than taking it: the text has to be a
+real region of the file and carry the line its own arm names. A chain
+head is the one case where the span that is cut and the clause that goes
+differ: the head's `end_lineno` runs down the whole elif chain, and the
+promotion re-supplies that chain, so `removed` stops at the head's own
+body and the text that took its place comes back separately in
+`promoted`. Five shapes of clause need five ops:
 
     drop_if    cut an `if`/`elif` arm, promoting a chain head's orelse
     drop_stmt  cut a statement outright
