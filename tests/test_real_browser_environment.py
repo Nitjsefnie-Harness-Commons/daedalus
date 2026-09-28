@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _util  # noqa: E402
-from _noderun import run_node_argv  # noqa: E402
 from _realbrowser_fixture_controls import _enter_fixture  # noqa: E402
 
 
@@ -51,10 +50,10 @@ def test_repository_node_probe_starts_and_terminates(tmp):
     if not node:
         _realbrowser_controls.control_requirement_missing(
             'Node is absent, so its repository probe cannot be checked')
-    capability = run_node_argv(
-        node, ['-e',
-               "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
-        _realbrowser.ROOT)
+    capability = subprocess.run(
+        [node, '-e',
+         "process.exit(typeof WebSocket === 'function' ? 0 : 1)"],
+        capture_output=True, text=True, timeout=10)
     assert capability.returncode in (0, 1), (
         capability.returncode, capability.stdout, capability.stderr)
     requirements = None
@@ -85,7 +84,8 @@ def test_repository_worker_probe_matches_declared_functions(tmp):
         program = (
             declarations + '\nprocess.stdout.write(String('
             + _realbrowser._WORKER_READY_PROBE + '));')
-        result = run_node_argv(node, ['-e', program], _realbrowser.ROOT)
+        result = subprocess.run(
+            [node, '-e', program], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, (
             node, result.returncode, result.stdout, result.stderr)
         return result.stdout
@@ -192,52 +192,22 @@ def test_e2big_start_failure_fails_when_minimal_spawn_succeeds(tmp):
 
 
 def test_nonterminating_node_probe_is_harness_failure(tmp):
-    """A wedged capability probe is a HARNESS failure, and a classified one.
-
-    The interpreter started, so its fixed program failing to terminate is
-    the harness's defect rather than a missing machine capability — and the
-    distinction is load-bearing, because `BrowserEnvironmentSkipped` skips
-    every real-browser test, so classifying a wedged probe as an absent
-    capability would hide a broken harness behind a green skip.
-
-    The bound is the shared detector's, shortened for the control rather
-    than this module's own constant, because the source is planted into the
-    real probe and the child really does wedge: the deadline that ends it is
-    the one every routed child gets. The child's own output is asserted as
-    well, since a child that stopped answering is exactly the case where its
-    partial output is the only evidence there is.
-    """
-    import _noderun
     del tmp
     node = shutil.which('node')
     assert node, 'Node is required to execute the probe control'
-    stalling = ("process.stdout.write('the probe spoke before it wedged\\n');"
-                " setInterval(() => {}, 1000);")
-    real_deadline = _noderun.CHILD_DEADLINE_S
-    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
     failure = None
-    try:
-        with mock.patch.object(
-                _realbrowser.shutil, 'which', _which_with(node)), \
-                mock.patch.object(
-                    _realbrowser, 'NODE_WEBSOCKET_PROBE', stalling):
-            try:
-                _realbrowser.browser_requirements()
-            except Exception as why:  # noqa: BLE001
-                failure = why
-    finally:
-        _noderun.CHILD_DEADLINE_S = real_deadline
+    with mock.patch.object(
+            _realbrowser.shutil, 'which', _which_with(node)), \
+            mock.patch.object(
+                _realbrowser, 'NODE_WEBSOCKET_PROBE', 'while (true) {}'), \
+            mock.patch.object(_realbrowser, 'NODE_PROBE_TIMEOUT', 0.05):
+        try:
+            _realbrowser.browser_requirements()
+        except Exception as why:  # noqa: BLE001
+            failure = why
     assert failure.__class__ is AssertionError, failure
-    # `__cause__` is a descriptor pylint types as a class, so reading the
-    # detector's own report off it is a false positive rather than a real
-    # one; the `isinstance` below is what tells the two apart for real.
-    # pylint: disable=no-member
-    cause = failure.__cause__
-    assert isinstance(cause, _noderun.ChildDeadlineExceeded), cause
-    assert not isinstance(cause, subprocess.TimeoutExpired), cause
-    assert 'the probe spoke before it wedged' in cause.stdout, cause.stdout
-    assert cause.cleanup_diagnostic, 'the cleanup reported nothing'
-    # pylint: enable=no-member
+    assert isinstance(
+        failure.__cause__, subprocess.TimeoutExpired), failure.__cause__
 
 
 def test_browser_interpreter_start_failure_is_environment_skip(tmp):

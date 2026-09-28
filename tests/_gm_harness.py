@@ -11,11 +11,11 @@ before-evidence.
 """
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _noderun import run_node_argv  # noqa: E402
 from _repo import ROOT  # noqa: E402
 from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
 
@@ -381,12 +381,13 @@ def _run_node(harness, content_path=None, with_page=False):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension storage boundary'
     ext = ROOT / 'extension'
-    result = run_node_argv(node, [
-        '-e', harness,
-        str(content_path or (ext / 'content.js')),
-        str(ext / 'page.js') if with_page else '',
-        str(ext / 'worker' / 'util.js'),
-        str(ext / 'worker' / 'gm_storage.js')], ROOT)
+    argv = [node, '-e', harness,
+            str(content_path or (ext / 'content.js')),
+            str(ext / 'page.js') if with_page else '',
+            str(ext / 'worker' / 'util.js'),
+            str(ext / 'worker' / 'gm_storage.js')]
+    result = subprocess.run(
+        argv, cwd=ROOT, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)

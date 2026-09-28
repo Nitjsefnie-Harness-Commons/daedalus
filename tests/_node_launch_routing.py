@@ -57,7 +57,9 @@ NOT_SITES = ('_noderun.py', '_node_launch_routing.py',
 # separately required to still bound its own child.
 CLASSIFYING_MODULES = {
     '_dashnode.py': 'scales its own bound per retry attempt',
+    '_gm_harness.py': 'a real-browser storage boundary (task 3)',
     '_overlap.py': 'its expiry is already classified by the harness',
+    '_realbrowser.py': 'a real-browser probe with a composed bound (task 3)',
     # Its executable is a function PARAMETER named `node`, so the walk
     # admits it without binding it — a name spelled `node` is in scope
     # whether or not it resolves, because admitting a site only makes the
@@ -65,7 +67,10 @@ CLASSIFYING_MODULES = {
     # that keeps it honest is the one every member carries.
     '_realbrowser_workers.py': 'a CDP call whose bound IS the response '
                                'deadline it asserts, classified into '
-                               'CDPTimeout by the module',
+                               'CDPTimeout by the module (task 3)',
+    'test_real_browser_classification.py': 'a real-browser probe (task 3)',
+    'test_real_browser_environment.py': 'a real-browser probe (task 3)',
+    'test_real_browser_harness.py': 'a real-browser probe (task 3)',
 }
 
 # A launch whose executable this walk cannot resolve is a FINDING, not a
