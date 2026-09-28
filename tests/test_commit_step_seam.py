@@ -412,7 +412,11 @@ def test_a_missing_install_is_never_a_filesystem_fact(tmp):
     assert not holds, 'a command that ran and failed read as unresolvable'
     assert detail == 'install: boom', detail
 
-    # The measurement, wherever this PATH can arrange the case.
+    # The measurement, wherever this PATH can arrange the case. A skip
+    # here names BOTH measured halves -- the PATH that still resolves
+    # `install`, and the filesystem that cannot hold a mode -- because a
+    # reason naming only the second would hide the first, and the first
+    # is the unexplained one.
     bare = Path(tmp) / 'bare-bin'
     bare.mkdir()
     stripped = dict(environment, PATH=str(bare))
@@ -427,12 +431,14 @@ def test_a_missing_install_is_never_a_filesystem_fact(tmp):
             f'where it is load-bearing: {why or "a bare PATH is not bare"}')
     if resolves:
         _util.skip(
-            'this filesystem cannot hold a POSIX mode, so the step\'s own '
-            'command fails whatever PATH it is given and the '
-            'missing-install case is not observable here; the '
-            'classification that decides it is pinned above on every '
-            'platform, and the case runs on every filesystem that can '
-            'hold a mode')
+            'the missing-install case cannot be arranged here, and both '
+            'halves of that are measured rather than guessed: this PATH '
+            f'still resolves install ({why}), and the filesystem cannot '
+            'hold a POSIX mode, so the step\'s own command fails whatever '
+            'PATH it is given. The classification that decides the case '
+            'is pinned above on every platform, and the case itself runs '
+            'on every filesystem that can hold a mode -- where failing to '
+            'arrange it is a failure, not this skip')
     holds, detail = filesystem_holds_a_mode(workdir, stripped)
     assert holds, 'a PATH with no install reported a filesystem fact'
     assert 'install cannot be resolved' in detail, detail
