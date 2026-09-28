@@ -214,8 +214,8 @@ def select(runs, wanted, max_cells=1, recorded=0):
         selected.append((run_id, weights, references))
         if len(selected) == wanted:
             break
-    report = {'reached': len(selected) + len(incomplete) + len(degenerate)
-                                  + empty,
+    report = {'reached': (len(selected) + len(incomplete)
+                          + len(degenerate) + empty),
               'incomplete': incomplete, 'degenerate': degenerate,
               'empty': empty}
     return selected, report

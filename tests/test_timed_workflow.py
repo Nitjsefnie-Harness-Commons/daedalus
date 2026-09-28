@@ -679,7 +679,7 @@ def test_the_commit_subject_is_the_one_the_refresher_wrote(tmp):
     """
     source = _timed_workflow()
     refresh_step = workflow_script(source, 'refresh',
-                                  'Refresh the data file')
+                                   'Refresh the data file')
     commit_step = workflow_script(source, 'refresh', 'Commit the refresh')
     match = re.search(r'--message-file\s+(\S+)', refresh_step)
     assert match, refresh_step
