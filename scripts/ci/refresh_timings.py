@@ -1,64 +1,60 @@
 #!/usr/bin/env python3
 """Re-derive `.github/suite-timings.json` from the timed job's artifacts.
 
-The data file is a function of CI's own measurements: each suite's
-weight is the time it took per measured head round, as a multiple of
-one fixed reference workload (`reference_workload.py`) measured on the
-same runner, and the planner packs cells by those weights. This script
-is the half of that which owns the measurement; the planner owns the
-packing, and the workflow owns the ordering (download the artifacts,
-then run this).
+Each suite's weight is the time it took per measured head round, as a
+multiple of one fixed reference workload measured on the same runner,
+and the planner packs cells by those weights. This script owns the
+measurement; the planner owns the packing; the workflow owns the order.
 
 WHAT IT READS, AND WHICH RUNS. Both are `scripts/ci/timings_runs.py`,
 which owns the artifact layout, the run selection and the two rules
 that keep a refresh from narrowing the file: the runs that produced a
 COMPLETE cell set, and the collapsed run that produced one cell where
 the file bounds the matrix at more than one, which is skipped and
-reported rather than taken as the partition. The median is taken over
-the selected runs and `runs` records that sample -- a median over one
-run is still a median; a file that silently claimed three is not.
+reported rather than taken as the partition. The median is over the
+selected runs and `runs` records that sample -- a median over one run
+is still a median, and a file that silently claimed three is not.
 
 THE WRITE, WHICH IS A UNION. The file is rewritten when a weight moved
 beyond `WEIGHT_MARGIN` of the recorded one, a suite appeared in the
 measurements, or the recorded target was re-derived because the margin
 forbade it -- that last reason depends on the tree, through the
 planner, so the decision is not a function of the measurements alone.
-Otherwise nothing is written and the reason is printed, so a scheduled
-refresh that finds nothing to say is a no-op, not a commit.
+Otherwise nothing is written and the reason printed, so a scheduled
+refresh that finds nothing to say is a no-op rather than a commit.
 
 A suite that LEFT the measurements is not a reason to write, because a
 run does not leave a suite by measuring it faster: a run that executed
-one cell of a fifteen-cell matrix did not measure the other fourteen,
-and writing the measured set alone deletes the weights of every suite
-that run did not happen to execute. That is how a refresh left the
-shipped file describing 28 of 326 suites and the planner then priced
-the other 298 at the median of the heavy tail that survived. So the
-recorded weights of suites these runs did not measure are carried into
-the write in the file's own units, the new measurement wins wherever
-both have one, and the report names what was carried so a reader can
-tell which numbers a write measured. A suite deleted from the tree
-keeps its recorded weight until some run measures it again, which
-costs a named `stale` entry in the planner's summary and nothing else.
+one cell of a fifteen-cell matrix did not measure the other fourteen.
+Writing the measured set alone deletes the weights of every suite that
+run did not happen to execute, and that is how a refresh left the
+shipped file describing 28 of 326 suites for the planner to price at the
+median of the heavy tail that survived. So the recorded weights of
+suites these runs did not measure are carried into the write in the
+file's own units, the new measurement wins wherever both have one, and
+the report names what was carried. A suite deleted from the tree keeps
+its recorded weight until some run measures it again, which costs a
+named `stale` entry in the planner's summary and nothing else.
 
 THE BOUNDS. `target_cell_weight` and `max_cells` are not measurements;
 they are the file's two policy numbers, coupled to the planner's
 `CELL_WEIGHT_MARGIN` by construction and to nothing else, and the
 planner only notes a target the margin forbids before exiting 0. So
-before every write -- seed or refresh -- the target is verified
-against the margin with the weights being written and re-derived
-rather than written through when the margin forbids it
-(`timings_bounds`, the chokepoint), and the file carries a `basis`
-field naming both bounds, their measured basis and the tree suites the
-measurements do not cover, rebuilt from the numbers of that write so
-it cannot go stale the way a preserved sentence would.
+before every write -- seed or refresh -- the target is verified against
+the margin with the weights being written and re-derived rather than
+written through (`timings_bounds`, the chokepoint), and the file
+carries a `basis` field naming both bounds, their measured basis and
+the tree suites the measurements do not cover, rebuilt from that write's
+own numbers so it cannot go stale the way a preserved sentence would.
+A SEED also passes the coverage chokepoint, and a refresh does not
+because a union can only widen what the file already described.
 
 UNITS. Weights are reference-multiples. A file in seconds is rescaled
 into them -- the target with the weights, by the same factor -- so the
-cell target keeps the wall-clock load it was derived from; a target
-left in seconds beside weights in multiples would be a bound on
-nothing. The seed mode (`--seed`) writes the first file from a single
-run's RAW seconds, because the reference workload does not exist until
-the timed job runs it, and says so in that same field.
+cell target keeps the wall-clock load it was derived from. The seed mode
+(`--seed`) writes the first file from a single run's RAW seconds,
+because the reference workload does not exist until the timed job runs
+it, and says so in that same field.
 
   python3 scripts/ci/refresh_timings.py --runs-root runs/ --out FILE
   python3 scripts/ci/refresh_timings.py --runs-root seed/ --out FILE \
@@ -73,7 +69,8 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     from plan_timed_matrix import (
-        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names)
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names,
+        verify_measured)
     from timings_bounds import (
         BoundsError, basis_sentence, derive_target, live_recorded,
         plan_is_balanced, verify_target)
@@ -81,7 +78,8 @@ try:
         RefreshError, cell_dirs, discover_runs, select, suite_seconds)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names)
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names,
+        verify_measured)
     from scripts.ci.timings_bounds import (
         BoundsError, basis_sentence, derive_target, live_recorded,
         plan_is_balanced, verify_target)
@@ -121,9 +119,8 @@ def _moved(recorded, computed):
 def median_weights(selected):
     """Every suite's median weight over the sample, and the reference.
 
-    The writing half's own arithmetic, kept beside the write that uses
-    it: it is a statistic of a run SAMPLE, which is not a thing the
-    reader of a run directory knows anything about.
+    A statistic of a run SAMPLE, so it belongs beside the write that
+    uses it rather than beside the reader of a run directory.
     """
     by_suite = {}
     references = []
@@ -149,11 +146,10 @@ def unit_scale(old_units, reference):
 def _reasons(existing, measured):
     """Why the file would be rewritten; empty means leave it alone.
 
-    Membership is judged against what the RUNS measured, not against
-    the union: a suite this run did not measure is carried forward, not
-    appeared, and one the file records and the runs did not measure is
-    neither of the two -- it keeps its recorded weight, so there is no
-    reason to write and the message names it separately.
+    Judged against what the RUNS measured, not against the union: a
+    suite this run did not measure is carried forward, not appeared,
+    and one the file records and the runs did not is neither -- it keeps
+    its recorded weight, so there is no reason to write.
     """
     reasons = []
     if existing['units'] != 'reference-multiples':
@@ -182,15 +178,17 @@ def _rounded(weight):
 def _runs_text(run_ids):
     """The ONE rendering of a run list, used by every field that names one.
 
-    The commit subject and the file's `measured_from` are two records
-    of the same measurement, so they are rendered from the same list by
-    the same join. They did not have to be, and did not: commit
-    `eed3ae9e` is titled "ci: refresh suite timings from run
-    36318864740" while the file it wrote records `measured_from:
-    36310409594`, because the workflow built the subject from `${{
-    github.run_id }}` -- the REFRESH workflow's own run -- and the
-    refresher recorded the `tests` run it measured. Both were right
-    about their own value, and nothing compared them.
+    The field is the SAMPLE, not the file: a union write carries every
+    weight it did not re-measure, so after a partial run most of the
+    numbers are older than any run named here. The `basis` clause is
+    where the split is recorded, and both come from this value.
+
+    The commit subject and `measured_from` are two records of the same
+    measurement, so they are rendered from the same list by the same
+    join. They did not have to be, and did not: commit `eed3ae9e` is
+    titled "refresh suite timings from run 36318864740" -- the REFRESH
+    workflow's own run -- while the file it wrote records the `tests`
+    run it measured. Both were right about their own value.
     """
     return ', '.join(str(run_id) for run_id in run_ids)
 
@@ -225,10 +223,8 @@ def _write(path, data):
 def _attach_basis(tree, data, cells, measured):
     """The file's `basis` field: the basis of both bounds, rebuilt now.
 
-    `measured` is what the RUNS measured, not what the file records.
-    The write is a union, so the file records every carried suite too,
-    and a clause driven by the file's own weights called the tree fully
-    measured by a run that measured three suites of it.
+    `measured` is what the RUNS measured, not what the file records --
+    the write is a union, so the file records every carried suite too.
     """
     data[BASIS_FIELD] = basis_sentence(
         tree, data, cells, [name for name in suite_names(tree)
@@ -240,25 +236,12 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
             message_file=None):
     """Recompute the file from the runs; return the message, or refuse.
 
-    A WRITE IS A UNION, never a replacement. A run that executed one
-    cell of a fifteen-cell matrix measured a fraction of the tree, and
-    writing the measured set alone deletes the weights of every suite
-    that run did not happen to execute -- which is how a refresh left
-    the shipped file describing 28 of 326 suites, and the planner then
-    priced the other 298 at the median of the heavy tail that
-    survived. So the recorded weights of suites these runs did not
-    measure are carried into the write in the file's own units, the
-    new measurement wins wherever both have one, and the report names
-    what was carried so a reader can tell which numbers a write
-    measured. A suite deleted from the tree keeps its recorded weight
-    until some run measures it again, which costs a named `stale`
-    entry in the planner's summary and nothing else.
-
-    The caller owns the exit code; `RefreshError` and `BoundsError` are
-    the refusals. The target is verified against the margin BEFORE the
-    decision to write, so a forbidden target is re-derived even when no
-    weight moved -- the file cannot be left in a state the shipped
-    margin forbids, and the re-derivation is itself a reason to write.
+    The union, and every reason for it, is the module docstring's. The
+    caller owns the exit code; `RefreshError` and `BoundsError` are the
+    refusals. The target is verified BEFORE the decision to write, so a
+    forbidden target is re-derived even when no weight moved -- the
+    file cannot be left in a state the margin forbids, and the
+    re-derivation is itself a reason to write.
     """
     if tree is None:
         tree = _REPO_ROOT
@@ -342,7 +325,16 @@ def _reached_message(report):
 
 
 def seed(runs_root, out, tree):
-    """Write the first file from one run's raw seconds; return the message."""
+    """Write the first file from one run's raw seconds; return the message.
+
+    A SEED IS THE ONE WRITE WITH NO PREVIOUS FILE. A refresh is a union
+    and can only widen what the file already described, so the
+    planner's coverage guard is enough for it; a seed has nothing to
+    widen and writes the measured set alone, which is the shape the
+    guard exists to refuse. So the file is put through the same
+    chokepoint before it is written rather than at plan time, in a
+    different job, naming a different remedy.
+    """
     runs = discover_runs(runs_root)
     for run_id, path in runs:
         cells = cell_dirs(path)
@@ -364,6 +356,7 @@ def seed(runs_root, out, tree):
             f'run {run_id}: no target within max_cells {max_cells} balances '
             f'its weights at the margin; split the heaviest suite or raise '
             f'max_cells by hand')
+    verify_measured(tree, data)
     _attach_basis(tree, data, max_cells, seconds)
     _write(out, data)
     return (f'seeded {out} from tests run {run_id}: {len(seconds)} suites '
