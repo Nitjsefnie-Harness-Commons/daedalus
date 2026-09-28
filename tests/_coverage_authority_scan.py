@@ -79,12 +79,15 @@ def _defines(text, squeezed, key):
             targets = [node.target]
         else:
             continue
+        if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+            continue
         value = node.value
-        if (len(targets) == 1 and isinstance(targets[0], ast.Name)
-                and isinstance(value, ast.Constant)
-                and isinstance(value.value, str)
-                and squeezed(value.value) == key
-                and key in squeezed(_written(text, value))):
+        if not (isinstance(value, ast.Constant)
+                and isinstance(value.value, str)):
+            continue
+        if squeezed(value.value) != key:
+            continue
+        if key in squeezed(_written(text, value)):
             return True
     return False
 
