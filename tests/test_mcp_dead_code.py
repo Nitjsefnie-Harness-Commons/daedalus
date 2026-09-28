@@ -389,8 +389,8 @@ def load():
 
 
 def test_a_finally_body_tail_is_out_of_the_scan_set(_tmp):
-    """The `finalbody` field, and the block the walk's own prose names
-    without a row behind it.
+    """The `finalbody` field, and one of the blocks the walk's own prose
+    names without a row behind it.
 
     A `finally` runs whether or not the body raised, so a call inside one is
     a call the runtime makes — the call after the `return` is not, because
