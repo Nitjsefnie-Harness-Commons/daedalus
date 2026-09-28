@@ -69,7 +69,7 @@ def _file(tmp, data, name='suite-timings.json'):
     return path
 
 
-def _run(refresh, args, expect=0):
+def _refreshed(refresh, args, expect=0):
     """Run main() with both streams captured; return (code, out, err)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -110,7 +110,7 @@ def test_a_one_cell_run_is_not_the_partition_when_an_older_measured_more(
                                   'cell-02': {'test_b.py': 2.0}})
     out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}),
                 name='timings.json')
-    _out, err = _run(refresh, _refresh_args(tmp, root, out, runs=3))
+    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out, runs=3))
     written = json.loads(out.read_text(encoding='utf-8'))
     assert written['measured_from'] == '139, 138', written
     assert written['suite_weights'] == {'test_a.py': 4.0,
@@ -132,7 +132,7 @@ def test_a_refresh_with_only_a_collapsed_matrix_to_choose_from_is_refused(
     _write_run(root, 150, {'cell-01': {'test_a.py': 4.0}})
     out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}))
     before = out.read_text(encoding='utf-8')
-    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
     assert 'wrote nothing' in err, err
     assert '150' in err and 'one cell' in err, err
     assert 'max_cells bound of 15' in err, err
@@ -154,7 +154,7 @@ def test_a_one_cell_run_that_measured_everything_is_not_a_collapse(tmp):
     _write_run(root, 160, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 2.0}})
     out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}))
     before = out.read_text(encoding='utf-8')
-    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
     assert 'wrote nothing' in err, err
     assert 'one cell' not in err, err
     assert out.read_text(encoding='utf-8') == before
@@ -172,11 +172,43 @@ def test_a_file_bounded_at_one_cell_takes_a_one_cell_measurement(tmp):
     root = Path(tmp) / 'runs'
     _write_run(root, 170, {'cell-01': {'test_a.py': 4.0}})
     out = _file(tmp, _data({'test_a.py': 2.0, 'test_b.py': 1.0}, max_cells=1))
-    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    _out, err = _refreshed(refresh, _refresh_args(tmp, root, out))
     assert 'carried forward' in err, err
     assert 'one cell' not in err, err
 
 
+
+
+def test_the_shipped_file_describes_the_tree_it_plans(tmp):
+    """The other half of the tripwire, and the half that was missing.
+
+    `test_timed_refresh.py` checks that the shipped file's own numbers
+    hold the balance margin they name. That file satisfied it while
+    recording 28 of the tree's 326 suites, because a total that is
+    wrong by 3.15x is balanced with itself: the check reads the file
+    against ITSELF and cannot see that it describes a corner of the
+    tree.
+
+    So this reads the file against the TREE. Every suite the tree holds
+    is either recorded a weight or named in the file's own estimated
+    clause, and the coverage guard accepts the plan those weights make.
+    Both fail on the file that shipped: 28 recorded, 288 estimated, and
+    10 suites the file never heard of because they arrived after it was
+    written.
+    """
+    planner = _util.load(ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py',
+                         'plan_timed_matrix')
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    names = set(planner.suite_names(ROOT))
+    listed = set(_util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                            'timings_bounds').estimated_count(ROOT, data))
+    missing = names - set(data['suite_weights']) - listed
+    assert not missing, sorted(missing)
+    # The guard is the same chokepoint the planner's CLI calls, so this
+    # is a refusal on the shipped file rather than a restatement of the
+    # arithmetic: a 28-weight file raises here.
+    planner.verify_measured(ROOT, data)
+    assert listed, 'a fully measured file is the state this guards'
 
 
 def main():
