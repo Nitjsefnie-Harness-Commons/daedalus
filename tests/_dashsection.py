@@ -346,7 +346,7 @@ function openPump() {
 // so the two dispatch it at different points. The other difference is
 // that the same function registered twice fires twice here and once
 // there. Nothing shipped reaches either today: the three `bus.on` call
-// sites -- `overview.js:111`, `tabs.js:198` and `_util.js:90` -- each
+// sites -- `overview.js:110`, `tabs.js:198` and `_util.js:90` -- each
 // register a fresh arrow, and none is registered twice. The gap is one
 // a NEW section could walk into, and `_util.js:90` is the way in:
 // `bindTabSelector` is an EXPORTED helper, so a section that calls it
