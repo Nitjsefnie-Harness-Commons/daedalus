@@ -209,6 +209,15 @@ def test_a_failed_scratch_removal_does_not_replace_the_classified_error(tmp):
     # type assertion alone would not have caught.
     assert 'was not fully removed' in message, message
     assert 'PermissionError' in message, message
+    # TWO of them, and the count is the pin. `run_node_program` hands the
+    # launcher its own scratch tree alongside the output one and the two
+    # are closed after the cleanup and BEFORE the report is built, so
+    # dropping the caller's tree from that loop — `(output_scratch,)` — is
+    # invisible to every other assertion here: one removal still fails, the
+    # phrase is still in the report, and the line that went missing is the
+    # one a maintainer reads at 3am on `windows-latest`. Measured, not
+    # argued: that reversion left this file 15/15.
+    assert message.count('was not fully removed') == 2, message
 
 
 # --- the exact-argv entry point -------------------------------------------

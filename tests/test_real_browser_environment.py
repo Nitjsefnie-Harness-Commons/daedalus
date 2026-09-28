@@ -275,14 +275,14 @@ def test_nonterminating_node_probe_is_harness_failure(tmp):
 def test_a_stalled_minimal_spawn_is_the_detectors_own_failure(tmp):
     """The E2BIG probe's expiry is CLASSIFIED, and says what was diagnosed.
 
-    This is the one site in the branch no control can watch by running the
-    suite, because it only runs when a launch fails with E2BIG and nothing
-    here does that. So the control reaches it directly, and asserts the
-    three things the old message got wrong: the failure is the detector's
-    own and not a bare `AssertionError`, it carries the deadline that
-    actually fired, and it names the command the probe was diagnosing —
-    because "the cause is undetermined" is false here, the cause is a
-    `TimeoutExpired` with a known figure.
+    This is the one site in the branch no control can watch by running a
+    suite and letting a real launch fail, because it is only reached
+    through a launch that failed with E2BIG. So the control reaches it
+    directly, and asserts the three things the old message got wrong: the
+    failure is the detector's own and not a bare `AssertionError`, it
+    carries the deadline that actually fired, and it names the command the
+    probe was diagnosing — because "the cause is undetermined" is false
+    here, the cause is a `TimeoutExpired` with a known figure.
     """
     from _node_launch_routing import NodeBoundExceeded
     del tmp
@@ -315,15 +315,16 @@ def test_the_minimal_spawn_site_can_fire_at_all(tmp):
     What that planted shape cannot show is whether the site FIRES. So the
     site's own composed deadline is shortened to 1ms and a real
     `python -c ''` is launched and genuinely outrun, and this asserts only
-    that: the class, and that the deadline it reports is the one that was
-    set. It deliberately asserts nothing about the child's output, because
-    the real child writes none and a stand-in standing in for the site
-    would be asserting a shape the site never produces.
+    what a real child can be asked about: the class it raises, the deadline
+    that class reports, and the command it names. It deliberately asserts
+    nothing about the child's output, because the real child writes none and
+    a stand-in standing in for the site would be asserting a shape the site
+    never produces.
 
     1ms is safe on any host and immune to a coarse clock: the control
-    FAILS if the child ever finishes inside it, and the slowest sample this
-    branch recorded for this child is 0.209s, so a host that cannot lose
-    that race is a host this control is reporting.
+    FAILS if the child ever finishes inside it, and the FASTEST of the 22
+    samples in `MINIMAL_SPAWN_SAMPLES_S` is 0.209s — 209x the deadline — so
+    a host that cannot lose that race is a host this control is reporting.
     """
     from _node_launch_routing import NodeBoundExceeded
     del tmp

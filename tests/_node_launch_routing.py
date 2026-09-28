@@ -5,27 +5,22 @@ and there are two shapes of one here. A site that launches through
 `tests/_noderun.py` is bounded by that module's `CHILD_DEADLINE_S`, and
 that is the default. A site that does not — a real-browser capability
 probe, a GM storage harness over the shipped scripts — keeps its bound at
-its own call site, because reaching the shared launcher puts the module
-and everything it calls inside `tests/_launch_census.py`'s audited path
-(`path_functions`, below): nineteen modules this branch never asked for.
+its own call site, because reaching the shared launcher puts that module
+and everything it calls inside `tests/_launch_census.py`'s audited path:
+nineteen modules this branch never asked for. What neither shape may be
+is a wall-clock literal; the constant below says what a call-site bound is
+composed from instead.
 
-What neither shape may be is a wall-clock literal. A bare `10` measures
-the runner's busyness and nothing about the child. A call-site bound is a
-detector of the same form: a table of what the child costs, the slowest
-sample from it, and a multiple above that.
+The success near the deadline is the site itself: every child here runs in
+a suite run, so seven of the eight figures are exercised in the PASSING
+path. The E2BIG probe's child runs at 1ms, never at its own 80s, so its
+figure is the one no suite run reaches.
 
-The success near the deadline is the site itself: every child here runs in a
-suite run except the E2BIG probe, so seven of the eight figures are exercised
-in the PASSING path and one is not.
-
-This is a shared helper rather than a suite because two suites need the
-walk and neither owns it: one holds the rule over the real tree, the
-other the shapes the walk must read and refuse. A sibling SUITE import is
-a seam the repository refuses — see `tests/test_suite_import_boundaries.py`
-— so the walk lives here.
-
-It is named with an underscore, so it is a shared helper by that alone and
-owns every name it declares; the names it shares are suffixed.
+It is a shared helper rather than a suite because two suites need the walk
+and neither owns it — one holds the rule over the real tree, the other the
+shapes it must read and refuse — and a sibling SUITE import is a seam the
+repository refuses. The underscore makes it a shared helper by that alone,
+so it owns every name it declares; the names it shares are suffixed.
 """
 import ast
 import sys
@@ -44,20 +39,18 @@ _TESTS_DIR = Path(__file__).resolve().parent
 #
 # The same three-step chain `tests/_noderun.py` composes, with the multiple
 # named here rather than retyped per site: five modules scaling five numbers
-# by five literals is five numbers a fix has to reach.
+# by five literals is five numbers a fix has to reach. The samples are taken
+# with the machine BUSY, not idle, because a bound is two margins and only
+# the second is what a bare number measures.
 #
 #   SITE_HANG_MULTIPLE  5   a wedged child, not a slow one
 #
-# The samples a site composes its figure from are measured with the machine
-# BUSY, not idle: a wall-clock bound is two margins — the child's real cost
-# and the runner's busyness — and only the second is what a bare number
-# measures, so idle samples hide that margin in the multiple.
-#
-# What that buys is a ratio, because a ratio is what it is: the literals these
-# replace sat at 1.8x to 3.4x the slowest busy sample each site recorded —
-# thin, and the whole argument for not typing a number. No run in that band
-# CROSSED them, so nothing here claims it did. The one crossing this branch
-# found is the E2BIG child in `tests/_realbrowser.py`, whose table records it.
+# What that buys is a RATIO, and one number would hide the site that matters.
+# Divide the literal this branch REPLACED by the slowest sample in its own
+# table — `10` everywhere but `GM_CHILD`, which was `90`: `NODE_PROBE`
+# 3.397, `MINIMAL_SPAWN` 0.629, `GM_CHILD` 4.996, `CONTROL_CHILD` 4.049,
+# `REPO_PROBE` 2.450, `WORKER_PROBE` 3.885, `WORKER_CHECK` 2.781, `CDP_HARNESS`
+# 5.238 — a band of 0.63x to 5.24x, ONE site UNDER the child it guarded.
 SITE_HANG_MULTIPLE = 5
 
 
@@ -69,9 +62,9 @@ class NodeBoundExceeded(AssertionError):
     defect: it names a figure nobody can re-derive, and it carries the
     child's output as BYTES even when the launch asked for text. It carries
     the child, the deadline and that output, because a child which stopped
-    answering is exactly the case where its partial output is all there is.
-    `context` names the site when the child is a diagnostic rather than the
-    work itself, and that diagnostic is an interpreter, not `node`.
+    answering is exactly the case where its output is all there is.
+    `context` names the site when the child is a DIAGNOSTIC — an interpreter,
+    not the `node` this class is named for.
     """
 
     def __init__(self, command, deadline_s, stdout, stderr, context=""):
@@ -97,10 +90,9 @@ def _as_text(stream):
     """A `TimeoutExpired` stream as text, whatever the launch asked for.
 
     `subprocess.run` hands the bytes it read straight to the exception, so a
-    launch with `text=True` still raises one carrying `bytes`, and a report
-    printing `b'partial\\n'` where the child wrote text has lost the one
-    thing a reader needs. Undecodable bytes are replaced rather than raised,
-    because this is built on the failure path.
+    launch with `text=True` still raises one carrying `bytes`; a report
+    printing `b'partial\\n'` where the child wrote text has lost the only
+    thing a reader needs. Undecodable bytes are replaced, not raised.
     """
     if stream is None:
         return ''
@@ -111,9 +103,8 @@ def node_bound_expiry(why, deadline_s, context=""):
     """A site's `TimeoutExpired` as this module's named failure.
 
     The figure beside `why` is the composed deadline that actually fired, so
-    the report names the number a maintainer re-derives rather than the one
-    the call site happened to pass. `context` is for a site whose child is a
-    DIAGNOSTIC — the E2BIG probe names which command it was diagnosing.
+    the report names the number a maintainer re-derives. `context` is for a
+    site whose child is a DIAGNOSTIC: the E2BIG probe names the command.
     """
     return NodeBoundExceeded(
         getattr(why, 'cmd', None), deadline_s,
@@ -121,8 +112,14 @@ def node_bound_expiry(why, deadline_s, context=""):
         _as_text(getattr(why, 'stderr', None)), context)
 
 
-# The modules the sweep does not walk, each for its own reason rather than
-# one rule applied to all of them.
+# The modules the sweep does not walk, each carrying its own reason rather
+# than one rule applied to all of them. A member is a reason string, not a
+# name in a tuple, because a member is skipped WHOLE: every launch in it is
+# skipped with it, so a table that can be appended to without saying why is a
+# table whose next member silences a real defect. `_carve_outs` is what
+# closes that — it asks every member for the verdicts the walk WOULD report
+# and requires it to report none, so an entry added to make a red go away
+# reds here instead.
 #
 # `_noderun.py` holds the launcher's own `Popen`, so it is the subject
 # rather than a site. This module and the routing suite are the walk and
@@ -138,30 +135,59 @@ def node_bound_expiry(why, deadline_s, context=""):
 # depends on a property of a file nobody is thinking about when they edit
 # it, and the honest direction to fail is stated here rather than left for
 # a reader to infer.
-NOT_SITES = ('_noderun.py', '_node_launch_routing.py',
-             'test_node_launch_routing.py',
-             'test_node_launch_routing_shapes.py')
+NOT_SITES = {
+    '_noderun.py':
+        "the shared launcher's own Popen IS the detector, not a site of it",
+    '_node_launch_routing.py':
+        'the walk itself; a rule is not a site of itself',
+    'test_node_launch_routing.py':
+        'the control that runs the walk over the real tree',
+    'test_node_launch_routing_shapes.py':
+        'every plant in it is a string literal, so it contributes no launch '
+        'to any walk — a fact about how it is WRITTEN, not a property of it, '
+        'so this entry fails OPEN',
+}
 
 # The boundary: a module whose child is NOT a fixed unit of work, or whose
 # expiry is already classified, keeps a bound of its own. The population is
 # derived and never listed, so this is closed only because every member is
 # separately required to still bound its own child.
+#
+# Each reason NAMES the function it excuses, because the key is a module
+# while the requirement it carries is per-launch: a reason that reads as
+# though it covered the whole file is a reader's licence to add a fourth
+# launch under it. `tests/test_node_launch_routing.py` requires every named
+# function to still exist, so a rename reds rather than quietly widening.
 CLASSIFYING_MODULES = {
-    '_dashnode.py': 'scales its own bound per retry attempt',
-    '_gm_harness.py': 'a real-browser storage boundary (task 3)',
-    '_overlap.py': 'its expiry is already classified by the harness',
-    '_realbrowser.py': 'a real-browser probe with a composed bound (task 3)',
+    '_dashnode.py': '`_run_dashboard_node_once` scales its own bound per '
+                    'retry attempt',
+    '_gm_harness.py': '`_run_node` is a real-browser storage boundary '
+                      '(task 3)',
+    '_overlap.py': '`run_background_overlap` has its expiry already '
+                   'classified by the harness',
+    '_realbrowser.py': '`browser_requirements` is a real-browser probe with '
+                       'a composed bound (task 3)',
     # Its executable is a function PARAMETER named `node`, so the walk
     # admits it without binding it — a name spelled `node` is in scope
     # whether or not it resolves, because admitting a site only makes the
     # control ask for more, while leaving one out loses it. The requirement
     # that keeps it honest is the one every member carries.
-    '_realbrowser_workers.py': 'a CDP call whose bound IS the response '
-                               'deadline it asserts, classified into '
-                               'CDPTimeout by the module (task 3)',
-    'test_real_browser_classification.py': 'a real-browser probe (task 3)',
-    'test_real_browser_environment.py': 'a real-browser probe (task 3)',
-    'test_real_browser_harness.py': 'a real-browser probe (task 3)',
+    '_realbrowser_workers.py': '`cdp_call` is a CDP call whose bound IS the '
+                               'response deadline it asserts, classified '
+                               'into CDPTimeout by the module (task 3). Its '
+                               'other two launches are a real browser rather '
+                               'than a Node child, and `UNRESOLVED_LAUNCHES` '
+                               'names them by shape',
+    'test_real_browser_classification.py':
+        '`test_the_control_extension_satisfies_its_own_probe` is a '
+        'real-browser probe (task 3)',
+    'test_real_browser_environment.py':
+        'the two real-browser probes, in '
+        '`test_repository_node_probe_starts_and_terminates` and in the '
+        '`node` parameter of `evaluate` (task 3)',
+    'test_real_browser_harness.py':
+        '`_bounded` runs under a `node` parameter, a real-browser probe '
+        '(task 3)',
 }
 
 # A launch whose executable this walk cannot resolve is a FINDING, not a
@@ -247,8 +273,12 @@ UNRESOLVED_LAUNCHES = {
 # A `node` verdict can be a FALSE one — a control that plants its own stub
 # executable to prove routing writes a function whose parameter is named
 # `node` — and a finding its author cannot answer is a finding they stop
-# reading. Such a site is named here. What a row may and may not excuse is
-# the `bound`/`spelled` asymmetry, stated once in `_executable_verdict`.
+# reading. Such a site would be named here, and the table is empty because
+# the two `spelled` sites the tree actually holds are answered by
+# `CLASSIFYING_MODULES` before this table is ever consulted, not by a row.
+# What a row may and may not excuse is the `bound`/`spelled` asymmetry,
+# stated once in `_executable_verdict`, and
+# `tests/test_node_launch_routing_shapes.py` pins both halves of it.
 NOT_FIXED_WORK = {}
 
 VERDICT_NODE = 'node'
@@ -464,6 +494,26 @@ def _imported_stems(tree, exported):
             if (alias.asname or alias.name) in exported}
 
 
+def _resolved_constant(name, own, imported):
+    """A constant as the module under test BINDS it, as source.
+
+    A module-level assignment shadows the import it shares a name with, so
+    the two are read in that order. This exists for `SITE_HANG_MULTIPLE`:
+    a rule that checks a deadline is spelled `round(X * SITE_HANG_MULTIPLE)`
+    has checked that the NAME is used and nothing about what the name is
+    worth, and the name is rebindable at module scope. One line in the real
+    `tests/_gm_harness.py` composing a 208-day bound left the walk, the
+    census and the control that reads the spelling all green.
+    """
+    found = own.get(name) or imported.get(name)
+    if not found:
+        return None
+    # A module-level assignment arrives as the one node it bound; an import
+    # arrives as a LIST of the sources it resolved to, because a name bound
+    # more than once is what a shadowing import looks like.
+    return ast.unparse(found[0] if isinstance(found, list) else found)
+
+
 def _launches(tree, exported=None):
     """Every launch in a module, with the shape the exemption table keys on.
 
@@ -471,6 +521,14 @@ def _launches(tree, exported=None):
     a child. Nothing is filtered out before that, so a module the walk
     cannot parse, or a launcher spelled a way this does not follow, shows up
     as an unclassified site rather than as a clean tree.
+
+    Each row carries the `scope` it was found in — the container's own
+    statements, the same node the walk entered — because the questions
+    asked ABOUT a launch are questions about the code around it, and a
+    reader that reaches outside the launch's own scope can be answered by a
+    sibling it has nothing to do with. That is a false green, which is the
+    direction that loses a site, so the scope travels with the row rather
+    than being re-derived per question.
     """
     if exported is None:
         exported = _sibling_constants()
@@ -526,6 +584,7 @@ def _launches(tree, exported=None):
                     if argv is not None else (VERDICT_UNRESOLVED, None)),
                 'deadline': _deadline(node),
                 'node': node,
+                'scope': scope,
             })
     return sorted(found, key=lambda row: row['line'])
 
@@ -557,39 +616,55 @@ def _deadline(launch):
     return None
 
 
+def _names_a_timeout(handler):
+    return (isinstance(handler, ast.ExceptHandler) and handler.type is not None
+            and 'TimeoutExpired' in ast.unparse(handler.type))
+
+
 def _inside_expiry_handler(node, parents):
-    """Whether a call sits in a handler for a child that already timed out.
+    """Whether a call sits in an `except` for a child that already timed out.
 
     A drain or a reap of an already-killed child bounds nothing about that
-    child's execution. The bound this control is about ends a child still
-    running on its own, and `_dashnode.py` carries three `timeout=` keywords
-    on the same receiver for exactly this reason — only the first bounds
-    the child.
+    child's execution, and `_dashnode.py` carries three `timeout=` keywords
+    on one receiver for exactly that reason — only the first bounds the
+    child. The `finally:` of a `try` is NOT read here, and whether a
+    `finally` is a drain is a question about the retyped-bound rule rather
+    than about this one; `tests/test_node_launch_routing.py`'s reader
+    answers it, with the condition that makes the answer right.
     """
-    current = parents.get(id(node))
-    while current is not None:
-        if isinstance(current, ast.ExceptHandler) and current.type is not None:
-            if 'TimeoutExpired' in ast.unparse(current.type):
-                return True
-        current = parents.get(id(current))
+    current = node
+    while (parent := parents.get(id(current))) is not None:
+        if _names_a_timeout(parent):
+            return True
+        current = parent
     return False
 
 
-def _bounds_its_own_child(tree, launch, parents):
+def _bounds_its_own_child(launch, parents):
     """Whether a wait on THIS child, outside any expiry handler, is bounded.
 
     `subprocess.run(..., timeout=…)` is the bound at the launch itself. A
     `Popen` is not, and needs a later `child.communicate`/`child.wait` on
     the name the launch bound the child to. A `timeout=` anywhere else in
-    the enclosing function is not this: the drain of a killed process and
-    the reap after it are both bounded and neither bounds the child.
+    the function is not this; `_inside_expiry_handler` is what tells a
+    cleanup apart from a bound.
+
+    The search is over the launch's OWN scope, which is the whole of the
+    difference between this question and the question it used to ask. A
+    module-wide search is answered by any sibling that binds the same name:
+    two `Popen`s in one file, one bounded and one not, each certify the
+    other, and the unbounded one is reported as bounded — a false green,
+    invisible to every other gate, and the direction that loses a site. A
+    bound that is not reachable from the launch it bounds is not this
+    launch's bound, so the walk stays inside the scope the launch was found
+    in.
     """
     if _bounds(launch['deadline']):
         return True
-    name = _child_name(tree, launch['node'])
+    name = _child_name(launch['scope'], launch['node'])
     if name is None:
         return False
-    for node in ast.walk(tree):
+    for node in ast.walk(launch['scope']):
         if not isinstance(node, ast.Call):
             continue
         if not _bounds(next((word.value for word in node.keywords
@@ -636,9 +711,14 @@ def _bounds(value):
     return True
 
 
-def _child_name(tree, launch):
-    """The name the launch call binds the launched child to, or None."""
-    for node in ast.walk(tree):
+def _child_name(scope, launch):
+    """The name the launch call binds the launched child to, or None.
+
+    `scope` is the launch's own, for the reason `_bounds_its_own_child`
+    states: a name another function binds is not this launch's name, and
+    matching on it is how one child's bound came to certify another's.
+    """
+    for node in ast.walk(scope):
         if not isinstance(node, ast.Assign):
             continue
         if not any(child is launch for child in ast.walk(node.value)):
@@ -646,6 +726,21 @@ def _child_name(tree, launch):
         if isinstance(node.targets[0], ast.Name):
             return node.targets[0].id
     return None
+
+
+def _planted_copy(root, module_name, plant):
+    """A real module's own bytes with `plant` appended, written under `root`.
+
+    The plants belong in a REAL target. A string handed to `ast.parse` shows
+    what the walk thinks of a shape; it cannot show whether the walk and the
+    module the rule is written about agree, which is the question a plant is
+    for. A copy answers it without a test rewriting a tracked file while
+    every other suite is reading it: the bytes are the module's own, the
+    walk reads them off disk, and the plant is the one change under test.
+    """
+    source = (_TESTS_DIR / module_name).read_text(encoding='utf-8')
+    root.mkdir(parents=True, exist_ok=True)
+    (root / module_name).write_text(f'{source}\n\n{plant}\n', encoding='utf-8')
 
 
 def _exempt(shape, launch):
@@ -658,43 +753,108 @@ def _exempt(shape, launch):
     return shape in NOT_FIXED_WORK and launch['verdict'][1] == 'spelled'
 
 
-def _routing_sweep():
-    """The four failure lists the real tree produces."""
+def _module_findings(name, tree, used):
+    """The three site classes one module contributes.
+
+    Split out of `_routing_sweep` so `_carve_outs` asks the same question
+    the sweep asks. A skip list whose members are exempt from a decision is
+    only honest if something still makes that decision about them, and one
+    reader of the launch rules is what makes it true.
+    """
+    parents = _parents(tree)
     unrouted, unbounded, unclassified = [], [], []
-    used = set()
-    for path in sorted(_TESTS_DIR.glob('*.py')):
-        if path.name in NOT_SITES:
-            continue
-        tree = ast.parse(path.read_text(encoding='utf-8'))
-        parents = _parents(tree)
-        for launch in _launches(tree):
-            shape = (path.name, launch['function'], launch['callee'])
-            verdict = launch['verdict'][0]
-            if verdict == VERDICT_UNRESOLVED:
-                if shape in UNRESOLVED_LAUNCHES:
-                    used.add(shape)
-                else:
-                    unclassified.append(f'{path.name}:{launch["line"]} in '
-                                        f'{launch["function"]}()')
-                continue
-            if verdict != VERDICT_NODE:
-                continue
-            if path.name in CLASSIFYING_MODULES:
-                if not _bounds_its_own_child(tree, launch, parents):
-                    unbounded.append(f'{path.name}:{launch["line"]}')
-                continue
-            if _exempt(shape, launch):
+    for launch in _launches(tree):
+        shape = (name, launch['function'], launch['callee'])
+        verdict = launch['verdict'][0]
+        if verdict == VERDICT_UNRESOLVED:
+            if shape in UNRESOLVED_LAUNCHES:
                 used.add(shape)
-                continue
-            # A `Popen` carries no `timeout=` to print, and that is the most
-            # likely real finding this control exists to report, so the
-            # message names the child rather than raising on the way there.
-            shown = launch['deadline']
-            unrouted.append(
-                f'{path.name}:{launch["line"]} (timeout='
-                f'{ast.unparse(shown) if shown is not None else "none"})')
+            else:
+                unclassified.append(f'{name}:{launch["line"]} in '
+                                    f'{launch["function"]}()')
+            continue
+        if verdict != VERDICT_NODE:
+            continue
+        if name in CLASSIFYING_MODULES:
+            if not _bounds_its_own_child(launch, parents):
+                unbounded.append(f'{name}:{launch["line"]}')
+            continue
+        if _exempt(shape, launch):
+            used.add(shape)
+            continue
+        # A `Popen` carries no `timeout=` to print, and that is the most
+        # likely real finding this control exists to report, so the
+        # message names the child rather than raising on the way there.
+        shown = launch['deadline']
+        unrouted.append(
+            f'{name}:{launch["line"]} (timeout='
+            f'{ast.unparse(shown) if shown is not None else "none"})')
+    return unrouted, unbounded, unclassified
+
+
+def _carve_outs(root):
+    """`NOT_SITES` members the walk would have reported on.
+
+    A member is skipped whole, so a module added here hides every launch in
+    it, and nothing in the rest of the table would notice: the row it silences
+    was never read. This asks each member the question the sweep asks and
+    requires the answer to be empty, so the exemption is a no-op on the tree
+    as it stands and a real module added to the list fails here. Only the two
+    classes a launch rule decides are asked — an unresolvable executable is
+    `UNRESOLVED_LAUNCHES`' business, and a member that needed a row there
+    would be a member in two tables.
+    """
+    offenders = []
+    for name in sorted(NOT_SITES):
+        path = root / name
+        if not path.is_file():
+            continue
+        used = set()
+        unrouted, unbounded, _ = _module_findings(
+            name, ast.parse(path.read_text(encoding='utf-8')), used)
+        offenders.extend(f'{name} {site}' for site in unrouted + unbounded)
+    return offenders
+
+
+def _population(root=None):
+    """The modules one sweep reads, in order — the population, not a sample.
+
+    A separate function rather than a loop inside `_routing_sweep` because
+    a population nothing can inspect is a population that can be narrowed
+    in silence: skipping `tests/_gm_harness.py` out of the walk and nothing
+    else left every control green, and the `unused`-row check does not
+    close that direction, because a module with no allowance row of its own
+    takes no row with it when it stops being read.
+    `tests/test_node_launch_routing.py` reads this against what the sweep
+    says it actually walked, so the two cannot drift.
+    """
+    root = _TESTS_DIR if root is None else root
+    return [path for path in sorted(root.glob('*.py'))
+            if path.name not in NOT_SITES]
+
+
+def _routing_sweep(root=None, walked=None):
+    """The five failure lists the tree produces.
+
+    `root` is the directory the walk reads, and it exists so a control can
+    run the walk over a COPY of a real module with a defect planted in it —
+    the evidence that the rule fires on the module it is written about,
+    without a test rewriting a tracked file while other suites read it.
+    `walked` is filled with the names the sweep actually read, so a control
+    measures this walk rather than re-deriving what it should have read.
+    """
+    root = _TESTS_DIR if root is None else root
+    unrouted, unbounded, unclassified, used = [], [], [], set()
+    for path in _population(root):
+        if walked is not None:
+            walked.append(path.name)
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        found = _module_findings(path.name, tree, used)
+        unrouted += found[0]
+        unbounded += found[1]
+        unclassified += found[2]
     unused = [(table, row) for table, rows in (
         ('UNRESOLVED_LAUNCHES', UNRESOLVED_LAUNCHES),
         ('NOT_FIXED_WORK', NOT_FIXED_WORK))
         for row in sorted(set(rows) - used)]
-    return unrouted, unbounded, unclassified, unused
+    return unrouted, unbounded, unclassified, _carve_outs(root), unused
