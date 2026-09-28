@@ -41,11 +41,11 @@ import statistics
 
 try:
     from plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, suite_names)
+        CELL_WEIGHT_MARGIN, resolve, suite_names)
     from plan_timed_matrix import plan as plan_matrix
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, suite_names)
+        CELL_WEIGHT_MARGIN, resolve, suite_names)
     from scripts.ci.plan_timed_matrix import plan as plan_matrix
 
 # The step between candidate targets, in the file's own units.
@@ -76,14 +76,43 @@ def _candidate(weights, target, max_cells):
             'suite_weights': weights}
 
 
-def derive_target(tree, weights, max_cells):
+def tree_weights(tree, recorded):
+    """The recorded weights the TREE still holds, as the planner sees them.
+
+    One resolver, so a weight for a suite the tree has since deleted
+    cannot be read as a live one by any consumer outside the planner.
+    The union write carries such a weight forward forever -- no run can
+    measure a suite the tree no longer has -- and a hundred dead weights
+    beside six live ones moved the derived target by an order of
+    magnitude and packed a 120-multiple live tree into one cell.
+    """
+    return resolve(recorded, suite_names(tree), 1.0)[0]
+
+
+def live_recorded(tree, data):
+    """How many of the file's recorded weights the TREE still holds.
+
+    Not the resolved weights: this counts what the file MEASURED, and
+    the collapse rule is judged against a suite a run could have
+    measured. `resolve` prices an unmeasured tree suite at the recorded
+    median, which would answer a different question.
+    """
+    return len(set(data['suite_weights']) & set(suite_names(tree)))
+
+
+def derive_target(tree, recorded, max_cells):
     """The smallest target the balance guarantee allows, in TARGET_STEPs.
 
     At a target the margin forbids, a heavy suite sits alone in its
     cell while the median cell stays small, and the ratio crosses the
     margin; raising the target lets more suites share cells and the
     median rises under the heavy one.
+
+    Scoped to the tree before anything is summed: the target is derived
+    from the weights the packer will actually place, and a weight for a
+    deleted suite is never placed.
     """
+    weights = tree_weights(tree, recorded)
     total = sum(weights.values())
     if total <= 0 or max_cells < 1:
         return float(TARGET_STEP)

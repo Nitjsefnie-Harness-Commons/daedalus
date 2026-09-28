@@ -33,7 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _timed_basis import write_run as _write_run  # noqa: E402
+from _timed_basis import fixture_tree, write_run as _write_run  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -53,15 +53,22 @@ def _drive(tmp, root, weights, runs=3, max_cells=15, **flags):
     needs nothing says nothing. Returns the file's TEXT, the exit code
     and stderr -- a test that wants the weights parses the text, and one
     that wants to prove the file is untouched compares it verbatim.
+
+    The tree is a fixture holding exactly the file's recorded suites,
+    because the rules here are judged against what the TREE holds: the
+    collapse is counted against the recorded suites the tree still has,
+    and against the real repository's 327 suites every fixture name
+    would be a deleted suite and the rule could never fire.
     """
     path = Path(tmp) / 'suite-timings.json'
+    tree = fixture_tree(tmp, sorted(weights))
     seed = {'schema_version': _planner().SCHEMA_VERSION,
             'target_cell_weight': 10.0, 'max_cells': max_cells,
             'units': 'reference-multiples', 'measured_from': 'tests run 1',
             'runs': 1, 'suite_weights': weights}
     path.write_text(json.dumps(seed, indent=2) + '\n', encoding='utf-8')
     argv = ['--runs-root', str(root), '--out', str(path),
-            '--runs', str(runs)]
+            '--runs', str(runs), '--tree', str(tree)]
     argv += [item for name in sorted(flags)
              for item in (f'--{name.replace("_", "-")}', str(flags[name]))]
     err = io.StringIO()
