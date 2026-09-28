@@ -219,6 +219,23 @@ def select(runs, wanted, max_cells=1, recorded=0):
     small enough to be one cell has a file bounded at one, and a
     one-cell measurement of that tree is an ordinary refresh rather than
     a collapse.
+
+    AND A TWO-CELL RUN STILL TAKES THE PARTITION, which is a decision
+    rather than an oversight. A run that produced two cells of a
+    fourteen-cell matrix becomes `expected`, and every richer run behind
+    it is filed `incomplete`. The file it writes is honest about it --
+    the `basis` names the suites the run did not measure and says that
+    the run is not the matrix this file plans -- and the planner refuses
+    to plan a file whose content is mostly invented
+    (`timings_coverage`), so nothing wrong is published and nothing
+    wrong is committed. Widening the rule above to "fewer cells than
+    the bound" would fire on an ordinary PARTIAL matrix, which is the
+    case the union exists for, and it would leave `expected` set by an
+    older run: a re-plan that legitimately takes a matrix from fourteen
+    cells to thirteen would then be read as a collapse and the file
+    would be planned against last week's partition. Recovery needs
+    nothing: the next full matrix is newer, becomes `expected` on its
+    own, and carries the file the rest of the way.
     """
     selected = []
     expected = None
