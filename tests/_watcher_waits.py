@@ -352,11 +352,10 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
                 f'spend. It reads as one of four - a boundary the log '
                 f'carries as no marker, a value that came round again, a '
                 f'run of new values over that bound, or a single value and '
-                f'nothing after it - and which of the two ways a run of '
-                f'new values got there, this log does not say. '
-                f'IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses a '
-                f'poll wider than an idle one on a healthy watcher. This '
-                f'one is: {READINGS[_reading(sequence)]}.')
+                f'nothing after it. IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) '
+                f'is what refuses a poll wider than an idle one on a '
+                f'healthy watcher. This one is: '
+                f'{READINGS[_reading(sequence)]}.')
         time.sleep(POLL)
 
 
