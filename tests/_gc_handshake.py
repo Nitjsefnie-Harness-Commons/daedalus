@@ -17,10 +17,8 @@ _GC_TRIGGER = '.gc-trigger'
 _GC_DONE = '.gc-done'
 _GC_DONE_TEMP = '.gc-done.tmp'
 _GC_PREFIX = '.gc-'
-# Deliberately outside the prefix, so a refusal the injector raises can still
-# be logged and the injector cannot refuse its own bookkeeping.
-_GC_REFUSED_PARENT = 'gc-refused-parent.txt'
-_GC_REFUSED_CHILD = 'gc-refused-child.txt'
+_GC_REFUSED_PARENT = '.gc-refused-parent.txt'
+_GC_REFUSED_CHILD = '.gc-refused-child.txt'
 
 # No queue or command name in this tree begins with the marker prefix -- they
 # are `<token>_<tab>` and `<token>.json` -- so filtering on it cannot hide a
@@ -28,13 +26,11 @@ _GC_REFUSED_CHILD = 'gc-refused-child.txt'
 
 
 def _child_refusal_source(attempts):
-    """The child's copy of the injector, empty unless a count is asked for.
+    """Composed apart from the base so a zero-attempt fixture writes the bytes
+    it always did.
 
-    Composed apart from the base so a zero-attempt fixture writes the bytes
-    it always did. `os` is imported here rather than in the base because
-    only the patched `os.replace` needs it. The log name carries no marker
-    prefix, so a refusal can still be logged and the injector cannot refuse
-    its own bookkeeping.
+    `os` is imported here rather than in the base because only the patched
+    `os.replace` needs it.
     """
     if not attempts:
         return ''
@@ -122,6 +118,11 @@ def _on_demand_command_gc(fault_dir, refusals=0):
         + _child_refusal_source(refusals)
         + 'command_queue.gc_loop = gc_loop\n',
         encoding='utf-8')
+    # A syntax slip in the string above would otherwise leave the collector on
+    # its default and the parent would report a handshake timeout, naming no
+    # cause. Compiling here turns that into a failure that names the file.
+    compile((fault_dir / 'sitecustomize.py').read_text(encoding='utf-8'),
+            str(fault_dir / 'sitecustomize.py'), 'exec')
     return str(fault_dir)
 
 
