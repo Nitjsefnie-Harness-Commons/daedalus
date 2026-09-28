@@ -9,6 +9,19 @@ def dict_length(items, counted=True):
     return len(items) if counted and DYNAMIC_KEY not in items else None
 
 
+def retired_into(retired, items):
+    """The retired keys that survived into `items`.
+
+    A retirement is a fact about the values a container RECORDED, so a
+    container built out of those values carries the fact with them: the
+    destination cannot claim at a key the source has disowned that its own
+    value there is current. A key the fold did not write is not the
+    source's to retire, and the unknown-key slot names no key, so it is
+    neither carried nor consulted here.
+    """
+    return retired & set(items)
+
+
 def stale_after_store(owner, written=(), unreadable=False):
     """The keys a store leaves holding a value it may have replaced.
 
@@ -29,14 +42,18 @@ def stale_after_store(owner, written=(), unreadable=False):
 def container_copy(owner, items, unknown_length=False, stale=None):
     """A copy of owner holding items; a dict's length is recounted, and
     the keys an earlier unreadable store retired carry over unless this
-    copy says which of them are current again."""
+    copy says which of them are current again. The unknown-key slot is
+    stripped from the set whichever way it arrives: it names no key, so a
+    retirement at it would be a fact about nothing, and the read arms
+    consult it on their own."""
     length = owner.length
     if owner.kind == 'dict':
         length = dict_length(
             items, owner.length is not None and not unknown_length)
+    current = owner.stale if stale is None else stale
     return DeferredContainer(items, length, owner.kind, owner.identity,
                              owner.star_display,
-                             owner.stale if stale is None else stale)
+                             current - {DYNAMIC_KEY})
 
 
 def fold_dynamic(target, value):
