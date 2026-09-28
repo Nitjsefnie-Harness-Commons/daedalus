@@ -38,8 +38,11 @@ did". A pull-request head that conflicts with its base dispatches no
 that batch, reading like a settled green matrix with the gating matrix
 silently absent from the tally (issue #1223). It now reads the run set
 through `ci_gate.missing_required`, the same predicate `ci_wait.py` refuses
-with; `_settled` carries what an absent gate means and what the cap line
-says about it.
+with, and over the same set - the newest run per workflow, so a superseded
+run's name satisfies nothing (issue #1262). What is deliberately not shared
+is the conclusion rule: a completed failure settles this batch as much as a
+completed success does, while `ci_wait` judges both. `_settled` carries what
+an absent gate means and what the cap line says about it.
 
 This is a true debounce: the window restarts on every arrival, so nothing is
 emitted while either watcher is still producing. `ci_watch.py` chose a fixed

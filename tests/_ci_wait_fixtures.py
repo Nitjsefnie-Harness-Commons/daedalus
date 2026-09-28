@@ -4,11 +4,11 @@ Not a suite itself — `run_tests.py` only loads `test_*.py`.
 
 These three live here rather than in any one suite because three suites now
 need them: `test_ci_wait.py` and `test_ci_wait_gate.py` share the verdict
-contract, and `test_ci_gate.py` asks the gate predicate which run set
-reaches it. A helper declared in one and imported from the other is a suite
-importing a sibling suite, which `tests/test_suite_import_boundaries.py`
-refuses. A `tests/_*.py` module is where a shared helper belongs; this is
-that module for these three.
+contract, and `test_ci_gate.py` asks the gate predicate what it answers. A
+helper declared in one and imported from the other is a suite importing a
+sibling suite, which `tests/test_suite_import_boundaries.py` refuses. A
+`tests/_*.py` module is where a shared helper belongs; this is that module
+for these three.
 
 All three carry a `ci_wait` prefix and none keeps the bare name it had in
 its declaring suite. That is the same reason twice: `_run` is owned in this

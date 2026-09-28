@@ -263,73 +263,73 @@ def test_each_caller_reaches_the_predicate_through_ci_gate(tmp):
     assert answer is True, answer
 
 
-def test_each_caller_passes_the_set_it_wants_judged(tmp):
-    """Which SET reaches the predicate, which the control above cannot see:
-    it answers only whether the call happened, and both readings of
-    `missing_required` make it.
+def _refusing_wait(caller, runs):
+    """(exit code, the line it printed) for a wait that reaches its refusal.
 
-    The property is a call shape rather than an answer, because on the data
-    the producer emits the two shapes are the same fact: it names every run
-    of a workflow alike, so a `tests` run existing and the newest `tests`
-    run existing are one fact, and a filtered read of the set agrees with an
-    unfiltered one. That is also why the fixture the removed control used is
-    unproducible and cannot be restored - it gave one workflow two different
-    run names. The recorder sees the set itself, so it needs no such
-    fixture.
+    The head is made CONFLICTING so the wait refuses at once rather than
+    waiting out a grace, and no clock really advances: the bound is read
+    through `_frozen_ci_wait_clock`, so a timeout here would be a value
+    rather than a margin.
+    """
+    setattr(caller, 'runs_on', lambda repo, sha: runs)
+    setattr(caller, 'prs_on', lambda repo, sha: [
+        {'number': 1, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
+         'mergeStateStatus': 'DIRTY', 'headRefOid': sha}])
+    out, err = io.StringIO(), io.StringIO()
+    with _frozen_wait_clock(caller, _Clock()), contextlib.redirect_stderr(err):
+        code = caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300)
+    return code, out.getvalue()
 
-    Two runs of ONE workflow, so the filtered set is the newer alone. Both
-    of ci_wait's calls must carry it - the verdict's own check, and the
-    `_missing` the refusal names the gate from - or a superseded run's name
-    can satisfy the gate on its own. watch_all's is asserted as it stands,
-    so the divergence the two callers carry over the same question is
-    visible rather than incidental; on the producer's data their answers
-    agree, and whether they should is not settled here.
+
+def test_every_reader_answers_over_the_judged_set(tmp):
+    """The ANSWER the three readers give, not the set each one passed.
+
+    The control this replaces read the shape of the call - which run ids
+    reached the predicate - and could not do better: the producer names
+    every run of a workflow alike, so on the data it emits the raw reading
+    and the judged reading are one fact and no answer tells them apart. A
+    call shape is the weaker thing in any case, since a caller can hand
+    over exactly the ids a recorder wants and still be asking the wrong
+    question.
+
+    So the fixture is the one the removed control called unproducible -
+    two runs of ONE workflow, the older named `tests` and the newer named
+    something else - and what is pinned here is the RULE rather than a
+    shape the producer emits. A workflow's `name:` changing in its own
+    YAML is all it takes to make this set real; until then the control is
+    a guard, and a guard passes on the tree it was written against by
+    construction, so the defect was planted in ci_gate.py to watch it fail.
+
+    They are meant to agree (issue #1262). A superseded run's name must
+    not satisfy the gate on its own, which is what issue #1249 established
+    for conclusions; the nearest precedent is #1223, where the hold read a
+    settled green matrix with the gating workflow silently absent.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
-    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_gate_set')
-    hold = _util.load(skill / 'watch_all.py', 'watch_all_gate_set')
+    mod = _util.load(skill / 'ci_gate.py', 'ci_gate_one_judged_set')
+    wait = _util.load(skill / 'ci_wait.py', 'ci_wait_one_judged_set')
+    hold = _util.load(skill / 'watch_all.py', 'watch_all_one_judged_set')
     runs = [
         _run(1, 'failure', '2026-09-20T10:00:00Z', name='tests'),
-        _run(2, 'success', '2026-09-20T10:05:00Z', name='tests'),
+        _run(2, 'success', '2026-09-20T10:05:00Z', name='gate freshness'),
     ]
-
-    def _record(caller, call):
-        seen = []
-
-        def _recorder(runs, *args, **kwargs):
-            seen.append([run['id'] for run in runs])
-            return ['tests']
-
-        real = caller.ci_gate.missing_required
-        setattr(caller.ci_gate, 'missing_required', _recorder)
-        try:
-            call(caller)
-        finally:
-            setattr(caller.ci_gate, 'missing_required', real)
-        return seen
-
-    def _incomplete_wait(caller):
-        """A wait that reaches the refusal, so `_missing` is called too."""
-        clock = _Clock()
-        setattr(caller, 'runs_on', lambda repo, sha: runs)
-        setattr(caller, 'prs_on', lambda repo, sha: [
-            {'number': 1, 'state': 'OPEN', 'mergeable': 'CONFLICTING',
-             'mergeStateStatus': 'DIRTY', 'headRefOid': sha}])
-        out, err = io.StringIO(), io.StringIO()
-        with _frozen_wait_clock(caller, clock), \
-                contextlib.redirect_stderr(err):
-            return caller.wait('o/r', 'a' * 40, 60, 600, out, grace=300)
-
-    # The verdict's own check first, then the refusal's: a caller that
-    # filtered in one and not the other is the hole this names, and the two
-    # recorded calls are what says the wait reached the refusal at all.
-    seen = _record(wait, lambda m: m.verdict(runs))
-    assert seen == [[2]], seen
-    seen = _record(wait, _incomplete_wait)
-    assert seen == [[2], [2]], seen
-    seen = _record(hold, lambda m: m._settled(runs))
-    assert seen == [[1, 2]], seen
+    assert mod.missing_required(runs) == ['tests']
+    assert [run['id'] for run in mod._judged(runs)] == [2]
+    # Asked of the raw list and of the set the filter left, the predicate
+    # answers alike: a caller that pre-filters cannot move the answer, and
+    # one that does not cannot either.
+    assert mod.missing_required(mod._judged(runs)) == ['tests']
+    assert wait.verdict(runs) == ('incomplete', [])
+    assert wait._missing(runs) == ['tests']
+    absent = hold._settled(runs)
+    assert isinstance(absent, hold.ci_gate.GateAbsent), absent
+    assert absent.missing == ('tests',), absent
+    # And the refusal built from that answer names the gate, rather than
+    # printing a doubled space where the name belongs (issue #839).
+    code, printed = _refusing_wait(wait, runs)
+    assert code == 4, printed
+    assert 'no tests run on' in printed, printed
 
 
 def test_both_waiters_read_this_one_predicate(tmp):
