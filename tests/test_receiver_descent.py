@@ -138,6 +138,27 @@ def _for_iterable_carrier_cases():
     on a bare name carries its launcher in the arguments, which the walk
     already reaches, and a loop over something that is not a call is
     judged by the walk with no help from here.
+
+    The five rows between those bounds and the four above enumerate the
+    FAMILY the arm cannot separate, because its condition is structural
+    — the callee chain bottoms on something other than a name — and not
+    a property of what the call returns. The four above are detections:
+    every one of them yields the module, and a launch method read off
+    the module launches. The five below are NOT, and are refused anyway.
+    Measured at runtime and recorded here so the trade is stated once:
+
+    | row | what the loop actually receives |
+    |---|---|
+    | dict keys | a `str` — `AttributeError` on `.run` |
+    | dict items | a `tuple` — `AttributeError` on `.run` |
+    | list pop | the module, which is not iterable — `TypeError` |
+    | f-string method | the `str` of a string — `AttributeError` on `.run` |
+    | tuple index | an `int` — `TypeError` |
+
+    The arm cannot tell these from the four without naming methods, which
+    is the mistake `_opaque_callee_cases`'s docstring records as this
+    repository's before. They are here so a future narrowing of the arm
+    has to account for the four detections beside them.
     """
     return (
         ('dict values as an iterable', """import os
@@ -171,6 +192,36 @@ async def go():
     for launcher in {'sp': subprocess}.values():
         launcher.run(['python3', 'child.py'])
 """, 'for launcher in'),
+        ('dict keys as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'sp': subprocess}.keys():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('dict items as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in {'sp': subprocess}.items():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('list pop as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in [subprocess].pop():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('f-string method as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in f"{subprocess}".upper():
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+        ('tuple index as an iterable', """import os
+import subprocess
+os.chdir(tmp)
+for launcher in (subprocess,).index(1):
+    launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
         ('iterable call on a bare name', """import os
 import subprocess
 os.chdir(tmp)
@@ -182,6 +233,71 @@ import subprocess
 os.chdir(tmp)
 for launcher in {'sp': subprocess}:
     launcher.run(['python3', 'child.py'])
+""", 'for launcher in'),
+    )
+
+
+def _comprehension_iterable_cases():
+    """A comprehension decomposes its iterable exactly as a `for` does.
+
+    The same bypass as the table above, spelled as an expression, which is
+    what a comprehension is: every element of the iterable is bound to the
+    target and read in the element. These seven rows were refused on
+    `8babe1ae` and went clean when the loop arm was written for the `for`
+    statement and not for the `comprehension`, which is the arm's own
+    sibling and nothing else.
+
+    The last three are the family the table above enumerates, carried into
+    the expression form: `.keys()` and `.items()` are among the members
+    that are not detections, and the f-string method is another. The
+    third row is a `Popen` rather than a `run` and the second a dict
+    comprehension, so neither is the first row with a name changed.
+
+    The comprehension's own conditions are a different path and are
+    unaffected: `_CARRIED_FIELDS[ast.comprehension]` is `('ifs',)`, and
+    this arm reads the iterable, never the conditions.
+    """
+    return (
+        ('list comprehension over dict values', """import os
+import subprocess
+os.chdir(tmp)
+go = [launcher.run(['python3', 'child.py'])
+      for launcher in {'sp': subprocess}.values()]
+""", 'for launcher in'),
+        ('dict comprehension over dict values', """import os
+import subprocess
+os.chdir(tmp)
+go = {k: launcher.run(['python3', 'child.py'])
+      for k, launcher in {'sp': subprocess}.values()}
+""", 'for k, launcher in'),
+        ('list comprehension over a Popen', """import os
+import subprocess
+os.chdir(tmp)
+go = [launcher.Popen(['python3'])
+      for launcher in {'sp': subprocess}.values()]
+""", 'for launcher in'),
+        ('generator expression over dict keys', """import os
+import subprocess
+os.chdir(tmp)
+go = (launcher.run(['python3'])
+      for launcher in {'sp': subprocess}.keys())
+""", 'for launcher in'),
+        ('set comprehension over dict items', """import os
+import subprocess
+os.chdir(tmp)
+go = {launcher.run(['python3'])
+      for launcher in {'sp': subprocess}.items()}
+""", 'for launcher in'),
+        ('list comprehension over a list pop', """import os
+import subprocess
+os.chdir(tmp)
+go = [launcher.run(['python3']) for launcher in [subprocess].pop()]
+""", 'for launcher in'),
+        ('list comprehension over an f-string method', """import os
+import subprocess
+os.chdir(tmp)
+go = [launcher.run(['python3'])
+      for launcher in f"{subprocess}".upper()]
 """, 'for launcher in'),
     )
 
@@ -294,6 +410,11 @@ def test_a_receiver_reached_through_an_intermediate_call_is_refused(tmp):
 def test_a_loop_reading_a_launcher_out_of_its_iterable_is_refused(tmp):
     del tmp
     _one_verdict_each(_for_iterable_carrier_cases())
+
+
+def test_a_comprehension_reading_a_launcher_is_refused(tmp):
+    del tmp
+    _one_verdict_each(_comprehension_iterable_cases())
 
 
 def test_a_binding_putting_the_module_in_a_container_is_refused(tmp):

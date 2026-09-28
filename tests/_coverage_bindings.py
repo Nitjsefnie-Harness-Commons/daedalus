@@ -133,9 +133,12 @@ def _bound_values(node, facts):
     `target` is a name it binds, which reads differently: a target may
     shadow a name that already spells a module rather than carry a
     launcher, and the Assign arm exempts exactly that shape. `iterable`
-    is a loop's iterable, which is decomposed rather than carried, so it
-    is judged a second time by `_iterable_parts`; that second reading is
-    the For arm's own business and no other statement's.
+    is what a loop decomposes into targets, so it is judged a second time
+    by `_iterable_parts`; the two arms that emit it are the `For` and
+    `AsyncFor` statement and the `comprehension`, because a comprehension
+    is the same decomposition written as an expression and
+    `[launcher.run(...) for launcher in {'sp': subprocess}.values()]` is
+    the same bypass as the loop it is spelled without.
     """
     if isinstance(node, ast.Assign):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
@@ -159,6 +162,7 @@ def _bound_values(node, facts):
                 (node.lineno, node.target, _TARGET)]
     if isinstance(node, ast.comprehension):
         return [(node.target.lineno, node.iter, _BIND),
+                (node.target.lineno, node.iter, _ITERABLE),
                 (node.target.lineno, node.target, _TARGET)]
     if isinstance(node, (ast.With, ast.AsyncWith)):
         return [(node.lineno, part, position)
@@ -445,10 +449,19 @@ def _iterable_parts(value):
     clean while `for launcher in {'sp': subprocess}.values():` does not:
     the discriminator is the use site, not the call.
 
-    The arm is one-way on purpose. It cannot tell a method that yields
-    the container's own values from one that computes a number off it,
-    so a loop over `{'sp': subprocess}.index(1)` is refused where the
-    guard would rather refuse than miss. Everything else is left to
+    The condition is structural — whether the callee chain bottoms on
+    something other than a name — and that is the whole of what the arm
+    knows. Four of the family it judges are real: `{'sp': subprocess}
+    .values()` and the three subscripted spellings beside it all yield
+    the module, and a launch method read off the module launches. Five
+    are not, and are refused anyway: `.keys()` yields a string,
+    `.items()` a tuple, `[subprocess].pop()` a module that is not
+    iterable, an f-string method a string, and a tuple's `.index()` an
+    int. The arm cannot tell them apart without naming methods, which is
+    the mistake `_opaque_callee_cases`'s docstring records as this
+    repository's before. The family and what each of them yields is
+    enumerated in tests/test_receiver_descent.py, so the trade is stated
+    once rather than rediscovered. Everything else is left to
     `_carried_parts`, which already judges an iterable that is not a
     call and a call that is built on a bare name.
     """
