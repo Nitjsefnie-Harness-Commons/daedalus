@@ -287,6 +287,29 @@ def load(cond='raise'):
       ('load', 'pass', {'raised': None, 'loaded': ['pkg.leaf']})])
 
 
+def test_an_if_whose_only_leaving_branch_is_its_orelse_keeps_the_call(_tmp):
+    """The `body` limb alone, and the only input that limb decides.
+
+    The same two shapes with the branches swapped, so the row above cannot
+    answer for this limb: it reads the `orelse` leaving, calls the `if` a
+    barrier, and drops a module the runtime imports on the run that falls
+    through. Each limb is pinned by an input the other limb decides the other
+    way.
+    """
+    _a_partly_leaving_if_keeps_the_call(_tmp, """
+import importlib
+
+
+def load(cond='pass'):
+    if cond == 'pass':
+        pass
+    else:
+        raise ValueError('taken')
+    return importlib.import_module('pkg.leaf')
+""", [('load', 'pass', {'raised': None, 'loaded': ['pkg.leaf']}),
+      ('load', 'raise', {'raised': 'ValueError', 'loaded': []})])
+
+
 def test_a_raising_loop_body_does_not_end_the_block(_tmp):
     """The body raising says nothing about the loop, which may run zero
     times and fall through either way."""
