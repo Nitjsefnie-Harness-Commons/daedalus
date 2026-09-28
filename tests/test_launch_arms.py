@@ -5,14 +5,12 @@
 the state it is in, the evidence for that state, and the one clause a
 sweep deleted to find out. This suite is what stops the table drifting
 from the tree — a named row that no longer exists, a duplicated arm, an
-arm whose text has left the analyser — and it replays the sweep for one
-arm of each state, so the table's own method is exercised rather than
-merely described.
+arm whose line has moved — and it replays the sweep for one arm of each
+state, so the table's own method is exercised.
 
-It also carries the arms the two row files cannot express: three
-controls asserting sites AND refusals where a `LAUNCH_REFUSAL_ROW` is
-built to hold exactly one refusal, and one step ceiling for the arm
-whose mutant does not answer wrong but does not stop.
+It also carries what the two row files cannot express: three controls
+asserting sites AND refusals, and the step ceiling for an arm whose
+mutant does not stop.
 """
 import ast
 import importlib
@@ -68,8 +66,7 @@ def _anchor(arm):
     An anchor is a PREFIX of the arm's block, so the table costs one
     line per arm instead of three, and the prefix is what has to still
     be there for the arm to be where the table says it is. The strip is
-    the `': ...'` form, where the ellipsis stands in for a body rather
-    than for the tail of a word.
+    the `': ...'` form, where the ellipsis stands in for a body.
     """
     return _collapsed(arm[ANCHOR]).removesuffix('...').rstrip()
 
@@ -77,12 +74,10 @@ def _anchor(arm):
 def _from_line(rows, line, width):
     """The collapsed source from `line` on, for at least `width` chars.
 
-    An anchor is a PREFIX of the arm's own block, and is not always
-    inside the clause the sweep cuts: a `drop_stmt` arm's anchor runs on
-    into the statement after it, and a `boolop` arm's runs out to the end
-    of the disjunction. So the span is the anchor's own length rather
-    than the resolved clause's -- the check is the same either way, which
-    is the point: the recorded line is where the quoted text BEGINS.
+    An anchor is not always inside the clause the sweep cuts: a
+    `drop_stmt` arm's runs on into the next statement, a `boolop` arm's
+    out to the end of the disjunction. So the span is the anchor's own
+    length -- the check is that the line is where the text BEGINS.
     """
     taken, length = [], 0
     for row in rows[line - 1:]:
@@ -146,13 +141,8 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
 def test_every_step_ceiling_arm_names_the_test_that_holds_it(tmp):
     """The step ceiling is not a row, so the record must name a real test.
 
-    `STEP_CEILING_CONTROL` is a label of its own, in neither row file, so
-    an evidence string naming it resolves to nothing and the only test
-    that looked at it checked it against itself. What actually holds
-    these two arms is a test that bounds a STEP COUNT rather than a
-    verdict, so the record names that test and this resolves every name
-    against the tree -- a renamed or deleted holder is named, not
-    silently inherited.
+    What holds these two arms bounds a STEP COUNT rather than a
+    verdict, so the record names that test and this resolves it.
     """
     del tmp
     by_name = {arm[ID]: arm for arm in LAUNCH_ARMS}
@@ -180,27 +170,20 @@ def test_every_step_ceiling_arm_names_the_test_that_holds_it(tmp):
 def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
     """The `line` column is the addressing scheme, so it is the checked one.
 
-    Every one of the 150 `cut` specs is line-keyed, so a line that has
-    moved is not a stale note in a table: `tests/_arm_sweep.py` resolves
-    it by `node.lineno == line`, and the arm it then cuts is whichever
-    clause landed there. Checking that the anchor text is present
-    SOMEWHERE in the analyser cannot see that -- the text survives every
-    shift, and a line still inside the file's range satisfies the
-    bound -- so one comment line above an arm passed every suite while
-    149 of 150 cut specs went on resolving a different clause.
-
-    So the assertion is the currency one: the collapsed source
-    beginning at the recorded line is the arm's own anchor. A shift
-    reds HERE, naming the line that is now wrong, rather than at a
-    downstream clause that lost its coverage.
+    Every one of the 150 `cut` specs is line-keyed and
+    `tests/_arm_sweep.py` resolves it by `node.lineno == line`, so a
+    moved line means the arm now cuts whichever clause landed there.
+    Checking the anchor appears SOMEWHERE in the analyser cannot see
+    that -- the text survives every shift -- so one comment line above
+    an arm passed every suite while 149 of 150 cut specs went on
+    resolving a different clause.
     """
     del tmp
     rows = {}
     for name in {arm[FILE] for arm in LAUNCH_ARMS}:
         text = (TESTS / name).read_text(encoding='utf-8')
         rows[name] = [_collapsed(row) for row in text.splitlines()]
-    # Sorted by line so the FIRST entry is the cause: one insertion moves
-    # every arm below it, and the earliest wrong line is the insertion.
+    # Sorted by line so the FIRST entry is the cause.
     stale = []
     for arm in LAUNCH_ARMS:
         anchor = _anchor(arm)
@@ -211,8 +194,8 @@ def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
                           f'{arm[FILE]}:{line} {arm[ID]} reads {at[:50]!r}'))
     stale.sort()
     named = [row for _, _, row in stale]
-    # One insertion moves every arm below it, so the list is long and the
-    # cause is the first entry; the rest is the count.
+    # One insertion moves every arm below it, so the cause is the
+    # first entry and the rest is the count.
     shown = named[:8] + ([f'(+{len(named) - 8} more)'] if len(named) > 8
                          else [])
     assert not stale, ('arms whose recorded line no longer carries their own '
@@ -363,15 +346,7 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
     `return` header plus each disjunct of a multi-line condition. A
     reader who takes that marker and finds a clause at a line the table
     does not list has found an unstated hole in the one claim the table
-    exists to make. `MARKER_NON_MEMBERS` is the answer, one line per
-    clause, and this re-derives the marker so the answer cannot fall
-    behind the analysers.
-
-    `return` is in the marker because the TABLE uses it: `pf.fallthrough`
-    is `drop_stmt` on a `return True` and `rw.no-container` on a `return
-    None`, so a fallthrough return is a clause here by the table's own
-    practice and narrowing the marker to exclude it answers a question
-    nobody asked.
+    exists to make, and `MARKER_NON_MEMBERS` is the answer.
     """
     del tmp
     named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
