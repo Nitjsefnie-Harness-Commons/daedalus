@@ -61,8 +61,8 @@ def _forced_rows(source):
     """Census rows for a planted module with EVERY function in path.
 
     The same derivation the real-file controls use, so a planted shape
-    that names no `run_gate` is still read: the table below is the lead's
-    F1 table, and it was measured that way.
+    that names no `run_gate` is still read: the tables below are measured
+    against `origin/main` and this is how they were taken.
     """
     tree = ast.parse(source)
     in_path = frozenset(
@@ -207,42 +207,41 @@ SPELLINGS = {
 SHADOWED = (
     ('a-parameter-shadows-a-from-import',
      'from urllib.request import urlopen\n\ndef run_gate(urlopen, url):\n'
-     '    return urlopen(url, timeout=10)\n'),
+     '    return urlopen(url, timeout=10)\n', 4),
     ('a-local-lambda-shadows-it',
      'from urllib.request import urlopen\n\ndef run_gate(url):\n'
      '    urlopen = lambda u: u\n'
-     '    return urlopen(url, timeout=10)\n'),
+     '    return urlopen(url, timeout=10)\n', 5),
     ('a-call-result-rebinds-the-alias',
      'import urllib.request\n\ndef run_gate(url):\n'
      '    urllib = object()\n'
-     '    return urllib.request.urlopen(url, timeout=10)\n'),
+     '    return urllib.request.urlopen(url, timeout=10)\n', 5),
     ('a-subscript-rebinds-the-alias',
      'import urllib.request\n\ndef run_gate(url, table):\n'
      '    urllib = table["x"]\n'
-     '    return urllib.request.urlopen(url, timeout=10)\n'),
+     '    return urllib.request.urlopen(url, timeout=10)\n', 5),
 )
 
 
-def test_a_shadowed_import_binding_is_still_a_fault(tmp):
-    """F4: the known false GREEN, pinned, and named in the disclosure.
+def test_a_shadowed_import_binding_is_refused_not_discharged(tmp):
+    """A rebinding the walk cannot resolve is not still the import.
 
     `_dotted_bindings` records an assignment only when its right-hand side
     resolves to a dotted name, so a parameter, a lambda, a call result or
-    a subscript that rebinds an imported name leaves the IMPORT binding
-    standing and the call below it is discharged. Empty expectations here
-    are the bug, not the verdict: this control exists so that fixing the
-    shadowing turns it red and forces the census's disclosure to be
-    rewritten rather than quietly invalidated.
+    a subscript that rebinds an imported name left the IMPORT binding
+    standing and the call below it was discharged. Four lines pop the
+    binding instead, and the direction is the one that cannot be wrong: an
+    unresolved callee is not a network read, so the deadline is refused.
 
-    None of the four occurs in the three real files, so this is latent
-    rather than live. The direction is the one that matters — a narrowing
-    whose failure mode is a DISCHARGE has its holes here — and it is the
-    same shape of disclosure the module already carries for
-    `sock.settimeout`.
+    This was a disclosure for one wave and is a fix now. A name in a
+    review corpus recorded that naming a miss is not what converts it into
+    a non-recurrence, and that the disclosure naming the gap is what made
+    a reader trust a hole — the exact species this is.
     """
     del tmp
-    for label, source in SHADOWED:
-        assert _rows(source) == [], (label, _rows(source))
+    for label, source, line in SHADOWED:
+        assert _rows(source) == [(line, 'timeout= keyword')], (
+            label, _rows(source))
 
 
 def test_the_receiver_is_resolved_rather_than_the_callee_spelled(tmp):
@@ -314,7 +313,12 @@ def run_gate():
     return worker.join(timeout=2)
 '''
 
-NESTED_DOUBLE = '''def run_gate(proc, spent):
+# The list is bound in the ENCLOSING scope, which is what
+# `tests/test_bridge_startup.py:182` does with `spent = []` and what the
+# proof rests on: the receiver the deadline reaches is a literal.
+NESTED_DOUBLE = '''def run_gate(proc):
+    spent = []
+
     def refusing_await(proc, drained, timeout=None):
         """Record the allowance the fixture chose, and refuse to wait."""
         del proc, drained
@@ -342,7 +346,7 @@ def test_a_doubles_modelled_signature_is_not_a_launchers_deadline(tmp):
     del tmp
     for source, in_path, call_line in (
             (THREAD_DOUBLE, ('run_gate', 'join'), 14),
-            (NESTED_DOUBLE, ('run_gate', 'refusing_await'), 8)):
+            (NESTED_DOUBLE, ('run_gate', 'refusing_await'), 10)):
         rows = _rows(source, in_path)
         assert 'timeout parameter' not in [route for _, route in rows], rows
         assert (call_line, 'timeout= keyword') in rows, rows
@@ -422,7 +426,7 @@ UNTRACEABLE = {
         'class H:\n'
         '    def run(self, argv, timeout=None):\n'
         '        return self.run_node_program(argv, timeout=timeout)\n',
-        [(6, 'timeout= keyword')]),
+        [(5, 'timeout parameter'), (6, 'timeout= keyword')]),
     'the-control-the-function-owns': (
         'import subprocess\n\n\n'
         'def run_gate(argv, *, timeout=None):\n'
@@ -444,16 +448,80 @@ def test_a_deadline_the_census_cannot_trace_is_still_refused(tmp):
 
     Every expected row set is what `origin/main` emits for the same
     source, so this pins the four rows the first version of the arm
-    silenced and cannot be satisfied by re-weakening the rule. The fourth
-    shape is the one that legitimately keeps less: its call site is
-    already refused as a `timeout= keyword` on line 6, which is where the
-    number is written, and a method call on an unresolved receiver is not
-    a child-ending operation.
+    silenced and cannot be satisfied by re-weakening the rule. All five
+    shapes are measured against `origin/main` rather than argued, and all
+    five now match it row for row, the method hand-off included: the
+    receiver of that call is `self`, which the tree does not bind to a
+    literal, so the deadline reaches a call the census cannot show is
+    harmless and the signature is refused exactly as main refuses it.
     """
     del tmp
     for label, (source, expected) in UNTRACEABLE.items():
         assert _forced_rows(source) == expected, (
             label, _forced_rows(source))
+
+
+# The reapers the census cannot NAME. Every row set here is what
+# `origin/main` emits, measured there. A deadline that reaches a call the
+# walk cannot show is harmless is a bound the gate is blind to, whether
+# the reaper is `Popen.wait` or a third-party one — so the control is
+# about the OPERATION being unknown, not about a list of known ones.
+UNNAMED_REAPERS = {
+    'an-unresolved-receiver': UNTRACEABLE['an-unresolved-receiver'],
+    'a-derived-local':
+        UNTRACEABLE['a-local-derived-from-the-deadline'],
+    'a-bare-name-reaper':
+        ('from psutil import wait_procs\n\n\n'
+         'def run_gate(procs, timeout):\n'
+         '    return wait_procs(procs, timeout)\n',
+         [(4, 'timeout parameter')]),
+    'a-method-reaper-on-a-receiver':
+        ('def run_gate(pool, timeout):\n'
+         '    return pool.reap_all(timeout)\n',
+         [(1, 'timeout parameter')]),
+    'a-method-reaper-and-its-caller':
+        ('class Pool:\n'
+         '    def join(self, proc, timeout):\n'
+         '        return proc.wait(timeout)\n\n\n'
+         'def go(pool, proc, timeout):\n'
+         '    return pool.join(proc, timeout)\n',
+         [(2, 'timeout parameter'), (6, 'timeout parameter')]),
+    'a-spread-in-front-of-the-deadline':
+        ('import subprocess\n\n\n'
+         'def _start(argv):\n'
+         '    return subprocess.Popen(argv)\n\n\n'
+         'def run_gate(argv, *, timeout=None):\n'
+         '    child = _start(argv)\n'
+         '    return child.wait(*[], timeout)\n',
+         [(8, 'timeout parameter')]),
+    'a-spread-with-a-derived-deadline':
+        ('import subprocess\n\n\n'
+         'def _start(argv):\n'
+         '    return subprocess.Popen(argv)\n\n\n'
+         'def run_gate(argv, *, timeout=None):\n'
+         '    child = _start(argv)\n'
+         '    d = timeout\n'
+         '    return child.wait(*[], d)\n',
+         [(8, 'timeout parameter')]),
+}
+
+
+def test_a_reaper_the_census_cannot_name_is_still_refused(tmp):
+    """The class, not the two names: a deadline reaching an unknown sink.
+
+    `Popen.wait` and `Popen.communicate` are two names off one stdlib
+    class, and a rule built on them does not read the CLASS. A third-party
+    reaper called `wait_procs`, a pool's own `reap_all`, a spread in front
+    of the argument slot — none of them is a name the census holds, and
+    all of them end a child. A guard that detects two instances of a class
+    has not been shown to detect the class, so the arm is about the
+    RECEIVER being provably child-free rather than the operation being
+    known, and every expected row set is `origin/main`'s.
+    """
+    del tmp
+    for label, (source, expected) in UNNAMED_REAPERS.items():
+        assert _forced_rows(source) == expected, (label,
+                                                  _forced_rows(source))
 
 
 def test_a_deadline_handed_to_a_child_slot_is_refused_with_no_launch_near(

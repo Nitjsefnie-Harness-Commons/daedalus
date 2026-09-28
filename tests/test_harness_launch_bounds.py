@@ -327,7 +327,7 @@ def test_the_receivers_the_census_does_not_read_are_disclosed(tmp):
     """
     del tmp
     disclosed = census.__doc__ or ''
-    for item in ('network read', 'cannot put it on a child',
+    for item in ('network read', 'can be PROVEN to put the',
                  'test_launch_census_receivers.py'):
         assert item in disclosed, item
     assert (TESTS / 'test_launch_census_receivers.py').is_file()
