@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+from _cli_handler_wire import _api_put  # noqa: E402
 import _cli_parse  # noqa: E402
 import _util  # noqa: E402
 
@@ -33,11 +34,6 @@ refused = _cli_parse.refused
 
 TOK = 'clitok'
 PATTERN = '*.cdn.example.com/vod/*/seg-*'
-
-
-def _put(body):
-    return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
-            'timeout': 30}
 
 
 def _wait(cmd_id, delivery):
@@ -92,7 +88,7 @@ def test_a_positive_rule_id_reaches_the_wire_as_the_integer_it_was(tmp):
     recorded, out = run_cli(
         ['unblock-requests', '--rule-id', '7'],
         [{'did': 'd9'}, _envelope(result={'removed': [7]})],
-        plan=[_put(body), _wait('_unblock', 'd9')], token=TOK)
+        plan=[_api_put(body), _wait('_unblock', 'd9')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -117,7 +113,7 @@ def test_do_block_requests_sends_the_pattern_it_was_given(tmp):
         [{'did': 'd1'},
          _envelope(result={'pattern': PATTERN, 'ruleId': 3,
                            'tabIds': [11, 12]})],
-        plan=[_put(body), _wait('_block', 'd1')], token=TOK)
+        plan=[_api_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -132,7 +128,7 @@ def test_do_block_requests_names_the_tab_chrome_numbered_zero(tmp):
     recorded, out = run_cli(
         ['block-requests', PATTERN, '--chrome-tab', '0'],
         [{'did': 'd1'}, _envelope(result={'pattern': PATTERN, 'ruleId': 1})],
-        plan=[_put(body), _wait('_block', 'd1')], token=TOK)
+        plan=[_api_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -151,7 +147,7 @@ def test_do_block_requests_renders_a_result_echoing_nothing(tmp):
             'tab': 'extension', 'pattern': PATTERN}
     _recorded, out = run_cli(
         ['block-requests', PATTERN], [{'did': 'd1'}, _envelope(result={})],
-        plan=[_put(body), _wait('_block', 'd1')], token=TOK)
+        plan=[_api_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert out == 'Blocked:   ruleId=  tabs=[]\n', repr(out)
 
@@ -163,7 +159,7 @@ def test_do_block_requests_exits_when_no_result_arrives(tmp):
             'tab': 'extension', 'pattern': PATTERN}
     code, out = run_cli_exit(
         ['block-requests', PATTERN], [{'did': 'd1'}, None],
-        plan=[_put(body), _wait('_block', 'd1')], token=TOK)
+        plan=[_api_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert code == 'Timeout (10s)', code
     assert out == '', repr(out)
@@ -178,7 +174,7 @@ def test_do_block_requests_exits_with_the_error_the_extension_reported(tmp):
         ['block-requests', PATTERN],
         [{'did': 'd1'},
          {'id': '_block', 'error': 'Extension asleep', 'ts': 1}],
-        plan=[_put(body), _wait('_block', 'd1')], token=TOK)
+        plan=[_api_put(body), _wait('_block', 'd1')], token=TOK)
 
     assert code == 'Error: Extension asleep', code
     assert out == '', repr(out)
@@ -199,7 +195,7 @@ def test_do_unblock_requests_omits_the_rule_id_when_none_was_given(tmp):
     recorded, out = run_cli(
         ['unblock-requests'],
         [{'did': 'd2'}, _envelope(result={'removed': [4, 9]})],
-        plan=[_put(body), _wait('_unblock', 'd2')], token=TOK)
+        plan=[_api_put(body), _wait('_unblock', 'd2')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -213,7 +209,7 @@ def test_do_unblock_requests_renders_an_empty_removal_as_zero(tmp):
             'tab': 'extension'}
     _recorded, out = run_cli(
         ['unblock-requests'], [{'did': 'd2'}, _envelope(result={})],
-        plan=[_put(body), _wait('_unblock', 'd2')], token=TOK)
+        plan=[_api_put(body), _wait('_unblock', 'd2')], token=TOK)
 
     assert out == 'Removed 0 rule(s): []\n', repr(out)
 
@@ -225,7 +221,7 @@ def test_do_unblock_requests_exits_when_no_result_arrives(tmp):
             'tab': 'extension'}
     code, out = run_cli_exit(
         ['unblock-requests'], [{'did': 'd2'}, None],
-        plan=[_put(body), _wait('_unblock', 'd2')], token=TOK)
+        plan=[_api_put(body), _wait('_unblock', 'd2')], token=TOK)
 
     assert code == 'Timeout (10s)', code
     assert out == '', repr(out)
@@ -240,7 +236,7 @@ def test_do_unblock_requests_exits_with_the_error_the_extension_reported(tmp):
         ['unblock-requests'],
         [{'did': 'd2'},
          {'id': '_unblock', 'error': 'no such rule', 'ts': 1}],
-        plan=[_put(body), _wait('_unblock', 'd2')], token=TOK)
+        plan=[_api_put(body), _wait('_unblock', 'd2')], token=TOK)
 
     assert code == 'Error: no such rule', code
     assert out == '', repr(out)
@@ -266,7 +262,7 @@ def test_do_list_block_rules_prints_one_row_per_rule_in_the_order_given(tmp):
     ]
     _recorded, out = run_cli(
         ['list-block-rules'], [{'did': 'd3'}, _envelope(result=rules)],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert out == (
         '  id=4  pattern=*.a.example.com/*  tabs=[1, 2]\n'
@@ -283,7 +279,7 @@ def test_do_list_block_rules_names_every_rule_the_bridge_reported(tmp):
         ['list-block-rules'],
         [{'did': 'd3'},
          _envelope(result=[{'id': 1, 'condition': {'urlFilter': '*'}}])],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
         recorded.api_calls
@@ -304,7 +300,7 @@ def test_do_list_block_rules_renders_a_rule_carrying_no_condition(tmp):
     _recorded, out = run_cli(
         ['list-block-rules'],
         [{'did': 'd3'}, _envelope(result=[{'id': 8}])],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert out == '  id=8  pattern=  tabs=all\n1 rule(s)\n', repr(out)
 
@@ -316,7 +312,7 @@ def test_do_list_block_rules_says_so_when_no_rule_is_active(tmp):
             'tab': 'extension'}
     _recorded, out = run_cli(
         ['list-block-rules'], [{'did': 'd3'}, _envelope(result=[])],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert out == 'No active block rules\n', repr(out)
 
@@ -328,7 +324,7 @@ def test_do_list_block_rules_exits_when_no_result_arrives(tmp):
             'tab': 'extension'}
     code, out = run_cli_exit(
         ['list-block-rules'], [{'did': 'd3'}, None],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert code == 'Timeout (10s)', code
     assert out == '', repr(out)
@@ -343,7 +339,7 @@ def test_do_list_block_rules_exits_with_the_error_the_extension_reported(tmp):
         ['list-block-rules'],
         [{'did': 'd3'},
          {'id': '_list_rules', 'error': 'Extension asleep', 'ts': 1}],
-        plan=[_put(body), _wait('_list_rules', 'd3')], token=TOK)
+        plan=[_api_put(body), _wait('_list_rules', 'd3')], token=TOK)
 
     assert code == 'Error: Extension asleep', code
     assert out == '', repr(out)
