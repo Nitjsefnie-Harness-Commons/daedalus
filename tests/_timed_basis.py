@@ -36,12 +36,21 @@ sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
 # The count the prose states, in the two spellings `_plural` produces.
 _MEASURED_CELLS_CLAUSE = r'the measured run ran (\d+) cells?,'
-# The estimated-suite clause: how many, of how many in the tree, and
-# which, so the tree can be rebuilt from the file rather than from the
-# working tree the `suites` job checks out.
+# The estimated-suite clause: how many, of how many in the tree, which
+# are CARRIED at the weight the file already recorded and which are
+# estimated at the recorded median, and which suites -- so the tree can
+# be rebuilt from the file rather than from the working tree the
+# `suites` job checks out. Each half is optional: the union write
+# carries every weight it has and estimates only the suites that
+# arrived after it, so either half can be empty and the other is the
+# whole clause.
 _ESTIMATED_CLAUSE = (
-    r"(\d+) of the tree's (\d+) suites are not measured by these runs"
-    r".*?: (.+?) Re-derive with ")
+    r"(\d+) of the tree\'s (\d+) suites are not measured by these runs, "
+    r"(?:(\d+) carried at the weight this file already recorded"
+    r"(?: and)? )?"
+    r"(?:(\d+) estimated at the median of the recorded weights)?"
+    r": (.+?) Re-derive with "
+)
 
 
 def fixture_tree(tmp, suites):
@@ -66,7 +75,7 @@ def fixture_tree(tmp, suites):
 
 
 def unmeasured_names(basis):
-    """`(count, tree_count, names)` from the file's own coverage clause.
+    """`(count, tree, names, carried, estimated)` from the coverage clause.
 
     The clause names the tree suites these runs did not measure, which
     is the fact a reader of the file alone has, and the fact the
@@ -75,13 +84,21 @@ def unmeasured_names(basis):
     a computation from the file's own weights is the defect this clause
     exists to fix: the write is a union, so a carried suite is recorded
     whatever the runs did.
+
+    The two counts are the SPLIT, and they are not interchangeable: a
+    carried suite keeps its own recorded weight and an unrecorded one
+    is priced by the planner at the recorded median, so a clause that
+    called both of them estimates would name a number the planner does
+    not use. Either half is empty whenever the other is the whole
+    clause, so each is optional and reads as zero.
     """
     match = re.search(_ESTIMATED_CLAUSE, basis)
     if match is None:
         assert 'every suite in the tree is measured' in basis, basis
-        return 0, 0, []
+        return 0, 0, [], 0, 0
     return (int(match.group(1)), int(match.group(2)),
-            [name.strip() for name in match.group(3).split(',')])
+            [name.strip() for name in match.group(5).split(',')],
+            int(match.group(3) or 0), int(match.group(4) or 0))
 
 
 def recorded_cell_count(basis):
@@ -113,19 +130,25 @@ def assert_the_generator_wrote_the_basis(tmp, data):
     The suites the runs did not MEASURE are read out of the prose for
     the same reason and handed to the generator as itself, not
     recomputed: the write is a union, so the file records the carried
-    suites too, and the generator's clause is about the runs.
+    suites too, and the generator's clause is about the runs. The
+    clause's own split is checked before the compare, because a basis
+    that lost a half of it has to fail on the split rather than on a
+    diff of the whole sentence.
     """
     bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
                         'timings_bounds')
     basis = data['basis']
-    count, total, listed = unmeasured_names(basis)
+    count, total, listed, carried, estimated = unmeasured_names(basis)
+    assert carried + estimated == count == len(listed), (
+        count, len(listed), carried, estimated)
     if listed:
-        # The tree-owned clause, checked from the file alone: the count it
-        # states is the names it lists, and the tree it totals is the
-        # recorded weights plus those names.
-        assert count == len(listed), (count, listed)
-        assert total == len(data['suite_weights']) + count, (
+        # The tree-owned clause, checked from the file alone: the tree it
+        # totals is the recorded weights plus the names it lists, and a
+        # carried name is one the file already records.
+        assert total == len(set(data['suite_weights']) | set(listed)), (
             total, len(data['suite_weights']), count)
+        assert carried <= len(data['suite_weights']), (
+            carried, len(data['suite_weights']))
     measured = recorded_cell_count(basis)
     assert 1 <= measured <= data['max_cells'], (
         measured, data['max_cells'], basis)
@@ -191,6 +214,62 @@ def verify_recorded_count(data, runs_root):
         f'and the run it was written from disagree')
     return (f'{runs_root}: run {run_id} measured {measured} cells, which is '
             f'what the committed basis records')
+
+
+def verify_unmeasured_list(data, runs_root):
+    """Check the file's UNMEASURED list against the runs it names.
+
+    The clause is read out of the prose and handed back to the generator,
+    so the byte compare is self-consistent by construction: a generator
+    and a file can be wrong together and green. This is the half that
+    cannot be, wherever the downloaded runs are on disk -- the timed
+    job alone.
+
+    Every run the file names has to be under the root, not just the
+    first: the basis's unmeasured set is the complement of the whole
+    SAMPLE, so a partial root would compare one run's measurement
+    against the union's and call the difference a disagreement. The run
+    ids are `measured_from`'s, for the same reason
+    `verify_recorded_count` asks about the run the file names rather
+    than whatever the root selects today.
+
+    Returns a one-line report including every way it could do nothing,
+    so a skip is visible rather than silent, and raises only where it
+    had both numbers and they disagree.
+    """
+    if not runs_root.is_dir():
+        return (f'no runs root at {runs_root}: the unmeasured suite list went '
+                f'UNCHECKED here')
+    runs = _util.load(ROOT / 'scripts' / 'ci' / 'timings_runs.py',
+                      'timings_runs')
+    by_id = {str(run_id): path
+             for run_id, path in runs.discover_runs(runs_root)}
+    named = [part.strip() for part in data['measured_from'].split(',')]
+    missing = [run_id for run_id in named if run_id not in by_id]
+    if missing:
+        return (f'{runs_root} does not carry run {", ".join(missing)}, which '
+                f'the file names: the unmeasured suite list went UNCHECKED '
+                f'here')
+    measured = set()
+    for run_id in named:
+        try:
+            measured |= runs.measured_suites(by_id[run_id], int(run_id))
+        except (runs.RefreshError, ValueError) as error:
+            return (f'run {run_id} under {runs_root} cannot be read '
+                    f'({error}): the unmeasured suite list went UNCHECKED '
+                    f'here')
+    _c, _t, listed, _carried, _est = unmeasured_names(data['basis'])
+    claims = set(data['suite_weights']) | set(listed)
+    unmeasured = claims - measured
+    assert set(listed) == unmeasured, (
+        f'the committed basis says these runs did not measure '
+        f'{sorted(listed)}, and the runs themselves measured '
+        f'{sorted(claims - unmeasured)} of the file\'s {len(claims)} suites '
+        f'and not {sorted(unmeasured)}: the file and the runs it was written '
+        f'from disagree')
+    return (f'{runs_root}: the run(s) {", ".join(named)} measured '
+            f'{len(claims) - len(unmeasured)} of the file\'s {len(claims)} '
+            f'suites, which is what the committed basis records')
 
 
 def suite_file(path, seconds):
