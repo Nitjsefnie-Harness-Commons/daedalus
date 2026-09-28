@@ -185,6 +185,15 @@ def test_a_pull_request_reads_its_file_list(tmp):
         'repos/octo/daedalus/pulls/247/files', '--jq', '.[].filename']], calls
 
 
+def test_the_shared_event_default_names_a_requestable_pull_request(tmp):
+    """The default number is a real one: it reaches the request URL."""
+    del tmp
+    mod = _classifier()
+    calls, run = _recording_run('README.md\n')
+    mod.classify(_event(), run)
+    assert 'repos/octo/daedalus/pulls/248/files' in calls[0], calls
+
+
 def test_a_push_reads_the_compare_between_before_and_sha(tmp):
     del tmp
     mod = _classifier()
