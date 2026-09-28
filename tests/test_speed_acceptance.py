@@ -497,7 +497,14 @@ def test_the_accepted_speed_manifest_can_be_empty_or_missing(tmp):
 def test_speed_comparison_refusal_is_normalised_not_raised(tmp):
     """A parser refusal is a value the driver returns, not an escape."""
     compare = _durations_comparator()
-    code, output = _run_comparator(compare, ['--base'])
+    try:
+        code, output = _run_comparator(compare, ['--base'])
+    except SystemExit as exc:
+        # An escape here ends the whole suite, so a removed arm would hide
+        # every other result instead of failing here by name.
+        raise AssertionError(
+            'the driver let a SystemExit escape instead of normalising '
+            f'it: {exc!r}') from exc
     assert code == 2, (code, output)
     assert 'usage:' in output and '--head' in output, output
 
