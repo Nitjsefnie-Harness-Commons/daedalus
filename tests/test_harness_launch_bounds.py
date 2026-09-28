@@ -67,9 +67,12 @@ def test_the_timeout_concept_is_read_whatever_the_receiver(tmp):
     child, which is why a narrowed version of this audit missed all three
     of the first plants here: `queue.get` and `thread.join` are not
     subprocess launches, and nothing in a launch-only reading sees them.
-    The scan is receiver-independent and signature-reading, so a `timeout=`
-    on ANY call on the path is refused and a `timeout` parameter on a path
-    FUNCTION is refused from its signature alone.
+    The scan reads a `timeout=` on any call the census has NOT resolved to
+    a network read, and refuses a `timeout` parameter whose deadline can
+    reach a child. Receiver-independent is not receiver-unread; the two
+    receivers it does not read are in
+    `tests/test_launch_census_receivers.py`, and this file is what says
+    the other four spellings are still faults.
 
     The last plant is the one the disclosure used to leave implicit: a
     defaulted `timeout=` on a path function is an undeclared way to bound a
@@ -311,6 +314,23 @@ def test_the_interval_timer_that_carries_no_number_is_disclosed(tmp):
         'a rule now reads a timeout out of a call that has none')
     disclosed = census.__doc__ or ''
     assert 'os.waitid' in disclosed, 'the disclosure lost its item'
+
+
+def test_the_receivers_the_census_does_not_read_are_disclosed(tmp):
+    """#1299's two arms are named in the disclosure and pinned beside it.
+
+    A narrowing that is not in the "not enforced" list is a narrowing no
+    reader can audit, and the plants for both live in another module. So
+    this is the control that would go red if the docstring lost either
+    item, or if the module holding the plants were removed and the two
+    arms became claims with nothing behind them.
+    """
+    del tmp
+    disclosed = census.__doc__ or ''
+    for item in ('network read', 'cannot put it on a child',
+                 'test_launch_census_receivers.py'):
+        assert item in disclosed, item
+    assert (TESTS / 'test_launch_census_receivers.py').is_file()
 
 
 # --- R7: a deadline in the argv ------------------------------------------

@@ -39,6 +39,20 @@ P1 is a statement about source, not about a comment. #1117's separate
 requirement that the measurement and the multiple sit BESIDE the constant
 is a comment requirement, and no rule in this file can see a comment.
 
+## The `timeout` CONCEPT, and the receiver it is not read on
+
+Beyond those routes the concept `timeout` is read wherever it appears on a
+path function, which is deliberately receiver-INDEPENDENT: `queue.get(
+timeout=5)` and `thread.join(timeout=2)` are faults here and are the reason
+this reading exists, because no launch-only filter sees either. Receiver-
+independent is not receiver-unread. `_is_launch` proves a call IS a launch;
+#1299 added the complementary statement for a receiver the census can
+prove is NOT a child, and the two are the same question asked from both
+sides. A callee that resolves to a network read and a signature whose
+deadline can reach no child are the two places that question answers, and
+neither is "not a subprocess" — the thread and the queue resolve to
+nothing at all and are still refused.
+
 ## The launch-position `**` blind spot is the AUDIT's
 
 `**{'timeout': 30}` unpacked on a launch is a launch-call site.
@@ -78,6 +92,35 @@ assignment rather than a gap: one control, one owner, and a control in
     fault — is the one change that would close this, and it would have to
     land with a measure of how often a non-child receiver appears on the
     path;
+  - a `timeout` keyword on a call the census RESOLVES to a network read.
+    The members are derived from `urllib.request`, `http.client` and
+    `socket` at use — the stdlib's own tables, filtered to the members
+    whose signature takes a `timeout` — and a call qualifies by resolving
+    to one of those OBJECTS, so the eight import spellings one object can
+    be reached under are one receiver and not eight allowances. Two
+    controls in `tests/test_launch_census_receivers.py` hold it: one pins
+    every member the stdlib derives, and one pins the spellings. The
+    negative space is untouched by construction rather than by a table: a
+    child-ending call resolves to a `Popen` method or a `subprocess`
+    member, and none of those is a member of the three modules;
+  - `socket.socket` is a CLASS, so no member of the modules above
+    resolves a receiver to one and `sock.settimeout(timeout=5)` is STILL
+    refused. That is a known false red, named here rather than left to be
+    found, and the control beside it is
+    `test_a_call_that_is_not_a_read_keeps_its_timeout_fault`, which goes
+    red if a narrowing ever starts discharging it;
+  - a `timeout` PARAMETER on a function that cannot put it on a child: it
+    neither places a launch nor hands the parameter, or a name computed
+    from it, to a receiver the census has resolved to a child or to a
+    path function called by BARE NAME. A test double's modelled signature
+    and a helper that applies its own number are both that, and the
+    number a CALLER fills is still read at the caller's line by
+    `_parameter_bound_faults`, which is the mechanism the hand-off has
+    always used. Four controls in
+    `tests/test_launch_census_receivers.py` hold it, in both directions:
+    the two doubles and the helper, and a double that forwards its
+    deadline to a child either by owning it or by handing it to a path
+    function;
   - FOUR classes of site the analyser REFUSES and the repo-layout gate does
     not act on, so they are reported and not policed. The gate's keep rule
     (`tests/test_repo_layout.py::_bound_sites`) admits a site only when the
@@ -98,6 +141,7 @@ assignment rather than a gap: one control, one owner, and a control in
 import ast
 
 import _launch_path as path
+import _receiver_resolution as receiver
 
 # The binding readers live in the path module — reading what a source binds
 # a launcher to is the same work whichever question is asked of it — and the
@@ -457,14 +501,22 @@ def _path_body(name):
     return path.body_named(name)
 
 
-def _timeout_faults(relative, function, scope, constants, handed=frozenset()):
+def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
+                    context=()):
     """Every place the deadline CONCEPT `timeout` appears in one function.
 
-    Receiver-independent and signature-reading, which is the generality the
-    route rules gave up: a `timeout=` on ANY call is read here, so
+    Receiver-INDEPENDENT by default, which is the generality the route
+    rules gave up: a `timeout=` on ANY call is read here, so
     `queue.get(timeout=5)` and `thread.join(timeout=2)` are refused on a
-    launch-path function even though neither is a subprocess launch, and a
-    `timeout` parameter on such a function is read from the signature.
+    launch-path function even though neither is a subprocess launch. What
+    is NOT read is a callee the census has resolved to a network read, and
+    a signature whose deadline can reach no child — a test double's own
+    modelled API and a helper that applies its own number. Receiver-
+    independent is not "receiver unread": `_is_launch` proves a call IS a
+    launch, and #1299 is the complementary statement for a receiver the
+    census can prove is NOT a child. Neither arm is "not a subprocess":
+    a thread's `join` and a queue's `get` resolve to nothing at all, and
+    are still refused.
 
     The concept enters a child four ways: a `timeout=` keyword on any call,
     a `timeout` parameter, a `'timeout'` key stored into a container, and a
@@ -472,18 +524,22 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset()):
     no `timeout` anywhere is deliberately not a fault: a spread is not
     evidence of a bound.
 
-    A `timeout` PARAMETER is refused outright, because a launcher that
-    accepts one has an undeclared way to bound a child and the signature is
-    the only place that shows. Every other hit goes through the same
-    permission the route rules use, so the launcher's own detector — a
-    derived, classified, failure-reporting deadline — is not a fault here
-    either. A parameter the CALLER fills is left to the hand-off rule,
-    which judges the number where it was passed, because judging it here
-    would refuse the shipped cleanup's own bounded reap.
+    A `timeout` PARAMETER is refused when the deadline can reach a child,
+    which is what the signature refusal was standing in for. Every other
+    hit goes through the same permission the route rules use, so the
+    launcher's own detector — a derived, classified, failure-reporting
+    deadline — is not a fault here either. A parameter the CALLER fills is
+    left to the hand-off rule, which judges the number where it was passed,
+    because judging it here would refuse the shipped cleanup's own bounded
+    reap.
     """
+    callees, bound, receivers, direct, aliases, parameters = context
     faults = []
     if (function is scope and 'timeout' in _parameter_names(function)
-            and 'timeout' not in handed):
+            and 'timeout' not in handed
+            and receiver.deadline_reaches_a_child(
+                function, 'timeout', callees, receivers, direct, aliases,
+                parameters)):
         faults.append((relative, function.lineno, 'timeout parameter',
                        'a path function takes a deadline parameter, so a '
                        'bound reaches the child through the signature'))
@@ -500,16 +556,21 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset()):
                            "a '**' spread forwards a mapping holding a"
                            " 'timeout' key"))
     for node in ast.walk(function):
-        if not isinstance(node, ast.keyword) or node.arg != 'timeout':
+        if not _is_call(node) or receiver.is_network_read(node.func, bound):
             continue
-        if isinstance(node.value, ast.Name) and node.value.id in handed:
-            faults.extend(_parameter_bound_faults(
-                relative, node.value, scope, constants,
-                'timeout= keyword at a caller-filled parameter'))
-            continue
-        reason = _permitted(node.value, scope, constants)
-        if reason:
-            faults.append((relative, node.lineno, 'timeout= keyword', reason))
+        for keyword in node.keywords:
+            if keyword.arg != 'timeout':
+                continue
+            if (isinstance(keyword.value, ast.Name)
+                    and keyword.value.id in handed):
+                faults.extend(_parameter_bound_faults(
+                    relative, keyword.value, scope, constants,
+                    'timeout= keyword at a caller-filled parameter'))
+                continue
+            reason = _permitted(keyword.value, scope, constants)
+            if reason:
+                faults.append((relative, keyword.lineno, 'timeout= keyword',
+                               reason))
     return faults
 
 
@@ -521,12 +582,15 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     aliases = _member_aliases(tree, receivers, direct)
     callees = set(in_path) | set(callable_names)
     constants = _module_constants(tree)
+    context = (callees, receiver._dotted_bindings(tree), receivers, direct,
+               aliases, parameters)
     faults = []
     handed = frozenset(_CHILD_PARAMETERS.get(relative, {}))
     for scope in _bodies_in_scope(tree, in_path):
         for function in _functions_in(scope):
             faults.extend(
-                _timeout_faults(relative, function, scope, constants, handed))
+                _timeout_faults(relative, function, scope, constants, handed,
+                                context))
             faults.extend(_positional_deadline_faults(
                 relative, function, scope, constants, handed))
         for node in ast.walk(scope):
