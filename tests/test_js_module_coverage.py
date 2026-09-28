@@ -14,6 +14,7 @@ from _repo import ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 import js_coverage  # noqa: E402
+from js_lines import code_lines  # noqa: E402
 
 POLICY_SOURCE = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
 SKILL_SOURCE = ROOT / '.claude' / 'skills' / 'changing-daedalus' / 'SKILL.md'
@@ -89,40 +90,69 @@ def test_the_gate_reuses_the_totals_gate_attribution(tmp):
     assert counts['dashboard/sections/tabs.js'] > 0, counts
 
 
-def test_a_file_at_or_under_its_record_passes(tmp):
-    policy = _policy()
-    found = policy.violations({'a.js': 3, 'b.js': 1}, {'a.js': 3, 'b.js': 5})
-    assert not any(found.values()), found
+def test_violations_reports_each_kind_and_nothing_on_a_clean_pair(tmp):
+    """The whole four-key dict, so each filter's negative space is driven.
 
-
-def test_a_file_over_its_record_is_refused_with_both_numbers(tmp):
+    `ok.js` is the cell that decides the `unrecorded` filter: a tracked
+    file the run covered completely measures 0, and 0 is not a missing
+    record. Dropping the `count > 0` guard from that filter is the repair
+    a plausible fix reaches for, it leaves every other case here passing,
+    and it makes the real gate refuse all fifteen fully covered modules on
+    every run — so the clean pair below must carry a zero-count file that
+    has no record.
+    """
     del tmp
     policy = _policy()
-    found = policy.violations({'tabs.js': 12},
-                              {'tabs.js': 9})
-    assert found['grown'] == {
-        'tabs.js': (12, 9)}, found
+    baseline = {'a.js': 2, 'b.js': 1, 'gone.js': 3, 'done.js': 1}
+    counts = {'a.js': 3, 'b.js': 1, 'done.js': 0,
+              'new.js': 1, 'ok.js': 0}
+    found = policy.violations(counts, baseline)
+    assert found == {
+        'grown': {'a.js': (3, 2)},
+        'unrecorded': {'new.js': 1},
+        'missing': ['gone.js'],
+        'graduated': ['done.js'],
+    }, found
+    clean = policy.violations({'a.js': 2, 'b.js': 0}, {'a.js': 2})
+    assert not any(clean.values()), clean
+    assert sorted(clean) == ['graduated', 'grown', 'missing', 'unrecorded']
 
 
-def test_a_file_with_no_record_is_refused(tmp):
+def test_every_tracked_module_satisfies_the_per_module_policy(tmp):
+    """`violations()` over the repository's own JavaScript, not a fixture.
+
+    A suite run has no V8 dump, so the count each file carries here is
+    read back from the record: a recorded file stands at its recorded
+    number, and a file with no record stands at 0, which is what a run
+    that covered it completely measured. That is the policy's own
+    invariant made concrete — a file needs a record exactly when it has
+    an uncovered line — and running it over the real thirty-eight files
+    is what puts the fifteen fully covered modules into the negative
+    space of `unrecorded` as fifteen zero-count entries with no record,
+    the cell a fixture of four invented names never reaches.
+
+    What this does not claim is that the recorded numbers are right: the
+    measurement belongs to the coverage job, which is the only place the
+    dumps exist. It claims the record and the tracked tree agree, so an
+    entry naming a file the tree does not ship (`missing`), a recorded
+    file that can hold no count at all (`graduated`), a tracked module
+    with no executable line to cover, and a counted file above its own
+    record (`grown`) are all refused by the test job rather than waiting
+    for a push.
+    """
     del tmp
     policy = _policy()
-    found = policy.violations({'dashboard/app.js': 4}, {})
-    assert found['unrecorded'] == {'dashboard/app.js': 4}, found
-
-
-def test_an_entry_for_a_file_that_is_gone_is_refused(tmp):
-    del tmp
-    policy = _policy()
-    found = policy.violations({}, {'dashboard/sections/gone.js': 3})
-    assert found['missing'] == ['dashboard/sections/gone.js'], found
-
-
-def test_a_zeroed_entry_is_graduated_rather_than_kept(tmp):
-    del tmp
-    policy = _policy()
-    found = policy.violations({'a.js': 0}, {'a.js': 4})
-    assert found['graduated'] == ['a.js'], found
+    baseline = _thresholds().js_coverage_baseline(_document())
+    assert baseline, 'the ratchet records nothing, so it exempts everything'
+    sources = js_coverage.tracked_sources(ROOT)
+    counts = dict.fromkeys(sources, 0) | dict(baseline)
+    found = policy.violations(counts, baseline)
+    assert not found['missing'], found['missing']
+    assert not found['graduated'], found['graduated']
+    assert not found['unrecorded'], found['unrecorded']
+    assert not found['grown'], found['grown']
+    for rel, text in sources.items():
+        assert code_lines(text, rel), rel
 
 
 def test_tightened_lowers_a_file_that_lost_cover(tmp):
