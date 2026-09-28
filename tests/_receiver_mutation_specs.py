@@ -4,7 +4,7 @@ Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Split out of tests/_coverage_mutation_specs.py, which carries the rows for
 the guard as a whole and had no room for these. It reached the 700-line
-ceiling at this branch's first commit, da437578, and the file that pressed
+ceiling at this branch's first commit, 34d8d7a6, and the file that pressed
 it was tests/test_coverage_bindings.py, which these rows came out of; the
 module is back under the ceiling since. The two invokes below that rows
 outside this file also use stay there, so both are read there and imported
