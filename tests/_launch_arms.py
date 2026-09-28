@@ -456,11 +456,17 @@ LAUNCH_ARMS = (
      'if not isinstance(func, ast.Attribute) \\ or not isinstance(func.va...',
      'anything but a method on a bare name is not machinery', 'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
+    # `evidence` is the step ceiling, not the row. The row enters this
+    # arm through a KeyError on the ordinary path, which pins "the
+    # analyser must not raise"; the guard is for the CYCLE, and only the
+    # step ceiling enters that -- with the cut the fixpoint runs past
+    # 100000 line events, which is what this arm does instead of
+    # answering wrong. The row still holds the arm, as SECONDARY_CONTROLLED
+    # says, and it is a control no other arm names.
     ('mr.while-guard', '_launch_audit.py', 471, 'replace:471:while True:',
      'while base in binding_map and base not in seen \\ and base not in a...',
      'the base-following loop stops on an unheld, seen or ambiguous base',
-     'CONTROLLED',
-     'machinery-reached-by-assignment-is-unproved'),
+     'CONTROLLED', STEP_CEILING_CONTROL),
     ('mr.target-not-name', '_launch_audit.py', 475, 'drop_if:475',
      'if not isinstance(target, ast.Name): return False',
      'a base bound to a non-Name is not machinery', 'CONTROLLED',
@@ -711,3 +717,28 @@ LAUNCH_ARMS = (
      'a name in scope is followed one hop', 'CONTROLLED',
      'self-referential-concat-name'),
 )
+
+CRASH_CONTROLLED = frozenset({
+    'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
+    'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
+    'par.comprehension', 'pf.not-a-name', 'rc.guard', 'rs.follow',
+    'rs.guard', 'rw.no-container',
+})
+
+# A CONTROLLED arm's `evidence` names the control that enters the arm
+# that can actually FAIL. Where another control also holds the arm, it
+# is named here rather than left implicit in the gap: a reader of the
+# one line above it would not know it exists. Two arms need it.
+#
+#   mr.while-guard  the row reaches the guard through a KeyError on the
+#                   ordinary path; the step ceiling is the control that
+#                   enters the CYCLE, which is the shape the guard is
+#                   for, and the table's `evidence` now names that one.
+#   rs.guard        its `evidence` goes red by raising, but
+#                   `import-module-name-bound-twice` isolates the
+#                   clause by changing a value -- so this arm is held
+#                   by a control that pins the mechanism as well as by
+#                   one that only pins the absence of a crash.
+SECONDARY_CONTROLLED = {
+    'mr.while-guard': ('machinery-reached-by-assignment-is-unproved',),
+}
