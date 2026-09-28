@@ -302,6 +302,7 @@ jobs:
           python3 tests/test_timed_planner.py
           python3 tests/test_timed_refresh.py
           python3 tests/test_timed_coverage.py
+          python3 tests/test_timed_coverage_bounds.py
 
       - name: Commit the refresh
         # A deploy key, not the built-in token, and the difference is not a
