@@ -10,7 +10,12 @@ reader's, and this only produces the evidence for it.
 
 The cut is AST-located and the exact text it removed is returned, so a
 reader can see which clause the verdict depended on rather than trust
-that the right one went. Three shapes of clause need three ops:
+that the right one went. A chain head is the one case where the span
+that is cut and the clause that goes differ: the head's `end_lineno`
+runs down the whole elif chain, and the promotion re-supplies that
+chain, so `removed` stops at the head's own body and the text that took
+its place comes back separately in `promoted`. Three shapes of clause
+need three ops:
 
     drop_if    cut an `if`/`elif` arm, promoting a chain head's orelse
     drop_stmt  cut a statement outright
@@ -175,16 +180,19 @@ def _end_of(node, line):
 
 
 def cut_arm(source, spec):
-    """`(mutated_source, removed_text)` for a `cut` field of the table."""
+    """`(mutated, removed, promoted)` for a `cut` field of the table."""
     parts = spec.split(':')
     op, line = parts[0], int(parts[1])
     tree = ast.parse(source)
     lines = source.splitlines(keepends=True)
     if op == 'boolop':
-        return _drop_operand(source, lines, tree, line, int(parts[2]))
+        mutated, removed = _drop_operand(source, lines, tree, line,
+                                         int(parts[2]))
+        return mutated, removed, ''
     node, is_elif = _locate(tree, line)
     if node is None:
         raise ValueError(f'no statement on line {line}')
+    promoted = None
     if op == 'replace':
         # A replacement rewrites the header and keeps the body: a
         # `while <guard>:` becomes `while True:` with its body intact.
@@ -205,14 +213,48 @@ def cut_arm(source, spec):
             new = ''
         elif op == 'drop_if':
             new = _promote(lines, node)
+            if new:
+                promoted = node
         else:
             raise ValueError(f'unknown cut op {op}')
     for extra in range(0, MAX_UPWARD + 1):
         cut = (_offset(lines, start - extra), _offset(lines, end + 1))
         candidate = source[:cut[0]] + new + source[cut[1]:]
         if _parses(candidate):
-            return candidate, ''.join(lines[start - extra - 1:end])
+            return (candidate, _removed(lines, start, extra, end, promoted),
+                    new)
     raise ValueError(f'no parsing cut for line {line}')
+
+
+def _removed(lines, start, extra, end, promoted):
+    """The clause that went, which is not always the span that was cut.
+
+    A chain head's `end_lineno` runs down the whole elif chain, and the
+    promotion re-supplies that chain, so reporting the cut span would
+    name the elif arm the reader can still see in the file as deleted.
+    `promoted` is set only for a chain head whose orelse was promoted, and
+    the reported text stops at the end of the head's OWN body.
+    """
+    if promoted:
+        return ''.join(
+            lines[start - extra - 1:_end_of(promoted.body[-1], start)])
+    return ''.join(lines[start - extra - 1:end])
+
+
+RAISED = 'RAISED '
+
+
+def _crashed(baseline, after):
+    """The labels a mutation made RAISE, that were not raising before.
+
+    A crash is a control, but a weaker one than a changed value: it says
+    the analyser must not raise, not that the arm's own clause decided
+    the answer. A robustness change can satisfy the first while the
+    second goes unpinned, so the two are counted apart.
+    """
+    return sorted(key.split(' ', 1)[1] for key in after
+                  if after[key].startswith(RAISED)
+                  and not baseline.get(key, '').startswith(RAISED))
 
 
 def _child_verdicts(tests_dir):
@@ -239,13 +281,19 @@ def _child_verdicts(tests_dir):
 
 
 def arm_sweep(tmp, arms):
-    """`{arm: {'removed', 'moved', 'timed_out'}}` for each named arm.
+    """`{arm: {'removed', 'promoted', 'moved', 'crash', 'timed_out'}}`.
 
     `arms` is read from the caller rather than imported, so a suite that
     narrows the sweep to two arms gets exactly those two. The mutation
     lands in a COPY of the test tree (`_owned_writes.copy_test_tree`),
     never in the checkout, and a fresh interpreter reads it, so no stale
     bytecode and no half-restored file can be mistaken for a verdict.
+
+    `crash` is the subset of `moved` that moved by RAISING rather than to
+    another value, because a reader must be able to tell the two apart.
+    `timed_out` is a child that did not answer at all, which is neither:
+    it moves nothing and proves nothing, so every consumer has to reject
+    it rather than read the empty `moved` as an answer.
     """
     from _owned_writes import clear_bytecode, copy_test_tree
 
@@ -259,10 +307,10 @@ def arm_sweep(tmp, arms):
         path = target / file_name
         original = path.read_text(encoding='utf-8')
         try:
-            mutated, removed = cut_arm(original, spec)
+            mutated, removed, promoted = cut_arm(original, spec)
         except ValueError as error:
-            findings[arm_id] = {'removed': '', 'moved': [],
-                                'refused': str(error)}
+            findings[arm_id] = {'removed': '', 'promoted': '', 'moved': [],
+                                'crash': [], 'refused': str(error)}
             continue
         path.write_text(mutated, encoding='utf-8')
         clear_bytecode(target)
@@ -270,11 +318,13 @@ def arm_sweep(tmp, arms):
         path.write_text(original, encoding='utf-8')
         clear_bytecode(target)
         if after is None:
-            findings[arm_id] = {'removed': removed, 'moved': [],
+            findings[arm_id] = {'removed': removed, 'promoted': promoted,
+                                'moved': [], 'crash': [],
                                 'timed_out': True}
             continue
         moved = sorted(key.split(' ', 1)[1] for key in after
                        if after[key] != baseline[key])
-        findings[arm_id] = {'removed': removed, 'moved': moved,
+        findings[arm_id] = {'removed': removed, 'promoted': promoted,
+                            'moved': moved, 'crash': _crashed(baseline, after),
                             'evidence': evidence}
     return findings
