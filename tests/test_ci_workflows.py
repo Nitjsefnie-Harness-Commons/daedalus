@@ -218,7 +218,7 @@ def test_a_step_that_pushes_to_main_is_gated_by_the_steps_before_it(
     cancelled job should not push a file its own measurement never
     finished writing.
     """
-    source = (ROOT / '.github' / 'workflows' / 'timed-timings.yml')
+    source = ROOT / '.github' / 'workflows' / 'timed-timings.yml'
     section = '\n'.join(_job_section(
         source.read_text(encoding='utf-8'), 'refresh'))
     _seen, verify, after = section.partition('- name: Verify the change\n')

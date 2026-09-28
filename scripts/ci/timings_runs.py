@@ -61,7 +61,6 @@ a second rule for what a measurement is.
 """
 import json
 import math
-import statistics
 
 # The timed job's own round names. A head round is measured; `base-<n>`
 # and `warmup` are not. The cell names, unlike these, are generated.
