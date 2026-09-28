@@ -38,12 +38,16 @@ reference reading -- and drives `refresh_timings.main()` over it.
 import contextlib
 import io
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _repo import ROOT, git_index  # noqa: E402
+from _speedharness import (  # noqa: E402
+    run_workflow_script, workflow_script)
 from _timed_basis import (  # noqa: E402
     fixture_tree, unmeasured_names, write_run as _write_run)
 
@@ -398,6 +402,115 @@ def test_each_coverage_bound_refuses_a_file_the_other_one_publishes(tmp):
             assert 'suites are estimated' in refusal, refusal
             counts['suite'] += 1
     assert counts == {'weight': 1, 'suite': 1}, counts
+
+
+# The two halves of the seam, as the runner sees them: every command
+# line of the refresh step, and the commit step up to and including the
+# commit itself. The comments between them are not pinned -- prose moves
+# -- but the command list is the whole of what the seam is, and a grep
+# for two substrings is not a list: planting `rm -f refreshed-subject.txt`
+# as the commit step's first line left every asserted substring in place
+# and the suite green, on a workflow that can no longer commit at all.
+_REFRESH_COMMANDS = [
+    'python3 scripts/ci/refresh_timings.py --runs-root runs \\',
+    '  --message-file refreshed-subject.txt \\',
+    '  2>> "$GITHUB_STEP_SUMMARY"',
+    'git diff --text -- .github/suite-timings.json \\',
+    '  >> "$GITHUB_STEP_SUMMARY"',
+]
+_COMMIT_COMMANDS = [
+    'if git diff --quiet -- .github/suite-timings.json; then',
+    '  echo "No weight moved; nothing to commit."',
+    '  exit 0',
+    'fi',
+    'install -d -m 700 ~/.ssh',
+    "printf '%s\\n' \"$RATCHET_SSH_KEY\" > ~/.ssh/ratchet",
+    'chmod 600 ~/.ssh/ratchet',
+    "printf '%s\\n' 'github.com ssh-ed25519 "
+    'AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\''
+    ' \\',
+    '  > ~/.ssh/known_hosts',
+    'chmod 600 ~/.ssh/known_hosts',
+    "git config user.name 'github-actions[bot]'",
+    "git config user.email "
+    "'41898282+github-actions[bot]@users.noreply.github.com'",
+    'git add .github/suite-timings.json',
+    'git commit -F refreshed-subject.txt',
+]
+
+
+def _commands(script):
+    """The step's source lines that are commands: no comment, no blank."""
+    return [line for line in script.splitlines()
+            if line.strip() and not line.lstrip().startswith('#')]
+
+
+def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
+    """The seam, pinned as a list of commands AND executed end to end.
+
+    The refresh step writes the subject to a workspace file and the
+    commit step commits that file, and the whole point of the seam is
+    that the subject then names the runs the refreshed file records in
+    `measured_from`. Grepping both steps for `--message-file` and
+    `-F` never established that: one line planted in the commit step
+    left every asserted substring intact and the workflow unable to
+    commit. So the command lists are compared exactly, and then the
+    commit step is RUN, in a real checkout, over a real data file
+    whose `measured_from` is known, and the resulting commit subject is
+    read back.
+    """
+    source = (ROOT / '.github' / 'workflows' / 'timed-timings.yml'
+              ).read_text(encoding='utf-8')
+    refresh_step = workflow_script(source, 'refresh', 'Refresh the data file')
+    commit_step = workflow_script(source, 'refresh', 'Commit the refresh')
+    commands = _commands(refresh_step)
+    assert commands == _REFRESH_COMMANDS, commands
+    commit_commands = _commands(commit_step)
+    through = commit_commands[:len(_COMMIT_COMMANDS)]
+    assert through == _COMMIT_COMMANDS, through
+
+    repository = Path(tmp) / 'checkout'
+    (repository / '.github').mkdir(parents=True)
+    data_file = repository / '.github' / 'suite-timings.json'
+    refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                         'refresh_timings')
+    runs = [101, 100]
+    data_file.write_text(json.dumps(
+        {'schema_version': 2, 'target_cell_weight': 25.0,
+         'max_cells': 15, 'units': 'reference-multiples',
+         'measured_from': '300', 'runs': 1,
+         'suite_weights': {'test_a.py': 1.0}}) + '\n', encoding='utf-8')
+    git_index(repository, 'init', '-q')
+    git_index(repository, 'add', '--', '.github/suite-timings.json')
+    git_index(repository, '-c', 'user.name=base',
+               '-c', 'user.email=base@example.invalid',
+               'commit', '-q', '-m', 'base')
+    # What the refresh left behind: the same file re-derived from two
+    # other runs, unstaged, which is the state the commit step runs on.
+    data_file.write_text(json.dumps(
+        {'schema_version': 2, 'target_cell_weight': 25.0,
+         'max_cells': 15, 'units': 'reference-multiples',
+         'measured_from': ','.join(str(run) for run in runs),
+         'runs': len(runs),
+         'suite_weights': {'test_a.py': 2.0}}) + '\n', encoding='utf-8')
+    (repository / 'refreshed-subject.txt').write_text(
+        refresh.commit_message(runs) + '\n', encoding='utf-8')
+    home = Path(tmp) / 'home'
+    home.mkdir()
+    run_workflow_script(
+        repository, '\n'.join(through),
+        {'HOME': str(home), 'RATCHET_SSH_KEY': 'not-a-key',
+         'GITHUB_STEP_SUMMARY': str(Path(tmp) / 'summary.md'),
+         'REPO': 'example/example'})
+    subject = subprocess.run(
+        ['git', '-C', str(repository), 'log', '-1', '--pretty=%s'],
+        check=True, capture_output=True, text=True, timeout=30
+    ).stdout.strip()
+    named = set(re.findall(r'\d+', subject))
+    assert named == {str(run) for run in runs}, subject
+    assert 'ci: refresh suite timings from run' in subject, subject
+    assert json.loads(data_file.read_text(encoding='utf-8'))[
+        'measured_from'] == ','.join(str(run) for run in runs)
 
 
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
