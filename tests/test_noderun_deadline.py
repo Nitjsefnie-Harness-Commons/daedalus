@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _launcher_stand_ins as stand_ins  # noqa: E402
 import _util  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
@@ -31,13 +32,13 @@ TESTS = Path(__file__).resolve().parent
 # `tests/_noderun.py` — which is precisely the code a reversion removes. So
 # against a launch reverted to an UNBOUNDED one, the control's only defence
 # is the machinery it is testing, and it hangs until something external
-# kills it: a silent 150 s rather than a named failure. This alarm is armed
+# kills it: a silent stall rather than a named failure. This alarm is armed
 # by the control, on the call, and raises whatever the subject does.
 #
 # It must clear the healthy path with room to spare and still fire well
 # inside any external bound. The healthy budget is
 # `round(CHILD_DEADLINE_S * 0.1)` = 11s, and the slowest observed correct
-# run of the whole arm — a file timed at about 120s — is well under a
+# run of the whole arm — a file recorded at about 120s — is well under a
 # minute; 57s is roughly five times the healthy budget, and turning a
 # wedge into a named failure costs a minute where the alternative costs
 # whatever the runner's ceiling costs.
@@ -47,6 +48,24 @@ OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
 # Cancelling a timer IS a zero-second deadline, and the census requires the
 # figure to be composed from a named chain rather than typed at the call.
 OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
+
+# --- the budget a STALLED child is given -----------------------------------
+#
+# Two controls below drive a real child that never settles, and each used to
+# wait out its site's composed figure: 208s of deliberate deadline firing, a
+# 23% of the 900s `run_tests.py` allows, on every leg of a twelve-cell
+# matrix and on the `speed` suite. Both children write a line and then hold
+# the event loop open forever, so the deadline's one job is to clear node's
+# own startup. The figures are arithmetic and the AST control pins the
+# chain; the FIRING does not depend on them, which the expiry-message
+# control above already shows at a one-second budget. What is given up is
+# named here rather than traded silently: that 107 and 90 fire in
+# particular.
+#
+# The table is what the budget must clear — node's own startup, measured
+# `Popen` to first line for exactly the source the first control runs.
+STALLED_CHILD_START_SAMPLES_S = (0.048, 0.054, 0.080, 0.147, 0.158)
+STALLED_CHILD_START_SLOWEST_S = max(STALLED_CHILD_START_SAMPLES_S)
 
 
 def _raise_outer_deadline(_signum, _frame):
@@ -69,27 +88,7 @@ def test_the_expiry_message_names_the_child_the_deadline_and_the_evidence(
     """
     import _noderun  # noqa: E402
 
-    class Stuck:
-        """A child that is already past the detector and never exits."""
-
-        pid = 4242
-
-        def wait(self, timeout=None):
-            raise subprocess.TimeoutExpired(
-                ['node', 'x'], timeout or 0.0)
-
-        def kill(self):
-            pass
-
-    captured = {}
-
-    def fake_popen(argv, **kwargs):
-        captured['stdout'] = kwargs['stdout']
-        captured['stderr'] = kwargs['stderr']
-        kwargs['stdout'].write(b'partial child output')
-        kwargs['stderr'].write(b'partial child diagnostics')
-        return Stuck()
-
+    fake_popen = stand_ins.stuck_popen()
     real_popen = _noderun.subprocess.Popen
     real_deadline = _noderun.CHILD_DEADLINE_S
     real_cleanup = _noderun.cleanup_process_tree
@@ -149,19 +148,6 @@ def test_exactly_one_module_under_tests_ends_a_child(tmp):
         assert found == ['_processtree.py'], (marker, found)
 
 
-class StuckAgain:
-    """A child already past the detector, for the unlink-door control."""
-
-    pid = 4343
-
-    def wait(self, timeout=None):
-        """Time out however long it is given."""
-        raise subprocess.TimeoutExpired(['node', 'x'], timeout or 1)
-
-    def kill(self):
-        """Nothing to kill in this double."""
-
-
 def test_a_failed_scratch_removal_does_not_replace_the_classified_error(tmp):
     """A removal that raises is recorded, not raised over the report.
 
@@ -183,8 +169,8 @@ def test_a_failed_scratch_removal_does_not_replace_the_classified_error(tmp):
     real_popen = _noderun.subprocess.Popen
     real_deadline = _noderun.CHILD_DEADLINE_S
     real_cleanup = _noderun.cleanup_process_tree
-    _noderun._remove_tree = _raise_permission_error
-    _noderun.subprocess.Popen = _stuck_popen
+    _noderun._remove_tree = stand_ins.raise_permission_error
+    _noderun.subprocess.Popen = stand_ins.stuck_popen_again
     _noderun.cleanup_process_tree = lambda process, bound: 'simulated cleanup'
     _noderun.CHILD_DEADLINE_S = 1
     caught = None
@@ -350,7 +336,7 @@ def test_the_expiry_message_names_a_tail_that_is_not_a_path(tmp):
               " process.stdout.write('" + 'x' * 4000 + "');")
     real_popen = _noderun.subprocess.Popen
     real_cleanup = _noderun.cleanup_process_tree
-    _noderun.subprocess.Popen = _stuck_popen
+    _noderun.subprocess.Popen = stand_ins.stuck_popen_again
     _noderun.cleanup_process_tree = lambda process, bound: 'simulated cleanup'
     caught = None
     try:
@@ -410,6 +396,21 @@ def test_both_entry_points_reach_one_launch(tmp):
     assert ast.unparse(call.args[0]) == _bound_child_name(tree, launch), (
         ast.unparse(call))
     assert ast.unparse(call.args[1]) == 'CLEANUP_DEADLINE_S', ast.unparse(call)
+    # And the CHILD's own bound, read the same way. Every behavioural
+    # control below learns whether it works by WAITING for it, so a
+    # `timeout=99999` typed at the wait was caught by nothing but the suite
+    # ceiling — a signal that says "the job timed out" rather than "this
+    # assertion is wrong", and the slowest way to learn a one-line change.
+    waits = [node for node in ast.walk(tree)
+             if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and node.func.attr == 'wait'
+             and any(word.arg == 'timeout' for word in node.keywords)]
+    assert len(waits) == 1, [ast.unparse(one) for one in waits]
+    child_bound = next(word.value for word in waits[0].keywords
+                       if word.arg == 'timeout')
+    assert ast.unparse(child_bound) == 'CHILD_DEADLINE_S', (
+        ast.unparse(child_bound))
     for name in ('run_node_program', 'run_node_argv'):
         assert any(
             isinstance(node, ast.Call)
@@ -442,19 +443,21 @@ def _function_named(tree, name):
 
 
 def test_a_child_that_never_settles_is_killed_and_reported(tmp):
-    """A REAL child, past the REAL deadline — the shape CI has to survive.
+    """A REAL child, past a REAL deadline — the shape CI has to survive.
 
-    The deadline is the module's own `CHILD_DEADLINE_S` rather than a value
-    this test shrinks to keep itself quick: a test that has to guess how
-    long a loaded runner takes to start node is the same wall-clock margin
-    this branch exists to remove, one level down. So this costs a detector
-    budget and buys a kill, a report and a reap that are all the real ones.
+    The kill, the report and the reap are all the launcher's own; only the
+    budget is a quarter of the site's figure, for the reasons recorded above
+    the sample table, and the deadline the report names is read back off
+    the failure rather than off the module.
     """
     import _noderun  # noqa: E402
 
     source = ("process.stdout.write(process.pid + '\\n');"
               " process.stdout.write('partial child output\\n');"
               " setInterval(() => {}, 1000);")
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    budget = round(real_deadline * 0.25)
+    _noderun.CHILD_DEADLINE_S = budget
     caught = None
     try:
         _noderun.run_node_argv(_node(), ['-e', source], tmp)
@@ -467,40 +470,23 @@ def test_a_child_that_never_settles_is_killed_and_reported(tmp):
         assert not isinstance(unexpected, subprocess.TimeoutExpired), (
             'a bare TimeoutExpired reached the caller', unexpected)
         raise
+    finally:
+        _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the child that never settles finished'
     assert not isinstance(caught, subprocess.TimeoutExpired), caught
     assert isinstance(caught, _noderun.ChildDeadlineExceeded), (
         type(caught).__name__, caught)
     failure = caught
-    assert failure.deadline_s == _noderun.CHILD_DEADLINE_S, failure.deadline_s
+    assert failure.deadline_s == budget, failure.deadline_s
     assert 'partial child output' in failure.stdout, failure.stdout
     assert failure.cleanup_diagnostic, 'the cleanup reported nothing'
-    assert _child_is_gone(failure.stdout), (
+    assert stand_ins.child_is_gone(failure.stdout), (
         'the cleanup reported a kill and left the child running')
     message = str(failure)
     assert _node() in message, message
     for line in (f'deadline: {failure.deadline_s}s', 'cleanup: ',
                  'stdout: ', 'stderr: '):
         assert line in message, (line, message)
-
-
-def _child_is_gone(stdout):
-    """Whether the pid the child reported is no longer a live process.
-
-    The cleanup's own string is a REPORT; this is the thing the report is
-    about, and a launcher that reported a kill it never performed passes a
-    string assertion. The probe is `os.kill(pid, 0)`, which on POSIX raises
-    for a pid the kernel has reaped and returns for a live one, and on
-    Windows raises for a process it cannot open and TERMINATES one it can —
-    so a survivor fails the assertion on both, and the orphan left by a
-    broken cleanup does not outlive the suite.
-    """
-    pid = int(stdout.splitlines()[0])
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return True
-    return False
 
 
 def test_a_real_call_site_reports_its_own_stalled_child(tmp):
@@ -576,27 +562,32 @@ def test_a_call_site_bound_reports_its_own_stalled_child(tmp):
     failure carrying the line it wrote before it stopped, not by a bare
     `TimeoutExpired` that names a figure nobody can re-derive.
 
-    It costs the site's real composed budget, which is what the two controls
-    above already do: the figure a maintainer re-derives is the one the
-    expiry has to fire at, and a control that shortened it would be proving
-    a different number.
+    It costs a quarter of the site's composed budget, for the reasons
+    recorded above the sample table. This child is a `-e` source of its own
+    rather than the shipped scripts, so the healthy path is node's startup
+    and nothing else.
     """
+    import _gm_harness  # noqa: E402
     from _gm_harness import _run_node  # noqa: E402
     from _node_launch_routing import NodeBoundExceeded  # noqa: E402
 
     stalling = ("process.stdout.write('the storage child spoke before it "
                 "wedged\\n'); setInterval(() => {}, 1000);")
+    real_deadline = _gm_harness.GM_CHILD_DEADLINE_S
+    budget = round(real_deadline * 0.25)
+    _gm_harness.GM_CHILD_DEADLINE_S = budget
     caught = None
     try:
         _run_node(stalling)
     except NodeBoundExceeded as failure:
         caught = failure
     finally:
+        _gm_harness.GM_CHILD_DEADLINE_S = real_deadline
         del tmp
     assert caught is not None, 'the storage child that never settles finished'
     assert 'the storage child spoke before it wedged' in caught.stdout, (
         caught.stdout)
-    assert caught.deadline_s > 0, caught.deadline_s
+    assert caught.deadline_s == budget, caught.deadline_s
 
 
 def test_an_environment_the_caller_built_reaches_the_child(tmp):
@@ -609,9 +600,11 @@ def test_an_environment_the_caller_built_reaches_the_child(tmp):
     send the child to the wrong directory, so the assertion is on what the
     child actually saw.
 
-    The negative half is the same property from the other side: with no
-    environment passed, the child gets this process's, and a value planted
-    only in the caller's dict does not reach it.
+    The other half is the same property read from the default: with no
+    environment passed, the child gets THIS PROCESS's, so a value planted
+    in `os.environ` rather than in the caller's dict reaches it too — and
+    the two cannot agree by accident, because the last launch uses a third
+    value and asserts that one instead.
     """
     import _noderun  # noqa: E402
 
@@ -624,8 +617,9 @@ def test_an_environment_the_caller_built_reaches_the_child(tmp):
         environment=_util.child_coverage('scrub', environment))
     assert result.returncode == 0, (result.returncode, result.stderr)
     assert result.stdout == caller_only, result.stdout
-    # And the same child launched without one does not see it, so the
-    # assertion above is the parameter doing the work.
+    # And the same child launched with NO environment sees this process's,
+    # which is what shows the assertion above is the parameter doing the
+    # work rather than the value simply being in the air.
     os.environ['NODE_V8_COVERAGE'] = caller_only
     try:
         without = _noderun.run_node_argv(_node(), ['-e', source], tmp)
@@ -633,7 +627,7 @@ def test_an_environment_the_caller_built_reaches_the_child(tmp):
         del os.environ['NODE_V8_COVERAGE']
     assert without.returncode == 0, (without.returncode, without.stderr)
     assert without.stdout == caller_only, (
-        'the launcher read os.environ rather than the caller\'s dict')
+        'a launch with no environment did not fall back to this process\'s')
     # A different value entirely, so the two halves cannot agree by luck.
     other = str(Path(tmp) / 'other-dumps')
     second = dict(os.environ)
@@ -642,18 +636,25 @@ def test_an_environment_the_caller_built_reaches_the_child(tmp):
         _node(), ['-e', source], tmp,
         environment=_util.child_coverage('scrub', second))
     assert third.stdout == other, third.stdout
-
-
-def _raise_permission_error(directory):
-    del directory
-    raise PermissionError(32, 'The process cannot access the file')
-
-
-def _stuck_popen(argv, **kwargs):
-    """A launch that writes the output the report must carry, then sticks."""
-    kwargs['stdout'].write(b'out')
-    kwargs['stderr'].write(b'err')
-    return StuckAgain()
+    # And the scrub runs over the CALLER's dict rather than over this
+    # process's, which is the other half of what the docstring at
+    # `tests/_noderun.py:260` claims. A coverage name planted in the
+    # environment the caller supplies is stripped before the launch, and an
+    # unrelated marker in the same dict still reaches the child — so this
+    # is a scrub and not a wholesale replacement. A launcher that read
+    # `os.environ` where the caller passed a dict would show 'none' for the
+    # marker too, and that is the whole difference between the two.
+    scrub_source = ("process.stdout.write(String("
+                    "process.env.COVERAGE_PROCESS_START || 'none') + '|' + "
+                    "String(process.env.DAEDALUS_ENV_MARKER || 'none'));")
+    scrubbed = _noderun.run_node_argv(
+        _node(), ['-e', scrub_source], tmp,
+        environment=_util.child_coverage('scrub', {
+            'PATH': os.environ.get('PATH', ''),
+            'COVERAGE_PROCESS_START': str(Path(tmp) / 'dumps'),
+            'DAEDALUS_ENV_MARKER': 'reached'}))
+    assert scrubbed.returncode == 0, (scrubbed.returncode, scrubbed.stderr)
+    assert scrubbed.stdout == 'none|reached', scrubbed.stdout
 
 
 def main():

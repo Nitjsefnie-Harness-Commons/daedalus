@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Every plant-based control of the launch-routing walk.
 
-`tests/_node_launch_routing.py` holds the walk; this holds the shapes it has
-to read and the shapes it must refuse. Each plant below is a case the walk
+`tests/_node_launch_routing.py` holds the rule and
+`tests/_node_launch_sweep.py` the walk; this holds the shapes they have to
+read and the shapes they must refuse. Each plant below is a case the walk
 used to get wrong in the direction that loses a site, and each is checked
 against the decision the walk makes rather than against a restatement of
 it. The rationale for what each one is for lives beside the code it
@@ -23,11 +24,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _node_launch_routing as routing  # noqa: E402
+import _node_launch_sweep as sweep  # noqa: E402
 import _util  # noqa: E402
 from _command_type_readers import _parents  # noqa: E402
 from _node_launch_routing import (  # noqa: E402
     NOT_FIXED_WORK, VERDICT_NODE, VERDICT_OTHER, VERDICT_UNRESOLVED, _bounds,
-    _bounds_its_own_child, _exempt, _launches)
+    _bounds_its_own_child, _exempt)
+from _node_launch_sweep import _launches  # noqa: E402
 
 # The body this branch removed from the real `tests/_jsroute_harness.py`:
 # a Node child launched at a hand-typed `timeout=30`, outside the shared
@@ -53,14 +56,14 @@ def test_the_walk_reports_a_routed_module_reverted_to_a_typed_bound(tmp):
     anything else in the repository reads.
     """
     root = Path(tmp) / 'planted'
-    routing._planted_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
+    sweep._planted_module_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
     planted = (root / '_jsroute_harness.py').read_text(encoding='utf-8')
     assert planted.count('timeout=30') == 1, (
         'the plant did not reach the real module')
     line = planted.splitlines().index(
         '    return subprocess.run([node, str(path)], capture_output=True,'
     ) + 1
-    unrouted, _, unclassified, _, _ = routing._routing_sweep(root)
+    unrouted, _, unclassified, _, _ = sweep._routing_sweep(root)
     assert not unclassified, unclassified
     assert unrouted == [f'_jsroute_harness.py:{line} (timeout=30)'], (
         'a Node child at a hand-typed bound was walked and not reported: '
@@ -82,7 +85,7 @@ def test_a_carve_out_that_hides_a_site_is_reported_by_the_walk(tmp):
     reported is a finding about the exemption rather than about the launch.
     """
     root = Path(tmp) / 'planted'
-    routing._planted_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
+    sweep._planted_module_copy(root, '_jsroute_harness.py', _TYPED_LAUNCH)
     line = (root / '_jsroute_harness.py').read_text(
         encoding='utf-8').splitlines().index(
             '    return subprocess.run([node, str(path)], '
@@ -90,7 +93,7 @@ def test_a_carve_out_that_hides_a_site_is_reported_by_the_walk(tmp):
     original = dict(routing.NOT_SITES)
     routing.NOT_SITES['_jsroute_harness.py'] = 'planted'
     try:
-        _, _, _, carved, _ = routing._routing_sweep(root)
+        _, _, _, carved, _ = sweep._routing_sweep(root)
         assert carved == [
             f'_jsroute_harness.py _jsroute_harness.py:{line} (timeout=30)'
         ], carved
@@ -102,8 +105,8 @@ def test_a_carve_out_that_hides_a_site_is_reported_by_the_walk(tmp):
     # rather than refusing every member, and the exemption is a no-op on
     # the tree as it stands.
     clean = Path(tmp) / 'clean'
-    routing._planted_copy(clean, '_jsroute_harness.py', 'VALUE = 1')
-    _, _, _, not_carved, _ = routing._routing_sweep(clean)
+    sweep._planted_module_copy(clean, '_jsroute_harness.py', 'VALUE = 1')
+    _, _, _, not_carved, _ = sweep._routing_sweep(clean)
     assert not not_carved, not_carved
 
 
