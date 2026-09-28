@@ -23,8 +23,7 @@ _WAIT_HARNESS = (
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
-    '        # time.sleep refuses a negative duration, and a stand-in\n'
-    '        # that accepts one hides a loop that asks to sleep backwards.\n'
+    '        # time.sleep refuses a negative duration.\n'
     '        if seconds < 0:\n'
     '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
@@ -139,28 +138,26 @@ _OVERSHOOT_HARNESS = (
     'import json\n'
     'from daedalus_cli import transport\n'
     'class _Clock:\n'
-    '    def __init__(self, deadline):\n'
+    '    def __init__(self, timeout):\n'
     '        self.now = 1000.0\n'
-    '        self.deadline = deadline\n'
+    '        self.deadline = self.now + timeout\n'
     '        self.sleeps = []\n'
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
-    '        # time.sleep refuses a negative duration, and a stand-in\n'
-    '        # that accepts one hides a loop that asks to sleep backwards.\n'
+    '        # time.sleep refuses a negative duration.\n'
     '        if seconds < 0:\n'
     '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        if len(self.sleeps) == 1:\n'
-    '            # The opening sleep is what runs the budget out: it is\n'
-    '            # asked for 0.02s and returns on the deadline instead,\n'
-    '            # which is what a loaded runner does. Landing exactly on\n'
-    '            # it is the only spelling that also tells "<= 0" apart\n'
-    '            # from "< 0" here; a real clock cannot be made to.\n'
+    '            # The opening sleep runs the budget out, landing on\n'
+    '            # the deadline: a loaded runner returning from 0.02s\n'
+    '            # after the 0.5s is gone. Landing exactly is what\n'
+    '            # tells "<= 0" apart from "< 0"; no real clock can.\n'
     '            self.now = self.deadline\n'
     '        else:\n'
     '            self.now += seconds\n'
-    'transport.time = _Clock(1000.0 + 0.5)\n'
+    'transport.time = _Clock(0.5)\n'
     'calls = []\n'
     'def fake_api(method, path, body=None, timeout=None, headers=None):\n'
     '    calls.append(path)\n'
@@ -189,11 +186,10 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
     """Uncorrelated delivery IDs keep polling without consuming a result.
 
     The virtual clock stands in for time.sleep and records each
-    interval the loop REQUESTS, so the poll count below is the ramp
-    arithmetic on every machine. The real-clock form demanded two
-    polls, which is a wall-clock margin: a loaded macOS leg granted the
-    opening sleep and no more, and a correct waiter failed it one level
-    below the intermittency that leg was recorded for.
+    interval the loop REQUESTS. The real-clock form demanded two polls,
+    a wall-clock margin a busy runner could exhaust - the recorded leg
+    reached no poll at all, failing a correct waiter one level below the
+    intermittency that leg was recorded for.
     """
     del tmp
     run = subprocess.run(
@@ -218,20 +214,19 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
                  'peeks': len(outcome['peeks']), 'sleep_n': len(sleeps),
                  'sleep_head': sleeps[:6], 'sleep_tail': sleeps[-2:]}
         # What the loop REQUESTS, which a real clock records nothing of.
-        # An exact peek count is deliberately NOT among these: how many
-        # laps clear a 0.5s budget is a float-accumulation artifact of
-        # the stand-in's epoch, not a property the ramp promises, and
-        # it moved when only the epoch changed.
-        assert sleeps[0] == 0.02, brief          # opens below the interval
+        # No exact peek count: how many laps clear a 0.5s budget is a
+        # float-accumulation artifact of the stand-in's epoch, and it
+        # moved when only the epoch changed.
+        assert sleeps[:1] == [0.02], brief         # opens below interval
         assert set(sleeps[1:-1]) == {0.01}, brief  # saturates at interval
-        # The last lap is shorter than a full one, so the loop capped it
-        # to the budget that was left instead of asking for another 0.01.
-        assert 0 < sleeps[-1] < 0.01, brief
-        # One peek per lap that left budget, and the laps stop on the
-        # deadline having spent the budget the caller passed. The
-        # second is the exact form of "spent": a bounded sum of the
-        # recorded sleeps is a weaker restatement of the same fact and
-        # goes false at any epoch where 0.01 is below the clock's ulp.
+        # The last lap is cut to the budget that was left, so the loop
+        # stopped short of asking for another whole interval. The slice
+        # guards keep an empty record a named failure, not an IndexError.
+        assert sleeps[-1:] and 0 < sleeps[-1] < 0.01, brief
+        # One peek per lap that left budget. now == deadline says the
+        # loop neither quit early nor overshot: the last sleep is the
+        # exact remainder by construction, so this holds for any number
+        # of laps and is not what reds on a wrong ramp.
         assert len(outcome['peeks']) == len(sleeps) - 1, brief
         assert outcome['now'] == outcome['deadline'], brief
         assert set(outcome['peeks']) == {selector}, brief
@@ -327,17 +322,18 @@ def test_the_result_wait_reports_none_when_the_sleep_spends_the_budget(tmp):
     """A wait whose opening sleep outlives the budget polls nothing.
 
     The recorded macOS failure was
-    {'consumes': [], 'name': 'empty', 'peeks': [], 'result': None} — the
-    waiter issued no request at all and returned before its first poll,
-    because a runner busy enough returned from one 0.02s sleep after the
-    whole 0.5s budget was gone. That is the CORRECT contract, not a
-    defect: the caller asked to wait at most 0.5s, the deadline says
-    stop, and nothing was consumed or destroyed. What was wrong was the
-    real-clock control around it, which demanded two polls and so failed
-    correct code one level below the intermittency it was written to
-    remove. The virtual clock here lands the opening sleep exactly on
-    the deadline, so the empty record is produced by a run instead of
-    by a busy machine.
+    {'consumes': [], 'name': 'empty', 'peeks': [], 'result': None}: the
+    waiter issued no request and returned before its first poll. The
+    opening sleep outliving the budget is the reading that record
+    supports — the other, a guard firing before any sleep, is far less
+    likely — but no control can pin which, because the real-clock
+    harness recorded no sleep schedule. The empty record is correct
+    either way: the caller asked to wait at most 0.5s, the deadline says
+    stop, and nothing was consumed.
+
+    What was wrong was the control around it, not the waiter. The
+    virtual clock here lands the opening sleep exactly on the deadline,
+    so the record is produced by a run instead of by a busy machine.
     """
     del tmp
     run = subprocess.run(
