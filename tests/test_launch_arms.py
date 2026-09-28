@@ -254,7 +254,7 @@ def test_every_arm_is_uniquely_addressed(tmp):
             f'not distinct: {cuts}')
     shared = sorted(where for where, cuts in on_one_line.items()
                     if len(cuts) > 1)
-    assert shared == [('_launch_audit.py', 534), ('_launch_audit.py', 557)], (
+    assert shared == [('_launch_audit.py', 531), ('_launch_audit.py', 554)], (
         'the same-line pairs the table carries, each two operands of one '
         f'disjunction; a new one is a decision, not an accident: {shared}')
 
@@ -263,7 +263,7 @@ def test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it(tmp):
     """Where the spelling cannot say which arm is meant, the cut does.
 
     An address is a claim about a clause, and a claim the source cannot
-    repeat back is not one the text can check: `_launch_audit.py:167` and
+    repeat back is not one the text can check: `_launch_audit.py:169` and
     `:170` carry byte-identical text and differ only in indentation, so
     exchanging the two entries' `line` and `cut` leaves the line check,
     the uniqueness check and the span check all green while the table

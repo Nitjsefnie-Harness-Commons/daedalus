@@ -86,7 +86,7 @@ SECONDARY_CONTROLLED = {
 # The closure claim is a GRANULARITY claim, so it is stated with one. The
 # spelling-independent marker is every `if`/`elif`/`while`/`return` header
 # plus each disjunct of a multi-line condition (the granularity the table
-# already uses for :532 and :557), and a clause inside a listed arm's
+# already uses for :529 and :554), and a clause inside a listed arm's
 # SPAN is that arm. `return` is in it because the table treats one as a
 # member (`pf.fallthrough` is `drop_stmt` on one).
 #
@@ -98,9 +98,9 @@ SECONDARY_CONTROLLED = {
 # (seven): a last statement, or one only caller reads for membership
 # or truthiness.
 #
-# The two finer clauses sit INSIDE a listed arm: :575 is the `**`-unpack
+# The two finer clauses sit INSIDE a listed arm: :572 is the `**`-unpack
 # operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
-# operand of `rs.guard` (:203). The table splits :532 and :557 per
+# operand of `rs.guard` (:203). The table splits :529 and :554 per
 # operand and leaves these whole, a spelling difference, not a gap.
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
@@ -133,12 +133,12 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 395, 'MERGED',
      'the head of a one-member chain; :397 ch.machinery-member is its '
      'only member and is listed'),
-    # The chain limb and the root predicate it reads, both in
-    # MARKER_NON_MEMBERS because `tests/_launch_arms.py` is at its size
-    # ceiling. Each names the row that moves when it is dropped.
-    ('_launch_audit.py', 511, 'CONTROLLED',
+    # The chain limb and the root predicate it reads. They sit here
+    # rather than in `tests/_launch_arms.py`, which is at its size
+    # ceiling; each names the row that moves when it is dropped.
+    ('_launch_audit.py', 510, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 513, 'CONTROLLED',
+    ('_launch_audit.py', 512, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 694, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -152,14 +152,14 @@ MARKER_NON_MEMBERS = (
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 700, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 580, 'INERT',
+    ('_launch_audit.py', 577, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
      'only tests it for truth'),
-    ('_launch_audit.py', 599, 'CONTROLLED',
+    ('_launch_audit.py', 596, 'CONTROLLED',
      'ambiguous-name'),
-    ('_launch_audit.py', 666, 'CONTROLLED',
+    ('_launch_audit.py', 663, 'CONTROLLED',
      'aliased-machinery-member-call'),
-    ('_launch_audit.py', 683, 'CONTROLLED',
+    ('_launch_audit.py', 680, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     ('_argv_read.py', 65, 'INERT',
      "the None closing resolve_constant's recursion; deleting its "
@@ -190,8 +190,8 @@ MARKER_NON_MEMBERS = (
 # crash-held at one clause and value-held at another. The suite sweeps
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
-    '_argv_read.py:153', '_launch_audit.py:54', '_launch_audit.py:69',
-    '_launch_audit.py:386',
+    '_argv_read.py:153', '_launch_audit.py:53', '_launch_audit.py:68',
+    '_launch_audit.py:383',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
