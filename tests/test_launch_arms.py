@@ -66,9 +66,30 @@ def _anchor(arm):
 
     An anchor is a PREFIX of the arm's block, so the table costs one
     line per arm instead of three, and the prefix is what has to still
-    be there for the arm to be where the table says it is.
+    be there for the arm to be where the table says it is. The strip is
+    the `': ...'` form, where the ellipsis stands in for a body rather
+    than for the tail of a word.
     """
-    return _collapsed(arm[ANCHOR]).removesuffix('...')
+    return _collapsed(arm[ANCHOR]).removesuffix('...').rstrip()
+
+
+def _from_line(rows, line, width):
+    """The collapsed source from `line` on, for at least `width` chars.
+
+    An anchor is a PREFIX of the arm's own block, and is not always
+    inside the clause the sweep cuts: a `drop_stmt` arm's anchor runs on
+    into the statement after it, and a `boolop` arm's runs out to the end
+    of the disjunction. So the span is the anchor's own length rather
+    than the resolved clause's -- the check is the same either way, which
+    is the point: the recorded line is where the quoted text BEGINS.
+    """
+    taken, length = [], 0
+    for row in rows[line - 1:]:
+        taken.append(row)
+        length += len(row) + 1
+        if length >= width:
+            break
+    return ' '.join(taken)
 
 
 def _arm(name):
@@ -134,26 +155,46 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
 
 
 def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
-    """The `anchor` column is a drift check, not decoration.
+    """The `line` column is the addressing scheme, so it is the checked one.
 
-    A classified arm whose text has left the analyser is an arm the
-    table is still describing, and reading it as current is how a
-    successor is misled.
+    Every one of the 150 `cut` specs is line-keyed, so a line that has
+    moved is not a stale note in a table: `tests/_arm_sweep.py` resolves
+    it by `node.lineno == line`, and the arm it then cuts is whichever
+    clause landed there. Checking that the anchor text is present
+    SOMEWHERE in the analyser cannot see that -- the text survives every
+    shift, and a line still inside the file's range satisfies the
+    bound -- so one comment line above an arm passed every suite while
+    149 of 150 cut specs went on resolving a different clause.
+
+    So the assertion is the currency one: the collapsed source
+    beginning at the recorded line is the arm's own anchor. A shift
+    reds HERE, naming the line that is now wrong, rather than at a
+    downstream clause that lost its coverage.
     """
     del tmp
-    names = {arm[FILE] for arm in LAUNCH_ARMS}
-    sources = {name: _collapsed((TESTS / name).read_text(encoding='utf-8'))
-               for name in names}
-    lengths = {name: len((TESTS / name).read_text(
-        encoding='utf-8').splitlines()) for name in sources}
-    missing = sorted(arm[ID] for arm in LAUNCH_ARMS
-                     if _anchor(arm) not in sources[arm[FILE]])
-    assert not missing, ('arms whose text is no longer in the analyser: '
-                         f'{missing}')
-    out_of_range = sorted(arm[ID] for arm in LAUNCH_ARMS
-                          if not 0 < arm[LINE] <= lengths[arm[FILE]])
-    assert not out_of_range, (
-        f'arms whose line is outside its file: {out_of_range}')
+    rows = {}
+    for name in {arm[FILE] for arm in LAUNCH_ARMS}:
+        text = (TESTS / name).read_text(encoding='utf-8')
+        rows[name] = [_collapsed(row) for row in text.splitlines()]
+    # Sorted by line so the FIRST entry is the cause: one insertion moves
+    # every arm below it, and the earliest wrong line is the insertion.
+    stale = []
+    for arm in LAUNCH_ARMS:
+        anchor = _anchor(arm)
+        line = arm[LINE]
+        at = _from_line(rows[arm[FILE]], line, len(anchor))
+        if not at.startswith(anchor):
+            stale.append((arm[FILE], line,
+                          f'{arm[FILE]}:{line} {arm[ID]} reads {at[:50]!r}'))
+    stale.sort()
+    named = [row for _, _, row in stale]
+    # One insertion moves every arm below it, so the list is long and the
+    # cause is the first entry; the rest is the count.
+    shown = named[:8] + ([f'(+{len(named) - 8} more)'] if len(named) > 8
+                         else [])
+    assert not stale, ('arms whose recorded line no longer carries their own '
+                       'anchor, so the cut spec resolves another clause; the '
+                       f'first is the cause: {shown}')
 
 
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
