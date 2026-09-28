@@ -435,6 +435,8 @@
     "_git_at": {"python": ["tests/_scratch_index.py"]},
     "_git_in": {"python": ["tests/_branch_boundary.py"]},
     "_git_text": {"python": ["tests/_branch_boundary.py"]},
+    "_global_names": {"python": ["tests/_receiver_resolution.py"]},
+    "_global_rebindings": {"python": ["tests/_receiver_resolution.py"]},
     "_grammar_forms": {"python": ["tests/_carrier_cases.py"]},
     "_guarded": {"python": ["tests/_realbrowser_controls.py"]},
     "_handed_a_child": {"python": ["tests/_launch_path.py"]},

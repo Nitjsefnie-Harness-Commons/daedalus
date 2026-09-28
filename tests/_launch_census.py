@@ -568,7 +568,8 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
     for node in ast.walk(function):
         if not _is_call(node) or receiver.is_network_read(
                 node.func, bound,
-                shadows.get(function, frozenset())):
+                shadows.get(function, frozenset())
+                | params.get(function, frozenset())):
             continue
         for keyword in node.keywords:
             if keyword.arg != 'timeout':
@@ -594,9 +595,10 @@ def _faults(relative, tree, in_path=frozenset(), callable_names=frozenset(),
     aliases = _member_aliases(tree, receivers, direct)
     callees = set(in_path) | set(callable_names)
     constants = _module_constants(tree)
-    context = (callees, receiver._dotted_bindings(tree), receivers, direct,
+    bindings = receiver._dotted_bindings(tree)
+    context = (callees, bindings, receivers, direct,
                aliases, receiver.literal_bindings(tree),
-               receiver._shadowed_parameters(tree),
+               receiver._shadowed_parameters(tree, bindings),
                receiver._function_parameters(tree))
     faults = []
     handed = frozenset(_CHILD_PARAMETERS.get(relative, {}))
