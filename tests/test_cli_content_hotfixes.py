@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+from _cli_handler_wire import _ext_cmd  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -39,11 +40,6 @@ run_cli_exit = _cli_dispatch.run_cli_exit
 TOK = 'clitok'
 SCOPE = '*://*.example.com/*'
 CODE = 'console.log(1)'
-
-
-def _ext(cmd_id, cmd_type, fields, timeout=10):
-    return {'via': 'ext_cmd', 'id': cmd_id, 'type': cmd_type,
-            'fields': fields, 'timeout': timeout}
 
 
 def _stored(**over):
@@ -65,7 +61,7 @@ def test_store_hotfix_sends_the_code_and_neither_flag_when_none_was_given(tmp):
     del tmp
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE], [_stored()],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE})],
         token=TOK)
 
@@ -100,7 +96,7 @@ def test_store_hotfix_sends_an_empty_pattern_rather_than_dropping_it(tmp):
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE, '--match', ''],
         [_stored()],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE, 'match': ''})],
         token=TOK)
 
@@ -127,7 +123,7 @@ def test_store_hotfix_reads_its_source_out_of_the_file_it_was_given(tmp):
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--file', str(path)],
         [_stored(stored='fix', total=2)],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': source})],
         token=TOK)
 
@@ -148,7 +144,7 @@ def test_store_hotfix_carries_the_permanent_flag_only_when_it_was_given(tmp):
     recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE, '--permanent'],
         [_stored(permanent=True)],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE, 'permanent': True})],
         token=TOK)
 
@@ -171,7 +167,7 @@ def test_store_hotfix_renders_both_markers_for_a_permanent_scoped_fix(tmp):
         ['store-hotfix', 'fix', '--code', CODE, '--permanent',
          '--match', SCOPE],
         [_stored(permanent=True, match=SCOPE)],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE, 'permanent': True,
                     'match': SCOPE})],
         token=TOK)
@@ -194,7 +190,7 @@ def test_store_hotfix_prints_placeholders_for_a_result_naming_nothing(tmp):
     del tmp
     _recorded, out = run_cli(
         ['store-hotfix', 'fix', '--code', CODE], [{}],
-        plan=[_ext('_store_hf', 'store-hotfix',
+        plan=[_ext_cmd('_store_hf', 'store-hotfix',
                    {'fixId': 'fix', 'code': CODE})],
         token=TOK)
 
@@ -213,7 +209,7 @@ def test_do_clear_hotfix_reports_the_fix_it_cleared_and_what_remains(tmp):
     recorded, out = run_cli(
         ['clear-hotfix', 'fix'], [{'cleared': 'fix', 'found': True,
                                    'remaining': 2}],
-        plan=[_ext('_clear_hf', 'clear-hotfix', {'fixId': 'fix'})],
+        plan=[_ext_cmd('_clear_hf', 'clear-hotfix', {'fixId': 'fix'})],
         token=TOK)
 
     assert recorded.calls == [('_clear_hf', 'clear-hotfix',
@@ -231,7 +227,7 @@ def test_do_clear_hotfix_renders_a_result_carrying_neither_count(tmp):
     del tmp
     _recorded, out = run_cli(
         ['clear-hotfix', 'ghost'], [{}],
-        plan=[_ext('_clear_hf', 'clear-hotfix', {'fixId': 'ghost'})],
+        plan=[_ext_cmd('_clear_hf', 'clear-hotfix', {'fixId': 'ghost'})],
         token=TOK)
 
     assert out == 'Cleared hotfix "?" (found=False, remaining=0)\n', \
@@ -251,7 +247,7 @@ def test_do_clear_hotfixes_sends_include_permanent_false_when_not_asked(tmp):
     del tmp
     recorded, out = run_cli(
         ['clear-hotfixes'], [{'removed': 3, 'kept': 1}],
-        plan=[_ext('_clear_all_hf', 'clear-all-hotfixes',
+        plan=[_ext_cmd('_clear_all_hf', 'clear-all-hotfixes',
                    {'includePermanent': False})],
         token=TOK)
 
@@ -267,7 +263,7 @@ def test_do_clear_hotfixes_renders_zero_counts_when_the_extension_has_nothing(
     del tmp
     _recorded, out = run_cli(
         ['clear-hotfixes'], [{}],
-        plan=[_ext('_clear_all_hf', 'clear-all-hotfixes',
+        plan=[_ext_cmd('_clear_all_hf', 'clear-all-hotfixes',
                    {'includePermanent': False})],
         token=TOK)
 
@@ -285,7 +281,7 @@ def test_do_clear_hotfixes_reports_the_wider_clear_without_the_counts(tmp):
     recorded, out = run_cli(
         ['clear-hotfixes', '--include-permanent'],
         [{'removed': 0, 'kept': 9}],
-        plan=[_ext('_clear_all_hf', 'clear-all-hotfixes',
+        plan=[_ext_cmd('_clear_all_hf', 'clear-all-hotfixes',
                    {'includePermanent': True})],
         token=TOK)
 
@@ -308,7 +304,7 @@ def test_do_list_hotfixes_says_so_when_none_is_stored(tmp):
     del tmp
     recorded, out = run_cli(
         ['list-hotfixes'], [{'version': '1.0', 'fixes': []}],
-        plan=[_ext('_list_hf', 'list-hotfixes', {})], token=TOK)
+        plan=[_ext_cmd('_list_hf', 'list-hotfixes', {})], token=TOK)
 
     assert recorded.calls == [('_list_hf', 'list-hotfixes', {})], \
         recorded.calls
@@ -329,7 +325,7 @@ def test_do_set_permanent_sends_the_flag_it_decoded_from_either_spelling(
     recorded, on = run_cli(
         ['set-permanent', 'fix1', 'yes'],
         [{'found': True}],
-        plan=[_ext('_set_perm', 'set-permanent',
+        plan=[_ext_cmd('_set_perm', 'set-permanent',
                    {'fixId': 'fix1', 'permanent': True})],
         token=TOK)
 
@@ -341,7 +337,7 @@ def test_do_set_permanent_sends_the_flag_it_decoded_from_either_spelling(
     recorded, off = run_cli(
         ['set-permanent', 'fix1', 'off'],
         [{'found': True}],
-        plan=[_ext('_set_perm', 'set-permanent',
+        plan=[_ext_cmd('_set_perm', 'set-permanent',
                    {'fixId': 'fix1', 'permanent': False})],
         token=TOK)
 
@@ -361,7 +357,7 @@ def test_do_set_permanent_exits_when_the_extension_found_no_such_fix(tmp):
     del tmp
     code, out = run_cli_exit(
         ['set-permanent', 'ghost', 'true'], [{'found': False}],
-        plan=[_ext('_set_perm', 'set-permanent',
+        plan=[_ext_cmd('_set_perm', 'set-permanent',
                    {'fixId': 'ghost', 'permanent': True})],
         token=TOK)
 

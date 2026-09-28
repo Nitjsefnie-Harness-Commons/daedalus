@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_put, _wait_result  # noqa: E402
+from _cli_handler_wire import _api_put, _ext_cmd, _wait_result  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -45,11 +45,6 @@ def _rendered(out):
     untouched and every whole-string comparison here fails.
     """
     return out.replace('<-', IN)
-
-
-def _ext(cmd_id, cmd_type, fields, timeout=10):
-    return {'via': 'ext_cmd', 'id': cmd_id, 'type': cmd_type,
-            'fields': fields, 'timeout': timeout}
 
 
 def _envelope(**over):
@@ -376,7 +371,7 @@ def test_do_fetch_timings_asks_without_a_reset_and_renders_the_table(tmp):
     recorded, out = run_cli(
         ['fetch-timings'], [_timings(FIRST, SECOND)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     assert recorded.calls == [('_fetch_timings', 'fetch-timings', {})], \
         recorded.calls
@@ -398,7 +393,7 @@ def test_do_fetch_timings_carries_the_reset_flag_only_when_it_was_given(tmp):
     recorded, out = run_cli(
         ['fetch-timings', '--reset'], [_timings(FIRST)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {'reset': True})],
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {'reset': True})],
         token=TOK)
 
     assert recorded.calls == [('_fetch_timings', 'fetch-timings',
@@ -423,7 +418,7 @@ def test_do_fetch_timings_prints_the_buffer_as_json_when_raw(tmp):
         ['fetch-timings', '--raw'],
         [_timings(FIRST, count=7, native=True)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     assert out == (
         'Fetch timings: 7 entries  nativeToBase64=True\n'
@@ -451,7 +446,7 @@ def test_do_fetch_timings_says_so_when_the_buffer_is_empty(tmp):
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings()],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     assert out == (
         'Fetch timings: 0 entries  nativeToBase64=False\n(empty)\n'), repr(out)
@@ -468,7 +463,7 @@ def test_do_fetch_timings_renders_a_failed_entry_in_its_own_columns(tmp):
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings(ABORTED)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     assert out == (
         'Fetch timings: 1 entries  nativeToBase64=False\n'
@@ -490,7 +485,7 @@ def test_do_fetch_timings_prints_no_statistics_when_every_entry_failed(tmp):
     _recorded, out = run_cli(
         ['fetch-timings'], [_timings(ABORTED, ABORTED)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     row = (f'GET    ERR{ERR_GAP}5  '
            'https://cdn.example.com/bad.ts (net::ERR_ABORTED)\n')
@@ -510,7 +505,7 @@ def test_do_fetch_timings_counts_the_whole_buffer_not_the_tail_it_shows(tmp):
     _recorded, out = run_cli(
         ['fetch-timings', '-n', '1'], [_timings(FIRST, SECOND)],
         module=commands_browser,
-        plan=[_ext('_fetch_timings', 'fetch-timings', {})], token=TOK)
+        plan=[_ext_cmd('_fetch_timings', 'fetch-timings', {})], token=TOK)
 
     assert out == (
         'Fetch timings: 2 entries  nativeToBase64=False\n'
@@ -527,8 +522,8 @@ def test_do_ext_self_reload_reports_the_version_it_reloaded_from(tmp):
     del tmp
     recorded, out = run_cli(
         ['ext-self-reload'], [{'version': '2.7.1'}],
-        module=commands_browser, plan=[_ext('_ext_reload', 'ext-reload', {})],
-        token=TOK)
+        module=commands_browser,
+        plan=[_ext_cmd('_ext_reload', 'ext-reload', {})], token=TOK)
 
     assert recorded.calls == [('_ext_reload', 'ext-reload', {})], \
         recorded.calls
@@ -541,8 +536,8 @@ def test_do_ext_self_reload_prints_a_placeholder_for_a_missing_version(tmp):
     del tmp
     _recorded, out = run_cli(
         ['ext-self-reload'], [{}],
-        module=commands_browser, plan=[_ext('_ext_reload', 'ext-reload', {})],
-        token=TOK)
+        module=commands_browser,
+        plan=[_ext_cmd('_ext_reload', 'ext-reload', {})], token=TOK)
 
     assert out == ('Extension reloading from v? — will reconnect '
                    'SSE automatically\n'), repr(out)

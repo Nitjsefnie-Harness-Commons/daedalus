@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+from _cli_handler_wire import _ext_cmd  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -22,11 +23,6 @@ sys.path.insert(0, str(_util.ROOT))
 run_cli = _cli_dispatch.run_cli
 
 TOK = 'clitok'
-
-
-def _ext(cmd_id, cmd_type, fields, timeout=10):
-    return {'via': 'ext_cmd', 'id': cmd_id, 'type': cmd_type,
-            'fields': fields, 'timeout': timeout}
 
 
 def _css_file(directory, name, text):
@@ -48,7 +44,7 @@ def test_do_inject_css_sends_the_inline_css_and_neither_option(tmp):
     recorded, out = run_cli(
         ['inject-css', '--css', 'a{color:red}'],
         [{'injected': 10, 'tabId': 7}],
-        plan=[_ext('_inject_css', 'inject-css', {'css': 'a{color:red}'})],
+        plan=[_ext_cmd('_inject_css', 'inject-css', {'css': 'a{color:red}'})],
         token=TOK)
 
     assert recorded.calls == [('_inject_css', 'inject-css',
@@ -69,7 +65,7 @@ def test_do_inject_css_reads_its_css_out_of_the_file_it_was_given(tmp):
     recorded, out = run_cli(
         ['inject-css', '--file', path],
         [{'injected': 21, 'tabId': 3}],
-        plan=[_ext('_inject_css', 'inject-css', {'css': text})],
+        plan=[_ext_cmd('_inject_css', 'inject-css', {'css': text})],
         token=TOK)
 
     assert recorded.calls == [('_inject_css', 'inject-css',
@@ -88,7 +84,8 @@ def test_do_inject_css_names_the_tab_chrome_numbered_zero(tmp):
     recorded, out = run_cli(
         ['inject-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'injected': 3, 'tabId': 0}],
-        plan=[_ext('_inject_css', 'inject-css', {'css': 'a{}', 'tabId': 0})],
+        plan=[_ext_cmd('_inject_css', 'inject-css',
+                      {'css': 'a{}', 'tabId': 0})],
         token=TOK)
 
     assert recorded.calls == [('_inject_css', 'inject-css',
@@ -102,7 +99,7 @@ def test_do_inject_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     recorded, out = run_cli(
         ['inject-css', '--css', 'a{}', '--all-frames'],
         [{'injected': 3, 'tabId': 2}],
-        plan=[_ext('_inject_css', 'inject-css',
+        plan=[_ext_cmd('_inject_css', 'inject-css',
                    {'css': 'a{}', 'allFrames': True})],
         token=TOK)
 
@@ -117,7 +114,7 @@ def test_do_inject_css_prints_placeholders_for_a_result_counting_nothing(tmp):
     del tmp
     _recorded, out = run_cli(
         ['inject-css', '--css', 'a{}'], [{}],
-        plan=[_ext('_inject_css', 'inject-css', {'css': 'a{}'})],
+        plan=[_ext_cmd('_inject_css', 'inject-css', {'css': 'a{}'})],
         token=TOK)
 
     assert out == 'Injected ? chars CSS into tab ?\n', repr(out)
@@ -131,7 +128,7 @@ def test_do_remove_css_sends_the_inline_css_and_neither_option(tmp):
     recorded, out = run_cli(
         ['remove-css', '--css', 'a{color:red}'],
         [{'removed': 10, 'tabId': 7}],
-        plan=[_ext('_remove_css', 'remove-css', {'css': 'a{color:red}'})],
+        plan=[_ext_cmd('_remove_css', 'remove-css', {'css': 'a{color:red}'})],
         token=TOK)
 
     assert recorded.calls == [('_remove_css', 'remove-css',
@@ -152,7 +149,7 @@ def test_do_remove_css_reads_its_css_out_of_the_file_it_was_given(tmp):
     recorded, out = run_cli(
         ['remove-css', '--file', path],
         [{'removed': 21, 'tabId': 3}],
-        plan=[_ext('_remove_css', 'remove-css', {'css': text})],
+        plan=[_ext_cmd('_remove_css', 'remove-css', {'css': text})],
         token=TOK)
 
     assert recorded.calls == [('_remove_css', 'remove-css',
@@ -166,7 +163,8 @@ def test_do_remove_css_names_the_tab_chrome_numbered_zero(tmp):
     recorded, out = run_cli(
         ['remove-css', '--css', 'a{}', '--chrome-tab', '0'],
         [{'removed': 3, 'tabId': 0}],
-        plan=[_ext('_remove_css', 'remove-css', {'css': 'a{}', 'tabId': 0})],
+        plan=[_ext_cmd('_remove_css', 'remove-css',
+                      {'css': 'a{}', 'tabId': 0})],
         token=TOK)
 
     assert recorded.calls == [('_remove_css', 'remove-css',
@@ -180,7 +178,7 @@ def test_do_remove_css_carries_all_frames_only_when_it_was_asked_for(tmp):
     recorded, out = run_cli(
         ['remove-css', '--css', 'a{}', '--all-frames'],
         [{'removed': 3, 'tabId': 2}],
-        plan=[_ext('_remove_css', 'remove-css',
+        plan=[_ext_cmd('_remove_css', 'remove-css',
                    {'css': 'a{}', 'allFrames': True})],
         token=TOK)
 
@@ -195,7 +193,7 @@ def test_do_remove_css_prints_placeholders_for_a_result_counting_nothing(tmp):
     del tmp
     _recorded, out = run_cli(
         ['remove-css', '--css', 'a{}'], [{}],
-        plan=[_ext('_remove_css', 'remove-css', {'css': 'a{}'})],
+        plan=[_ext_cmd('_remove_css', 'remove-css', {'css': 'a{}'})],
         token=TOK)
 
     assert out == 'Removed ? chars CSS from tab ?\n', repr(out)

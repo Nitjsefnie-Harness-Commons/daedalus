@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
+from _cli_handler_wire import _ext_cmd  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -43,17 +44,12 @@ def _rendered(out):
     return out.replace('->', OUT)
 
 
-def _ext(cmd_id, cmd_type, fields, timeout=10):
-    return {'via': 'ext_cmd', 'id': cmd_id, 'type': cmd_type,
-            'fields': fields, 'timeout': timeout}
-
-
 # ── do_open_tab ──────────────────────────────────────────────────────
 
 def test_do_open_tab_sends_the_url_and_neither_option(tmp):
     """The bare arm: `url` alone, and a ten-second wait."""
     del tmp
-    plan = [_ext('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
+    plan = [_ext_cmd('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
     recorded, out = run_cli(
         ['open-tab', 'https://example.com/'],
         [{'tabId': 42, 'url': 'https://example.com/'}],
@@ -80,7 +76,7 @@ def test_do_open_tab_sends_active_false_only_with_background(tmp):
         ['open-tab', 'https://example.com/', '--background'],
         [{'tabId': 42, 'url': 'https://example.com/'}],
         module=commands_browser,
-        plan=[_ext('_open_tab', 'open-tab', fields)], token=TOK)
+        plan=[_ext_cmd('_open_tab', 'open-tab', fields)], token=TOK)
 
     assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
         recorded.calls
@@ -96,7 +92,7 @@ def test_do_open_tab_sends_pinned_only_with_the_flag(tmp):
         ['open-tab', 'https://example.com/', '--pinned'],
         [{'tabId': 42, 'url': 'https://example.com/'}],
         module=commands_browser,
-        plan=[_ext('_open_tab', 'open-tab', fields)], token=TOK)
+        plan=[_ext_cmd('_open_tab', 'open-tab', fields)], token=TOK)
 
     assert recorded.calls == [('_open_tab', 'open-tab', fields)], \
         recorded.calls
@@ -107,7 +103,7 @@ def test_do_open_tab_sends_pinned_only_with_the_flag(tmp):
 def test_do_open_tab_prints_a_placeholder_for_a_missing_tab_id(tmp):
     """A result with no `tabId` reads `?` rather than `None`."""
     del tmp
-    plan = [_ext('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
+    plan = [_ext_cmd('_open_tab', 'open-tab', {'url': 'https://example.com/'})]
     _recorded, out = run_cli(
         ['open-tab', 'https://example.com/'], [{}],
         module=commands_browser, plan=plan, token=TOK)
@@ -126,7 +122,7 @@ def test_do_open_tabs_sends_every_url_in_order_and_waits_thirty(tmp):
     """
     del tmp
     fields = {'urls': ['https://a.example.com/', 'https://b.example.com/']}
-    plan = [_ext('_open_tabs', 'open-tabs', fields, timeout=30)]
+    plan = [_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)]
     recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/', 'https://b.example.com/'],
         [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'},
@@ -151,7 +147,7 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
     """
     del tmp
     fields = {'urls': ['https://a.example.com/', 'https://b.example.com/']}
-    plan = [_ext('_open_tabs', 'open-tabs', fields, timeout=30)]
+    plan = [_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)]
     _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/', 'https://b.example.com/'],
         [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}],
@@ -167,7 +163,7 @@ def test_do_open_tabs_reports_a_partial_failure_as_both_kinds_of_line(tmp):
 
 def test_do_open_tabs_prints_only_a_count_when_nothing_opened(tmp):
     del tmp
-    plan = [_ext('_open_tabs', 'open-tabs',
+    plan = [_ext_cmd('_open_tabs', 'open-tabs',
                  {'urls': ['https://a.example.com/']}, timeout=30)]
     _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/'], [{}],
@@ -184,7 +180,7 @@ def test_do_open_tabs_sends_active_false_only_with_background(tmp):
         ['open-tabs', 'https://a.example.com/', '--background'],
         [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
         module=commands_browser,
-        plan=[_ext('_open_tabs', 'open-tabs', fields, timeout=30)],
+        plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
         token=TOK)
 
     assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
@@ -202,7 +198,7 @@ def test_do_open_tabs_sends_pinned_only_with_the_flag(tmp):
         ['open-tabs', 'https://a.example.com/', '--pinned'],
         [{'opened': [{'tabId': 42, 'url': 'https://a.example.com/'}]}],
         module=commands_browser,
-        plan=[_ext('_open_tabs', 'open-tabs', fields, timeout=30)],
+        plan=[_ext_cmd('_open_tabs', 'open-tabs', fields, timeout=30)],
         token=TOK)
 
     assert recorded.calls == [('_open_tabs', 'open-tabs', fields)], \
@@ -219,7 +215,7 @@ def test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error(tmp):
     visible rather than printed as None.
     """
     del tmp
-    plan = [_ext('_open_tabs', 'open-tabs',
+    plan = [_ext_cmd('_open_tabs', 'open-tabs',
                  {'urls': ['https://a.example.com/']}, timeout=30)]
     _recorded, out = run_cli(
         ['open-tabs', 'https://a.example.com/'], [{'errors': [{}]}],
@@ -232,7 +228,7 @@ def test_do_open_tabs_renders_a_refusal_carrying_no_url_or_error(tmp):
 
 def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
     del tmp
-    plan = [_ext('_focus', 'focus-tab', {'tabId': 0})]
+    plan = [_ext_cmd('_focus', 'focus-tab', {'tabId': 0})]
     recorded, out = run_cli(
         ['focus-tab', '0'], [{'tabId': 0, 'windowId': 7}],
         module=commands_browser, plan=plan, token=TOK)
@@ -244,7 +240,7 @@ def test_do_focus_tab_names_the_tab_and_the_window_it_focused(tmp):
 
 def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
     del tmp
-    plan = [_ext('_focus', 'focus-tab', {'tabId': 0})]
+    plan = [_ext_cmd('_focus', 'focus-tab', {'tabId': 0})]
     _recorded, out = run_cli(
         ['focus-tab', '0'], [{}],
         module=commands_browser, plan=plan, token=TOK)
@@ -257,7 +253,7 @@ def test_do_focus_tab_prints_placeholders_for_both_absent_fields(tmp):
 def test_do_ext_navigate_sends_the_url_and_no_tab_id(tmp):
     """No `tabId`: the browser's active tab runs it."""
     del tmp
-    plan = [_ext('_nav', 'navigate', {'url': 'https://example.com/'})]
+    plan = [_ext_cmd('_nav', 'navigate', {'url': 'https://example.com/'})]
     recorded, out = run_cli(
         ['ext-navigate', 'https://example.com/'],
         [{'tabId': 42}],
@@ -281,7 +277,7 @@ def test_do_ext_navigate_carries_the_chrome_tab_only_when_it_was_given(tmp):
     recorded, out = run_cli(
         ['ext-navigate', 'https://example.com/', '--chrome-tab', '0'],
         [{'tabId': 0}],
-        module=commands_browser, plan=[_ext('_nav', 'navigate', fields)],
+        module=commands_browser, plan=[_ext_cmd('_nav', 'navigate', fields)],
         token=TOK)
 
     assert recorded.calls == [('_nav', 'navigate', fields)], \
@@ -301,7 +297,7 @@ def test_do_ext_reload_sends_no_fields_at_all_on_the_bare_arm(tmp):
     del tmp
     recorded, out = run_cli(
         ['ext-reload'], [{'tabId': 42}],
-        module=commands_browser, plan=[_ext('_reload', 'reload', {})],
+        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', {})],
         token=TOK)
 
     assert recorded.calls == [('_reload', 'reload', {})], recorded.calls
@@ -314,7 +310,7 @@ def test_do_ext_reload_carries_the_chrome_tab_only_when_it_was_given(tmp):
     recorded, out = run_cli(
         ['ext-reload', '--chrome-tab', '0'], [{'tabId': 0}],
         module=commands_browser,
-        plan=[_ext('_reload', 'reload', {'tabId': 0})], token=TOK)
+        plan=[_ext_cmd('_reload', 'reload', {'tabId': 0})], token=TOK)
 
     assert recorded.calls == [('_reload', 'reload', {'tabId': 0})], \
         recorded.calls
@@ -332,7 +328,7 @@ def test_do_ext_reload_names_the_cache_bypass_in_its_output_too(tmp):
     fields = {'bypassCache': True}
     recorded, out = run_cli(
         ['ext-reload', '--bypass-cache'], [{'tabId': 42}],
-        module=commands_browser, plan=[_ext('_reload', 'reload', fields)],
+        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', fields)],
         token=TOK)
 
     assert recorded.calls == [('_reload', 'reload', fields)], \
@@ -346,7 +342,7 @@ def test_do_ext_reload_carries_both_fields_when_both_were_given(tmp):
     recorded, out = run_cli(
         ['ext-reload', '--chrome-tab', '7', '--bypass-cache'],
         [{'tabId': 7}],
-        module=commands_browser, plan=[_ext('_reload', 'reload', fields)],
+        module=commands_browser, plan=[_ext_cmd('_reload', 'reload', fields)],
         token=TOK)
 
     assert recorded.calls == [('_reload', 'reload', fields)], \
