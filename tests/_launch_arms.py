@@ -514,12 +514,28 @@ LAUNCH_ARMS = (
      'a call is proved when the analyser can name what it calls',
      'CONTROLLED',
      'factory-origin-cannot-be-named-is-unproved'),
+    # Recorded CONTROLLED, and the mechanism, because the two halves of
+    # this return are asked about DIFFERENT names. `proved_fixed` is
+    # asked about the receiver of the bounded call; `origin` is the
+    # top-level base of the callee of the value the receiver is bound
+    # to. So the `placed` bound `pf.in-bound` cites does not decide this
+    # one: :408 places a call whose RECEIVER is a name in `bound`, and
+    # never looks at what that name is bound to. The only name that can
+    # satisfy both `origin in safe_names` and `origin in bound` here is
+    # `subprocess` itself -- the plain import puts it in `safe_names` at
+    # :222-223, and rebinding it to a subprocess-derived value (which
+    # `derives` answers True for at :109) puts it in `bound` -- so
+    # `origin not in bound` is the only clause refusing. Deleting it
+    # makes a bounded call through an unproved receiver vanish instead
+    # of being reported, which is the fail-open direction on the
+    # fail-closed arm. The whole class: any module that rebinds a name
+    # it also imported to a subprocess-derived value, and then calls a
+    # result through a name.
     ('pf.origin-not-bound', '_launch_audit.py', 549, 'boolop:549:1',
      'return origin in safe_names and origin not in bound',
-     'the `origin not in bound` half of that same return', 'DEAD',
-     ('the same `placed` bound as `pf.in-bound`: a name both `safe_names` '
-      'holds (an import at :223) and `bound` holds is placed at :408 before '
-      'the unplaced loop reads it')),
+     'the `origin not in bound` half of that same return',
+     'CONTROLLED',
+     'rebound-module-name-called-bare-is-unplaced'),
     ('pf.fallthrough', '_launch_audit.py', 550, 'drop_stmt:550',
      'return True', 'a name bound to no call is proved', 'CONTROLLED',
      'proved-name-receiver-is-not-reported'),
