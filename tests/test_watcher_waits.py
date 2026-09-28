@@ -16,13 +16,17 @@ by the ledger below: a control per arm of each wait, every arm killed by
 name against a planted defect, and the mutation proofs on the teardown
 tests.
 
-What no arm of any wait can end on is the shape none of these controls
-drive: a child that stays up, healthy, and never publishes. A marker
-assignment no-opped in both watchers produces exactly that, and the three
-budget controls waiting on a real loop child would spin until the job's
-own limit ends the run nameless. It is the trade this module already takes
-for `await_lines` and `await_calls`, taken deliberately, and a bound here
-would buy an early failure with a flaky leg on a loaded runner.
+One arm of `await_polls` does end on that shape, and it is the one that
+needed it. A marker assignment no-opped in either watcher leaves the loop
+child up, healthy and publishing nothing new, and the three budget
+controls waiting on one would spin until the job's own limit ended the run
+nameless. The arm is a ceiling on the CALLS a run may log before the index
+advances, not a bound in seconds: it is monotone in evidence, so a loaded
+runner reaches it later or not at all and cannot be failed by it, where a
+timeout buys an early failure with a flaky leg. It names what it saw and
+says plainly that one very wide poll reads the same as a frozen index,
+with the idle bound as the other refusal. `await_lines` and `await_calls`
+take no such bound, and the trade they take is unchanged.
 """
 import os
 import sys
@@ -34,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _watcher_waits  # noqa: E402
 from _watcher_waits import (  # noqa: E402
+    POLL_WIDTH,
     ChildProcess,
     Stream,
     await_calls,
@@ -218,6 +223,45 @@ def test_the_poll_wait_gives_up_by_name_when_the_child_exits(tmp):
     assert message is not None
     assert '2 poll(s)' in message, message
     assert 'poll failed (1): no fixture carries it' in message, message
+
+
+# How many polls the ceiling control asks for, and the log it hands over:
+# one entry past the ceiling, every entry carrying the SAME marker, so the
+# distinct count can never reach the poll count and the child is alive
+# throughout. Those two facts are what leave the ceiling as the only arm
+# that can end this wait.
+_FROZEN_POLLS = 2
+_FROZEN_LOG = [{'poll': '1', 'request': f'query {index}'}
+               for index in range(_FROZEN_POLLS * POLL_WIDTH + 1)]
+
+
+def test_the_poll_wait_gives_up_by_name_when_the_index_never_advances(tmp):
+    """The call ceiling, on the one shape no other arm of this wait reaches.
+
+    A child that stays up and keeps logging the same marker is a frozen
+    poll index: it is not silent, and it is not dead, so neither the
+    marker count nor `child.alive` can end the wait. Without the ceiling
+    this control ends on the log double's own runaway guard, which names
+    the double rather than the defect. The refusal has to carry what a
+    reader needs - the markers, the calls logged, the polls expected - and
+    to say that this log cannot tell a frozen index from one very wide
+    poll, because it cannot.
+    """
+    del tmp
+    log = _GrowingLog(_FROZEN_LOG)
+    child = _ScriptedChild(alive=True)
+    message = None
+    try:
+        await_polls(log, _FROZEN_POLLS, child, '2 poll(s)')
+    except AssertionError as exc:
+        message = str(exc)
+    assert message is not None, 'a frozen poll index did not fail'
+    assert "markers seen ['1']" in message, message
+    assert f'{len(_FROZEN_LOG)} gh call(s) logged' in message, message
+    assert '2 advancing marker(s) expected' in message, message
+    assert 'cannot tell a frozen index from one very wide poll' in message, (
+        message)
+    assert 'IDLE_POLL_BOUND' in message, message
 
 
 def test_the_death_wait_ends_when_the_pids_are_gone(tmp):

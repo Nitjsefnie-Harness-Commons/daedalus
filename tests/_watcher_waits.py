@@ -15,6 +15,7 @@ import threading
 import time
 
 from _processtree import cleanup_process_tree
+from _watcher_fixtures import IDLE_POLL_BOUND
 
 # The backstop on the one wait that cannot end on a state. 90s is the
 # figure tests/test_parent_watch.py already waits a real grandchild's death
@@ -26,6 +27,14 @@ BACKSTOP = 90
 POLL = 0.05
 # The bound on the reap that follows a cancel, and on the cancel itself.
 CANCEL_BOUND = 60
+# How many gh calls one poll may log before `await_polls` gives up on the
+# index not advancing. Generous by construction: the budget suite's own
+# bound on one idle poll is IDLE_POLL_BOUND (1), and the widest loop any
+# control measures costs 2 requests a poll
+# (test_a_loop_that_repeats_its_last_request_costs_two), so 4 leaves
+# headroom above every measured poll - and a poll that did exceed it would
+# already have been refused by the idle bound.
+POLL_WIDTH = 4
 
 
 class Stream:
@@ -189,7 +198,7 @@ def await_calls(fake, count, child, what):
         time.sleep(POLL)
 
 
-def await_polls(fake, polls, child, what):
+def await_polls(fake, polls, child, what, width=POLL_WIDTH):
     """The call log, once it carries `polls` distinct poll markers.
 
     A watcher names its own poll boundary by publishing an index its `gh`
@@ -200,15 +209,30 @@ def await_polls(fake, polls, child, what):
     thing that must not assume it.
 
     The last marker seen names a poll that may still be in flight, so the
-    caller reads the ones before it. The same trade as `await_calls` holds: a
-    child that stays up and never publishes leaves this wait nothing to end
-    it.
+    caller reads the ones before it.
+
+    The ceiling is in CALLS, not in seconds, and that is the whole reason it
+    can exist. A bound in time would fail a slow or loaded runner that is
+    making progress; this one is monotone in evidence, so a slow runner
+    reaches it later or not at all. What it does catch is the shape no other
+    arm can: a child that stays up, healthy, and republishes the same index
+    forever, which neither the distinct count nor `child.alive` can end.
     """
+    ceiling = polls * width
     while True:
         calls = fake.calls()
-        if len({call.get('poll') for call in calls}) >= polls:
+        markers = {call.get('poll') for call in calls}
+        if len(markers) >= polls:
             return calls
         assert child.alive(), f'{what}:\n' + child.captured()
+        if len(calls) >= ceiling:
+            raise AssertionError(
+                f'{what}: the poll index did not advance - {len(calls)} gh '
+                f'call(s) logged, markers seen {sorted(markers)}, {polls} '
+                f'advancing marker(s) expected within {ceiling} call(s). '
+                f'This log cannot tell a frozen index from one very wide '
+                f'poll; IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses a '
+                f'poll wider than an idle one.')
         time.sleep(POLL)
 
 
