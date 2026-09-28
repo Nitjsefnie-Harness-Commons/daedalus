@@ -16,6 +16,7 @@ import _realbrowser_workers  # noqa: E402
 import _util  # noqa: E402
 from _deliveries import (  # noqa: E402
     real_eval, real_ext_command)
+from _noderun import run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT  # noqa: E402
 from _realbrowser_classification_support import (  # noqa: E402
     answered_diagnosis, control_diagnosis)
@@ -339,17 +340,65 @@ def test_the_control_extension_satisfies_its_own_probe(tmp):
     control = _realbrowser._control_extension(tmp)
     source = (control / _realbrowser.CONTROL_WORKER_SCRIPT).read_text(
         encoding='utf-8')
-    checked = subprocess.run(
-        [node, '--check'], input=source, capture_output=True, text=True,
-        timeout=10)
+    checked = run_node_argv(node, ['--check'], _realbrowser.ROOT,
+                            stdin_data=source)
     assert checked.returncode == 0, (checked.returncode, checked.stderr)
-    answer = subprocess.run(
-        [node, '-e',
-         source + '\nprocess.stdout.write(String('
-                  + _realbrowser.CONTROL_WORKER_PROBE + '))'],
-        capture_output=True, text=True, timeout=10)
+    answer = run_node_argv(
+        node, ['-e',
+               source + '\nprocess.stdout.write(String('
+               + _realbrowser.CONTROL_WORKER_PROBE + '))'],
+        _realbrowser.ROOT)
     assert answer.returncode == 0, (answer.returncode, answer.stderr)
     assert answer.stdout == 'true', (answer.stdout, answer.stderr)
+
+
+def test_the_control_probe_site_reports_its_own_stalled_child(tmp):
+    """A wedged control script is a CLASSIFIED failure, carrying its line.
+
+    The `-e` site reads the control's script out of the extension directory
+    `_control_extension` builds, so that directory is the real input: a
+    script that writes a line and then holds the event loop open is planted
+    there and the site launches it for real. The bound on it is the shared
+    detector's, so what the site reports has to be that detector's own
+    failure carrying the line the child produced — a bare `TimeoutExpired`
+    names the whole command and hands the reader none of it.
+
+    The planted source also clears the `--check` site beside it, which is
+    the point: a syntax check of a string is terminal either way, so the
+    two sites in this function are reached by one plant.
+    """
+    import _noderun
+    stalling = ("process.stdout.write('the control child spoke before it "
+                "wedged\\n'); setInterval(() => {}, 1000);")
+
+    def planted_extension(root):
+        directory = Path(root) / 'planted-extension'
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / _realbrowser.CONTROL_WORKER_SCRIPT).write_text(
+            stalling, encoding='utf-8')
+        return directory
+
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
+    caught = None
+    try:
+        with mock.patch.object(_realbrowser, '_control_extension',
+                               planted_extension):
+            test_the_control_extension_satisfies_its_own_probe(tmp)
+    except _noderun.ChildDeadlineExceeded as failure:
+        caught = failure
+    except BaseException as unexpected:  # noqa: BLE001
+        # A bare `TimeoutExpired` is the failure this control exists to
+        # replace, so it is named rather than merely re-raised.
+        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+            'a bare TimeoutExpired reached the caller', unexpected)
+        raise
+    finally:
+        _noderun.CHILD_DEADLINE_S = real_deadline
+    assert caught is not None, 'the wedged control script finished'
+    assert 'the control child spoke before it wedged' in caught.stdout, (
+        caught.stdout)
+    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
 
 
 def test_the_control_probe_requirement_is_a_skip_not_a_failure(tmp):

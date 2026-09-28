@@ -24,13 +24,13 @@ def test_a_deadline_that_cannot_expire_is_not_a_deadline(tmp):
     """`timeout=` being present is not a bound, in all five spellings.
 
     The value is read as a node, not off its printed form, so the stdlib's
-    own "no deadline" spellings are refused. A `Constant` that is not a
-    positive number bounds nothing; a composed name is a deadline, because
-    what it composes to is not visible from here and refusing it would
-    refuse every real bound in the tree.
+    own "no deadline" spellings are refused, and so is a negative one. A
+    `Constant` that is not a positive number bounds nothing; a composed
+    name is a deadline, because what it composes to is not visible from
+    here and refusing it would refuse every real bound in the tree.
     """
     del tmp
-    for value in ('None', '0', 'False', '0.0'):
+    for value in ('None', '0', 'False', '0.0', '-1'):
         source = ('import subprocess\n'
                   'def launch():\n'
                   "    return subprocess.run(['node', 'c.js'],\n"
