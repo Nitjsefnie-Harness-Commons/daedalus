@@ -112,16 +112,29 @@ _MARK_LINE = "POLL_MARK = 'DAEDALUS_WATCHER_POLL'\n"
 # points, so a run over the bound for a few polls can be stepped over in
 # one stalled sample - the return arm fires at the boundary count and the
 # run is measured, unrefused, with the control reporting the mutant as
-# clean. Two CI legs and a local run did exactly that. At the tolerance
-# with one spike near the end, the run can be caught at ONE sample in the
-# whole 64; this shape is over at 28 of them, the first at the second
-# marker, so escaping means stalling across a gap no longer than seven
-# calls. It survives sixty times the wait's own sample interval.
+# clean. Two CI legs and a local run did exactly that.
+#
+# Counted over the call counts this run can REACH before the return arm
+# fires - ending at the first call of the poll that publishes the
+# boundary count, not at the end of that poll - this shape is over the
+# bound at 21 of 62, in runs no longer than 16 calls under it. The shape
+# it replaced was over at 1 of 57, in a run of 56 under. That is the
+# whole difference: a sampler reading every sample point cannot miss 21
+# of 62, and can miss one of 57 by accident.
+#
+# Sampled more slowly than the wait samples itself, the control holds at
+# 0.2s, 0.5s, 2.0s, 4.0s, 8.0s and 10.0s, and fails at 6.0s and 12.0s.
+# Those are not a threshold and are not meant to be one - whether a stall
+# escapes depends on the phase of the calls it spans - so the residual is
+# stochastic and starts somewhere around six seconds. It fails LOUDLY
+# when it does: `_verdict` reports the mutant as measured anyway, so the
+# cost of being wrong about it here is a red leg rather than a green one.
 #
 # The first poll is AT the tolerance, and that is not decoration. A run
 # over from its first call is refused at ONE marker, which is the
-# one-value row - not the row this half exists to reach, and the half that
-# lands there is a wide first poll, which the other control already drives.
+# one-value row - not the row this half exists to reach, and the half
+# that lands there is a wide first poll, which the other control drives.
+# I built that shape first and measured it refusing there.
 _GROWING = [
     (_MARK_LINE, '_GROWING_POLLS = 0\n'),
     (_PULL_PAGE, '    global _GROWING_POLLS\n    _GROWING_POLLS += 1\n'
