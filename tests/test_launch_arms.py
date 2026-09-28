@@ -164,6 +164,12 @@ def test_the_sweep_reproduces_each_state_it_claims(tmp):
     none, and every cut removed text rather than nothing. So the three
     states are told apart by what the sweep does, which is the claim the
     whole enumeration rests on.
+
+    A child that did not ANSWER is none of those. It moves no verdict
+    because it produced none, so an empty `moved` from a hung or dead
+    child is read here as the same thing as a mutant that changed
+    nothing -- and the two arms in `SWEEP_SAMPLE` this cannot tell apart
+    are exactly the two states the sweep exists to adjudicate.
     """
     arms = [_arm(name) for name in SWEEP_SAMPLE]
     findings = arm_sweep(Path(tmp), arms)
@@ -172,6 +178,10 @@ def test_the_sweep_reproduces_each_state_it_claims(tmp):
         found = findings[name]
         assert found['removed'].strip(), f'{name}: the cut removed nothing'
         assert 'refused' not in found, f'{name}: {found["refused"]}'
+        assert 'timed_out' not in found, (
+            f'{name}: the child did not answer, so this run says nothing '
+            'about the arm; an empty `moved` from a child that hung is '
+            'not a mutant that changed nothing')
         if state == 'CONTROLLED':
             assert evidence in found['moved'], (
                 f'{name}: deleting it left every verdict alone, so its own '
