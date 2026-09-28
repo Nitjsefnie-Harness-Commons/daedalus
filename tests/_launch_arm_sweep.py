@@ -9,7 +9,7 @@ checked.
 
 It lives here, beside the modules it imports, because it is a driver
 over the test tree and not a repository script: under `scripts/` the
-type checker's default scope put it on the root path, where the three
+type checker's default scope put it on the root path, where the four
 test-tree imports it is built on did not resolve.
 
     python3 tests/_launch_arm_sweep.py
@@ -21,13 +21,9 @@ from pathlib import Path
 from _arm_sweep import arm_sweep
 from _launch_arm_records import (
     CRASH_CONTROLLED, EVIDENCE, ID, SECONDARY_CONTROLLED, STATE)
-from _launch_arms import (CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES,
-                          STEP_CEILING_CONTROL)
+from _launch_arms import CONTROLLED, LAUNCH_ARMS, REDUNDANT, STATES
+from test_launch_arms import CEILING_ARMS
 
-# The arms bound to the step ceiling are exactly the arms whose child
-# produces no verdict: it is for a mutant that does not stop.
-CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
-                if arm[EVIDENCE] == STEP_CEILING_CONTROL}
 EVIDENCE_OF = {arm[ID]: arm[EVIDENCE] for arm in LAUNCH_ARMS}
 
 

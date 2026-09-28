@@ -128,12 +128,7 @@ def _disjunction(tree, line):
 
 
 def _check_kind(op, node, line):
-    """The refusal that puts a mis-keyed spec in the `refused` channel.
-
-    `CUT_KIND` above says what each op needs; this names what was found,
-    so a `drop_if` on a `for` and a `drop_stmt` on a decorator are two
-    readable findings rather than a silent cut and an `AttributeError`.
-    """
+    """The refusal that puts a mis-keyed spec in the `refused` channel."""
     wanted = CUT_KIND.get(op)
     if wanted is None or isinstance(node, wanted):
         return
