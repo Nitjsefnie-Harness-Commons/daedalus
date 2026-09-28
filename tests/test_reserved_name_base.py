@@ -421,6 +421,77 @@ STALE_BASE_CELLS = (
 )
 
 
+def test_a_deleted_covered_module_is_still_a_violation(tmp):
+    """The `stale` limb's boundary, pinned from the REFUSING side.
+
+    A module the base's tree carries is deleted and nothing rebinds what
+    it bound. The document still records the name, the tree no longer
+    derives it, and the module is in the base -- so this is a `stale`
+    violation, which is what `violations`'s docstring claims
+    deliberately. Nothing in the suite would fail if that stopped being
+    true: both plants of the boundary that survived review are the
+    forgiving direction, and the cheaper mutant here is to intersect
+    `covered` with what is on disk, which forgives the deletion and
+    leaves every other test in the suite green.
+
+    The counterpart, the forgiving direction, is
+    `test_a_live_module_outside_the_base_is_forgiven` below. These are
+    one question asked twice, and they are the same plants the review
+    reached from the two directions.
+    """
+    tree = _checkout(tmp, 'deleted', _BASE_FILES)
+    _branch_git(tree, 'add', '-A')
+    _tighten(tree)
+    _commit_all(tree, 'the committed set')
+    owner = next(name for name in sorted(_BASE_FILES)
+                 if name.endswith('_owner.py'))
+    (tree / owner).unlink()
+    _commit_all(tree, 'the owning module is deleted')
+    result = _branch_check(tree)
+    assert not _green(result), (result.stdout, result.stderr)
+    assert 'stale:' in result.stderr, result.stderr
+    assert '--tighten' in result.stderr, result.stderr
+
+
+def test_a_live_module_outside_the_base_is_forgiven(tmp):
+    """The `stale` limb's boundary, pinned from the FORGIVING side.
+
+    A name recorded against a module the base never carried, where that
+    module is nevertheless live: another branch added it and the
+    document has not absorbed it yet. That is the composition the
+    scoping is FOR, so it is green, and the success line's two counts
+    differ -- which is how a reader knows the document owes a name
+    rather than that the check is blind.
+
+    This is what a `stale` limb with its scoping dropped would refuse:
+    every committed-not-derived name is then a violation, and the
+    documented exemption becomes a permanent false red. It is the
+    counterpart of the deletion case above, and the same question.
+    """
+    tree = _checkout(tmp, 'outside', _BASE_FILES)
+    _branch_git(tree, 'add', '-A')
+    _tighten(tree)
+    _commit_all(tree, 'the committed set')
+    live = 'tests/_from_another_branch.py'
+    # Present and tracked, and binding NOTHING: another branch added a
+    # module that never bound this name, so the document's claim about
+    # it is `stale` rather than merely under-covering.
+    (tree / live).write_text('def _something_else(value):\n    return value\n',
+                             encoding='utf-8')
+    _branch_git(tree, 'add', '-A')
+    _commit_all(tree, 'another branch adds a module')
+    committed = json.loads(_artifact(tree).read_text(encoding='utf-8'))
+    committed['names']['_from_another_helper'] = {'python': [live]}
+    _artifact(tree).write_text(json.dumps(committed) + '\n',
+                               encoding='utf-8')
+    result = _branch_check(tree)
+    assert _green(result), (result.stdout, result.stderr)
+    assert 'drift inside the base' in result.stdout, result.stdout
+    # Two counts that differ, and no claim of a match: the line is what
+    # makes the exemption visible rather than silent.
+    assert ' against the ' in result.stdout, result.stdout
+
+
 def test_a_second_tightening_landed_by_rebase_reports_the_missing_name(tmp):
     """A rebased document really does not match the tree it landed on.
 

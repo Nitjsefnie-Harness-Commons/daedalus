@@ -411,6 +411,56 @@ def test_a_noop_tighten_writes_nothing(tmp):
                                  set(_live_sources_of(tree)))) == 3
 
 
+def test_the_success_line_names_what_was_compared_and_against_which_base(
+        tmp):
+    """The line a reader trusts, asserted.
+
+    This branch REMOVED the only assertion on the success line in the
+    same change that made it carry more, and added two printed lines
+    nothing read. A success line whose number came from a different set
+    than the one under comparison is the false-green shape the first
+    design died of, so the line this branch exists to improve is the one
+    surface that must not be prose.
+
+    Four things are pinned: that it names the base it compared against,
+    that it carries BOTH counts rather than one, that the tightening
+    line names its own coverage, and -- the reason the line was
+    rewritten -- that it cannot claim a match when the counts differ.
+    """
+    policy = _contract()
+    tree = _fixture_checkout(tmp, _planted_tree({}), 'line')
+    artifact = tree / '.github' / 'reserved-test-names.json'
+    modes = ['--tree', str(tree), '--artifact', str(artifact)]
+    tightened = _run_generator(tree, artifact, '--tighten')
+    assert tightened.returncode == 0, (tightened.stdout, tightened.stderr)
+    assert 'the committed set now covers all' in tightened.stdout, \
+        tightened.stdout
+    _commit(tree, 'the committed set')
+    base, _covered = artifact_base.base_files(
+        tree, '.github/reserved-test-names.json')
+    status, stdout, stderr = _generator(policy, modes)
+    assert (status, stderr) == (0, ''), (status, stderr)
+    assert 'no drift inside the base' in stdout, stdout
+    assert base[:12] in stdout, (base, stdout)
+    committed = len(policy.load(artifact)['names'])
+    derived = len(policy.document(_live_sources_of(tree))['names'])
+    assert f'{committed} committed names against the {derived} ' in stdout, \
+        stdout
+    assert 'match the committed set' not in stdout, stdout
+
+    # The line must not be able to claim a match it did not find: an
+    # emptied document is the case the first design got wrong, and the
+    # two counts are what make the difference visible rather than silent.
+    shipped = json.loads(artifact.read_text(encoding='utf-8'))
+    shipped['names'] = {}
+    artifact.write_text(json.dumps(shipped) + '\n', encoding='utf-8')
+    status, stdout, stderr = _generator(policy, modes)
+    assert (status, stdout) == (1, ''), (status, stdout)
+    assert 'no drift inside the base' not in stdout, stdout
+    assert 'match the committed set' not in stdout, stdout
+    assert 'absent:' in stderr, stderr
+
+
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
     """The artifact is replaced or left whole, never truncated in place.
 
