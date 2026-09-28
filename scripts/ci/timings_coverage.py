@@ -185,8 +185,9 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 # the distribution. See `recorded_skew` and the docstring's cost table.
 #
 # 2.0, AND THE NUMBER IS A DECISION, NOT A GAP. The construction: over
-# the live tree (334 suites, 328 recorded, true total 357.6), keep the
-# `k` LIGHTEST recorded weights, drop the rest, and let the planner
+# the LIVE TREE -- the frame the table below is measured in, and the one
+# a merge moves, so no figure of it is quoted here -- keep the `k`
+# LIGHTEST recorded weights, drop the rest, and let the planner
 # estimate every suite the file no longer records.
 #
 #   k-rec  est-share  skew   plan total   understated    2.0    2.2
