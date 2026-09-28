@@ -163,16 +163,24 @@ def test_clear_discards_the_entry_it_names(tmp):
     assert target.read_bytes() == _COMMITTED
 
 
-def _restrictive_mode():
-    """The mode these tests record: POSIX has an execute bit and Windows has
-    only the read-only flag, so each platform is asked in its own terms."""
-    return 0o400 if os.name == 'posix' else 0o600
+# Read-only on BOTH platforms: Windows has no execute bit and honours only
+# this flag. `test_the_recorded_mode_is_the_polarity_this_suite_asserts`
+# keeps this and the polarity the restore assertion below uses in step.
+RECORDED_MODE = 0o400
+
+
+def test_the_recorded_mode_is_the_polarity_this_suite_asserts(tmp):
+    del tmp
+    # A recorded mode with the write bit would contradict the assertion
+    # below, and a platform that cannot report an execute bit would only
+    # find that out in CI.
+    assert not RECORDED_MODE & stat.S_IWRITE, oct(RECORDED_MODE)
 
 
 def test_restore_returns_the_mode_it_recorded(tmp):
     target = _repo(tmp)
     store = Path(tmp) / 'store'
-    target.chmod(_restrictive_mode())
+    target.chmod(RECORDED_MODE)
     saved = _plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
     target.chmod(0o600)
@@ -180,10 +188,11 @@ def test_restore_returns_the_mode_it_recorded(tmp):
     assert restored.returncode == 0, _say(restored)
     assert target.read_bytes() == _COMMITTED
     recorded = stat.S_IMODE(target.stat().st_mode)
+    assert not recorded & stat.S_IWRITE, recorded
     if os.name == 'posix':
-        assert recorded == 0o400, recorded
-    else:
-        assert not recorded & stat.S_IWRITE, recorded
+        # Windows reports 0o444 for the same flag, so exactness is POSIX's
+        # to claim; the read-only assertion above is the portable one.
+        assert recorded == RECORDED_MODE, recorded
 
 
 def test_restore_returns_a_target_that_was_saved_read_only(tmp):
