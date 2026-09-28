@@ -192,8 +192,30 @@ def main(repo):
     return 0
 
 
+# One spelling, two callers, so the help line and the no-argument line
+# cannot drift: the second is pinned byte for byte by
+# tests/test_gitignore_generator.py.
+USAGE = 'usage: {script} <repo> [<repo> ...]'
+HELP_FLAGS = ('--help', '-h')
+
+
+def _run(argv):
+    """The script's entry point, so a flag is never a repository path.
+
+    The repository is this script's first POSITIONAL argument, so before
+    it meant that `--help` was passed to `git -C` and the failure reported
+    was git's, naming a subcommand nobody asked to run (#1301). A flag
+    that looks like a flag is a request for the usage line, not a path.
+    Two flags, so no parser: an argument is a help flag or it is a repo.
+    """
+    if any(arg in HELP_FLAGS for arg in argv):
+        print(USAGE.format(script=sys.argv[0]))
+        return 0
+    if not argv:
+        print(USAGE.format(script=sys.argv[0]), file=sys.stderr)
+        return 2
+    return max(main(repo) for repo in argv)
+
+
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print(f'usage: {sys.argv[0]} <repo> [<repo> ...]', file=sys.stderr)
-        sys.exit(2)
-    sys.exit(max(main(r) for r in sys.argv[1:]))
+    sys.exit(_run(sys.argv[1:]))

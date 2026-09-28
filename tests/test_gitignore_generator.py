@@ -357,6 +357,34 @@ def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
     assert 'usage' in result.stderr.lower(), result.stderr
 
 
+def test_gitignore_help_flag_prints_usage_and_exits_zero(tmp):
+    """`--help` and `-h` are flags, not repository paths (#1301).
+
+    The script takes the repository as its first positional argument, so
+    `--help` was handed straight to `git -C` and the failure reported was
+    git's, naming a subcommand nobody meant to run. A reader who typed a
+    flag gets the usage line and exit 0.
+
+    Both spellings are driven as real invocations rather than a call into
+    a helper, and both assert the output carries no `FAIL` and no `git
+    ls-files`. That second half is the part that would catch a regression
+    to the behaviour above: the old failure is usage-shaped, so an
+    assertion on "says usage" alone would pass against it.
+    """
+    del tmp
+    for flag in ('--help', '-h'):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / 'scripts' / 'gen_gitignore.py'),
+             flag],
+            capture_output=True, text=True, timeout=60)
+        said = result.stdout + result.stderr
+        assert result.returncode == 0, (
+            flag, result.returncode, result.stdout, result.stderr)
+        assert 'usage' in result.stdout.lower(), (flag, result.stdout)
+        assert 'FAIL' not in said, (flag, said)
+        assert 'git ls-files' not in said, (flag, said)
+
+
 # The block layout, written out here rather than read back from the
 # generator. A literal is the only expectation the subject cannot produce by
 # accident, and the HEAD preamble above it is a frozen constant rather than
