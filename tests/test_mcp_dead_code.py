@@ -388,6 +388,30 @@ def load():
     assert _runtime(_tmp) == {'raised': 'ValueError', 'loaded': []}
 
 
+def test_a_finally_body_tail_is_out_of_the_scan_set(_tmp):
+    """The `finalbody` field, and the block the walk's own prose names
+    without a row behind it.
+
+    A `finally` runs whether or not the body raised, so a call inside one is
+    a call the runtime makes — the call after the `return` is not, because
+    that `return` leaves the frame. A block is a property of the field that
+    holds it, and a read that skipped `finalbody` would keep a module the
+    runtime cannot import, in the direction the walk is written to err in and
+    does not here.
+    """
+    _a_barrier_tail_is_out_of_the_scan_set(_tmp, """
+import importlib
+
+
+def load():
+    try:
+        pass
+    finally:
+        return 1
+        importlib.import_module('pkg.leaf')
+""", {'raised': None, 'loaded': []})
+
+
 def test_every_statement_the_standard_library_declares_is_answered(_tmp):
     """The whole domain, derived rather than listed.
 
