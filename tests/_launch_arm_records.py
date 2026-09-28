@@ -8,16 +8,18 @@ verdict a reader would otherwise have to take on trust. They are one
 concern and not the enumeration, and the enumeration has a size ceiling
 to keep.
 
-    CRASH_CONTROLLED      arms whose evidence goes red by RAISING
-    SECONDARY_CONTROLLED  a control that holds an arm without being its
-                          recorded evidence
-    MARKER_NON_MEMBERS    guard clauses the spelling-independent marker
-                          finds outside every listed arm, and what
-                          covers each
-    ROW_UNCLAIMED         rows this branch added that no arm records
-    ARM_NOTES             why a particular verdict is what it is
+    CRASH_CONTROLLED       arms whose evidence goes red by RAISING
+    SECONDARY_CONTROLLED   a control that holds an arm without being its
+                           recorded evidence
+    MARKER_NON_MEMBERS     guard clauses the spelling-independent marker
+                           finds outside every listed arm, and what
+                           covers each
+    ROW_UNCLAIMED          rows this branch added that no arm records
+    STEP_CEILING_HELD_BY   the test that holds each step-ceiling arm,
+                           which no row can
+    ARM_NOTES              why a particular verdict is what it is
 
-`tests/test_launch_arms.py` checks all five, and the table carries a
+`tests/test_launch_arms.py` checks all six, and the table carries a
 one-line pointer to the note at each arm it names.
 """
 # The CONTROLLED arms whose `evidence` goes red by RAISING rather than
@@ -209,4 +211,27 @@ ARM_NOTES = {
 # which the step ceiling enters and the row does not. The row still
 # holds the arm; SECONDARY_CONTROLLED says so.
     ''',
+}
+
+
+# `STEP_CEILING_CONTROL` is not a row label and not an `ARM_CONTROLS`
+# label, so an evidence string naming it resolves to nothing a suite can
+# check -- the one test that looked at it checked it against itself. The
+# arms it holds are real and the re-review proved it by deletion, but a
+# claim no command re-derives is the defect this issue is about, so the
+# test that holds each is named here instead and
+# `tests/test_launch_arms.py` resolves every name against the tree.
+#
+# Neither is a row assertion, so neither is pinned by the sweep's verdict
+# table: what holds them is that the arm's mutant does not STOP.
+# `scripts/launch_arm_sweep.py` checks the other half of the same fact --
+# that the arms bound to the ceiling are exactly the two whose child
+# produces no verdict at all.
+STEP_CEILING_HELD_BY = {
+    'fx.skip-registered': (
+        'tests/test_launch_arms.py:'
+        'test_the_fixpoint_stops_on_a_factory_it_has_already_registered',),
+    'mr.while-guard': (
+        'tests/test_repo_layout.py:'
+        'test_a_cyclic_machinery_base_terminates_within_a_step_ceiling',),
 }

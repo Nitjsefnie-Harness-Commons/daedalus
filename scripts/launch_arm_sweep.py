@@ -65,11 +65,11 @@ def _report(findings):
     # step ceiling exists for. They are checked by the ceiling check below.
     answered = [arm for arm in LAUNCH_ARMS
                 if arm[ID] not in silent and arm[ID] not in refused]
-    uncontrolled = sorted(arm[ID] for arm in answered
-                          if arm[STATE] == CONTROLLED
-                          and EVIDENCE_OF[arm[ID]] not in findings[arm[ID]]['moved']
-                          and EVIDENCE_OF[arm[ID]]
-                          not in findings[arm[ID]]['crash'])
+    uncontrolled = sorted(
+        arm[ID] for arm in answered
+        if arm[STATE] == CONTROLLED
+        and EVIDENCE_OF[arm[ID]] not in findings[arm[ID]]['moved']
+        and EVIDENCE_OF[arm[ID]] not in findings[arm[ID]]['crash'])
     crash_held = {name for name, found in findings.items()
                   if EVIDENCE_OF[name] in found['crash']}
     by_value = sorted(name for name, found in findings.items()
