@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """The overview panel, run rather than read.
 
-Four counters, a clear button and the live SSE event log, and nothing that
-mounts it directly -- `dashboard/app.js` reaches it on the way to every
-other section. Each case emits bus events at the shipped section over the
-real `api.js` and reads the rows, the stat cells and the status line back
-out of the tree.
+Four counters, a clear button and the live SSE event log. In the shipped
+dashboard `dashboard/app.js` mounts it on the way to every other section,
+and this suite calls `mount` on the section itself rather than reaching
+it through that routing. Each case emits bus events at the shipped
+section over the real `api.js` and reads the rows, the stat cells and the
+status line back out of the tree.
 """
 import sys
 import time
@@ -214,9 +215,9 @@ def test_a_tab_update_names_its_title_then_its_url_then_neither(_tmp):
 
 def test_the_first_event_clears_the_placeholder_and_stacks_newest_first(
         _tmp):
-    """`!hasEvents` is the only signal that the placeholder is
-    still there. An unnamed type falls through to `JSON.stringify` of the
-    event, which is what keeps a later bus section readable here first."""
+    """`!hasEvents` is the only signal that the placeholder is still
+    there. An unnamed type falls through to `JSON.stringify` of the event,
+    which is what keeps a later bus section readable here first."""
     report = _run('const before = { rows: logEl.children.length,\n'
                   '  text: logEl.textContent };\n'
                   'bus.emit({ type: "tab-unregistered", tabId: 4 });\n'
@@ -264,7 +265,7 @@ def test_the_log_keeps_two_hundred_rows_while_the_rate_keeps_all_of_them(
 
 def test_the_clear_button_empties_the_log_and_leaves_the_rate_alone(_tmp):
     """The rate window is a different array and survives the clear. The
-    emptied event array is also what lets the next event remove the
+    `hasEvents` reset is also what lets the next event remove the
     `cleared.` row."""
     report = _run('bus.emit({ type: "tab-unregistered", tabId: 4 });\n'
                   'bus.emit({ type: "tab-unregistered", tabId: 5 });\n'
