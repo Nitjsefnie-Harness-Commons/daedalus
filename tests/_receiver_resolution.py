@@ -15,15 +15,11 @@ reaches no child and discharges only on one: the number reaching no call
 at all, every call it reaching having a receiver the tree binds to a
 literal, or every one of them only building what a `raise` raises.
 
-That is the whole of the rule, and it is a proof rather than a guess on
-purpose. Two earlier versions each substituted a guess, from opposite
-sides — discharging when the receiver did not resolve, and discharging
-when the operation's name was not one the census held — and each silenced
-a different set of shapes that reap a real child. Neither "the receiver
-did not resolve" nor "the operation is not one I know" is a statement
-about the number. `deadline_reaches_a_child` is where that reasoning
-lives and `literal_bindings` is what the second proof is read off; this
-is the map, not the argument.
+That is the whole of the rule, and each of the three is a proof rather
+than a guess about what the census does not know.
+`deadline_reaches_a_child` is where that reasoning lives, and
+`literal_bindings` is what the second proof is read off; this is the map,
+not the argument.
 """
 import ast
 import importlib
@@ -92,10 +88,11 @@ def _dotted_bindings(tree):
     is the whole of the termination argument: the loop is `for _ in
     range(3)`, so a cycle cannot run and a chain longer than the rounds
     stops where the budget runs out. Source order does the work in a
-    single pass for a forward-declared chain; a REVERSED chain needs one
-    round per link, and a three-link chain written back to front stops
-    short with its tail unresolved. That failure direction is a false red
-    and never a false green — an unresolved callee is not a network read.
+    single pass for a forward-declared chain; a chain written back to
+    front resolves one indirection per round, so one longer than the
+    budget stops short with its tail unresolved. That failure direction is
+    a false red and never a false green — an unresolved callee is not a
+    network read.
     """
     scoped = _scoped_assignments(tree)
     bound = {}
@@ -134,9 +131,15 @@ def _dotted_bindings(tree):
 
 
 def _function_nodes(tree):
-    """Every function and lambda body in the tree, as a set of objects."""
+    """Every function, lambda AND class body, as a set of objects.
+
+    A class body binds no name in any scope the reader tracks: its names
+    are attributes, reached through the instance, and a class-level
+    `urlopen = []` must not pop a module import.
+    """
     return {node for node in ast.walk(tree)
-            if path._is_def(node) or isinstance(node, ast.Lambda)}
+            if path._is_def(node) or isinstance(node, (ast.Lambda,
+                                                       ast.ClassDef))}
 
 
 def _scoped_assignments(tree):
@@ -150,7 +153,8 @@ def _scoped_assignments(tree):
 
 
 def _shadowed_parameters(tree):
-    """`function ->` the parameter names that shadow an import inside it.
+    """`function ->` what shadows a name inside it: parameters, and the
+    targets of assignments the walk cannot resolve.
 
     The module table cannot carry this. A parameter named after a
     from-import is a shadow in the function that declares it and nowhere
@@ -186,7 +190,7 @@ _LITERALS = (ast.List, ast.Dict, ast.Set, ast.Tuple, ast.Constant,
 
 
 def literal_bindings(tree):
-    """`dotted name` for every name bound to a LITERAL, tree-wide.
+    """`dotted name` for every name written as a LITERAL in EVERY scope.
 
     The discharge's proof, and the reason it is one: a container literal
     is not a process, so a call whose receiver is one cannot end a child.
@@ -195,12 +199,21 @@ def literal_bindings(tree):
     double's recorder is bound in `__init__` and a fixture's list in the
     test body, while the deadline-carrying call sits in a third scope.
 
-    A literal is a STARTING state, and the table is last-write-wins: a
-    name bound to `[]` and then rebound to a real child is a child, and a
-    set that only ever added kept reading it as a container. The discard
-    below is the same move `_dotted_bindings` makes for the same reason.
+    A name is in the set only when EVERY writing of it is a literal, and
+    that is a CONSERVATIVE JOIN rather than a last-write-wins. The order
+    is not available to be right: `ast.walk` is breadth-first, so a nested
+    write is applied after a shallower one whatever the source says, and
+    a table-wide last-write-wins silences a class that holds a real child
+    because a LATER class bound the same attribute to a list. Differing
+    reachable states are unprovable, and unprovable here is a refusal.
+
+    This is deliberately not the move `_dotted_bindings` makes. That one
+    adds a binding module-wide and discards only outside a function or
+    class body, so its two arms fail in OPPOSITE directions and neither
+    can undo the other. Here a single non-literal writing is enough, and
+    that is the opposite bias: over-refuse rather than discharge.
     """
-    bound = set()
+    verdicts = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and node.value is not None:
             targets, value = node.targets, node.value
@@ -208,15 +221,12 @@ def literal_bindings(tree):
             targets, value = [node.target], node.value
         else:
             continue
+        literal = isinstance(value, _LITERALS)
         for target in targets:
             key = path._dotted_key(target)
-            if not key:
-                continue
-            if isinstance(value, _LITERALS):
-                bound.add(key)
-            else:
-                bound.discard(key)
-    return frozenset(bound)
+            if key:
+                verdicts[key] = verdicts.get(key, True) and literal
+    return frozenset(key for key, ok in verdicts.items() if ok)
 
 
 def _takes_a_timeout(value):
@@ -314,15 +324,17 @@ def _raised_exceptions(function, bound):
 
     Constructing the exception is not ending a child, and the deadline
     reaching nothing else is the same proof as the arithmetic case. The
-    callee is resolved to a live live object and asked what it IS, so a
+    callee is resolved to a live object and asked what it IS, so a
     call that merely looks like an exception is not cleared — the mistake
     the two-name operation test made from the other direction.
 
-    IMPORTED, specifically. A local `class Refused(Exception)` does not
-    fire this arm: the resolver reads imports, and a class the module
-    defines is not one it can reach. That is a false red on a fixture
-    that raises its own error with the deadline in hand, and it is
-    disclosed with the control beside it rather than left to be found.
+    IMPORTED, specifically, and the limit is a false red rather than a
+    false green: a local `class Refused(Exception)` does not fire this
+    arm, because the resolver reads imports and a class the module
+    defines is not one it can reach. A fixture that raises its own error
+    with the deadline in hand is therefore refused. That HAPPENS today,
+    and `test_a_raise_carrying_the_deadline_is_discharged_when_imported`
+    is the control that holds it there.
     """
     raised = set()
     for node in ast.walk(function):
@@ -339,7 +351,7 @@ def _raised_exceptions(function, bound):
 
 
 def deadline_reaches_a_child(function, name, callees, receivers, direct,
-                             aliases, literals, bound):
+                             aliases, literals, bound, shadowed):
     """Whether the deadline this signature takes can reach a child.
 
     Two ways, and both are the census's own question asked of a parameter
@@ -399,15 +411,17 @@ def deadline_reaches_a_child(function, name, callees, receivers, direct,
         if isinstance(func, ast.Name):
             return True
         if isinstance(func, ast.Attribute):
-            if path._dotted_key(func.value) not in literals:
+            receiver = path._dotted_key(func.value)
+            if receiver not in literals:
+                return True
+            # A receiver the function itself SHADOWS is not the table's
+            # verdict: the module saw one binding and the call may see
+            # the caller's. Only a bare name can be shadowed that way —
+            # `self.x` is an attribute of a parameter, and the join over
+            # the class's own writings is what speaks for it.
+            if isinstance(func.value, ast.Name) and func.value.id in shadowed:
                 return True
             continue
-        # A callee that is neither a name nor an attribute has no
-        # receiver to ask about and nothing the walk can resolve, so
-        # there is no proof to offer and the shape is a refusal. Without
-        # this the loop fell through and returned the narrowing verdict,
-        # which is silence: a subscript, a call and a lambda each reached
-        # the end and were discharged, and one of them hands a real child
-        # to a real `wait`.
+        # No receiver to ask about, so no proof to offer: a refusal.
         return True
     return False
