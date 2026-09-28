@@ -31,6 +31,8 @@ from _launch_arm_records import (  # noqa: E402
     ANCHOR, ARM_NOTES, CRASH_CONTROLLED, CUT, EVIDENCE, FILE, ID, LINE,
     MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD, ROW_UNCLAIMED,
     SECONDARY_CONTROLLED, STATE, STEP_CEILING_HELD_BY, WHAT)
+from _launch_arm_pinning import (  # noqa: E402
+    anchor, collapsed, from_line, unpinnable)
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
                           REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
@@ -53,38 +55,6 @@ CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
 # sweep is replayed in every shape the table claims for it.
 SWEEP_SAMPLE = ('ch.namedexpr-in-bound', 'res.call-attribute-subprocess',
                 'pf.in-bound', 'ra.else')
-
-
-def _collapsed(text):
-    return ' '.join(text.split())
-
-
-def _anchor(arm):
-    """The arm's own text, less the ellipsis a truncated anchor ends on.
-
-    An anchor is a PREFIX of the arm's block, so the table costs one
-    line per arm instead of three, and the prefix is what has to still
-    be there for the arm to be where the table says it is. The strip is
-    the `': ...'` form, where the ellipsis stands in for a body.
-    """
-    return _collapsed(arm[ANCHOR]).removesuffix('...').rstrip()
-
-
-def _from_line(rows, line, width):
-    """The collapsed source from `line` on, for at least `width` chars.
-
-    An anchor is not always inside the clause the sweep cuts: a
-    `drop_stmt` arm's runs on into the next statement, a `boolop` arm's
-    out to the end of the disjunction. So the span is the anchor's own
-    length -- the check is that the line is where the text BEGINS.
-    """
-    taken, length = [], 0
-    for row in rows[line - 1:]:
-        taken.append(row)
-        length += len(row) + 1
-        if length >= width:
-            break
-    return ' '.join(taken)
 
 
 def _arm(name):
@@ -212,14 +182,14 @@ def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
     rows = {}
     for name in {arm[FILE] for arm in LAUNCH_ARMS}:
         text = (TESTS / name).read_text(encoding='utf-8')
-        rows[name] = [_collapsed(row) for row in text.splitlines()]
+        rows[name] = [collapsed(row) for row in text.splitlines()]
     # Sorted by line so the FIRST entry is the cause.
     stale = []
     for arm in LAUNCH_ARMS:
-        anchor = _anchor(arm)
+        text = anchor(arm)
         line = arm[LINE]
-        at = _from_line(rows[arm[FILE]], line, len(anchor))
-        if not at.startswith(anchor):
+        at = from_line(rows[arm[FILE]], line, len(text))
+        if not at.startswith(text):
             stale.append((arm[FILE], line,
                           f'{arm[FILE]}:{line} {arm[ID]} reads {at[:50]!r}'))
     stale.sort()
@@ -244,19 +214,29 @@ def test_every_arm_is_uniquely_addressed(tmp):
     byte-identical anchor satisfies the check while its cut removes a
     neighbour's clause in another function.
 
-    Two things close that. The identity the check runs on —
-    (file, line, anchor, cut) — is asserted unique over the real table,
-    and every entry's recorded line is asserted to fall inside the span
-    its OWN cut removes, so the two columns cannot drift apart. The
-    same-line pairs the table carries on purpose are named rather than
-    left to be rediscovered: two arms on one line is a property here,
-    because two arms cut two operands of one disjunction, and what
-    separates them is the cut.
+    Neither of the two properties below closes THAT, and this no longer
+    claims it does. Uniqueness is a property of the set, so two entries
+    that are each unique stay unique when their addresses are exchanged;
+    and `line ∈ span(own cut)` is satisfied by an exchange by
+    construction, each arm then carrying the other's line and the
+    other's cut. What they do close is single-column drift: move one
+    `line` or one `cut` on its own and the span check fires.
+
+    What closes the exchange is deletion, in
+    `test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it`, and
+    what is still open is an exchange that carries the recorded state
+    and evidence with it — two rows relabelled, which nothing here can
+    see, because no id in the tree is bound to a clause.
+
+    The same-line pairs the table carries on purpose are named rather
+    than left to be rediscovered: two arms on one line is a property
+    here, because two arms cut two operands of one disjunction, and
+    what separates them is the cut.
     """
     del tmp
     seen = {}
     for arm in LAUNCH_ARMS:
-        key = (arm[FILE], arm[LINE], _anchor(arm), arm[CUT])
+        key = (arm[FILE], arm[LINE], anchor(arm), arm[CUT])
         assert key not in seen, (
             f'{arm[ID]} is addressed exactly as {seen[key]} is: file, line, '
             'anchor and cut alike, so the line check finds whichever the '
@@ -283,6 +263,54 @@ def test_every_arm_is_uniquely_addressed(tmp):
     assert shared == [('_launch_audit.py', 526), ('_launch_audit.py', 549)], (
         'the same-line pairs the table carries, each two operands of one '
         f'disjunction; a new one is a decision, not an accident: {shared}')
+
+
+def test_every_arm_the_text_cannot_pin_is_settled_by_deleting_it(tmp):
+    """Where the spelling cannot say which arm is meant, the cut does.
+
+    An address is a claim about a clause, and a claim the source cannot
+    repeat back is not one the text can check: `_launch_audit.py:167` and
+    `:168` carry byte-identical text and differ only in indentation, so
+    exchanging the two entries' `line` and `cut` leaves the line check,
+    the uniqueness check and the span check all green while the table
+    says an undriven arm is CONTROLLED.
+
+    So every arm `unpinnable` derives is cut for real here, and its
+    recorded state has to agree with what the cut did. That is what
+    closes the exchange: a table that has swapped two addresses is then
+    wrong about a state the sweep measures, rather than only about a
+    column nothing reads. The set is derived, not recorded, so a later
+    edit that makes two arms alike brings its own arm here; and an arm
+    sharing a line is unpinnable by definition, so an empty set is a
+    derivation that stopped deriving.
+    """
+    unpinned = unpinnable()
+    on_line = {}
+    for arm in LAUNCH_ARMS:
+        on_line.setdefault((arm[FILE], arm[LINE]), []).append(arm[ID])
+    swept = {arm[ID] for arm, _ in unpinned}
+    missing = sorted(name for mates in on_line.values() if len(mates) > 1
+                     for name in mates if name not in swept)
+    assert not missing, (
+        'arms that share a line with another arm are unpinnable by '
+        f'construction, so the derivation dropped them: {missing}')
+    findings = arm_sweep(Path(tmp), [arm for arm, _ in unpinned])
+    for arm, why in unpinned:
+        name, state, found = arm[ID], arm[STATE], findings[arm[ID]]
+        assert 'refused' not in found, f'{name} ({why}): {found["refused"]}'
+        assert 'timed_out' not in found, (
+            f'{name} ({why}): the child did not answer, so this run says '
+            'nothing about the arm')
+        if state == 'CONTROLLED':
+            assert arm[EVIDENCE] in found['moved'], (
+                f'{name} ({why}): deleting it left every verdict alone, so '
+                'it is not the CONTROLLED arm its own cut makes it; it '
+                f'moved {found["moved"]}')
+        else:
+            assert state in (REDUNDANT, DEAD), name
+            assert not found['moved'], (
+                f'{name} ({why}): recorded {state} but deleting it moved '
+                f'{found["moved"]}')
 
 
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
