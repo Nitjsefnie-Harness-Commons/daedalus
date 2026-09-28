@@ -327,6 +327,52 @@ def test_a_spec_whose_op_does_not_match_its_node_is_refused(tmp):
         assert op in refused and 'found a' in refused, refused
 
 
+def test_the_removed_text_is_the_text_the_cut_took(tmp):
+    """`removed` is the text, which is the claim nothing else checked.
+
+    The mechanism's reason for existing is that a reader can see WHICH
+    clause a verdict depended on, and the only consumer of the field
+    asked whether it was non-empty -- so a constant satisfied every
+    control. Four relations close it, and each is read off the source
+    and the mutation rather than out of the mechanism that reported
+    them: the cut changed the file, the text it reported is a real
+    region of the source, that text carries the line this arm is
+    addressed at, and where the cut only deletes, the file is shorter
+    by exactly the length of the text reported. `promoted` gets the
+    matching relation -- it is in the mutated file -- so the field
+    saying what took the clause's place is watched too.
+    """
+    del tmp
+    sources = {arm[FILE]: (TESTS / arm[FILE]).read_text(encoding='utf-8')
+               for arm in LAUNCH_ARMS}
+    for arm in LAUNCH_ARMS:
+        name, line, spec = arm[ID], arm[LINE], arm[CUT]
+        source, op = sources[arm[FILE]], spec.split(':')[0]
+        mutated, removed, promoted = cut_arm(source, spec)
+        where = f'{name} {spec}'
+        assert mutated != source, f'{where}: the cut changed nothing'
+        assert removed.strip() and removed in source, (
+            f'{where}: the text reported is not a region of the source: '
+            f'{removed[:60]!r}')
+        assert source.splitlines(keepends=True)[line - 1] in removed, (
+            f'{where}: the text reported does not carry the line this arm '
+            f'is addressed at, so it cannot show which clause the verdict '
+            f'depended on: {removed[:60]!r}')
+        assert promoted in mutated, (
+            f"{where}: what took the clause's place is not in the mutated "
+            f'file: {promoted[:60]!r}')
+        if op in ('drop_stmt', 'drop_span') or (op == 'drop_if'
+                                                and not promoted):
+            # The ops that only delete. `replace` re-renders a header, a
+            # promoted `drop_if` re-supplies the chain below the head's
+            # own body, and a `boolop` re-renders the whole enclosing
+            # statement -- so none of the three leaves the file merely
+            # shorter by the text it reported.
+            assert len(source) - len(mutated) == len(removed), (
+                f'{where}: the file is {len(source) - len(mutated)} '
+                f'characters shorter and {len(removed)} were reported')
+
+
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
     """The arms no row file can hold, pinned on sites AND refusals.
 

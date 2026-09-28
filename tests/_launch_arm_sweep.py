@@ -98,6 +98,18 @@ def _counters(findings):
         failed.append(f'arms whose child did not answer {silent}, against '
                       f'the {sorted(CEILING_ARMS)} the step ceiling is '
                       'bound to')
+    if failed:
+        # `removed` and `promoted` exist so a reader can see which clause
+        # a verdict depended on, and this is the only place a human is
+        # handed one. An arm named in a failure is exactly where that
+        # text is wanted, so it is printed there rather than on every one
+        # of 150 green arms.
+        for name in sorted({*refused, *uncontrolled, *only_recorded,
+                            *only_derived, *unrecorded, *silent}):
+            found = findings.get(name, {})
+            removed = found.get('removed') or '<the cut was refused>'
+            print(f'  {name}: removed={removed!r} '
+                  f'promoted={found.get("promoted") or "<nothing>"!r}')
     return failed
 
 
