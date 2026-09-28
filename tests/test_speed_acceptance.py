@@ -494,6 +494,14 @@ def test_the_accepted_speed_manifest_can_be_empty_or_missing(tmp):
     assert compare._load_acceptances(missing) == []
 
 
+def test_speed_comparison_refusal_is_normalised_not_raised(tmp):
+    """A parser refusal is a value the driver returns, not an escape."""
+    compare = _durations_comparator()
+    code, output = _run_comparator(compare, ['--base'])
+    assert code == 2, (code, output)
+    assert 'usage:' in output and '--head' in output, output
+
+
 def main():
     return _util.runner(_util.collect(globals()),
                         tmp_prefix='speedacceptance_')
