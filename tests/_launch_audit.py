@@ -15,8 +15,7 @@ binds and the analyser read, or an attribute chain spelled from a dotted
 import of a stdlib root. A receiver the analyser cannot prove is never
 passed over, so a bounded git launch cannot reach the tree however the
 module was obtained or reached, without a refusal or an allowance row.
-
-Only the argv and head reading lives in `_argv_read.py`. It binds no
+Only the argv and head reading lives in `_argv_read.py`, which binds no
 configuration of its own.
 """
 import ast
@@ -34,8 +33,7 @@ def _parameters(node):
     """The parameter names of a function, lambda or comprehension.
 
     A parameter is a binding in its own scope whatever shares its
-    spelling, and the receiver resolver needs to know which names those
-    are. A comprehension has no `args`, so its loop names are the
+    spelling. A comprehension has no `args`, so its loop names are the
     parameters it binds.
     """
     args = getattr(node, 'args', None)
@@ -60,8 +58,7 @@ def _launch_keywords():
     From `inspect.signature` rather than from a list, so a keyword a future
     interpreter adds is admitted and a misspelling of one is a refusal
     rather than a silent pass. A hand list here is what made `pipesize` a
-    false red once already. `_argv_read` owns the argv; this owns the
-    keywords, and the two are read from the same place for the same reason.
+    false red once already.
     """
     popen = inspect.signature(
         subprocess.__dict__['Popen'].__init__).parameters
@@ -452,11 +449,10 @@ def launch_refusals(source, here, bound_sink=None):
     def machinery_route(held):
         """Is this call the import machinery, by any route that reaches it?
 
-        `import importlib as il` is one route and `il = importlib` is
-        another, and the two differ in the spelling the callee carries.
-        So the callee's base is followed through the bindings before the
-        comparison: a name bound to the module and then used to call its
-        member is the same machinery call.
+        `import importlib as il` and `il = importlib` differ in the
+        spelling the callee carries, so the base is followed through the
+        bindings first: a name bound to the module and used to call a
+        member of it is the same machinery call.
         """
         if not isinstance(held, ast.Call):
             return False
@@ -488,9 +484,11 @@ def launch_refusals(source, here, bound_sink=None):
         (a different binding from a module import of the same name), an
         attribute or subscript (`self.mod`, `ns[key]`), a name bound to
         a call the IMPORT MACHINERY makes by any route, and a name bound
-        to `getattr`. An attribute chain spelled from a dotted import of a
-        stdlib root is the interpreter's own code, and is the one shape
-        proved without being a bare name.
+        to `getattr`, which hands back whatever the module holds. An
+        attribute chain spelled from a dotted import of a stdlib root is
+        the interpreter's own code, and is the one shape proved without
+        being a bare name — unless the module binds that root again, which
+        is a binding it cannot read and so the same unreadable name.
 
         A name the module binds to some OTHER call is proved, because
         the call itself is then the fixed value. A receiver the analyser
@@ -505,10 +503,13 @@ def launch_refusals(source, here, bound_sink=None):
         list names the family rather than the members it has been seen
         in.
         """
-        # An attribute chain: a dotted stdlib root, unless it can launch.
+        # An attribute chain: a dotted stdlib root, unless the module has
+        # since rebound that name, it is a parameter here, or it can launch.
         root = _dotted_stdlib_root(receiver, dotted_roots)
-        if root is not None and root not in parameter_names.get(
-                id(function_scopes.get(id(receiver))), ()):
+        shadowed = parameter_names.get(
+            id(function_scopes.get(id(receiver))), ())
+        if root is not None and root not in binding_map \
+                and root not in shadowed:
             return True
         if not isinstance(receiver, ast.Name):
             return False
@@ -533,8 +534,7 @@ def launch_refusals(source, here, bound_sink=None):
         # A parameter is a DIFFERENT binding from a module-level import
         # of the same name, in a different scope, and this one the analyser
         # cannot read.
-        if receiver.id in parameter_names.get(
-                id(function_scopes.get(id(receiver))), ()):
+        if receiver.id in shadowed:
             return False
         held = binding_map.get(receiver.id)
         if machinery_route(held):
