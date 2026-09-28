@@ -548,6 +548,20 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     reset = now + 5
     clock = _Clock([mod.RateLimited('rate limited', reset)])
     watcher = mod.Watcher('PR 1 watcher', out=out)
+    # The wait is wrapped, not stood in for: the duration the pause ASKED for
+    # is read beside the one it printed, and the real wait still happens. The
+    # two are separate claims and a lower bound catches neither - a pause that
+    # reports 5s and sleeps 3.5s clears `>= 3` and still lies. `sleep` is a
+    # plain method, so an instance attribute shadows it and the shipped
+    # client needs no seam for this.
+    real_sleep = watcher.sleep
+    slept = []
+
+    def recording_sleep(seconds):
+        slept.append(seconds)
+        real_sleep(seconds)
+
+    watcher.sleep = recording_sleep
     with _frozen_client_clock(mod, now):
         assert watcher.poll(clock) == 'answered'
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
@@ -556,6 +570,7 @@ def test_a_refusal_pauses_once_naming_the_reset_and_then_resumes(tmp):
     # The stamp names the instant; the duration is a second claim of the same
     # pause, and pinned it is exactly the five between `now` and `reset`.
     assert 'waiting 5s' in lines[0], lines[0]
+    assert slept == [reset - now], (slept, reset - now)
     stamp = lines[0].rsplit(' ', 1)[-1]
     wanted = datetime.fromtimestamp(reset, timezone.utc).strftime(
         '%Y-%m-%dT%H:%M:%SZ')
