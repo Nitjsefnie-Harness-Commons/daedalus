@@ -6,6 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _binding_assertions import (  # noqa: E402
     _assert_binding_pair, _scope_cases, _scope_violations)
+from _coverage_authority_scan import (  # noqa: E402
+    _AUTHORITY_FILE, _AUTHORITY_HALF, _AUTHORITY_REST, _STALE_UNIVERSAL,
+    holders)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
     _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _DEST_MUTATIONS,
@@ -600,17 +603,6 @@ def test_each_new_binding_and_match_arm_is_mutation_sensitive(tmp):
     mutation_sweep(tmp, _mutation_specs())
 
 
-# The two halves of the authority sentence, as literals the scan below
-# looks for. Holding them here is what lets the scan run, and it is not a
-# second statement of the rule: this file checks, it does not claim.
-_AUTHORITY_HALF = 'whose `attr` is in `_LAUNCH_READS`'
-_AUTHORITY_REST = 'attribute outside that set is a'
-# The wave-3 wording, a false universal: `__call__` is an "other attribute"
-# and is not treated as a constant read.
-_STALE_UNIVERSAL = 'every other attribute is a constant read'
-_AUTHORITY_FILE = '_coverage_bindings.py'
-
-
 def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     """One authority for which attributes the walk opens, across `tests/`.
 
@@ -639,45 +631,23 @@ def test_the_opened_set_is_stated_once_across_the_tests_package(tmp):
     earlier versions missed their own mutants. The squeeze uses `str.replace`
     because the control-write policy already models it, and widening that
     policy so this control passes would be the mistake the wave is about. A
-    restatement in different words is not detectable here. This file is
-    excluded from its own scan: it holds the search keys, and a checker is not
-    a second authority.
+    restatement in different words is not detectable here. This suite and the
+    helper holding its search keys are both excluded from its own scan: a file
+    holding the keys cannot be one of the files searched for them, and a
+    checker is not a second authority.
     """
     from _coverage_bindings import _carried_parts
-    from _repo import ROOT
 
     del tmp
-    paths = [path for path in sorted((ROOT / 'tests').glob('*.py'))
-             if path.name != Path(__file__).name]
-
-    def squeezed(text):
-        """The text with a rewrap's marks gone, so wrapping cannot hide it."""
-        return text.replace('\n', '').replace(' ', '').replace(
-            '\t', '').replace('#', '')
-
-    def holders(phrase):
-        """(the files stating `phrase`, how many times between them).
-
-        Occurrences and not files, because a second copy in the same module
-        is the likeliest one of all and a file count cannot see it.
-        """
-        key = squeezed(phrase)
-        stated, total = [], 0
-        for path in paths:
-            count = squeezed(path.read_text(encoding='utf-8')).count(key)
-            if count:
-                stated.append(path.name)
-            total += count
-        return stated, total
-
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
-        stated, total = holders(phrase)
+        stated, total = holders(phrase, Path(__file__).name)
         assert stated == [_AUTHORITY_FILE], (phrase, stated)
         assert total == 1, (phrase, stated, total)
     authority = _carried_parts.__doc__ or ''
     for phrase in (_AUTHORITY_HALF, _AUTHORITY_REST):
         assert phrase in authority, (phrase, authority)
-    assert not holders(_STALE_UNIVERSAL)[0], holders(_STALE_UNIVERSAL)
+    stale = holders(_STALE_UNIVERSAL, Path(__file__).name)
+    assert not stale[0], stale
 
 
 def test_controls_never_write_inside_the_repository(tmp):
