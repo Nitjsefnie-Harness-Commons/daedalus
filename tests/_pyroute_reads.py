@@ -1,13 +1,13 @@
 """The read half of a deferred value: what an expression reads.
 
 Every read of a value the model tracks is resolved here -- a position, an
-attribute, a literal key, a whole mapping literal, a receiver expression --
-and answers from the storage the model recorded rather than from the source
-text alone. A read the model cannot name joins the unknown slot instead of
-naming one value. `pop` is the one write, and it is here because
-`resolve_expression_value` reaches it while resolving the read that names
-the key it removes. The store side is `_pyroute_mapping` and
-`_pyroute_stores`.
+attribute, a literal key, a whole mapping literal, a receiver expression, a
+mapping read-back -- and answers from the storage the model recorded rather
+than from the source text alone. A read the model cannot name joins the
+unknown slot instead of naming one value. `pop` is the one write, and it is
+here because `resolve_expression_value` reaches it while resolving the read
+that names the key it removes; `popitem` is the second, for the same reason.
+The store side is `_pyroute_mapping` and `_pyroute_stores`.
 """
 import ast
 
@@ -210,10 +210,60 @@ def _mapping_item_value(node, owner, state):
                               node.args[0] if node.args else None, state)))
 
 
+_MAPPING_READBACKS = ('values', 'items', 'popitem', 'copy')
+
+
+def _readback_items(owner, pair):
+    """The items one mapping read-back hands back, in the order recorded.
+
+    A read-back names no key, so every recorded value is a candidate and the
+    recorded order is all that separates them. A value the model holds at
+    the unknown-key slot cannot be placed among the rest, so it joins the
+    unpositioned slot and takes the count with it. `pair` wraps each value
+    in the (key, value) pair `items` really yields, and leaves the key half
+    empty: a key routes nothing, and a callable the model holds as one is a
+    missing datum tracked on its own.
+    """
+    def entry(value):
+        return DeferredContainer({0: None, 1: value}, 2, 'tuple') \
+            if pair else value
+    items = {index: entry(stored) for index, stored in enumerate(
+        value for key, value in owner.items.items() if key is not DYNAMIC_KEY)}
+    if DYNAMIC_KEY in owner.items:
+        items[DYNAMIC_KEY] = entry(owner.items[DYNAMIC_KEY])
+    return DeferredContainer(items, dict_length(items), 'list')
+
+
+def _mapping_readback(node, state, readback):
+    """The value one mapping read-back evaluates to, or None.
+
+    `values` and `items` hand the mapping's own recorded values back, `copy`
+    hands back a mapping holding them, and `popitem` hands back one pair of
+    them -- the pair the model cannot say, so its value half is every value
+    the mapping recorded. A receiver that is not a tracked mapping is not
+    one of these operations, and an empty mapping has no pair to pop. The
+    entry popitem removed is not applied to the storage: the model cannot
+    say which one it was, and marking the key set unaccountable instead
+    measured identical on every read this arm reaches.
+    """
+    owner = _known_value(node.func.value, state)
+    if not isinstance(owner, DeferredContainer) or owner.kind != 'dict':
+        return None
+    if readback == 'copy':
+        return container_copy(owner, dict(owner.items))
+    if readback != 'popitem':
+        return _readback_items(owner, readback == 'items')
+    if not owner.length and DYNAMIC_KEY not in owner.items:
+        return None
+    return DeferredContainer(
+        {0: None, 1: merge_yielded(owner.items.values())}, 2, 'tuple', node)
+
+
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
                              unprovable_sender):
-    """A pop's removal is applied here, at evaluation, once per node per
-    state; every other resolution leaves the state as it found it."""
+    """A pop's and a popitem's removals are applied here, at evaluation, once
+    per node per state; every other resolution leaves the state as it found
+    it."""
     known = _known_value(node, state)
     if known is not None: return known
     if isinstance(node, ast.GeneratorExp):
@@ -298,6 +348,13 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
         if (isinstance(node.func, ast.Attribute)
                 and node.func.attr == 'setdefault'):
             return _setdefault_value(node, state)
+        if isinstance(node.func, ast.Attribute) \
+                and node.func.attr in _MAPPING_READBACKS:
+            # Before the owner arms: a read-back names no key, so it reaches
+            # every value the mapping holds, where a lookup answers for one.
+            readback = _mapping_readback(node, state, node.func.attr)
+            if readback is not None:
+                return readback
         owner = mapping_lookup_owner(node, state)
         if owner is not None:
             value = _mapping_item_value(node, owner, state)

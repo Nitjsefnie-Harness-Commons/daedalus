@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Mapping operations whose receiver is not a bare name.
+"""Mapping operations that dropped the value their receiver held.
 
 The guard keys deferred storage by name, so a store, a method call and a
 mutation resolved its owner only when the receiver was an `ast.Name`; a dict
 reached any other way resolved to nothing and the value it held was dropped.
-Each receiver here is one spelling of that one defect.
+Each receiver here is one spelling of that one defect. A read-back is the
+same drop by a different route: `values`, `items`, `popitem` and `copy` hand
+a mapping's recorded values back, and the call reader had no arm for any of
+them, so every spelling of the read dropped the value, named receiver or not.
 """
 import ast
 import sys
@@ -157,6 +160,129 @@ _CONTROLS = [
 
 def _verdict(tmp, body):
     return _tracked_focus_verdict(tmp, _PRELUDE + body, counts=True)
+
+
+# A read-back names no key, so it cannot drop a value the way a constant-key
+# read does by answering a default: it dropped every one of them, through
+# every receiver, because the call reader had no arm for the operation.
+_D = 'd = {"k": relay()}\n'
+_SEND = 'send = ext_cmd\n'
+_TAIL = '\nreturn [f() for f in d.values()]'
+_READBACKS = [
+    ('values-comprehension', _D + _SEND + _TAIL),
+    ('values-loop', _D + _SEND + 'for f in d.values():\n    f()'),
+    ('values-bound-view', _D + 'v = d.values()\n' + _SEND
+     + '\nreturn [f() for f in v]'),
+    ('values-alias-receiver', _D + 'e = d\n' + _SEND
+     + '\nreturn [f() for f in e.values()]'),
+    ('values-class-attribute', 'class K: pass\nK.d = {"k": relay()}\n'
+     + _SEND + '\nreturn [f() for f in K.d.values()]'),
+    ('values-instance-attribute',
+     'class K: pass\nk = K()\nk.d = {"k": relay()}\n'
+     + _SEND + '\nreturn [f() for f in k.d.values()]'),
+    ('values-subscript-receiver', 'box = {"d": {"k": relay()}}\n' + _SEND
+     + '\nreturn [f() for f in box["d"].values()]'),
+    ('values-after-a-store', 'd = {}\nd["k"] = relay()\n' + _SEND + _TAIL),
+    ('values-after-an-update', 'd = {}\nd.update(k=relay())\n'
+     + _SEND + _TAIL),
+    ('values-dict-call-receiver', 'd = dict(k=relay())\n' + _SEND + _TAIL),
+    ('values-two-keys', 'd = {"k": relay(), "j": ordinary}\n' + _SEND + _TAIL),
+    ('items-comprehension', _D + _SEND
+     + '\nreturn [v() for k, v in d.items()]'),
+    ('items-loop', _D + _SEND + 'for k, v in d.items():\n    v()'),
+    ('items-through-dict-call', _D + _SEND
+     + '\nreturn [f() for f in dict(d.items()).values()]'),
+    ('popitem-subscript', _D + _SEND + '\nreturn d.popitem()[1]()'),
+    ('popitem-unpack', _D + 'k, v = d.popitem()\n' + _SEND + '\nreturn v()'),
+    ('copy-subscript', _D + _SEND + '\nreturn d.copy()["k"]()'),
+    ('copy-then-values', _D + _SEND
+     + '\nreturn [f() for f in d.copy().values()]'),
+    # The wrappers consume the view the read-back hands back, so a value the
+    # read dropped is dropped through them as well.
+    ('values-in-a-list', _D + _SEND
+     + '\nreturn [f() for f in list(d.values())]'),
+    ('values-in-a-tuple', _D + _SEND
+     + '\nreturn [f() for f in tuple(d.values())]'),
+    ('values-in-a-set', _D + _SEND + '\nreturn [f() for f in {*d.values()}]'),
+    ('values-in-a-star', _D + _SEND + '\nreturn [f() for f in [*d.values()]]'),
+    ('values-sorted', _D + _SEND
+     + '\nreturn [f() for f in sorted(d.values(), key=lambda g: 0)]'),
+]
+
+# The other half: a mapping holding nothing the guard may route has to keep
+# reading clean through every one of those spellings, and a read-back nobody
+# consumes is not a route either.
+_READBACK_CLEAN = [
+    ('clean-values', 'd = {"k": ordinary}\n' + _SEND + _TAIL, (0, 0)),
+    ('clean-quiet-value', 'd = {"k": quiet()}\n' + _SEND + _TAIL, (0, 0)),
+    ('clean-mixed-values', 'd = {"k": ordinary, "j": quiet()}\n'
+     + _SEND + _TAIL, (0, 0)),
+    ('clean-items', 'd = {"k": ordinary, "j": quiet()}\n' + _SEND
+     + '\nreturn [v() for k, v in d.items()]', (0, 0)),
+    ('clean-popitem', 'd = {"k": ordinary}\n' + _SEND
+     + '\nreturn d.popitem()[1]()', (0, 0)),
+    ('clean-copy', 'd = {"k": ordinary}\n' + _SEND
+     + '\nreturn d.copy()["k"]()', (0, 0)),
+    ('clean-empty-values', 'd = {}\n' + _SEND + _TAIL, (0, 0)),
+    ('clean-unread-value', _D + _SEND + '\nreturn 0', (0, 0)),
+    ('clean-never-read', _D + '\nreturn 0', (0, 0)),
+    ('clean-copy-unread', _D + _SEND + '\nreturn d.copy()', (0, 0)),
+    # A callable as a dict KEY is issue 1012, tracked on its own: a
+    # values() read-back hands back the value half, and that half is clean.
+    ('clean-callable-key',
+     'd = {relay(): ordinary}\n' + _SEND + _TAIL, (0, 0)),
+    # A popitem between a clean store and a later read: the arm resolves the
+    # pair it returns, and marking the entry it removed unaccountable would
+    # make these three read as a violation nothing reaches.
+    ('clean-after-popitem', 'd = {"k": ordinary, "j": ordinary}\n'
+     'd.popitem()\n' + _SEND + '\nreturn d.get("k", ordinary)()', (0, 0)),
+    ('clean-after-popitem-values',
+     'd = {"k": ordinary, "j": ordinary}\nd.popitem()\n' + _SEND + _TAIL,
+     (0, 0)),
+    ('clean-one-entry-popitem',
+     'd = {"k": ordinary}\nd.popitem()\n' + _SEND + _TAIL, (0, 0)),
+    ('clean-set-control', 's = {relay()}\n' + _SEND
+     + '\nreturn [f() for f in s]', (1, 1)),
+]
+
+
+def test_a_mapping_read_back_reports_the_value_it_holds(tmp):
+    for label, body in _READBACKS:
+        actual = _verdict(tmp, body)
+        assert actual == (1, 1), f'{label}: expected (1, 1), got {actual}'
+
+
+def test_a_mapping_read_back_stays_clean(tmp):
+    for label, body, expected in _READBACK_CLEAN:
+        actual = _verdict(tmp, body)
+        assert actual == expected, \
+            f'{label}: expected {expected}, got {actual}'
+
+
+# A receiver that is itself a call result never reaches the read-back arm: the
+# value the reader holds for the call node is the mapping the receiver names,
+# so the call resolves before any receiver-method arm is consulted and the
+# value is dropped however the read is spelled. Issue 1302. The rows below are
+# the defect's own measurement, so the arm repair they sit beside cannot be
+# credited with covering this shape; they flip when 1302 lands. The `values`
+# spelling of the same receiver is not listed because it flips to (1, 1) when
+# an unrelated definition precedes it, so it is not a stable row to pin.
+_READBACK_GAPS = {
+    'call-result-items': ('d = {"k": relay()}\ndef getd(): return d\n' + _SEND
+                          + '\nreturn [v() for k, v in getd().items()]'),
+    'call-result-popitem': ('d = {"k": relay()}\ndef getd(): return d\n'
+                            + _SEND + '\nreturn getd().popitem()[1]()'),
+    'call-result-copy-values': ('d = {"k": relay()}\ndef getd(): return d\n'
+                                + _SEND
+                                + '\nreturn [f() for f in'
+                                + ' getd().copy().values()]'),
+}
+
+
+def test_a_call_result_receiver_still_drops_the_read_back(tmp):
+    dropped = {label: _verdict(tmp, body)
+               for label, body in _READBACK_GAPS.items()}
+    assert dropped == dict.fromkeys(_READBACK_GAPS, (1, 0)), dropped
 
 
 def test_a_receiver_that_is_not_a_name_still_reports(tmp):
