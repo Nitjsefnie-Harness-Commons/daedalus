@@ -304,8 +304,9 @@ def _readback_popitem(node, state, owner):
     return DeferredContainer({0: None, 1: value}, 2, 'tuple', node)
 
 
-# One member per read-back, and the membership test IS this table, so a name
-# added without an arm of its own cannot reach the dispatch silently.
+# One member per read-back, and the membership test IS this table: a name
+# that has no arm here is not a read-back the reader consults, so dropping a
+# member drops its rows with it.
 _READBACK_ARMS = {
     'values': _readback_values,
     'items': _readback_items_arm,
