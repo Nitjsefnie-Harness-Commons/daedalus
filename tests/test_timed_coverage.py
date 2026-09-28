@@ -39,13 +39,12 @@ import contextlib
 import io
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT, git_index  # noqa: E402
+from _repo import ROOT, git_index, git_output  # noqa: E402
 from _speedharness import (  # noqa: E402
     run_workflow_script, workflow_script)
 from _timed_basis import (  # noqa: E402
@@ -502,10 +501,7 @@ def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
         {'HOME': str(home), 'RATCHET_SSH_KEY': 'not-a-key',
          'GITHUB_STEP_SUMMARY': str(Path(tmp) / 'summary.md'),
          'REPO': 'example/example'})
-    subject = subprocess.run(
-        ['git', '-C', str(repository), 'log', '-1', '--pretty=%s'],
-        check=True, capture_output=True, text=True, timeout=30
-    ).stdout.strip()
+    subject = git_output(repository, 'log', '-1', '--pretty=%s')
     named = set(re.findall(r'\d+', subject))
     assert named == {str(run) for run in runs}, subject
     assert 'ci: refresh suite timings from run' in subject, subject
