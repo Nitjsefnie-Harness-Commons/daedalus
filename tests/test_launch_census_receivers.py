@@ -57,12 +57,40 @@ def _full_census(root):
     return census.census(Path(root), ('_noderun.py', '_stream_fake.py'))
 
 
+def _forced_rows(source):
+    """Census rows for a planted module with EVERY function in path.
+
+    The same derivation the real-file controls use, so a planted shape
+    that names no `run_gate` is still read: the table below is the lead's
+    F1 table, and it was measured that way.
+    """
+    tree = ast.parse(source)
+    in_path = frozenset(
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    return sorted((line, route) for _, line, route, _ in
+                  census._faults('planted.py', tree, in_path))
+
+
 def _real_rows(relative):
     """The census reading a REAL file with every function forced in path.
 
-    The only way to reach these three files is the derivation a control
-    uses: the path is forced, so a row here is the row the census will
-    emit the day the real-browser harness joins the path.
+    The only way to reach these three files today: the path is forced, so
+    a row here is a row the census will emit the day the real-browser
+    harness joins the path.
+
+    Forcing can only OVER-report, never under-report. It puts every
+    function in the file into `in_path`, which widens the callee set the
+    reachability arm matches a bare name against and adds an enclosing
+    scope per function, so a row may appear that the real derivation
+    would not produce — and no row the real derivation produces is
+    missing. So a DISCHARGED row here is proof the rule is right about
+    those lines, and a KEPT row is weaker evidence than it looks, being a
+    bound under a reading strictly wider than the shipped one. Measured
+    on all three files at `6b055a10`, the forced row set equals the union
+    of the per-function solo derivations, so nothing is overstated today;
+    when issue 1121's branch lands the forcing becomes redundant and this
+    should read the real `census()` instead.
     """
     tree = ast.parse((TESTS / relative).read_text(encoding='utf-8'))
     in_path = frozenset(
@@ -176,6 +204,47 @@ SPELLINGS = {
 }
 
 
+SHADOWED = (
+    ('a-parameter-shadows-a-from-import',
+     'from urllib.request import urlopen\n\ndef run_gate(urlopen, url):\n'
+     '    return urlopen(url, timeout=10)\n'),
+    ('a-local-lambda-shadows-it',
+     'from urllib.request import urlopen\n\ndef run_gate(url):\n'
+     '    urlopen = lambda u: u\n'
+     '    return urlopen(url, timeout=10)\n'),
+    ('a-call-result-rebinds-the-alias',
+     'import urllib.request\n\ndef run_gate(url):\n'
+     '    urllib = object()\n'
+     '    return urllib.request.urlopen(url, timeout=10)\n'),
+    ('a-subscript-rebinds-the-alias',
+     'import urllib.request\n\ndef run_gate(url, table):\n'
+     '    urllib = table["x"]\n'
+     '    return urllib.request.urlopen(url, timeout=10)\n'),
+)
+
+
+def test_a_shadowed_import_binding_is_still_a_fault(tmp):
+    """F4: the known false GREEN, pinned, and named in the disclosure.
+
+    `_dotted_bindings` records an assignment only when its right-hand side
+    resolves to a dotted name, so a parameter, a lambda, a call result or
+    a subscript that rebinds an imported name leaves the IMPORT binding
+    standing and the call below it is discharged. Empty expectations here
+    are the bug, not the verdict: this control exists so that fixing the
+    shadowing turns it red and forces the census's disclosure to be
+    rewritten rather than quietly invalidated.
+
+    None of the four occurs in the three real files, so this is latent
+    rather than live. The direction is the one that matters — a narrowing
+    whose failure mode is a DISCHARGE has its holes here — and it is the
+    same shape of disclosure the module already carries for
+    `sock.settimeout`.
+    """
+    del tmp
+    for label, source in SHADOWED:
+        assert _rows(source) == [], (label, _rows(source))
+
+
 def test_the_receiver_is_resolved_rather_than_the_callee_spelled(tmp):
     """The mutation detector: a list of spellings is red here.
 
@@ -194,25 +263,37 @@ def test_the_receiver_is_resolved_rather_than_the_callee_spelled(tmp):
 
 
 def test_a_call_that_is_not_a_read_keeps_its_timeout_fault(tmp):
-    """The negative of the arm: the near misses stay faults.
+    """The negative of the arm, in the two directions a resolver can fail.
 
-    `queue.get` and `thread.join` are the two the previous narrowing of
-    this rule missed, and the ones the file the census does NOT own
-    refuses. A network read is not "anything that is not a subprocess":
-    these two are not network reads and are still refused, and a socket
-    method is not a network read either — `socket.socket` is a CLASS, so
-    no module member resolves a receiver to one and `settimeout` stays
-    refused. The census's disclosure names that as a known false red
-    rather than a bound it has decided about.
+    A callee the census cannot RESOLVE (`queue.get`, `thread.join`, a
+    socket method) is not a network read, and neither is a callee it
+    resolves to a live object that is not a read. The two are kept apart
+    on purpose: a suite holding only unresolvable receivers cannot tell a
+    read-set narrowed to nothing from one that admits every member of the
+    three modules, and the second is the mutation that turns this arm into
+    a blanket discharge. `socket.socket` and `socket.getaddrinfo` are the
+    resolvable pair — both live members of a seed module, neither a read,
+    because the read set is the members whose own signature takes a
+    `timeout` and neither one's does.
     """
     del tmp
-    for body in ('import queue\n\ndef run_gate(q):\n'
-                 '    return q.get(timeout=5)\n',
-                 'import threading\n\ndef run_gate(worker):\n'
-                 '    return worker.join(timeout=2)\n',
-                 'import socket\n\ndef run_gate(probe):\n'
-                 '    return probe.settimeout(timeout=5)\n'):
-        assert _rows(body) == [(4, 'timeout= keyword')], body
+    for label, body in (
+            ('unresolvable-queue',
+             'import queue\n\ndef run_gate(q):\n'
+             '    return q.get(timeout=5)\n'),
+            ('unresolvable-thread',
+             'import threading\n\ndef run_gate(worker):\n'
+             '    return worker.join(timeout=2)\n'),
+            ('unresolvable-socket-method',
+             'import socket\n\ndef run_gate(probe):\n'
+             '    return probe.settimeout(timeout=5)\n'),
+            ('resolvable-not-a-read-socket-class',
+             'import socket\n\ndef run_gate(url):\n'
+             '    return socket.socket(url, timeout=10)\n'),
+            ('resolvable-not-a-read-lookup',
+             'import socket\n\ndef run_gate(host):\n'
+             '    return socket.getaddrinfo(host, 80, timeout=10)\n')):
+        assert _rows(body) == [(4, 'timeout= keyword')], (label, _rows(body))
 
 
 # --- a deadline the function cannot put on a child ------------------------
@@ -303,6 +384,105 @@ def test_a_double_that_forwards_its_deadline_to_a_child_is_still_refused(tmp):
     assert [row[:3] for row in faults
             if row[2] == 'timeout parameter'] == [
                 ('_stream_fake.py', 2, 'timeout parameter')], faults
+
+
+# The F1 shapes: a real `subprocess.Popen` child reaped through a receiver
+# the census cannot resolve. Each expected row set is what `origin/main`
+# emits, measured there and not reasoned about.
+UNTRACEABLE = {
+    'an-unresolved-receiver': (
+        'import subprocess\n\n\n'
+        'def _start(argv):\n'
+        '    return subprocess.Popen(argv)\n\n\n'
+        'def run_gate(argv, *, timeout=None):\n'
+        '    child = _start(argv)\n'
+        '    return child.wait(timeout)\n',
+        [(8, 'timeout parameter')]),
+    'a-local-derived-from-the-deadline': (
+        'import subprocess\n\n\n'
+        'def _start(argv):\n'
+        '    return subprocess.Popen(argv)\n\n\n'
+        'def run_gate(argv, *, timeout=None):\n'
+        '    child = _start(argv)\n'
+        '    budget = timeout * 2\n'
+        '    return child.wait(budget)\n',
+        [(8, 'timeout parameter')]),
+    'a-child-on-self': (
+        'import subprocess\n\n\n'
+        'def _start(argv):\n'
+        '    return subprocess.Popen(argv)\n\n\n'
+        'class _D:\n'
+        '    def __init__(self, child):\n'
+        '        self.child = child\n\n'
+        '    def drain(self, timeout=None):\n'
+        '        return self.child.wait(timeout)\n',
+        [(12, 'timeout parameter')]),
+    'a-hand-off-to-an-unresolved-method': (
+        'import subprocess\n\n\n'
+        'class H:\n'
+        '    def run(self, argv, timeout=None):\n'
+        '        return self.run_node_program(argv, timeout=timeout)\n',
+        [(6, 'timeout= keyword')]),
+    'the-control-the-function-owns': (
+        'import subprocess\n\n\n'
+        'def run_gate(argv, *, timeout=None):\n'
+        '    child = subprocess.Popen(argv)\n'
+        '    return child.wait(timeout)\n',
+        [(4, 'timeout parameter'),
+         (6, 'positional timeout on a launched child')]),
+}
+
+
+def test_a_deadline_the_census_cannot_trace_is_still_refused(tmp):
+    """F1: the receiver failing to resolve is NOT a proof of safety.
+
+    The unconditional signature refusal this arm replaced existed for
+    exactly this case, and the issue's Expected Behavior says the
+    existing refusals may not weaken. "The census cannot trace where the
+    number went" is a statement about the walk, not about the number, and
+    a walk that cannot trace it is the shape a bound hides in.
+
+    Every expected row set is what `origin/main` emits for the same
+    source, so this pins the four rows the first version of the arm
+    silenced and cannot be satisfied by re-weakening the rule. The fourth
+    shape is the one that legitimately keeps less: its call site is
+    already refused as a `timeout= keyword` on line 6, which is where the
+    number is written, and a method call on an unresolved receiver is not
+    a child-ending operation.
+    """
+    del tmp
+    for label, (source, expected) in UNTRACEABLE.items():
+        assert _forced_rows(source) == expected, (
+            label, _forced_rows(source))
+
+
+def test_a_deadline_handed_to_a_child_slot_is_refused_with_no_launch_near(
+        tmp):
+    """F2: the child-SLOT route, and nothing else holding it up.
+
+    The sibling control above cannot cover this: its shapes are caught by
+    the launch-placement half, so a mutant in the slot half is masked by a
+    passing assertion next door. Here the function places no launch, the
+    receiver is a bare parameter the census never resolves, and the only
+    route left is the operation: the deadline goes into `Popen.wait`'s
+    timeout slot, on an object the census cannot prove is anything.
+
+    Both spellings of "into the slot" are here — the `timeout=` keyword
+    and a name computed from the parameter — because they are two lines of
+    the same check and one of them can go without the other.
+    """
+    del tmp
+    for label, tail, call_line in (
+            ('keyword',
+             '    return proc.wait(timeout=timeout)\n', 2),
+            ('derived-local',
+             '    deadline = timeout * 2\n'
+             '    return proc.wait(timeout=deadline)\n', 3)):
+        source = (f'def run_gate(proc, *, timeout=None):\n{tail}')
+        assert _rows(source) == [
+            (1, 'timeout parameter'),
+            (call_line, 'timeout= keyword')], (
+            label, _rows(source), _routes(source, ('run_gate',)))
 
 
 CALLER_FILLED = '''import subprocess
