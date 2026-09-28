@@ -24,7 +24,8 @@ from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
                      read_stream_data, stream_response)
 from _gc_handshake import (  # noqa: E402
     _GC_DONE, _GC_PREFIX, _GC_REFUSED_CHILD, _GC_TRIGGER,
-    _on_demand_command_gc, _refuse_marker_operations)
+    _on_demand_command_gc, _refusals_logged, _refuse_marker_operations,
+    _routed_marker_operations)
 from daedalus_bridge import atomic_file  # noqa: E402
 
 
@@ -310,19 +311,19 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
         os.utime(fresh, (now + _STAMP_LEASH, now + _STAMP_LEASH))
         os.utime(expired, (now - 15, now - 15))
         with _refuse_marker_operations(command_root, refusals) as parent_log:
+            # Twice, so the second sweep finds a record and the parent's
+            # unlink of it runs at all.
+            _sweep(command_root, served)
             _sweep(command_root, served)
         assert fresh.exists(), 'configured TTL expired a fresh command'
         assert not expired.exists(), expired
-    # Each assertion keeps a silent injector from reading as a passing one:
-    # without a refusal on both sides this proves only that the sweep ran.
-    parent = parent_log.read_text(encoding='utf-8').splitlines()
-    child = (command_root / _GC_REFUSED_CHILD).read_text(
-        encoding='utf-8').splitlines()
-    assert parent, 'the parent never met a refused marker operation'
-    assert child, 'the bridge child never met a refused marker operation'
-    for side, lines in (('parent', parent), ('child', child)):
-        assert any(line.split()[-1].startswith(_GC_PREFIX)
-                   for line in lines), (side, lines)
+    # A wrong set means a routing lost its refusal or one fired where the
+    # handshake does not: non-emptiness per side would read either as a pass.
+    observed = set()
+    for side, log in (('parent', parent_log),
+                      ('child', command_root / _GC_REFUSED_CHILD)):
+        observed |= set(_refusals_logged(log, side))
+    assert observed == _routed_marker_operations(), sorted(observed)
 
 
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
