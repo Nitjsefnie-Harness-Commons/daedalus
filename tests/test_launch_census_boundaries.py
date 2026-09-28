@@ -277,10 +277,10 @@ def test_a_rebinding_in_any_form_stops_the_read_at_both_scopes(tmp):
 
     Module scope and function scope are two axes and only their
     intersection was closed: the pop is gated on a node sitting outside
-    every function body, and the plain `Assign` survived at function
-    scope only because a different reader already collected
-    function-local assignment targets for the parameter-shadow question.
-    The rebinding forms reached neither. This is the pair.
+    every function body, and the plain `Assign` reached function scope
+    only because the parameter reader already collected function-local
+    assignment targets. The rebinding forms reached neither. This is the
+    pair.
 
     A literal is not in this table and never should be: a function that
     makes its own container and puts the deadline in it discharges, which
@@ -322,20 +322,43 @@ NOT_COLLECTED_STILL_DISCHARGES = {
 }
 
 
+TYPE_PARAM_SHAPES = {
+    'def': 'def f[T](u):\n    return T\n',
+    'async def': 'async def f[T](u):\n    return T\n',
+    'class': 'class C[T]:\n    pass\n',
+    'type alias': 'type T[U] = list[U]\n',
+}
+
+
+def test_every_type_parameter_list_is_collected(tmp):
+    """§4.2.1's last bullet, for all four kinds and not only the fallback.
+
+    `type_params` lived in the `else` of an `elif` chain, and a `def`, an
+    `async def` and a `class` all matched earlier — so the bullet was
+    unreachable BY CONSTRUCTION for three of its four carriers, and a
+    `type X[T]` alias skipped the call the same way.
+
+    Reverting the collection turns every row red, which is the point: the
+    3.11 row proves the reader imports and RUNS and says nothing about
+    whether this branch is REACHED, and that distinction is what the last
+    two rounds got wrong.
+    """
+    del tmp
+    if not hasattr(ast, 'TypeAlias'):
+        return
+    for label, source in TYPE_PARAM_SHAPES.items():
+        names = [n for _, n in receiver._rebindings(ast.parse(source))]
+        assert 'T' in names, (label, names)
+
+
 def test_a_read_the_census_cannot_see_through_is_still_discharged(tmp):
-    """The four shapes item 3 and the class rule leave DISCHARGED, on
-    purpose, and this is the control that says so.
+    """Three reads that stay DISCHARGED on purpose, and the control says so.
 
-    Each is a form the readers do not collect: a `match` capture's name is
-    a string on a `MatchAs`, a `global` rebind needs the declaration read,
-    and a class body binds class scope rather than a module name. Where a
-    shape is COLLECTED the rebinding table's ten rows refuse it, and
-    where it is not, the read is left alone rather than refused.
-
-    This is the pair with the ten rows. A widening for any of these four
-    is the change this control is here to catch, and the forms are named
-    by name in the census's disclosure so the next reader does not have to
-    re-derive which is which.
+    A rebinding to the SAME object (`urlopen = urllib.request.urlopen`) is
+    still the read it was; a class body binds class scope and rebinds no
+    module name; and a parameter named `url` shadows nothing. Each is a
+    case where the readers correctly reach "not a rebinding", and a
+    widening for any of them is what this control catches.
     """
     del tmp
     for label, source in NOT_COLLECTED_STILL_DISCHARGES.items():
