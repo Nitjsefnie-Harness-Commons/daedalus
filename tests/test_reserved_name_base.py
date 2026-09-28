@@ -41,6 +41,7 @@ worth sharing with the derivation suite beside it.
 import json
 import subprocess
 import sys
+from itertools import product
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -406,33 +407,28 @@ def test_every_landing_of_two_branches_lands_green(tmp):
     design, not an expectation to be adjusted, and this suite fails on it
     rather than reporting it and passing.
     """
+    # The product, not five nested loops: one seed's zero is a sample, and
+    # the axes are the claim, so they are written as the claim and read
+    # off one enumeration.
+    axes = (('tighten', 'skip'), ('tighten', 'skip'),
+            ('overlap', 'disjoint'), (('a', 'b'), ('b', 'a')),
+            ('rebase', 'merge'))
     verdicts = []
-    counter = 0
-    for a_regen in (True, False):
-        for b_regen in (True, False):
-            for overlap in (True, False):
-                names = ({'a_name': '_shared_helper',
-                          'b_name': '_shared_helper'} if overlap else
-                         {'a_name': '_alpha_helper',
-                          'b_name': '_beta_helper'})
-                a_bound, b_bound = names['a_name'], names['b_name']
-                for order in (('a', 'b'), ('b', 'a')):
-                    for by_rebase in (True, False):
-                        cell = (f'A={"tighten" if a_regen else "skip"}',
-                                f'B={"tighten" if b_regen else "skip"}',
-                                'overlap' if overlap else 'disjoint',
-                                ''.join(order),
-                                'rebase' if by_rebase else 'merge')
-                        counter += 1
-                        result, conflicted = _land_and_check(
-                            tmp, f'cell{counter:02d}', order, by_rebase,
-                            a_name=a_bound, b_name=b_bound,
-                            a_regen=a_regen, b_regen=b_regen)
-                        green = _green(result)
-                        verdicts.append(('|'.join(cell), green, conflicted))
-                        if not green:
-                            print(f'RED {"|".join(cell)}: '
-                                  f'{result.stderr.strip()[:200]}')
+    cells = list(product(*axes))
+    for counter, (a_way, b_way, shape, order, landing) in enumerate(cells, 1):
+        a_bound, b_bound = (('_shared_helper', '_shared_helper')
+                            if shape == 'overlap'
+                            else ('_alpha_helper', '_beta_helper'))
+        by_rebase = landing == 'rebase'
+        cell = (f'A={a_way}', f'B={b_way}', shape, ''.join(order), landing)
+        result, conflicted = _land_and_check(
+            tmp, f'cell{counter:02d}', order, by_rebase, a_name=a_bound,
+            b_name=b_bound, a_regen=a_way == 'tighten',
+            b_regen=b_way == 'tighten')
+        green = _green(result)
+        verdicts.append(('|'.join(cell), green, conflicted))
+        if not green:
+            print(f'RED {"|".join(cell)}: {result.stderr.strip()[:200]}')
     print(f'the generated sweep, {len(verdicts)} cells, one line each:')
     for line, green, conflicted in verdicts:
         print(f'  {line:52} {"GREEN" if green else "RED"}'
