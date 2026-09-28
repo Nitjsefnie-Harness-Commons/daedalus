@@ -59,29 +59,51 @@ WINDOWS_COMMAND_TOO_LONG = 206
 
 # The two children this module launches, and a bound composed for each. They
 # are hang detectors, not health margins: `NODE_WEBSOCKET_PROBE` starts Node,
-# reads one global and writes one of two tokens, and the E2BIG diagnostic
-# runs the interpreter on an empty program. Neither can reach outside the
-# suite, so a bound here is for a WEDGED child, never a slow one.
+# reads one global and writes one of two tokens, and the E2BIG diagnostic runs
+# the interpreter on an empty program. Neither can reach outside the suite, so
+# a bound here is for a WEDGED child, never a slow one.
 #
-# The samples are measured with the machine BUSY, because a wall-clock bound
-# is two margins — the child's real cost, and the runner's busyness — and a
-# bare 10 was measuring only the second. At under 2.5 multiples of a busy run
-# that is what a correct child on a loaded runner was failing against.
+# The samples are measured with the machine BUSY, because a wall-clock bound is
+# two margins — the child's real cost, and the runner's busyness — and only the
+# second is what a bare number measures. A sample that cannot express the
+# second is a sample of the first, which is what the literal was: the bare `10`
+# this replaces sat at 3.4x `NODE_PROBE`'s own slowest busy sample, and at
+# 2.8x `MINIMAL_SPAWN`'s, which is the site that record does not belong to.
+# Both are tight, and a ratio that thin is the argument for not typing a
+# number. No run in either band crossed the literal, so nothing here claims
+# one did; that is the edge this change cuts at, and the ratio is its width.
 #
-#   NODE_PROBE_SAMPLES_S      idle then busy, the WebSocket capability probe
-#   NODE_PROBE_SLOWEST_S      2.944  max of those
+# The band is one busy process per core on a 12-core host. `MINIMAL_SPAWN` also
+# records an oversubscribed band, and that is where the one real crossing in
+# this module is: at three processes per core the same child reached 15.9s,
+# which is past the 10 it used to wear, and a detector that ignored that band
+# would be the new false alarm.
+#
 #   SITE_HANG_MULTIPLE        5      a wedged child, not a slow one
+#   NODE_PROBE_SAMPLES_S      2.944  max, idle then busy
 #   NODE_PROBE_DEADLINE_S     15     round(2.944 * 5)
+#   MINIMAL_SPAWN_SAMPLES_S   15.904 max, idle then busy then oversubscribed
+#   MINIMAL_SPAWN_DEADLINE_S  80     round(15.904 * 5)
 #
-#   MINIMAL_SPAWN_SAMPLES_S   idle then busy, `python -c ''`
-#   MINIMAL_SPAWN_SLOWEST_S   0.948  max of those
-#   MINIMAL_SPAWN_DEADLINE_S  5      round(0.948 * 5)
+# `MINIMAL_SPAWN` is also the one site here with no runtime stall control, and
+# that is a stated limit rather than an oversight: it only runs when a launch
+# fails with E2BIG, which no suite produces, so no control in the tree can
+# watch its child, which is why a stand-in it can be driven with is the whole
+# of what covers it. What holds its FIGURE is two rules in
+# `tests/test_node_launch_routing.py`: one refuses a deadline that is not
+# `round()`ed from a recorded table and the shared multiple, and the other
+# refuses a table whose slowest sample would compose a deadline under a
+# second. The second is the one that answers a fabricated table, because the
+# first can be satisfied by arithmetic on a table nobody measured.
 NODE_PROBE_SAMPLES_S = (0.654, 0.300, 0.173, 0.379,
                         2.944, 0.846, 1.899, 0.984)
 NODE_PROBE_SLOWEST_S = max(NODE_PROBE_SAMPLES_S)
 NODE_PROBE_DEADLINE_S = round(NODE_PROBE_SLOWEST_S * SITE_HANG_MULTIPLE)
-MINIMAL_SPAWN_SAMPLES_S = (0.288, 0.248, 0.681, 0.656,
-                           0.948, 0.336, 0.329, 0.751)
+MINIMAL_SPAWN_SAMPLES_S = (0.533, 0.746, 0.642, 0.413, 0.209, 1.358,
+                           2.294, 3.634, 0.674, 0.354, 0.641, 2.123,
+                           6.304, 3.110,
+                           14.585, 2.584, 8.424, 7.282, 14.065, 15.904,
+                           2.874, 8.076)
 MINIMAL_SPAWN_SLOWEST_S = max(MINIMAL_SPAWN_SAMPLES_S)
 MINIMAL_SPAWN_DEADLINE_S = round(MINIMAL_SPAWN_SLOWEST_S * SITE_HANG_MULTIPLE)
 
@@ -113,6 +135,15 @@ def _raise_start_failure(label, executable, why):
                 f'{label} command was too large to start: {executable}; '
                 'the cause is undetermined because a minimal spawn failed'
             ) from minimal_failure
+        except subprocess.TimeoutExpired as minimal_failure:
+            # BEFORE the `SubprocessError` arm, which this one shadows:
+            # `TimeoutExpired` IS a `SubprocessError`, and a message saying
+            # the cause is undetermined when it is a `TimeoutExpired` with a
+            # known deadline is the defect this branch exists to remove. The
+            # detector's own failure carries the child and its output.
+            raise node_bound_expiry(
+                minimal_failure, MINIMAL_SPAWN_DEADLINE_S,
+                f' while diagnosing {label}: {executable}') from why
         except subprocess.SubprocessError as minimal_failure:
             raise AssertionError(
                 f'{label} command was too large to start: {executable}; '

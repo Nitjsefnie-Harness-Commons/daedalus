@@ -7,26 +7,25 @@ that is the default. A site that does not — a real-browser capability
 probe, a GM storage harness over the shipped scripts — keeps its bound at
 its own call site, because reaching the shared launcher puts the module
 and everything it calls inside `tests/_launch_census.py`'s audited path
-(`path_functions`, below), and a site that pulls that in inherits the
-audit of nineteen modules it never asked for.
+(`path_functions`, below): nineteen modules this branch never asked for.
 
 What neither shape may be is a wall-clock literal. A bare `10` measures
-the runner's busyness and nothing about the child, and that is what failed
-correct children on a loaded CI runner. A call-site bound is a detector of
-exactly the same form: a table of what the child really costs, the
-slowest sample taken from it, and a multiple above that.
+the runner's busyness and nothing about the child. A call-site bound is a
+detector of the same form: a table of what the child costs, the slowest
+sample from it, and a multiple above that.
+
+The success near the deadline is the site itself: every child here runs in a
+suite run except the E2BIG probe, so seven of the eight figures are exercised
+in the PASSING path and one is not.
 
 This is a shared helper rather than a suite because two suites need the
-walk and neither owns it: one holds the rule enforced over the real tree,
-the other holds the shapes the walk has to read and the shapes it must
-refuse. A sibling SUITE import is a seam the repository refuses — see
-`tests/test_suite_import_boundaries.py` — so the walk lives here and both
-suites read it.
+walk and neither owns it: one holds the rule over the real tree, the
+other the shapes the walk must read and refuse. A sibling SUITE import is
+a seam the repository refuses — see `tests/test_suite_import_boundaries.py`
+— so the walk lives here.
 
 It is named with an underscore, so it is a shared helper by that alone and
-owns every name it declares. `TESTS`, `OTHER`, `UNRESOLVED` and `_sweep` are
-each bound by an untouched sibling, so the names here are suffixed to say
-what they are for this walk rather than to collide with them.
+owns every name it declares; the names it shares are suffixed.
 """
 import ast
 import sys
@@ -50,28 +49,32 @@ _TESTS_DIR = Path(__file__).resolve().parent
 #   SITE_HANG_MULTIPLE  5   a wedged child, not a slow one
 #
 # The samples a site composes its figure from are measured with the machine
-# BUSY, not idle, and that is the whole difference between this and the
-# literal it replaces. A wall-clock bound is two margins — the child's real
-# cost, and the runner's busyness — and only the second is what a bare number
-# measures. A table of idle samples hides that margin in the multiple, where
-# it is an assumption; measuring under load puts it in the table, where it is
-# evidence. At 2 the literals these replace were already inside two multiples
-# of a busy run, which is the measurement of why they flaked correct children.
+# BUSY, not idle: a wall-clock bound is two margins — the child's real cost
+# and the runner's busyness — and only the second is what a bare number
+# measures, so idle samples hide that margin in the multiple.
+#
+# What that buys is a ratio, because a ratio is what it is: the literals these
+# replace sat at 1.8x to 3.4x the slowest busy sample each site recorded —
+# thin, and the whole argument for not typing a number. No run in that band
+# CROSSED them, so nothing here claims it did. The one crossing this branch
+# found is the E2BIG child in `tests/_realbrowser.py`, whose table records it.
 SITE_HANG_MULTIPLE = 5
 
 
 class NodeBoundExceeded(AssertionError):
-    """A Node child did not finish inside the bound its own site composed.
+    """A child did not finish inside the bound its own site composed.
 
     An `AssertionError`, so it reads as the test failure it is, and named
     because a bare `subprocess.TimeoutExpired` is the other half of the
     defect: it names a figure nobody can re-derive, and it carries the
-    child's output as BYTES even when the launch asked for text. Carries
+    child's output as BYTES even when the launch asked for text. It carries
     the child, the deadline and that output, because a child which stopped
     answering is exactly the case where its partial output is all there is.
+    `context` names the site when the child is a diagnostic rather than the
+    work itself, and that diagnostic is an interpreter, not `node`.
     """
 
-    def __init__(self, command, deadline_s, stdout, stderr):
+    def __init__(self, command, deadline_s, stdout, stderr, context=""):
         self.command = command
         self.deadline_s = deadline_s
         self.stdout = stdout
@@ -81,9 +84,9 @@ class NodeBoundExceeded(AssertionError):
         # first.
         child = ' '.join(str(part)[:60] for part in command or ())
         super().__init__(
-            f'a Node child did not finish within {deadline_s}s and was '
+            f'a harness child did not finish within {deadline_s}s and was '
             f'killed; this bound is a hang detector, not a health margin, '
-            f'so nothing correct reaches it.\n'
+            f'so nothing correct reaches it{context}.\n'
             f'  child: {child}\n'
             f'  deadline: {deadline_s}s\n'
             f'  stdout: {stdout[:2000]!r}\n'
@@ -104,17 +107,18 @@ def _as_text(stream):
     return stream.decode('utf-8', 'replace')
 
 
-def node_bound_expiry(why, deadline_s):
+def node_bound_expiry(why, deadline_s, context=""):
     """A site's `TimeoutExpired` as this module's named failure.
 
     The figure beside `why` is the composed deadline that actually fired, so
     the report names the number a maintainer re-derives rather than the one
-    the call site happened to pass.
+    the call site happened to pass. `context` is for a site whose child is a
+    DIAGNOSTIC — the E2BIG probe names which command it was diagnosing.
     """
     return NodeBoundExceeded(
         getattr(why, 'cmd', None), deadline_s,
         _as_text(getattr(why, 'stdout', None)),
-        _as_text(getattr(why, 'stderr', None)))
+        _as_text(getattr(why, 'stderr', None)), context)
 
 
 # The modules the sweep does not walk, each for its own reason rather than
