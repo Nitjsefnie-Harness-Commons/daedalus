@@ -299,6 +299,7 @@
     "_decoded_mapping_entry": {"python": ["tests/_yamlread.py"]},
     "_default_key": {"python": ["tests/_jsroute_sweep.py"]},
     "_deferred_signature": {"python": ["tests/_pyroute_values.py"]},
+    "_defines": {"python": ["tests/_coverage_authority_scan.py"]},
     "_delete": {"python": ["tests/_mcp_tool_commands.py"]},
     "_depth_at": {"python": ["tests/_command_type_readers.py"]},
     "_derive": {"python": ["tests/_reserved_names.py"]},
