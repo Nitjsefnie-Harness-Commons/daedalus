@@ -241,6 +241,7 @@
 !/scripts/ci/gate_freshness.py
 !/scripts/ci/js_coverage.py
 !/scripts/ci/js_lines.py
+!/scripts/ci/js_module_coverage.py
 !/scripts/ci/line_lengths.py
 !/scripts/ci/plan_timed_matrix.py
 !/scripts/ci/ratchet.py
@@ -620,6 +621,7 @@
 !/tests/test_js_coverage.py
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
+!/tests/test_js_module_coverage.py
 !/tests/test_jsread_mask.py
 !/tests/test_launch_arm_cuts.py
 !/tests/test_launch_arms.py

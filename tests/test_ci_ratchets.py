@@ -23,6 +23,9 @@ THRESHOLDS_PATH = ROOT / '.github' / 'ci-thresholds.json'
 RATCHET_PATH = ROOT / 'scripts' / 'ci' / 'ratchet.py'
 SIZE_PATH = ROOT / 'scripts' / 'ci' / 'size_baseline.py'
 LINES_PATH = ROOT / 'scripts' / 'ci' / 'line_lengths.py'
+JS_MODULE_PATH = ROOT / 'scripts' / 'ci' / 'js_module_coverage.py'
+JS_COVERAGE_PATH = ROOT / 'scripts' / 'ci' / 'js_coverage.py'
+JS_LINES_PATH = ROOT / 'scripts' / 'ci' / 'js_lines.py'
 
 
 def _thresholds():
@@ -48,6 +51,7 @@ def _ratchet_document(python=(80.0, 78.5), javascript=(35.5, 34.0)):
         },
         'long_line_baseline': {},
         'type_error_baseline': {},
+        'js_coverage_baseline': {},
     }
 
 
@@ -299,6 +303,7 @@ def _seed_publisher_tree(repo, data):
     (repo / 'tests').mkdir()
     _thresholds().write(repo / '.github' / 'ci-thresholds.json', data)
     for path in (RATCHET_PATH, SIZE_PATH, LINES_PATH,
+                 JS_MODULE_PATH, JS_COVERAGE_PATH, JS_LINES_PATH,
                  ROOT / 'scripts' / 'ci' / 'thresholds.py'):
         shutil.copy2(path, repo / 'scripts' / 'ci' / path.name)
     (repo / 'tests' / 'test_mcp_server.py').write_text(
@@ -497,8 +502,9 @@ def test_real_publisher_step_changed_summary_and_noop_outputs_are_exact(tmp):
     _repo, _path, _before, noop_output, noop_summary, done = noop
     assert done.returncode == 0, (done.stdout, done.stderr)
     assert noop_output.read_text(encoding='utf-8') == 'changed=false\n'
-    assert ('no raise; no module shrank and no file lost an over-limit '
-            'line.') in noop_summary.read_text(encoding='utf-8')
+    assert ('no raise; no module shrank, no file lost an over-limit '
+            'line and no module lost an uncovered JavaScript line.'
+            ) in noop_summary.read_text(encoding='utf-8')
 
 
 def test_publisher_ratchet_and_commit_conditions_keep_authority_boundary(tmp):

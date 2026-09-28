@@ -72,6 +72,9 @@ def _assert_document_contract(path):
     typed = thresholds.type_error_baseline(data)
     assert typed == data['type_error_baseline']
     assert all(count > 0 for count in typed.values())
+    modules = thresholds.js_coverage_baseline(data)
+    assert modules == data['js_coverage_baseline']
+    assert all(count > 0 for count in modules.values())
     result = _check(path)
     assert result.returncode == 0, (result.stdout, result.stderr)
     return data
@@ -107,7 +110,8 @@ def test_required_and_unknown_fields_are_rejected(tmp):
     path = Path(tmp) / 'thresholds.json'
     cases = []
     for key in ('schema_version', 'coverage', 'module_size_baseline',
-                'long_line_baseline', 'type_error_baseline'):
+                'long_line_baseline', 'type_error_baseline',
+                'js_coverage_baseline'):
         value = _valid()
         del value[key]
         cases.append((value, f'missing field: {key}'))
@@ -244,7 +248,7 @@ def test_baseline_paths_and_counts_are_safe_and_positive(tmp):
         _write_json(path, candidate)
         _assert_refused(path, 'unsafe module path')
     for member in ('module_size_baseline', 'long_line_baseline',
-                   'type_error_baseline'):
+                   'type_error_baseline', 'js_coverage_baseline'):
         for count in (True, 0, -1, 1.5, '10'):
             candidate = _valid()
             candidate[member] = {'tests/x.py': count}
@@ -279,6 +283,10 @@ def test_nonobject_baseline_and_missing_threshold_file_are_refused(tmp):
     candidate['type_error_baseline'] = []
     _write_json(path, candidate)
     _assert_load_refused(path, 'type_error_baseline must be an object')
+    candidate = _valid()
+    candidate['js_coverage_baseline'] = []
+    _write_json(path, candidate)
+    _assert_load_refused(path, 'js_coverage_baseline must be an object')
     _assert_load_refused(Path(tmp) / 'missing.json', 'cannot read thresholds:')
 
 
@@ -295,6 +303,8 @@ def test_public_accessors_return_validated_data(tmp):
         == data['long_line_baseline']
     assert thresholds.type_error_baseline(data) \
         == data['type_error_baseline']
+    assert thresholds.js_coverage_baseline(data) \
+        == data['js_coverage_baseline']
     try:
         thresholds.coverage(data, 'ruby')
     except ValueError as error:
