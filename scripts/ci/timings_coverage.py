@@ -132,13 +132,19 @@ all. Two days of a collapsed run, a rate limit or an Actions outage
 would have been a repo-wide CI outage.
 
 That band is the price of the tier, and it is a real one. A BIASED file
-at 10.9% estimated is between 1.10x out (construction B) and 3.45x
-(construction A) and is published with a note instead of refused. The
-band is the part no share can close and `MIN_RECORDED_SKEW` only partly
-does: between a skew of 2.0 and 2.34 a biased plan is 2.3x to 4.8x out
-and is still published, because its recorded set still carries enough
-tail to look like a sample. That is a priced acceptance and the
-constant carries the numbers, the trade and the reason it is not closed
+at 10.9% estimated is between 1.10x out (construction B, 40 arrivals)
+and 3.45x (construction A, 48 dropped, 14.6% estimated) -- two shapes
+at the point each crosses -- and is published with a note instead of
+refused. The band is the part no share can close and `MIN_RECORDED_SKEW`
+only partly does: between a skew of 2.0 and 2.34 a biased plan is 4.8x
+to 6.5x out and is still published -- 4.82x at the 260 lightest and
+6.49x at the 240, the two rows of the live-tree construction under
+`MIN_RECORDED_SKEW` whose skew falls in that interval, and 4.84x and
+6.53x in the file's own 328 above, which is the same shape measured
+over the file rather than over the tree -- because its recorded set
+still carries enough tail to look like a sample. That is a priced
+acceptance and the constant carries the numbers, the trade and the
+reason it is not closed
 -- which is a number about this tree, not about a distribution a
 nightly refresh re-measures. The alternative -- refusing the drifted
 file too -- is not a stricter guard but a broken one, because the
@@ -195,10 +201,12 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 # lightest, 8.29x out, published behind a summary reading
 # `heaviest/median 1.000` -- sits at 1.87 and is refused, and so is
 # everything more truncated. The residual band is 2.0 to 2.34, which is
-# 2.3x to 4.8x out, and it is a PRICED ACCEPTANCE rather than an
-# oversight: a plan in that band is lopsided, and every suite in it
-# still runs, so a lopsided matrix and no matrix are not comparable
-# outcomes. Ruled by the maintainer.
+# 4.8x to 6.5x out -- the 260 lightest at 4.82x and the 240 lightest at
+# 6.49x, the only two rows above whose skew falls in that interval --
+# and it is a PRICED ACCEPTANCE rather than an oversight: a plan in
+# that band is lopsided, and every suite in it still runs, so a
+# lopsided matrix and no matrix are not comparable outcomes. Ruled by
+# the maintainer.
 #
 # 2.2 WOULD BUY the 240-lightest file at 6.49x, and IS NOT TAKEN, for a
 # reason that is NOT the drift path. It is tempting to read 2.2 as
