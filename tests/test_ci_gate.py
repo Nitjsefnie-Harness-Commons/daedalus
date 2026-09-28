@@ -161,6 +161,11 @@ def test_the_expectation_has_exactly_one_definition(tmp):
     for path in sorted(skill.iterdir()):
         if path.suffix != '.py':
             continue
+        # `missing_required` is exempt from no alias and no import:
+        # `test_each_caller_reaches_the_predicate_through_ci_gate` needs
+        # a caller to reach it through `ci_gate`, and one that binds the
+        # name itself reds there. `REQUIRED_WORKFLOWS` is exempt, being
+        # the same object under a second name.
         for file, name in _module_declarations(path, watched,
                                                always=('missing_required',)):
             found.append(f'{file} {name}')
@@ -318,7 +323,7 @@ def _refusing_wait(caller, runs):
 
     The head is made CONFLICTING so the wait refuses at once rather than
     waiting out a grace, and no clock really advances: the bound is read
-    through `_frozen_ci_wait_clock`, so a timeout here would be a value
+    through `_frozen_wait_clock`, so a timeout here would be a value
     rather than a margin.
     """
     setattr(caller, 'runs_on', lambda repo, sha: runs)
@@ -391,23 +396,27 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
 
     A copy pasted back into a caller is the drift this branch exists to
     end, and it survives every other control: a behaviourally identical
-    private `_judged` in `ci_wait.py` leaves the 81 pre-existing tests in
-    the four suites that read these modules green.
+    private `_judged` in `ci_wait.py` leaves every other test in the four
+    suites that read these modules green.
 
     The first half refuses a module-scope definition of any of the four
-    names outside `ci_gate`, whatever nests it and whatever form it takes,
-    and accepts an alias bound to the authority - the pattern `ci_wait.py`
-    already uses for `REQUIRED_WORKFLOWS`, and what `_is_an_alias` is
-    for. The second pins the binding: the object `ci_wait` binds, if it
-    binds one, is ci_gate's, which is what an alias or a plain import
-    gives and what a copy does not.
+    names outside `ci_gate`, whatever nests it and in every binding form
+    the symbol table reports, and accepts an alias bound to the authority
+    - the pattern `ci_wait.py` already uses for `REQUIRED_WORKFLOWS`, and
+    what `_is_an_alias` is for. The one binding it does not refuse is an
+    import-form alias (`import os as _judged`), which is someone else's
+    object under a misleading name rather than a second filter, and the
+    second half is what catches that - in `ci_wait.py`, which is the
+    caller that binds the names at all. `watch_all.py` imports none of
+    them, so a filter name bound there to a foreign object is green here.
 
     What it does not establish: that a caller REACHES the filter.
-    `ci_wait.py` with the import deleted and two dangling call sites is
-    green here, because an unbound name and an attribute read look alike
-    to `getattr`; two controls in this file and 26 in `test_ci_wait.py`
-    are what catch that. And it cannot see a copy pasted under a name none
-    of the four carries, which is the standing limit of watching names.
+    Deleting the filter import and leaving the call sites dangling is
+    green here, because `getattr`'s default cannot tell an unbound name
+    from an attribute read; the controls beside this one are what catch
+    that, as is every case in `test_ci_wait.py` that reaches the verdict.
+    Nor can it see a copy pasted under a name none of the four carries,
+    which is the standing limit of watching names.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
