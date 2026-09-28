@@ -167,14 +167,28 @@ def _owners(entry):
     return {owner for owners in entry.values() for owner in owners}
 
 
-def _inside_base(*entries, covered):
-    """True when every module a discrepancy names is inside the base.
+def _inside_base(*entries, covered, live):
+    """True when a discrepancy is a VIOLATION. The polarity is the trap.
+
+    `True` means the check refuses; it does NOT mean the discrepancy is
+    inside the base. Reading the name the other way round inverts the
+    control, which is easy to do and was done twice while landing this.
 
     This is the WHOLE of the scoping, and it is one predicate. A
-    discrepancy is a violation iff every module involved in it --
+    discrepancy is a violation when every module involved in it --
     recorded OR derived, old OR new -- is in `covered`, the paths
-    present in the tree of the commit that last wrote the committed
-    document.
+    present in the tree of the commit that last wrote the document; and
+    also when a module it involves is neither in the base NOR on disk.
+
+    That second clause is where the exemption ends. `covered` alone
+    forgave any claim the document made about a path the base never
+    carried, including a real covered name REASSIGNED to a path that
+    does not exist -- a two-line hand edit of a generated file, green,
+    with equal counts printed over it. A module outside the base that is
+    nevertheless LIVE is a module another branch added, and forgiving
+    its names is the composition the scoping is for. A module that is
+    outside the base and not on disk is nobody's module, and a document
+    naming it is making a claim about nothing.
 
     One predicate in one direction is not a simplification. The first
     attempt at this scoped each kind on a different side: `absent` on
@@ -186,18 +200,20 @@ def _inside_base(*entries, covered):
     scope, so it cannot switch the control off either.
     """
     involved = set().union(*(_owners(one) for one in entries if one))
-    return involved <= covered
+    outside = involved - covered
+    return involved <= covered or not outside <= live
 
 
-def violations(committed, derived, covered):
+def violations(committed, derived, covered, live):
     """The names the committed document and a fresh derivation disagree on.
 
     `absent` is derived and not committed, `stale` is committed and no
     longer derived, and `owners` is a name both carry with a different
     owner set -- a module renamed or a second module taking a name the
     first owned alone. Each is reported through `_inside_base`, so a
-    module the base's tree does not carry is a reason the check is not
-    asked about the name at all.
+    module the base's tree does not carry but the checkout still tracks
+    is a reason the check is not asked about the name at all. `live` is
+    the paths the checkout currently tracks.
 
     A DELETION without regeneration is a violation, deliberately. It
     fires deterministically rather than order-dependently, so it costs
@@ -208,13 +224,16 @@ def violations(committed, derived, covered):
     new = derived['names']
     return {
         'absent': sorted(name for name in set(new) - set(old)
-                         if _inside_base(None, new[name], covered=covered)),
+                         if _inside_base(None, new[name], covered=covered,
+                                         live=live)),
         'stale': sorted(name for name in set(old) - set(new)
-                        if _inside_base(old[name], None, covered=covered)),
+                        if _inside_base(old[name], None, covered=covered,
+                                        live=live)),
         'owners': sorted(name for name in set(old) & set(new)
                          if old[name] != new[name]
                          and _inside_base(old[name], new[name],
-                                          covered=covered)),
+                                          covered=covered,
+                                          live=live)),
     }
 
 
@@ -270,7 +289,7 @@ def main(argv=None):
         inside = helper.relative_to_tree(args.tree, args.artifact)
         helper.require_history(args.tree, inside)
         base, covered = helper.base_files(args.tree, inside)
-        found = violations(committed, derived, covered)
+        found = violations(committed, derived, covered, set(sources))
         if not any(found.values()):
             # What was compared, and the base it was compared against.
             # Not "N names match": a name the base does not cover is

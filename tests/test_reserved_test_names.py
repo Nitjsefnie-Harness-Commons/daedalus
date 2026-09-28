@@ -333,7 +333,8 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
     policy = _contract()
     _base, covered = artifact_base.base_files(
         ROOT, artifact_base.relative_to_tree(ROOT, ARTIFACT))
-    found = policy.violations(policy.load(), policy.document(), covered)
+    found = policy.violations(policy.load(), policy.document(), covered,
+                              set(_live_sources()))
     detail = '\n'.join(f'{kind}: {rows}' for kind, rows in found.items()
                        if rows)
     assert not any(found.values()), (
@@ -406,7 +407,8 @@ def test_a_noop_tighten_writes_nothing(tmp):
     assert checked.stderr == '', checked.stderr
     assert len(policy.violations(policy.load(artifact),
                                  policy.document(_live_sources_of(tree)),
-                                 _base_of(tree))) == 3
+                                 _base_of(tree),
+                                 set(_live_sources_of(tree)))) == 3
 
 
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
@@ -687,8 +689,8 @@ def test_the_script_docstring_carries_the_printed_remedy(tmp):
     assert ' '.join(policy.STALE_REMEDY.split()) in doc, policy.STALE_REMEDY
     # The kinds a refusal prints, and that there is no fourth: the
     # document states no scope, so a caller states the base instead.
-    assert sorted(policy.violations({'names': {}}, {'names': {}}, set())) == [
-        'absent', 'owners', 'stale']
+    assert sorted(policy.violations({'names': {}}, {'names': {}}, set(),
+                                    set())) == ['absent', 'owners', 'stale']
 
 
 def main():

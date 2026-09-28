@@ -25,9 +25,11 @@ The three shapes, and what each must do:
 (c) matters as much as (b): a check that refuses anything with a
 worktree git directory would pass this suite and be useless.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
@@ -81,16 +83,71 @@ def _clone(root, source, name, depth=None):
     return Path(root) / name
 
 
-def test_a_shallow_clone_is_refused(tmp):
-    clone = _clone(tmp, _origin(tmp), 'shallow', depth=1)
-    assert artifact_base.is_shallow(clone), 'the fixture is not shallow'
+def _refusal(clone):
+    """The refusal a shallow checkout gets, as text."""
     try:
         artifact_base.require_history(clone, ARTIFACT)
     except artifact_base.ShallowHistory as error:
-        assert 'fetch-depth: 0' in str(error), str(error)
-        assert 'GITHUB_JOB is unset' in str(error), str(error)
-    else:
-        raise AssertionError('a shallow clone was accepted')
+        return str(error)
+    raise AssertionError('a shallow checkout was accepted')
+
+
+# The two branches the refusal takes on `GITHUB_JOB`, pinned in FULL. The
+# VARIABLE IS SET BY THIS TEST, never inherited: GitHub Actions sets it for
+# every step, so an assertion that reads the ambient value is green on a
+# developer's box and red on every runner, which is how this suite came to
+# be red in fourteen CI legs while passing everywhere it was run by hand.
+# The whole sentence is pinned, not a fragment, so a reworded or truncated
+# remedy on EITHER branch is caught rather than one of them drifting
+# unremarked -- and the two are built to differ, so neither pin can be a
+# tautology over the other.
+JOB_PRESENT = "job 'reserved-names'"
+JOB_ABSENT = (
+    'the job that ran this (GITHUB_JOB is unset, so this refusal cannot name '
+    'it -- read it from the run that produced it)')
+
+
+def _expected(root, named):
+    return (f'cannot resolve the base of {ARTIFACT}: the checkout at {root} '
+            f'is shallow, so no commit in it is known to be the one that last '
+            f'wrote that artifact. {artifact_base.SHALLOW_REMEDY}. '
+            f'Affected: {named}')
+
+
+def test_both_branches_of_the_refusal_name_the_job_and_carry_the_remedy(tmp):
+    """Both wordings, driven in-process, each pinned in full.
+
+    The remedy token is a PROMISE TO ANOTHER SEAT: a control stacked on
+    this module asserts `SHALLOW_REMEDY` is in the refusal, so a branch
+    that worded itself without the token would turn THEIR suite red on
+    CI for exactly the reason this one was. Both branches are therefore
+    asserted to carry it, not only the one this box happens to take.
+    """
+    clone = _clone(tmp, _origin(tmp), 'shallow', depth=1)
+    assert artifact_base.is_shallow(clone), 'the fixture is not shallow'
+    seen = {}
+    for job in ('reserved-names', None):
+        environ = dict(os.environ)
+        if job is None:
+            environ.pop('GITHUB_JOB', None)
+        else:
+            environ['GITHUB_JOB'] = job
+        with mock.patch.dict(os.environ, environ, clear=True):
+            seen[job] = _refusal(clone)
+    assert seen['reserved-names'] == _expected(clone, JOB_PRESENT), \
+        seen['reserved-names']
+    assert seen[None] == _expected(clone, JOB_ABSENT), seen[None]
+    for job, text in seen.items():
+        assert artifact_base.SHALLOW_REMEDY in text, (job, text)
+        assert 'fetch-depth: 0' in text, (job, text)
+    # And the two really are different, so neither pin is a tautology.
+    assert seen['reserved-names'] != seen[None]
+
+
+def test_a_shallow_clone_is_refused(tmp):
+    clone = _clone(tmp, _origin(tmp), 'shallow', depth=1)
+    assert artifact_base.is_shallow(clone), 'the fixture is not shallow'
+    assert artifact_base.SHALLOW_REMEDY in _refusal(clone)
 
 
 def test_a_linked_worktree_of_a_shallow_clone_is_refused(tmp):
