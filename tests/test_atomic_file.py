@@ -3,6 +3,7 @@
 import os
 import sys
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -149,16 +150,18 @@ def test_a_refusal_that_never_clears_costs_the_whole_attempt_budget(tmp):
         attempts.append((src, dst))
         raise PermissionError(13, 'injected sharing violation')
 
-    module.os = _PublishSpy(always_refused)
-    raised = None
-    try:
-        module.replace_atomically(src, dst)
-    except PermissionError as error:
-        raised = error
+    with mock.patch.object(module.os, 'replace', always_refused):
+        raised = None
+        try:
+            module.replace_atomically(src, dst)
+        except PermissionError as error:
+            raised = error
 
     assert isinstance(raised, PermissionError), raised
-    assert len(attempts) == module._RETRY_ATTEMPTS, (
-        len(attempts), module._RETRY_ATTEMPTS)
+    # A literal, not the constant the subject reads: reading `_RETRY_ATTEMPTS`
+    # off the module moves both sides of this comparison together, so a plant
+    # that changes the constant passes a test written to police it.
+    assert len(attempts) == 5, attempts
     assert not dst.exists()
 
 

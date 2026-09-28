@@ -26,9 +26,9 @@ def _retrying(perform: Callable[[], _Result]) -> _Result:
     fixing anything.
 
     The sleeps run while the caller holds whatever locks it holds, so the
-    wait is bounded at roughly `_RETRY_ATTEMPTS * _RETRY_DELAY` (80 ms) per
-    retrying call. The last attempt stands outside the loop because a
-    refusal to it is the answer, not another wait.
+    wait is bounded at roughly `(_RETRY_ATTEMPTS - 1) * _RETRY_DELAY`
+    (80 ms) per retrying call. The last attempt stands outside the loop
+    because a refusal to it is the answer, not another wait.
     """
     for _ in range(_RETRY_ATTEMPTS - 1):
         try:
