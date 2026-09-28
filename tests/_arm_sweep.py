@@ -281,7 +281,8 @@ def _child_verdicts(tests_dir):
 
 
 def arm_sweep(tmp, arms):
-    """`{arm: {'removed', 'promoted', 'moved', 'crash', 'timed_out'}}`.
+    """`{arm: {'removed', 'promoted', 'moved', 'crash', 'timed_out',
+    'refused'}}`.
 
     `arms` is read from the caller rather than imported, so a suite that
     narrows the sweep to two arms gets exactly those two. The mutation
@@ -293,7 +294,15 @@ def arm_sweep(tmp, arms):
     another value, because a reader must be able to tell the two apart.
     `timed_out` is a child that did not answer at all, which is neither:
     it moves nothing and proves nothing, so every consumer has to reject
-    it rather than read the empty `moved` as an answer.
+    it rather than read the empty `moved` as an answer. `refused` is a
+    cut the analyser could not be asked to make, which is the fourth
+    answerable outcome and not an error in the sweep: a `cut` spec whose
+    line no longer names the clause it was written for lands on whatever
+    is there instead, and the shape of the node it then finds decides
+    whether the walk refuses, raises, or -- worst -- succeeds on the
+    wrong clause. All of those are a finding naming the arm and the
+    spec, because the alternative is a sweep that dies on the first
+    mis-keyed row and says nothing about the 149 after it.
     """
     from _owned_writes import clear_bytecode, copy_test_tree
 
@@ -303,14 +312,19 @@ def arm_sweep(tmp, arms):
     baseline = _child_verdicts(target)
     assert baseline is not None, 'the unmutated child did not answer'
     findings = {}
-    for arm_id, file_name, _, spec, _, _, _, evidence in arms:
+    for arm_id, file_name, arm_line, spec, _, _, _, evidence in arms:
         path = target / file_name
         original = path.read_text(encoding='utf-8')
         try:
             mutated, removed, promoted = cut_arm(original, spec)
-        except ValueError as error:
-            findings[arm_id] = {'removed': '', 'promoted': '', 'moved': [],
-                                'crash': [], 'refused': str(error)}
+        # Which node a mis-keyed line lands on decides how the cut fails,
+        # and the shape is not enumerable, so the type is named in the
+        # refusal rather than left to be one a reader has to guess at.
+        except Exception as error:  # pylint: disable=broad-except
+            findings[arm_id] = {
+                'removed': '', 'promoted': '', 'moved': [], 'crash': [],
+                'refused': (f'{file_name}:{arm_line} {arm_id} {spec}: '
+                            f'{type(error).__name__}: {error}')}
             continue
         path.write_text(mutated, encoding='utf-8')
         clear_bytecode(target)
