@@ -11,8 +11,9 @@ A block is read as a PROPERTY of the field that holds it rather than as a
 list of the node types that happen to carry one, so a block form nobody has
 thought of is the same read again. A statement leaves its block when every
 path through it leaves, and the containers that may or may not run are
-excluded from that with the runtime's reason beside each — which is what
-keeps a `try`, a `with`, a loop and a `match` from reading as barriers.
+answered by the same fall-through, with the runtime's reason beside it —
+which is what keeps a `try`, a `with`, a loop and a `match` from reading as
+barriers.
 """
 import ast
 
@@ -20,14 +21,13 @@ import ast
 # where it stands, so nothing after them runs.
 _BARRIERS = (ast.Raise, ast.Return, ast.Break, ast.Continue)
 
-# The containers that may run and may not. None of them is a barrier, and
-# each is here for the reason it is not one: a handler may CATCH and
-# execution continues past a `try` (`except*` is the same `try`); a context
-# manager's `__exit__` may swallow and execution continues past a `with`,
-# which is what `contextlib.suppress` is for; a loop may run zero times; a
-# `match` may match no case at all.
-_MAY_CONTINUE = (ast.Try, ast.With, ast.AsyncWith, ast.For, ast.AsyncFor,
-                 ast.While, ast.Match)
+# Only those four, and two limits are declared here rather than answered
+# there. A call that provably raises — `sys.exit()`, `os._exit()`, `exit()` —
+# is not a barrier, so the code after it stays in the scan set; nor is a
+# `return` inside a `finally`, which really does leave the frame, so the
+# tail after that is dead and the rule does not find it. Both err the same
+# way, keeping a position the runtime cannot reach instead of dropping one
+# it can, and that is the direction this whole module is written to err in.
 
 
 def dead_nodes(tree):
@@ -102,8 +102,15 @@ def _leaves(statement, dead):
     if isinstance(statement, ast.If) and statement.orelse:
         return (_leaves(statement.body[-1], dead)
                 and _leaves(statement.orelse[-1], dead))
-    if isinstance(statement, _MAY_CONTINUE):
-        return False
-    # Everything else is an expression, a store, an import or a declaration:
-    # it evaluates and control reaches the next statement.
+    # The containers that may run and may not fall through here as well, each
+    # for the runtime's reason it is not a barrier: a handler may CATCH and
+    # execution continues past a `try` (`except*` is the same `try`), and a
+    # `try` with no handler may still run to completion, because the walk
+    # cannot know its body always raises; a context manager's `__exit__` may
+    # swallow and execution continues past a `with`, which is what
+    # `contextlib.suppress` is for; a loop may run zero times; a `match` may
+    # match no case at all. They are named here rather than checked, because
+    # a list would read as the mechanism and is not one: this return is what
+    # answers them, and every other kind besides the barriers and a
+    # two-leaving `if` with it.
     return False

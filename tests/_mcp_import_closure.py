@@ -301,7 +301,8 @@ class _BindingWalk(ast.NodeVisitor):
         """Refuse a default that hands the operation, the registry or a
         code-evaluating builtin to its parameter. The message names the
         offending parameter, not the whole definition, so a maintainer
-        reads one line in the traceback."""
+        reads one line in the traceback.
+        """
         self.refuse(
             node, f'parameter {name}={ast.unparse(default)} binds '
             f'{_HIDDEN_NOUN[hidden]} to a name this scan cannot follow')
