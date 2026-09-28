@@ -31,7 +31,7 @@ def _entry(store, path):
 
 def _git(path, *args):
     return subprocess.run(
-        ['git', '-C', os.path.dirname(path) or os.curdir, *args],
+        ['git', '-C', os.path.dirname(path), *args],
         capture_output=True, text=True, timeout=GIT_TIMEOUT, check=False)
 
 
@@ -128,7 +128,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    try:
-        raise SystemExit(main())
-    except KeyboardInterrupt:
-        raise SystemExit(130)
+    sys.exit(main())
