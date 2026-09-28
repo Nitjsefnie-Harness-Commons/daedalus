@@ -2,10 +2,9 @@
 """Save a file's bytes before planting a defect, and put them back after.
 
 A path-scoped VCS restore is a statement about the whole path: `git
-checkout -- f` also sets `f` to whatever HEAD holds, so using it to undo a
-planted probe silently discards the uncommitted work that path carried.
-This helper writes back the bytes it read instead, and re-reads the file to
-prove the write landed, so the proof is in its own output.
+checkout -- f` also sets `f` to whatever HEAD holds, so undoing a planted
+probe with one silently discards the uncommitted work that path carried.
+This writes the bytes it read back instead, atomically, then re-reads.
 """
 import argparse
 import hashlib
@@ -15,6 +14,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import uuid
+from datetime import datetime, timezone
 
 GIT_TIMEOUT = 30
 
@@ -36,11 +37,7 @@ def _git(path, *args):
 
 
 def _head_state(path):
-    """Whether the path is clean against HEAD, or 'unknown'.
-
-    A signal for the operator, not a gate: saving a dirty file is exactly
-    what makes the restore safe, so a dirty path is never a refusal.
-    """
+    """Clean, dirty, or 'unknown' - a signal, never a gate."""
     try:
         inside = _git(path, 'rev-parse', '--is-inside-work-tree')
         if inside.returncode or inside.stdout.strip() != 'true':
@@ -54,26 +51,103 @@ def _head_state(path):
     return 'dirty' if status.stdout.strip() else 'clean'
 
 
-def _write(target, payload):
-    with open(target, 'wb') as handle:
-        handle.write(payload)
+def _publish(target, payload):
+    """Replace `target` in one step, never a partial file - the shape of
+    `daedalus_bridge/result_store.py`'s atomic publish. Truncate-then-write
+    needs write permission on the file; `os.replace` needs the directory's,
+    so a read-only target still restores."""
+    temp = os.path.join(
+        os.path.dirname(target),
+        f'.{os.path.basename(target)}.{uuid.uuid4().hex}.tmp')
+    try:
+        with open(temp, 'wb') as handle:
+            handle.write(payload)
+        # Windows refuses to replace a read-only target, so clear the flag
+        # on the target itself; the caller re-applies the recorded mode.
+        if os.path.exists(target) and not os.access(target, os.W_OK):
+            try:
+                os.chmod(target, stat.S_IMODE(os.stat(target).st_mode)
+                         | stat.S_IWRITE)
+            except OSError:
+                pass
+        os.replace(temp, target)
+    except OSError:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
+
+def _stored_matches(path, entry):
+    try:
+        with open(os.path.join(entry, 'bytes'), 'rb') as handle:
+            stored = handle.read()
+        with open(path, 'rb') as handle:
+            return handle.read() == stored
+    except OSError:
+        return False
+
+
+def _entry_advice(path, entry):
+    """Advice that never recommends a restore it cannot show is
+    lossless."""
+    if _stored_matches(path, entry):
+        return ('the file still matches that copy, so restoring it loses '
+                'nothing - run `plant.py restore` for this path, or '
+                f'`plant.py clear {path}` to discard the entry')
+    return ('but the file has changed since that copy was taken, and '
+            'restoring it would overwrite the newer change - discard the '
+            f'entry with `plant.py clear {path}` and save again')
+
+
+def _entry_detail(entry):
+    """What the entry recorded; its directory is named by a hash."""
+    parts = []
+    for name, label in (('path', 'path'), ('saved-at', 'saved')):
+        try:
+            with open(os.path.join(entry, name), 'r', encoding='utf-8',
+                      errors='replace') as handle:
+                value = handle.read().strip()
+        except OSError:
+            continue
+        if value:
+            parts.append(f'{label} {value}')
+    return f' ({", ".join(parts)})' if parts else ''
+
+
+def clear(path, store):
+    entry = _entry(store, path)
+    if not os.path.isdir(entry):
+        return _refuse(f'no stored copy of {path} under {store}; there is '
+                       'nothing to clear')
+    print(f'discarding the stored copy of {path} at {entry}'
+          f'{_entry_detail(entry)}')
+    shutil.rmtree(entry)
+    return 0
 
 
 def save(path, store):
     entry = _entry(store, path)
     if os.path.exists(entry):
-        return _refuse(
-            f'{path} already has a stored copy at {entry}; restore it '
-            'before saving this path again')
+        return _refuse(f'{path} already has a stored copy at {entry}; '
+                       f'{_entry_advice(path, entry)}')
     try:
         with open(path, 'rb') as handle:
             payload = handle.read()
         mode = stat.S_IMODE(os.stat(path).st_mode)
+        # In the try: the guard is check-then-act, so a racing save lands
+        # here and must refuse, not traceback.
+        os.makedirs(entry)
+        _publish(os.path.join(entry, 'bytes'), payload)
+        _publish(os.path.join(entry, 'mode'), f'{mode:o}\n'.encode('ascii'))
+        _publish(os.path.join(entry, 'path'),
+                 path.encode('utf-8', 'surrogateescape'))
+        _publish(os.path.join(entry, 'saved-at'),
+                 datetime.now(timezone.utc).isoformat(
+                     timespec='seconds').encode('ascii'))
     except OSError as why:
         return _refuse(f'cannot save {path}: {why}')
-    os.makedirs(entry)
-    _write(os.path.join(entry, 'bytes'), payload)
-    _write(os.path.join(entry, 'mode'), f'{mode:o}\n'.encode('ascii'))
     print(f'saved {path}: {_head_state(path)} against HEAD, '
           f'{len(payload)} bytes in {entry}')
     return 0
@@ -93,8 +167,9 @@ def restore(path, store):
         with open(os.path.join(entry, 'mode'), 'r',
                   encoding='ascii') as handle:
             mode = int(handle.read().strip(), 8)
-        _write(path, payload)
-        os.chmod(path, mode)
+        _publish(path, payload)
+        # Read back before the chmod, which a restrictive recorded mode
+        # would make impossible.
         with open(path, 'rb') as handle:
             written = handle.read()
     except OSError as why:
@@ -103,6 +178,7 @@ def restore(path, store):
         return _refuse(
             f'{path} read back {len(written)} bytes after {len(payload)} '
             f'were written; the stored copy is still at {entry}')
+    os.chmod(path, mode)
     shutil.rmtree(entry)
     print(f'restored {path}: {len(written)} bytes re-read, match')
     return 0
@@ -112,8 +188,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog='plant.py',
         description='Save a file before planting a defect, restore it after.')
-    parser.add_argument('action', choices=('save', 'restore'))
-    parser.add_argument('file', help='the path to save or restore')
+    parser.add_argument('action', choices=('save', 'restore', 'clear'))
+    parser.add_argument('file', help='the path to save, restore or clear')
     parser.add_argument(
         '--store', default=os.path.join(tempfile.gettempdir(),
                                         'daedalus-plants'),
@@ -123,8 +199,8 @@ def main(argv=None):
     store = os.path.abspath(args.store)
     if args.action == 'save':
         os.makedirs(store, exist_ok=True)
-        return save(path, store)
-    return restore(path, store)
+    return {'save': save, 'restore': restore,
+            'clear': clear}[args.action](path, store)
 
 
 if __name__ == '__main__':
