@@ -362,19 +362,27 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         assert 'waiting 6s' in pause, pause
         waits.await_lines(child.out, _reports_state, 1,
                           'the resumed poll to report what it found')
-        # The second poll was the pause resuming, not the pause giving up and
-        # the watcher repolling on its own tick. Both produce a second call at
-        # or past the reset, so the timestamp cannot tell them apart - but only
-        # the abandoned one raises, and the script's own report that a poll
-        # raised is the difference. This is not a wall-clock bound: it reads
-        # the error stream once the resumed poll has already reported, so a
-        # line saying otherwise had the whole wait to arrive, and the pristine
-        # child never emits one at all.
+        # Raising is the one give-up the watcher announces rather than
+        # swallows, so it is caught here as soon as the poll reports. It is
+        # not what tells a resumed poll from an abandoned one - the indexes
+        # below are - and it is kept for the message it gives.
         assert not [line for line in child.err.lines
                     if _reports_a_failed_poll(line)], child.err.lines
         calls = fake.calls()
         assert len(calls) == 2, [call['request'][:60] for call in calls]
         assert calls[1]['t'] >= reset, (calls[1]['t'], reset)
+        # The second query belongs to the SAME poll as the first, which is
+        # what resuming means. The watcher publishes the index of the poll
+        # it is in where the `gh` children inherit it, and the pause
+        # reissues the query inside that one poll; a poll that returns,
+        # breaks, falls off the end or ends the process ends the poll, and
+        # the script's next iteration publishes the next index. The index is
+        # therefore the property and not a correlate of it - and no wall
+        # clock is consulted, so this holds however long either took.
+        # The first index is checked for presence, or an unwired seam would
+        # pass the comparison below without saying anything.
+        assert calls[0]['poll'] is not None, calls[0]
+        assert calls[1]['poll'] == calls[0]['poll'], [c['poll'] for c in calls]
         # One line for the whole wait, not one per poll inside it.
         assert len([line for line in child.out.lines
                     if _reports_rate_limit(line)]) == 1
