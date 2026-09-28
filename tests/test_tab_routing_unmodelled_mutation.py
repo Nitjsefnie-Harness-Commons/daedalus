@@ -259,6 +259,26 @@ _READING = [
 ]
 
 
+# A read-back whose result the read CONSUMES. The `mapping_values`,
+# `mapping_items` and `mapping_copy` rows above carry a quiet value through
+# a read that never calls it, so they pin the non-consuming direction and
+# cannot see whether the read-back resolves at all. Each row here pairs with
+# its twin, so a read-back the model drops loses the report and a read-back
+# that answers wrongly loses the clean verdict.
+_READBACKS = [
+    ('mapping_values_consumed', 'd = {"a": relay()}', 'd.values()', '',
+     '[f() for f in d.values()]'),
+    # `items` yields pairs, so the read that consumes it unpacks the pair
+    # rather than calling one: a body that called a pair raises at runtime.
+    ('mapping_items_consumed', 'd = {"a": relay()}', 'd.items()', '',
+     '[v() for k, v in d.items()]'),
+    ('mapping_copy_consumed', 'd = {"a": relay()}', 'd.copy()', '',
+     '[f() for f in d.copy().values()]'),
+    ('mapping_popitem_leaves_the_rest', 'd = {"a": relay(), "b": ordinary}',
+     'd.popitem()', '', 'd["a"]()'),
+]
+
+
 def _swap(text):
     return re.sub(r'relay|quiet',
                   lambda m: 'quiet' if m[0] == 'relay' else 'relay', text)
@@ -307,6 +327,16 @@ def test_a_modelled_mutator_keeps_its_precise_result(tmp):
 
 def test_a_modelled_mutator_twin_stays_clean(tmp):
     flagged = _flagged(tmp, _PRECISE, (0, 0), True)
+    assert not flagged, flagged
+
+
+def test_a_read_back_the_read_consumes_fails_closed(tmp):
+    missed = _missed(tmp, _READBACKS, (1, 1))
+    assert not missed, missed
+
+
+def test_a_read_back_the_read_consumes_twin_stays_clean(tmp):
+    flagged = _flagged(tmp, _READBACKS, (0, 0), True)
     assert not flagged, flagged
 
 
