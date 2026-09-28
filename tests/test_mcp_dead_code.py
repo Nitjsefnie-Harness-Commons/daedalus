@@ -313,6 +313,33 @@ def load(cond='pass'):
       ('load', 'raise', {'raised': 'ValueError', 'loaded': []})])
 
 
+def test_an_if_whose_only_dead_branch_is_its_body_leaves_the_block(_tmp):
+    """The third limb of the conjunction, and the only input it decides.
+
+    Neither branch here is a barrier by itself: the `orelse` is an inner
+    `if` that leaves on its own, and the `body` leaves only because the
+    `raise` above it already marked the branch's last statement dead. That
+    answer is only available once the inner tail is marked, so this row
+    holds the order `_descend` walks in as well as the clause in `_leaves`
+    that reads a statement it already knows to be dead.
+    """
+    _a_barrier_tail_is_out_of_the_scan_set(_tmp, """
+import importlib
+
+
+def load(outer=True, inner=True):
+    if outer:
+        raise ValueError('body')
+        importlib.import_module('pkg.leaf')
+    else:
+        if inner:
+            raise ValueError('a')
+        else:
+            raise ValueError('b')
+    return importlib.import_module('pkg.after')
+""", {'raised': 'ValueError', 'loaded': []})
+
+
 def test_a_raising_loop_body_does_not_end_the_block(_tmp):
     """The body raising says nothing about the loop, which may run zero
     times and fall through either way."""
