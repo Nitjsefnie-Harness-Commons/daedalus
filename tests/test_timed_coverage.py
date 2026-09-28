@@ -481,9 +481,10 @@ def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
          'suite_weights': {'test_a.py': 1.0}}) + '\n', encoding='utf-8')
     git_index(repository, 'init', '-q')
     git_index(repository, 'add', '--', '.github/suite-timings.json')
-    git_index(repository, '-c', 'user.name=base',
-               '-c', 'user.email=base@example.invalid',
-               'commit', '-q', '-m', 'base')
+    git_index(
+        repository, '-c', 'user.name=base',
+        '-c', 'user.email=base@example.invalid', 'commit', '-q', '-m',
+        'base')
     # What the refresh left behind: the same file re-derived from two
     # other runs, unstaged, which is the state the commit step runs on.
     data_file.write_text(json.dumps(
