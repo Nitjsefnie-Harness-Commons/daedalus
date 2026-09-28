@@ -78,7 +78,7 @@ try:
         plan_is_balanced, verify_target)
     from timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
-        _unit_scale, discover_runs, read_run, select)
+        _unit_scale, discover_runs, select)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
         BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
@@ -87,7 +87,7 @@ except ImportError:  # pragma: no cover - the script-directory import path
         plan_is_balanced, verify_target)
     from scripts.ci.timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
-        _unit_scale, discover_runs, read_run, select)
+        _unit_scale, discover_runs, select)
 
 # The share a recomputed weight may differ from the recorded one before
 # the file is rewritten: runner noise and a suite's own jitter move a
@@ -248,7 +248,7 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
         # to make. It is a workspace file the step never stages.
         Path(message_file).write_text(
             commit_message(run_ids) + '\n', encoding='utf-8')
-    where = (f'median over runs {", ".join(str(r) for r in run_ids)} '
+    where = (f'median over runs {_runs_text(run_ids)} '
              f'(sample {len(run_ids)}, {len(medians)} suites); '
              + _reached_message(report))
     scale = _unit_scale(existing['units'], reference)
