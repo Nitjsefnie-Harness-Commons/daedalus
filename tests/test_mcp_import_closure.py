@@ -675,5 +675,22 @@ def test_the_real_composition_scan_set_is_pinned(_tmp):
             'change is right')
 
 
+def test_a_source_the_scan_accepts_is_reported_as_a_silent_scan(_tmp):
+    """The refusal helper reports a source the scan let through.
+
+    Every other case here hands it a source the scan really does refuse, so
+    the arm that reports a silent one is reached by nothing else. It is the
+    arm that makes the helper a tripwire rather than a call, and it is what
+    a scan that stopped refusing would have to be caught by.
+    """
+    try:
+        _assert_scan_refusal(_tmp, 'value = 1\n', 1, 'never raised')
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(
+            'the refusal helper returned for a source the scan accepts')
+
+
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
