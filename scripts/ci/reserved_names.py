@@ -2,11 +2,8 @@
 """Check and tighten the set of names a new tests module may not bind.
 
 The mutable policy state is the ``.github/reserved-test-names.json``
-document: every reserved name, the limb that owns it, the module or
-modules that own it, and the tests modules the derivation covered. The
-committed form is generated from the tree, and the verdict is asked only
-about the modules it names, because an exhaustive document is not a
-question two branches can both answer (see ``violations``). The
+document: every reserved name, the limb that owns it, and the module or
+modules that own it. The committed form is generated from the tree. The
 three limbs are the ones ``tests/_reserved_names.py`` derives from the
 recognisers the two name-bound controls already use, so an entry is added
 or dropped by tightening, and a name that is stale is a rule nobody
@@ -34,8 +31,25 @@ sys.path.insert(0, str(ROOT / 'tests'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ARTIFACT = ROOT / '.github' / 'reserved-test-names.json'
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 1
 _DERIVATION = None
+_BASE = None
+
+
+def _base_helper():
+    """`artifact_base`, imported on demand and kept, like `_derivation`.
+
+    Deferred for the same reason and by the same argument: the script
+    reaches out of its own directory twice now, and a tree carrying the
+    script alone is a shape an operator produces by copying one file. A
+    module-scope import would traceback before `main` could refuse,
+    which is the failure the two bare-copy tests in the suite pin.
+    """
+    global _BASE
+    if _BASE is None:
+        import artifact_base  # pyright: ignore[reportMissingImports]
+        _BASE = artifact_base
+    return _BASE
 
 STALE_REMEDY = (
     'The committed set is generated and never edited by hand: '
@@ -81,7 +95,7 @@ def _validated(value, label='reserved names'):
     """The document this script writes, or a refusal naming what is wrong."""
     if not isinstance(value, dict):
         raise ValueError(f'{label} must be an object')
-    unknown = sorted(set(value) - {'schema_version', 'names', 'modules'})
+    unknown = sorted(set(value) - {'schema_version', 'names'})
     if unknown:
         raise ValueError(f'unknown field: {unknown[0]}')
     if 'names' not in value:
@@ -89,8 +103,6 @@ def _validated(value, label='reserved names'):
     schema = value.get('schema_version')
     if schema != _SCHEMA_VERSION:
         raise ValueError(f'unsupported schema_version: {schema}')
-    if 'modules' not in value:
-        raise ValueError('missing field: modules')
     if not isinstance(value['names'], dict):
         raise ValueError('names must be an object')
     for name, entry in sorted(value['names'].items()):
@@ -104,14 +116,6 @@ def _validated(value, label='reserved names'):
             if (not isinstance(owners, list)
                     or not all(isinstance(one, str) for one in owners)):
                 raise ValueError(f'owners must be module paths: {name}')
-    modules = value['modules']
-    if not isinstance(modules, list):
-        raise ValueError('modules must be a list of module paths')
-    for module in modules:
-        if not isinstance(module, str) or not module:
-            raise ValueError('a covered module must be a nonempty string')
-    if len(set(modules)) != len(modules):
-        raise ValueError('a module is covered twice')
     return value
 
 
@@ -136,21 +140,15 @@ def _line(name, entry):
 
 
 def render(document):
-    """The canonical bytes: one name and one module per line, so a diff
-    reads as a set."""
+    """The canonical bytes: one name per line, so a diff reads as a set."""
     _validated(document)
     body = ',\n'.join(_line(name, entry)
                       for name, entry in sorted(document['names'].items()))
-    scope = ',\n'.join(f'    {json.dumps(module)}'
-                       for module in sorted(document['modules']))
     return ('{\n'
             f'  "schema_version": {document["schema_version"]},\n'
             '  "names": {\n'
             f'{body}\n'
-            '  },\n'
-            '  "modules": ['
-            + (f'\n{scope}\n  ' if scope else '')
-            + ']\n'
+            '  }\n'
             '}\n').encode('utf-8')
 
 
@@ -161,8 +159,6 @@ def document(sources=None):
         'schema_version': _SCHEMA_VERSION,
         'names': {name: {limb: list(owners) for limb, owners in entry.items()}
                   for name, entry in derived.items()},
-        'modules': sorted({owner for entry in derived.values()
-                           for owners in entry.values() for owner in owners}),
     }
 
 
@@ -170,48 +166,54 @@ def _owners(entry):
     return {owner for owners in entry.values() for owner in owners}
 
 
-def violations(committed, derived, tracked):
+def _inside_base(*entries, covered):
+    """True when every module a discrepancy names is inside the base.
+
+    This is the WHOLE of the scoping, and it is one predicate. A
+    discrepancy is a violation iff every module involved in it --
+    recorded OR derived, old OR new -- is in `covered`, the paths
+    present in the tree of the commit that last wrote the committed
+    document.
+
+    One predicate in one direction is not a simplification. The first
+    attempt at this scoped each kind on a different side: `absent` on
+    the new binders, `owners` on the old recorded ones, so two rules
+    forgave in opposite directions and two new modules binding a name
+    in common still went red on a clean merge -- the mechanism, not
+    fixed. Reading the base from git rather than from the document is
+    what makes one direction enough: the document cannot widen the
+    scope, so it cannot switch the control off either.
+    """
+    involved = set().union(*(_owners(one) for one in entries if one))
+    return involved <= covered
+
+
+def violations(committed, derived, covered):
     """The names the committed document and a fresh derivation disagree on.
 
     `absent` is derived and not committed, `stale` is committed and no
-    longer derived, `owners` is a name both carry with a different owner
-    set -- a module renamed or a second module taking a name the first
-    owned alone -- and `scope` is an owner the document records in a
-    module it does not list as covered.
+    longer derived, and `owners` is a name both carry with a different
+    owner set -- a module renamed or a second module taking a name the
+    first owned alone. Each is reported through `_inside_base`, so a
+    module the base's tree does not carry is a reason the check is not
+    asked about the name at all.
 
-    THE VERDICT IS SCOPED TO WHAT THE DOCUMENT COVERED. A derivation
-    over the whole tree is not a question two branches can both answer:
-    each derives against a base the other has moved past, so each
-    document is exact for what its own run saw and the MERGE is where
-    the equality first fails, on `main`, with no branch left to fix it
-    (issue 1266). `tracked` is the tests modules the checkout carries,
-    and `covered` is the document's own `modules` intersected with it,
-    so a module that has since been deleted is out of scope until the
-    document absorbs the deletion.
-
-    Each kind is a violation only when it is a fact about the covered
-    modules: `absent` when every module that now binds the name is
-    covered, `stale` when a recorded owner is still on disk (a module
-    that merely stopped binding a name exists, so over-claiming stays a
-    violation), and `owners` when every recorded owner is covered. A
-    module outside the scope contributes a name the document owes
-    nothing about, and it cannot be an owner the document records --
-    which is what `scope` is for, and the one hole the scoping opens.
+    A DELETION without regeneration is a violation, deliberately. It
+    fires deterministically rather than order-dependently, so it costs
+    the composition nothing, and it is the one drift an operator makes
+    on purpose.
     """
     old = committed['names']
     new = derived['names']
-    listed = set(committed['modules'])
-    covered = listed & set(tracked)
     return {
         'absent': sorted(name for name in set(new) - set(old)
-                         if _owners(new[name]) <= covered),
+                         if _inside_base(None, new[name], covered=covered)),
         'stale': sorted(name for name in set(old) - set(new)
-                        if _owners(old[name]) & set(tracked)),
+                        if _inside_base(old[name], None, covered=covered)),
         'owners': sorted(name for name in set(old) & set(new)
                          if old[name] != new[name]
-                         and _owners(old[name]) <= covered),
-        'scope': sorted({owner for entry in old.values()
-                         for owner in _owners(entry) - listed}),
+                         and _inside_base(old[name], new[name],
+                                          covered=covered)),
     }
 
 
@@ -254,14 +256,27 @@ def main(argv=None):
             import thresholds
             thresholds.publish(args.artifact, payload)
             print(f'tightened the reserved set: {len(derived["names"])} names')
-            print(f'covered modules: {len(derived["modules"])} of '
-                  f'{len(sources)} tracked; a name bound by a module outside '
-                  'that list is out of the committed set\'s scope')
+            print(f'the committed set now covers all {len(sources)} tracked '
+                  'tests modules')
             return 0
-        found = violations(load(args.artifact), derived, set(sources))
+        committed = load(args.artifact)
+        # The base comes from git, never from the artifact: a document
+        # that carried its own scope would be able to widen it, and an
+        # emptied one would switch this check off entirely.
+        helper = _base_helper()
+        base, covered = helper.base_files(
+            args.tree, helper.relative_to_tree(args.tree, args.artifact))
+        found = violations(committed, derived, covered)
         if not any(found.values()):
-            print(f'{len(derived["names"])} reserved names match the '
-                  'committed set')
+            # What was compared, and the base it was compared against.
+            # Not "N names match": a name the base does not cover is
+            # legitimately absent from the document, so the two counts
+            # can differ on a clean run and a line claiming they match
+            # would be the contradiction the first attempt printed.
+            print(f'no drift inside the base: {len(committed["names"])} '
+                  f'committed names against the {len(derived["names"])} the '
+                  f'tree derives, over the {len(covered)} paths in the tree '
+                  f'of {base[:12]}')
             return 0
         for kind, rows in found.items():
             if rows:

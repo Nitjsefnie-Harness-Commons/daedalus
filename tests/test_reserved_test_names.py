@@ -26,8 +26,10 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts' / 'ci'))
 import _reserved_names  # noqa: E402
 import _util  # noqa: E402
+import artifact_base  # noqa: E402
 from _helper_binds import definitions  # noqa: E402
 from _helper_reimplementation import (  # noqa: E402
     _entry_points, _live_sources)
@@ -78,11 +80,10 @@ _FIXTURES = (
 # A committed set drifted by hand, in the shape the reader accepts, so the
 # tests planting it reach the drift rather than a schema refusal. The
 # planted name is owned by a module both fixture trees carry and both
-# list as covered, so the drift is one the verdict is asked about: a
-# document claiming a module it never read is a different edit, and the
-# scoping is what forgives that one.
-_HAND_TYPED = ('{"schema_version": 2, "modules": ["tests/_owner.py",'
-               ' "tests/_wffixtures.py"], "names":'
+# have ever committed, so it is inside the base the verdict is asked
+# about: a document claiming a module that base never had is a different
+# edit, and the scoping is what forgives that one.
+_HAND_TYPED = ('{"schema_version": 1, "names":'
                ' {"made_up": {"python": ["tests/_owner.py"]}}}\n')
 
 
@@ -273,24 +274,42 @@ def _contract():
 
 
 def _fixture_checkout(tmp, files, name):
-    """A git-indexed tree carrying `files`, for the real generator to read.
+    """A committed git checkout carrying `files`, for the real generator.
 
     A checkout rather than a directory, because the generator enumerates
     the TRACKED tree: an index populated by `git add` is what `git
-    ls-files` reads, so no commit is made or needed.
+    ls-files` reads. Committed as well, because the verdict is asked
+    about the tree of the commit that last wrote the committed set, and
+    a tree with no commits has no such commit to name.
     """
     tree = Path(tmp) / name
     for rel, text in files.items():
         path = tree / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding='utf-8')
-    for argv in (['git', 'init', '-q'],
+    for argv in (['git', 'init', '-q', '-b', 'main'],
                  ['git', 'config', 'user.email', 'tests@example.invalid'],
                  ['git', 'config', 'user.name', 'Tests'],
                  ['git', 'add', '-A']):
         subprocess.run(argv, cwd=tree, check=True,
                        env=_util.child_coverage('scrub'))
+    _commit(tree, 'the tree under test')
     return tree
+
+
+def _commit(tree, message):
+    """Record the current tree, so a later commit is the last writer."""
+    subprocess.run(['git', 'add', '-A'], cwd=tree, check=True,
+                   env=_util.child_coverage('scrub'))
+    subprocess.run(['git', 'commit', '-q', '-m', message, '--allow-empty'],
+                   cwd=tree, check=True, env=_util.child_coverage('scrub'))
+
+
+def _base_of(tree):
+    """The paths in the tree of the commit that last wrote the set."""
+    artifact = Path(tree) / '.github' / 'reserved-test-names.json'
+    return artifact_base.base_files(
+        tree, artifact_base.relative_to_tree(tree, artifact))[1]
 
 
 def _run_generator(tree, artifact, *args):
@@ -308,15 +327,17 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
     may bind, and nothing reads the artifact until a control does, so a
     hand-typed one is a rule nobody enforces.
 
-    The verdict is scoped to the modules the document says it covered,
-    so the tree that scope is measured against is named here rather than
-    read from inside the check: `document()` with no argument derives
-    over the same live tree `_live_sources()` returns.
+    The verdict is scoped to the base -- the tree of the commit that
+    last wrote the document -- so that base is read here and passed in,
+    rather than the check reading it for itself out of the document it
+    is checking.
     """
     del tmp
     policy = _contract()
-    found = policy.violations(policy.load(), policy.document(),
-                              set(_live_sources()))
+    base, covered = artifact_base.base_files(
+        ROOT, artifact_base.relative_to_tree(ROOT, ARTIFACT))
+    del base
+    found = policy.violations(policy.load(), policy.document(), covered)
     detail = '\n'.join(f'{kind}: {rows}' for kind, rows in found.items()
                        if rows)
     assert not any(found.values()), (
@@ -341,6 +362,7 @@ def test_the_generator_writes_exactly_a_fresh_derivation_gives(tmp):
     result = _run_generator(tree, artifact, '--tighten')
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stderr == '', result.stderr
+    _commit(tree, 'the committed set')
     expected = policy.render(policy.document(_live_sources_of(tree)))
     assert artifact.read_bytes() == expected
     assert str(len(policy.load(artifact)['names'])) in result.stdout
@@ -373,6 +395,7 @@ def test_a_noop_tighten_writes_nothing(tmp):
     artifact = tree / '.github' / 'reserved-test-names.json'
     first = _run_generator(tree, artifact, '--tighten')
     assert first.returncode == 0, (first.stdout, first.stderr)
+    _commit(tree, 'the committed set')
     untouched = artifact.stat()
     second = _run_generator(tree, artifact, '--tighten')
     assert second.returncode == 0, (second.stdout, second.stderr)
@@ -387,7 +410,7 @@ def test_a_noop_tighten_writes_nothing(tmp):
     assert checked.stderr == '', checked.stderr
     assert len(policy.violations(policy.load(artifact),
                                  policy.document(_live_sources_of(tree)),
-                                 set(_live_sources_of(tree)))) == 4
+                                 _base_of(tree))) == 3
 
 
 def test_a_tighten_that_cannot_publish_leaves_the_committed_set(tmp):
@@ -426,11 +449,9 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
 
     The three drift kinds are what a hand edit looks like: a name the
     tree derives and the document lacks, one it no longer derives, and
-    one whose owners moved. `scope` is the fourth and it is the hole
-    the scoping opens -- an entry the document records against a module
-    it does not list as covered could be exempted from every other kind
-    by the same hand that added it, so the structural check refuses it
-    whatever else the document says.
+    one whose owners moved. Each is planted against a module the base's
+    tree really carries, so the scoping -- which forgives a name a module
+    outside the base brought -- is never the reason one of them passes.
     """
     policy = _contract()
     tree = _fixture_checkout(tmp, {
@@ -439,21 +460,22 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     }, 'drift')
     artifact = tree / '.github' / 'reserved-test-names.json'
     assert _run_generator(tree, artifact, '--tighten').returncode == 0
+    _commit(tree, 'the committed set')
     derived = policy.load(artifact)
     planted = json.loads(json.dumps(derived))
     dropped = sorted(planted['names'])[0]
     del planted['names'][dropped]
-    # The moved owner is a COVERED module that does not own the name
-    # today, so the entry is inside the scope the verdict is asked
-    # about and a different owner set is a real disagreement.
+    # The moved owner is a module the base's tree carries that does not
+    # own the name today, so the entry is inside the scope the verdict
+    # is asked about and a different owner set is a real disagreement.
     moved = sorted(planted['names'])[0]
     taken = {owner for one in planted['names'][moved].values()
              for owner in one}
-    other = sorted(set(planted['modules']) - taken)[0]
+    other = sorted({one for one in _base_of(tree) if one.endswith('.py')}
+                   - taken)[0]
     planted['names'][moved] = {limb: [other]
                                for limb in planted['names'][moved]}
     planted['names']['invented_name'] = {'python': ['tests/_owner.py']}
-    planted['names']['out_of_scope'] = {'python': ['tests/test_planted.py']}
     artifact.write_text(json.dumps(planted) + '\n', encoding='utf-8')
     result = _run_generator(tree, artifact)
     assert result.returncode == 1, (result.stdout, result.stderr)
@@ -462,7 +484,6 @@ def test_the_check_refuses_each_drift_kind_and_names_the_command(tmp):
     assert f'absent: [{dropped!r}]' in result.stderr, result.stderr
     assert "stale: ['invented_name']" in result.stderr, result.stderr
     assert f'owners: [{moved!r}]' in result.stderr, result.stderr
-    assert "scope: ['tests/test_planted.py']" in result.stderr, result.stderr
     assert result.stderr.rstrip().endswith(policy.STALE_REMEDY), result.stderr
     assert 'Traceback' not in result.stderr
 
@@ -472,29 +493,25 @@ def test_a_document_that_is_not_the_generated_form_is_refused_by_name(tmp):
     failures = (
         ('{', 'invalid reserved names JSON'),
         ('[]', 'reserved names must be an object'),
-        ('{"schema_version": 3, "names": {}, "modules": []}',
-         'unsupported schema_version'),
-        ('{"schema_version": 2}', 'missing field: names'),
-        ('{"schema_version": 2, "names": {}}', 'missing field: modules'),
-        ('{"schema_version": 2, "names": [], "extra": 1}', 'unknown field'),
-        ('{"schema_version": 2, "names": [], "modules": []}',
-         'names must be an object'),
-        ('{"schema_version": 2, "names": {"": ["x"]}, "modules": []}',
+        ('{"schema_version": 2, "names": {}}', 'unsupported schema_version'),
+        ('{"schema_version": 1}', 'missing field: names'),
+        ('{"schema_version": 1, "names": [], "extra": 1}', 'unknown field'),
+        ('{"schema_version": 1, "names": []}', 'names must be an object'),
+        ('{"schema_version": 1, "names": {"": ["x"]}}',
          'a name must be a nonempty string'),
-        ('{"schema_version": 2, "names": {"a": []}, "modules": []}',
+        ('{"schema_version": 1, "names": {"a": []}}',
          'a name must map to an object of limbs'),
-        ('{"schema_version": 2, "names": {"a": {"python": "x"}},'
-         ' "modules": []}', 'owners must be module paths'),
-        ('{"schema_version": 2, "names": {"a": {"cobol": ["x"]}},'
-         ' "modules": []}', 'unknown limb: cobol'),
-        ('{"schema_version": 2, "names": {"a": {"python": [1]}},'
-         ' "modules": []}', 'owners must be module paths'),
-        ('{"schema_version": 2, "names": {}, "modules": "x"}',
-         'modules must be a list of module paths'),
-        ('{"schema_version": 2, "names": {}, "modules": [""]}',
-         'a covered module must be a nonempty string'),
-        ('{"schema_version": 2, "names": {}, "modules": ["a", "a"]}',
-         'a module is covered twice'),
+        ('{"schema_version": 1, "names": {"a": {"python": "x"}}}',
+         'owners must be module paths'),
+        ('{"schema_version": 1, "names": {"a": {"cobol": ["x"]}}}',
+         'unknown limb: cobol'),
+        ('{"schema_version": 1, "names": {"a": {"python": [1]}}}',
+         'owners must be module paths'),
+        # A field the document does not have is how the removed scoping
+        # was expressed, so the reader refusing it is what makes the
+        # document unable to carry a scope at all.
+        ('{"schema_version": 1, "names": {}, "modules": []}',
+         'unknown field: modules'),
     )
     for text, marker in failures:
         path = Path(tmp) / 'reserved.json'
@@ -591,13 +608,18 @@ def test_main_reports_a_matching_set_then_refuses_and_tightens_it(tmp):
     # A planted tree the generator reads for itself, so `main` is reached
     # without a reader swapped underneath it.
     tree = _fixture_checkout(tmp, _planted_tree({}), 'modes')
-    target = Path(tmp) / 'reserved.json'
+    # Inside the tree: the verdict is asked about the tree of the commit
+    # that last wrote the artifact, and a file outside the checkout has
+    # no such commit there.
+    target = tree / '.github' / 'reserved.json'
     modes = ['--tree', str(tree), '--artifact', str(target)]
     fresh = policy.render(policy.document(_live_sources_of(tree)))
     count = len(policy.document(_live_sources_of(tree))['names'])
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(fresh)
-    assert _generator(policy, modes) == (
-        0, f'{count} reserved names match the committed set\n', '')
+    _commit(tree, 'the committed set')
+    matched = _generator(policy, modes)
+    assert matched[0] == 0 and matched[2] == '', matched
 
     drifted = json.loads(fresh.decode('utf-8'))
     del drifted['names'][sorted(drifted['names'])[0]]
@@ -667,13 +689,10 @@ def test_the_script_docstring_carries_the_printed_remedy(tmp):
                    '.github/reserved-test-names.json'):
         assert phrase in doc, phrase
     assert ' '.join(policy.STALE_REMEDY.split()) in doc, policy.STALE_REMEDY
-    # The kinds a refusal prints, and the shape it reads them from: the
-    # document states the scope the verdict is asked about, and a caller
-    # states the tree that scope is measured against.
-    assert sorted(policy.violations({'names': {}, 'modules': []},
-                                    {'names': {}, 'modules': []},
-                                    set())) == [
-        'absent', 'owners', 'scope', 'stale']
+    # The kinds a refusal prints, and that there is no fourth: the
+    # document states no scope, so a caller states the base instead.
+    assert sorted(policy.violations({'names': {}}, {'names': {}}, set())) == [
+        'absent', 'owners', 'stale']
 
 
 def main():

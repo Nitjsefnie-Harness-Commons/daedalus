@@ -86,15 +86,15 @@ def _policy():
     return _util.load(POLICY_SOURCE, 'reserved_base_contract')
 
 
-def _git(tree, *argv, check=True, env=None):
+def _branch_git(tree, *argv, check=True, env=None):
     return subprocess.run(
         ['git', '-C', str(tree), *argv], check=check, capture_output=True,
         text=True, env=env or _util.child_coverage('scrub'), timeout=180)
 
 
 def _commit_all(tree, message):
-    _git(tree, 'add', '-A')
-    _git(tree, 'commit', '-q', '-m', message, '--allow-empty')
+    _branch_git(tree, 'add', '-A')
+    _branch_git(tree, 'commit', '-q', '-m', message, '--allow-empty')
 
 
 def _checkout(root, name, files):
@@ -108,9 +108,9 @@ def _checkout(root, name, files):
         path = tree / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding='utf-8')
-    _git(tree, 'init', '-q', '-b', 'main')
-    _git(tree, 'config', 'user.email', 'tests@example.invalid')
-    _git(tree, 'config', 'user.name', 'Tests')
+    _branch_git(tree, 'init', '-q', '-b', 'main')
+    _branch_git(tree, 'config', 'user.email', 'tests@example.invalid')
+    _branch_git(tree, 'config', 'user.name', 'Tests')
     _commit_all(tree, 'base')
     return tree
 
@@ -119,7 +119,7 @@ def _artifact(tree):
     return Path(tree) / ARTIFACT
 
 
-def _run(tree, *args):
+def _branch_check(tree, *args):
     """The shipped command, over `tree` and its own committed set."""
     return subprocess.run(
         [sys.executable, str(POLICY_SOURCE), *args,
@@ -129,12 +129,25 @@ def _run(tree, *args):
 
 
 def _tighten(tree):
-    result = _run(tree, '--tighten')
+    result = _branch_check(tree, '--tighten')
     assert result.returncode == 0, (result.stdout, result.stderr)
 
 
 def _unresolved(tree):
-    return _git(tree, 'ls-files', '-u', check=False).stdout.strip()
+    return _branch_git(tree, 'ls-files', '-u', check=False).stdout.strip()
+
+
+def _union_entry(one, two):
+    """Two records of the same name resolved: the union of their owners.
+
+    A name both documents record is a name both modules bind, so the
+    answer is both owners rather than one of them. Picking a side is the
+    judgement call the resolve is supposed to contain none of, and it is
+    the one that leaves the merged document disagreeing with the merged
+    tree. A limb or a name only one side has is carried through.
+    """
+    return {limb: sorted(set(one.get(limb, ())) | set(two.get(limb, ())))
+            for limb in sorted(set(one) | set(two))}
 
 
 def _union(left, right):
@@ -149,7 +162,9 @@ def _union(left, right):
     for key in sorted(set(left) | set(right)):
         one, two = left.get(key), right.get(key)
         if isinstance(one, dict) and isinstance(two, dict):
-            merged[key] = {**one, **two}
+            merged[key] = {name: _union_entry(one.get(name, {}),
+                                              two.get(name, {}))
+                           for name in sorted(set(one) | set(two))}
         elif isinstance(one, list) and isinstance(two, list):
             merged[key] = sorted(set(one) | set(two))
         else:
@@ -159,11 +174,11 @@ def _union(left, right):
 
 def _show(tree, ref):
     """The artifact as `ref` has it, or None when `ref` does not exist."""
-    result = _git(tree, 'show', f'{ref}:{ARTIFACT}', check=False)
+    result = _branch_git(tree, 'show', f'{ref}:{ARTIFACT}', check=False)
     return result.stdout if result.returncode == 0 else None
 
 
-def _resolve(tree, ours, incoming, continue_with):
+def _resolve_union(tree, ours, incoming, continue_with):
     """Take the union of ours and the incoming artifact, then continue.
 
     Both sides are read out of git rather than off disk: after a
@@ -172,8 +187,8 @@ def _resolve(tree, ours, incoming, continue_with):
     """
     merged = _union(json.loads(ours), json.loads(incoming))
     _artifact(tree).write_text(json.dumps(merged) + '\n', encoding='utf-8')
-    _git(tree, 'add', '-A')
-    _git(tree, '-c', 'core.editor=true', *continue_with, check=False)
+    _branch_git(tree, 'add', '-A')
+    _branch_git(tree, '-c', 'core.editor=true', *continue_with, check=False)
 
 
 def _land(tree, shas, by_rebase):
@@ -190,15 +205,15 @@ def _land(tree, shas, by_rebase):
     conflicted = False
     for sha in shas:
         if by_rebase:
-            if _git(tree, 'cherry-pick', sha, check=False).returncode:
+            if _branch_git(tree, 'cherry-pick', sha, check=False).returncode:
                 conflicted = True
-                _resolve(tree, _show(tree, 'HEAD'),
+                _resolve_union(tree, _show(tree, 'HEAD'),
                          _show(tree, 'CHERRY_PICK_HEAD'),
                          ['cherry-pick', '--continue'])
-        elif _git(tree, 'merge', '-q', '--no-ff', '--no-edit',
+        elif _branch_git(tree, 'merge', '-q', '--no-ff', '--no-edit',
                   sha, check=False).returncode:
             conflicted = True
-            _resolve(tree, _show(tree, 'HEAD'), _show(tree, 'MERGE_HEAD'),
+            _resolve_union(tree, _show(tree, 'HEAD'), _show(tree, 'MERGE_HEAD'),
                      ['commit', '-q', '--no-edit'])
     return conflicted
 
@@ -213,32 +228,32 @@ def _world(root, name, *, a_name, b_name, a_regen, b_regen):
     commit rather than the one a branch pushed.
     """
     tree = _checkout(root, name, _BASE_FILES)
-    _git(tree, 'add', '-A')
+    _branch_git(tree, 'add', '-A')
     _tighten(tree)
     _commit_all(tree, 'the committed set')
     shas = {}
     for branch, stem, bound in (('a', 'alpha', a_name),
                                 ('b', 'beta', b_name)):
-        _git(tree, 'checkout', '-q', '-b', branch, 'main')
+        _branch_git(tree, 'checkout', '-q', '-b', branch, 'main')
         (tree / _MODULE.format(stem)).write_text(
             f'def {bound}(value):\n    return value\n', encoding='utf-8')
         # Staged BEFORE the tightening, because the generator enumerates
         # the TRACKED tree: an untracked module is not a name the set
         # derives, and a branch that "regenerated" without it would make
         # every cell of the sweep agree for the wrong reason.
-        _git(tree, 'add', '-A')
+        _branch_git(tree, 'add', '-A')
         if (a_regen if branch == 'a' else b_regen):
             _tighten(tree)
         _commit_all(tree, f'branch {branch}')
-        shas[branch] = _git(tree, 'rev-parse', 'HEAD').stdout.strip()
-    _git(tree, 'checkout', '-q', 'main')
+        shas[branch] = _branch_git(tree, 'rev-parse', 'HEAD').stdout.strip()
+    _branch_git(tree, 'checkout', '-q', 'main')
     return tree, shas
 
 
 def _land_and_check(root, name, order, by_rebase, **world):
     tree, shas = _world(root, name, **world)
     conflicted = _land(tree, [shas[one] for one in order], by_rebase)
-    return _run(tree), conflicted
+    return _branch_check(tree), conflicted
 
 
 def _green(result):
@@ -310,41 +325,61 @@ def test_an_emptied_artifact_is_not_a_match(tmp):
     comes out absent.
     """
     tree = _checkout(tmp, 'emptied', _BASE_FILES)
-    _git(tree, 'add', '-A')
+    _branch_git(tree, 'add', '-A')
     _tighten(tree)
     _commit_all(tree, 'the committed set')
     shipped = json.loads(_artifact(tree).read_text(encoding='utf-8'))
     _artifact(tree).write_text(
         json.dumps(_emptied(shipped)) + '\n', encoding='utf-8')
-    result = _run(tree)
+    result = _branch_check(tree)
     assert not _green(result), (result.stdout, result.stderr)
     assert 'absent:' in result.stderr, result.stderr
     assert 'match the committed set' not in result.stdout, result.stdout
 
 
-def test_a_phantom_has_nothing_to_pair_itself_with(tmp):
+def test_an_invented_name_is_still_a_violation(tmp):
+    """The hand edit the check exists to catch, which scoping must not cost.
+
+    An invented entry owned by a module the base's tree really carries:
+    the module is inside the scope, so the entry is a claim about a
+    module the document is answerable for, and nothing the document says
+    about itself can excuse it.
+    """
+    tree = _checkout(tmp, 'invented', _BASE_FILES)
+    _branch_git(tree, 'add', '-A')
+    _tighten(tree)
+    _commit_all(tree, 'the committed set')
+    committed = json.loads(_artifact(tree).read_text(encoding='utf-8'))
+    committed['names']['invented_name'] = {'python': ['tests/_owner.py']}
+    _artifact(tree).write_text(json.dumps(committed) + '\n',
+                               encoding='utf-8')
+    result = _branch_check(tree)
+    assert not _green(result), (result.stdout, result.stderr)
+    assert "stale: ['invented_name']" in result.stderr, result.stderr
+
+
+def test_the_document_carries_no_field_to_pair_a_phantom_with(tmp):
     """The hole the structural check did not close, unrepresentable now.
 
     A phantom entry owned by a path that is not on disk, paired with the
     scope list naming that same path, silenced every kind at once: the
-    phantom was not on disk, not derived, and listed. The real list
-    survives, so nothing else in the document is disturbed and the only
-    thing the pairing buys is the silence.
+    phantom was not on disk, not derived, and listed. That pairing needs
+    a field the document does not have, so the reader refuses the
+    document rather than reporting a match for it.
     """
     tree = _checkout(tmp, 'phantom', _BASE_FILES)
-    _git(tree, 'add', '-A')
+    _branch_git(tree, 'add', '-A')
     _tighten(tree)
     _commit_all(tree, 'the committed set')
     committed = json.loads(_artifact(tree).read_text(encoding='utf-8'))
     ghost = 'tests/_never_existed.py'
     committed['names']['invented_name'] = {'python': [ghost]}
-    if 'modules' in committed:
-        committed['modules'] = sorted({*committed['modules'], ghost})
+    committed['modules'] = [ghost]
     _artifact(tree).write_text(json.dumps(committed) + '\n',
                                encoding='utf-8')
-    result = _run(tree)
+    result = _branch_check(tree)
     assert not _green(result), (result.stdout, result.stderr)
-    assert 'invented_name' in result.stderr, result.stderr
+    assert 'unknown field: modules' in result.stderr, result.stderr
 
 
 # --------------------------------------------------------------------------
