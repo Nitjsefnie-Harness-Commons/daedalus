@@ -50,26 +50,22 @@ POLL_WIDTH = 8
 # below is made over the whole run, so a longer window changes what a
 # refusal shows and nothing it concludes.
 SEQUENCE = 12
-# The four renderings `poll_sequence` can produce, and what each settles.
 # A rule written over a COLLAPSED rendering has to enumerate what the
-# collapse HIDES as well as what it shows - and here the collapse hides a
-# poll that republished the value already current, because every one of
-# them is one more run of the same value and a run is what the collapse
-# merges. So rows 2 and 3 are AMBIGUITIES and say so: they name both
-# candidates rather than choosing, and the control beside them drives two
-# plants with opposite causes through the real loop and shows both earn
-# the same honest answer.
+# collapse HIDES as well as what it shows, and what it hides here is a
+# poll that republished the value already current: every one of them is
+# one more run of the same value, and a run is what the collapse merges.
+# Rows 2 and 3 are the two shapes that leaves ambiguous, and each says so
+# in its own clause.
 #
 # Row 0 is first because a boundary can be `None` - the marker field is
-# `os.environ.get(POLL_MARK)`, so it is absent on any call made while the
-# seam is not wired - and a sequence CONTAINING one is a fact no other
-# row can state. It catches `[None]` and `['1', None]` alike, and it
-# should: both are the same defect, the seam not wired on some poll, and
-# the rendering does not say which polls.
+# `os.environ.get(POLL_MARK)`, absent on any call made while the seam is
+# not wired - and a sequence CONTAINING one is a fact no other row can
+# state. `[None]` and `['1', None]` are the same defect, the seam not
+# wired on some poll, and the rendering does not say which polls.
 #
-# Row 1 is the one the payload separates, and it is separated by
-# something the collapse cannot hide: a value that comes back after a
-# DIFFERENT one has been published in between.
+# Row 1 is the one the payload separates, by something the collapse
+# cannot hide: a value that comes back after a DIFFERENT one has been
+# published in between.
 READINGS = (
     'a boundary the log carries as no marker at all is a seam that is not '
     'wired there - not an index that stopped advancing, and not a poll '
@@ -97,11 +93,9 @@ def _reading(sequence):
 
     The repetition test reads the WHOLE run, not the window: a cycle
     longer than `SEQUENCE` repeats outside the window and is a re-use all
-    the same, and testing the window put a run whose first repeat fell
-    past it into the row that says no value came round again. That
-    property is about what `await_polls` HANDS this function, so its
-    control drives the refusal rather than calling `_reading` directly -
-    a control on the function cannot see the call site.
+    the same. That is a property of what `await_polls` HANDS this
+    function, so its control drives the refusal rather than calling
+    `_reading` - a control on the function cannot see the call site.
     """
     if None in sequence:
         return 0                      # a poll published no marker at all
@@ -193,35 +187,20 @@ def _cancel(proc):
     The tree has to go, on both platforms, and `tests/_processtree.py` is
     where that lives.
 
-    **This is deduplication, not a repair.** `ChildProcess` launches with
-    `start_new_session=True`, so the child is its own session and group
-    leader from `Popen` returning, and the local spelling that passed
-    `proc.pid` AS the group id resolved to the same group the owner's
-    lookup does - always, and not because of luck. The two spellings
-    already agreed; the guard in `tests/test_noderun_deadline.py` is what
-    disagreed with them, because a second copy of a kill is a second
-    mechanism wearing the same name. What rests on that equivalence, and
-    is worth saying where the code relies on it: `start_new_session=True`
-    AND the child being unreaped. The second half is load-bearing - a
-    reaped pid can be recycled, and a recycled pid is not its own group.
-
-    The `proc.kill()` below is the local copy's own fallback, kept. The
+    The `proc.kill()` below is a fallback the owner does not provide: the
     owner returns a description when a group is already gone and does not
-    fall back to a direct kill, so a bare delegation would drop it; here
+    fall back to a direct kill, so a bare delegation would drop it. Here
     it fires on the one state where a direct kill is wanted, the child
-    still running, rather than on the owner's wording. It is contained
-    for the reason the owner contains its own steps: an uncontained
-    cleanup failure is one more thing that can replace the expiry the
-    caller is about to report, and this one would replace it with an
-    `OSError` from the very call meant to be the last resort.
+    still running, rather than on the owner's wording. It is contained for
+    the reason the owner contains its own steps: an uncontained cleanup
+    failure is one more thing that can replace the expiry the caller is
+    about to report, and this one would replace it with an `OSError` from
+    the very call meant to be the last resort.
 
-    **What delegating cost, in time.** `ChildProcess.stop` used to wait
-    once, for `CANCEL_BOUND`, and that was the whole bound. The owner
-    waits for its own reap, and then `stop` waits again, so the worst
-    case is now `2 x CANCEL_BOUND` inside the owner plus `stop`'s own
-    `CANCEL_BOUND` - three waits, not one, on a child that will not die.
-    The owner returns no description to report, and `stop` returns the
-    process's own return code, so nothing reads a reason.
+    The worst case is now three waits, not one, on a child that will not
+    die: `2 x CANCEL_BOUND` inside the owner plus `stop`'s own. The owner
+    returns no description to report and `stop` returns the process's own
+    return code, so nothing reads a reason.
     """
     killed = cleanup_process_tree(proc, CANCEL_BOUND)
     if proc.poll() is None:
@@ -280,8 +259,7 @@ def poll_sequence(calls):
     `1,1,2,2,3,3` is three boundaries. The collapse is by POSITION and
     never by value: a mapping keyed on the marker turns `1,2,3,4,1,2,3,4`
     into `1,2,3,4` and loses the re-use, which is the one thing a reading
-    of this exists to carry - and a refusal that names two causes and
-    cannot say which is the reader's problem instead.
+    of this exists to carry.
     """
     sequence = []
     for call in calls:
@@ -292,14 +270,13 @@ def poll_sequence(calls):
 
 
 def await_polls(fake, polls, child, what, width=POLL_WIDTH):
-    """The call log, once it carries `polls` distinct poll markers.
+    """A watcher names its own poll boundary by publishing an index its
+    `gh` children inherit, so the log says how many polls ran rather than
+    leaving the count to be inferred from the calls.
 
-    A watcher names its own poll boundary by publishing an index its `gh`
-    children inherit, so the log says how many polls ran rather than leaving
-    the count to be inferred from the calls. Polls are counted rather than
-    calls because a poll's width is data-dependent - a follow-up query and a
-    paginated connection both make it wider - and the measurement is the one
-    thing that must not assume it.
+    Polls are counted rather than calls because a poll's width is
+    data-dependent - a follow-up query and a paginated connection both make
+    it wider - and the measurement is the one thing that must not assume it.
 
     The last marker seen names a poll that may still be in flight, so the
     caller reads the ones before it.
@@ -323,9 +300,7 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
 
     What it catches is the shape no other arm can: a child that stays up,
     healthy, and keeps logging calls without publishing a new boundary,
-    which neither the distinct count nor `child.alive` can end. Which
-    defect that is, is `READINGS`: the refusal names the row the rendered
-    sequence falls in, and there is a control per row.
+    which neither the distinct count nor `child.alive` can end.
     """
     while True:
         calls = fake.calls()
@@ -334,13 +309,12 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
             return calls
         assert child.alive(), f'{what}:\n' + child.captured()
         if len(calls) > len(markers) * width:
-            # The SEQUENCE, not the set: a set is sorted, and sorting both
-            # throws on a seam wired below the first request (a sequence
-            # mixing a marker with none) and throws away the order, which
-            # is the part the first reading below is made of. The window
-            # is rendered for a reader and is NOT what the reading is made
-            # from: `_reading` takes the whole run, so a cycle longer than
-            # `SEQUENCE` is still a re-use.
+            # The SEQUENCE, not the set: a set is sorted, and sorting
+            # discards the order, which is the part the first reading is
+            # made of, and throws outright on a seam wired below the
+            # first request. The window here is rendered for a reader and
+            # is NOT what the reading is made from: `_reading` takes the
+            # whole run.
             sequence = poll_sequence(calls)
             shown = ', '.join(str(marker) for marker in sequence[:SEQUENCE])
             if len(sequence) > SEQUENCE:

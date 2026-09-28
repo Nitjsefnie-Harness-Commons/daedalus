@@ -16,11 +16,11 @@ by the ledger below: a control per arm of each wait, every arm killed by
 name against a planted defect, and the mutation proofs on the teardown
 tests.
 
-One arm of `await_polls` does end on that shape, and it is the one that
-needed it. A marker assignment no-opped in either watcher leaves the loop
-child up, healthy and publishing nothing new, and the three budget
-controls waiting on one would spin until the job's own limit ended the run
-nameless. The arm bounds CALLS PER PUBLISHED MARKER, not seconds: a run
+One arm of `await_polls` does end on that shape. A marker assignment
+no-opped in either watcher leaves the loop child up, healthy and publishing
+nothing new, and the budget controls waiting on one would spin until the
+job's own limit ended the run nameless. The arm bounds CALLS PER PUBLISHED
+MARKER, not seconds: a run
 whose polls are no wider than the tolerance spends about that many calls
 per marker however long it runs, so a loaded runner reaches it later or
 not at all, where a timeout buys an early failure with a flaky leg. It is
@@ -28,12 +28,9 @@ a tolerance and not a promise: a poll wider than it is refused by name,
 with the idle bound as the other refusal, and `gh_client.Watcher.poll`
 re-entering its own body on a rate-limit refusal can spend more under
 one marker than any single poll is expected to. What the arm cannot
-settle on its own, it does not claim to: the refusal names the `READINGS`
-row the rendered order falls in, and TWO of those four rows are
-ambiguities the row states rather than resolves. Marking one row
-unresolvable says nothing about the others - so the hedge names the
-count, not a single case. `await_lines` and `await_calls` take no such
-bound, and the trade they take is unchanged.
+settle on its own it does not claim to, and it says how many rows are
+ambiguous rather than marking one: two of the four. `await_lines` and
+`await_calls` take no such bound, and the trade they take is unchanged.
 """
 import os
 import sys
@@ -341,11 +338,11 @@ def test_a_cycle_longer_than_the_window_is_still_a_re_use(tmp):
     """The CALL SITE, which is the subject here, not `_reading`.
 
     `_reading` reads the whole run and the wait hands it the whole run;
-    those are two claims and only the second is what the reviewer planted
-    - `_reading(sequence[:SEQUENCE])` at the call site survives every
-    control that calls `_reading` itself, because a function-level
-    control cannot see what its caller passes. So this drives
-    `await_polls` with a cycle whose repeat falls OUTSIDE the window: the
+    those are two claims, and only the second is a property of the CALL
+    SITE - `_reading(sequence[:SEQUENCE])` there survives every control
+    that calls `_reading` itself, because a function-level control cannot
+    see what its caller passes. So this drives `await_polls` with a cycle
+    whose repeat falls OUTSIDE the window: the
     window shows twelve new values and `... 2 more`, and a reading made
     over the window would call that a run of new values.
     """
@@ -379,12 +376,11 @@ def test_a_poll_that_published_no_marker_is_an_unwired_seam(tmp):
 def test_a_run_of_new_values_names_both_candidates(tmp):
     """New values over the bound, and the two things that can mean.
 
-    A control per row proves each row in isolation, which is exactly how
-    an over-claiming row got a green suite: this subject alone cannot
+    A control per row proves each row in isolation, which cannot catch a
+    row claiming more than the payload carries: this subject alone cannot
     tell a wide poll from a sticky index, so the clause has to name both.
-    The control beside this one, in the poll-index suite, drives two
-    plants with OPPOSITE causes through the real loop and shows they earn
-    the same honest answer - this one says what the answer is.
+    The control in the poll-index suite drives two plants with OPPOSITE
+    causes through the real loop; this one says what the answer is.
     """
     del tmp
     message = _refusal_for(_OVER_LOG, SEQUENCE + 4, '16 poll(s)')
@@ -413,16 +409,14 @@ def test_the_reading_covers_every_rendering_the_renderer_can_produce(tmp):
 
     The previous version carried a `row` column it never asserted, so
     collapsing two rows left it passing - a totality check wearing a
-    mapping's clothes. It asserts the row now, so the fixture says what
-    the control checks.
+    mapping's clothes. The fixture says what the control checks.
 
     The long-run case is what the call-site control drives from outside:
     a cycle longer than the window repeats only outside the window, and
     a reading that tested the window put it in the no-repetition row.
-    Every sequence here is one `poll_sequence` can actually emit, which
-    the previous fixture was not, and the two `None` shapes are here as
-    well as in their own control because the row they take is the one a
-    reader would not guess.
+    Every sequence here is one `poll_sequence` can actually emit, and
+    the two `None` shapes are here as well as in their own control
+    because the row they take is the one a reader would not guess.
     """
     del tmp
     new_run = [str(n) for n in range(1, SEQUENCE + 2)]
