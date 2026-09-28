@@ -23,7 +23,7 @@ from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _arm_sweep import arm_sweep, cut_arm  # noqa: E402
+from _arm_sweep import arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
                                 MARKER_NON_MEMBERS, ROW_UNCLAIMED,
@@ -238,6 +238,57 @@ def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
     assert not stale, ('arms whose recorded line no longer carries their own '
                        'anchor, so the cut spec resolves another clause; the '
                        f'first is the cause: {shown}')
+
+
+def test_every_arm_is_uniquely_addressed(tmp):
+    """The line check cannot say WHICH arm it found, so identity is pinned.
+
+    `test_every_arm_is_still_in_the_analyser_it_was_classified_in`
+    reads the text at an arm's recorded line and asks whether it starts
+    with that arm's anchor. Twenty anchors match at a second arm's line
+    and twelve are shared outright, so re-pointing an arm at a line
+    carrying a byte-identical anchor satisfies the check while its cut
+    removes a neighbour's clause in another function.
+
+    Two things close that. The identity the check runs on —
+    (file, line, anchor, cut) — is asserted unique over the real table,
+    and every entry's recorded line is asserted to fall inside the span
+    its OWN cut removes, so the two columns cannot drift apart. The
+    same-line pairs the table carries on purpose are named rather than
+    left to be rediscovered: two arms on one line is a property here,
+    because two arms cut two operands of one disjunction, and what
+    separates them is the cut.
+    """
+    del tmp
+    seen = {}
+    for arm in LAUNCH_ARMS:
+        key = (arm[FILE], arm[LINE], _anchor(arm), arm[CUT])
+        assert key not in seen, (
+            f'{arm[ID]} is addressed exactly as {seen[key]} is: file, line, '
+            'anchor and cut alike, so the line check finds whichever the '
+            'reader has in mind and the cut can remove the other clause')
+        seen[key] = arm[ID]
+    sources = {arm[FILE]: (TESTS / arm[FILE]).read_text(encoding='utf-8')
+               for arm in LAUNCH_ARMS}
+    for arm in LAUNCH_ARMS:
+        span = cut_span(sources[arm[FILE]], arm[CUT])
+        assert span is not None, f'{arm[ID]}: {arm[CUT]} removes no clause'
+        assert span[0] <= arm[LINE] <= span[1], (
+            f'{arm[ID]} records line {arm[LINE]}, which is not in the '
+            f'{span[0]}-{span[1]} span its own cut {arm[CUT]} removes, so '
+            'the two columns address different clauses')
+    on_one_line = {}
+    for arm in LAUNCH_ARMS:
+        on_one_line.setdefault((arm[FILE], arm[LINE]), []).append(arm[CUT])
+    for where, cuts in sorted(on_one_line.items()):
+        assert len(set(cuts)) == len(cuts), (
+            f'{where[0]}:{where[1]} carries {len(cuts)} arms whose cuts are '
+            f'not distinct: {cuts}')
+    shared = sorted(where for where, cuts in on_one_line.items()
+                    if len(cuts) > 1)
+    assert shared == [('_launch_audit.py', 526), ('_launch_audit.py', 549)], (
+        'the same-line pairs the table carries, each two operands of one '
+        f'disjunction; a new one is a decision, not an accident: {shared}')
 
 
 def test_each_control_asserts_what_the_analyser_answers_today(tmp):
