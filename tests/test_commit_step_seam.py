@@ -83,7 +83,7 @@ def _commands(script):
             if line.strip() and not line.lstrip().startswith('#')]
 
 
-def _steps():
+def _seam_steps():
     """The two `run:` blocks the seam is made of, as command lists."""
     source = (ROOT / '.github' / 'workflows' / 'timed-timings.yml'
               ).read_text(encoding='utf-8')
@@ -106,7 +106,7 @@ def test_the_two_steps_are_pinned_as_exact_command_lists(tmp):
     more after the commit (the push, and its own distinction between a
     rejected push and a moved main). The prefix is the seam.
     """
-    refresh, commit = _steps()
+    refresh, commit = _seam_steps()
     assert refresh == _REFRESH_COMMANDS, refresh
     through = commit[:len(_COMMIT_COMMANDS)]
     assert through == _COMMIT_COMMANDS, through
@@ -152,7 +152,7 @@ def _environment(home, tmp):
             'REPO': 'example/example'}
 
 
-def _planted(tool, script, tmp, slot=None):
+def _tool_on_path(tool, script, tmp, slot=None):
     """A PATH holding an executable named `tool` running `script`.
 
     Ahead of everything else, which is the only way to make a real
@@ -266,7 +266,7 @@ def test_the_skip_is_granted_only_on_a_measured_inability(tmp):
     """
     workdir = Path(tmp) / 'tree'
     workdir.mkdir()
-    refusing = _planted(
+    refusing = _tool_on_path(
         'install',
         'echo "install: cannot change permissions of $1: '
         'Permission denied" >&2\nexit 1', tmp, slot='refusing')
@@ -277,7 +277,7 @@ def test_the_skip_is_granted_only_on_a_measured_inability(tmp):
         workdir, _step_environment({}, refusing))
     assert not holds, 'a refusing install still read as capable'
     assert 'Permission denied' in detail, detail
-    succeeding = _planted('install', 'exit 0', tmp, slot='succeeding')
+    succeeding = _tool_on_path('install', 'exit 0', tmp, slot='succeeding')
     holds, detail = filesystem_holds_a_mode(
         workdir, _step_environment({}, succeeding))
     assert holds, 'an install that succeeds still read as incapable'
@@ -319,7 +319,7 @@ def _replay(repository, environment, measure=None):
     swallow. `test_the_committed_subject...` calls it the same way with
     the real measurement.
     """
-    _refresh, commit = _steps()
+    _refresh, commit = _seam_steps()
     through = commit[:len(_COMMIT_COMMANDS)]
     skip_unless_a_mode_can_be_set(repository, environment, measure=measure)
     seeded = git_output(repository, 'log', '-1', '--pretty=%s')
