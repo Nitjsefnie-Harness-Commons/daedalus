@@ -10,6 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import (  # noqa: E402
+    _assert_scan_refusal, _write_tree)
 import _util  # noqa: E402
 
 
@@ -21,13 +23,6 @@ def run():
     if leaf.dead:
         from pkg import hidden
 '''
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
 
 
 def test_the_scan_set_includes_a_module_imported_under_a_dead_branch(_tmp):
@@ -79,22 +74,9 @@ from mcp.server.mcpserver import MCPServer
 '''
 
 
-def _assert_refusal(_tmp, source, site, phrase):
-    """The scan refuses this composition source, naming the site and why."""
-    _write_tree(Path(_tmp), {'composition.py': source})
-    try:
-        _mcp_import_closure.composition_scan_set(
-            Path(_tmp) / 'composition.py', _tmp)
-    except AssertionError as raised:
-        assert f'composition:{site}' in str(raised), raised
-        assert phrase in str(raised), raised
-    else:
-        raise AssertionError('a computed import was silently skipped')
-
-
 def _refuses_the_scan(_tmp, source, site):
     """The scan refuses this composition source, naming the import site."""
-    _assert_refusal(_tmp, source, site, 'cannot read statically')
+    _assert_scan_refusal(_tmp, source, site, 'cannot read statically')
 
 
 def _scans_silently(_tmp, source):
@@ -122,7 +104,7 @@ def test_a_registry_key_the_walk_cannot_read_refuses(_tmp):
              '    return sys.modules[k]\n', 6),
             ('\nimport sys\n\n\ndef load():\n'
              '    return vars(sys)["mod" + "ules"]\n', 6)):
-        _assert_refusal(_tmp, source, site, 'cannot resolve')
+        _assert_scan_refusal(_tmp, source, site, 'cannot resolve')
 
 
 def test_a_registry_key_naming_another_attribute_resolves(_tmp):
@@ -293,7 +275,7 @@ def test_a_dotted_importlib_import_binds_the_operation(_tmp):
     scan matching the whole alias walks past a real import-by-name call and
     the closure drops whatever it loads.
     """
-    _assert_refusal(
+    _assert_scan_refusal(
         _tmp, DOTTED_IMPORTLIB_COMPOSITION, 6, 'cannot read statically')
 
 
@@ -332,11 +314,11 @@ def test_an_assigned_alias_of_a_bound_name_refuses_the_scan(_tmp):
     Naming the assignment is what a reader can go and change; the call it
     feeds reads as an ordinary attribute on an ordinary local.
     """
-    _assert_refusal(_tmp, ASSIGNED_ALIAS_COMPOSITION, 6, 'cannot follow')
+    _assert_scan_refusal(_tmp, ASSIGNED_ALIAS_COMPOSITION, 6, 'cannot follow')
 
 
 def test_an_assignment_of_the_operation_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -352,7 +334,7 @@ def test_a_walrus_alias_refuses_the_scan(_tmp):
     An ordinary refactor to a walrus, with no evasion in it, used to leave
     the call reading as an ordinary attribute on an ordinary local.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -363,7 +345,7 @@ def load(name):
 
 
 def test_a_tuple_unpack_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -374,7 +356,7 @@ def load(name):
 
 
 def test_a_list_unpack_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -390,7 +372,7 @@ def test_an_unpaired_unpack_alias_refuses_the_scan(_tmp):
     The starred target's arity is not knowable statically, so every leaf
     is offered every value — refusing more rather than reading less.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -401,7 +383,7 @@ def load(name):
 
 
 def test_a_for_target_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -412,7 +394,7 @@ def load(name):
 
 
 def test_a_with_target_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -428,7 +410,7 @@ def test_an_attribute_store_alias_refuses_the_scan(_tmp):
     A name store is what the map can reason about; an attribute store is
     the same escape with no name to record.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -440,7 +422,7 @@ class Holder:
 
 
 def test_a_comprehension_target_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -451,7 +433,7 @@ def load(name):
 
 def test_a_parameter_default_alias_refuses_the_scan(_tmp):
     """A default binds a name the map never saw either."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -468,7 +450,7 @@ def test_a_parameter_default_holding_the_registry_refuses_the_scan(_tmp):
              '    return r.modules["json"]\n', 5),
             ('\nimport sys\n\n\ndef load(*, r=sys):\n'
              '    return r.modules["json"]\n', 5)):
-        _assert_refusal(_tmp, source, site, 'cannot follow')
+        _assert_scan_refusal(_tmp, source, site, 'cannot follow')
 
 
 def test_a_parameter_default_refusal_is_one_line_naming_the_parameter(_tmp):
@@ -499,7 +481,7 @@ def load(name, loader=importlib):
 def test_a_bare_registry_store_is_refused_as_the_registry(_tmp):
     """A bare registry store routes to the registry refusal, not the
     operation one: the exclusion is load-bearing."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import sys
 
 m = sys
@@ -507,7 +489,7 @@ m = sys
 
 
 def test_an_except_target_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -528,7 +510,7 @@ def test_an_except_clause_that_delivers_the_operation_refuses(_tmp):
     the exception, so what the clause names is what the handler is handed.
     A clause naming nothing the map tracks is left alone either way.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -606,7 +588,7 @@ def test_a_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
     The map's answer for `importlib` cannot survive a store to that name,
     and refusing the store is the only way the answer stays true.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -617,7 +599,7 @@ def load(name):
 
 
 def test_an_unreadable_rebind_of_a_tracked_name_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -628,7 +610,7 @@ def load(name):
 
 
 def test_a_getattr_of_the_operation_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -668,7 +650,7 @@ def test_a_getattr_of_an_unknown_attribute_on_a_bound_name_refuses(_tmp):
     names, and the same one the sibling code-eval axis draws for a `getattr`
     whose key it cannot read either.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 

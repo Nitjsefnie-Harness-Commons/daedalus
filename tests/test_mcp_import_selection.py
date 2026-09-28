@@ -23,14 +23,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import (  # noqa: E402
+    _callee_scan, _write_tree)
 import _util  # noqa: E402
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
 
 
 # Callee spellings that read the operation OUT of a value rather than
@@ -81,8 +76,8 @@ def _spelling(callee):
 def _refuses_the_callee(_tmp, callee):
     """The scan refuses a call whose callee `callee` it cannot resolve.
 
-    `_assert_refusal` in the closure suite checks the site and the reason;
-    a refusal that fails to name the offending SPELLING leaves a maintainer
+    `_assert_scan_refusal` checks the site and the reason; a refusal that
+    fails to name the offending SPELLING leaves a maintainer
     reading the source to find which of several calls the closure is
     complaining about, and one that drops the remedy leaves them with a
     complaint instead, so both are checked here.
@@ -142,22 +137,6 @@ def _scan_source(_tmp, source):
                 Path(_tmp) / 'composition.py', Path(_tmp)))
     except AssertionError as raised:
         return str(raised)
-
-
-def _callee_scan(_tmp, callee):
-    """`resolved`, `refused`, or `silent` for one callee, with a resolvable
-    `pkg/leaf.py` on disk so a resolved value is told apart from a silence."""
-    _write_tree(Path(_tmp), {
-        'pkg/__init__.py': '', 'pkg/leaf.py': 'leaf = True\n',
-        'composition.py': ('\nimport importlib\n\n\ndef load(c, i):\n'
-                           f'    return {callee}("pkg.leaf")\n')})
-    try:
-        scanned = _mcp_import_closure.composition_scan_set(
-            Path(_tmp) / 'composition.py', _tmp)
-    except AssertionError:
-        return 'refused'
-    names = {path.relative_to(Path(_tmp)).as_posix() for path in scanned}
-    return 'resolved' if 'pkg/leaf.py' in names else 'silent'
 
 
 def test_a_callee_whose_value_is_a_lambda_is_not_refused(_tmp):

@@ -16,14 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import _write_tree  # noqa: E402
 import _util  # noqa: E402
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
 
 
 def _assert_refusal(_tmp, source, site, phrase):
