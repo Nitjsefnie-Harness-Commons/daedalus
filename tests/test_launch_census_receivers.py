@@ -334,22 +334,35 @@ def test_a_doubles_modelled_signature_is_not_a_launchers_deadline(tmp):
 
     `_DrainThreadDouble.join`'s signature IS the API it models for
     `threading.Thread.join`; there is no number in it to derive from
-    anything. `refusing_await` is defined in a test to refuse to wait.
-    Neither launches and neither hands the number on, so the SIGNATURE is
-    not the row.
+    anything. `refusing_await` is defined in a test to refuse to wait,
+    and `SELF_BOUND_DOUBLE` is the same double with its recorder bound in
+    its own body. None launches and none hands the number on, so the
+    SIGNATURE is not the row — and the third is here precisely because the
+    second could not falsify it.
 
     The CALL is still one, and that is the point: the number the caller
     wrote is the caller's, which is the mechanism `_parameter_bound_faults`
     already describes, and `test_bridge_startup.py:259` is the shipped
-    site where it is refused.
+    site where it is refused. `SELF_BOUND_DOUBLE` has no caller, so only
+    the signature route is asserted for it — there is no call site to
+    refuse.
     """
     del tmp
     for source, in_path, call_line in (
             (THREAD_DOUBLE, ('run_gate', 'join'), 14),
-            (NESTED_DOUBLE, ('run_gate', 'refusing_await'), 10)):
+            (NESTED_DOUBLE, ('run_gate', 'refusing_await'), 10),
+            # The SAME double with its recorder bound in its OWN body
+            # rather than one scope out. It discharges for the same
+            # reason and it is here because the two are indistinguishable
+            # in the fixture that motivated the fix: a control built from
+            # one cannot falsify the other, and this is the class that let
+            # a regression through two waves.
+            (SELF_BOUND_DOUBLE, ('g',), None),
+            (SELF_BOUND_MAPPING, ('g',), None)):
         rows = _rows(source, in_path)
         assert 'timeout parameter' not in [route for _, route in rows], rows
-        assert (call_line, 'timeout= keyword') in rows, rows
+        if call_line is not None:
+            assert (call_line, 'timeout= keyword') in rows, rows
 
 
 def _routes(source, in_path):
@@ -553,45 +566,22 @@ def test_a_deadline_handed_to_a_child_slot_is_refused_with_no_launch_near(
             label, _rows(source), _routes(source, ('run_gate',)))
 
 
-CALLER_FILLED = '''import subprocess
-import time
-
-WAIT_TIMEOUT = 90
-
-
-def _wait_for_exit(proc, info=None, timeout=WAIT_TIMEOUT):
-    deadline = time.monotonic() + timeout
-    while proc.poll() is None:
-        if time.monotonic() >= deadline:
-            raise AssertionError('process did not exit')
-        time.sleep(0.01)
-
-
-def run_gate(proc):
-    _wait_for_exit(proc, None, timeout=0)
-    child = subprocess.Popen(['node', 'x.js'])
-    return child.wait(timeout=5)
+# A function that makes its own container and puts the deadline in it, in
+# the two ways a body can hold one: a list it appends to, and a dict it
+# subscripts. The second is the neighbour this control's own fixture could
+# not express, and it was found by building it rather than by reasoning
+# about it.
+SELF_BOUND_DOUBLE = '''def g(argv, timeout=None):
+    spent = []
+    spent.append(timeout)
+    raise RuntimeError('no')
 '''
 
-
-def test_a_helper_taking_its_deadline_from_its_caller_is_judged_there(tmp):
-    """`tests/test_parent_watch.py::_wait_for_exit`, in miniature.
-
-    The signature is not a fault; the FILL is, and it is reported on the
-    caller's line — the mechanism `_parameter_bound_faults` already
-    describes for a bound that arrived as an argument. Nine of the real
-    helper's call sites pass nothing and take the `WAIT_TIMEOUT` default;
-    the tenth passes `timeout=0` deliberately, and that line is the one
-    a caller is answerable for. The child's own wait two lines below it
-    is still a fault, so "the helper is not a launcher" has not spread.
-    """
-    del tmp
-    rows = _rows(CALLER_FILLED, ('run_gate', '_wait_for_exit'))
-    assert 7 not in {line for line, _ in rows}, rows
-    assert sorted(rows) == [
-        (16, 'timeout= keyword'),
-        (18, 'positional timeout on a launched child'),
-        (18, 'timeout= keyword')], rows
+SELF_BOUND_MAPPING = '''def g(argv, timeout=None):
+    spent = {}
+    spent['seen'] = timeout
+    raise RuntimeError('no')
+'''
 
 
 # --- the real files, which are not on the path ----------------------------

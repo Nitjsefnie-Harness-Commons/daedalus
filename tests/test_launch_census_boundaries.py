@@ -303,6 +303,47 @@ def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
         assert _rows(source) == [], (label, _rows(source))
 
 
+CALLER_FILLED = '''import subprocess
+import time
+
+WAIT_TIMEOUT = 90
+
+
+def _wait_for_exit(proc, info=None, timeout=WAIT_TIMEOUT):
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None:
+        if time.monotonic() >= deadline:
+            raise AssertionError('process did not exit')
+        time.sleep(0.01)
+
+
+def run_gate(proc):
+    _wait_for_exit(proc, None, timeout=0)
+    child = subprocess.Popen(['node', 'x.js'])
+    return child.wait(timeout=5)
+'''
+
+
+def test_a_helper_taking_its_deadline_from_its_caller_is_judged_there(tmp):
+    """`tests/test_parent_watch.py::_wait_for_exit`, in miniature.
+
+    The signature is not a fault; the FILL is, and it is reported on the
+    caller's line — the mechanism `_parameter_bound_faults` already
+    describes for a bound that arrived as an argument. Nine of the real
+    helper's call sites pass nothing and take the `WAIT_TIMEOUT` default;
+    the tenth passes `timeout=0` deliberately, and that line is the one
+    a caller is answerable for. The child's own wait two lines below it
+    is still a fault, so "the helper is not a launcher" has not spread.
+    """
+    del tmp
+    rows = _rows(CALLER_FILLED, ('run_gate', '_wait_for_exit'))
+    assert 7 not in {line for line, _ in rows}, rows
+    assert sorted(rows) == [
+        (16, 'timeout= keyword'),
+        (18, 'positional timeout on a launched child'),
+        (18, 'timeout= keyword')], rows
+
+
 def main():
     return _util.runner(
         _util.collect(globals()), tmp_prefix='launchcensusboundaries_')
