@@ -474,29 +474,39 @@ def test_a_file_whose_weight_is_mostly_estimated_is_a_named_refusal(tmp):
     assert 'refresh_timings.py' in message, message
 
 
-def test_the_estimated_share_is_of_weight_and_not_of_suite_count(tmp):
-    """Most SUITES estimated is a normal refresh; most WEIGHT is not.
+def test_the_guard_drives_both_shares_and_never_a_suite_count(tmp):
+    """Nine of ten suites estimated is a REFUSAL, and by count.
 
-    The two disagree when the recorded weights are lopsided, which is
-    the ordinary case: a tree's measured suites skew heavy, so the
-    median the planner lends the unmeasured ones sits low and a handful
-    of heavy measured suites can carry a file whose four fifths of
-    SUITES are estimates. Counting suites would refuse a file that
-    describes the tree well; counting weight refuses the file that does
-    not. This one has nine of ten suites estimated and plans, and the
-    expectation is the guard's own share recomputed here from the
-    planner's own estimate.
+    The two shares disagree wherever the recorded weights are
+    lopsided -- the ordinary shape, since the suites that dominate a
+    matrix are the ones measured hardest. This file is where counting
+    suites and counting weight come to opposite conclusions: 7% of the
+    plan's weight is estimated, 70% of its suites. So the assertion
+    is on both shares AND on which refusal came back: a guard whose
+    `estimated_share` returned a suite count would name the weight
+    bound here, and one reading the weight share for both would
+    publish the file.
     """
+    coverage = _coverage()
     suites = [f'test_{index:02d}.py' for index in range(10)]
     recorded = {'test_00.py': 1.0, 'test_01.py': 1.0, 'test_09.py': 90.0}
     data = _data(recorded, target=100.0, max_cells=30)
-    estimate = statistics.median(list(recorded.values()))
-    share = estimate * 7 / (sum(recorded.values()) + estimate * 7)
-    assert len([name for name in suites if name not in recorded]) > 3
-    assert share < _coverage().MAX_ESTIMATED_WEIGHT_SHARE, share
-    plan, _out = _plan(tmp, suites, data)
-    assert plan.estimated == sorted(set(suites) - set(recorded)), plan
-    assert sum(len(cell.suites) for cell in plan.cells) == len(suites)
+    planner = _planner()
+    tree = _tree(tmp, suites)
+    weights, estimated, _stale = planner.resolve(
+        recorded, planner.suite_names(tree), 1.0)
+    weight_share = coverage.estimated_share(weights, estimated)
+    suite_share = coverage.estimated_suite_share(weights, estimated)
+    assert weight_share < coverage.MAX_ESTIMATED_WEIGHT_SHARE, weight_share
+    assert suite_share > coverage.MAX_ESTIMATED_SUITE_SHARE, suite_share
+    assert estimated == sorted(set(suites) - set(recorded)), estimated
+    refusal = coverage.coverage_refusal(weights, estimated)
+    assert refusal and 'weight is estimated' not in refusal, refusal
+    stderr = _captured_stderr(planner, [
+        '--tree', str(tree), '--timings',
+        str(_write(Path(tmp) / 'skewed.json', data))])
+    assert 'suites are estimated' in stderr, stderr
+    assert 'weight is estimated' not in stderr, stderr
 
 
 def test_the_packing_is_deterministic(tmp):
