@@ -101,17 +101,21 @@ SAMPLE_RUNS = 3
 def _moved(recorded, computed):
     """Suites whose weight moved beyond the margin, with both numbers.
 
-    A recorded weight of zero -- which the seed's millisecond rounding
-    can produce for a sub-millisecond suite -- has no relative move to
-    measure, and any new positive weight is infinitely far from it, so
-    it counts as moved rather than dividing by it.
+    The divisor is positive at both ends and neither end is this
+    function: `recorded` is what `read_timings` returned, and the
+    schema refuses a weight of zero or less there, while `_rounded` is
+    what stops the writer producing one -- including on the seed path,
+    where a sub-millisecond suite rounds to zero and would otherwise be
+    written as a weight the reader rejects. So there is no arm here for
+    a zero: an earlier one claimed the seed's rounding could produce
+    one, and `_rounded` is the answer to that.
     """
     moved = []
     for suite, old in sorted(recorded.items()):
         new = computed.get(suite)
         if new is None:
             continue
-        if old <= 0 or abs(new - old) / old > WEIGHT_MARGIN:
+        if abs(new - old) / old > WEIGHT_MARGIN:
             moved.append((suite, old, new))
     return moved
 

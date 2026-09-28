@@ -279,7 +279,8 @@ def suite_file(path, seconds):
                                 'outcomes': {}}), encoding='utf-8')
 
 
-def write_run(root, run_id, cells, reference: float | None = 2.0, decoys=()):
+def write_run(root, run_id, cells, reference: float | None = 2.0, decoys=(),
+              rounds=None):
     """One run's artifact tree; `cells` maps a cell name to suite seconds.
 
     Each suite gets the given seconds in `head-1` and `head-2`, the two
@@ -287,6 +288,14 @@ def write_run(root, run_id, cells, reference: float | None = 2.0, decoys=()):
     all. `decoys` names extra round directories (`base-1`, `warmup`)
     that carry the same suites at ten times the seconds, so a parser
     that counted them would not agree with one that did not.
+
+    `rounds` overrides the per-round seconds for named suites, so a
+    fixture can carry a suite at a DIFFERENT value in each head round.
+    Without it every suite is the same number in both rounds, and a
+    parser that took the first round instead of the mean of them would
+    agree with this fixture on every suite it builds -- which is what
+    made the round average unpinned: the only two-head-round fixture in
+    the repository could not tell `mean` from `values[0]`.
     """
     run = Path(root) / str(run_id)
     for cell, suites in cells.items():
@@ -294,8 +303,9 @@ def write_run(root, run_id, cells, reference: float | None = 2.0, decoys=()):
             # time_tests.py names each file after the suite's STEM, so
             # the file is `test_a.json` for `test_a.py`.
             name = f'{Path(suite).stem}.json'
-            for round_name in ('head-1', 'head-2'):
-                suite_file(run / cell / round_name / name, seconds)
+            per_round = (rounds or {}).get(suite, (seconds, seconds))
+            for round_name, value in zip(('head-1', 'head-2'), per_round):
+                suite_file(run / cell / round_name / name, value)
         for decoy in decoys:
             for suite, seconds in suites.items():
                 name = f'{Path(suite).stem}.json'

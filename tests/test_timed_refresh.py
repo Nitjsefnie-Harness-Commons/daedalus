@@ -402,7 +402,10 @@ def test_the_seed_command_measures_seconds_and_explains_both_bounds(tmp):
     # run did not measure is under a tenth: a seed is refused now unless
     # the run it seeds from measured the tree, and this fixture is about
     # the units, the target and the bound rather than about that.
-    shape = ([60.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0] * 2
+    # The two heaviest are 220 rather than 60 so the recorded set's own
+    # mean clears twice its median: the coverage guard's third condition
+    # reads that ratio, and 60 beside the rest is 1.16.
+    shape = ([220.0, 30.0, 30.0, 30.0, 20.0, 20.0, 10.0, 5.0] * 2
              + [5.0, 4.0])
     suites = {f'test_s{index:02d}.py': seconds
               for index, seconds in enumerate(shape)}
@@ -572,12 +575,15 @@ def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     the units, both bounds and the tree suites still estimated.
     """
     refresh = _refresh()
-    # Eleven measured over twelve, for the seed's coverage bound.
+    # Eleven measured over twelve, for the seed's coverage bound. The
+    # one heavy weight is 80 rather than 40 so the recorded set has the
+    # spread a measurement has: the coverage guard's third condition
+    # reads its skew, and 40 beside ten 4s is a ratio of 1.8.
     measured = ['test_a.py', 'test_b.py'] + [f'test_x{i}.py' for i in range(9)]
     tree = _tree(tmp, measured + ['test_unmeasured.py'])
     seed_root = Path(tmp) / 'seed-runs'
     _write_run(seed_root, 1,
-               {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0,
+               {'cell-01': {'test_a.py': 80.0, 'test_b.py': 4.0,
                             **{name: 4.0 for name in measured[2:]}}},
                reference=None)
     out = _file(tmp, _data({}, units='seconds'), name='seed.json')
@@ -586,7 +592,7 @@ def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
         out.read_text(encoding='utf-8'))['basis']
     root = Path(tmp) / 'runs'
     _write_run(root, 2,
-               {'cell-01': {'test_a.py': 40.0, 'test_b.py': 4.0,
+               {'cell-01': {'test_a.py': 80.0, 'test_b.py': 4.0,
                             **{name: 4.0 for name in measured[2:]}}},
                reference=2.0)
     _run(refresh, _refresh_args(tmp, root, out, tree=tree))
@@ -623,15 +629,6 @@ def test_the_basis_does_not_equate_the_bound_with_the_measured_cells(tmp):
     assert 'max_cells 5' in basis, basis
     assert '2 cells' in basis, basis
     assert 'the bound is that number' not in basis, basis
-
-
-def test_a_recorded_zero_weight_is_a_move_not_a_division(tmp):
-    """The seed rounds to four decimals; a zero must not divide."""
-    refresh = _refresh()
-    # pylint: disable=protected-access
-    assert refresh._moved({'test_tiny.py': 0.0},
-                          {'test_tiny.py': 1.5}) == [
-        ('test_tiny.py', 0.0, 1.5)]
 
 
 def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
