@@ -95,7 +95,7 @@ def _drift(tmp, data, recorded, days, name):
     return fixture_tree(Path(tmp) / name, suites), gain
 
 
-def _verdict(tree, tmp, data, name='timings.json', *flags):
+def _verdict(tree, tmp, data, *flags, name='timings.json'):
     """The planner's CLI over a fixture tree: (code, stderr, summary)."""
     path = Path(tmp) / name
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
@@ -143,7 +143,8 @@ def test_two_days_of_drift_publishes_with_the_share_named(tmp):
     data, recorded = _shipped_weights()
     tree, gain = _drift(tmp, data, recorded, 2, 'two-days')
     assert gain == 38, gain
-    code, err, summary, published = _verdict(tree, tmp, data, 'two-days.json')
+    code, err, summary, published = _verdict(
+        tree, tmp, data, name='two-days.json')
     assert code == 0, err
     assert 'cell-01' in published, published
     assert '10.6% of this plan' in summary, summary
@@ -156,7 +157,7 @@ def test_two_days_of_drift_publishes_with_the_share_named(tmp):
 def test_the_shipped_files_own_coverage_quotes_no_note(tmp):
     """The operating point stays quiet: 9 of 328 is 2.7%, under a tenth."""
     data, _recorded = _shipped_weights()
-    _code, _err, summary, _out = _verdict(ROOT, tmp, data, 'shipped.json')
+    _code, _err, summary, _out = _verdict(ROOT, tmp, data, name='shipped.json')
     assert 'of this plan\'s suites are estimated' not in summary, summary
 
 
@@ -186,7 +187,7 @@ def test_the_refusal_waits_for_a_file_that_is_not_a_description_of_its_tree(
         tree, gain = _drift(tmp, data, recorded, days, f'{days}-days')
         share = gain / (len(recorded) + gain)
         code, err, summary, published = _verdict(
-            tree, tmp, data, f'{days}-days.json')
+            tree, tmp, data, name=f'{days}-days.json')
         if refused:
             assert code == 1, (days, share, summary)
             assert 'suites are estimated' in err, err
