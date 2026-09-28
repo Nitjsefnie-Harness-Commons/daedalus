@@ -10,7 +10,7 @@ hand-rolled loops this replaces conflate:
   0  every run on the SHA has `status: completed`, every conclusion is
      `success`, `neutral` or `skipped`, and every workflow in
      REQUIRED_WORKFLOWS has at least one run of its own left after the
-     newest-run-per-workflow filter below
+     newest-run-per-workflow filter
   1  every run concluded and at least one conclusion is none of those; the
      offending runs are named on stdout with their URLs
   2  the wait exceeded --timeout without every run concluding, or with
@@ -73,13 +73,12 @@ still fail.
 Discarding a failure is what that rule costs, so the discard is never
 silent: the acceptable line names every run the filter dropped, with its
 workflow, its run id, its conclusion and its URL, and its count is the
-number of lines printed. The grouping is by workflow, the path standing in
-when the id is absent, and never by the run's name; "newer" is by
-run_started_at, created_at standing in when that is missing, ties broken by
-numeric id. A superseded run's name never satisfies the required-workflow
-check, because that check reads the set the filter left. The runs are read
-through the commit's check suites rather than the check-runs list because
-that list is appended to while a matrix fills; how is `gh_client`'s subject.
+number of lines printed. The filter is `ci_gate`'s and the required-workflow
+check is its predicate, which applies that filter itself, so a superseded
+run's name cannot satisfy the gate and this tool and `watch_all.py` cannot
+answer the same question differently (issue #1262). The runs are read through
+the commit's check suites rather than the check-runs list because that list
+is appended to while a matrix fills; how is `gh_client`'s subject.
 
 Run --once before a long wait; --once prints the matrix to stderr and exits 0
 when the query succeeded, `state: incomplete` included, because a trial call
@@ -91,11 +90,13 @@ import argparse
 import re
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_gate  # noqa: E402
+# The newest-run-per-workflow filter is ci_gate's, beside the predicate it
+# defines the set for, so there is one filter rather than one per caller.
+from ci_gate import _judged, _superseded  # noqa: E402
 import gh_client  # noqa: E402
 import gh_head_prs  # noqa: E402
 
@@ -111,7 +112,6 @@ ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 # exists to protect.
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
-OLDEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
 class RefusingParser(argparse.ArgumentParser):
@@ -134,57 +134,13 @@ def prs_on(repo, sha):
     return gh_head_prs.head_pull_requests(owner, name, sha)
 
 
-def _workflow_of(run):
-    """The workflow a run belongs to: its id, or its path when id is absent."""
-    return run.get('workflow_id') or run.get('path')
-
-
-def _started_key(run):
-    """(start, id): the instant the run began, tie-broken by numeric id."""
-    text = run.get('run_started_at') or run.get('created_at')
-    stamp = OLDEST
-    if text:
-        try:
-            stamp = datetime.fromisoformat(str(text).replace('Z', '+00:00'))
-        except ValueError:
-            stamp = OLDEST
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp, int(run.get('id') or 0)
-
-
-def _superseded(run, runs):
-    """True when a strictly newer run of the same workflow exists.
-
-    A run naming no workflow - neither an id nor a path, which `gh_client`
-    emits when both are null - is never superseded: there is nothing to
-    group it on, so grouping it would let one unidentified run clear
-    another's conclusion.
-    """
-    mine = _workflow_of(run)
-    if not mine:
-        return False
-    started = _started_key(run)
-    return any(_workflow_of(other) == mine and _started_key(other) > started
-               for other in runs)
-
-
-def _judged(runs):
-    """The runs the verdict reads: each workflow's newest run, and no other.
-
-    The rule's rationale and the cost it pays are the module docstring's;
-    the naming that pays it is in `wait`.
-    """
-    return [run for run in runs if not _superseded(run, runs)]
-
-
 def _missing(runs, required=REQUIRED_WORKFLOWS):
     """The required workflow names no run the filter kept carries.
 
-    Read through the shared predicate and over the set the filter left, so
+    Read through the shared predicate, which applies the filter itself, so
     a superseded run's name cannot satisfy the gate on its own.
     """
-    return ci_gate.missing_required(_judged(runs), required=required)
+    return ci_gate.missing_required(runs, required=required)
 
 
 def verdict(runs, *, required=REQUIRED_WORKFLOWS):
@@ -194,14 +150,14 @@ def verdict(runs, *, required=REQUIRED_WORKFLOWS):
     (exit 4). Zero runs is waiting - "no run yet" must not read as "all
     concluded", and must not read as an incomplete set either. A superseded
     run is out of the judged set whatever it concluded: its name cannot
-    satisfy the required-workflow check that runs after the filter.
+    satisfy the required-workflow check, which reads that same set.
 
     The order is load-bearing. A conclusion is judged before the set is:
     a required workflow that is present and red is a failure (1), never an
     incomplete set (4), so the refusal a missing gate earns can never
     swallow a real failure. Only a set whose every conclusion is acceptable
     can be incomplete, and the set question is ci_gate's, which
-    watch_all.py asks the same way.
+    watch_all.py asks through the same call.
 
     That question is ALL-OF: a set is incomplete unless EVERY required
     workflow is present. An earlier form on this branch read it any-of,
