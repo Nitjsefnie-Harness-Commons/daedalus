@@ -19,6 +19,17 @@ union -- and `test_timed_planner.py` covers the guard on the other
 side of the file, which refuses a plan whose weight is mostly
 estimated.
 
+THE GUARD ON THE OTHER SIDE, `scripts/ci/timings_coverage.py`, is here
+too, and its two conditions are the subject of the last three tests.
+The weight share alone could not hold it: a file recording the
+twenty-nine LIGHTEST suites of the tree plus its heaviest is nine per
+cent of the plan's suites and, because that one heavy weight inflates
+the denominator the share is computed against, thirty-one per cent of
+its weight. That is under the weight bound, the planner published one
+cell for 327 suites, and the plan's total was 22.3 where the tree
+really holds 345.2 -- a 15.5x understatement, worse than the 3.15x the
+guard exists to stop.
+
 The artifacts are fixtures under a temp tree: no API, no `gh`, no
 network. Each test builds a run the way the timed job leaves one --
 `<run>/<cell>/head-N/<suite>.json`, one JSON per suite, plus the cell's
@@ -295,6 +306,98 @@ def test_a_partial_run_does_not_claim_to_have_measured_the_tree(tmp):
     # the repository runs, whatever the file went on to derive.
     assert 'the concurrency the repository runs today' not in basis, basis
     assert 'the measured run ran 2 cells,' in basis, basis
+
+
+def _thinned_to_the_lightest(data, names, keep=30):
+    """The file's own weights, kept at their lightest plus its heaviest.
+
+    The shape that flatters the weight share: `keep - 1` weights at the
+    bottom of the tree's distribution and the single heaviest one on
+    top. The median the planner lends the unmeasured suites is the
+    median of that set, which is tiny, and the heaviest weight sits in
+    the denominator the share is divided by.
+    """
+    recorded = {name: data['suite_weights'][name] for name in names
+                if name in data['suite_weights']}
+    light = sorted(recorded, key=lambda name: recorded[name])[:keep - 1]
+    heavy = max(recorded, key=lambda name: recorded[name])
+    return {name: recorded[name] for name in list(light) + [heavy]}
+
+
+def test_a_light_tailed_recorded_set_is_not_a_share_the_guard_believes(tmp):
+    """The weight share, on a real file, is 31.1% of a 15.5x error.
+
+    The guard's own arithmetic, on the shipped file's own weights over
+    the real tree: twenty-nine lightest suites plus the heaviest. The
+    estimate is their median, the denominator is their sum, and the
+    heaviest weight is most of it -- so the share reads 31% and passes
+    a 50% bound, while the plan it produces is ONE cell for 327 suites
+    and totals 22.3 reference multiples where the tree holds 345.2.
+    A heavy recorded suite flatters the very statistic meant to catch
+    it, and a second condition that no recorded weight can move is the
+    only thing that closes that.
+    """
+    planner = _planner()
+    coverage = _util.load(ROOT / 'scripts' / 'ci' / 'timings_coverage.py',
+                          'timings_coverage')
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    names = planner.suite_names(ROOT)
+    kept = _thinned_to_the_lightest(data, names)
+    weights, estimated, _stale = planner.resolve(kept, names, 1.0)
+    assert len(kept) == 30 and len(estimated) == len(names) - 30
+    truth = sum(planner.resolve(
+        data['suite_weights'], names, 1.0)[0].values())
+    assert coverage.estimated_share(weights, estimated) < 0.5
+    plan = planner.plan(ROOT, dict(data, suite_weights=kept))
+    assert len(plan.cells) == 1, [cell.suites for cell in plan.cells]
+    assert truth / sum(weights.values()) > 15, (truth, sum(weights.values()))
+    refusal = coverage.coverage_refusal(weights, estimated)
+    assert refusal is not None, 'the planner published a matrix on a fiction'
+    assert 'refresh_timings.py' in refusal, refusal
+
+
+def test_each_coverage_bound_refuses_a_file_the_other_one_publishes(tmp):
+    """Neither statistic is a restatement of the other; both earn their place.
+
+    Ten suites, three recorded at 1.0, 1.0 and 90.0: seven of the
+    plan's SUITES are estimated and 7% of its weight, so the weight
+    bound alone would publish it and the count bound refuses. Nine
+    suites, five recorded at 0.001, 0.001, 5, 5, 5: four of its
+    suites are estimated -- 44%, under the count bound -- and 57% of
+    its weight, so the count bound alone would publish it and the
+    weight bound refuses. A file with fewer than half its suites
+    missing can still be a fiction, and one with an eighth of its
+    weight missing can still be a quarter of the tree.
+    """
+    planner = _planner()
+    coverage = _util.load(ROOT / 'scripts' / 'ci' / 'timings_coverage.py',
+                          'timings_coverage')
+    planner_module = planner
+    counts = {'weight': 0, 'suite': 0}
+    for case, (recorded, suites) in enumerate((
+            ({'test_00.py': 1.0, 'test_01.py': 1.0, 'test_09.py': 90.0},
+             [f'test_{index:02d}.py' for index in range(10)]),
+            ({'test_00.py': 0.001, 'test_01.py': 0.001, 'test_02.py': 5.0,
+              'test_03.py': 5.0, 'test_04.py': 5.0},
+             [f'test_{index:02d}.py' for index in range(9)]))):
+        # One tree per case: a shared one would carry the first case's
+        # tenth suite into the second.
+        tree = fixture_tree(Path(tmp) / f'case{case}', suites)
+        weights, estimated, _stale = planner_module.resolve(
+            recorded, planner_module.suite_names(tree), 1.0)
+        weight_share = coverage.estimated_share(weights, estimated)
+        suite_share = coverage.estimated_suite_share(weights, estimated)
+        assert weight_share != suite_share, (weight_share, suite_share)
+        refusal = coverage.coverage_refusal(weights, estimated)
+        if weight_share > 0.5:
+            assert suite_share < 0.5, (weight_share, suite_share)
+            assert 'weight is estimated' in refusal, refusal
+            counts['weight'] += 1
+        else:
+            assert suite_share > 0.5, (weight_share, suite_share)
+            assert 'suites are estimated' in refusal, refusal
+            counts['suite'] += 1
+    assert counts == {'weight': 1, 'suite': 1}, counts
 
 
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
