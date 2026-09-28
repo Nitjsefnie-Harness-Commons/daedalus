@@ -219,7 +219,7 @@ for launcher in f"{subprocess}".upper():
         ('tuple index as an iterable', """import os
 import subprocess
 os.chdir(tmp)
-for launcher in (subprocess,).index(1):
+for launcher in (subprocess, 1).index(1):
     launcher.run(['python3', 'child.py'])
 """, 'for launcher in'),
         ('iterable call on a bare name', """import os
