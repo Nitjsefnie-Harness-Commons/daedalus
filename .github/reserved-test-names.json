@@ -682,6 +682,7 @@
     "_readback_items_arm": {"python": ["tests/_pyroute_reads.py"]},
     "_readback_popitem": {"python": ["tests/_pyroute_reads.py"]},
     "_readback_values": {"python": ["tests/_pyroute_reads.py"]},
+    "_reading": {"python": ["tests/_watcher_waits.py"]},
     "_reads_attribute": {"python": ["tests/_coverage_scopes.py"]},
     "_ready_worker": {"python": ["tests/_realbrowser_fixture_controls.py"]},
     "_real": {"python": ["tests/_wffixtures.py"], "fixture": ["tests/_wffixtures.py"]},
