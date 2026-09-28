@@ -262,10 +262,13 @@ def main(argv=None):
         committed = load(args.artifact)
         # The base comes from git, never from the artifact: a document
         # that carried its own scope would be able to widen it, and an
-        # emptied one would switch this check off entirely.
+        # emptied one would switch this check off entirely. The history
+        # is asked for before anything else, so a shallow checkout is
+        # refused rather than answered with a plausible empty scope.
         helper = _base_helper()
-        base, covered = helper.base_files(
-            args.tree, helper.relative_to_tree(args.tree, args.artifact))
+        inside = helper.relative_to_tree(args.tree, args.artifact)
+        helper.require_history(args.tree, inside)
+        base, covered = helper.base_files(args.tree, inside)
         found = violations(committed, derived, covered)
         if not any(found.values()):
             # What was compared, and the base it was compared against.

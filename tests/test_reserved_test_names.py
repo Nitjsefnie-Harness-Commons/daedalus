@@ -306,7 +306,6 @@ def _commit(tree, message):
 
 
 def _base_of(tree):
-    """The paths in the tree of the commit that last wrote the set."""
     artifact = Path(tree) / '.github' / 'reserved-test-names.json'
     return artifact_base.base_files(
         tree, artifact_base.relative_to_tree(tree, artifact))[1]
@@ -328,15 +327,12 @@ def test_the_committed_set_is_what_the_rules_derive(tmp):
     hand-typed one is a rule nobody enforces.
 
     The verdict is scoped to the base -- the tree of the commit that
-    last wrote the document -- so that base is read here and passed in,
-    rather than the check reading it for itself out of the document it
-    is checking.
+    last wrote the document -- so it is read here and passed in.
     """
     del tmp
     policy = _contract()
-    base, covered = artifact_base.base_files(
+    _base, covered = artifact_base.base_files(
         ROOT, artifact_base.relative_to_tree(ROOT, ARTIFACT))
-    del base
     found = policy.violations(policy.load(), policy.document(), covered)
     detail = '\n'.join(f'{kind}: {rows}' for kind, rows in found.items()
                        if rows)

@@ -34,6 +34,26 @@ that has to deepen its checkout and the line that fixes it. It is a
 as one line, and it RAISES rather than returning an empty answer --
 an empty answer reads as "nothing is covered", which is a pass, and a
 pass that is really an unanswerable question is worse than a red.
+
+THE MARKER IS NOT WHERE THE NAIVE PATH LOOKS. A clone that was fetched
+with a depth keeps its marker in the CLONE's own git directory. In a
+linked worktree `git rev-parse --absolute-git-dir` answers the
+worktree's own directory instead -- something like
+``.git/worktrees/<name>/`` -- and that directory carries no marker at
+all, so a helper that opens ``<root>/.git/shallow`` concludes the
+checkout is complete when it is not. That failure is invisible in CI,
+where a checkout is a clone, and it is the whole of what a linked
+worktree of a shallow clone is: the control degrades into its strict
+form and reports a false red on the merge the scoping exists to survive.
+So the marker is read from the COMMON directory, which every worktree of
+a clone shares, and a linked worktree of a FULL clone has no marker
+there either -- so the check distinguishes the two shapes rather than
+refusing everything with a worktree git dir.
+
+CALLERS ASK FIRST. ``require_history`` is a separate, explicitly named
+call, made before anything else is asked of this module, because a
+helper that can also be called in a way that yields a plausible empty
+set is not fail-closed.
 """
 import os
 import subprocess
@@ -45,6 +65,8 @@ SHALLOW_REMEDY = (
     'checkout cannot say: set `fetch-depth: 0` on the actions/checkout '
     'step of the job named below, then re-run it')
 
+SHALLOW_MARKER = 'shallow'
+
 
 class ShallowHistory(ValueError):
     """The checkout has no history to resolve a last writer from."""
@@ -53,35 +75,59 @@ class ShallowHistory(ValueError):
 def _git(root, *argv, check=True):
     result = subprocess.run(
         ['git', '-C', str(root), *argv], check=False, capture_output=True,
-        text=True, timeout=120)
+        text=True)
     if check and result.returncode != 0:
         raise ValueError(f'git {argv[0]} failed under {root}: '
                          f'{result.stderr.strip()}') from None
     return result
 
 
-def _is_shallow(root):
-    result = _git(root, 'rev-parse', '--is-shallow-repository', check=False)
+def common_dir(root):
+    """The clone's own git directory, which every worktree of it shares.
+
+    Asked for by `--git-common-dir` rather than derived from the path,
+    because in a linked worktree the two are different directories and
+    only this one is the clone's.
+    """
+    result = _git(root, 'rev-parse', '--path-format=absolute',
+                   '--git-common-dir', check=False)
     if result.returncode != 0:
-        return False
-    return result.stdout.strip() == 'true'
+        raise ValueError(f'{root} is not a git checkout: '
+                         f'{result.stderr.strip()}') from None
+    return Path(result.stdout.strip())
+
+
+def is_shallow(root):
+    """True when the clone behind `root` has a truncated history.
+
+    A linked worktree of a shallow clone is shallow, because the marker
+    is in the clone's directory and a worktree never has one of its own.
+    """
+    return (common_dir(root) / SHALLOW_MARKER).exists()
 
 
 def _job():
     return os.environ.get('GITHUB_JOB') or ''
 
 
-def refuse_shallow(root, artifact):
-    """Raise, naming the job whose checkout is too shallow to answer."""
-    job = _job()
-    named = (f'job {job!r}' if job
-             else 'the job that ran this (GITHUB_JOB is unset, so this '
-                  'refusal cannot name it -- set it, or read the job name '
-                  'from the run that produced it)')
-    raise ShallowHistory(
-        f'cannot resolve the base of {artifact}: the checkout at {root} is '
-        f'shallow, so no commit in it is known to be the one that last '
-        f'wrote that artifact. {SHALLOW_REMEDY}. Affected: {named}')
+def require_history(root, artifact):
+    """Refuse a shallow checkout, naming the job that has to deepen it.
+
+    The call a caller makes FIRST. It raises rather than returning a
+    verdict, and it raises rather than answering, because every answer
+    this module could give about a shallow checkout is a guess and the
+    guess is always the permissive one.
+    """
+    if is_shallow(root):
+        job = _job()
+        named = (f'job {job!r}' if job else
+                 'the job that ran this (GITHUB_JOB is unset, so this '
+                 'refusal cannot name it -- read it from the run that '
+                 'produced it)')
+        raise ShallowHistory(
+            f'cannot resolve the base of {artifact}: the checkout at {root} '
+            f'is shallow, so no commit in it is known to be the one that '
+            f'last wrote that artifact. {SHALLOW_REMEDY}. Affected: {named}')
 
 
 def last_writer(root, artifact):
@@ -89,10 +135,10 @@ def last_writer(root, artifact):
 
     `artifact` is relative to `root`. A path no commit has ever written
     is a refusal, not an empty answer: there is no base to scope
-    against, and reporting one would exempt every name.
+    against, and reporting one would exempt every name. The shallow
+    refusal is repeated here so the function is not a way to skip it.
     """
-    if _is_shallow(root):
-        refuse_shallow(root, artifact)
+    require_history(root, artifact)
     result = _git(root, 'log', '-1', '--format=%H', '--', artifact,
                   check=False)
     commit = result.stdout.strip()

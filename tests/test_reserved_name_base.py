@@ -89,7 +89,7 @@ def _policy():
 def _branch_git(tree, *argv, check=True, env=None):
     return subprocess.run(
         ['git', '-C', str(tree), *argv], check=check, capture_output=True,
-        text=True, env=env or _util.child_coverage('scrub'), timeout=180)
+        text=True, env=env or _util.child_coverage('scrub'))
 
 
 def _commit_all(tree, message):
@@ -124,8 +124,11 @@ def _branch_check(tree, *args):
     return subprocess.run(
         [sys.executable, str(POLICY_SOURCE), *args,
          '--tree', str(tree), '--artifact', str(_artifact(tree))],
+        # No bound of its own: the suite runner bounds it, and a hang
+        # surfacing as the enclosing bound is a better failure than a
+        # margin on a loaded runner.
         cwd=str(tree), env=_util.child_coverage('scrub'),
-        capture_output=True, text=True, timeout=180)
+        capture_output=True, text=True)
 
 
 def _tighten(tree):
@@ -213,8 +216,9 @@ def _land(tree, shas, by_rebase):
         elif _branch_git(tree, 'merge', '-q', '--no-ff', '--no-edit',
                   sha, check=False).returncode:
             conflicted = True
-            _resolve_union(tree, _show(tree, 'HEAD'), _show(tree, 'MERGE_HEAD'),
-                     ['commit', '-q', '--no-edit'])
+            _resolve_union(tree, _show(tree, 'HEAD'),
+                         _show(tree, 'MERGE_HEAD'),
+                         ['commit', '-q', '--no-edit'])
     return conflicted
 
 
@@ -250,8 +254,10 @@ def _world(root, name, *, a_name, b_name, a_regen, b_regen):
     return tree, shas
 
 
-def _land_and_check(root, name, order, by_rebase, **world):
-    tree, shas = _world(root, name, **world)
+def _land_and_check(root, name, order, by_rebase, *, a_name, b_name,
+                    a_regen, b_regen):
+    tree, shas = _world(root, name, a_name=a_name, b_name=b_name,
+                        a_regen=a_regen, b_regen=b_regen)
     conflicted = _land(tree, [shas[one] for one in order], by_rebase)
     return _branch_check(tree), conflicted
 
@@ -409,6 +415,7 @@ def test_every_landing_of_two_branches_lands_green(tmp):
                           'b_name': '_shared_helper'} if overlap else
                          {'a_name': '_alpha_helper',
                           'b_name': '_beta_helper'})
+                a_bound, b_bound = names['a_name'], names['b_name']
                 for order in (('a', 'b'), ('b', 'a')):
                     for by_rebase in (True, False):
                         cell = (f'A={"tighten" if a_regen else "skip"}',
@@ -419,7 +426,8 @@ def test_every_landing_of_two_branches_lands_green(tmp):
                         counter += 1
                         result, conflicted = _land_and_check(
                             tmp, f'cell{counter:02d}', order, by_rebase,
-                            a_regen=a_regen, b_regen=b_regen, **names)
+                            a_name=a_bound, b_name=b_bound,
+                            a_regen=a_regen, b_regen=b_regen)
                         green = _green(result)
                         verdicts.append(('|'.join(cell), green, conflicted))
                         if not green:
