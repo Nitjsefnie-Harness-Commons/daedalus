@@ -46,6 +46,10 @@ CANCEL_BOUND = 60
 # of exactly this width and of one more, so the margin either side of the
 # boundary is a run and not an argument.
 POLL_WIDTH = 8
+# How many published boundaries a refusal renders before it says how many
+# more there are. A re-use shows inside the first cycle, and a run longer
+# than the bound is itself evidence: a healthy run's are all new.
+SEQUENCE = 12
 
 
 class Stream:
@@ -209,6 +213,24 @@ def await_calls(fake, count, child, what):
         time.sleep(POLL)
 
 
+def poll_sequence(calls):
+    """The markers a call log published, in order, each run collapsed.
+
+    A call log carries a marker's name for every call inside one poll, so
+    `1,1,2,2,3,3` is three boundaries. The collapse is by POSITION and
+    never by value: a mapping keyed on the marker turns `1,2,3,4,1,2,3,4`
+    into `1,2,3,4` and loses the re-use, which is the one thing a reading
+    of this exists to carry - and a refusal that names two causes and
+    cannot say which is the reader's problem instead.
+    """
+    sequence = []
+    for call in calls:
+        marker = call.get('poll')
+        if not sequence or sequence[-1] != marker:
+            sequence.append(marker)
+    return sequence
+
+
 def await_polls(fake, polls, child, what, width=POLL_WIDTH):
     """The call log, once it carries `polls` distinct poll markers.
 
@@ -222,17 +244,26 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
     The last marker seen names a poll that may still be in flight, so the
     caller reads the ones before it.
 
-    The bound is on CALLS PER PUBLISHED MARKER, and that is what makes it
-    both safe and prompt. `m` markers have been published by a poll making
-    at most `m` of them, so a healthy run never exceeds `width` per marker
-    however wide its polls are and however long it takes - there is no
-    clock in it, and a loaded runner reaches it later or not at all. A run
-    that is not healthy exceeds it as soon as the evidence says so: after
-    `width` calls when the index has not moved at all, and after
-    `m * width` when it moved `m` times and stopped. What it catches is the
-    shape no other arm can: a child that stays up, healthy, and keeps
-    logging calls without publishing a new boundary, which neither the
-    distinct count nor `child.alive` can end.
+    The bound is on CALLS PER PUBLISHED MARKER. A run whose polls are no
+    wider than `width` spends about `width` calls per marker however long
+    it runs and however slowly the runner gets there - there is no clock
+    in it, so a loaded runner reaches the bound later or not at all, where
+    a timeout buys an early failure with a flaky leg. A poll WIDER than
+    `width` is refused by name, with the idle bound as the other refusal.
+    `width` is a TOLERANCE for what one poll may cost, not a promise that
+    no poll can cost more, and the two boundary controls in
+    tests/test_watcher_poll_index.py are a run at each side of it.
+
+    The premise has a hole the file should name rather than deny:
+    `gh_client.Watcher.poll` re-enters its own body on a rate-limit
+    refusal, with no cap on the re-entries, so ONE poll can make
+    arbitrarily many calls under one marker. The bound reports that
+    correctly - the call count is the evidence - but the reading of it is
+    the message's, not this sentence's.
+
+    What it catches is the shape no other arm can: a child that stays up,
+    healthy, and keeps logging calls without publishing a new boundary,
+    which neither the distinct count nor `child.alive` can end.
     """
     while True:
         calls = fake.calls()
@@ -241,19 +272,26 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
             return calls
         assert child.alive(), f'{what}:\n' + child.captured()
         if len(calls) > len(markers) * width:
-            # `key=repr` so a seam wired below the first request - a set
-            # mixing a marker with no marker - renders as the observation
-            # it is instead of raising out of the refusal.
-            seen = sorted(markers, key=repr)
+            # The SEQUENCE, not the set: a set is sorted, and sorting both
+            # throws on a seam wired below the first request (a sequence
+            # mixing a marker with none) and throws away the order, which
+            # is the part that separates the causes below.
+            sequence = poll_sequence(calls)
+            shown = ', '.join(str(marker) for marker in sequence[:SEQUENCE])
+            if len(sequence) > SEQUENCE:
+                shown += f', ... {len(sequence) - SEQUENCE} more'
             raise AssertionError(
                 f'{what}: the poll markers did not reach {polls} within '
-                f'{len(calls)} gh call(s): {len(markers)} seen ({seen}), over '
-                f'the {width} call(s) per marker one poll may spend. Either '
-                f'the index is stuck and this run will never reach {polls} '
-                f'markers, or every poll here spent more than {width} '
-                f'call(s), which no measured poll does. This log cannot '
-                f'tell the two apart; IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) '
-                f'is what refuses a poll wider than an idle one.')
+                f'{len(calls)} gh call(s): {len(markers)} distinct, sequence '
+                f'{shown}, over the {width} call(s) per marker one poll may '
+                f'spend. A run whose polls are no wider than that spends '
+                f'about {width} call(s) per marker however long it runs, so '
+                f'this is a poll WIDER than the tolerance, or an index not '
+                f'advancing once per poll, and the sequence above is what '
+                f'tells the two apart: a value that comes round again is a '
+                f're-used index, a run of new ones is a wide poll. '
+                f'IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses a '
+                f'poll wider than an idle one.')
         time.sleep(POLL)
 
 

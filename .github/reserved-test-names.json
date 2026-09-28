@@ -1342,6 +1342,7 @@
     "planted": {"python": ["tests/_watcher_once.py"]},
     "poisonedThen": {"javascript": ["tests/_evalpages.py"]},
     "pollTarget": {"javascript": ["tests/_dashsection_transport.py"]},
+    "poll_sequence": {"python": ["tests/_watcher_waits.py"]},
     "polls_in": {"python": ["tests/_watcher_once.py"]},
     "position_key": {"python": ["tests/_pyroute_positions.py"]},
     "post_json": {"python": ["tests/_util.py"]},
