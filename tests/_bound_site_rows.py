@@ -664,4 +664,30 @@ BOUND_SITE_ROWS = (
      "import os\n"
      "os(timeout=30)\n",
      []),
+    # The limb reads the root off the IMPORT's spelling, so a name the
+    # module has since bound is not the one the import put there. Two
+    # receiver shapes, because the bare name and the chain are the two it
+    # proves; and the negative, because a name SOME OTHER binding took
+    # must not cost an intact root its proof.
+    ('a-rebound-dotted-root-is-not-proved',
+     "import subprocess\n"
+     "import http.client\n"
+     "http = getattr(cfg, 'client')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "http.request(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('a-rebound-dotted-root-blocks-the-chain-limb',
+     "import subprocess\n"
+     "import email.mime.text\n"
+     "email = getattr(cfg, 'mail')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "email.mime.text.send(['git', 'status'], timeout=30)\n",
+     [(5, 'unreadable', 'unplaced')]),
+    ('another-bindings-name-leaves-the-dotted-root-proved',
+     "import subprocess\n"
+     "import http.client\n"
+     "other = getattr(cfg, 'x')\n"
+     "subprocess.run(['git', 'status'], check=True)\n"
+     "http.client.HTTPSConnection('h', timeout=30)\n",
+     []),
 )
