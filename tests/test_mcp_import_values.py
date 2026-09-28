@@ -12,27 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _mcp_import_closure  # noqa: E402
+from _mcp_import_fixtures import (  # noqa: E402
+    _assert_scan_refusal, _write_tree)
 import _util  # noqa: E402
-
-
-def _write_tree(directory, files):
-    for name, source in files.items():
-        path = directory / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(source, encoding='utf-8')
-
-
-def _assert_refusal(_tmp, source, site, phrase):
-    """The scan refuses this composition source, naming the site and why."""
-    _write_tree(Path(_tmp), {'composition.py': source})
-    try:
-        _mcp_import_closure.composition_scan_set(
-            Path(_tmp) / 'composition.py', _tmp)
-    except AssertionError as raised:
-        assert f'composition:{site}' in str(raised), raised
-        assert phrase in str(raised), raised
-    else:
-        raise AssertionError('a computed import was silently skipped')
 
 
 def _scans_silently(_tmp, source):
@@ -48,7 +30,7 @@ def test_a_conditional_alias_refuses_the_scan(_tmp):
     The operation sits in one arm of a conditional, so a value classifier
     that reads one level deep walks straight past the store.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -59,7 +41,7 @@ def load(name, flag):
 
 
 def test_a_boolean_choice_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -76,7 +58,7 @@ def test_a_comparison_alias_refuses_the_scan(_tmp):
     direction: the resolver reads a wrapper uniformly rather than special-
     casing the ones whose result type is known.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -87,7 +69,7 @@ def load(name, flag):
 
 
 def test_a_subscripted_container_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -98,7 +80,7 @@ def load(name):
 
 
 def test_a_starred_value_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -109,7 +91,7 @@ def load(name):
 
 
 def test_a_container_element_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -120,7 +102,7 @@ def load(name):
 
 
 def test_a_comprehension_value_alias_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -131,7 +113,7 @@ def load(name):
 
 
 def test_a_walrus_inside_a_value_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -148,7 +130,7 @@ def test_a_lambda_delivery_alias_refuses_the_scan(_tmp):
     returns one, and the call it is called with comes later, spelled on an
     expression this walk has already passed.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -159,7 +141,7 @@ def load(name):
 
 
 def test_a_lambda_returning_the_operation_refuses_the_scan(_tmp):
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -175,7 +157,7 @@ def test_a_yield_delivery_alias_refuses_the_scan(_tmp):
     Deferred delivery, not a call, and the spelling that resumes it is
     written after the store the scan has already read.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -193,7 +175,7 @@ def test_an_attribute_over_a_comprehension_base_refuses_the_scan(_tmp):
     the operation itself, and a base that is not a bare Name must be read
     through its own children rather than skipped.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -209,7 +191,7 @@ def test_an_attribute_over_a_subscript_key_base_refuses_the_scan(_tmp):
     `table[importlib].import_module` reads the operation's own name off a
     base the two-member match cannot see, so the base's children decide.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -225,7 +207,7 @@ def test_an_attribute_over_a_conditional_base_refuses_the_scan(_tmp):
     The base is not a bare Name, so the arm must descend into it; the
     tracked name is in the `IfExp` and the store is refused.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -241,7 +223,7 @@ def test_an_attribute_over_a_boolean_base_refuses_the_scan(_tmp):
     Same mechanism as the conditional: the base is a `BoolOp`, not a Name,
     and the tracked name sits in its children.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -259,7 +241,7 @@ def test_a_key_position_mention_refuses_the_scan(_tmp):
     rule over the whole subtree rather than a hand-picked set of children
     per node type.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -278,7 +260,7 @@ def test_an_attribute_over_a_followable_call_base_is_a_delivery(_tmp):
     store receives the module and the attribute read off it is the
     operation. The sibling code-eval axis draws the same line here.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -314,7 +296,7 @@ def test_a_bare_call_over_a_wrapped_base_is_read_as_dynamic(_tmp):
     the store side uses; when it only recognised a bare-Name base, the name
     this call loaded was dropped from the scan set in silence.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import importlib
 
 
@@ -332,7 +314,7 @@ def test_a_string_literal_naming_the_operation_is_refused(_tmp):
     attribute by string the way a dotted attribute does. Neither is a
     spelling the closure may skip, so each is refused at its own site.
     """
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import sys
 
 
@@ -340,7 +322,7 @@ def load(name):
     loader = sys.modules['importlib'].import_module
     return loader(name)
 ''', 6, 'cannot resolve')
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 def load(name):
     other = __import__('importlib').__dict__['import_module']
     return other
@@ -350,7 +332,7 @@ def load(name):
 def test_a_registry_read_that_reaches_no_operation_still_refuses(_tmp):
     """The unresolvable module itself is refused, not only the operation
     read off it — the same fail-closed posture the tail states."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import sys
 
 
@@ -369,7 +351,7 @@ def test_the_registry_arrives_under_every_import_grammar(_tmp):
              '    return modules["json"]\n', 6),
             ('\nfrom sys import modules as reg\n\n\ndef load():\n'
              '    return reg["json"]\n', 6)):
-        _assert_refusal(_tmp, source, site, 'cannot resolve')
+        _assert_scan_refusal(_tmp, source, site, 'cannot resolve')
 
 
 def test_a_registry_read_through_any_base_spelling_refuses(_tmp):
@@ -384,13 +366,13 @@ def test_a_registry_read_through_any_base_spelling_refuses(_tmp):
              '    return [sys][0].modules[key]\n', 6),
             ('\nimport sys\n\n\ndef load(key):\n'
              '    return sys.__dict__["modules"][key]\n', 6)):
-        _assert_refusal(_tmp, source, site, 'cannot resolve')
+        _assert_scan_refusal(_tmp, source, site, 'cannot resolve')
 
 
 def test_a_registry_handed_to_a_name_by_a_store_refuses(_tmp):
     """A3: a store that hides the registry behind a name is refused at the
     store, since no later read the walk can see will notice it."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import sys
 
 m = sys
@@ -403,7 +385,7 @@ def load(key):
 
 def test_a_star_import_refuses_the_scan(_tmp):
     """A4: a star import binds names no name-based walk can follow."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 from sys import *
 
 
@@ -414,7 +396,7 @@ def load(key):
 
 def test_the_registry_bound_by_a_dotted_import_alias_refuses(_tmp):
     """A5: `import sys.modules as r` binds the registry itself, not `sys`."""
-    _assert_refusal(_tmp, '''
+    _assert_scan_refusal(_tmp, '''
 import sys.modules as registry
 
 
@@ -434,7 +416,7 @@ def test_a_concatenated_string_that_assembles_the_operation_refuses(_tmp):
             ('\ndef load(d):\n    return d["import_" + "module"]\n', 3),
             ('\ndef load(m):\n'
              '    return getattr(m, "import_" + "module")\n', 3)):
-        _assert_refusal(_tmp, source, site, 'cannot follow')
+        _assert_scan_refusal(_tmp, source, site, 'cannot follow')
 
 
 def test_a_runtime_assembled_string_is_the_declared_limit(_tmp):
@@ -462,7 +444,7 @@ def test_a_mapping_lookup_naming_the_operation_refuses(_tmp):
             ('\ndef load(table):\n    return table.get("import_module")\n', 3),
             ('\ndef load(namespace):\n'
              '    return dict.get(namespace, "__import__")\n', 3)):
-        _assert_refusal(_tmp, source, site, 'cannot follow')
+        _assert_scan_refusal(_tmp, source, site, 'cannot follow')
 
 
 def test_the_operation_delivered_as_a_call_argument_is_the_declared_limit(
@@ -541,7 +523,7 @@ def test_a_call_result_the_structural_read_sees_through_refuses(_tmp):
              '    return vars(sys)["modules"][key]\n', 6),
             ('\nimport sys\n\n\ndef load(key):\n'
              '    return (lambda: sys)().modules[key]\n', 6)):
-        _assert_refusal(_tmp, source, site, 'cannot resolve')
+        _assert_scan_refusal(_tmp, source, site, 'cannot resolve')
 
 
 def test_ordinary_aliases_and_lookups_are_scanned_silently(_tmp):
