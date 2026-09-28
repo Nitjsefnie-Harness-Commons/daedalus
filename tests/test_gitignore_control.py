@@ -23,8 +23,6 @@ from _repo import ROOT  # noqa: E402
 BLOCK = '# ─── '
 
 
-# ── fixture repositories ───────────────────────────────────────────────
-
 def _git_of(repo, *args):
     return git_read(repo, *args)
 
@@ -50,10 +48,9 @@ def _regenerate(repo, message='regenerate the ignore file'):
         _git_of(repo, 'add', '-f', ARTIFACT)
     subprocess.run(['git', '-C', str(repo), 'commit', '-q', '-m', message],
                    check=False, capture_output=True)
-    return _head(repo)
 
 
-def _fixture_repo(directory, files, removals=()):
+def _fixture_repo(directory, files):
     """A throwaway repository whose ignore file the real generator wrote."""
     repo = Path(directory)
     repo.mkdir(parents=True)
@@ -65,9 +62,6 @@ def _fixture_repo(directory, files, removals=()):
     _git_of(repo, 'add', '-f', *files)
     _git_of(repo, 'commit', '-q', '-m', 'the tracked files')
     _regenerate(repo, 'name every tracked file')
-    for gone in removals:
-        _git_of(repo, 'rm', '-q', gone)
-        _git_of(repo, 'commit', '-q', '-m', f'drop {gone}')
     return repo
 
 
@@ -93,8 +87,6 @@ def _merge(repo, branch):
         capture_output=True, text=True, check=False)
     return done.returncode != 0
 
-
-# ── the repository this suite runs in ───────────────────────────────────
 
 def test_the_committed_ignore_file_is_what_the_generator_derives(tmp):
     del tmp
@@ -123,8 +115,6 @@ def test_the_line_endings_are_folded_before_anything_compares_them(tmp):
     assert ctl.normalise('!/a.py\r\n!/b.py\r\n') == '!/a.py\n!/b.py\n'
     assert ctl.normalise('!/a.py\n') == '!/a.py\n'
 
-
-# ── the defects the control exists to catch ────────────────────────────
 
 def test_a_hand_deleted_entry_is_red(tmp):
     repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py', 'c.py'))
@@ -259,8 +249,6 @@ def test_a_nested_directory_reports_no_ghost(tmp):
     assert 'named but not tracked' not in dropped.detail, dropped.detail
 
 
-# ── the composition property, which is what the rule leans on ──────────
-
 def _two_branches(tmp, name, left_adds, right_adds):
     """Two branches off ONE base, each green on its own head."""
     repo = _fixture_repo(Path(tmp) / name, tuple(f'm{i:02d}.txt'
@@ -340,7 +328,8 @@ def test_a_union_resolution_is_order_sensitive_and_regenerating_is_not(tmp):
                                            encoding='utf-8')
         verdicts[order] = control(repo).status
         _regenerate(repo, 'resolve by regenerating instead')
-        assert control(repo).status == 'green', f'{order}: {control(repo)}'
+        verdict = control(repo)
+        assert verdict.status == 'green', f'{order}: {verdict.status}'
     assert sorted(set(verdicts.values())) == ['green', 'red'], verdicts
 
 
@@ -367,8 +356,6 @@ def test_an_undecodable_byte_in_the_ignore_file_does_not_crash(tmp):
     assert verdict.status == 'red', verdict.detail
     assert 'named but not tracked' in verdict.detail, verdict.detail
 
-
-# ── the refusals ───────────────────────────────────────────────────────
 
 def test_a_repository_with_no_tracked_paths_refuses(tmp):
     """An empty tracked set is unreadable, not a clean comparison."""

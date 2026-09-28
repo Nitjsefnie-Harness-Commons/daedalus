@@ -75,8 +75,10 @@ against the derivation, and when both come from the same `HEAD` constant
 they agree on a file that denies nothing. The rule is pinned instead as a
 literal by `tests/test_gitignore_generator.py`'s
 `test_the_derivation_always_carries_the_deny_rule`, which shares no state
-with the text it checks; removing `*` from `HEAD` turns that one test red
-and nothing else.
+with the text it checks. Removing `*` from `HEAD` and regenerating turns
+that one red AND this suite's `test_a_missing_deny_rule_is_red`, whose
+anchor assertion fires because the text it edits is gone — the substantive
+red is the generator suite's.
 
 Both sides are enumerated by the SAME call. The tracked set is
 `git ls-files`, which reads the INDEX, and that is exactly the call
@@ -122,7 +124,6 @@ def git_read(root, *args):
 
 
 def paths(text):
-    """The NUL-separated paths git printed."""
     return {path for path in text.split('\0') if path}
 
 
@@ -158,9 +159,10 @@ def named_path(line):
 def counts(tracked):
     """The one set this verdict is about, and the number that describes it.
 
-    Under this rule there is a single set: the derivation ran over
-    exactly the paths the comparison checked, so there is no second
-    figure that could describe a different one.
+    Nothing checks this sentence: it reaches message text only, and no
+    test asserts it, so a constant here would pass the tree. Stated
+    rather than claimed as a control, because a claim nothing can fail is
+    the defect this change exists to remove.
     """
     return (f'{len(tracked)} tracked path(s) checked, and the derivation '
             'ran over exactly those')
