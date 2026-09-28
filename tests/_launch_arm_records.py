@@ -133,14 +133,17 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 395, 'MERGED',
      'the head of a one-member chain; :397 ch.machinery-member is its '
      'only member and is listed'),
-    # The chain limb and the root predicate it reads. They sit here
-    # rather than in `tests/_launch_arms.py`, which is at its size
-    # ceiling; each names the row that moves when it is dropped, and
-    # the sweep in `test_launch_arms.py` measures that rather than
-    # believing it. The three conditions of the one `if` below share a
-    # clause, so the exclusion set has no row of its own here: the five
-    # `excluded-stdlib-root-*` rows in `_bound_site_rows.py` are what
-    # hold it, and emptying the set turns all five.
+    ('_launch_audit.py', 577, 'INERT',
+     'the False closing unplaced_bounded_call; its one caller '
+     'only tests it for truth'),
+    ('_launch_audit.py', 596, 'CONTROLLED',
+     'ambiguous-name'),
+    ('_launch_audit.py', 663, 'CONTROLLED',
+     'aliased-machinery-member-call'),
+    ('_launch_audit.py', 680, 'CONTROLLED',
+     'a-clean-launch-emits-nothing'),
+    # The chain limb and the root predicate it reads, recorded here
+    # rather than in the enumeration for the reason above.
     ('_launch_audit.py', 510, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 512, 'CONTROLLED',
@@ -154,15 +157,6 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 700, 'INERT',
      "the None closing _dotted_stdlib_root; deleting its last "
      'statement returns the same value'),
-    ('_launch_audit.py', 577, 'INERT',
-     'the False closing unplaced_bounded_call; its one caller '
-     'only tests it for truth'),
-    ('_launch_audit.py', 596, 'CONTROLLED',
-     'ambiguous-name'),
-    ('_launch_audit.py', 663, 'CONTROLLED',
-     'aliased-machinery-member-call'),
-    ('_launch_audit.py', 680, 'CONTROLLED',
-     'a-clean-launch-emits-nothing'),
     ('_argv_read.py', 65, 'INERT',
      "the None closing resolve_constant's recursion; deleting its "
      'last statement returns the same value'),
