@@ -66,6 +66,7 @@ the timed job runs it, and says so in that same field.
 """
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -77,8 +78,7 @@ try:
         BoundsError, basis_sentence, derive_target, live_recorded,
         plan_is_balanced, verify_target)
     from timings_runs import (
-        RefreshError, _head_rounds, _median_weights, _suite_seconds,
-        _unit_scale, discover_runs, select)
+        RefreshError, cell_dirs, discover_runs, select, suite_seconds)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
         BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names)
@@ -86,8 +86,7 @@ except ImportError:  # pragma: no cover - the script-directory import path
         BoundsError, basis_sentence, derive_target, live_recorded,
         plan_is_balanced, verify_target)
     from scripts.ci.timings_runs import (
-        RefreshError, _head_rounds, _median_weights, _suite_seconds,
-        _unit_scale, discover_runs, select)
+        RefreshError, cell_dirs, discover_runs, select, suite_seconds)
 
 # The share a recomputed weight may differ from the recorded one before
 # the file is rewritten: runner noise and a suite's own jitter move a
@@ -117,6 +116,34 @@ def _moved(recorded, computed):
         if old <= 0 or abs(new - old) / old > WEIGHT_MARGIN:
             moved.append((suite, old, new))
     return moved
+
+
+def median_weights(selected):
+    """Every suite's median weight over the sample, and the reference.
+
+    The writing half's own arithmetic, kept beside the write that uses
+    it: it is a statistic of a run SAMPLE, which is not a thing the
+    reader of a run directory knows anything about.
+    """
+    by_suite = {}
+    references = []
+    for _run_id, weights, readings in selected:
+        for suite, weight in weights.items():
+            by_suite.setdefault(suite, []).append(weight)
+        references.extend(readings.values())
+    return ({suite: statistics.median(values)
+             for suite, values in by_suite.items()},
+            statistics.median(references))
+
+
+def unit_scale(old_units, reference):
+    """What a number recorded in `old_units` is worth in the new units."""
+    if old_units == 'reference-multiples':
+        return 1.0
+    if old_units == 'seconds':
+        return 1.0 / reference
+    raise RefreshError(f'cannot convert units {old_units!r} into '
+                       'reference-multiples')
 
 
 def _reasons(existing, measured):
@@ -246,7 +273,7 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
                 + (_degenerate_message(report, existing['max_cells'])
                    if report['degenerate'] else '')
                 + f'); wrote nothing to {out}')
-    medians, reference = _median_weights(selected)
+    medians, reference = median_weights(selected)
     run_ids = [run_id for run_id, _w, _r in selected]
     if message_file is not None:
         # Written on BOTH outcomes, a changed file and an unchanged
@@ -258,7 +285,7 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
     where = (f'median over runs {_runs_text(run_ids)} '
              f'(sample {len(run_ids)}, {len(medians)} suites); '
              + _reached_message(report))
-    scale = _unit_scale(existing['units'], reference)
+    scale = unit_scale(existing['units'], reference)
     carried = {suite: weight * scale
                for suite, weight in existing['suite_weights'].items()
                if suite not in medians}
@@ -307,8 +334,7 @@ def seed(runs_root, out, tree):
     """Write the first file from one run's raw seconds; return the message."""
     runs = discover_runs(runs_root)
     for run_id, path in runs:
-        cells = {entry.name: entry for entry in sorted(path.iterdir())
-                 if entry.is_dir() and _head_rounds(entry)}
+        cells = cell_dirs(path)
         if cells:
             break
     else:
@@ -316,7 +342,7 @@ def seed(runs_root, out, tree):
                            'artifacts; nothing to seed from')
     seconds = {}
     for cell in cells.values():
-        seconds.update(_suite_seconds(cell, run_id))
+        seconds.update(suite_seconds(cell, run_id))
     if not seconds:
         raise RefreshError(f'run {run_id} carries no suite durations')
     max_cells = len(cells)
