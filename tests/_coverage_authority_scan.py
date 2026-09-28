@@ -1,4 +1,4 @@
-"""Count where one phrase is stated across the `tests/` package.
+"""Count where one phrase is stated across `tests/*.py`.
 
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
@@ -28,7 +28,7 @@ _AUTHORITY_FILE = '_coverage_bindings.py'
 _OWN_FILE = Path(__file__).name
 
 
-def holders(phrase, excluded=()):
+def phrase_holders(phrase, excluded=()):
     """(the files stating `phrase`, how many times between them).
 
     Occurrences and not files, because a second copy in the same module
