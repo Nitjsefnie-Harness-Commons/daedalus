@@ -51,6 +51,7 @@ def _base_helper():
         _BASE = artifact_base
     return _BASE
 
+
 STALE_REMEDY = (
     'The committed set is generated and never edited by hand: '
     'python3 scripts/ci/reserved_names.py --tighten')

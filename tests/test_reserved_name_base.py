@@ -211,14 +211,14 @@ def _land(tree, shas, by_rebase):
             if _branch_git(tree, 'cherry-pick', sha, check=False).returncode:
                 conflicted = True
                 _resolve_union(tree, _show(tree, 'HEAD'),
-                         _show(tree, 'CHERRY_PICK_HEAD'),
-                         ['cherry-pick', '--continue'])
+                               _show(tree, 'CHERRY_PICK_HEAD'),
+                               ['cherry-pick', '--continue'])
         elif _branch_git(tree, 'merge', '-q', '--no-ff', '--no-edit',
-                  sha, check=False).returncode:
+                         sha, check=False).returncode:
             conflicted = True
             _resolve_union(tree, _show(tree, 'HEAD'),
-                         _show(tree, 'MERGE_HEAD'),
-                         ['commit', '-q', '--no-edit'])
+                           _show(tree, 'MERGE_HEAD'),
+                           ['commit', '-q', '--no-edit'])
     return conflicted
 
 

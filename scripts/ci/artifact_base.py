@@ -90,7 +90,7 @@ def common_dir(root):
     only this one is the clone's.
     """
     result = _git(root, 'rev-parse', '--path-format=absolute',
-                   '--git-common-dir', check=False)
+                  '--git-common-dir', check=False)
     if result.returncode != 0:
         raise ValueError(f'{root} is not a git checkout: '
                          f'{result.stderr.strip()}') from None
