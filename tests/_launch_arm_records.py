@@ -37,6 +37,16 @@ one-line pointer to the note at each arm it names.
 # cut is the fixpoint that does not stop), so there is no verdict to
 # classify. Its real control is the step ceiling and the row this table
 # used to name is the second, weaker one; see SECONDARY_CONTROLLED.
+#
+# The suite checks each name here really crashes, and that the set is a
+# partition of the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
+# crash-held -- is a claim about the 150 arms this set does NOT name, so
+# it needs the whole sweep, and the sweep was a script outside the tree
+# until now. `scripts/launch_arm_sweep.py` is it: it re-derives the set
+# from the tree, checks it against this tuple in BOTH directions, and
+# exits nonzero naming the arms that disagree. Sweeping all 150 costs
+# about two minutes, which is why it is a gate and not a suite; the
+# claim is still checkable in one command.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',

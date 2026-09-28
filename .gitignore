@@ -222,6 +222,7 @@
 !/scripts/
 !/scripts/check_versions.py
 !/scripts/gen_gitignore.py
+!/scripts/launch_arm_sweep.py
 !/scripts/mcp_probe.py
 !/scripts/version_html_context.py
 !/scripts/version_regions.py
