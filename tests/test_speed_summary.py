@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """The speed summary's covered set, stated against what the runs recorded."""
-import contextlib
-import io
 import json
 import sys
 from pathlib import Path
@@ -9,12 +7,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
+from _durations_compare import (  # noqa: E402
+    _durations_comparator, _run_comparator)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-
-
-def _comparator():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
 
 def _summary_tree(tmp, side, rounds):
@@ -29,19 +25,8 @@ def _summary_tree(tmp, side, rounds):
     return dirs
 
 
-def _run_comparator(compare, argv):
-    stdout, stderr = io.StringIO(), io.StringIO()
-    with (contextlib.redirect_stdout(stdout),
-          contextlib.redirect_stderr(stderr)):
-        try:
-            code = compare.main(argv)
-        except SystemExit as exc:
-            code = exc.code
-    return code, stdout.getvalue() + stderr.getvalue()
-
-
 def test_the_summary_states_the_covered_set_against_the_total(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0, 'b': 2.0}}])
     head = _summary_tree(tmp, 'head', [
         {'tests': {'a': 1.5, 'b': 2.5, 'c': 9.0},
@@ -57,7 +42,7 @@ def test_the_summary_states_the_covered_set_against_the_total(tmp):
 
 
 def test_report_without_outcomes_still_states_the_total(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0, 'b': 2.0}}])
     head = _summary_tree(
         tmp, 'head', [{'tests': {'a': 1.0, 'b': 2.0, 'c': 1.0}}])
@@ -72,7 +57,7 @@ def test_report_without_outcomes_still_states_the_total(tmp):
 
 
 def test_the_all_drop_skip_line_names_the_total(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [
         {'tests': {'a': 1.0}, 'outcomes': {'b': 'FAIL'}}])
     head = _summary_tree(tmp, 'head', [
@@ -88,7 +73,7 @@ def test_the_all_drop_skip_line_names_the_total(tmp):
 
 
 def test_the_measured_comparison_exports_its_ratio(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0, 'b': 1.0}}])
     head = _summary_tree(tmp, 'head', [{'tests': {'a': 1.042, 'b': 1.0}}])
     ratio_file = Path(tmp) / 'ratio.txt'
@@ -100,7 +85,7 @@ def test_the_measured_comparison_exports_its_ratio(tmp):
 
 
 def test_a_comparison_with_no_shared_set_writes_no_ratio_file(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0}}])
     head = _summary_tree(tmp, 'head', [{'tests': {'b': 1.0}}])
     ratio_file = Path(tmp) / 'ratio.txt'
@@ -111,7 +96,7 @@ def test_a_comparison_with_no_shared_set_writes_no_ratio_file(tmp):
 
 
 def test_an_unwritable_ratio_file_leaves_the_verdict_alone(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     block = Path(tmp) / 'block'
     block.write_text('a regular file, not a directory', encoding='utf-8')
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0}}])
@@ -124,7 +109,7 @@ def test_an_unwritable_ratio_file_leaves_the_verdict_alone(tmp):
 
 
 def test_an_unwritable_summary_file_leaves_the_verdict_alone(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     block = Path(tmp) / 'block'
     block.write_text('a regular file, not a directory', encoding='utf-8')
     base = _summary_tree(tmp, 'base', [{'tests': {'a': 1.0}}])
@@ -148,7 +133,7 @@ def _table(text, heading, end):
 
 
 def test_the_ratio_table_ranks_a_multiplier_above_ten_drifts(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     drifts = {f'test_drift_{index:02d}': 40.0 for index in range(10)}
     base = _summary_tree(tmp, 'base', [
         {'tests': {**drifts, 'test_multiplier': 0.40}}])
@@ -174,7 +159,7 @@ def test_the_noise_floor_omits_sub_floor_movements(tmp):
     # Pinned from both signs and both sides of the floor: 0.20s - 0.10s is
     # exactly the floor, 0.15s - 0.05s computes one ulp under it, and a
     # qualifying speedup appears with its ratio below 1.
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {
         'test_steady': 40.00, 'test_barely_moving': 1.00,
         'test_at_the_floor': 0.10, 'test_under_the_floor': 0.05,
@@ -202,7 +187,7 @@ def test_the_noise_floor_omits_sub_floor_movements(tmp):
 
 
 def test_a_zero_baseline_renders_inf_and_sorts_first(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {
         'test_steady': 20.00, 'test_doubled': 0.10, 'test_from_zero': 0.0}}])
     head = _summary_tree(tmp, 'head', [{'tests': {
@@ -220,7 +205,7 @@ def test_a_zero_baseline_renders_inf_and_sorts_first(tmp):
 
 
 def test_an_all_quiet_comparison_names_the_noise_floor(tmp):
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _summary_tree(tmp, 'base', [{'tests': {'test_quiet': 1.00}}])
     head = _summary_tree(tmp, 'head', [{'tests': {'test_quiet': 1.00}}])
     summary = Path(tmp) / 'summary.md'

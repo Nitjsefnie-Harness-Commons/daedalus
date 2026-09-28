@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """The speed verdict's record and table, with the ratio that decided them."""
-import contextlib
-import io
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT  # noqa: E402
+from _durations_compare import (  # noqa: E402
+    _durations_comparator, _run_comparator)
 from _speedharness import (  # noqa: E402
     run_workflow_script, workflow_script)
 from _wfgraph import _tests_yml  # noqa: E402
-
-
-def _comparator():
-    return _util.load(ROOT / 'scripts' / 'ci' / 'compare_durations.py')
 
 
 def _rounds(tmp, side, report):
@@ -25,17 +20,6 @@ def _rounds(tmp, side, report):
     (directory / 'test_suite.json').write_text(json.dumps(report),
                                                encoding='utf-8')
     return str(directory)
-
-
-def _run_comparator(compare, argv):
-    stdout, stderr = io.StringIO(), io.StringIO()
-    with (contextlib.redirect_stdout(stdout),
-          contextlib.redirect_stderr(stderr)):
-        try:
-            code = compare.main(argv)
-        except SystemExit as exc:
-            code = exc.code
-    return code, stdout.getvalue() + stderr.getvalue()
 
 
 def _record_cell(tmp, group='bridge'):
@@ -134,7 +118,7 @@ def test_a_comparison_that_accepts_every_shared_test_writes_no_ratio(tmp):
     manifest.write_text(json.dumps({'acceptances': [{
         'test': 'a', 'max_ratio': 2.0, 'reason': 'accepted earlier',
         'through_baseline': ['baseline']}]}), encoding='utf-8')
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _rounds(tmp, 'base', {'tests': {'a': 1.0}})
     head = _rounds(tmp, 'head', {'tests': {'a': 1.0}})
     ratio_file = Path(tmp) / 'ratio.txt'
@@ -147,7 +131,7 @@ def test_a_comparison_that_accepts_every_shared_test_writes_no_ratio(tmp):
 
 def test_a_failing_comparison_still_exports_its_ratio(tmp):
     """A red verdict's deciding number is what issue 488 wants visible."""
-    compare = _comparator()
+    compare = _durations_comparator()
     base = _rounds(tmp, 'base', {'tests': {'a': 1.0}})
     head = _rounds(tmp, 'head', {'tests': {'a': 2.0}})
     ratio_file = Path(tmp) / 'ratio.txt'
