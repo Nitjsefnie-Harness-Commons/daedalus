@@ -10,9 +10,11 @@ Neither is keyed on a name the source could spell another way. The
 network arm resolves a callee to a live OBJECT and asks whether that
 object is a member of a stdlib network module, so `urlopen`, an aliased
 import of it, a module aliased at the import and a local bound from it
-are ONE receiver; the reachability arm asks whether the number the
-parameter names reaches a child the census has RESOLVED, never whether
-the signature looks like a launcher's.
+are ONE receiver; the reachability arm asks what OPERATION the number is
+handed to, never whether the signature looks like a launcher's and never
+whether the receiver happened to resolve — an unresolved receiver is the
+case the unconditional refusal existed for, and reading it as a proof of
+safety is what silenced three real bounds in the first version of it.
 """
 import ast
 import importlib
