@@ -18,7 +18,7 @@ what the size policy asks of a suite at its ceiling.
 Every control here drives the REAL loop against the idle answers, so each
 one is a run and not an argument about a run. A control that could be
 satisfied by a narrower subject than the one it names would prove nothing
-about the watcher, and three of them below fail if their plant did not take.
+about the watcher, and seven of them below fail if their plant did not take.
 """
 import sys
 from pathlib import Path
