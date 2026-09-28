@@ -23,6 +23,10 @@ _WAIT_HARNESS = (
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
+    '        # time.sleep refuses a negative duration, and a stand-in\n'
+    '        # that accepts one hides a loop that asks to sleep backwards.\n'
+    '        if seconds < 0:\n'
+    '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
     'cases = (\n'
@@ -87,6 +91,8 @@ _BACKOFF_HARNESS = (
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
+    '        if seconds < 0:\n'
+    '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
     'transport.time = _Clock()\n'
@@ -112,6 +118,8 @@ _CUTOFF_HARNESS = (
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
+    '        if seconds < 0:\n'
+    '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        self.now += seconds\n'
     'transport.time = _Clock()\n'
@@ -138,6 +146,10 @@ _OVERSHOOT_HARNESS = (
     '    def monotonic(self):\n'
     '        return self.now\n'
     '    def sleep(self, seconds):\n'
+    '        # time.sleep refuses a negative duration, and a stand-in\n'
+    '        # that accepts one hides a loop that asks to sleep backwards.\n'
+    '        if seconds < 0:\n'
+    '            raise ValueError("sleep length must be non-negative")\n'
     '        self.sleeps.append(seconds)\n'
     '        if len(self.sleeps) == 1:\n'
     '            # The opening sleep is what runs the budget out: it is\n'
@@ -205,25 +217,24 @@ def test_result_wait_requires_nonempty_exact_delivery_ids(tmp):
         brief = {'name': outcome['name'], 'result': outcome['result'],
                  'peeks': len(outcome['peeks']), 'sleep_n': len(sleeps),
                  'sleep_head': sleeps[:6], 'sleep_tail': sleeps[-2:]}
-        # Derived from the ramp, not observed: the opening sleep is the
-        # fixed 0.02s, the first doubling clamps to interval=0.01, and
-        # 0.02 + 48 * 0.01 spends the 0.5s budget in 49 laps. Each of
-        # those 49 ends with budget left and peeks; the 50th is cut to
-        # the sliver that is left, spends it, and the post-sleep guard
-        # returns without a 50th peek.
-        assert len(outcome['peeks']) == 49, brief
-        assert set(outcome['peeks']) == {selector}, brief
-        # The schedule itself, not the count alone: a real clock
-        # records no requested intervals at all, and the count is
-        # algebraically blind to whether the stand-in is in place.
-        assert sleeps[0] == 0.02, brief
-        assert set(sleeps[1:-1]) == {0.01}, brief
+        # What the loop REQUESTS, which a real clock records nothing of.
+        # An exact peek count is deliberately NOT among these: how many
+        # laps clear a 0.5s budget is a float-accumulation artifact of
+        # the stand-in's epoch, not a property the ramp promises, and
+        # it moved when only the epoch changed.
+        assert sleeps[0] == 0.02, brief          # opens below the interval
+        assert set(sleeps[1:-1]) == {0.01}, brief  # saturates at interval
+        # The last lap is shorter than a full one, so the loop capped it
+        # to the budget that was left instead of asking for another 0.01.
         assert 0 < sleeps[-1] < 0.01, brief
-        # One peek per lap that left budget, and the laps spend
-        # exactly the budget the caller passed.
+        # One peek per lap that left budget, and the laps stop on the
+        # deadline having spent the budget the caller passed. The
+        # second is the exact form of "spent": a bounded sum of the
+        # recorded sleeps is a weaker restatement of the same fact and
+        # goes false at any epoch where 0.01 is below the clock's ulp.
         assert len(outcome['peeks']) == len(sleeps) - 1, brief
         assert outcome['now'] == outcome['deadline'], brief
-        assert abs(sum(sleeps) - 0.5) < 1e-9, brief
+        assert set(outcome['peeks']) == {selector}, brief
 
 
 def test_result_wait_rejects_receipt_for_different_generation(tmp):
