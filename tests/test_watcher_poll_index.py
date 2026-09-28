@@ -15,10 +15,9 @@ what a poll COSTS: what makes its figure a figure is a boundary that moves,
 which is a different question with a different failure. The split is also
 what the size policy asks of a suite at its ceiling.
 
-Every control here drives the REAL loop against the idle answers, so each
-one is a run and not an argument about a run. A control that could be
-satisfied by a narrower subject than the one it names would prove nothing
-about the watcher, and seven of them below fail if their plant did not take.
+A control that could be satisfied by a narrower subject than the one it
+names would prove nothing about the watcher, and the controls that drive
+a planted watcher read back what it actually published.
 """
 import sys
 from pathlib import Path
@@ -39,13 +38,12 @@ from _watcher_waits import poll_sequence  # noqa: E402
 SKILL = once_run.SKILL
 
 # How many distinct markers the controls read. A measurement reads
-# `POLLS + 1`; this reads twice that, and the depth is the re-used index
-# that sets it: a watcher publishing 1,2,3,4,1,2,3,4,5,6 reaches four
-# distinct markers on its fourth poll, so a control that stops where a
-# measurement stops has never seen the re-use it exists to catch. Depth is
-# not a proof against a cycle longer than itself and cannot be - the
-# sequence is unbounded - so what the depth buys is every cycle a counter
-# reset produces inside it, and nothing is claimed beyond that.
+# `POLLS + 1`; this reads twice that, and the re-used index sets it: a
+# cycling watcher reaches a measurement's count on its fourth poll, before
+# the cycle has come round. Depth is not a proof against a cycle longer
+# than itself and cannot be - the sequence is unbounded - so what it buys
+# is every cycle a counter reset produces inside it, and nothing beyond
+# that.
 BOUNDARIES = 2 * (once_run.POLLS + 1)
 
 # One more of the very same call, immediately after the one already there:
@@ -122,16 +120,13 @@ _STICKY = (_PUBLISH, '        if poll_index > 3:\n'
 def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK):
     """Every call a real loop run logged, read off its own log whole.
 
-    `once_run.measure` is deliberately not what reads this, and the reason
-    is the point of the suite. Its `seen` drops every call carrying the
-    last marker it saw - the in-flight poll - and on a watcher that re-uses
-    an index that last marker IS the second occurrence, dropped with the
-    rest of its poll, so the projection cannot show the re-use at all. And
-    `polls_in` deduplicates by value in first-appearance order, which is
+    `once_run.measure` is deliberately not what reads this. Its `seen`
+    drops every call carrying the last marker it saw - the in-flight
+    poll - and on a re-using watcher that last marker IS the second
+    occurrence, dropped with the rest of its poll. And `polls_in`
+    deduplicates by value in first-appearance order, which is
     monotonising: read through it, no publication order the watcher can
-    produce looks like anything but a rising run. The loop is therefore
-    driven here and its log read whole, which is the only reading that
-    still carries the evidence.
+    produce looks like anything but a rising run.
 
     `interval` is the suite's tick for a control about what the watchers
     do, and zero for a control about the ceiling: `Watcher.sleep(0)` is a
@@ -239,8 +234,7 @@ def test_both_watchers_publish_a_new_larger_poll_index_each_poll(tmp):
     re-use that KEEPS producing new markers up to the boundary count is
     one neither the distinct-marker count nor the call ceiling can see.
     A reset that never leaves its first value is a different shape, and
-    the call ceiling sees that one: see
-    test_a_frozen_poll_index_is_refused_by_name below.
+    the call ceiling sees that one.
     """
     for name, args in (('pr_comment_watch.py', [PR]),
                        ('ci_watch.py', [BRANCH])):
@@ -273,14 +267,12 @@ def test_a_poll_spending_the_tolerated_width_still_reaches_its_markers(tmp):
     """The false-positive direction, as a run rather than an argument.
 
     A poll of `POLL_WIDTH` calls is the widest this wait tolerates, so
-    this is the boundary from the healthy side: a run at exactly the
-    tolerated width must still reach its markers. The bound it used to
-    carry was an absolute `polls * width`, which tolerates a healthy poll
-    of at most `width` calls and nothing more, so a pull request whose
-    comment surface needed a second page was refused by a control meant
-    to catch a stuck index. The last assertion is what stops this control
-    passing on a narrower subject than it names: the run really did spend
-    `POLL_WIDTH` calls a poll.
+    this is the boundary from the healthy side. An absolute
+    `polls * width` is the same bound spelled as a total rather than a
+    ratio, and it refuses a healthy run whose polls are wider than
+    `width` - a pull request whose comment surface needed a second page -
+    in a control meant to catch a stuck index. The last assertion is what
+    stops this control passing on a narrower subject than it names.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'wide', *_wide(POLL_WIDTH))
     # `--interval 0`: this is the ceiling's HEALTHY side, and the ceiling
@@ -322,9 +314,8 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
             'stuck where it started and one wide first poll'
             in refused), refused
     assert 'IDLE_POLL_BOUND' in refused, refused
-    # 'did not advance' is the round-2 headline this branch removed and
-    # no clause in `READINGS` can emit it: insurance against its return,
-    # not evidence - the phrase is the one a reader remembers.
+    # Insurance, not evidence: no clause in `READINGS` can emit this, and
+    # it is the phrase a reader remembers.
     assert 'did not advance' not in refused, refused
 
 
@@ -334,10 +325,9 @@ def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
     A cycle of period 4 publishes four distinct markers and then repeats
     them, so it never reaches `BOUNDARIES` of them: `_run_loop` waits for
     a count this mutant will not produce and the CALL BOUND is the arm
-    that ends the run. So this control is not written to tolerate either
-    arm - if the invariant arm ever started to catch it, `_refusal`
-    would report the mutant as measured and the control would fail, which
-    is the point of a control that names a defect.
+    that ends the run. This control is not written to tolerate either arm -
+    if the invariant arm ever started to catch it, `_refusal` would report
+    the mutant as measured and the control would fail.
 
     What it does check is the message's own reading, because that is what
     distinguishes a cycle from a stall: a value that comes round again
@@ -364,11 +354,11 @@ def test_a_cycle_longer_than_the_window_is_named_as_a_re_use(tmp):
     `_reading` reads the whole run and `await_polls` hands it the whole
     run; a reading of `sequence[:SEQUENCE]` at the call site survives
     every control that calls `_reading` itself, because a function-level
-    control cannot see what its caller passes. The two markers below are
-    what it takes to reach that: a cycle of period 13, and a wait for
-    more markers than the cycle can produce - at `BOUNDARIES` the wait
-    RETURNS on the eighth distinct marker and never refuses, which is
-    why this control names its own boundary count.
+    control cannot see what its caller passes. Reaching that needs a
+    cycle of period 13 AND a wait for more markers than the cycle can
+    produce: at `BOUNDARIES` the wait RETURNS on the eighth distinct
+    marker and never refuses, which is why this names its own boundary
+    count.
     """
     boundaries = 2 * SEQUENCE
     script, fake = _mutant_watcher(Path(tmp) / 'longcycle', _LONG_CYCLE)
@@ -386,11 +376,11 @@ def test_a_frozen_poll_index_is_refused_by_name(tmp):
     """A marker that never changes, planted in a runnable copy.
 
     A child that stays up, healthy, and publishes nothing new is a shape
-    neither arm `await_polls` already had could end, so every budget
-    control measuring a loop child would spin until the job's own limit
-    ended the run nameless. The last two assertions are what keep the
-    control from going vacuous: the log has to show one constant index, or
-    the bound has proved nothing about the shape it exists for.
+    no arm `await_polls` has can end, so every budget control measuring a
+    loop child would spin until the job's own limit ended the run
+    nameless. The last two assertions keep the control from going
+    vacuous: the log has to show one constant index, or the bound has
+    proved nothing about the shape it exists for.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'frozen', _FROZEN)
     refused = _refusal('a frozen poll index', script, fake)
@@ -436,13 +426,12 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
 def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
     """The non-discrimination proof, driven side by side.
 
-    A control per row proves each row in isolation, and that is exactly
-    how a row claiming more than the payload carries got a green suite:
-    every control drove a subject that could only be read one way. This
-    one drives two plants with OPPOSITE causes - a healthy run whose
-    third poll is one call wider than the tolerance, and an index that
-    sticks at 3 with every poll costing one call - and requires that both
-    earn the same honest answer naming both candidates.
+    A control per row proves each row in isolation, which cannot catch a
+    row claiming more than the payload carries - every subject it drives
+    can be read one way. This one drives two plants with OPPOSITE causes,
+    a healthy run whose third poll is one call wider than the tolerance
+    and an index that sticks at 3 with every poll costing one call, and
+    requires both to earn the same answer naming both candidates.
 
     They must, and why is the collapse: it folds every poll republishing
     the current value into the one boundary it shows, so a sticky index
@@ -467,9 +456,7 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
                 and 'republished the value already current' in refused), (
             label, refused)
         assert 'this log cannot say' in refused, (label, refused)
-        # 'stopped advancing' is the row round 4 replaced, and no clause
-        # can emit it now - the same insurance, on the round that removed
-        # it.
+        # Insurance, as above.
         assert 'stopped advancing' not in refused, (label, refused)
     # The pair's premise, not a check on the reading: see the docstring.
     heads = [refused.split('over the')[0] for _, refused in pair]
@@ -521,10 +508,8 @@ def test_a_partially_wired_poll_seam_is_refused_by_name(tmp):
     watcher never published or published once.
 
     The same run has to earn the OTHER unwired verdict as well, from
-    `_indexes`, which is where a reader reading a healthy-looking loop
-    would meet the defect: the marker is absent, so the seam is unwired -
-    which is the one reading of the two that is right here, and the one
-    the name-marking control beside it must NOT earn.
+    `_indexes` - the one reading of the two that is right here, and the
+    one the name-marking control beside it must NOT earn.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'unwired', _UNWIRED)
     refused = _refusal('a partially wired poll seam', script, fake)
@@ -532,9 +517,8 @@ def test_a_partially_wired_poll_seam_is_refused_by_name(tmp):
     assert 'did not reach' in refused, refused
     # The MIXED shape earns the same row as the all-absent one, and it
     # should: a boundary the log carries as nothing is a seam not wired
-    # on that poll, and the rendering does not say which polls. What it
-    # must NOT earn is the row about a poll costing more than the
-    # tolerance, which is what it got before the row existed.
+    # on that poll. What it must NOT earn is the row about a poll
+    # costing more than the tolerance.
     assert ('a boundary the log carries as no marker at all is a seam that '
             'is not wired there' in refused), refused
     assert 'no value came round again' not in refused, refused
@@ -554,11 +538,10 @@ def test_a_non_integer_poll_marker_is_refused_by_name(tmp):
     thing between this watcher and a `ValueError` that names the
     conversion instead of the watcher.
 
-    The verdict is a FORMAT defect and says so. Calling it an unwired
-    seam is false on both halves here: the seam is wired, and the index
-    advances on every poll, so the last assertion here is the control
-    obligation - a name is a different defect from a missing marker, and
-    the two controls above and here must not be reading alike.
+    The verdict is a FORMAT defect and says so: calling it an unwired
+    seam would be false on both halves, the seam being wired and the
+    index advancing on every poll. A name is a different defect from a
+    missing marker, and the two controls must not be reading alike.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'worded', _WORDED)
     sequence = _boundaries(_run_loop(script, fake, interval=0))
