@@ -16,8 +16,8 @@ Every arm in this list was classified by DELETING it from the real
 analyser in a worktree and re-asking every row and every probe shape,
 not by reading it. The arms the two row files could not express are the
 three in ARM_CONTROLS, which assert sites AND refusals rather than the
-one-refusal shape a LAUNCH_REFUSAL_ROW is built for, and the one the
-step ceiling names, whose mutant does not answer wrong but does not
+one-refusal shape a LAUNCH_REFUSAL_ROW is built for, and the two the
+step ceiling names, whose mutants do not answer wrong but do not
 stop, so there is no verdict for a row to hold.
 
 `line` is where the arm was classified, `cut` is the one clause the
