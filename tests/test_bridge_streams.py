@@ -444,6 +444,43 @@ def test_collector_thread_uses_configured_ttl_for_one_sweep(tmp):
         assert not expired.exists(), expired
 
 
+def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
+    """The controlled sweep completes while both sides are refused."""
+    # _retrying makes _RETRY_ATTEMPTS (5) attempts at _RETRY_DELAY, so a
+    # count of 2 clears with two attempts still in hand, while an unfixed
+    # read or replace raises on attempt one and never reaches a second.
+    refusals = 2
+    fault_dir = Path(tmp) / 'refusing-command-gc'
+    env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
+           'PYTHONPATH': _on_demand_command_gc(fault_dir, refusals=refusals)}
+    served = []
+    with _util.bridge(tmp, env=env, output=served) as (_base, docroot):
+        command_root = Path(docroot) / 'commands'
+        queue = command_root / TOK
+        queue.mkdir()
+        fresh = queue / 'fresh.json'
+        expired = queue / 'expired.json'
+        fresh.write_text('{"id":"fresh"}', encoding='utf-8')
+        expired.write_text('{"id":"expired"}', encoding='utf-8')
+        now = time.time()
+        os.utime(fresh, (now + _STAMP_LEASH, now + _STAMP_LEASH))
+        os.utime(expired, (now - 15, now - 15))
+        with _refuse_marker_operations(command_root, refusals) as parent_log:
+            _sweep(command_root, served)
+        assert fresh.exists(), 'configured TTL expired a fresh command'
+        assert not expired.exists(), expired
+    # Each assertion keeps a silent injector from reading as a passing one:
+    # without a refusal on both sides this proves only that the sweep ran.
+    parent = parent_log.read_text(encoding='utf-8').splitlines()
+    child = (command_root / _GC_REFUSED_CHILD).read_text(
+        encoding='utf-8').splitlines()
+    assert parent, 'the parent never met a refused marker operation'
+    assert child, 'the bridge child never met a refused marker operation'
+    for side, lines in (('parent', parent), ('child', child)):
+        assert any(line.split()[-1].startswith(_GC_PREFIX)
+                   for line in lines), (side, lines)
+
+
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
     token = '123e4567-e89b-12d3-a456-426614174000'
     with _util.bridge(
