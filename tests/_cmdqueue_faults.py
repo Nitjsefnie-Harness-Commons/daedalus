@@ -36,9 +36,14 @@ def _poll_budget(timeout):
     that clock, so a reader that stops calling it — or never entered it —
     is charged by none. `_queueread.POLL_DELAY` aliases this module's.
 
-    The `ceil` is float-sensitive on the products call sites pass
+    Two version axes, measured on 3.11 through 3.14. The `ceil` is
+    float-sensitive on the products call sites pass
     (`3 * POLL_DELAY / POLL_DELAY` ceils to 4, not 3), so a budget can
-    quietly gain a pass, always toward more headroom.
+    quietly gain a pass, always toward more headroom. And `_QUEUE_PROBES`
+    costs what pathlib's own internals cost: up to 3.12 a selector calls
+    `parent.is_dir()`, so one `glob` is two probes there and one on 3.13.
+    A control must therefore never assert a count of glob calls; the
+    ceiling itself is identical on every version.
     """
     attempts = math.ceil(timeout / _cmdqueue.POLL_DELAY)
     return _PROBES_PER_ATTEMPT * _POLL_HEADROOM * attempts
