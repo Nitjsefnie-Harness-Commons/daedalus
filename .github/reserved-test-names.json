@@ -689,6 +689,7 @@
     "_parameters": {"python": ["tests/_launch_audit.py"]},
     "_parameters_by_function": {"python": ["tests/_command_type_readers.py"]},
     "_parameters_for": {"python": ["tests/_launch_census.py"]},
+    "_parameters_of": {"python": ["tests/_receiver_resolution.py"]},
     "_parent_map": {"python": ["tests/_js_functions.py"]},
     "_parents": {"python": ["tests/_command_type_readers.py", "tests/_coverage_scopes.py"]},
     "_parse_all": {"python": ["tests/_launch_path.py"]},

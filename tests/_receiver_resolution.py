@@ -300,6 +300,15 @@ def _function_parameters(tree):
     return names
 
 
+def _parameters_of(node):
+    """Every name a function or lambda node's own signature binds."""
+    args = node.args
+    found = [arg.arg for arg in list(args.posonlyargs) + list(args.args)
+             + list(args.kwonlyargs)]
+    found.extend(arg.arg for arg in (args.vararg, args.kwarg) if arg)
+    return found
+
+
 def _shadowed_parameters(tree, bindings=None):
     """`function ->` what shadows a name inside it: its PARAMETERS, and
     every binding in its own body that is not a literal.
@@ -336,6 +345,14 @@ def _shadowed_parameters(tree, bindings=None):
         args = node.args
         names = {arg.arg for arg in list(args.posonlyargs) + list(args.args)
                  + list(args.kwonlyargs)}
+        for sub in ast.walk(node):
+            # A lambda's parameters are §4.2.1's FIRST bullet and are
+            # `ast.arg`, not `Name`, so the loop below cannot see them.
+            # They belong to the ENCLOSING function's shadow set: a
+            # lambda binds nothing in the module, so the module table
+            # correctly stays as it is and is the wrong table for this.
+            if isinstance(sub, ast.Lambda):
+                names.update(_parameters_of(sub))
         for bound, name in every:
             if id(bound) not in inside:
                 continue
