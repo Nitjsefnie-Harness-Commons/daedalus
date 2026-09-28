@@ -46,6 +46,62 @@ def git_index(root, *args):
                    capture_output=True, timeout=30)
 
 
+def committable(root):
+    """Make `root` a temp checkout that can actually COMMIT, anywhere.
+
+    Three things have to be pinned, because the runners disagree and the
+    workflow's own `git config` lines run only after the step's first
+    command:
+
+    - an IDENTITY in the repo's own config, so neither the seed commit
+      here nor the step's commit can depend on a global config the
+      harness has replaced;
+    - `core.autocrlf=false`, because the system config on Windows sets
+      it to true and a checkout that normalises differently from the
+      fixture's text-mode writes is a diff that means something else
+      than the test wrote;
+    - nothing else. The child environment carries the rest
+      (`commit_environment`), and any ambient hook or signing setting
+      is a difference between this machine and the one that runs it.
+
+    A control that drives a real commit needs a real commit to happen:
+    `tests/test_timed_coverage.py` reads the subject back, and a
+    checkout that cannot commit reads the PREVIOUS subject and reports
+    it as if the step had produced the wrong one.
+    """
+    for setting, value in (('user.name', 'base'),
+                           ('user.email', 'base@example.invalid'),
+                           ('core.autocrlf', 'false'),
+                           ('commit.gpgsign', 'false')):
+        git_index(root, 'config', setting, value)
+
+
+def commit_environment(home):
+    """The environment a committing child needs, on every platform.
+
+    `GIT_CONFIG_NOSYSTEM` and an empty `GIT_CONFIG_GLOBAL` keep the
+    Windows system config's `core.autocrlf` and any inherited identity
+    out of the child; the four identity variables make the commit
+    possible even where the repository's own config is not read;
+    `GIT_TERMINAL_PROMPT` keeps a credential prompt from hanging a
+    scheduled suite, and `LC_ALL` keeps git's own messages parseable
+    if they ever have to be.
+    """
+    return {
+        'HOME': str(home),
+        'GIT_CONFIG_NOSYSTEM': '1',
+        'GIT_CONFIG_GLOBAL': str(Path(home) / '.gitconfig'),
+        'GIT_AUTHOR_NAME': 'github-actions[bot]',
+        'GIT_AUTHOR_EMAIL': '41898282+github-actions[bot]@users.noreply.'
+                            'github.com',
+        'GIT_COMMITTER_NAME': 'github-actions[bot]',
+        'GIT_COMMITTER_EMAIL': '41898282+github-actions[bot]@users.noreply.'
+                               'github.com',
+        'GIT_TERMINAL_PROMPT': '0',
+        'LC_ALL': 'C',
+    }
+
+
 def git_output(root, *args):
     """Run a git command against `root` and return its stdout, stripped.
 
