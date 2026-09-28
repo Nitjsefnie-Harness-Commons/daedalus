@@ -186,10 +186,10 @@ def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
     # Sorted by line so the FIRST entry is the cause.
     stale = []
     for arm in LAUNCH_ARMS:
-        text = anchor(arm)
+        prefix = anchor(arm)
         line = arm[LINE]
-        at = from_line(rows[arm[FILE]], line, len(text))
-        if not at.startswith(text):
+        at = from_line(rows[arm[FILE]], line, len(prefix))
+        if not at.startswith(prefix):
             stale.append((arm[FILE], line,
                           f'{arm[FILE]}:{line} {arm[ID]} reads {at[:50]!r}'))
     stale.sort()
