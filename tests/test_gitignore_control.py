@@ -369,6 +369,7 @@ def test_a_repository_with_no_tracked_paths_refuses(tmp):
     repo.mkdir()
     _git_of(repo, 'init', '-q', '-b', 'main')
     _git_of(repo, 'config', 'user.email', 'control@example.invalid')
+    _git_of(repo, 'config', 'user.name', 'Control')
     _git_of(repo, 'commit', '-q', '--allow-empty', '-m', 'an empty commit')
     (Path(repo) / ARTIFACT).write_text('*\n', encoding='utf-8')
     verdict = control(repo)
