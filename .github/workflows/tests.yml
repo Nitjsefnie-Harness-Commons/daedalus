@@ -983,6 +983,14 @@ jobs:
             --xml javascript-coverage.xml \
             "--fail-under=$javascript_floor"
 
+      # Policy tests select this step by its exact name.
+      - name: JavaScript per-module coverage gate
+        if: ${{ !cancelled() && steps.measure.conclusion == 'success' }}
+        # A total can clear its floor while one module rots, so every
+        # tracked file carries its own count of uncovered code lines.
+        run: |
+          python scripts/ci/js_module_coverage.py "$NODE_V8_COVERAGE"
+
       - name: Work out the raise this run justifies
         # Only measurements from main may change its calibration.
         id: ratchet
@@ -1003,13 +1011,16 @@ jobs:
           python scripts/ci/ratchet.py --language javascript \
             --measured "$javascript_measured" \
             --thresholds .github/ci-thresholds.json
-          # The size and long-line baselines ratchet the other way: each
-          # follows a file down when it shrinks, so the lines cannot come back
-          # for free. Growth is never written here — that stays a decision a
-          # reviewer sees.
+          # The size, long-line and per-module coverage baselines ratchet
+          # the other way: each follows a file down when it shrinks, so the
+          # lines cannot come back for free. Growth is never written here —
+          # that stays a decision a reviewer sees.
           python scripts/ci/size_baseline.py --tighten \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/line_lengths.py --tighten \
+            --thresholds .github/ci-thresholds.json
+          python scripts/ci/js_module_coverage.py --tighten \
+            "$NODE_V8_COVERAGE" \
             --thresholds .github/ci-thresholds.json
           python scripts/ci/thresholds.py --check \
             --thresholds .github/ci-thresholds.json
@@ -1018,8 +1029,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             printf '%s %s %s\n' \
               "Python coverage ${python_measured}% and JavaScript coverage" \
-              "${javascript_measured}% justified no raise; no module shrank" \
-              "and no file lost an over-limit line." \
+              "${javascript_measured}% justified no raise; no module shrank, no file lost an over-limit line and no module lost an uncovered JavaScript line." \
               >> "$GITHUB_STEP_SUMMARY"
           else
             {

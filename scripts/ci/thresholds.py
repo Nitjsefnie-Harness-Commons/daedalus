@@ -17,7 +17,8 @@ _ONE_DECIMAL = Decimal('0.1')
 _SCHEMA_VERSION = 1
 _COVERAGE_LANGUAGES = ('python', 'javascript')
 _BASELINE_FIELDS = (
-    'module_size_baseline', 'long_line_baseline', 'type_error_baseline')
+    'module_size_baseline', 'long_line_baseline', 'type_error_baseline',
+    'js_coverage_baseline')
 _TOP_LEVEL_FIELDS = ('schema_version', 'coverage', *_BASELINE_FIELDS)
 _COVERAGE_FIELDS = ('measured', 'floor')
 _FIELD_LABELS = {
@@ -211,6 +212,10 @@ def long_line_baseline(data):
 
 def type_error_baseline(data):
     return dict(normalise(data)['type_error_baseline'])
+
+
+def js_coverage_baseline(data):
+    return dict(normalise(data)['js_coverage_baseline'])
 
 
 def _json_ready(value):

@@ -200,6 +200,20 @@ entry whose file has no type error left. An entry naming a file that is gone
 is removed by hand. `tests/test_type_errors.py` gates the policy and reads
 this paragraph the same way.
 
+**The same file's `js_coverage_baseline` holds the per-module JavaScript
+coverage policy on the same terms.** It records how many uncovered
+executable lines each tracked JavaScript file still carries, counted from
+the same V8 dumps and the same physical code-line detection
+`python3 scripts/ci/js_coverage.py` reports the tree-wide total from; a
+number is never raised by hand and no entry is ever added by hand. The
+remedy for a refusal is to cover the uncovered lines in the named file -
+a total that clears its floor says nothing about the one module that
+rotted while its neighbours improved - and the fall is recorded with
+`python3 scripts/ci/js_module_coverage.py --tighten "$NODE_V8_COVERAGE"`,
+which also drops an entry whose file is fully covered. An entry naming a
+file that is gone is removed by hand. `tests/test_js_module_coverage.py`
+gates the policy and reads this paragraph the same way.
+
 ## Git and CI
 
 **Audit co-author trailer values before every push.** Run
