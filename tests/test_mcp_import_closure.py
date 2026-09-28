@@ -685,8 +685,8 @@ def test_a_source_the_scan_accepts_is_reported_as_a_silent_scan(_tmp):
     """
     try:
         _assert_scan_refusal(_tmp, 'value = 1\n', 1, 'never raised')
-    except AssertionError:
-        pass
+    except AssertionError as raised:
+        assert 'a computed import' in str(raised), raised
     else:
         raise AssertionError(
             'the refusal helper returned for a source the scan accepts')
