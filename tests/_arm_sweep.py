@@ -14,8 +14,8 @@ that the right one went. A chain head is the one case where the span
 that is cut and the clause that goes differ: the head's `end_lineno`
 runs down the whole elif chain, and the promotion re-supplies that
 chain, so `removed` stops at the head's own body and the text that took
-its place comes back separately in `promoted`. Three shapes of clause
-need three ops:
+its place comes back separately in `promoted`. Five shapes of clause
+need five ops:
 
     drop_if    cut an `if`/`elif` arm, promoting a chain head's orelse
     drop_stmt  cut a statement outright
@@ -33,6 +33,20 @@ import subprocess
 import sys
 
 MAX_UPWARD = 8
+
+# What kind of node each op is cut for. `_locate` answers the node that
+# CARRIES the line, not the one the op names, so a spec keyed one line
+# off lands on a neighbour: a `drop_if` on a `for` cut the whole loop
+# and reported a plausible `removed`, and a `drop_stmt` on a decorator
+# cut the decorator. The op says what it needs and a node of another
+# kind is refused, so a mis-keyed spec is a finding naming the arm
+# rather than a mutation of the wrong clause.
+CUT_KIND = {
+    'drop_if': ast.If,
+    'drop_stmt': ast.stmt,
+    'drop_span': ast.stmt,
+    'replace': ast.stmt,
+}
 
 # The fresh child's program: it imports the analyser from whatever source
 # is in the tree it is handed, and prints one line per verdict.
@@ -113,9 +127,25 @@ def _disjunction(tree, line):
     return found[0] if found else (None, None, None)
 
 
+def _check_kind(op, node, line):
+    """Refuse a spec whose op and the node it found are not the same kind.
+
+    A `while` carries no orelse, so promoting one is not a smaller
+    failure than an `AttributeError` on it: both are a spec whose line
+    no longer names its clause. Naming the kind turns the pair into the
+    `refused` channel the sweep already reports, and keeps the refusal
+    the module's own `ValueError` rather than an internal one.
+    """
+    wanted = CUT_KIND.get(op)
+    if wanted is None or isinstance(node, wanted):
+        return
+    raise ValueError(f'{op}:{line} found a {type(node).__name__}, and '
+                     f'{op} cuts a {wanted.__name__}')
+
+
 def _promote(lines, node):
     """A chain head's orelse becomes the body; `elif` becomes `if`."""
-    orelse = node.orelse
+    orelse = getattr(node, 'orelse', None)
     if not orelse:
         return ''
     rows = lines[orelse[0].lineno - 1:orelse[-1].end_lineno]
@@ -192,7 +222,11 @@ def cut_arm(source, spec):
     node, is_elif = _locate(tree, line)
     if node is None:
         raise ValueError(f'no statement on line {line}')
+    _check_kind(op, node, line)
     promoted = None
+    # Dispatch on the op, never on the node: what a spec means is the op
+    # it names, and a branch that keys on the node's own shape then runs
+    # for every op that node happens to suit.
     if op == 'replace':
         # A replacement rewrites the header and keeps the body: a
         # `while <guard>:` becomes `while True:` with its body intact.
@@ -200,23 +234,24 @@ def cut_arm(source, spec):
         end = (node.body[0].lineno - 1 if getattr(node, 'body', None)
                else _end_of(node, line))
         new = ' ' * node.col_offset + ':'.join(parts[2:]) + '\n'
-    elif is_elif and isinstance(node, ast.If):
-        # An `elif` is nested in the head's orelse, so its own end_lineno
-        # runs to the end of the whole chain. The arm is the header plus
-        # its own body; the chain continues.
-        start, end, new = line, _end_of(node.body[-1], line), ''
-    else:
-        end = int(parts[2]) if op == 'drop_span' and len(parts) > 2 \
-            else _end_of(node, line)
-        start = line
-        if op in ('drop_stmt', 'drop_span'):
-            new = ''
-        elif op == 'drop_if':
+    elif op == 'drop_if':
+        if is_elif:
+            # An `elif` is nested in the head's orelse, so its own
+            # end_lineno runs to the end of the whole chain. The arm is
+            # the header plus its own body; the chain continues.
+            start, end, new = line, _end_of(node.body[-1], line), ''
+        else:
+            start, end = line, _end_of(node, line)
             new = _promote(lines, node)
             if new:
                 promoted = node
-        else:
-            raise ValueError(f'unknown cut op {op}')
+    elif op in ('drop_stmt', 'drop_span'):
+        end = int(parts[2]) if op == 'drop_span' and len(parts) > 2 \
+            else _end_of(node, line)
+        start = line
+        new = ''
+    else:
+        raise ValueError(f'unknown cut op {op}')
     for extra in range(0, MAX_UPWARD + 1):
         cut = (_offset(lines, start - extra), _offset(lines, end + 1))
         candidate = source[:cut[0]] + new + source[cut[1]:]
@@ -314,9 +349,11 @@ def arm_sweep(tmp, arms):
     it moves nothing and proves nothing, so every consumer has to reject
     it rather than read the empty `moved` as an answer. `refused` is a
     cut the analyser could not be asked to make: a spec whose line no
-    longer names its clause lands on whatever is there, and that node
-    decides whether the walk refuses, raises, or succeeds on the wrong
-    clause -- all three a finding naming the arm and the spec.
+    longer names its clause lands on whatever is there, and `cut_arm`
+    refuses the op that does not match the node it found -- so a
+    mis-keyed `drop_if` is reported rather than cutting a `for` -- and
+    the walk refuses a cut that leaves no parseable file behind. Both
+    are a finding naming the arm and the spec.
     """
     from _owned_writes import clear_bytecode, copy_test_tree
 
