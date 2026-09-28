@@ -69,7 +69,7 @@ def stored_signature(value, occupancy=True):
                       else None)
             signature = ('container', identity_token(value), length,
                          value.kind, _items_signature(value.items, occupancy),
-                         value.star_display)
+                         value.star_display, value.stale)
             _STORED_SIGNATURES[key] = signature
             _STORED_ANCHORS.append(value)
         return signature
@@ -240,7 +240,9 @@ class DeferredMethod:
 @dataclass(frozen=True)
 class DeferredContainer:
     """Statically known deferred values stored by key or index. star_display
-    marks a sequence built by a display holding a star of unknown count."""
+    marks a sequence built by a display holding a star of unknown count, and
+    stale names the keys a store the model could not read has since put
+    something else at, so their recorded values are candidates again."""
 
     items: dict
     length: int | None = None
@@ -248,6 +250,7 @@ class DeferredContainer:
     identity: object = field(default_factory=object, compare=False,
                              repr=False)
     star_display: bool = False
+    stale: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
