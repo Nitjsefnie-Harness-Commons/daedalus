@@ -651,8 +651,11 @@ def test_only_a_bare_literal_in_the_key_holder_defines_a_key(tmp):
     neither is the `Constant` a definition is; each is counted beside
     the prose copy that proves no exemption was spent on it. Adjacent
     literals are folded by the parser into one `Constant` before this
-    sees them, so they are a definition — the row below is what keeps
-    the module's own claim about that from going stale.
+    sees them, so their VALUE is the key while their written text is
+    not — the closing quote between the two pieces keeps the key from
+    appearing in the count at all. An exemption taken against an
+    occurrence that does not exist eats a real statement instead, so
+    that spelling earns none, and the prose copy below survives it.
     """
     left, right = 'a synthetic', 'probe phrase'
     phrase = f'{left} {right}'
@@ -668,7 +671,7 @@ def test_only_a_bare_literal_in_the_key_holder_defines_a_key(tmp):
 
     (Path(tmp) / '_coverage_authority_scan.py').write_text(
         f"ONE = {left!r} {right!r}\n# {phrase}\n", encoding='utf-8')
-    assert phrase_holders(phrase, Path(tmp)) == ([], 0)
+    assert phrase_holders(phrase, Path(tmp)) == ([holder], 1)
 
 
 def test_controls_never_write_inside_the_repository(tmp):

@@ -34,16 +34,39 @@ _AUTHORITY_FILE = '_coverage_bindings.py'
 _KEY_HOLDER = Path(__file__).name
 
 
+def _written(text, node):
+    """The source a node was parsed from, which is not always its value.
+
+    A literal the parser folded from adjacent pieces is one `Constant`
+    whose written text still carries the quote between them, so only
+    the source tells that spelling from a whole literal. Offsets are
+    byte offsets, so the text is cut as bytes rather than characters.
+    """
+    raw = text.encode('utf-8')
+    starts, at = [0], 0
+    for line in raw.splitlines(keepends=True):
+        at += len(line)
+        starts.append(at)
+    return raw[starts[node.lineno - 1] + node.col_offset:
+               starts[node.end_lineno - 1] + node.end_col_offset
+               ].decode('utf-8')
+
+
 def _defines(text, squeezed, key):
     """True when this module's top level declares the phrase as a key.
 
     One shape, and only that one: a statement in the module body whose
     single target is a `Name` and whose value is a string `Constant`.
     An explicit `+` is a `BinOp` and an f-string a `JoinedStr`, so
-    neither is a definition. Adjacent literals are a case the parser
-    settles before this sees them — it folds them into one `Constant` —
-    so they are a definition, and the suite pins that rather than
-    leaving it to the reader.
+    neither is a definition.
+
+    The value is not enough on its own, and the second condition is
+    what makes the subtraction sound. A declaration spelled as adjacent
+    literals is folded into a `Constant` whose value IS the key while
+    its written text is not, so it contributes no occurrence to the
+    count; exempting it would spend the subtraction on a statement
+    beside it instead. Requiring the key to appear in the declaration's
+    own source means the occurrence it excuses is one the count found.
 
     The module body and not the whole tree, because a nested assignment
     sits inside some other scope and is a statement wherever it is
@@ -60,7 +83,8 @@ def _defines(text, squeezed, key):
         if (len(targets) == 1 and isinstance(targets[0], ast.Name)
                 and isinstance(value, ast.Constant)
                 and isinstance(value.value, str)
-                and squeezed(value.value) == key):
+                and squeezed(value.value) == key
+                and key in squeezed(_written(text, value))):
             return True
     return False
 
@@ -76,8 +100,9 @@ def phrase_holders(phrase, directory=None):
     second statement anywhere else. The one exemption is this module's
     own declaration of a key at its top level, and it is reached only
     there: the same assignment in any other file, under any name, at any
-    depth, is a statement like any other. One is ever exempted, so a
-    second declaration beside the first is still a second statement.
+    depth, is a statement like any other. One is ever exempted, and only
+    against an occurrence the count actually found, so a declaration
+    beside the first is still a second statement.
     """
     def squeezed(text):
         """The text with a rewrap's marks gone, so wrapping cannot hide it."""
