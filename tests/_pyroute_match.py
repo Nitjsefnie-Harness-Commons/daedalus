@@ -38,6 +38,7 @@ from _pyroute_mapping import (_UNRESOLVED_KEY, _literal_key,
 from _pyroute_reads import _selected_values
 from _pyroute_state import (UNPROVABLE_SENDER, FlowState, bind_alias_target,
                             clear_names, dedupe_states, rebound_names)
+from _pyroute_storage import retired_into
 from _pyroute_values import (DYNAMIC_KEY, DeferredAlternatives,
                              DeferredContainer, _known_value,
                              is_deferred_value, merge_yielded)
@@ -157,9 +158,9 @@ def _bind_mapping(pattern, value, state):
             rest = {k: item for k, item in branch.items.items()
                     if all(k != _literal_key(key, state)
                            for key in pattern.keys)}
-            rests.append(DeferredContainer(rest, len(rest), 'dict',
-                                           branch.identity,
-                                           stale=branch.stale & set(rest)))
+            rests.append(DeferredContainer(
+                rest, len(rest), 'dict', branch.identity,
+                stale=retired_into(branch.stale, rest)))
         _merge_bind(ast.MatchAs(name=pattern.rest), rests, state)
 
 

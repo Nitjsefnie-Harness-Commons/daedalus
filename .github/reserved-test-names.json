@@ -1635,6 +1635,7 @@
     "responseFor": {"javascript": ["tests/_gm_harness.py"]},
     "rest_403": {"python": ["tests/_watcher_fixtures.py"]},
     "results": {"python": ["tests/_dashsection_wave1.py"]},
+    "retired_into": {"python": ["tests/_pyroute_storage.py"]},
     "returns_promoting": {"python": ["tests/_jsroute_net_read.py"]},
     "reversed_read": {"python": ["tests/_pyroute_indexing.py"]},
     "review": {"python": ["tests/_watcher_fixtures.py"]},
