@@ -267,6 +267,22 @@ def _green(result):
     return result.returncode == 0
 
 
+def _cell(root, name, a_way, b_way, shape, order, landing):
+    """One sweep cell, built fresh: `(result, conflicted)`."""
+    a_bound, b_bound = (('_shared_helper', '_shared_helper')
+                        if shape == 'overlap'
+                        else ('_alpha_helper', '_beta_helper'))
+    return _land_and_check(root, name, order, landing == 'rebase',
+                           a_name=a_bound, b_name=b_bound,
+                           a_regen=a_way == 'tighten',
+                           b_regen=b_way == 'tighten')
+
+
+def _label(a_way, b_way, shape, order, landing):
+    return '|'.join((f'A={a_way}', f'B={b_way}', shape, ''.join(order),
+                     landing))
+
+
 # --------------------------------------------------------------------------
 # The fixtures that killed the first attempt. Each is red against it.
 # --------------------------------------------------------------------------
@@ -393,6 +409,116 @@ def test_the_document_carries_no_field_to_pair_a_phantom_with(tmp):
 # The generated sweep. One seed's zero is a sample.
 # --------------------------------------------------------------------------
 
+# The four cells whose verdict is a property rather than a surprise: the
+# branch that tightened lands SECOND, by rebase, onto a main that already
+# carries the other branch's module. Named as cells so the sweep and the
+# pin cannot disagree about which ones they are.
+STALE_BASE_CELLS = (
+    ('tighten', 'skip', 'disjoint', ('b', 'a'), 'rebase'),
+    ('tighten', 'skip', 'overlap', ('b', 'a'), 'rebase'),
+    ('skip', 'tighten', 'disjoint', ('a', 'b'), 'rebase'),
+    ('skip', 'tighten', 'overlap', ('a', 'b'), 'rebase'),
+)
+
+
+def test_a_second_tightening_landed_by_rebase_reports_the_missing_name(tmp):
+    """A rebased document really does not match the tree it landed on.
+
+    THE PROPERTY, PINNED. A branch that tightens writes a document that
+    is exact for the tree it saw. Landed by rebase, its commit is
+    replayed on top of whatever main already carried, so the tree that
+    commit now holds has a module the document was generated without.
+    The base is that rebased commit, that module is inside the base, and
+    the check reports the names the document is missing. It is a TRUE
+    POSITIVE, not a residue: the document really is stale, and the
+    remedy is one `--tighten`.
+
+    It is the landing method, not the merge, that makes the base
+    over-cover. The same pair landed as a merge commit keeps the branch's
+    own commit as the last writer, its tree lacks the landed module, and
+    the name is forgiven -- which is what
+    `test_the_generator_reads_a_rebased_document_as_it_lands` pins
+    beside it.
+
+    GREEN-BY-DESIGN-NOW: the claim this branch makes is that a MERGE no
+    longer produces a red that no human decision caused, not that a
+    merge never produces a red. If a future redesign makes these four
+    green, revisit this pin rather than deleting it: green here would
+    mean the design changed, and the question of whether that is better
+    is a different one from whether it happened.
+    """
+    for counter, cell in enumerate(STALE_BASE_CELLS, 1):
+        a_way, b_way, shape, order, landing = cell
+        result, conflicted = _cell(tmp, f'pin{counter}', a_way, b_way,
+                                   shape, order, landing)
+        label = _label(*cell)
+        assert not conflicted, (label, 'the resolve needed a decision')
+        assert not _green(result), (
+            f'{label} went GREEN -- the rebased document was accepted '
+            'against the tree it landed on, which is a design change and '
+            'not a fix')
+        assert 'absent:' in result.stderr or 'owners:' in result.stderr, (
+            label, result.stderr)
+        assert '--tighten' in result.stderr, (
+            f'{label}: the refusal carries no next step for the seat '
+            f'reading it: {result.stderr!r}')
+
+
+def test_the_generator_reads_a_rebased_document_as_it_lands(tmp):
+    """The residual is a landing, and the merge ref is not where it shows.
+
+    This is the evidence for the claim the pull request makes about it.
+    A branch tightens against a base that is missing a module another
+    branch has ALREADY landed on main. Built as a merge commit -- which
+    is what a pull request's own CI builds its merge ref as -- the branch
+    is green, because the last writer is the branch's own commit and its
+    tree does not carry the landed module. Landed by rebase, which is how
+    this repository lands, the same pair is red and prints the remedy.
+
+    So the red does NOT appear on the branch's own CI. It appears when
+    the branch is landed, and it is caught there, not before. This is
+    recorded because the alternative -- asserting the red from reasoning
+    about what a merge ref contains -- is exactly the kind of claim that
+    passes review and fails in production.
+    """
+    def world(root, name):
+        tree = _checkout(root, name, _BASE_FILES)
+        _branch_git(tree, 'add', '-A')
+        _tighten(tree)
+        _commit_all(tree, 'the committed set')
+        base = _branch_git(tree, 'rev-parse', 'HEAD').stdout.strip()
+        _branch_git(tree, 'checkout', '-q', 'main')
+        (tree / 'tests/_landed.py').write_text(
+            'def _landed_helper(value):\n    return value\n',
+            encoding='utf-8')
+        _branch_git(tree, 'add', '-A')
+        _commit_all(tree, 'main lands a module')
+        _branch_git(tree, 'checkout', '-q', '-b', 'feature', base)
+        (tree / 'tests/_branch.py').write_text(
+            'def _branch_helper(value):\n    return value\n',
+            encoding='utf-8')
+        _branch_git(tree, 'add', '-A')
+        _tighten(tree)
+        _commit_all(tree, 'the branch tightens')
+        return tree
+
+    # The merge ref, as the branch's own CI builds it.
+    merged = world(tmp, 'asmerge')
+    _branch_git(merged, 'checkout', '-q', 'main')
+    _branch_git(merged, 'merge', '-q', '--no-ff', '--no-edit', 'feature')
+    on_merge_ref = _branch_check(merged)
+    assert _green(on_merge_ref), (on_merge_ref.stdout, on_merge_ref.stderr)
+
+    # The same pair, landed the way this repository lands one.
+    rebased = world(tmp, 'asrebase')
+    _branch_git(rebased, 'checkout', '-q', 'feature')
+    _branch_git(rebased, 'rebase', '-q', 'main')
+    landed = _branch_check(rebased)
+    assert not _green(landed), (landed.stdout, landed.stderr)
+    assert 'absent:' in landed.stderr, landed.stderr
+    assert '--tighten' in landed.stderr, landed.stderr
+
+
 def test_every_landing_of_two_branches_lands_green(tmp):
     """The property, over the product rather than over the cases I chose.
 
@@ -416,24 +542,22 @@ def test_every_landing_of_two_branches_lands_green(tmp):
     verdicts = []
     cells = list(product(*axes))
     for counter, (a_way, b_way, shape, order, landing) in enumerate(cells, 1):
-        a_bound, b_bound = (('_shared_helper', '_shared_helper')
-                            if shape == 'overlap'
-                            else ('_alpha_helper', '_beta_helper'))
-        by_rebase = landing == 'rebase'
-        cell = (f'A={a_way}', f'B={b_way}', shape, ''.join(order), landing)
-        result, conflicted = _land_and_check(
-            tmp, f'cell{counter:02d}', order, by_rebase, a_name=a_bound,
-            b_name=b_bound, a_regen=a_way == 'tighten',
-            b_regen=b_way == 'tighten')
+        result, conflicted = _cell(
+            tmp, f'cell{counter:02d}', a_way, b_way, shape, order, landing)
+        label = _label(a_way, b_way, shape, order, landing)
         green = _green(result)
-        verdicts.append(('|'.join(cell), green, conflicted))
+        verdicts.append((label, green, conflicted))
         if not green:
-            print(f'RED {"|".join(cell)}: {result.stderr.strip()[:200]}')
+            print(f'RED {label}: {result.stderr.strip()[:200]}')
     print(f'the generated sweep, {len(verdicts)} cells, one line each:')
     for line, green, conflicted in verdicts:
         print(f'  {line:52} {"GREEN" if green else "RED"}'
               f'  conflict={"yes" if conflicted else "no"}')
-    assert all(green for _line, green, _c in verdicts), verdicts
+    stale = {_label(*one) for one in STALE_BASE_CELLS}
+    unexpected = [line for line, green, _c in verdicts
+                  if not green and line not in stale]
+    assert not unexpected, unexpected
+    assert all(green for line, green, _c in verdicts if line not in stale)
     # The two binders that agree on a name, where only one side
     # regenerated: the merge that reached main unnoticed, because nothing
     # in it needed a human decision. Every such cell is conflict-free.
