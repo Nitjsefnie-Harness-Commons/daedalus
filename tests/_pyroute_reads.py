@@ -270,9 +270,7 @@ def _popitem_entry(owner):
     """
     if DYNAMIC_KEY in owner.items or owner.length is None:
         return None
-    for key in reversed(list(owner.items)):
-        return key, owner.items[key]
-    return None
+    return next(reversed(list(owner.items.items())))
 
 
 def _readback_popitem(node, state, owner):
@@ -287,7 +285,7 @@ def _readback_popitem(node, state, owner):
     account of a key set with one entry the model cannot name taken out of
     it.
     """
-    if owner.length == 0 and DYNAMIC_KEY not in owner.items:
+    if owner.length == 0:
         return None            # an empty mapping has no pair to pop
     taken = _popitem_entry(owner)
     if taken is None:

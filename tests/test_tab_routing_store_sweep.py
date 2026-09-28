@@ -359,6 +359,30 @@ _POP_DIRECTION = [
 ]
 
 
+# A read-back hands back a SNAPSHOT of the items the model recorded when it
+# ran, so a store it records afterwards is not in the snapshot and a read
+# through it still answers with what the mapping held AT THE READ, while the
+# runtime walks a live view and routes. That is a false green, not a clean
+# verdict, and #1314 tracks it. The row below is pinned at its measured
+# (1, 0) and the fix for that issue is EXPECTED to flip it, which is not a
+# regression and must not be read as one. One row covers the mechanism:
+# `copy` and `items` hand back the same snapshot of the same items.
+_KNOWN_SNAPSHOT = [
+    ('known-defect-1314-store-after-a-bound-read', _flow(
+        _RELAY, 'd = {"k": ordinary}', 'v = d.values()', 'd["j"] = relay()',
+        invoke='[f() for f in v]'), (1, 0)),
+]
+
+
+def test_a_store_after_a_bound_read_is_a_known_defect(tmp):
+    bad = []
+    for label, body, expected in _KNOWN_SNAPSHOT:
+        actual = _tracked_focus_verdict(tmp, body, counts=True)
+        if actual != expected:
+            bad.append((label, actual, expected))
+    assert not bad, bad
+
+
 def test_rebinding_drops_the_first_literal(tmp):
     bad = []
     for label, body, expected in _REBINDING:
