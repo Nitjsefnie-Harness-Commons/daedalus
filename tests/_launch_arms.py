@@ -718,6 +718,28 @@ LAUNCH_ARMS = (
      'self-referential-concat-name'),
 )
 
+# The CONTROLLED arms whose `evidence` goes red by RAISING, not by
+# changing to another value. A crash is a real control -- the suite goes
+# red, so nothing here is a false green -- but a weaker one than it
+# looks: what it pins is "the analyser must not raise on this shape",
+# and a later robustness change can satisfy that while the arm's own
+# clause stops deciding the answer. So the subset is NAMED rather than
+# counted into `evidence-does-not-control`, which now means "the named
+# evidence's rendered verdict changes" and carries this set beside it.
+#
+# Derived by sweeping every arm and reading, per arm, whether its own
+# evidence label moved to a value or to a `RAISED ...` string: fourteen
+# of the CONTROLLED set, each of which moves NOTHING by value, so the
+# crash is the whole of its control. The derivation is the full sweep
+# (all 150 arms), not a sample; this suite re-proves every name below
+# and no other arm's crash is claimed.
+#
+# `mr.while-guard` is NOT here, and is the reason the set is not simply
+# "every arm that raises": its own evidence moves nothing, but the
+# mutant's child does not ANSWER (it does not stop, which is what its
+# `replace:471:while True:` cut is for), so there is no verdict to
+# classify. Its real control is the step ceiling, and the row this table
+# used to name is the second, weaker one -- see SECONDARY_CONTROLLED.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
@@ -741,4 +763,5 @@ CRASH_CONTROLLED = frozenset({
 #                   one that only pins the absence of a crash.
 SECONDARY_CONTROLLED = {
     'mr.while-guard': ('machinery-reached-by-assignment-is-unproved',),
+    'rs.guard': ('import-module-name-bound-twice',),
 }
