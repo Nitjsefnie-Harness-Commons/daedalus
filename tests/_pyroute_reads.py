@@ -20,7 +20,8 @@ from _pyroute_positions import (at_position, from_position,
                                 sequence_method_value)
 from _pyroute_setops import fold_set_operation, set_operands
 from _pyroute_storage import (container_copy, dict_length, fold_dynamic,
-                              replace_deferred_storage, stale_after_store)
+                              replace_deferred_storage, retired_into,
+                              stale_after_store)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -94,6 +95,7 @@ def _fold_items(target, source):
 
 def _dict_value(node, state):
     items = {}
+    stale = frozenset()
     counted = True
     for key, item in zip(node.keys, node.values):
         if key is not None:
@@ -108,17 +110,24 @@ def _dict_value(node, state):
                  else _known_value(item, state))
         if isinstance(value, DeferredContainer) and value.kind == 'dict':
             _fold_items(items, value.items)
+            # The last fold at a key is the value the display holds, so a
+            # source that carries a key un-retires whatever an earlier one
+            # retired there.
+            stale = ((stale - set(value.items))
+                     | retired_into(value.stale, items))
             counted = counted and value.length is not None
         else:
             fold_dynamic(items, UNPROVABLE_SENDER)
     if len(node.keys) == 1 and node.keys[0] is not None:
         return DeferredContainer(items, 1, 'dict', node)  # one entry, one key
-    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node,
+                             stale=stale)
 
 
 def _merge_or_value(node, state):
     """Mapping value of `left | right` from the provable dict sides."""
     items = {}
+    stale = frozenset()
     counted = True
     for side in (node.left, node.right):
         if isinstance(side, ast.Dict):
@@ -127,17 +136,21 @@ def _merge_or_value(node, state):
             known = _known_value(side, state)
         if isinstance(known, DeferredContainer) and known.kind == 'dict':
             _fold_items(items, known.items)
+            stale = ((stale - set(known.items))
+                     | retired_into(known.stale, items))
             counted = counted and known.length is not None
         else:
             fold_dynamic(items, UNPROVABLE_SENDER)
     if not items:
         return None
-    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node,
+                             stale=stale)
 
 
 def _dict_call_value(node, state):
     """Mapping value of a builtin dict() call, or None when untracked."""
     items = {}
+    stale = frozenset()
     counted = True
     sources = node.args[:1] + [
         keyword.value for keyword in node.keywords if keyword.arg is None]
@@ -147,13 +160,16 @@ def _dict_call_value(node, state):
             fold_dynamic(items, UNPROVABLE_SENDER)
         else:
             _fold_items(items, known[0])
+            stale = ((stale - set(known[0]))
+                     | retired_into(known[2], items))
             counted = counted and known[1]
     for keyword in node.keywords:
         if keyword.arg is not None:
             items[keyword.arg] = _known_value(keyword.value, state)
     if not items:
         return None
-    return DeferredContainer(items, dict_length(items, counted), 'dict', node)
+    return DeferredContainer(items, dict_length(items, counted), 'dict', node,
+                             stale=stale)
 
 
 def _setdefault_value(node, state):
@@ -486,14 +502,19 @@ def _literal_pair_items(source, state):
 
 
 def _source_items(source, state):
-    """Items one mapping store contributes and whether their keys are all
-    counted; None marks unknown contents."""
+    """Items one mapping store contributes, whether their keys are all
+    counted, and which of them the source has already retired; None marks
+    unknown contents.
+
+    The retirement travels with the items because it is a fact about them:
+    a destination built out of these values cannot claim at a retired key
+    that its own value there is current."""
     known = (_dict_value(source, state) if isinstance(source, ast.Dict)
              else _known_value(source, state))
     if not isinstance(known, DeferredContainer):
         return None
     if known.kind == 'dict':
-        return known.items, known.length is not None
+        return known.items, known.length is not None, known.stale
     if known.kind not in ('list', 'tuple', 'set'): return None
     items = {}
     entries, aligned = _literal_pair_items(source, state)
@@ -519,7 +540,9 @@ def _source_items(source, state):
     # `True` one key there), and only the dynamic slot precedes it.
     for key, value in entries.values():
         items[key] = value
-    return items, len(known.items) == known.length
+    # A pair source is a sequence, so it retires nothing: the keys the
+    # destination ends up holding are named here, not carried over.
+    return items, len(known.items) == known.length, frozenset()
 
 
 def _pop_key(call, state):

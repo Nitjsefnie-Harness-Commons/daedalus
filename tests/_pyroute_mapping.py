@@ -9,7 +9,7 @@ from _pyroute_reads import (_apply_pop, _fold_items, _literal_pair_items,
                             _source_items)
 from _pyroute_setops import fold_set_operation, set_operands
 from _pyroute_storage import (container_copy, replace_deferred_storage,
-                              stale_after_store)
+                              retired_into, stale_after_store)
 from _pyroute_stores import (base_owner, clear_owner, replace_container,
                              root_name, store_deferred_target)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
@@ -155,6 +155,7 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
     already held; the keys this call wrote from what the model DID read
     stay exact."""
     items = {}
+    carried = frozenset()
     counted = True
     for source in sources:
         merged = _source_items(source, state)
@@ -162,6 +163,9 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
             _mark_unprovable(state, owner, owner_name)
             return
         _fold_items(items, merged[0])
+        # The retirement rides with the values, and the last source at a
+        # key is the value the owner holds, so it settles that key.
+        carried = ((carried - set(merged[0])) | retired_into(merged[2], items))
         counted = counted and merged[1]
     for key, value in keywords.items():
         known = _known_value(value, state)
@@ -187,8 +191,9 @@ def _apply_mapping_store(state, owner, owner_name, sources, keywords, node):
         _fold_items(combined, items)
         replace_container(state, owner_name, owner, combined,
                           unknown_length=not counted,
-                          stale=stale_after_store(owner, items,
-                                                  unreadable=not counted))
+                          stale=(stale_after_store(owner, items,
+                                                   unreadable=not counted)
+                                 | carried))
 
 
 def _apply_setdefault(state, call, owner, owner_name):

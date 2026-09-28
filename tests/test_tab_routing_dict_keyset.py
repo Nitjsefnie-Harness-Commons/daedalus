@@ -60,12 +60,18 @@ say; and a starred positional source marks neither name, its fold sitting on
 no name at all. Those shapes are what `_SILENT` names, with the read form
 each member is silent on carried per member.
 """
+import ast
 import sys
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _pyroute_reads import _mapping_lookup  # noqa: E402
+from _pyroute_mapping import _apply_mapping_store  # noqa: E402
+from _pyroute_reads import (_dict_call_value, _dict_value,  # noqa: E402
+                            _mapping_lookup, _merge_or_value)
+from _pyroute_state import FlowState  # noqa: E402
+from _pyroute_stores import _subscript_store  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
                              DeferredAlternatives, DeferredContainer)
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
@@ -441,6 +447,104 @@ def test_the_mapping_read_joins_a_key_an_unreadable_store_replaced(tmp):
     assert _mapping_lookup(marked, 'j', default) == UNPROVABLE_SENDER
     assert _mapping_lookup(countable, 'j', default) is default
     assert _mapping_lookup(countable, 'j', None) is None
+
+
+# A source the model has retired a key in, and every spelling of a fold
+# that builds a destination out of its items. The retirement is a fact
+# about the values the source recorded, so it has to travel with them: the
+# destination cannot claim at a key the source has disowned that its own
+# value there is current.
+_STALE_SOURCE = 'd = {"k": ordinary}\nd.update(zip(["j"], [1]))\n'
+_FOLDS = ('update', 'update-star', 'ior', 'display', 'or-value', 'dict-call')
+
+
+def _retired_source_state():
+    """A state holding one source that recorded a key and then retired it."""
+    state = FlowState({}, {}, {}, {}, set(), set(), {}, set())
+    state.callables['d'] = DeferredContainer(
+        {'k': None}, None, 'dict', stale=frozenset({'k'}))
+    return state
+
+
+def _fold_into_destination(state) -> DeferredContainer:
+    """Run the store fold of a retired source into a bound destination."""
+    owner = DeferredContainer({}, 0, 'dict')
+    state.callables['o'] = owner
+    _apply_mapping_store(state, owner, 'o',
+                         [ast.Name(id='d', ctx=ast.Load())], {}, None)
+    return cast(DeferredContainer, state.callables['o'])
+
+
+def _folded(spelling) -> DeferredContainer:
+    """The container one spelling of a fold builds from the retired source.
+
+    Entered at each fold site's own function rather than through the flow,
+    so what is asserted is the container that site itself returns. The
+    three store spellings reach one function, which is why one entry covers
+    them: a `**` source and an `|=` operand are both a `sources` entry.
+    """
+    state = _retired_source_state()
+    if spelling in ('update', 'update-star', 'ior'):
+        return _fold_into_destination(state)
+    node = ast.parse(
+        {'display': '{**d}', 'or-value': '{} | d', 'dict-call': 'dict(d)'}
+        [spelling], mode='eval').body
+    folded = (_dict_value(node, state) if isinstance(node, ast.Dict)
+              else _merge_or_value(node, state)
+              if isinstance(node, ast.BinOp)
+              else _dict_call_value(node, state))
+    # A source that recorded a key gives every one of these something to
+    # fold, so none of them is the empty result they answer with.
+    assert folded is not None, spelling
+    return folded
+
+
+def test_a_fold_carries_the_source_retirement_with_its_items(tmp):
+    """The propagation, on the sites that have to do it.
+
+    A container built from a retired source's items carries the retirement
+    with them. This is asserted on the containers each fold site returns
+    rather than on a verdict, because no read form distinguishes the two
+    answers on this tree: the conservative "may be ext_cmd" rule already
+    reports a read whose value the model cannot name, so the end-to-end
+    test below passes with or without this. A control that only proves the
+    fix on the fixed tree proves nothing, and this is the half that does
+    not.
+    """
+    for spelling in _FOLDS:
+        destination = _folded(spelling)
+        assert destination.stale == frozenset({'k'}), (spelling, destination)
+    # The other half of the rule: a key the destination's own store writes
+    # back afterwards is current again, so the fold must not leave it
+    # retired and a later store must be able to clear it.
+    state = _retired_source_state()
+    _fold_into_destination(state)
+    _subscript_store(
+        state, ast.Subscript(value=ast.Name(id='o', ctx=ast.Load()),
+                             slice=ast.Constant('k'), ctx=ast.Store()),
+        None, state.callables['o'], 'o', False, False)
+    refreshed = cast(DeferredContainer, state.callables['o'])
+    assert refreshed.stale == frozenset(), refreshed
+
+
+def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):
+    """The shape the lead ruled in scope, end to end, as a control.
+
+    `o = {}; o.update(d)` and `o |= d` over a source that has retired the
+    key: the read must not read clean, on all three forms and both
+    prefixes. It measures `(0, 1)` on each of the six cells on this tree,
+    with or without the propagation, because the folded value at the key is
+    an ordinary one the model records as occupancy and the conservative
+    rule reports the unresolvable read that follows. So the invariant here
+    is "not clean" rather than a count, and the proof that the retirement
+    travels is the store-side test above.
+    """
+    for store in ('o = {}\no.update(d)', 'o = {}\no |= d'):
+        body = f'{_STALE_SOURCE}{store}'
+        for read, source in sorted(_READS.items()):
+            for prefix, tag in ((_PRE, 'routed'), (_CLEAN, 'clean')):
+                assert _verdict(tmp, body, source, prefix)[1] >= 1, (
+                    store, read, tag)
 
 
 def test_a_key_written_after_an_unreadable_store_keeps_its_value(tmp):
