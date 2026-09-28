@@ -92,9 +92,14 @@ reveals neither.
 
 **Restore the way `plant.py` does, never with the VCS.** Run
 `python3 .claude/skills/changing-daedalus/plant.py save FILE` before you
-revert the fix and `plant.py restore FILE` after. The restore writes back the
-bytes it read, re-reads them, and prints the comparison, so the proof is in
-its own output instead of in a check the next reader has to remember. A
+revert the fix and `plant.py restore FILE` after. The restore publishes the
+bytes it read in one atomic step, re-reads the file, and exits nonzero unless
+what it reads back is what it wrote - so its exit status answers the question
+you would otherwise have to remember to ask. A `save` that finds an entry from
+an earlier plant refuses rather than overwriting it, and when the file has
+moved on since that copy it names `plant.py clear FILE` rather than a restore,
+because restoring the older bytes over the newer change is the loss this
+replaces. A
 path-scoped VCS restore - `git checkout -- FILE`, `git restore FILE` - is a
 statement about the whole path, not about the plant: it cannot tell the
 planted bytes from uncommitted work on the same path, so it hands back HEAD
@@ -113,8 +118,6 @@ it exists to catch **in a real target**, prove the guard fails, restore, prove
 it passes. A synthetic fixture shows what the guard thinks; only a real target
 shows whether the guard and the runtime agree. Save and restore that target
 with the `plant.py` pair above; a VCS restore there is the same silent loss.
-
-
 
 **Never assert a wall-clock margin.** It passes because the machine was fast
 enough, never because the code is right, so it fails correct code on a loaded
