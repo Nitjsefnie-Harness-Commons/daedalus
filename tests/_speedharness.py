@@ -85,8 +85,95 @@ def stub_path(workdir):
 # platform name -- a Linux runner on a filesystem that cannot set the
 # mode is in exactly the same position as a Windows one, and a Windows
 # runner on a filesystem that can is fine.
-_MODE_PROBE = 'install -d -m 700 "$HOME/.daedalus-mode-probe"\n'
-_MODE_RESOLVE = 'command -v install > /dev/null || exit 127\n'
+#
+# THE TWO OUTCOMES ARE TOLD APART BY A MARKER, NOT BY A STATUS. `127` is
+# the shell's own "not found" convention, so a bare `exit 127` for an
+# unresolvable `install` cannot be read back without also claiming that
+# an `install` which RESOLVED and then exited 127 never ran -- which is
+# a different fact with a different consequence. The unresolved branch
+# prints its own marker on stdout and the classification reads that, so
+# each outcome names itself.
+MODE_PROBE_DIR = '.daedalus-mode-probe'
+_UNRESOLVED = '__daedalus_install_unresolved__'
+_UNRESOLVED_STATUS = 127
+MODE_PROBE = (
+    'if command -v install > /dev/null; then\n'
+    f'  install -d -m 700 "$HOME/{MODE_PROBE_DIR}"\n'
+    'else\n'
+    f"  echo '{_UNRESOLVED}'\n"
+    f'  exit {_UNRESOLVED_STATUS}\n'
+    'fi\n'
+)
+
+
+def unresolved_install_attempt(stdout=''):
+    """A `CompletedProcess` shaped like the probe's own not-found branch.
+
+    So a control can pin the classification's two outcomes without a
+    filesystem to arrange, and without the marker becoming a second
+    spelling of the rule that lives beside it.
+    """
+    return subprocess.CompletedProcess(
+        ['install', '-d', '-m', '700'], _UNRESOLVED_STATUS,
+        stdout or f'{_UNRESOLVED}\n', '')
+
+
+def failed_install_attempt(stderr, status=1):
+    """A `CompletedProcess` where `install` RESOLVED and then failed.
+
+    The other half of the same distinction, and the reason the two are
+    told apart by the probe's own marker rather than by a status: `127`
+    is the shell's "not found" convention, so a command that ran and
+    exited 127 is otherwise indistinguishable from one that was never
+    found, and reporting the second as the first would grant the skip on
+    a fact about the command rather than about the filesystem.
+    """
+    return subprocess.CompletedProcess(
+        ['install', '-d', '-m', '700'], status, '', stderr)
+
+
+def install_resolves(workdir, environment, timeout=120):
+    """`(resolves, detail)`: can THIS PATH run the step's own command.
+
+    Measured with the same `command -v` the probe uses, under the same
+    resolved bash and the same environment, so a case that needs an
+    unresolvable `install` can check that it got one instead of
+    asserting an answer it did not arrange. Where it cannot be
+    arranged, this is the fact to report: the case is then unobservable
+    here, which is a different statement from "the measurement is
+    wrong", and a control can say which.
+    """
+    done = run_workflow_script(
+        workdir, 'command -v install > /dev/null\n', environment, timeout)
+    if done.returncode == 0:
+        return True, ''
+    return False, ('install resolves on this PATH, so a case that needs it '
+                   'unresolvable cannot be set up here')
+
+
+def classify_mode_attempt(done):
+    """`(holds, detail)` from what the step's own command did.
+
+    Split out of the measurement so the MISSING-`install` rule is a
+    fact about this function rather than about a filesystem: a machine
+    that cannot hold a mode answers the filesystem question for every
+    case, and a rule that can only be observed on a filesystem with an
+    answer is a rule that goes unchecked on exactly the machines whose
+    behaviour it is about.
+
+    A MISSING `install` is deliberately not a filesystem fact and does
+    not report `holds=False`: a machine that cannot run the step at all
+    should have its control say so in one line, not skip quietly over a
+    problem it could have reported.
+    """
+    if _UNRESOLVED in (done.stdout or ''):
+        return True, ('install cannot be resolved on this PATH, so the '
+                      'mode was never attempted')
+    if done.returncode == 0:
+        return True, ''
+    detail = (done.stderr.strip() or done.stdout.strip()
+              or f'install exited {done.returncode}')
+    return False, detail
 
 
 def filesystem_holds_a_mode(workdir, environment, timeout=120):
@@ -97,21 +184,17 @@ def filesystem_holds_a_mode(workdir, environment, timeout=120):
     environment the step would run under -- so the answer is about this
     filesystem and this machine, not about a name.
 
-    A MISSING `install` is deliberately not a filesystem fact and does
-    not report `holds=False`: a machine that cannot run the step at all
-    should have its control say so in one line, not skip quietly over a
-    problem it could have reported.
+    The scratch directory is removed on every path, including the one
+    where it was created: a measurement that leaves `~/.ssh` next to the
+    home every other control uses is a measurement that changes the
+    environment the next one asks about. A caller that needs to read the
+    mode off the directory runs `MODE_PROBE` itself, which does not
+    remove it.
     """
     done = run_workflow_script(
-        workdir, _MODE_RESOLVE + _MODE_PROBE, environment, timeout)
-    if done.returncode == 0:
-        return True, ''
-    if done.returncode == 127:
-        return True, ('install cannot be resolved on this PATH, so the '
-                      'mode was never attempted')
-    detail = (done.stderr.strip() or done.stdout.strip()
-              or f'install exited {done.returncode}')
-    return False, detail
+        workdir, f'{MODE_PROBE}rm -rf "$HOME/{MODE_PROBE_DIR}"\n',
+        environment, timeout)
+    return classify_mode_attempt(done)
 
 
 def skip_unless_a_mode_can_be_set(workdir, environment, measure=None):
