@@ -370,10 +370,9 @@ def test_a_refused_comment_poll_pauses_until_the_reset_and_resumes(tmp):
         # iteration publishes the next index. No wall clock is read, so this
         # holds however long either took - and since both values come from
         # the same poll it says which poll issued the query, not that the
-        # index advances; that is tests/test_watcher_poll_index.py, whose
-        # two controls carry the invariant and a planted frozen index. The
-        # presence check is the other failure, an unwired seam rather than a
-        # frozen index.
+        # index advances; that is tests/test_watcher_poll_index.py. The
+        # presence check is the other failure, an unwired seam rather than
+        # a frozen index.
         assert calls[0]['poll'] is not None, calls[0]
         assert calls[1]['poll'] == calls[0]['poll'], [c['poll'] for c in calls]
         # One line for the whole wait, not one per poll inside it.
