@@ -336,13 +336,19 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
     """The closure claim is a granularity claim, so its granularity is checked.
 
     "Every arm of both analysers" reads as "every guard clause", and the
-    spelling-independent marker for that is every `if`/`elif`/`while`
-    header plus each disjunct of a multi-line condition. A reader who
-    takes that marker and finds a clause at a line the table does not
-    list has found an unstated hole in the one claim the table exists to
-    make. `MARKER_NON_MEMBERS` is the answer, one line per clause, and
-    this re-derives the marker so the answer cannot fall behind the
-    analysers.
+    spelling-independent marker for that is every `if`/`elif`/`while`/
+    `return` header plus each disjunct of a multi-line condition. A
+    reader who takes that marker and finds a clause at a line the table
+    does not list has found an unstated hole in the one claim the table
+    exists to make. `MARKER_NON_MEMBERS` is the answer, one line per
+    clause, and this re-derives the marker so the answer cannot fall
+    behind the analysers.
+
+    `return` is in the marker because the TABLE uses it: `pf.fallthrough`
+    is `drop_stmt` on a `return True` and `rw.no-container` on a `return
+    None`, so a fallthrough return is a clause here by the table's own
+    practice and narrowing the marker to exclude it answers a question
+    nobody asked.
     """
     del tmp
     named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
@@ -369,9 +375,10 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
         if state == 'CONTROLLED':
             assert why in known, (
                 f'{name}:{line} is CONTROLLED and names nothing: {why}')
-        else:
-            assert state == 'MERGED', f'{name}:{line}: state {state!r}'
-            assert len(why) > 40, f'{name}:{line}: a merge reason, not a shrug'
+            continue
+        assert state in ('MERGED', 'INERT'), f'{name}:{line}: state {state!r}'
+        assert len(why) > 40, (
+            f'{name}:{line}: a {state.lower()} reason, not a shrug')
 
 
 def _marker(name):
@@ -396,7 +403,7 @@ def _marker(name):
                     parent_of[id(item)] = (parent, field)
     clauses = []
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.If, ast.While)):
+        if not isinstance(node, (ast.If, ast.While, ast.Return)):
             continue
         parent, field = parent_of.get(id(node), (None, None))
         kind = ('elif' if field == 'orelse' and isinstance(parent, ast.If)

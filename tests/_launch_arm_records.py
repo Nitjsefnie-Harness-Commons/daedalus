@@ -61,14 +61,23 @@ SECONDARY_CONTROLLED = {
 
 # "Every arm of both analysers" is a GRANULARITY claim, so it is stated
 # with its granularity. The spelling-independent marker is every
-# `if`/`elif`/`while` header plus each disjunct of a multi-line condition
-# (which is the granularity the table already uses for :524 and :549),
-# and a clause inside a listed arm's SPAN is that arm rather than an
-# exception. Ten clauses fall outside every arm, and each is named here
-# with what covers it: MERGED is a chain head whose every member IS a
-# listed arm, CONTROLLED is one that stands alone, with the row holding
-# it. Measured by cutting each -- all ten move a label, nine of them to
-# a VALUE, and only :383 is crash-heavy (130 raise, 3 change).
+# `if`/`elif`/`while`/`return` header plus each disjunct of a multi-line
+# condition (which is the granularity the table already uses for :524 and
+# :549), and a clause inside a listed arm's SPAN is that arm rather than
+# an exception. `return` is in the marker because the table treats it as
+# a member: `pf.fallthrough` is `drop_stmt` on a `return True` and
+# `rw.no-container` on a `return None`, so a fallthrough return is a
+# clause by this table's own practice.
+#
+# Twenty-two clauses fall outside every arm, and each is named here with
+# what covers it: MERGED is a chain head whose every member IS a listed
+# arm (five), CONTROLLED is one that stands alone with a row holding it
+# (ten, all measured to move a label -- six to a value, and :53, :68,
+# :153 and :383 by a raise), and INERT is a clause whose deletion moves
+# no verdict at all (seven), with the reason why. The seven are the four
+# `return None` that close a function, where falling off the end returns
+# the same value, and the three whose only caller reads them for
+# membership or truthiness, where the implicit `None` reads the same.
 #
 # The two finer clauses sit INSIDE a listed arm: :567 is the `**`-unpack
 # operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
@@ -77,6 +86,17 @@ SECONDARY_CONTROLLED = {
 # `tests/test_launch_arms.py` re-derives the marker and refuses a
 # non-member this tuple does not name.
 MARKER_NON_MEMBERS = (
+    ('_launch_audit.py', 53, 'CONTROLLED',
+     'kwarg-receiver-shadowing-a-module-import-is-unproved'),
+    ('_launch_audit.py', 68, 'CONTROLLED',
+     'a-clean-launch-emits-nothing'),
+    ('_launch_audit.py', 95, 'INERT',
+     "normalize's own return of its argument; every caller of it "
+     'membership-tests the result or compares it to a literal, so the '
+     'implicit None a deletion leaves reads the same and no row moves'),
+    ('_launch_audit.py', 104, 'INERT',
+     "callee_of's documented `or None`; it is the function's last "
+     'statement, so deleting it returns the same value and no row moves'),
     ('_launch_audit.py', 211, 'MERGED',
      'the ast.Import chain head; every member is listed, at :213 '
      'imp.subprocess-alias, :218 imp.machinery, :220 imp.dotted and '
@@ -96,15 +116,41 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 392, 'MERGED',
      'the head of a one-member chain; :394 ch.machinery-member is its '
      'only member and is listed'),
+    ('_launch_audit.py', 572, 'INERT',
+     'the False that closes unplaced_bounded_call; its one caller tests '
+     'it for truth, so the implicit None a deletion leaves reads the '
+     'same and no row moves'),
     ('_launch_audit.py', 591, 'CONTROLLED',
      'ambiguous-name'),
+    ('_launch_audit.py', 658, 'CONTROLLED',
+     'aliased-machinery-member-call'),
+    ('_launch_audit.py', 675, 'CONTROLLED',
+     'a-clean-launch-emits-nothing'),
+    ('_argv_read.py', 65, 'INERT',
+     "the None that closes resolve_constant's recursion; it is the "
+     "function's last statement, so deleting it returns the same value "
+     'and no row moves'),
     ('_argv_read.py', 88, 'MERGED',
      'the ast.Name chain head of head_is_ambiguous; every member is '
      'listed, at :90 ha.name-guard, :93 ha.follow, :96 ha.list and '
      ':98 ha.else'),
+    ('_argv_read.py', 99, 'INERT',
+     "the None that closes head_is_ambiguous's cap loop; it is the "
+     'function\'s last statement, so deleting it returns the same value '
+     'and no row moves'),
     ('_argv_read.py', 114, 'MERGED',
      'the ast.Name chain head of resolve_string; every member is '
      'listed, at :115 rs.guard, :117 rs.ambiguous and :119 rs.follow'),
+    ('_argv_read.py', 123, 'INERT',
+     'the False that closes head_is_ambiguous; its one caller tests it '
+     'for truth, so the implicit None a deletion leaves reads the same '
+     'and no row moves'),
+    ('_argv_read.py', 153, 'CONTROLLED',
+     'a-clean-launch-emits-nothing'),
+    ('_argv_read.py', 216, 'INERT',
+     "the None that closes resolve_string's recursion; it is the "
+     "function's last statement, so deleting it returns the same value "
+     'and no row moves'),
 )
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
