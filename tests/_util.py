@@ -22,6 +22,12 @@ import typing
 from pathlib import Path
 
 from _completion import run_to_completion
+# A re-export, not a use: the suites read the log-rendering contract table at
+# the `_util.log_safe_cases()` spelling, while the table is a `log_safe`
+# fixture with nothing to do with running a test. `__all__` would be a false
+# promise here, as it is for `_dashnode.DOM`.
+# pylint: disable-next=unused-import
+from _log_safe_cases import log_safe_cases  # noqa: F401
 from _teardown import settle
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -188,64 +194,6 @@ def load(path, name=None):
 
 _PARENT_WATCH = load(
     ROOT / 'daedalus_bridge' / 'parent_watch.py', 'fixture_parent_watch')
-
-
-def log_safe_cases():
-    """The contract both log-safe implementations in this tree must satisfy.
-
-    The shared log_safe.py module serves the bridge and MCP entry points. The
-    standalone scripts/gen_gitignore.py keeps a behavior-identical copy because
-    the repository root is not on its import path. Their suites run this one
-    table against both implementations, and an MCP-suite meta-test proves a
-    deliberately divergent standalone copy fails it: values that must pass
-    through in full, values that must be backslash-escaped, and values whose
-    rendering must hit the fixed fallback rather than raise or escape to the
-    caller as a non-string.
-    """
-    class BrokenStr(Exception):
-        def __str__(self):
-            raise RuntimeError('broken __str__')
-
-    class EvilStr(str):
-        """str() returns this subclass unchanged, so .encode() dispatches to
-        it."""
-        # The invalid shape is the point: handing self back so the caller's
-        # .encode() runs this subclass's code outside any guard.
-        def __str__(self):  # pylint: disable=invalid-str-returned
-            return self
-
-        def encode(self, *args, **kwargs):
-            raise RuntimeError('evil encode')
-
-    class BadFormat:
-        """What a hostile decode() hands back: interpolating it raises."""
-        def __format__(self, _spec):
-            raise RuntimeError('evil format')
-
-    class HostileChain(str):
-        """str() returns this unchanged; decode() returns a non-string."""
-        def __str__(self):  # pylint: disable=invalid-str-returned
-            return self
-
-        def encode(self, *args, **kwargs):
-            return self
-
-        def decode(self, *args, **kwargs):
-            return BadFormat()
-
-    large = 'x' * 200000
-    return (
-        (b'\xff', repr(b'\xff')),
-        (None, 'None'),
-        (large, large),
-        (10 ** 5000, '<unprintable value>'),  # past the 4300-digit str() limit
-        ('\ud800', '\\ud800'),
-        ('\udc80', '\\udc80'),
-        ('\udcff', '\\udcff'),
-        (BrokenStr('x'), '<unprintable value>'),
-        (EvilStr('x'), '<unprintable value>'),
-        (HostileChain('x'), '<unprintable value>'),
-    )
 
 
 BIND_ERROR_MARKERS = (
@@ -657,6 +605,14 @@ def runner(tests, tmp_prefix='daedalustests_', requires=None):
             except Exception as e:  # noqa: BLE001
                 failed.append(t.__name__)
                 print(f'  ERROR {t.__name__}: {type(e).__name__}: {e}')
+            # Named, and not folded into the arms above: a wider catch would
+            # take a real Ctrl-C and report it as a FAIL, then carry on. Every
+            # code counts, 0 included — a subject that exits 0 is how a run
+            # reads as green having verified nothing.
+            except SystemExit as e:
+                failed.append(t.__name__)
+                print(f'  FAIL  {t.__name__}: SystemExit({e.code!r}) ended '
+                      f'the run from inside a test')
     finally:
         if not settle(td.cleanup):
             print(f'  WARN  temporary tree left behind: {td.name}')

@@ -1272,7 +1272,7 @@
     "live_expression_value": {"python": ["tests/_pyroute_live.py"]},
     "load": {"python": ["tests/_util.py", "tests/_wfjobs.py"], "javascript": ["tests/_dashshell.py"]},
     "load_callable_cells": {"python": ["tests/_pyroute_values.py"]},
-    "log_safe_cases": {"python": ["tests/_util.py"]},
+    "log_safe_cases": {"python": ["tests/_log_safe_cases.py"]},
     "main": {"javascript": ["tests/_bridge_fake_oracle_harness.py", "tests/_gm_harness.py", "tests/_gm_two_origin.py"]},
     "makeContext": {"javascript": ["tests/_boundary_env.py"]},
     "makeDoubleFireStorage": {"javascript": ["tests/_gm_two_origin.py"]},
