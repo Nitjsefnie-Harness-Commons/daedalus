@@ -86,7 +86,7 @@ SECONDARY_CONTROLLED = {
 # The closure claim is a GRANULARITY claim, so it is stated with one. The
 # spelling-independent marker is every `if`/`elif`/`while`/`return` header
 # plus each disjunct of a multi-line condition (the granularity the table
-# already uses for :529 and :554), and a clause inside a listed arm's
+# already uses for :530 and :554), and a clause inside a listed arm's
 # SPAN is that arm. `return` is in it because the table treats one as a
 # member (`pf.fallthrough` is `drop_stmt` on one).
 #
@@ -100,38 +100,38 @@ SECONDARY_CONTROLLED = {
 #
 # The two finer clauses sit INSIDE a listed arm: :572 is the `**`-unpack
 # operand of `ub.not-bounded` (:571) and _argv_read.py:212 the `seen`
-# operand of `rs.guard` (:203). The table splits :529 and :554 per
+# operand of `rs.guard` (:203). The table splits :530 and :554 per
 # operand and leaves these whole, a spelling difference, not a gap.
 # `tests/test_launch_arms.py` re-derives it and refuses a non-member
 # this tuple does not name.
 MARKER_NON_MEMBERS = (
-    ('_launch_audit.py', 54, 'CONTROLLED',
+    ('_launch_audit.py', 52, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 69, 'CONTROLLED',
+    ('_launch_audit.py', 66, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
-    ('_launch_audit.py', 97, 'INERT',
+    ('_launch_audit.py', 94, 'INERT',
      "normalize returning its own argument; callers only test it"),
-    ('_launch_audit.py', 106, 'INERT',
+    ('_launch_audit.py', 103, 'INERT',
      "callee_of's `or None`; deleting its last statement returns "
      'the same value'),
-    ('_launch_audit.py', 213, 'MERGED',
-     'the ast.Import chain head; every member is listed, at :215 '
-     'imp.subprocess-alias, :220 imp.machinery, :222 imp.dotted and '
-     ':226 imp.plain'),
-    ('_launch_audit.py', 227, 'MERGED',
-     'the ast.ImportFrom chain head; every member is listed, at :228 '
-     'imp.from-subprocess, :236 imp.from-partial and :239 '
+    ('_launch_audit.py', 210, 'MERGED',
+     'the ast.Import chain head; every member is listed, at :212 '
+     'imp.subprocess-alias, :217 imp.machinery, :219 imp.dotted and '
+     ':223 imp.plain'),
+    ('_launch_audit.py', 224, 'MERGED',
+     'the ast.ImportFrom chain head; every member is listed, at :225 '
+     'imp.from-subprocess, :233 imp.from-partial and :236 '
      'imp.from-import-module, and its else branch is inside its span'),
-    ('_launch_audit.py', 303, 'CONTROLLED',
+    ('_launch_audit.py', 300, 'CONTROLLED',
      'parameter-shadows-a-module-import-is-unproved'),
-    ('_launch_audit.py', 306, 'CONTROLLED',
+    ('_launch_audit.py', 303, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
-    ('_launch_audit.py', 327, 'CONTROLLED',
+    ('_launch_audit.py', 324, 'CONTROLLED',
      'bound-name-called-bare-is-a-placed-launch'),
-    ('_launch_audit.py', 386, 'CONTROLLED',
+    ('_launch_audit.py', 383, 'CONTROLLED',
      'call-func-receiver-is-unresolved'),
-    ('_launch_audit.py', 395, 'MERGED',
-     'the head of a one-member chain; :397 ch.machinery-member is its '
+    ('_launch_audit.py', 392, 'MERGED',
+     'the head of a one-member chain; :394 ch.machinery-member is its '
      'only member and is listed'),
     ('_launch_audit.py', 577, 'INERT',
      'the False closing unplaced_bounded_call; its one caller '
@@ -144,9 +144,9 @@ MARKER_NON_MEMBERS = (
      'a-clean-launch-emits-nothing'),
     # The chain limb and the root predicate it reads, recorded here
     # rather than in the enumeration for the reason above.
-    ('_launch_audit.py', 510, 'CONTROLLED',
+    ('_launch_audit.py', 511, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
-    ('_launch_audit.py', 512, 'CONTROLLED',
+    ('_launch_audit.py', 513, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
     ('_launch_audit.py', 694, 'CONTROLLED',
      'a-stdlib-dotted-import-member-is-a-proved-fixed-value'),
@@ -169,7 +169,8 @@ MARKER_NON_MEMBERS = (
      'last statement returns the same value'),
     ('_argv_read.py', 114, 'MERGED',
      'the ast.Name chain head of head_is_ambiguous; every member is '
-     'listed, at :115 ha.name-guard, :117 ha.ambiguous and :119 ha.follow'),
+     'listed, at :115 ha.name-guard, :117 ha.ambiguous and '
+     ':119 ha.follow'),
     ('_argv_read.py', 123, 'INERT',
      'the False closing head_is_ambiguous; its one caller only '
      'tests it for truth'),
@@ -186,8 +187,8 @@ MARKER_NON_MEMBERS = (
 # crash-held at one clause and value-held at another. The suite sweeps
 # all ten and re-derives this set.
 NON_MEMBER_CRASH_HELD = frozenset({
-    '_argv_read.py:153', '_launch_audit.py:54', '_launch_audit.py:69',
-    '_launch_audit.py:386',
+    '_argv_read.py:153', '_launch_audit.py:52', '_launch_audit.py:66',
+    '_launch_audit.py:383',
 })
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
@@ -218,11 +219,11 @@ ARM_NOTES = {
 # asked about the RECEIVER of the bounded call, `origin` about the
 # top-level base of the callee of the value that receiver is bound
 # to. So the `placed` bound `pf.in-bound` cites cannot decide it --
-# :411 places a call whose receiver is a name in `bound` and never
+# :408 places a call whose receiver is a name in `bound` and never
 # looks at what that name holds. The only name satisfying both
 # `origin in safe_names` and `origin in bound` here is `subprocess`:
-# the plain import puts it in `safe_names` (:225-226) and rebinding
-# it to a subprocess-derived value (`derives` says yes at :111) puts
+# the plain import puts it in `safe_names` (:222-223) and rebinding
+# it to a subprocess-derived value (`derives` says yes at :108) puts
 # it in `bound`, so this clause is the only thing refusing. Deleting
 # it makes a bounded call through an unproved receiver vanish
 # instead of being reported -- fail-open on the fail-closed arm. The
