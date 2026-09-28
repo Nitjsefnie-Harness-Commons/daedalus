@@ -184,14 +184,21 @@ def test_a_raise_carrying_the_deadline_is_discharged_when_imported(tmp):
     assert _rows(local) == [(5, 'timeout parameter')], _rows(local)
 
 
-def test_the_module_docstring_describes_the_arm_that_is_there(tmp):
-    """H4: the file's own map must match the code under it.
+def test_the_module_docstring_names_the_rule_that_is_there(tmp):
+    """H4, and what this control is NOT.
 
-    The module docstring described an operation test for a wave after the
-    operation test was deleted, so two docstrings in one file described
-    the same function differently and nothing pinned either. This fails
-    if the map names the rule that is not there, or drops the two
-    functions the rule is actually read from.
+    It pins the map's VOCABULARY, not its truth. Reverting the docstring
+    to a text naming a deleted rule reds it; ADDING a false sentence
+    beside a true one leaves it green, and that is the whole of the
+    defect class I-2 was — a replacement written without reading the code
+    beneath it, and a presence pin that cannot see it.
+
+    So the truth is carried behaviourally, and these are the controls that
+    carry it: `test_a_literal_binding_rebound_to_a_child_is_refused` and
+    `test_a_callee_the_walk_cannot_resolve_is_refused` in this module,
+    both of which fail if the rule is not the one the map describes. This
+    one exists to keep a deleted rule's name from surviving in prose, and
+    it is honest about being the weaker of the two.
     """
     del tmp
     text = receiver.__doc__ or ''
