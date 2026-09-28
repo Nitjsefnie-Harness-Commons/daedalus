@@ -15,7 +15,6 @@ controls that close that.
 import ast
 import os
 import shutil
-import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -23,17 +22,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _launcher_stand_ins as stand_ins  # noqa: E402
 import _util  # noqa: E402
+from _outer_bound import (  # noqa: E402
+    OuterBoundExpired, announcing_pid, outer_bound)
 
 TESTS = Path(__file__).resolve().parent
 
-# --- the outer alarm, which is not the subject's own defence ----------------
+# --- the outer bound, which is not the subject's own defence ----------------
 #
 # A control that provokes an expiry sets its budget inside
 # `tests/_noderun.py` — which is precisely the code a reversion removes. So
 # against a launch reverted to an UNBOUNDED one, the control's only defence
 # is the machinery it is testing, and it hangs until something external
-# kills it: a silent stall rather than a named failure. This alarm is armed
-# by the control, on the call, and raises whatever the subject does.
+# kills it: a silent stall rather than a named failure. This bound is held by
+# the control, from `tests/_outer_bound.py`, on the call.
 #
 # It must clear the healthy path with room to spare and still fire well
 # inside any external bound. The healthy budget is
@@ -42,12 +43,9 @@ TESTS = Path(__file__).resolve().parent
 # minute; 57s is roughly five times the healthy budget, and turning a
 # wedge into a named failure costs a minute where the alternative costs
 # whatever the runner's ceiling costs.
-OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
-OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
-OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
-# Cancelling a timer IS a zero-second deadline, and the census requires the
-# figure to be composed from a named chain rather than typed at the call.
-OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
+OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_BOUND_SLOWEST_S = max(OUTER_BOUND_SAMPLES)
+OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 
 # --- the budget a STALLED child is given -----------------------------------
 #
@@ -66,11 +64,6 @@ OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
 # `Popen` to first line for exactly the source the first control runs.
 STALLED_CHILD_START_SAMPLES_S = (0.048, 0.054, 0.080, 0.147, 0.158)
 STALLED_CHILD_START_SLOWEST_S = max(STALLED_CHILD_START_SAMPLES_S)
-
-
-def _raise_outer_deadline(_signum, _frame):
-    """What the outer alarm raises. `TimeoutError` so it is a named expiry."""
-    raise TimeoutError('the outer alarm on this control fired')
 
 
 # --- the expiry message, which is the whole value of the class ------------
@@ -501,44 +494,45 @@ def test_a_real_call_site_reports_its_own_stalled_child(tmp):
 
     The source reaches Node, writes a line and then never settles, so the
     child stalls having produced something — which is precisely the case
-    where its partial output is the only evidence there is.
+    where its partial output is the only evidence there is. It announces its
+    pid as well, because the bound that ends this control reading as a hang
+    needs one to kill: the launcher's own cleanup is what the reversion
+    removes.
     """
     import _noderun  # noqa: E402
     from _jsroute_harness import runtime_and_guard  # noqa: E402
 
     path = Path(tmp) / 'stalled.js'
+    pid_file = Path(tmp) / 'stalled.pid'
     real_deadline = _noderun.CHILD_DEADLINE_S
     _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
     caught = None
-    # The alarm is armed and disarmed HERE rather than in a context
-    # manager, because the census judges a process-level deadline against
-    # the scope that reports it, and a helper would put the two in
-    # different functions. `TimeoutError` is what the handler raises, and
-    # the handler re-raises as an assertion, so the alarm is a reported
-    # failure rather than a swallowed one.
-    signal.signal(signal.SIGALRM, _raise_outer_deadline)
-    signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_S)
+    # The bound wraps the call and reports from its own `__exit__`, so the
+    # wedge becomes a named failure inside this control rather than a stall
+    # the suite ceiling ends. It fires only on a launch reverted to an
+    # unbounded one, and kills the child rather than only reporting it.
     try:
-        try:
-            runtime_and_guard(
-                "process.stdout.write("
-                "'the child spoke before it wedged\\n');\n"
-                'setInterval(() => {}, 1000);\n', path)
-        except _noderun.ChildDeadlineExceeded as failure:
-            caught = failure
-        except BaseException as unexpected:  # noqa: BLE001
-            # A bare `TimeoutExpired` is the failure this entry point
-            # exists to replace, so it is named rather than re-raised.
-            assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-                'a bare TimeoutExpired reached the caller', unexpected)
-            raise
-    except TimeoutError as alarm:
+        with outer_bound(OUTER_BOUND_S, pid_file, 'the stalled call site'):
+            try:
+                runtime_and_guard(
+                    announcing_pid(pid_file) + '\n'
+                    "process.stdout.write("
+                    "'the child spoke before it wedged\\n');\n"
+                    'setInterval(() => {}, 1000);\n', path)
+            except _noderun.ChildDeadlineExceeded as failure:
+                caught = failure
+            except BaseException as unexpected:  # noqa: BLE001
+                # A bare `TimeoutExpired` is the failure this entry point
+                # exists to replace, so it is named rather than re-raised.
+                assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+                    'a bare TimeoutExpired reached the caller', unexpected)
+                raise
+    except OuterBoundExpired as wedged:
         raise AssertionError(
-            'the outer alarm fired: the child wedged and nothing in the '
+            'the outer bound fired: the child wedged and nothing in the '
             'suite ended it, which is what this control exists to prevent'
-        ) from alarm
+        ) from wedged
     finally:
-        signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_CLEAR_S)
         _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the child that never settles finished'
     assert 'the child spoke before it wedged' in caught.stdout, caught.stdout

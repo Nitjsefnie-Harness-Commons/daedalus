@@ -260,24 +260,49 @@ def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
     this reads the shape at its new home, asserts both callers call the one
     helper rather than re-implementing it, and keeps the bounded reap and
     the clean analysis it asserted before the move.
+
+    The kill itself sits in `kill_process_tree`, which takes a pid, because
+    `tests/_outer_bound.py` ends a child it never launched and cannot reap
+    what it did not start; `_kill_tree` is the delegation that keeps the
+    launched path reading as one helper. Both halves are asserted, so the
+    split cannot become a kill nothing routes to or a delegation with no
+    kill behind it.
     """
     del tmp
     relative = 'tests/_processtree.py'
     source = (ROOT / relative).read_text(encoding='utf-8')
     tree = ast.parse(source)
     lines = source.splitlines()
-    stops = drains = None
+    stops = drains = shared = None
     for function in ast.walk(tree):
         if not isinstance(function, ast.FunctionDef):
             continue
         if function.name == '_kill_tree':
             stops = function
+        elif function.name == 'kill_process_tree':
+            shared = function
         elif function.name == '_reap':
             drains = function
-    assert stops is not None and drains is not None
-    assert any('process.kill()' in lines[node.lineno - 1]
-               for node in ast.walk(stops)
-               if isinstance(node, ast.Call)), lines
+    assert stops is not None and drains is not None and shared is not None
+    # The kill is the shared entry, reached by pid so a caller that never
+    # launched the process can still end it, and `_kill_tree` is the thin
+    # delegation that keeps the launched path reading as one helper. Both
+    # halves are pinned: a kill in the shared function with no delegation
+    # would leave every launched child unroutled, and a delegation with no
+    # kill would leave the bound reporting a kill it never performed.
+    assert any(isinstance(node, ast.Call)
+               and isinstance(node.func, ast.Attribute)
+               and node.func.attr == 'killpg'
+               for node in ast.walk(shared)), lines
+    assert any(isinstance(node, ast.Call)
+               and isinstance(node.func, ast.Attribute)
+               and node.func.attr == 'kill'
+               and ast.unparse(node.args[0]) == 'pid'
+               for node in ast.walk(shared)), lines
+    assert [ast.unparse(node) for node in ast.walk(stops)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)] == [
+                'kill_process_tree(process.pid, cleanup_timeout)'], lines
     assert any('process.wait(timeout=cleanup_timeout)'
                in lines[node.lineno - 1]
                for node in ast.walk(drains)
@@ -291,7 +316,7 @@ def test_the_real_cross_scope_shape_is_the_shared_kill_and_reap(tmp):
         assert not any(
             isinstance(node, ast.FunctionDef)
             and node.name in ('_kill_process_tree', '_reap_process',
-                              '_kill_tree', '_reap')
+                              '_kill_tree', '_reap', 'kill_process_tree')
             for node in ast.walk(ast.parse(text))), caller
         assert scan._analyze(caller, text) == []
 

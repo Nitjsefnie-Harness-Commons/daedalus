@@ -30,7 +30,6 @@ from _node_launch_routing import (  # noqa: E402
 from _command_type_readers import _parents  # noqa: E402
 
 
-
 def _launches(tree, exported=None):
     """Every launch in a module, with the shape the exemption table keys on.
 
@@ -105,6 +104,7 @@ def _launches(tree, exported=None):
             })
     return sorted(found, key=lambda row: row['line'])
 
+
 def _own_statements(body):
     """A container's own statements: its body minus every nested definition.
 
@@ -119,6 +119,7 @@ def _own_statements(body):
               if not isinstance(statement, definitions)],
         type_ignores=[])
 
+
 def _planted_module_copy(root, module_name, plant):
     """A real module's own bytes with `plant` appended, written under `root`.
 
@@ -132,6 +133,7 @@ def _planted_module_copy(root, module_name, plant):
     source = (_TESTS_DIR / module_name).read_text(encoding='utf-8')
     root.mkdir(parents=True, exist_ok=True)
     (root / module_name).write_text(f'{source}\n\n{plant}\n', encoding='utf-8')
+
 
 def _module_findings(name, tree, used):
     """The three site classes one module contributes.
@@ -171,6 +173,7 @@ def _module_findings(name, tree, used):
             f'{ast.unparse(shown) if shown is not None else "none"})')
     return unrouted, unbounded, unclassified
 
+
 def _carve_outs(root):
     """`NOT_SITES` members the walk would have reported on.
 
@@ -194,6 +197,7 @@ def _carve_outs(root):
         offenders.extend(f'{name} {site}' for site in unrouted + unbounded)
     return offenders
 
+
 def _population(root=None):
     """The modules one sweep reads, in order — the population, not a sample.
 
@@ -209,6 +213,7 @@ def _population(root=None):
     root = _TESTS_DIR if root is None else root
     return [path for path in sorted(root.glob('*.py'))
             if path.name not in NOT_SITES]
+
 
 def _routing_sweep(root=None, walked=None):
     """The five failure lists the tree produces.
