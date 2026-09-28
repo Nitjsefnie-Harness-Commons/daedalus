@@ -6,8 +6,8 @@ mapping read-back -- and answers from the storage the model recorded rather
 than from the source text alone. A read the model cannot name joins the
 unknown slot instead of naming one value. `pop` is the one write, and it is
 here because `resolve_expression_value` reaches it while resolving the read
-that names the key it removes; `popitem` is the second, for the same reason.
-The store side is `_pyroute_mapping` and `_pyroute_stores`.
+that names the key it removes, and `popitem` for the same reason. The store
+side is `_pyroute_mapping` and `_pyroute_stores`.
 """
 import ast
 
@@ -216,11 +216,13 @@ _MAPPING_READBACKS = ('values', 'items', 'popitem', 'copy')
 def _readback_items(owner, pair):
     """The items one mapping read-back hands back, in the order recorded.
 
-    A read-back names no key, so every recorded value is a candidate and the
-    recorded order is all that separates them. A value the model holds at
-    the unknown-key slot cannot be placed among the rest, so it joins the
-    unpositioned slot and takes the count with it. `pair` wraps each value
-    in the (key, value) pair `items` really yields, and leaves the key half
+    A SNAPSHOT of the recorded items, not a live view of the mapping: a store
+    the model records after the read is not in it (issue 1314). A read-back
+    names no key, so every recorded value is a candidate and the recorded
+    order is all that separates them. A value the model holds at the
+    unknown-key slot cannot be placed among the rest, so it joins the
+    unpositioned slot and takes the count with it. `pair` wraps each value in
+    the (key, value) pair `items` really yields, and leaves the key half
     empty: a key routes nothing, and a callable the model holds as one is a
     missing datum tracked on its own.
     """
@@ -234,29 +236,97 @@ def _readback_items(owner, pair):
     return DeferredContainer(items, dict_length(items), 'list')
 
 
+def _readback_values(node, state, owner):
+    return _readback_items(owner, False)
+
+
+def _readback_items_arm(node, state, owner):
+    return _readback_items(owner, True)
+
+
+def _readback_copy(node, state, owner):
+    """A mapping holding what the receiver holds, under its OWN identity.
+
+    A copy given the original's identity is a second name for the one
+    container, so a store through the copy rewrote the original and the
+    value the model kept at a key it never wrote came back on the next read
+    of the receiver. The items and the length are what a copy holds; only
+    the identity is new.
+    """
+    items = dict(owner.items)
+    return DeferredContainer(
+        items, dict_length(items, owner.length is not None), 'dict', node)
+
+
+def _popitem_entry(owner):
+    """The (key, value) pair one popitem call removes, or None.
+
+    popitem takes the LAST entry, and the model records its mappings in
+    insertion order, so a mapping whose key set it can account for says
+    exactly which pair went. A mapping carrying the unknown-key slot, or one
+    whose count it lost, holds entries whose order against the recorded ones
+    it cannot name, so it returns None and the caller falls back to the whole
+    recorded key set.
+    """
+    if DYNAMIC_KEY in owner.items or owner.length is None:
+        return None
+    for key in reversed(list(owner.items)):
+        return key, owner.items[key]
+    return None
+
+
+def _readback_popitem(node, state, owner):
+    """The pair one popitem call returns, and the mapping it leaves.
+
+    The value half is the last entry, because that is the one the call
+    returns; where the model cannot say which entry that is, it is every
+    value the mapping holds, because the call takes one of them. The removal
+    is applied the way `pop` applies its own -- a mapping the model can
+    account for loses exactly the entry taken, and one it cannot keeps what
+    it recorded and joins the removed entry to the unknown-key slot, the only
+    account of a key set with one entry the model cannot name taken out of
+    it.
+    """
+    if owner.length == 0 and DYNAMIC_KEY not in owner.items:
+        return None            # an empty mapping has no pair to pop
+    taken = _popitem_entry(owner)
+    if taken is None:
+        pair = DeferredContainer(
+            {0: None, 1: merge_yielded(owner.items.values())}, 2, 'tuple',
+            node)
+        items = dict(owner.items)
+        fold_dynamic(items, UNPROVABLE_SENDER)
+        replace_deferred_storage(state, owner, container_copy(
+            owner, items, True))
+        return pair
+    key, value = taken
+    items = dict(owner.items)
+    del items[key]
+    replace_deferred_storage(state, owner, container_copy(owner, items))
+    return DeferredContainer({0: None, 1: value}, 2, 'tuple', node)
+
+
+# One member per read-back, and the membership test IS this table, so a name
+# added without an arm of its own cannot reach the dispatch silently.
+_READBACK_ARMS = {
+    'values': _readback_values,
+    'items': _readback_items_arm,
+    'popitem': _readback_popitem,
+    'copy': _readback_copy,
+}
+_MAPPING_READBACKS = tuple(_READBACK_ARMS)
+
+
 def _mapping_readback(node, state, readback):
     """The value one mapping read-back evaluates to, or None.
 
-    `values` and `items` hand the mapping's own recorded values back, `copy`
-    hands back a mapping holding them, and `popitem` hands back one pair of
-    them -- the pair the model cannot say, so its value half is every value
-    the mapping recorded. A receiver that is not a tracked mapping is not
-    one of these operations, and an empty mapping has no pair to pop. The
-    entry popitem removed is not applied to the storage: the model cannot
-    say which one it was, and marking the key set unaccountable instead
-    measured identical on every read this arm reaches.
+    A receiver that is not a tracked mapping is not one of these operations,
+    so a read-back through one is left to the arms that answer a name.
     """
     owner = _known_value(node.func.value, state)
     if not isinstance(owner, DeferredContainer) or owner.kind != 'dict':
         return None
-    if readback == 'copy':
-        return container_copy(owner, dict(owner.items))
-    if readback != 'popitem':
-        return _readback_items(owner, readback == 'items')
-    if not owner.length and DYNAMIC_KEY not in owner.items:
-        return None
-    return DeferredContainer(
-        {0: None, 1: merge_yielded(owner.items.values())}, 2, 'tuple', node)
+    return _READBACK_ARMS[readback](node, state, owner)
 
 
 def resolve_expression_value(node, state, generator_factory, sender_resolver,
@@ -264,11 +334,9 @@ def resolve_expression_value(node, state, generator_factory, sender_resolver,
     """A pop's and a popitem's removals are applied here, at evaluation, once
     per node per state; every other resolution leaves the state as it found
     it."""
-    # A read-back resolves before the cache is consulted, because the value
-    # the cache holds for a call whose receiver is a call result is the
-    # RECEIVER, and a read-back of that receiver is not what the call
-    # evaluates to. Every other resolution keeps the cache's answer, which
-    # is the whole point of consulting it.
+    # A read-back resolves before the cache, which holds the RECEIVER for a
+    # call whose receiver is a call result, and a read-back of that receiver
+    # is not what the call evaluates to.
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and node.func.attr in _MAPPING_READBACKS:
         readback = _mapping_readback(node, state, node.func.attr)
