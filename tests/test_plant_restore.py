@@ -8,12 +8,10 @@ so. These run the helper against a real repository carrying a real
 uncommitted edit, because a fixture without one cannot tell the two
 restores apart.
 
-A claim is only made here where a control would fail if it stopped being
-true, and each of those controls is mutation-proved. A restore that re-read
-what it wrote and refused a mismatch is NOT one of them: a mismatch needs
-a filesystem that lies, so no run reaches it, and a check on the source's
-spelling is satisfied by `payload = written`. That check is gone rather
-than kept, and the claim it guarded went with it.
+A claim is made here only where a control would fail if it stopped being
+true. A restore that re-read what it wrote and refused a mismatch is NOT
+one: a mismatch needs a filesystem that lies, so no run reaches it, and a
+check on the source's spelling is satisfied by `payload = written`.
 """
 import contextlib
 import io
@@ -69,13 +67,9 @@ def _say(result):
 
 
 def _reported_state(output):
-    """The state word the helper reported, not a word in its paths.
-
-    The suite names each temp directory after its test function, so the
-    path a test about a dirty target prints is full of the word "dirty"
-    whatever the program says. Slicing the state out is what keeps these
-    assertions about what was reported rather than about what was printed.
-    """
+    """The state word the helper reported, not a word in its paths: the
+    suite names each temp dir after its test function, so the path a test
+    about a dirty target prints is full of that word anyway."""
     return output.rsplit(': ', 1)[-1].split(' against')[0].strip()
 
 
@@ -88,15 +82,13 @@ def _only_entry(store):
 def _unreadable_as_bytes(entry):
     """Make a stored copy unreadable as bytes, on every platform.
 
-    A directory where a file is expected refuses the open on every
-    platform - IsADirectoryError on POSIX, PermissionError on Windows -
-    so this needs no privilege drop and no Windows carve-out. The class
-    is the platform's; what the caller can rely on is that it is an
-    OSError. That is a claim about the OPEN, so it holds only where the
-    open is reached: the advice path has no presence guard in front of
-    it, and the restore path does and answers the directory as "nothing
-    is stored" before any read.
+    A directory where a file is expected refuses the open everywhere -
+    IsADirectoryError on POSIX, PermissionError on Windows - so the class
+    is the platform's and only OSError may be relied on. It is a claim
+    about the OPEN, so it holds where the open is reached: the advice
+    path has no presence guard, the restore path does.
     """
+
     payload = entry / 'bytes'
     payload.unlink()
     payload.mkdir()
@@ -109,16 +101,11 @@ def _drop_to_nobody():
 
 
 def _as_nobody(command):
-    """Run `command` unprivileged, so the file mode bits actually bite.
-
-    Root bypasses them, which is why this route was enforced nowhere on
-    a root runner. The child owns what it publishes over, so the caller
-    hands the tree to it first.
-
-    An arrangement that cannot drop privileges - a user namespace, say -
-    skips with the reason rather than erroring: a control that
-    manufactures a red on correct code is the same defect as one that
-    passes on broken code.
+    """Run `command` unprivileged, so the file mode bits bite - root
+    bypasses them, which is why this route was enforced nowhere on a root
+    runner. An arrangement that cannot drop privileges skips with the
+    reason rather than erroring: a control that manufactures a red on
+    correct code is the same defect as one that passes on broken code.
     """
     try:
         return subprocess.run(command, capture_output=True, text=True,
@@ -129,14 +116,16 @@ def _as_nobody(command):
 
 
 def _hand_to_nobody(path):
+    # 0o700: the chown makes the child the OWNER, so owner bits are all
+    # it needs and group and other are nobody.
     os.chown(path, 65534, 65534)
-    os.chmod(path, 0o777)
+    os.chmod(path, 0o700)
 
 
 def _open_the_entry(store, target):
-    """Hand the child every directory and file it walks to publish: a
-    suite's temporary root is created 0700, and without the traverse bit
-    the child reads a refusal where the route should have run."""
+    """Hand the child every path it walks to publish: a suite's temporary
+    root is 0700, and without the traverse bit the child reads a refusal
+    where the route should have run."""
     entry = _only_entry(store)
     for directory in (target.parent, store, entry):
         for ancestor in (directory, *directory.parents):
@@ -150,8 +139,8 @@ def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
         tmp):
     target = _repo(tmp)
     store = Path(tmp) / 'store'
-    # The uncommitted "fix". `_FIXED` differs from the committed
-    # `_COMMITTED`, so the equality below is what proves it survived.
+    # The uncommitted "fix": `_FIXED` differs from the committed byte, so
+    # the equality below proves it survived.
     target.write_bytes(_FIXED)
 
     saved = _plant('save', str(target), '--store', str(store))
@@ -163,8 +152,7 @@ def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
     assert restored.returncode == 0, _say(restored)
     assert target.read_bytes() == _FIXED
     # No assertion on what the restore PRINTED: its own success wording
-    # survives the read-back being deleted, so such an assertion passes
-    # exactly when the program has stopped doing the work.
+    # is what it would report if it had stopped doing the work.
 
     # The entry is gone, proven through the CLI: a second restore refuses.
     again = _plant('restore', str(target), '--store', str(store))
@@ -248,17 +236,15 @@ def test_clear_discards_the_entry_it_names(tmp):
     assert target.read_bytes() == _COMMITTED
 
 
-# Read-only on BOTH platforms: Windows has no execute bit and honours only
-# this flag. `test_the_recorded_mode_is_the_polarity_this_suite_asserts`
-# keeps this and the polarity the restore assertion below uses in step.
+# Read-only on BOTH platforms - Windows has no execute bit and honours
+# only this flag. The polarity below is pinned to it by its own test.
 RECORDED_MODE = 0o400
 
 
 def test_the_recorded_mode_is_the_polarity_this_suite_asserts(tmp):
     del tmp
     # A recorded mode with the write bit would contradict the assertion
-    # below, and a platform that cannot report an execute bit would only
-    # find that out in CI.
+    # below, and only CI would find that out.
     assert not RECORDED_MODE & stat.S_IWRITE, oct(RECORDED_MODE)
 
 
@@ -268,18 +254,11 @@ _PAYLOAD = b'PUBLISHED' * 600000
 def _states_while_restoring(plant, target, store):
     """Every distinct state a reader observes while a restore publishes.
 
-    A reader loop is the only instrument that separates an atomic publish
-    from an in-place one without a platform mechanism, so it runs here on
-    every leg - including the Windows leg, where the file-size-limit route
-    skips.
-
-    What is sampled is the file's SIZE, one stat per turn. A publish is a
-    single `write`, so an in-place one is observable as a length between
-    the two states and a half-written one cannot reach the full length
-    before it holds the full bytes; the size is therefore a faithful
-    witness, and a stat is fast enough to sample the write densely. The
-    positive control below is what proves the sampling catches that
-    window - a loop's own length proves nothing about itself.
+    What is sampled is the file's SIZE, one stat per turn: an in-place
+    write is observable as a length between the two states, and a
+    half-written file cannot reach the full length before it holds those
+    bytes. Whether the sampler COULD see a third state is settled by the
+    hard-link control, not by this loop's length.
     """
     proc = subprocess.Popen(
         [sys.executable, str(plant), 'restore', str(target),
@@ -295,15 +274,18 @@ def _states_while_restoring(plant, target, store):
     return seen
 
 
-def _helper_that_publishes_in_place(tmp):
-    """A copy of the real helper whose _publish truncates the target, so
-    the non-vacuity proof below runs on every leg rather than being a
-    claim in a report."""
+def _helper_that_grows_the_target_in_place(tmp):
+    """A copy of the real helper whose _publish writes the target in
+    place, chunked and flushed - the honest shape, since a real in-place
+    write grows the file as the page cache drains."""
     source = PLANT.read_text(encoding='utf-8')
     old = '        os.replace(temp, target)'
-    new = ("        with open(temp, 'rb') as staged:\n"
-           "            with open(target, 'wb') as handle:\n"
-           '                handle.write(staged.read())')
+    new = ("        with open(target, 'wb') as handle:\n"
+           "            for start in range(0, len(payload), 1 << 14):\n"
+           "                handle.write(payload[start:start + (1 << 14)])\n"
+           "                handle.flush()\n"
+           "        del temp\n"
+           "        return")
     assert source.count(old) == 1, 'the publish anchor moved'
     broken = Path(tmp) / 'plant_in_place.py'
     broken.write_text(source.replace(old, new), encoding='utf-8')
@@ -311,8 +293,7 @@ def _helper_that_publishes_in_place(tmp):
 
 
 def _a_directory_on_another_device(store):
-    """A writable directory on another device from the store's - os.replace
-    is atomic only within one filesystem."""
+    """A directory on another device: os.replace is per-filesystem."""
     wanted = os.stat(store).st_dev
     for candidate in ('/dev/shm', tempfile.gettempdir()):
         try:
@@ -321,7 +302,9 @@ def _a_directory_on_another_device(store):
                 continue
             made = probe / f'plantrestore-otherdev-{os.getpid()}'
             made.mkdir(exist_ok=True)
-            os.chmod(made, 0o777)
+            # 0o700: the helper runs as the user that made the directory,
+            # so the owner bits are all it needs.
+            os.chmod(made, 0o700)
             return made
         except OSError:
             continue
@@ -397,15 +380,43 @@ def test_a_reader_never_sees_a_third_state_while_a_restore_publishes(tmp):
     assert seen <= {len(_PAYLOAD), len(_PLANTED)}, sorted(seen)
 
 
-def test_the_sampler_catches_a_publish_that_is_not_atomic(tmp):
-    target, store = _planted_publish_fixture(tmp)
-    seen = _states_while_restoring(_helper_that_publishes_in_place(tmp),
-                                   target, store)
-    partial = seen - {len(_PAYLOAD), len(_PLANTED)}
-    assert partial, (
-        'the sampler never saw the target mid-write, so it cannot tell an'
-        ' atomic publish from an in-place one and the row above proves'
-        ' nothing: ' + repr(sorted(seen)))
+def _link_sees_after_restore(plant, tmp):
+    """Restore a target, and report what a hard link to it saw afterwards.
+
+    A second name for one inode is a reader guaranteed to be there:
+    `os.replace` installs a NEW inode and leaves every other name on the
+    untouched old one, while a write in place mutates the inode they
+    share. That separates the forms by mechanism, not by racing.
+    """
+    repo = Path(tmp) / 'repo'
+    repo.mkdir(parents=True)
+    target = repo / 'target.py'
+    target.write_bytes(_COMMITTED)
+    link = repo / 'link.py'
+    os.link(target, link)
+    store = Path(tmp) / 'store'
+    assert _plant('save', str(target), '--store', str(store)).returncode == 0
+    target.write_bytes(_PLANTED)
+    out = subprocess.run(
+        [sys.executable, str(plant), 'restore', str(target),
+         '--store', str(store)], capture_output=True, text=True,
+        env=_util.child_coverage('scrub'), timeout=120)
+    assert out.returncode == 0, out.stdout + out.stderr
+    return link.read_bytes()
+
+
+def test_the_publish_swaps_the_inode_rather_than_writing_through_it(tmp):
+    # The link still holds the planted bytes: the restore published a new
+    # inode, so a reader holding the old one cannot see a partial file.
+    assert _link_sees_after_restore(PLANT, tmp) == _PLANTED
+
+
+def test_the_control_catches_a_publish_that_is_not_atomic(tmp):
+    # The same check against a helper that grows the target in place: the
+    # link now holds the RESTORED bytes, written through the shared
+    # inode. No window to win, so nothing passes this vacuously.
+    broken = _helper_that_grows_the_target_in_place(tmp)
+    assert _link_sees_after_restore(broken, tmp) == _COMMITTED
 
 
 def test_restore_returns_the_mode_it_recorded(tmp):
@@ -432,14 +443,12 @@ def test_restore_returns_a_target_that_was_saved_read_only(tmp):
     target.chmod(0o444)
     saved = _plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
-    # Truncate-then-write cannot open this; os.replace can.
     if hasattr(os, 'geteuid') and os.geteuid() == 0:
         try:
             _open_the_entry(store, target)
             _hand_to_nobody(target)
         except OSError as why:
-            _util.skip(f'the tree cannot be handed to an unprivileged '
-                       f'user: {why!r}')
+            _util.skip(f'cannot hand the tree to a plain user: {why!r}')
         target.chmod(0o444)
         restored = _as_nobody(
             [sys.executable, str(PLANT), 'restore', str(target),
@@ -448,8 +457,7 @@ def test_restore_returns_a_target_that_was_saved_read_only(tmp):
         restored = _plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     assert target.read_bytes() == _COMMITTED
-    # Windows refuses to delete a read-only file, and so does the runner's
-    # cleanup, so give the tree its permissions back before this returns.
+    # Windows refuses to delete a read-only file, and so does cleanup.
     target.chmod(0o600)
 
 
@@ -482,8 +490,7 @@ def test_restore_refuses_a_store_whose_mode_record_is_gone(tmp):
     (entry / 'mode').unlink()
     out = _plant('restore', str(target), '--store', str(store))
     assert out.returncode != 0, _say(out)
-    # A designed refusal names the path; an unhandled crash would not, and
-    # a crash is not a refusal on this branch.
+    # A designed refusal names the path; an unhandled crash does not.
     assert str(target) in _say(out), _say(out)
     assert target.read_bytes() == _FIXED, 'a refused restore wrote anyway'
     assert (entry / 'bytes').is_file(), 'a refused restore dropped the copy'
@@ -516,10 +523,9 @@ def test_the_two_spellings_of_a_path_do_not_share_an_entry(tmp):
     store = Path(tmp) / 'store'
     assert _plant('save', str(repo / 'link.py'), '--store',
                   str(store)).returncode == 0
-    # The key is the path as spelled, so the other spelling holds no entry
-    # and refuses. Keying it on the resolved path instead would make this
-    # restore the link's plant over the real file, which is the loss this
-    # helper exists to prevent.
+    # The key is the path as spelled, so the other spelling holds no
+    # entry. Keying on the resolved path would publish the link's plant
+    # over the real file.
     refused = _plant('restore', str(real), '--store', str(store))
     assert refused.returncode != 0, _say(refused)
     assert str(real) in _say(refused), _say(refused)
@@ -534,7 +540,7 @@ def test_clear_leaves_another_pending_plant_alone(tmp):
         assert _plant('save', str(target), '--store',
                       str(store)).returncode == 0
     assert _plant('clear', str(one), '--store', str(store)).returncode == 0
-    # One entry left, not zero: clearing one plant must not take another's.
+    # One left, not zero: clearing one plant takes no other's.
     assert len([i for i in Path(store).iterdir() if i.is_dir()]) == 1
     for target in (one, two):
         target.write_bytes(_PLANTED)
@@ -565,7 +571,7 @@ def test_a_write_that_dies_partway_leaves_the_target_untouched(tmp):
     assert saved.returncode == 0, _say(saved)
     target.write_bytes(_PLANTED)
     # One 512-byte block per file, so the payload cannot be written
-    # whole. However the child dies, the target keeps the planted bytes.
+    # whole; however the child dies, the target keeps its planted bytes.
     subprocess.run(
         ['sh', '-c', f'ulimit -f 1; exec "{sys.executable}" "{PLANT}" '
                      f'restore "{target}" --store "{store}"'],
@@ -613,9 +619,7 @@ def _flatten(text):
 
 
 def _plant_paragraph(text):
-    """The three mutation paragraphs, each isolated by a unique anchor, so a
-    phrase a neighbouring ratchet paragraph shares cannot satisfy one of the
-    decisions below."""
+    """The three mutation paragraphs, each isolated by a unique anchor."""
     blocks = _flatten(text).split('\n\n')
     found = []
     for anchor in _PARAGRAPH_ANCHORS:
