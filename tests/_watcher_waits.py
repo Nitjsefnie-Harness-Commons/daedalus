@@ -54,7 +54,7 @@ SEQUENCE = 12
 # collapse HIDES as well as what it shows, and what it hides here is a
 # poll that republished the value already current: every one of them is
 # one more run of the same value, and a run is what the collapse merges.
-# Rows 2 and 3 are the two shapes that leaves ambiguous, and each says so
+# Rows 2 and 3 are the two shapes it leaves ambiguous, and each says so
 # in its own clause.
 #
 # Row 0 is first because a boundary can be `None` - the marker field is
@@ -186,6 +186,18 @@ def _cancel(proc):
     measurement is still reading, after the child it belonged to is gone.
     The tree has to go, on both platforms, and `tests/_processtree.py` is
     where that lives.
+
+    **This is deduplication, not a repair.** `ChildProcess` launches with
+    `start_new_session=True`, so the child is its own session and group
+    leader from `Popen` returning, and the local spelling that passed
+    `proc.pid` AS the group id resolved to the same group the owner's
+    lookup does - always, and not because of luck. The two spellings
+    already agreed; the guard in `tests/test_noderun_deadline.py` is what
+    disagreed with them, because a second copy of a kill is a second
+    mechanism wearing the same name. What rests on that equivalence, and
+    is worth saying where the code relies on it: `start_new_session=True`
+    AND the child being unreaped. The second half is load-bearing - a
+    reaped pid can be recycled, and a recycled pid is not its own group.
 
     The `proc.kill()` below is a fallback the owner does not provide: the
     owner returns a description when a group is already gone and does not

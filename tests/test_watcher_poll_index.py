@@ -16,8 +16,10 @@ which is a different question with a different failure. The split is also
 what the size policy asks of a suite at its ceiling.
 
 A control that could be satisfied by a narrower subject than the one it
-names would prove nothing about the watcher, and the controls that drive
-a planted watcher read back what it actually published.
+names would prove nothing about the watcher, and every control but one
+that drives a planted watcher reads back what that watcher published -
+`test_a_poll_one_wider_than_the_tolerated_width_is_reported` asserts on
+the refusal and never touches the log.
 """
 import sys
 from pathlib import Path
