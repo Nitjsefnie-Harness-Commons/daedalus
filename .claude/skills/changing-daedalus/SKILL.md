@@ -205,14 +205,24 @@ coverage policy on the same terms.** It records how many uncovered
 executable lines each tracked JavaScript file still carries, counted from
 the same V8 dumps and the same physical code-line detection
 `python3 scripts/ci/js_coverage.py` reports the tree-wide total from; a
-number is never raised by hand and no entry is ever added by hand. The
-remedy for a refusal is to cover the uncovered lines in the named file -
-a total that clears its floor says nothing about the one module that
-rotted while its neighbours improved - and the fall is recorded with
+recorded number is never raised by hand. The remedy for a refusal is to
+cover the uncovered lines in the named file - a total that clears its
+floor says nothing about the one module that rotted while its neighbours
+improved - and the fall is recorded with
 `python3 scripts/ci/js_module_coverage.py --tighten "$NODE_V8_COVERAGE"`,
 which also drops an entry whose file is fully covered. An entry naming a
-file that is gone is removed by hand. `tests/test_js_module_coverage.py`
-gates the policy and reads this paragraph the same way.
+file that is gone is removed by hand.
+
+**`js_coverage_baseline` admits exactly one hand edit: a new module.** The
+`--tighten` command iterates what the record already names, so it can
+lower a number and drop an entry but never add one; a module the record
+does not name is admitted the way the seed itself was - at its measured
+uncovered count, in the same reviewed diff that introduces the module,
+after which the ordinary ratchet applies to it like any other. The
+alternative is to cover its lines, and then it needs no entry at all. Do
+not leave a new module unrecorded expecting the next tightening run to
+pick it up; it will not. `tests/test_js_module_coverage.py` gates the
+policy and reads both paragraphs the same way.
 
 ## Git and CI
 
