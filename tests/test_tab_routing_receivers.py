@@ -175,9 +175,14 @@ _READBACKS = [
      + '\nreturn [f() for f in v]'),
     ('values-alias-receiver', _D + 'e = d\n' + _SEND
      + '\nreturn [f() for f in e.values()]'),
-    ('values-class-attribute', 'class K: pass\nK.d = {"k": relay()}\n'
+    # Both receiver rows name the SPELLING, not the operation: a store
+    # evaluated at module level. A store in a class body or in `__init__` is
+    # dropped by the store side, which keeps only a class's callables and
+    # discards a container, so `get()` through the same receiver fails the
+    # same way and no read arm can close it.
+    ('values-module-level-class-store', 'class K: pass\nK.d = {"k": relay()}\n'
      + _SEND + '\nreturn [f() for f in K.d.values()]'),
-    ('values-instance-attribute',
+    ('values-module-level-instance-store',
      'class K: pass\nk = K()\nk.d = {"k": relay()}\n'
      + _SEND + '\nreturn [f() for f in k.d.values()]'),
     ('values-subscript-receiver', 'box = {"d": {"k": relay()}}\n' + _SEND
@@ -194,6 +199,14 @@ _READBACKS = [
      + '\nreturn [f() for f in dict(d.items()).values()]'),
     ('popitem-subscript', _D + _SEND + '\nreturn d.popitem()[1]()'),
     ('popitem-unpack', _D + 'k, v = d.popitem()\n' + _SEND + '\nreturn v()'),
+    # A pop on a key the model cannot name leaves the mapping with a count it
+    # has lost, and the read-back still has to hand back the value it holds:
+    # an unknown count is not an empty mapping.
+    ('popitem-after-an-unresolvable-pop',
+     _D + 'd.pop("".join(["zz"]), None)\n' + _SEND
+     + '\nreturn d.popitem()[1]()'),
+    ('popitem-after-an-unresolvable-pop-values',
+     _D + 'd.pop("".join(["zz"]), None)\n' + _SEND + _TAIL),
     ('copy-subscript', _D + _SEND + '\nreturn d.copy()["k"]()'),
     ('copy-then-values', _D + _SEND
      + '\nreturn [f() for f in d.copy().values()]'),
@@ -231,16 +244,36 @@ _READBACK_CLEAN = [
     # values() read-back hands back the value half, and that half is clean.
     ('clean-callable-key',
      'd = {relay(): ordinary}\n' + _SEND + _TAIL, (0, 0)),
-    # A popitem between a clean store and a later read: the arm resolves the
-    # pair it returns, and marking the entry it removed unaccountable would
-    # make these three read as a violation nothing reaches.
+    # A popitem takes the LAST entry, and the model records its mappings in
+    # insertion order, so a read after one reads the entries that are left.
+    # Each of these fails if the read-back merges every value instead of
+    # following the order, or if the removal is not applied at all.
     ('clean-after-popitem', 'd = {"k": ordinary, "j": ordinary}\n'
      'd.popitem()\n' + _SEND + '\nreturn d.get("k", ordinary)()', (0, 0)),
     ('clean-after-popitem-values',
      'd = {"k": ordinary, "j": ordinary}\nd.popitem()\n' + _SEND + _TAIL,
      (0, 0)),
+    ('clean-popitem-takes-the-removed-entry',
+     'd = {"k": ordinary, "j": relay()}\nd.popitem()\n' + _SEND + _TAIL,
+     (0, 0)),
+    ('clean-popitem-pairs-the-removed-entry',
+     'd = {"k": ordinary, "j": relay()}\nd.popitem()\n' + _SEND
+     + '\nreturn d.get("k", ordinary)()', (0, 0)),
     ('clean-one-entry-popitem',
      'd = {"k": ordinary}\nd.popitem()\n' + _SEND + _TAIL, (0, 0)),
+    ('clean-popitem-unknown-count', 'd = {"k": ordinary}\n'
+     'd.pop("".join(["zz"]), None)\nd.popitem()\n' + _SEND + _TAIL, (0, 0)),
+    # A read-back consumed by something that does not CALL it: the value is
+    # read and the runtime routes nothing, so the arm must not report.
+    ('clean-read-back-not-called', _D.replace('relay()', 'quiet()') + _SEND
+     + '\nreturn len(list(d.values()))', (0, 0)),
+    # A store through a copy: the copy is a second mapping, so the callable
+    # it is given never comes back on a read of the original. A copy holding
+    # the ORIGINAL's identity is one container under two names, and this row
+    # reports the difference -- the runtime makes no call either way.
+    ('clean-store-through-a-copy',
+     'd = {"k": ordinary}\nc = d.copy()\nc["j"] = relay()\n'
+     + _SEND + _TAIL, (0, 0)),
     ('clean-set-control', 's = {relay()}\n' + _SEND
      + '\nreturn [f() for f in s]', (1, 1)),
 ]
