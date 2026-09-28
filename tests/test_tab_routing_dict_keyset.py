@@ -548,9 +548,12 @@ def test_a_fold_of_a_retired_source_reports_every_read_form(tmp):
     destination and the guard has to report it -- twelve cells, four fold
     spellings by three read forms, `(1, 1)` routed and `(0, 1)` clean.
 
-    With the propagation removed from the real code these read `(1, 0)`, so
-    this is the control that has an opinion; the store-side test above is
-    the one that says where the fact is dropped.
+    With the propagation removed from the real code, ten of the twelve
+    read `(1, 0)`, so this is the control that has an opinion. The two
+    that hold are the subscript of `dict(d)` and of `{**d}`: their verdict
+    does not rest on the retirement in the destination's body, and which
+    mechanism carries it is not established here. The store-side test
+    above is the one that says where the fact is dropped.
     """
     for fold in _DESTINATION_FOLDS:
         body = f'{_RETIRED_SOURCE}{fold}'
