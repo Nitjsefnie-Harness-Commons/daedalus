@@ -501,33 +501,62 @@ def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
         refresh.commit_message(runs) + '\n', encoding='utf-8', newline='\n')
     home = Path(tmp) / 'home'
     home.mkdir()
+    environment = {**commit_environment(home), 'RATCHET_SSH_KEY': 'not-a-key',
+                   'GITHUB_STEP_SUMMARY': str(Path(tmp) / 'summary.md'),
+                   'REPO': 'example/example'}
+    seeded = git_output(repository, 'log', '-1', '--pretty=%s')
     done = run_workflow_script(
-        repository, '\n'.join(through),
-        {**commit_environment(home), 'RATCHET_SSH_KEY': 'not-a-key',
-         'GITHUB_STEP_SUMMARY': str(Path(tmp) / 'summary.md'),
-         'REPO': 'example/example'})
-    # `bash -e`, so a command the resolved bash cannot find stops the
-    # step where it stands and the subject below is the seed's -- which
-    # is what this assertion then reports, with no hint as to why. The
-    # step's exit status and stderr are the answer, and on a failure the
-    # census says which of the step's own commands this machine lacks.
-    if done.returncode:
-        census = run_workflow_script(
-            repository,
-            'for tool in git install chmod; do\n'
-            '  command -v "$tool" > /dev/null || echo "MISSING $tool"\n'
-            'done',
-            commit_environment(home))
-        raise AssertionError(
-            f'the commit step exited {done.returncode} without committing: '
-            f'{done.stderr.strip() or done.stdout.strip()}; tools this bash '
-            f'cannot find: {census.stdout.strip() or "none"}')
+        repository, '\n'.join(through), environment)
     subject = git_output(repository, 'log', '-1', '--pretty=%s')
+    if done.returncode or subject == seeded:
+        raise AssertionError(_no_commit(
+            repository, through, environment, done, subject))
     named = set(re.findall(r'\d+', subject))
     assert named == {str(run) for run in runs}, subject
     assert 'ci: refresh suite timings from run' in subject, subject
     assert json.loads(data_file.read_text(encoding='utf-8'))[
         'measured_from'] == ','.join(str(run) for run in runs)
+
+
+def _no_commit(repository, commands, environment, done, subject):
+    """Why a `run:` block that should have committed did not.
+
+    THE STEP'S EXIT STATUS IS NOT THE ANSWER, and the shape that first
+    refused only on a nonzero status proved it. A block that reaches
+    `git diff --quiet`, finds the file unchanged and exits 0 has the
+    SAME status as a block that committed, so the assertion after it
+    read the SEED's subject and reported it as the step's -- one line
+    reading `base`, on every Windows leg, with no exit status, no step
+    output and no hint which of the two shapes had happened. That is
+    the report a five-leg red gave the reader, so both shapes are
+    refused here, and the refusal carries what tells them apart:
+
+    - the step's own stdout and stderr;
+    - a `set -x` RE-RUN of the same commands, whose trace names the last
+      command line the shell reached. That is the answer whatever the
+      cause turns out to be -- a tool the resolved bash cannot find, a
+      `~` expanding somewhere the step did not mean, a checkout whose
+      diff reads empty -- so nothing here has to guess at one;
+    - which bash that is, what `~` is under the environment the step was
+      actually given, and which of the step's own tools it cannot find.
+    """
+    traced = run_workflow_script(
+        repository, 'set -x\n' + '\n'.join(commands), environment)
+    probe = run_workflow_script(
+        repository,
+        'printf "bash=%s\\n" "$(command -v bash)"\n'
+        'printf "HOME=%s tilde=%s\\n" "$HOME" "$(cd ~ && pwd)"\n'
+        'for tool in git install chmod mkdir; do\n'
+        '  command -v "$tool" > /dev/null || echo "MISSING $tool"\n'
+        'done',
+        environment)
+    trace = traced.stderr.strip().splitlines()
+    said = done.stderr.strip() or done.stdout.strip() or 'no output'
+    return (
+        f'the commit step exited {done.returncode} and left the subject at '
+        f'the seed\'s {subject!r}: {said}; the traced re-run stopped at '
+        f'{trace[-1] if trace else "nothing it traced"}; '
+        f'{probe.stdout.strip() or "the probe said nothing"}')
 
 
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
