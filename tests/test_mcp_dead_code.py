@@ -13,12 +13,14 @@ loop, a `match` and a bare `if` all look like barriers to a reader that has
 not asked what the runtime does past them, and each of them here is a
 module the runtime really imports, so a rule that over-reaches loses it.
 """
+import ast
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mcp_dead_code  # noqa: E402
 import _mcp_import_closure  # noqa: E402
 import _util  # noqa: E402
 
@@ -251,6 +253,40 @@ def load(raised=False):
 """)
 
 
+def _a_partly_leaving_if_keeps_the_call(_tmp, source, runs):
+    """An `if` leaves the block only when BOTH branches leave, and the runtime
+    is asked once per condition — the module is loaded on the run that falls
+    through, which is the one a walk that lost a branch cannot fake."""
+    _write_tree(Path(_tmp), _pkg(source=source, leaf=''))
+    _scan_is(_tmp, {'composition.py', 'pkg/__init__.py', 'pkg/leaf.py'})
+    for entry, arguments, expected in runs:
+        outcome = _runtime(_tmp, entry, arguments)
+        assert outcome == expected, (arguments, outcome)
+
+
+def test_an_if_with_only_one_branch_leaving_does_not_end_the_block(_tmp):
+    """The `orelse` limb alone, and the only input that limb decides.
+
+    One branch leaving is not the `if` leaving: the run that takes the other
+    branch falls through to the call and the runtime loads the module. A rule
+    that read the `body` and stopped there calls this a barrier and loses the
+    module on both runs, and every suite stays green over that — the whole
+    reason this row asks the runtime rather than the walk.
+    """
+    _a_partly_leaving_if_keeps_the_call(_tmp, """
+import importlib
+
+
+def load(cond='raise'):
+    if cond == 'raise':
+        raise ValueError('taken')
+    else:
+        pass
+    return importlib.import_module('pkg.leaf')
+""", [('load', 'raise', {'raised': 'ValueError', 'loaded': []}),
+      ('load', 'pass', {'raised': None, 'loaded': ['pkg.leaf']})])
+
+
 def test_a_raising_loop_body_does_not_end_the_block(_tmp):
     """The body raising says nothing about the loop, which may run zero
     times and fall through either way."""
@@ -297,6 +333,37 @@ def load():
 """, leaf=''))
     _scan_is(_tmp, {'composition.py', 'pkg/__init__.py', 'pkg/leaf.py'})
     assert _runtime(_tmp) == {'raised': 'ValueError', 'loaded': []}
+
+
+def test_every_statement_the_standard_library_declares_is_answered(_tmp):
+    """The whole domain, derived rather than listed.
+
+    `_leaves` answers True for the barriers and for an `if` whose two
+    branches leave, and False for every other statement there is — the
+    containers that may or may not run among them, which is why the walk
+    carries those as prose beside the fall-through and checks none of them.
+    Reading the domain off `ast.stmt` is what makes that a claim about all
+    of it: a kind a future release declares is inside this row the moment it
+    exists, with no edit here to bring it in, and a kind this walk starts
+    treating as a barrier has to be a barrier somewhere public.
+    """
+    kinds, pending = {}, [ast.stmt]
+    while pending:
+        for child in pending.pop().__subclasses__():
+            if child not in kinds:
+                kinds[child.__name__] = child
+                pending.append(child)
+    assert len(kinds) >= 20, f'the domain enumerated as {sorted(kinds)}'
+    barriers = {kind.__name__ for kind in _mcp_dead_code._BARRIERS}
+    for name, kind in sorted(kinds.items()):
+        if name == 'If':
+            statement = ast.If.__new__(ast.If)
+            statement.body = [ast.Raise.__new__(ast.Raise)]
+            statement.orelse = [ast.Raise.__new__(ast.Raise)]
+        else:
+            statement = kind.__new__(kind)
+        assert _mcp_dead_code._leaves(statement, set()) is (
+            name in barriers or name == 'If'), name
 
 
 def _a_nested_body_tail_is_out_of_the_scan_set(_tmp, source, runs):
