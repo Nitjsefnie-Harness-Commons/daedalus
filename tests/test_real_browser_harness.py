@@ -89,9 +89,9 @@ def test_repository_worker_probe_exception_counts_as_reached(tmp):
     def evaluate(_node, target, method, params):
         assert (_node, target, method) == (
             node, 'ws://worker', 'Runtime.evaluate')
-        check = subprocess.run(
-            [node, '--check'], input=params['expression'],
-            capture_output=True, text=True, timeout=10)
+        check = _bounded(
+            node, ['--check'], WORKER_CHECK_DEADLINE_S,
+            source=params['expression'])
         checks.append(check)
         if check.returncode:
             return {'exceptionDetails': {'text': 'probe did not parse'}}
@@ -215,9 +215,9 @@ global.setTimeout = (callback, delay) => {
 };
 global.clearTimeout = () => {};
 """ + _evalpages.CDP_CALL_HARNESS
-    result = subprocess.run(
-        [node, '-e', probe, 'ws://controlled', 'Page.navigate', '{}', '4321'],
-        capture_output=True, text=True, timeout=10)
+    result = _bounded(
+        node, ['-e', probe, 'ws://controlled', 'Page.navigate', '{}', '4321'],
+        CDP_HARNESS_DEADLINE_S)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     assert result.stdout == '4321', result.stdout
@@ -645,6 +645,50 @@ def test_post_configuration_navigation_timeout_stays_failure(tmp):
     assert skipped is None, skipped
     assert failure.__class__ is timeout_type, failure.__class__
     assert str(failure) == 'post-configuration CDP timeout', failure
+
+
+# Hang detectors, not health margins; the shape and the shared argument are in
+# `tests/_node_launch_routing.py`, and these samples are measured with the
+# machine BUSY. `node -e` runs a fake harness whose `setTimeout` PRINTS the
+# delay and returns 1 without arming anything, so the one timer the fake
+# could arm is the one it disarms. The `--check` site has no runtime stall
+# control. `_bounded` names `source` rather than `**`-forwarding it, because a
+# spread is how `_coverage_guard.py` reads `cwd` as arriving. This sits at the
+# foot of the file because `BOUNDED_GIT_LAUNCHES` is keyed on (path, line,
+# function), and this task may not edit that table.
+from _node_launch_routing import (  # noqa: E402
+    SITE_HANG_MULTIPLE, NodeBoundExceeded, node_bound_expiry)
+WORKER_CHECK_SAMPLES_S = (0.143, 0.249, 0.178, 0.110,
+                          0.162, 3.596, 3.517, 0.586)
+WORKER_CHECK_SLOWEST_S = max(WORKER_CHECK_SAMPLES_S)
+WORKER_CHECK_DEADLINE_S = round(WORKER_CHECK_SLOWEST_S * SITE_HANG_MULTIPLE)
+CDP_HARNESS_SAMPLES_S = (0.245, 0.122, 0.225, 0.162,
+                         1.021, 1.909, 0.319, 0.834)
+CDP_HARNESS_SLOWEST_S = max(CDP_HARNESS_SAMPLES_S)
+CDP_HARNESS_DEADLINE_S = round(CDP_HARNESS_SLOWEST_S * SITE_HANG_MULTIPLE)
+
+
+def _bounded(node, argv, deadline_s, source=None):
+    """A `node` child under a bound this module composed, classified."""
+    try:
+        return subprocess.run([node, *argv], capture_output=True,
+                              text=True, input=source, timeout=deadline_s)
+    except subprocess.TimeoutExpired as why:
+        raise node_bound_expiry(why, deadline_s) from why
+
+
+def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
+    stalling = "process.stdout.write('cdp spoke\\n');setInterval(()=>{},1000);"
+    caught = None
+    try:
+        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling):
+            test_cdp_harness_uses_passed_deadline(tmp)
+    except NodeBoundExceeded as failure:
+        caught = failure
+    assert caught is not None, 'the wedged CDP harness finished'
+    assert caught.deadline_s == CDP_HARNESS_DEADLINE_S, caught.deadline_s
+    assert 'cdp spoke' in caught.stdout, caught.stdout
+    assert isinstance(caught.stdout, str), type(caught.stdout)
 
 
 def main():

@@ -339,17 +339,52 @@ def test_the_control_extension_satisfies_its_own_probe(tmp):
     control = _realbrowser._control_extension(tmp)
     source = (control / _realbrowser.CONTROL_WORKER_SCRIPT).read_text(
         encoding='utf-8')
-    checked = subprocess.run(
-        [node, '--check'], input=source, capture_output=True, text=True,
-        timeout=10)
+    try:
+        checked = subprocess.run(
+            [node, '--check'], input=source, capture_output=True, text=True,
+            timeout=CONTROL_CHILD_DEADLINE_S)
+        answer = subprocess.run(
+            [node, '-e',
+             source + '\nprocess.stdout.write(String('
+                      + _realbrowser.CONTROL_WORKER_PROBE + '))'],
+            capture_output=True, text=True, timeout=CONTROL_CHILD_DEADLINE_S)
+    except subprocess.TimeoutExpired as why:
+        raise node_bound_expiry(why, CONTROL_CHILD_DEADLINE_S) from why
     assert checked.returncode == 0, (checked.returncode, checked.stderr)
-    answer = subprocess.run(
-        [node, '-e',
-         source + '\nprocess.stdout.write(String('
-                  + _realbrowser.CONTROL_WORKER_PROBE + '))'],
-        capture_output=True, text=True, timeout=10)
     assert answer.returncode == 0, (answer.returncode, answer.stderr)
     assert answer.stdout == 'true', (answer.stdout, answer.stderr)
+
+
+# Hang detectors, not health margins; the shape and the shared argument are
+# in `tests/_node_launch_routing.py`, and these samples are measured with the
+# machine BUSY. `--check` parses the worker's source and `-e` runs it, so one
+# deadline covers both. At the foot: `BOUNDED_GIT_LAUNCHES` is line-keyed.
+from _node_launch_routing import (  # noqa: E402
+    SITE_HANG_MULTIPLE, NodeBoundExceeded, node_bound_expiry)
+CONTROL_CHILD_CHECK_SAMPLES_S = (0.179, 0.252, 0.150, 0.085,
+                                 0.319, 0.862, 0.786, 1.613)
+CONTROL_CHILD_PROBE_SAMPLES_S = (0.353, 0.293, 0.214, 0.306,
+                                 1.447, 1.103, 2.470, 0.186)
+CONTROL_CHILD_SLOWEST_S = max(
+    *CONTROL_CHILD_CHECK_SAMPLES_S, *CONTROL_CHILD_PROBE_SAMPLES_S)
+CONTROL_CHILD_DEADLINE_S = round(CONTROL_CHILD_SLOWEST_S * SITE_HANG_MULTIPLE)
+
+
+def test_the_control_probe_site_reports_its_own_stalled_child(tmp):
+    stalling = "process.stdout.write('ctrl spoke\\n');setInterval(()=>{},900)"
+    ext = _realbrowser._control_extension(tmp)
+    script = ext / _realbrowser.CONTROL_WORKER_SCRIPT
+    script.write_text(stalling, encoding='utf-8')
+    caught = None
+    try:
+        with mock.patch.object(_realbrowser, '_control_extension',
+                               lambda _root: ext):
+            test_the_control_extension_satisfies_its_own_probe(tmp)
+    except NodeBoundExceeded as failure:
+        caught = failure
+    assert caught is not None, 'the wedged control script finished'
+    assert caught.deadline_s == CONTROL_CHILD_DEADLINE_S
+    assert 'ctrl spoke' in caught.stdout, caught.stdout
 
 
 def test_the_control_probe_requirement_is_a_skip_not_a_failure(tmp):

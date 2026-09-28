@@ -33,6 +33,8 @@ from _realbrowser_workers import (  # noqa: E402
     _control_worker_answered, _devtools_port, _devtools_targets,
     _listed_workers, _retire_browser, _worker_absence_verdict,
     _worker_targets, cdp_call, cdp_eval, ready_worker, worker_state)
+from _node_launch_routing import (  # noqa: E402
+    SITE_HANG_MULTIPLE, node_bound_expiry)
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -53,8 +55,35 @@ NODE_WEBSOCKET_PROBE = (
     "process.stdout.write(typeof WebSocket === 'function' ? "
     f'{json.dumps(WEBSOCKET_PRESENT_TOKEN)} : '
     f'{json.dumps(WEBSOCKET_ABSENT_TOKEN)})')
-NODE_PROBE_TIMEOUT = 10
 WINDOWS_COMMAND_TOO_LONG = 206
+
+# The two children this module launches, and a bound composed for each. They
+# are hang detectors, not health margins: `NODE_WEBSOCKET_PROBE` starts Node,
+# reads one global and writes one of two tokens, and the E2BIG diagnostic
+# runs the interpreter on an empty program. Neither can reach outside the
+# suite, so a bound here is for a WEDGED child, never a slow one.
+#
+# The samples are measured with the machine BUSY, because a wall-clock bound
+# is two margins — the child's real cost, and the runner's busyness — and a
+# bare 10 was measuring only the second. At under 2.5 multiples of a busy run
+# that is what a correct child on a loaded runner was failing against.
+#
+#   NODE_PROBE_SAMPLES_S      idle then busy, the WebSocket capability probe
+#   NODE_PROBE_SLOWEST_S      2.944  max of those
+#   SITE_HANG_MULTIPLE        5      a wedged child, not a slow one
+#   NODE_PROBE_DEADLINE_S     15     round(2.944 * 5)
+#
+#   MINIMAL_SPAWN_SAMPLES_S   idle then busy, `python -c ''`
+#   MINIMAL_SPAWN_SLOWEST_S   0.948  max of those
+#   MINIMAL_SPAWN_DEADLINE_S  5      round(0.948 * 5)
+NODE_PROBE_SAMPLES_S = (0.654, 0.300, 0.173, 0.379,
+                        2.944, 0.846, 1.899, 0.984)
+NODE_PROBE_SLOWEST_S = max(NODE_PROBE_SAMPLES_S)
+NODE_PROBE_DEADLINE_S = round(NODE_PROBE_SLOWEST_S * SITE_HANG_MULTIPLE)
+MINIMAL_SPAWN_SAMPLES_S = (0.288, 0.248, 0.681, 0.656,
+                           0.948, 0.336, 0.329, 0.751)
+MINIMAL_SPAWN_SLOWEST_S = max(MINIMAL_SPAWN_SAMPLES_S)
+MINIMAL_SPAWN_DEADLINE_S = round(MINIMAL_SPAWN_SLOWEST_S * SITE_HANG_MULTIPLE)
 
 
 class BrowserEnvironmentSkipped(_util.Skipped):
@@ -72,8 +101,8 @@ def _raise_start_failure(label, executable, why):
         # observes whether the inherited environment alone crosses the limit.
         try:
             minimal = subprocess.run(
-                [sys.executable, '-c', ''], cwd=ROOT,
-                capture_output=True, text=True, timeout=NODE_PROBE_TIMEOUT)
+                [sys.executable, '-c', ''], cwd=ROOT, capture_output=True,
+                text=True, timeout=MINIMAL_SPAWN_DEADLINE_S)
         except OSError as minimal_failure:
             if minimal_failure.errno == errno.E2BIG:
                 raise BrowserEnvironmentSkipped(
@@ -111,14 +140,17 @@ def browser_requirements():
     try:
         websocket = subprocess.run(
             [node, '-e', NODE_WEBSOCKET_PROBE], cwd=ROOT,
-            capture_output=True, text=True, timeout=NODE_PROBE_TIMEOUT)
+            capture_output=True, text=True, timeout=NODE_PROBE_DEADLINE_S)
     except OSError as why:
         _raise_start_failure('Node WebSocket probe', node, why)
     except subprocess.TimeoutExpired as why:
         # The interpreter started, so its fixed program failing to terminate
-        # is the harness's defect rather than a missing machine capability.
-        raise AssertionError(
-            f'Node WebSocket probe did not finish: {node}') from why
+        # is the harness's defect rather than a missing machine capability —
+        # and `NodeBoundExceeded` is an `AssertionError`, so the distinction
+        # that skips the whole real-browser surface is preserved. What it
+        # adds over a bare `AssertionError` is the deadline, the child and
+        # the output the child produced before it stopped answering.
+        raise node_bound_expiry(why, NODE_PROBE_DEADLINE_S) from why
     # Exit status only says whether our program ran; distinct stdout tokens
     # carry the capability answer without conflating it with probe failure.
     if websocket.returncode != 0:

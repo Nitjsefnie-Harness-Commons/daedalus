@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _node_launch_routing import (  # noqa: E402
+    SITE_HANG_MULTIPLE, node_bound_expiry)
 from _repo import ROOT  # noqa: E402
 from _worker_sources import CONTENT_SCRIPT_PAGE  # noqa: E402
 
@@ -377,6 +379,45 @@ Promise.all(settled).then(() => {
 """
 
 
+# The bound on the child `_run_node` launches. It is a hang detector and not
+# a health margin, and the reasoning for that verdict is here because a
+# shipped module is not a probe and a reader is entitled to the argument:
+#
+#   The child loads the SHIPPED `extension/content.js` and `page.js` into a
+#   fake window, so the question is whether a change to either could keep
+#   the event loop open. It cannot. Every handle one of them could hold it
+#   with is a no-op this harness installs — `setInterval` and `setTimeout`
+#   return 1 without arming anything, above, and the two modules' only
+#   timers are `content.js`'s keep-alive and `page.js`'s CSP poll — and the
+#   harness force-exits on its first write, so even a keeper a future
+#   module added would not hold the child.
+#
+#   So the real cost is a fixed unit of work, and what a bound on it must
+#   cover is a WEDGED child, never a slow one. The samples are measured
+#   with the machine busy, because a wall-clock bound is two margins and a
+#   bare 90 measured only the second. The two cheaper harnesses this one
+#   call site also serves — `run_relay` and `run_failure` — measured 1.918
+#   and 3.247 against the same load, and the table is the SLOWEST of the
+#   three, because one deadline covers all three.
+#
+#   GM_CHILD_SAMPLES_S   the eight slowest-child runs, idle then busy
+#   GM_CHILD_SLOWEST_S   18.015  max of those
+#   SITE_HANG_MULTIPLE   5       a wedged child, not a slow one
+#   GM_CHILD_DEADLINE_S  90      round(18.015 * 5)
+#
+# The composed figure lands on the 90 this wrote by hand, which is a
+# coincidence worth stating rather than hiding: the number was about right
+# for the child that actually costs something and roughly 300x too loose
+# for the two that do not. What changed is that it is now re-derivable from
+# five lines a reader can check, and that the expiry is a named failure
+# carrying the child's own output instead of a `TimeoutExpired` that
+# reaches the suite as an error naming the whole command.
+GM_CHILD_SAMPLES_S = (3.713, 3.810, 2.981, 4.005,
+                      16.873, 7.637, 18.015, 7.419)
+GM_CHILD_SLOWEST_S = max(GM_CHILD_SAMPLES_S)
+GM_CHILD_DEADLINE_S = round(GM_CHILD_SLOWEST_S * SITE_HANG_MULTIPLE)
+
+
 def _run_node(harness, content_path=None, with_page=False):
     node = shutil.which('node')
     assert node, 'node is required to execute the extension storage boundary'
@@ -386,8 +427,12 @@ def _run_node(harness, content_path=None, with_page=False):
             str(ext / 'page.js') if with_page else '',
             str(ext / 'worker' / 'util.js'),
             str(ext / 'worker' / 'gm_storage.js')]
-    result = subprocess.run(
-        argv, cwd=ROOT, capture_output=True, text=True, timeout=90)
+    try:
+        result = subprocess.run(
+            argv, cwd=ROOT, capture_output=True, text=True,
+            timeout=GM_CHILD_DEADLINE_S)
+    except subprocess.TimeoutExpired as why:
+        raise node_bound_expiry(why, GM_CHILD_DEADLINE_S) from why
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     return json.loads(result.stdout)
