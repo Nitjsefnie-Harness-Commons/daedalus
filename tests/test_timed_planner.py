@@ -408,6 +408,11 @@ def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
         plan.cells[0], 'the estimate is not the recorded median')
 
 
+def _coverage():
+    return _util.load(ROOT / 'scripts' / 'ci' / 'timings_coverage.py',
+                      'timings_coverage')
+
+
 def _shipped_thinned(keep_every):
     """The shipped file's own weights, thinned to every `keep_every`th.
 
@@ -451,7 +456,7 @@ def test_a_file_whose_weight_is_mostly_estimated_is_a_named_refusal(tmp):
     estimate = statistics.median(list(weights.values()))
     unmeasured = len(planner.suite_names(ROOT)) - len(weights)
     share = estimate * unmeasured / (recorded + estimate * unmeasured)
-    assert share > planner.MAX_ESTIMATED_WEIGHT_SHARE, share
+    assert share > _coverage().MAX_ESTIMATED_WEIGHT_SHARE, share
     # A plan the planner WOULD have published, and would have called
     # balanced, on exactly these weights.
     plan = planner.plan(ROOT, narrow)
@@ -482,16 +487,15 @@ def test_the_estimated_share_is_of_weight_and_not_of_suite_count(tmp):
     expectation is the guard's own share recomputed here from the
     planner's own estimate.
     """
-    planner = _planner()
     suites = [f'test_{index:02d}.py' for index in range(10)]
     recorded = {'test_00.py': 1.0, 'test_01.py': 1.0, 'test_09.py': 90.0}
     data = _data(recorded, target=100.0, max_cells=30)
     estimate = statistics.median(list(recorded.values()))
     share = estimate * 7 / (sum(recorded.values()) + estimate * 7)
     assert len([name for name in suites if name not in recorded]) > 3
-    assert share < planner.MAX_ESTIMATED_WEIGHT_SHARE, share
+    assert share < _coverage().MAX_ESTIMATED_WEIGHT_SHARE, share
     plan, _out = _plan(tmp, suites, data)
-    assert plan.estimated == sorted(set(suites) - set(recorded)), plan.estimated
+    assert plan.estimated == sorted(set(suites) - set(recorded)), plan
     assert sum(len(cell.suites) for cell in plan.cells) == len(suites)
 
 

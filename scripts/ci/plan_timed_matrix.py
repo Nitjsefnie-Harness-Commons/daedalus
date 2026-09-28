@@ -95,49 +95,8 @@ weights, well past it. Re-derive the two numbers with `python3
 scripts/ci/plan_timed_matrix.py --summary` against the data file at
 each target.
 
-MEASUREMENT COVERAGE. `MAX_ESTIMATED_WEIGHT_SHARE` bounds the share of
-a plan's total weight the planner had to INVENT, and past it the plan
-is a refusal rather than a matrix. An unrecorded suite is priced at
-the median of the recorded ones, which is the best guess available and
-a perfectly good one for the ordinary case -- a suite added since the
-last measurement, a handful of them, a few percent of the tree's
-weight. It stops being a good guess when the recorded suites are not
-the tree. The measured set skews heavy, so its median prices the whole
-light population at the heavy tail's rate and the total the packer
-sees is wrong by a multiple rather than by a percent. On this tree
-that is exactly what happened: a refresh measured 28 of the tree's 326
-suites, kept those 28 and dropped the other 245 (the refresher's own
-defect, fixed beside this guard), and the surviving 28 totalled 25.8
-reference-multiples where the tree really holds 345.2. The planner
-priced the other 298 suites at the 28's median, the derived cell count
-fell from 14 to 5, and the file still reported `heaviest/median
-1.000` -- because a total that is wrong by 3.15x is balanced with
-itself. The margin is computed over that same invented total, so it
-cannot be the thing that objects.
-
-THE BOUND IS A MAJORITY, and a majority is where the argument turns.
-Below it the plan is mostly a description of the tree: the numbers
-that decide the cell count and the balance are, in the main, numbers
-some run measured. Above it they are a function of one borrowed
-median, and a reader of the summary cannot tell which they got --
-the file's `estimated:` clause names the suites, and the line under it
-reports a confident ratio over the same fiction. Half is also the only
-value that cannot fire on ordinary drift. Reaching it would take an
-unmeasured population weighing as much as the measured one, which on a
-tree this size means hundreds of new suites rather than the one or two
-a week that appear between two measurements. A tighter bound (a
-tenth, say) would refuse a file that has drifted a little and is still
-worth publishing; a looser one (0.9, say) would let a file describing a
-twentieth of the tree through on the strength of a handful of heavy
-measured suites. The remedy the refusal names is the one that fixes
-it: re-derive the file from a run that measured the tree, with
-`scripts/ci/refresh_timings.py`.
-
-The share is of WEIGHT, not of suite count, and the two disagree
-wherever the recorded weights are lopsided -- the normal shape, because
-the suites that dominate a matrix are the ones measured hardest. A
-tree measured at nine of its ten suites by count can be measured at
-95% of its weight, and that file is a good one.
+MEASUREMENT COVERAGE, and why a mostly-estimated plan is a refusal:
+`scripts/ci/timings_coverage.py`, whose `verify_measured` `main` calls.
 """
 import argparse
 import json
@@ -151,8 +110,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     from time_tests import selected
+    from timings_coverage import coverage_refusal
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.time_tests import selected
+    from scripts.ci.timings_coverage import coverage_refusal
 
 # The data file's schema, as one authority for the writer to import.
 SCHEMA_VERSION = 2
@@ -166,9 +127,6 @@ BASIS_FIELD = 'basis'
 # the recorded weights, or at this when the file records none.
 DEFAULT_ESTIMATE = 1.0
 CELL_WEIGHT_MARGIN = 0.35
-# The share of a plan's total weight that may be an estimate before the
-# plan is refused rather than published; see MEASUREMENT COVERAGE above.
-MAX_ESTIMATED_WEIGHT_SHARE = 0.5
 _CELL_PREFIX = 'cell-'
 
 
@@ -362,54 +320,20 @@ def _resolve(recorded, names, scale):
     return weights, estimated, stale
 
 
-def _estimated_share(weights, estimated):
-    """The share of the plan's total weight the planner had to invent."""
-    total = sum(weights.values())
-    if not estimated:
-        return 0.0
-    if total <= 0:
-        return 1.0
-    return sum(weights[name] for name in estimated) / total
-
-
 def verify_measured(tree, timings, scale=1.0):
     """Refuse a file whose plan would be mostly estimate, with a reason.
 
-    The chokepoint the CLI calls before it plans, and the one gate on
-    this that is a refusal rather than a note: everything else about a
-    file the planner can state and let the reader weigh. A total that
-    is half fiction is not something to publish with a footnote, so
-    this names the share, the measured and estimated weights it came
-    from, and the command that re-derives a file from a run that
-    measured the tree.
-
-    It is deliberately NOT inside `plan()`. `timings_bounds` calls
-    `plan` to verify the TARGET, from the refresher, on the file being
-    written; a coverage refusal there would stop the refresher in
-    exactly the state it exists to repair, and would refuse every
-    hand-built runs root the tests drive it with. So the guard is where
-    a matrix is produced, which is the only place the fiction is
-    published.
+    A chokepoint `main` calls, and deliberately not a branch inside
+    `plan()`: `timings_bounds` calls `plan` from the refresher, on the
+    file being written, so a coverage refusal in there would stop the
+    refresher in the state it exists to repair.
     """
     names = suite_names(tree)
     weights, estimated, _stale = _resolve(
         timings['suite_weights'], names, scale)
-    share = _estimated_share(weights, estimated)
-    if share <= MAX_ESTIMATED_WEIGHT_SHARE:
-        return
-    measured = sum(weight for name, weight in weights.items()
-                   if name not in set(estimated))
-    raise PlanError(
-        f'{share:.0%} of this plan\'s weight is estimated, over the '
-        f'{MAX_ESTIMATED_WEIGHT_SHARE:.0%} bound: the file records '
-        f'{len(names) - len(estimated)} of the tree\'s {len(names)} suites '
-        f'({measured:.4g} measured against '
-        f'{sum(weights[name] for name in estimated):.4g} estimated at the '
-        f'median recorded weight), so the cell count and the balance '
-        f'guarantee are computed over a total the file does not '
-        f'measure; re-derive it from a run that measured the tree with '
-        f'`python3 scripts/ci/refresh_timings.py --runs-root '
-        f'<downloaded runs> --out .github/suite-timings.json`')
+    refusal = coverage_refusal(weights, estimated)
+    if refusal:
+        raise PlanError(refusal)
 
 
 def _open_cells(weights, order, target, max_cells, notes):

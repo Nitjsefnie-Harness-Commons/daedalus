@@ -52,7 +52,6 @@ looks at a bound the artifacts themselves do not carry.
 import json
 import math
 import statistics
-from pathlib import Path
 
 # The timed job's own round names. A head round is measured; `base-<n>`
 # and `warmup` are not. The cell names, unlike these, are generated.
