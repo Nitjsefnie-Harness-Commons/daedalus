@@ -53,10 +53,6 @@ BOUNDED_GIT_LAUNCHES = {
          'a drain of an already-killed process: it can only return',
     ('tests/_drain.py', 'kill_and_drain', 'process.wait(timeout)', 1):
          'the reap that follows that drain, on the same dead process',
-    ('tests/_realbrowser_workers.py', '_devtools_targets',
-     'urllib.request.urlopen(timeout)', 1):
-         'an HTTP read: a socket, not a git process, and the'
-         ' timeout is the bound itself',
     ('tests/_realbrowser_workers.py', '_retire_browser',
      'process.wait(timeout)', 1):
          'a browser-process wait while retiring it',
@@ -82,16 +78,9 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/_util.py', 'get_json', 'get()', 1):
          'an HTTP helper opening a socket; no git '
          'process is behind it',
-    ('tests/_util.py', 'header_stream', 'http.client.HTTPConnection(timeout)',
-     1):
-         'a connection constructor: it opens a socket and returns'
-         ' a client, and no git process sits behind a socket',
     ('tests/_util.py', 'post_json', 'request(body)', 1):
          'an HTTP helper opening a socket; no git '
          'process is behind it',
-    ('tests/_util.py', 'request', 'urllib.request.urlopen(timeout)', 1):
-         'an HTTP read: a socket, not a git process, and the'
-         ' timeout is the bound itself',
     ('tests/test_aggregate_gate.py',
      'test_every_single_dependency_result_is_tabled', '_needs()', 1):
          'a table builder called with a keyword mapping; it builds a'
@@ -99,11 +88,6 @@ BOUNDED_GIT_LAUNCHES = {
     ('tests/test_aggregate_gate.py',
      'test_two_dependencies_are_decided_jointly', 'zip()', 1):
          'the same table builder, keyed from a zipped mapping',
-    ('tests/test_bridge_startup.py',
-     'test_dashboard_responses_refuse_cross_origin_framing',
-     'urllib.request.urlopen(timeout)', 1):
-         'an HTTP read: a socket, not a git process, and the'
-         ' timeout is the bound itself',
     ('tests/test_dashboard_gate.py',
      'test_gate_is_released_by_the_os_when_the_holder_is_killed',
      'holder.wait(timeout)', 1):
@@ -135,11 +119,6 @@ BOUNDED_GIT_LAUNCHES = {
      'test_a_nonpositive_mcp_timeout_admits_no_command', 'getattr()', 1):
         "the test's subject: an MCP call the server must reject for"
          'its timeout',
-    ('tests/test_mcp_server.py',
-     'test_bearer_middleware_rejects_duplicate_authorization_headers',
-     'http.client.HTTPConnection(timeout)', 1):
-         'a connection constructor: it opens a socket and returns'
-         ' a client, and no git process sits behind a socket',
     ('tests/test_mcp_server.py',
      'test_mcp_port_zero_announces_the_actual_bound_port',
      'mod._bound.wait(timeout)', 1):
@@ -175,19 +154,9 @@ BOUNDED_GIT_LAUNCHES = {
      'test_unreadable_control_answer_polls_again_instead_of_settling',
      'process.wait.assert_called_once_with(timeout)', 1):
          'the same mock assertion, on the unreadable control',
-    ('tests/test_real_browser_harness.py', 'exercise',
-     'urllib.request.urlopen(timeout)', 1):
-        "the same navigation, on the harness's own page",
-    ('tests/test_real_browser_harness.py', 'first_navigation',
-     'urllib.request.urlopen(timeout)', 1):
-         'a browser navigation whose timeout is the bound itself',
     ('tests/test_segment_routes.py', 'refusing', 'real()', 1):
          'a test double delegating with its arguments; it launches'
          'nothing of its own',
-    ('tests/test_stream_lifecycle.py', '_open_stream',
-     'http.client.HTTPConnection(timeout)', 1):
-         'a connection constructor: it opens a socket and returns'
-         ' a client, and no git process sits behind a socket',
     ('tests/test_suite_runner.py',
      'test_output_close_failure_reaps_the_spawned_suite',
      'spawned[0].wait(timeout)', 1):
