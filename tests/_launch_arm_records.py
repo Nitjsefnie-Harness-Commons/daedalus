@@ -191,9 +191,9 @@ ARM_NOTES = {
 
 
 # `STEP_CEILING_CONTROL` is in neither row file, so an evidence string
-# naming it resolves to nothing -- the one test that looked at it
-# checked it against itself. What holds these two bounds a STEP COUNT
-# rather than a verdict, so the test is named and resolved.
+# naming it resolves to nothing and cannot be checked against itself.
+# What holds these two bounds a STEP COUNT rather than a verdict, so
+# the test that does is named here and resolved against the tree.
 STEP_CEILING_HELD_BY = {
     'fx.skip-registered': (
         'tests/test_launch_arms.py:'

@@ -173,10 +173,8 @@ def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
     Every one of the 150 `cut` specs is line-keyed and
     `tests/_arm_sweep.py` resolves it by `node.lineno == line`, so a
     moved line means the arm now cuts whichever clause landed there.
-    Checking the anchor appears SOMEWHERE in the analyser cannot see
-    that -- the text survives every shift -- so one comment line above
-    an arm passed every suite while 149 of 150 cut specs went on
-    resolving a different clause.
+    The anchor text appears SOMEWHERE in the analyser whatever moves,
+    so its presence is not the check; the line it starts at is.
     """
     del tmp
     rows = {}
@@ -344,9 +342,9 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
     "Every arm of both analysers" reads as "every guard clause", and the
     spelling-independent marker for that is every `if`/`elif`/`while`/
     `return` header plus each disjunct of a multi-line condition. A
-    reader who takes that marker and finds a clause at a line the table
-    does not list has found an unstated hole in the one claim the table
-    exists to make, and `MARKER_NON_MEMBERS` is the answer.
+    clause the marker finds at a line the table does not list is an
+    unstated hole in the one claim the table exists to make, so
+    `MARKER_NON_MEMBERS` is the answer and this refuses a hole in it.
     """
     del tmp
     named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
