@@ -360,12 +360,15 @@ def test_gitignore_generator_reports_usage_with_no_arguments(tmp):
 # The block layout, written out here rather than read back from the
 # generator. A literal is the only expectation the subject cannot produce by
 # accident, and the HEAD preamble above it is a frozen constant rather than
-# something this control recomputes.
+# something this control recomputes. TWO files share the root block on
+# purpose: with one file per block a derivation that stopped sorting still
+# renders every block in the right order and this literal cannot see it.
 _LITERAL_TAIL = (
     '\n'
     '\n'
     '# ─── root ───\n'
     '!/a.py\n'
+    '!/b.py\n'
     '\n'
     '# ─── d ───\n'
     '!/d/\n'
@@ -383,10 +386,13 @@ def test_the_derivation_renders_the_literal_block_layout(tmp):
     del tmp
     generator = _util.load(
         ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_literal')
-    # Unsorted, and in a nested directory beside a root file: the literal
-    # carries the sort order, the block header and the directory re-open.
-    text = generator.derive(['d/e.py', 'a.py'])
-    assert text.endswith(_LITERAL_TAIL), repr(text[-120:])
+    # Unsorted, two files in the root block and one in a nested directory:
+    # the literal carries the order WITHIN a block, the block header and
+    # the directory re-open.
+    text = generator.derive(['b.py', 'd/e.py', 'a.py'])
+    assert text.endswith(_LITERAL_TAIL), repr(text[-160:])
+    assert generator.derive(['a.py', 'b.py']) == generator.derive(
+        ['b.py', 'a.py']), 'the derivation kept the order it was handed'
 
 
 def test_the_derivation_launches_nothing_and_ignores_its_input_order(tmp):
