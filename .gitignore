@@ -407,6 +407,7 @@
 !/tests/_realbrowser_fixture_controls.py
 !/tests/_realbrowser_pages.py
 !/tests/_realbrowser_workers.py
+!/tests/_receiver_mutation_specs.py
 !/tests/_relayharness.py
 !/tests/_repo.py
 !/tests/_reserved_names.py

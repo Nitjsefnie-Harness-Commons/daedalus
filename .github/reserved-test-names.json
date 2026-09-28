@@ -457,6 +457,7 @@
     "_is_wsl_launcher": {"python": ["tests/_util.py"]},
     "_item": {"python": ["tests/_pyroute_invalidation.py"]},
     "_items_signature": {"python": ["tests/_pyroute_values.py"]},
+    "_iterable_parts": {"python": ["tests/_coverage_bindings.py"]},
     "_job_condition_runs": {"python": ["tests/_wfgraph.py"]},
     "_job_field_end": {"python": ["tests/_wfgraph.py"]},
     "_job_field_lines": {"python": ["tests/_wfgraph.py"]},
