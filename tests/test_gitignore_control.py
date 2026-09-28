@@ -100,6 +100,21 @@ def test_the_committed_ignore_file_is_what_the_generator_derives(tmp):
     # is pinned to neither the head nor the fork point.
 
 
+def test_the_line_endings_are_folded_before_anything_compares_them(tmp):
+    """CRLF is folded, and the fixture is synthetic because CI cannot be.
+
+    `git cat-file` hands back the blob's own bytes, which are LF, while a
+    Windows checkout hands the same file to `read_text` as CRLF. Fold one
+    and not the other and the two disagree about a file that is identical,
+    which is a false red on the platform the clause exists for. Linux and
+    macOS checkouts never produce the difference, so the only way this can
+    fail anywhere is a string the test writes itself.
+    """
+    del tmp
+    assert ctl.normalise('!/a.py\r\n!/b.py\r\n') == '!/a.py\n!/b.py\n'
+    assert ctl.normalise('!/a.py\n') == '!/a.py\n'
+
+
 def test_the_base_itself_is_green(tmp):
     repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py', 'c.py'))
     verdict = control(repo)

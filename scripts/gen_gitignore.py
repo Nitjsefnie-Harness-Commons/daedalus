@@ -118,8 +118,9 @@ def derive(tracked):
 
     Two callers need this text and there is one of it. `main` writes what
     this returns, and the committed-file control in
-    tests/test_gitignore_generator.py derives the side it compares the
-    committed file against by calling this, so a change to the rendering
+    tests/_gitignore_control.py derives the side it compares the
+    committed file against by calling this — its suite is
+    tests/test_gitignore_control.py — so a change to the rendering
     moves both at once instead of leaving a second copy to rot.
 
     The input is a set of paths and not a verdict about which of them ship,

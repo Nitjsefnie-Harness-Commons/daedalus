@@ -368,6 +368,11 @@ def decide(root):
     fresh, stale = now - at_base, at_base - now
     summary = counts(scope, fresh, stale)
     reduced = reduce_committed(committed, scope, stale)
+    # `derive` orders its input itself; the sort here is belt and braces,
+    # and it MASKS that property here. Dropping the sort inside `derive`
+    # leaves every fixture in this suite green — the pin for it is
+    # test_gitignore_generator.py's literal block layout, which is why that
+    # suite is not optional reading for anyone changing the rendering.
     expected = generator().derive(sorted(scope))
     if reduced == expected:
         return Verdict('green', summary, base, scope)
