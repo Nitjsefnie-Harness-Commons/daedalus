@@ -61,6 +61,23 @@ REBOUND = {
          '    def wait(self, timeout=None):\n'
          '        return self.procs.wait(timeout)\n',
          (16, 'timeout parameter')),
+    'a-later-class-silences-an-earlier-one':
+        ('import subprocess\n\n\n'
+         'class B:\n'
+         '    def __init__(self, child):\n'
+         '        self.child = child\n\n'
+         '    def wait(self, timeout=None):\n'
+         '        return self.child.wait(timeout)\n\n\n'
+         'class A:\n'
+         '    def __init__(self):\n'
+         '        self.child = []\n',
+         (8, 'timeout parameter')),
+    'a-nested-literal-over-a-shallower-child':
+        ('def run_gate(flag, pool, timeout=None):\n'
+         '    if flag:\n'
+         '        pool = []\n'
+         '    return pool.reap_all(timeout)\n',
+         (1, 'timeout parameter')),
     'a-name-rebound-in-one-scope':
         ('import subprocess\n\n\n'
          'class Runner:\n'
@@ -178,7 +195,7 @@ def test_the_module_docstring_describes_the_arm_that_is_there(tmp):
     """
     del tmp
     text = receiver.__doc__ or ''
-    assert 'PROOF' in text, 'the map no longer says the rule is a proof'
+    assert 'proof' in text, 'the map no longer says the rule is a proof'
     for absent in ('asks what OPERATION', 'never whether the receiver'):
         assert absent not in text, (absent, text)
     for present in ('literal_bindings', 'deadline_reaches_a_child'):
@@ -217,6 +234,39 @@ OVER_REFUSAL = {
          'def other():\n'
          '    urlopen = object()\n'
          '    return urlopen\n'),
+    'a-class-body-binding': (
+        'from urllib.request import urlopen\n\n\n'
+        'class C:\n    urlopen = []\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
+    'a-global-declaration-and-rebind': (
+        'from urllib.request import urlopen\n\n\n'
+        'def _other(url):\n'
+        '    global urlopen\n'
+        '    urlopen = object()\n    return urlopen\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
+    'a-module-for-target': (
+        'from urllib.request import urlopen\n\n\n'
+        'for urlopen in []:\n    pass\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
+    'a-module-with-target': (
+        'from urllib.request import urlopen\n\n\n'
+        'def _go():\n'
+        '    with open("x") as urlopen:\n        pass\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
+    'a-module-except-target': (
+        'from urllib.request import urlopen\n\n\n'
+        'try:\n    pass\nexcept ValueError as urlopen:\n    pass\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
+    'a-module-annotated-assignment': (
+        'from urllib.request import urlopen\n'
+        'urlopen: object = []\n\n\n'
+        'def run_gate(url):\n'
+        '    return urlopen(url, timeout=10)\n'),
     'no-shadow-at-all':
         ('from urllib.request import urlopen\n\n\n'
          'def run_gate(url):\n'
@@ -234,7 +284,12 @@ def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
     false red measured at one of five and one measured at none.
 
     A control that only checked the happy direction would have passed
-    with the module-wide pop, so every shape here carries a shadow.
+    with the module-wide pop, so every shape here carries a shadow. The
+    last six are the binding forms the boundary was assumed rather than
+    measured on: a class body, a `global` and a rebind, and module-level
+    `for` / `with` / `except` / annotated targets. A class body binds no
+    name in any scope this reader tracks, so it must not pop a module
+    import, and the other five reach the module table by no path at all.
     """
     del tmp
     for label, source in OVER_REFUSAL.items():

@@ -543,12 +543,13 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
     """
     (callees, bound, receivers, direct, aliases, literals,
      shadows) = context
+    shadowed = shadows.get(function, frozenset())
     faults = []
     if (function is scope and 'timeout' in _parameter_names(function)
             and 'timeout' not in handed
             and receiver.deadline_reaches_a_child(
                 function, 'timeout', callees, receivers, direct,
-                aliases, literals, bound)):
+                aliases, literals, bound, shadowed)):
         faults.append((relative, function.lineno, 'timeout parameter',
                        'a path function takes a deadline parameter, so a '
                        'bound reaches the child through the signature'))
@@ -566,7 +567,7 @@ def _timeout_faults(relative, function, scope, constants, handed=frozenset(),
                            " 'timeout' key"))
     for node in ast.walk(function):
         if not _is_call(node) or receiver.is_network_read(
-                node.func, bound, shadows.get(function, frozenset())):
+                node.func, bound, shadowed):
             continue
         for keyword in node.keywords:
             if keyword.arg != 'timeout':
