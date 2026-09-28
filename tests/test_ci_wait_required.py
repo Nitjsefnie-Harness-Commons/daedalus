@@ -245,6 +245,29 @@ def test_an_empty_required_value_is_a_rejected_invocation(tmp):
     assert text == '', text
 
 
+def test_a_blank_required_value_is_a_rejected_invocation(tmp):
+    """The same mechanism as #1320 under a second spelling. A value of
+    whitespace is accepted by a guard that tests the value for emptiness
+    alone, and it builds the identical requirement - a name no run can
+    carry - so the identical refusal follows, its name slot now holding a
+    space instead of nothing at all. Fixing one spelling of the defect and
+    leaving the other open is not a fix.
+
+    Two controls rather than one, because each names its own spelling and
+    a fixture covering both would pass whenever EITHER is refused, which is
+    exactly the hole a single control leaves.
+    """
+    del tmp
+    mod = _ci_wait()
+    err = io.StringIO()
+    code, text = _run_main(mod, _Clock(),
+                           ['4' * 40, '--repo', OTHER_REPO, '--required', ' '],
+                           _green('ci'), pulls=[_conflicting(7)], err=err)
+    assert code == 3, (code, text, err.getvalue())
+    assert '--required' in err.getvalue(), err.getvalue()
+    assert text == '', text
+
+
 def main():
     return _util.runner(_util.collect(globals()), tmp_prefix='ciwaitreq_')
 
