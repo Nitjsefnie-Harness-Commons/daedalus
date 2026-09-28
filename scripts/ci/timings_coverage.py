@@ -102,9 +102,9 @@ The note is a tenth because that is roughly where the BIASED shape's plan
 is out by 2x (construction A reaches 2.30x at 8.5%), and 2x is the
 tolerance the plan's purpose sets: the cell count is
 `ceil(total / target)`, so a total out by 2x is a matrix carrying half
-the parallelism the tree needs. The shipped file's own coverage is 4 of
-332 -- 1.2% -- an eighth of the bound, and says nothing, which is the
-point.
+the parallelism the tree needs. The shipped file's own estimated share
+is below the note tier, so the note is silent for it today, which is
+the point.
 
 The refusal is a third, and it is DERIVED rather than chosen: with `m`
 recorded weights summing `S` at median `e`, at least `floor(m/2)` of them
