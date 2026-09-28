@@ -684,7 +684,7 @@ def test_a_selection_agrees_with_a_store_of_the_same_container(_tmp):
                              (INLINE, '[0, importlib.import_module][i]')):
         _write_tree(Path(_tmp), {
             'composition.py': f'{prefix}.import_module]\n'
-                              f"    {spelling}('pkg.leaf')\n",
+                              f"    return {spelling}('pkg.leaf')\n",
             'pkg/__init__.py': '',
             'pkg/leaf.py': 'leaf = True\n'})
         try:
