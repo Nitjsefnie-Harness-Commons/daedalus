@@ -40,33 +40,41 @@ def _polls_named_in(message):
     return re.findall(r'\d+', message)
 
 
-def _polls_under_a_ceiling(tmp, max_polls, globs):
-    """Glob `globs` times under a `max_polls` ceiling; report the refusal."""
-    queue = Path(tmp) / f'ceiling-{max_polls}-{globs}'
+def _polls_under_a_ceiling(tmp, max_polls, charges):
+    """Charge `charges` probes; report the refusal and the count spent.
+
+    It drives `is_dir`, which costs exactly one probe on every interpreter,
+    and reads the count from the bound's own counter. `glob` is not
+    usable here: pathlib up to 3.12 has its selector call
+    `parent.is_dir()`, so one `glob` costs two probes there and one on
+    3.13, and a control counting glob calls asserts a number that
+    depends on the interpreter rather than on this branch.
+    """
+    queue = Path(tmp) / f'ceiling-{max_polls}-{charges}'
     queue.mkdir()
     failure = None
-    spent = 0
-    with _bounded_polls(max_polls):
-        for _ in range(globs):
-            spent += 1
+    with _bounded_polls(max_polls) as counted:
+        for _ in range(charges):
             try:
-                list(queue.glob('*.json'))
+                queue.is_dir()
             except AssertionError as caught:
                 failure = caught
                 break
-    return failure, spent
+    return failure, counted[0]
 
 
 def test_the_poll_bound_refuses_a_reader_that_polls_past_it(tmp):
     """The bound counts the probes, and spares a reader under the ceiling."""
-    for max_polls, over, under in ((0, 1, 0), (10, 11, 10)):
-        failure, spent = _polls_under_a_ceiling(tmp, max_polls, over)
-        assert isinstance(failure, AssertionError), (max_polls, over, failure)
-        assert spent == max_polls + 1, (max_polls, over, spent)
+    for max_polls in (0, 10):
+        over = _polls_under_a_ceiling(tmp, max_polls, max_polls + 1)
+        failure, spent = over
+        assert isinstance(failure, AssertionError), (max_polls, over)
+        assert spent == max_polls, (max_polls, over)
         assert str(max_polls) in _polls_named_in(str(failure)), failure
         assert 'poll' in str(failure), failure
-        assert _polls_under_a_ceiling(tmp, max_polls, under)[0] is None, (
-            max_polls, under)
+        under = _polls_under_a_ceiling(tmp, max_polls, max_polls)
+        assert under[0] is None, (max_polls, under)
+        assert under[1] == max_polls, (max_polls, under)
 
 
 def test_the_poll_ceiling_states_the_probes_and_names_no_cause(tmp):
@@ -74,7 +82,7 @@ def test_the_poll_ceiling_states_the_probes_and_names_no_cause(tmp):
     ceiling = 4
     failure, spent = _polls_under_a_ceiling(tmp, ceiling, ceiling + 1)
     assert isinstance(failure, AssertionError), failure
-    assert spent == ceiling + 1, (ceiling, spent)
+    assert spent == ceiling, (ceiling, spent)
     message = str(failure).lower()
     assert str(ceiling) in _polls_named_in(message), message
     for probe in _QUEUE_PROBES:
@@ -182,11 +190,17 @@ def test_the_reader_probes_the_queue_through_the_bounded_names(tmp):
 def test_the_alias_fixpoint_terminates_on_a_cyclic_binding(tmp):
     """A cycle in the binding graph ends the walk rather than spinning it.
 
-    A previous cut of this branch looped forever on the module scope and
-    killed the suite, so the guarantee is pinned here rather than assumed.
-    The alarm is the assertion: a spin shows up as a failure, not a hang.
+    The guarantee is structural rather than incidental: `_bound_to` grows
+    one set monotonically over a finite name space and returns only when a
+    whole pass adds nothing, so no input can keep it going. The control is
+    a formality against that arithmetic. The alarm is here only to turn a
+    regression in it into a failure rather than a hung suite, and it is
+    POSIX-only, so this control runs where one exists.
     """
     del tmp
+    if not hasattr(signal, 'alarm'):
+        _util.skip('signal.alarm is POSIX-only; the guarantee it watches '
+                   'is arithmetic, not a platform call')
     source = (
         'import os\n'
         'a = b\n'
