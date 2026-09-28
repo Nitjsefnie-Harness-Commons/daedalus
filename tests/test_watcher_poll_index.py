@@ -33,6 +33,7 @@ from _watcher_fixtures import TICK  # noqa: E402
 from _watcher_fixtures import idle_answers  # noqa: E402
 from _watcher_waits import POLL_WIDTH  # noqa: E402
 from _watcher_waits import await_polls  # noqa: E402
+from _watcher_waits import poll_sequence  # noqa: E402
 
 SKILL = once_run.SKILL
 
@@ -72,13 +73,15 @@ _PUBLISH = '        os.environ[POLL_MARK] = str(poll_index)\n'
 _TRY = '        try:\n'
 _TICK = '        poll_index += 1\n'
 
-# Four plants, one per shape of broken boundary.
+# Five plants, one per shape of broken boundary.
 _FROZEN = (_TICK, '        poll_index = 0\n')
 _STALLED = (_PUBLISH, '        if poll_index > 2:\n'
                       '            poll_index = 2\n')
 _REUSED = (_TRY, "        os.environ[POLL_MARK] = (\n"
                  "            str(poll_index) if poll_index != 5\n"
                  '            else str(poll_index - 4))\n')
+_CYCLING = (_TRY, '        os.environ[POLL_MARK] = '
+                  'str((poll_index - 1) % 4 + 1)\n')
 _WORDED = (_TRY, "        os.environ[POLL_MARK] = 'poll-' + str(poll_index)\n")
 _UNWIRED = (_TRY, '        if poll_index != 1:\n'
                   '            os.environ.pop(POLL_MARK, None)\n')
@@ -111,36 +114,33 @@ def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK):
 
 
 def _boundaries(calls):
-    """The markers in the order they were logged, each run of one collapsed.
-
-    The collapse is by POSITION. A call log carries a marker's name for
-    every call inside one poll, so `1,1,2,2,3,3` is three boundaries;
-    collapsing by VALUE instead - what a mapping keyed on the marker does -
-    turns `1,2,3,4,1,2,3,4` into `1,2,3,4` and loses the re-use, which is
-    the one thing the control judging them exists to see.
-    """
-    sequence = []
-    for call in calls:
-        marker = call.get('poll')
-        if not sequence or sequence[-1] != marker:
-            sequence.append(marker)
-    return sequence
+    """The markers a log published, each run collapsed - the wait's own
+    reading, so the control and the refusal it is judging read the same
+    evidence through the same mechanism."""
+    return poll_sequence(calls)
 
 
 def _indexes(subject, sequence):
     """The boundaries as integers, or the named verdict for one that is not.
 
-    A watcher that publishes nothing, or publishes a name rather than a
-    number, has an UNWIRED seam rather than a stuck index. Both are
-    verdicts a reader can act on, and neither is reached by letting the
-    conversion raise: a `TypeError` out of here names this conversion
+    The two shapes that are not a number are different defects and get
+    different verdicts. A boundary the log carries as nothing at all is an
+    UNWIRED seam: the watcher did not publish on that poll. A boundary that
+    is a name - `poll-1` where a number belongs - is a FORMAT defect, and
+    calling it unwired is wrong on both halves, because the seam is wired
+    and the index is advancing every poll. Neither is reached by letting
+    the conversion raise: a `TypeError` out of here names this conversion
     rather than the watcher that caused it.
     """
     indexes = []
     for marker in sequence:
+        assert marker is not None, (
+            f'{subject} published no poll marker on one of its polls, so '
+            f'the seam is unwired rather than stuck')
         assert isinstance(marker, str) and marker.isdigit(), (
-            f'{subject} published the poll marker {marker!r}, which is not an '
-            f'index: the seam is unwired rather than stuck')
+            f'{subject} published the poll marker {marker!r}, a NAME rather '
+            f'than an index: the index advances on every poll, so this is a '
+            f'format defect and neither a stuck nor an unwired one')
         indexes.append(int(marker))
     return indexes
 
@@ -250,20 +250,54 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
     """The same boundary from the other side, and the message it earns.
 
     One call more in every poll is over the tolerance, so the wait ends -
-    and what it has to say is what was measured, not a cause. The plant
-    keeps publishing a fresh index every poll, so a verdict claiming the
-    index had stalled would be contradicted by its own payload: by the
-    first poll the log holds one marker and nine calls, which is a wide
-    poll and nothing else. So the headline is required to state the
-    observation, and both explanations are required to follow it.
+    and what it has to say is what was measured. What this control pins
+    is the OBSERVATION and the pointer, not an exhaustive list of causes:
+    a control that required a named cause would refuse a refusal written
+    for a cause it had not met, which is how the two-cause sentence it
+    was written against came to be false for a re-used index.
+
+    The observation is sharp enough on its own. A wide first poll leaves
+    one boundary and no more, so the sequence is a single value; a
+    re-used index leaves the same value a second time, and the control
+    beside this one is what pins that difference. The idle bound is the
+    pointer either way: a poll over its tolerance on a healthy watcher is
+    what IDLE_POLL_BOUND refuses.
     """
-    script, fake = _mutant_watcher(Path(tmp) / 'wider', *_wide(POLL_WIDTH + 1))
+    script, fake = _mutant_watcher(Path(tmp) / 'wider',
+                                   *_wide(POLL_WIDTH + 1))
     refused = _refusal('a poll wider than the tolerance', script, fake)
-    assert 'did not advance' not in refused, refused
-    assert f'over the {POLL_WIDTH} call(s) per marker' in refused, refused
-    assert (f'or every poll here spent more than {POLL_WIDTH} call(s)'
+    assert (f'did not reach {BOUNDARIES} within {POLL_WIDTH + 1} gh call(s)'
             in refused), refused
-    assert 'This log cannot tell the two apart' in refused, refused
+    assert '1 distinct, sequence 1,' in refused, refused
+    assert 'sequence 1, 1,' not in refused, refused
+    assert f'over the {POLL_WIDTH} call(s) per marker' in refused, refused
+    assert 'a poll WIDER than the tolerance' in refused, refused
+    assert 'IDLE_POLL_BOUND' in refused, refused
+    assert 'did not advance' not in refused, refused
+
+
+def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
+    """An index that comes round again, and the message that shows it.
+
+    A cycle of period 4 never publishes `BOUNDARIES` distinct markers, so
+    this mutant cannot reach the invariant assertion at all - `_run_loop`
+    waits for a marker count a cycle will not produce, and the call bound
+    is what ends the run. The control is written for that: it asserts on
+    the MESSAGE, so it holds whichever arm catches the mutant, and the
+    sequence the refusal renders is the part that settles the cause -
+    a value that comes round again is a re-used index, and no two
+    explanations in between can both be false over a sequence like this.
+    """
+    script, fake = _mutant_watcher(Path(tmp) / 'cycling', _CYCLING)
+    refused = _refusal('a cycling poll index', script, fake)
+    assert 'sequence 1, 2, 3, 4, 1,' in refused, refused
+    assert 'a value that comes round again is a re-used index' in refused, (
+        refused)
+    assert 'did not advance' not in refused, refused
+    logged = sorted({call.get('poll') for call in fake.calls()}, key=repr)
+    assert logged == ['1', '2', '3', '4'], (
+        f'the mutant published {logged} rather than one cycle of four, so '
+        f'this control is not exercising a cycle')
 
 
 def test_a_frozen_poll_index_is_refused_by_name(tmp):
@@ -274,7 +308,7 @@ def test_a_frozen_poll_index_is_refused_by_name(tmp):
     control measuring a loop child would spin until the job's own limit
     ended the run nameless. The last two assertions are what keep the
     control from going vacuous: the log has to show one constant index, or
-    the ceiling has proved nothing about the shape it exists for.
+    the bound has proved nothing about the shape it exists for.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'frozen', _FROZEN)
     refused = _refusal('a frozen poll index', script, fake)
@@ -283,7 +317,7 @@ def test_a_frozen_poll_index_is_refused_by_name(tmp):
     assert logged == ['1'], (
         f'the mutant published {logged} rather than one constant index, so '
         f'this control is not exercising a frozen index')
-    assert "(['1'])" in refused, refused
+    assert 'sequence 1,' in refused, refused
 
 
 def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
@@ -291,11 +325,13 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
     stuck at 2 after two real polls have advanced.
 
     The frozen-from-the-first control alone would not cover it, because
-    that one never gets past its first marker, so a ceiling keyed on the
+    that one never gets past its first marker, so a bound keyed on the
     marker COUNT would go untested for a run that has already made some
     progress and then stopped. Here the marker count stalls at two while
     the calls keep coming, which is the case a bound read from progress
-    rather than from a total has to answer.
+    rather than from a total has to answer. The rendered sequence is
+    `1, 2` and then nothing: the collapse is by position, so a stall
+    reads as a sequence that stops rather than as one that repeats.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'stalled', _STALLED)
     refused = _refusal('a poll index frozen at two', script, fake)
@@ -304,7 +340,7 @@ def test_a_poll_index_frozen_after_advancing_is_refused_by_name(tmp):
     assert logged == ['1', '2'], (
         f'the mutant published {logged} rather than two markers it then '
         f'froze on, so this control is not exercising a stall')
-    assert "(['1', '2'])" in refused, refused
+    assert 'sequence 1, 2, over' in refused, refused
 
 
 def test_a_reused_poll_index_is_refused_by_name(tmp):
@@ -341,28 +377,52 @@ def test_a_partially_wired_poll_seam_is_refused_by_name(tmp):
     renderer rather than the seam. Both marks have to appear in the
     verdict, because which is which is what tells a reader whether the
     watcher never published or published once.
+
+    The same run has to earn the OTHER unwired verdict as well, from
+    `_indexes`, which is where a reader reading a healthy-looking loop
+    would meet the defect: the marker is absent, so the seam is unwired -
+    which is the one reading of the two that is right here, and the one
+    the name-marking control beside it must NOT earn.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'unwired', _UNWIRED)
     refused = _refusal('a partially wired poll seam', script, fake)
-    assert "['1', None]" in refused, refused
+    assert 'sequence 1, None,' in refused, refused
     assert 'did not reach' in refused, refused
+    unwired = _verdict(
+        'a partially wired poll seam',
+        lambda: _indexes('a partially wired poll seam',
+                         _boundaries(fake.calls())))
+    assert 'published no poll marker on one of its polls' in unwired, unwired
+    assert 'the seam is unwired rather than stuck' in unwired, unwired
 
 
 def test_a_non_integer_poll_marker_is_refused_by_name(tmp):
     """A marker that is a name rather than a number, on every poll.
 
-    Every poll publishes and the count reaches what the wait asked for, so
-    the conversion to an integer is the only thing between this watcher and
-    a `ValueError` that names the conversion instead of the watcher.
+    Every poll publishes, every boundary is new, and the count reaches
+    what the wait asked for - so the conversion to an integer is the only
+    thing between this watcher and a `ValueError` that names the
+    conversion instead of the watcher.
+
+    The verdict is a FORMAT defect and says so. Calling it an unwired
+    seam is false on both halves here: the seam is wired, and the index
+    advances on every poll, so the last assertion here is the control
+    obligation - a name is a different defect from a missing marker, and
+    the two controls above and here must not be reading alike.
     """
     script, fake = _mutant_watcher(Path(tmp) / 'worded', _WORDED)
     sequence = _boundaries(_run_loop(script, fake, interval=0))
     assert len(sequence) >= 2, sequence
+    assert len(set(sequence)) == len(sequence), (
+        f'the mutant published {sequence}, which repeats a boundary, so it '
+        f'is exercising a re-use rather than a format defect')
     refused = _verdict(
         'a watcher publishing a name',
         lambda: _indexes('a watcher publishing a name', sequence))
     assert "marker 'poll-1'" in refused, refused
-    assert 'unwired rather than stuck' in refused, refused
+    assert 'a NAME rather than an index' in refused, refused
+    assert 'a format defect' in refused, refused
+    assert 'the seam is unwired' not in refused, refused
 
 
 def main():
