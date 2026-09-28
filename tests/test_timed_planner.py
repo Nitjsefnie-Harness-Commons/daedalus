@@ -438,64 +438,64 @@ def _coverage():
                       'timings_coverage')
 
 
-def _shipped_thinned(keep_every):
-    """The shipped file's own weights, thinned to every `keep_every`th.
+def _arrivals(weights):
+    """The arrivals that double the estimated weight over the recorded.
 
-    The real target, not a shape invented here: the weights are the ones
-    `.github/suite-timings.json` records for this tree, and thinning
-    them is what a refresh that measured one cell of a fifteen-cell
-    matrix leaves behind -- the shipped file fell from 273 recorded
-    suites to 28 that way, and every other suite became an estimate
-    priced at the median of the heavy tail that survived.
+    The weight bound fires at `k * e > S`, so this solves the guard's own
+    inequality for `k` and doubles it: `2 * (floor(S / e) + 1)` arrivals put
+    `k * e` at `2 * S` or more and the share at `2 / 3` or more, at any size.
     """
-    planner = _planner()
-    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
-    names = planner.suite_names(ROOT)
-    kept = {name: data['suite_weights'][name] for name in names[::keep_every]
-            if name in data['suite_weights']}
-    assert kept, 'the shipped file records none of the tree'
-    return data, kept
+    count = 2 * (int(sum(weights.values()) / statistics.median(
+        weights.values())) + 1)
+    return [f'test_arrived{index:05d}.py' for index in range(count)]
 
 
 def test_a_file_whose_weight_is_mostly_estimated_is_a_named_refusal(tmp):
-    """The shipped file's weights, thinned to a tenth: refused by name.
+    """The weight bound, on the shipped file, reached BY DERIVATION.
 
-    The planner prices every unrecorded suite at the median of the
-    recorded ones, so a file that kept a tenth of the tree is a file
-    whose total weight is mostly one borrowed number. The balance
-    guarantee is computed over that total, so it passes trivially --
-    `heaviest/median 1.000` on a plan derived from 345 reference
-    multiples priced at 109 -- and the cell count collapses with it. The
-    refusal is what stops the summary reporting a fiction as balanced,
-    so the assertion here is on the exit code and the REASON, and the
-    plan the planner would otherwise have printed is shown to be
-    balanced first: a guard that also refused a healthy plan would pass
-    this test without doing anything.
+    The planner prices every unrecorded suite at the recorded median, so a
+    file holding the light tail of a measured set is a file whose total is
+    mostly one borrowed number: the balance guarantee is computed over that
+    total, so it passes trivially while the cell count collapses. The plan
+    the planner WOULD have published is shown balanced first, so a guard
+    that also refused a healthy plan cannot pass this.
+
+    The arrivals and the share are both derived, so the assertion holds at
+    any recorded count on any tree; all three are armed, so weight rules.
     """
     planner = _planner()
-    data, weights = _shipped_thinned(10)
-    narrow = dict(data, suite_weights=weights)
-    recorded = sum(weights.values())
-    # What the guard is judging: the estimate is the recorded median,
-    # and the tree carries far more suites than the file records.
-    estimate = statistics.median(list(weights.values()))
-    unmeasured = len(planner.suite_names(ROOT)) - len(weights)
-    share = estimate * unmeasured / (recorded + estimate * unmeasured)
-    assert share > _coverage().MAX_ESTIMATED_WEIGHT_SHARE, share
-    # A plan the planner WOULD have published, and would have called
-    # balanced, on exactly these weights.
-    plan = planner.plan(ROOT, narrow)
-    loads = [cell.weight for cell in plan.cells]
+    coverage = _coverage()
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    recorded = data['suite_weights']
+    tree_names = sorted(recorded)
+    for keep in (4, 30, 164):  # the CLI below runs the last of these
+        kept = dict(sorted(recorded.items(), key=lambda item: item[1])[:keep])
+        arrivals = _arrivals(kept)
+        weights, estimated, _stale = planner.resolve(
+            kept, tree_names + arrivals, 1.0)
+        unmeasured = sum(weights[name] for name in estimated)
+        measured = sum(weights.values()) - unmeasured
+        share = unmeasured / (measured + unmeasured)
+        assert unmeasured >= 2 * measured, (keep, unmeasured, measured)
+        assert coverage.estimated_suite_share(weights, estimated) > (
+            coverage.MAX_ESTIMATED_SUITE_SHARE), keep
+        assert coverage.recorded_skew(weights, estimated) < (
+            coverage.MIN_RECORDED_SKEW), keep
+    tree = _tree(tmp, tree_names + arrivals)
+    narrow = dict(data, suite_weights=kept)
+    loads = [cell.weight for cell in planner.plan(tree, narrow).cells]
     assert max(loads) <= statistics.median(loads) * (
         1 + planner.CELL_WEIGHT_MARGIN), loads
     error = io.StringIO()
     with contextlib.redirect_stderr(error):
-        code = planner.main(['--tree', str(ROOT), '--timings',
+        code = planner.main(['--tree', str(tree), '--timings',
                              str(_write(Path(tmp) / 'narrow.json', narrow))])
     assert code == 1, 'the planner published a matrix on a fiction'
     message = error.getvalue()
-    assert 'estimated' in message, message
-    assert f'{share:.0%}' in message or '0.5' in message, message
+    assert 'weight is estimated' in message, message
+    assert 'suites are estimated' not in message, message
+    assert f'{share:.0%}' in message, message
+    assert f'{measured:.4g} measured against {unmeasured:.4g}' in message
     assert 'refresh_timings.py' in message, message
 
 
