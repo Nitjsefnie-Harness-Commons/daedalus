@@ -7,12 +7,13 @@ of it: a declared `{hang: true}` relay answer that only cancellation ends,
 and the `node -e` launcher, which hands the program text to node as an
 argument instead of writing it to a file.
 """
-import signal
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _outer_bound import (  # noqa: E402
+    OuterBoundExpired, announcing_pid, outer_bound)
 from _repo import ROOT  # noqa: E402
 from _stream_fake import (  # noqa: E402
     STRICT_FETCH, require_node, run_gate, run_inline_gate)
@@ -21,37 +22,29 @@ from _worker_sources import (  # noqa: E402
 
 SYNC = 'POST /sync-tabs'
 
-# The outer alarm this module owns. A control that provokes an expiry sets
+# The outer bound this module owns. A control that provokes an expiry sets
 # its budget inside `tests/_noderun.py` — the code a reversion removes — so
 # without a bound of its own it hangs instead of failing. The census
 # requires the figure composed from a named chain and refuses a constant
 # carried in from a sibling, so the chain is repeated here rather than
 # imported.
 #
-#   OUTER_ALARM_SAMPLES    measured in tests/test_noderun_deadline.py,
-#                          which is the file these samples come from and
-#                          the only one they are a measurement OF. This
-#                          file's armed control finishes in about 12s
-#                          against an 11s deadline, so a 52/55/57s sample
-#                          cannot be one of its runs.
-#   OUTER_ALARM_SLOWEST_S  max of those samples
-#   OUTER_ALARM_S          the alarm, with no multiple — 57s is already
-#                          about five times this file's 11s healthy budget
+#   OUTER_BOUND_SAMPLES     measured in tests/test_noderun_deadline.py,
+#                           which is the file these samples come from and
+#                           the only one they are a measurement OF. This
+#                           file's armed control finishes in about 12s
+#                           against an 11s deadline, so a 52/55/57s sample
+#                           cannot be one of its runs.
+#   OUTER_BOUND_SLOWEST_S   max of those samples
+#   OUTER_BOUND_S           the bound, with no multiple — 57s is already
+#                           about five times this file's 11s healthy budget
 #
 # The margin over THIS file's healthy path is what the number has to keep,
 # and the samples are borrowed rather than re-derived, so the two facts are
 # stated separately on purpose. Re-measuring them is a different task.
-OUTER_ALARM_SAMPLES = (52.0, 55.0, 57.0)
-OUTER_ALARM_SLOWEST_S = max(OUTER_ALARM_SAMPLES)
-OUTER_ALARM_S = round(OUTER_ALARM_SLOWEST_S)
-# Cancelling a timer IS a zero-second deadline, and the census requires the
-# figure to be composed from a named chain rather than typed at the call.
-OUTER_ALARM_CLEAR_S = round(OUTER_ALARM_S * 0)
-
-
-def _raise_outer_deadline(_signum, _frame):
-    """What the outer alarm raises. `TimeoutError` so it is a named expiry."""
-    raise TimeoutError('the outer alarm on this control fired')
+OUTER_BOUND_SAMPLES = (52.0, 55.0, 57.0)
+OUTER_BOUND_SLOWEST_S = max(OUTER_BOUND_SAMPLES)
+OUTER_BOUND_S = round(OUTER_BOUND_SLOWEST_S)
 
 
 _HANG_HARNESS = r"""
@@ -260,40 +253,40 @@ def test_a_stalled_inline_child_is_reported_with_its_own_output(tmp):
 
     The program reaches Node, writes a line and then never settles, so the
     child stalls having produced something — which is precisely the case
-    where its partial output is the only evidence there is. A launcher with
-    no bound of its own returns nothing at all here, and leaves the suite
-    waiting, which is why the outer alarm below is armed by this control
-    rather than left to the machinery it is testing.
+    where its partial output is the only evidence there is. It announces its
+    pid too, because the bound below needs one to kill: the launcher's own
+    cleanup is what a reversion removes, so a launcher with no bound of its
+    own returns nothing at all here and leaves the suite waiting.
     """
     import subprocess  # noqa: E402
 
     import _noderun  # noqa: E402
 
-    program = ("process.stdout.write('the inline child spoke\\n');"
+    pid_file = Path(tmp) / 'inline.pid'
+    program = (announcing_pid(pid_file) + '\n'
+               "process.stdout.write('the inline child spoke\\n');"
                'setInterval(() => {}, 1000);')
     real_deadline = _noderun.CHILD_DEADLINE_S
     _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
     caught = None
-    signal.signal(signal.SIGALRM, _raise_outer_deadline)
-    signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_S)
     try:
-        try:
-            run_inline_gate(require_node(), program, [], cwd=ROOT,
-                            plan={'planned': []})
-        except _noderun.ChildDeadlineExceeded as failure:
-            caught = failure
-        except BaseException as unexpected:  # noqa: BLE001
-            assert not isinstance(unexpected, subprocess.TimeoutExpired), (
-                'a bare TimeoutExpired reached the caller', unexpected)
-            raise
-    except TimeoutError as alarm:
+        with outer_bound(OUTER_BOUND_S, pid_file, 'the stalled inline child'):
+            try:
+                run_inline_gate(require_node(), program, [], cwd=ROOT,
+                                plan={'planned': []})
+            except _noderun.ChildDeadlineExceeded as failure:
+                caught = failure
+            except BaseException as unexpected:  # noqa: BLE001
+                assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+                    'a bare TimeoutExpired reached the caller', unexpected)
+                raise
+    except OuterBoundExpired as wedged:
         raise AssertionError(
-            'the outer alarm fired: the inline child wedged and nothing in '
+            'the outer bound fired: the inline child wedged and nothing in '
             'the suite ended it, which is what this control exists to '
             'prevent'
-        ) from alarm
+        ) from wedged
     finally:
-        signal.setitimer(signal.ITIMER_REAL, OUTER_ALARM_CLEAR_S)
         _noderun.CHILD_DEADLINE_S = real_deadline
     assert caught is not None, 'the inline child that never settles finished'
     assert 'the inline child spoke' in caught.stdout, caught.stdout

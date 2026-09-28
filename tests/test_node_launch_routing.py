@@ -335,7 +335,7 @@ def test_a_module_cannot_rebind_the_shared_hang_multiple(tmp):
     everything.
     """
     root = _composed_population(Path(tmp) / 'planted', '_gm_harness.py',
-                               'SITE_HANG_MULTIPLE = 10 ** 6')
+                                'SITE_HANG_MULTIPLE = 10 ** 6')
     plant = (root / '_gm_harness.py').read_text(encoding='utf-8')
     assert plant.rstrip().endswith('SITE_HANG_MULTIPLE = 10 ** 6'), (
         'the plant did not reach the real module')
