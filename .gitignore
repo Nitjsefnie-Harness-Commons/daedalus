@@ -646,6 +646,7 @@
 !/tests/test_relay_example_placeholders.py
 !/tests/test_release_scan.py
 !/tests/test_repo_layout.py
+!/tests/test_reserved_name_base.py
 !/tests/test_reserved_name_scope.py
 !/tests/test_reserved_test_names.py
 !/tests/test_result_command_write_retry.py
