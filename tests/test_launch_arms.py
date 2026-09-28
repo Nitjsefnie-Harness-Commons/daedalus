@@ -15,6 +15,7 @@ mutant does not stop.
 import ast
 import importlib
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Final
@@ -375,6 +376,71 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
         assert state in ('MERGED', 'INERT'), f'{name}:{line}: state {state!r}'
         assert len(why) > 40, (
             f'{name}:{line}: a {state.lower()} reason, not a shrug')
+
+
+def _functions(name):
+    """`{name: (first line, last line)}` for every function in an analyser.
+
+    The INNESTEST span wins where functions nest, so a lookup answers
+    "which function is this line in" rather than "which functions cover
+    it" — the one a reason has to name.
+    """
+    spans = {}
+    for node in ast.walk(ast.parse((TESTS / name).read_text(
+            encoding='utf-8'))):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            held = spans.get(node.name)
+            if held is None or node.lineno > held[0]:
+                spans[node.name] = (node.lineno, node.end_lineno)
+    return spans
+
+
+def _enclosing(spans, line):
+    for name, (start, end) in sorted(spans.items(),
+                                    key=lambda item: item[1][0],
+                                    reverse=True):
+        if start <= line <= end:
+            return name
+    return ''
+
+
+def test_every_named_non_member_reason_names_the_function_it_is_in(tmp):
+    """A reason that is merely long is not a reason.
+
+    `len(why) > 40` cannot tell a true sentence from a plausible one,
+    and three of these named a function the clause is not in. So every
+    function a MERGED or INERT reason names is checked against the live
+    AST — a reason may not name the wrong one — and every arm a MERGED
+    reason places at a line is checked against the table, because an
+    arm id at a line no arm sits on is the same false sentence.
+    """
+    del tmp
+    files = {row[0] for row in MARKER_NON_MEMBERS}
+    by_file = {name: ([arm for arm in LAUNCH_ARMS if arm[FILE] == name],
+                      _functions(name))
+               for name in files}
+    for name, line, state, why in MARKER_NON_MEMBERS:
+        if state == 'CONTROLLED':
+            continue
+        arms, functions = by_file[name]
+        enclosing = _enclosing(functions, line)
+        named = sorted(fn for fn in functions
+                       if re.search(rf'\b{re.escape(fn)}\b', why))
+        assert not set(named) - {enclosing}, (
+            f'{name}:{line}: the reason names a function the clause is not '
+            f'in: {sorted(set(named) - {enclosing})}; it is in {enclosing!r}')
+        if state == 'MERGED':
+            placed = [(int(at), arm_id) for at, arm_id in
+                      re.findall(r':(\d+)\s+([a-z][\w-]*(?:\.[\w-]+)*)',
+                                 why)]
+            for at, arm_id in placed:
+                assert any(arm[ID] == arm_id for arm in arms), (
+                    f'{name}:{line}: the reason names {arm_id!r}, which is no '
+                    f'arm of the enumeration')
+                assert [arm[LINE] for arm in arms
+                        if arm[ID] == arm_id] == [at], (
+                    f'{name}:{line}: the reason places {arm_id!r} at :{at}, '
+                    'and the table puts it elsewhere')
 
 
 def _marker(name):
