@@ -181,16 +181,39 @@ def test_the_expectation_has_exactly_one_definition(tmp):
 
 
 def _declared_names(path):
-    """Every top-level name the module declares, whatever its kind."""
+    """Every name `path` declares at module scope, whatever its kind."""
+    return {name for _file, _node, name in _module_declarations(path)}
+
+
+def _module_declarations(path):
+    """(file, node, name) for every definition `path` makes at module scope.
+
+    A definition inside `if` / `try` / `with` / a loop is one: it binds at
+    module scope however it is indented, and the defensive `except
+    ImportError` fallback a caller would write is exactly that shape. A
+    definition inside a `def`, a `class` or a `lambda` is not - the name
+    is local there, and counting it would refuse correct code. `ast.walk`,
+    which descends into those as well, is the trade declined here.
+
+    A name bound by `from X import name` is a reference and is not
+    yielded: the import is the edge, not a second definition of it.
+    """
     tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-    names = set()
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            names.update(getattr(target, 'id', None)
-                         for target in node.targets)
-        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-            names.add(node.name)
-    return names
+    return _scope_declarations(tree.body, path.name)
+
+
+def _scope_declarations(nodes, name):
+    scopes = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            yield name, node, node.name
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    yield name, node, target.id
+        elif not isinstance(node, scopes):
+            yield from _scope_declarations(ast.iter_child_nodes(node), name)
 
 
 def test_the_required_names_are_spelled_in_exactly_one_module(tmp):
@@ -337,31 +360,40 @@ FILTER_NAMES = frozenset(
 
 
 def test_the_filter_is_reached_through_ci_gate(tmp):
-    """One filter, and the edge that reaches it - not its behaviour.
+    """One filter, reached through ci_gate - the edge, not its behaviour.
 
     A copy pasted back into a caller is the drift this branch exists to
     end, and it survives every other control: a behaviourally identical
     private `_judged` in `ci_wait.py` leaves the 81 pre-existing tests in
-    the four suites that read these modules green. The two halves below
-    are the tripwire the chokepoint needs. The first refuses a second
-    definition anywhere in the skill, counting only definitions - the
-    import that IS the edge is not one, which is why a correct tree lists
-    one holder. The second pins the binding, because `wait.ci_gate` is the
-    module `ci_wait` imported, so this compares the filter in use with the
-    filter owned rather than two separately loaded copies of one file.
+    the four suites that read these modules green.
 
-    What it does not see: a copy pasted under a name none of these four
+    The first half refuses a second module-scope definition of any of the
+    four names anywhere in the skill, nested control flow included, and
+    accepts an alias bound to the authority - the pattern `ci_wait.py`
+    already uses for `REQUIRED_WORKFLOWS`, and what `_is_an_alias` is
+    for. The second pins the binding: the object `ci_wait` uses is
+    ci_gate's, or the name is not bound at all, which is the
+    attribute-access spelling of the same edge and is not a copy either.
+
+    What it does not see: a copy pasted under a name none of the four
     carries. That is the standing limit of a control that watches names.
     """
     del tmp
     skill = _util.ROOT / '.claude' / 'skills' / 'changing-daedalus'
     wait = _util.load(skill / 'ci_wait.py', 'ci_wait_one_filter')
-    holders = [path.name for path in sorted(skill.iterdir())
-               if path.suffix == '.py'
-               and FILTER_NAMES & _declared_names(path)]
-    assert holders == ['ci_gate.py'], holders
-    assert wait._judged is wait.ci_gate._judged
-    assert wait._superseded is wait.ci_gate._superseded
+    owners = {}
+    for path in sorted(skill.iterdir()):
+        if path.suffix != '.py':
+            continue
+        for file, node, name in _module_declarations(path):
+            if name in FILTER_NAMES and not _is_an_alias(node):
+                owners.setdefault(file, []).append(name)
+    assert sorted(owners) == ['ci_gate.py'], owners
+    assert sorted(owners['ci_gate.py']) == sorted(FILTER_NAMES), owners
+    for name in ('_judged', '_superseded'):
+        owned = getattr(wait.ci_gate, name)
+        assert getattr(wait, name, owned) is owned, (
+            f'ci_wait binds its own {name}; the filter must be ci_gate\'s')
 
 
 def test_both_waiters_read_this_one_predicate(tmp):
