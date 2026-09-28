@@ -30,3 +30,7 @@ def _api_put(body):
 def _api_get(path):
     return {'via': 'api', 'method': 'GET', 'path': path, 'body': None,
             'timeout': 30}
+
+def _answered_result(**over):
+    base = {'id': 'job1', 'result': 'ok', 'error': None, 'ts': 1}
+    return dict(base, **over)

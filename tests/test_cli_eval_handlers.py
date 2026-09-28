@@ -34,7 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_get, _api_put  # noqa: E402
+from _cli_handler_wire import (  # noqa: E402
+    _answered_result, _api_get, _api_put)
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -84,11 +85,6 @@ def _stdin(text):
         yield
     finally:
         sys.stdin = original
-
-
-def _result(**over):
-    base = {'id': 'job1', 'result': 'ok', 'error': None, 'ts': 1}
-    return dict(base, **over)
 
 
 # ── do_tabs ──────────────────────────────────────────────────────────
@@ -199,8 +195,9 @@ def test_do_put_sends_the_file_it_read_and_waits_for_the_result(tmp):
     plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 15)]
     recorded, out = run_cli(
         ['put', 'job1', path], [{'target': 'tab0', 'did': 'd1'},
-                                _result(tabId='tab0', world='page:cdp',
-                                        exec_ms=3)],
+                                _answered_result(tabId='tab0',
+                                                 world='page:cdp',
+                                                 exec_ms=3)],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \
@@ -294,7 +291,7 @@ def test_do_put_waits_the_default_fifteen_seconds_and_not_the_zero(tmp):
     plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 15)]
     recorded, out = run_cli(
         ['put', 'job1', path, '-t', '0'],
-        [{'target': 'tab0', 'did': 'd1'}, _result()],
+        [{'target': 'tab0', 'did': 'd1'}, _answered_result()],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.timeouts == [15], recorded.timeouts
@@ -311,7 +308,7 @@ def test_do_put_carries_an_explicit_timeout_through_unchanged(tmp):
     plan = [_api_put(body), _wait('job1', 'tab0', 'd1', 7)]
     recorded, out = run_cli(
         ['put', 'job1', path, '--timeout', '7'],
-        [{'target': 'tab0', 'did': 'd1'}, _result()],
+        [{'target': 'tab0', 'did': 'd1'}, _answered_result()],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.timeouts == [7], recorded.timeouts
@@ -330,7 +327,8 @@ def test_do_exec_sends_the_inline_code_stripped(tmp):
     recorded, out = run_cli(
         ['exec', 'job5', '  1+1  '],
         [{'target': 'tab0', 'did': 'd2'},
-         _result(id='job5', tabId='tab0', world='page-main', exec_ms=7)],
+         _answered_result(id='job5', tabId='tab0', world='page-main',
+                          exec_ms=7)],
         module=commands_eval, plan=plan, target_tab='tab0', token=TOK)
 
     assert recorded.api_calls == [('PUT', '/command', body)], \

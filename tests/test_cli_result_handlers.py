@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_get  # noqa: E402
+from _cli_handler_wire import _answered_result, _api_get  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -39,18 +39,13 @@ def _rendered(out):
     return out.replace('<-', IN)
 
 
-def _result(**over):
-    base = {'id': 'job1', 'result': 'ok', 'error': None, 'ts': 1}
-    return dict(base, **over)
-
-
 # ── do_result ────────────────────────────────────────────────────────
 
 def test_do_result_asks_for_the_tab_it_was_given(tmp):
     """The tab is a query parameter, percent-encoded by the shared builder."""
     del tmp
     recorded, out = run_cli(
-        ['result'], [_result(tabId='tab0')],
+        ['result'], [_answered_result(tabId='tab0')],
         module=commands_eval, plan=[_api_get('/result?tab=tab0')],
         target_tab='tab0', token=TOK)
 
@@ -63,7 +58,7 @@ def test_do_result_asks_for_the_broadcast_result_when_no_tab_is_set(tmp):
     """No tab means the path carries no query at all, not an empty one."""
     del tmp
     _recorded, out = run_cli(
-        ['result'], [_result()], module=commands_eval,
+        ['result'], [_answered_result()], module=commands_eval,
         plan=[_api_get('/result')],
         target_tab='', token=TOK)
 
@@ -80,9 +75,9 @@ def test_do_result_adds_the_consume_flag_only_when_it_was_asked(tmp):
     """
     del tmp
     _recorded, out = run_cli(
-        ['result', '-c'], [_result(tabId='tab0')], module=commands_eval,
-        plan=[_api_get('/result?tab=tab0&consume=1')], target_tab='tab0',
-        token=TOK)
+        ['result', '-c'], [_answered_result(tabId='tab0')],
+        module=commands_eval, plan=[_api_get('/result?tab=tab0&consume=1')],
+        target_tab='tab0', token=TOK)
 
     assert _rendered(out) == f'{IN} job1  tab=tab0\nok\n', repr(out)
 
@@ -102,7 +97,7 @@ def test_do_result_prints_raw_json_when_asked(tmp):
     """`--raw` hands the machine the envelope, unindented by no printer."""
     del tmp
     _recorded, out = run_cli(
-        ['result', '--raw'], [_result()], module=commands_eval,
+        ['result', '--raw'], [_answered_result()], module=commands_eval,
         plan=[_api_get('/result?tab=tab0')], target_tab='tab0', token=TOK)
 
     assert out == (
@@ -115,7 +110,7 @@ def test_do_result_renders_an_undefined_result_as_a_word(tmp):
     """
     del tmp
     _recorded, out = run_cli(
-        ['result'], [_result(result=None, tabId='tab0')],
+        ['result'], [_answered_result(result=None, tabId='tab0')],
         module=commands_eval,
         plan=[_api_get('/result?tab=tab0')], target_tab='tab0', token=TOK)
 
