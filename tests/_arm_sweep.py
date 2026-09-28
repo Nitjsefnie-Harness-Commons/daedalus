@@ -164,6 +164,16 @@ def _drop_operand(source, lines, tree, line, index):
     return source[:cut[0]] + ''.join(text) + source[cut[1]:], removed
 
 
+def _end_of(node, line):
+    """The node's end line, refused rather than guessed when absent.
+
+    Every node here is parsed out of a real source, so it carries one.
+    """
+    if node.end_lineno is None:
+        raise ValueError(f'no end for the statement on line {line}')
+    return node.end_lineno
+
+
 def cut_arm(source, spec):
     """`(mutated_source, removed_text)` for a `cut` field of the table."""
     parts = spec.split(':')
@@ -180,16 +190,16 @@ def cut_arm(source, spec):
         # `while <guard>:` becomes `while True:` with its body intact.
         start = line
         end = (node.body[0].lineno - 1 if getattr(node, 'body', None)
-               else node.end_lineno)
+               else _end_of(node, line))
         new = ' ' * node.col_offset + ':'.join(parts[2:]) + '\n'
     elif is_elif and isinstance(node, ast.If):
         # An `elif` is nested in the head's orelse, so its own end_lineno
         # runs to the end of the whole chain. The arm is the header plus
         # its own body; the chain continues.
-        start, end, new = line, node.body[-1].end_lineno, ''
+        start, end, new = line, _end_of(node.body[-1], line), ''
     else:
         end = int(parts[2]) if op == 'drop_span' and len(parts) > 2 \
-            else node.end_lineno
+            else _end_of(node, line)
         start = line
         if op in ('drop_stmt', 'drop_span'):
             new = ''
