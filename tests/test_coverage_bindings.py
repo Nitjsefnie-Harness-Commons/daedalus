@@ -11,7 +11,8 @@ from _coverage_authority_scan import (  # noqa: E402
     phrase_holders)
 from _coverage_guard import _synthetic_violations  # noqa: E402
 from _coverage_mutation_specs import (  # noqa: E402
-    _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _DEST_MUTATIONS,
+    _BASH_MUTATION_SPECS, _CACHE_MUTATIONS, _CHAIN_INVOKE,
+    _DEST_MUTATIONS, _INLINE_INVOKE, _RECEIVER_MUTATIONS,
     _SCOPE_INVOKE as _SHARED_SCOPE_INVOKE, _SCOPE_MUTATIONS,
     _UNFOLLOWABLE_MUTATIONS)
 from _mutation_sweep import mutation_sweep  # noqa: E402
@@ -19,10 +20,6 @@ from _mutation_sweep import mutation_sweep  # noqa: E402
 
 _SCOPE_INVOKE = (
     'suite.test_python_evaluation_scopes_preserve_builtin_dict_identity(None)')
-_INLINE_INVOKE = (
-    'import test_static_guard_regressions as regression_suite; '
-    'regression_suite.test_inline_dict_receivers_refuse_hidden_'
-    'launchers(None)')
 _SCOPE_BINDING_INVOKE = (
     'import test_coverage_scope_bindings as binding_suite; '
     'binding_suite.test_import_bindings_shadow_the_builtin_dict(None)')
@@ -36,25 +33,12 @@ _SUBSCRIPT_INVOKE = (
 _FORM_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_value_preserving_form_is_refused(None)')
-_RECEIVER_CARRIER_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_receiver_that_carries_a_launcher_is_refused(None)')
-_RECEIVER_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_receiver_that_only_names_a_launcher_stays_clean(None)')
 _ARM_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_binding_arm_of_issue_1114_is_refused(None)')
-_ATOM_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_transforming_form_stays_an_atom(None)')
 _TARGET_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_target_that_carries_a_launcher_is_refused(None)')
-_CHAIN_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_launcher_used_as_a_callee_is_reached_through_'
-    'the_chain(None)')
 
 
 def _mutation_specs():
@@ -152,39 +136,6 @@ def _mutation_specs():
     slice_field = (
         "ast.Slice: ('lower', 'upper', 'step'),",
         "ast.Slice: ('lower', 'upper'),")
-    call_receiver = (
-        "    if not isinstance(callee, _ATOMS):\n"
-        "        yield from _carried_parts(callee)\n",
-        "    if False:\n        yield from _carried_parts(callee)\n")
-    # The gate is only a narrowing: handing an atom to the walk finds a
-    # bare module name and calls it a launcher in the receiver position,
-    # which is where a direct launch must not be refused. Without this
-    # row the set proves the arm exists and not that it is shut.
-    receiver_atoms = (
-        "    if not isinstance(callee, _ATOMS):\n"
-        "        yield from _carried_parts(callee)\n",
-        "    if True:\n        yield from _carried_parts(callee)\n")
-    # The subscripts the descent consumes are sub-values in their own
-    # right; dropping them is what leaves a launcher in an index or a
-    # bound invisible to this arm.
-    receiver_slice = (
-        "        if isinstance(callee, ast.Subscript):\n"
-        "            yield from _carried_parts(callee.slice)\n", "")
-    # The reads the descent consumes, of the set `_carried_parts.__doc__`
-    # names. Dropping the arm leaves the issue's second spelling clean and
-    # the constant-read row beside it passing, so only the callee-chain row
-    # notices. Dropping the flag alone keeps both refusals and reinstates
-    # the false positive the flag exists to stop.
-    receiver_launch = (
-        "        names_launch = (isinstance(callee, ast.Attribute)\n"
-        "                        and callee.attr in _LAUNCH_READS)\n"
-        "        if names_launch and launch_only and "
-        "callee is not value.func:\n"
-        "            yield callee\n"
-        "        launch_only = launch_only and names_launch\n", "")
-    receiver_flag = (
-        "        launch_only = launch_only and names_launch\n",
-        "        launch_only = True\n")
     # The whole elif chain, so the arm is deleted rather than narrowed.
     # Measured: deleting one arm at a time IS caught, by the
     # classification control and the over-refusal rows, so the comment
@@ -331,15 +282,6 @@ def _mutation_specs():
         ('comprehension target', 'bindings', (comprehension_target,),
          _TARGET_INVOKE),
         ('walk arms', 'bindings', (walk_arms,), _FORM_INVOKE),
-        ('receiver opens atoms', 'bindings', (receiver_atoms,),
-         _RECEIVER_INVOKE),
-        ('receiver drops the subscripts', 'bindings', (receiver_slice,),
-         _RECEIVER_CARRIER_INVOKE),
-        ('receiver drops the launch reads', 'bindings', (receiver_launch,),
-         _CHAIN_INVOKE),
-        ('receiver keeps a chain open past a constant', 'bindings',
-         (receiver_flag,), _ATOM_INVOKE),
-        ('call receiver', 'bindings', (call_receiver,), _INLINE_INVOKE),
         ('function default scope', 'scopes',
          (function_default_scope,),
          _SCOPE_INVOKE),
@@ -382,7 +324,7 @@ def _mutation_specs():
          'suite.test_match_captures_cannot_disguise_nonroot_chdir(None)'),
     ) + _BASH_MUTATION_SPECS + _SCOPE_MUTATIONS \
         + _DEST_MUTATIONS + _CACHE_MUTATIONS \
-        + _UNFOLLOWABLE_MUTATIONS
+        + _UNFOLLOWABLE_MUTATIONS + _RECEIVER_MUTATIONS
 
 
 def test_call_result_assignment_refuses_a_hidden_launcher(tmp):
