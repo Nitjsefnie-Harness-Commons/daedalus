@@ -262,6 +262,7 @@
 # ─── tests ───
 !/tests/
 !/tests/_argv_read.py
+!/tests/_arm_sweep.py
 !/tests/_bash_resolver_scan.py
 !/tests/_binding_assertions.py
 !/tests/_bound_site_rows.py
@@ -351,6 +352,7 @@
 !/tests/_jsroute_tab.py
 !/tests/_jsroute_target.py
 !/tests/_jsroute_timeline.py
+!/tests/_launch_arms.py
 !/tests/_launch_audit.py
 !/tests/_launch_census.py
 !/tests/_launch_fixtures.py
@@ -606,6 +608,7 @@
 !/tests/test_js_coverage_workflow.py
 !/tests/test_js_lines.py
 !/tests/test_jsread_mask.py
+!/tests/test_launch_arms.py
 !/tests/test_launch_control_boundary.py
 !/tests/test_launch_path.py
 !/tests/test_line_lengths.py
