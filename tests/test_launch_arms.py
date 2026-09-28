@@ -17,6 +17,7 @@ whose mutant does not answer wrong but does not stop.
 import os
 import sys
 from pathlib import Path
+from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
@@ -30,8 +31,17 @@ from _step_ceiling import within_step_ceiling  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
 
-# (id, file, line, cut, anchor, what, state, evidence)
-ID, FILE, LINE, CUT, ANCHOR, WHAT, STATE, EVIDENCE = range(8)
+# (id, file, line, cut, anchor, what, state, evidence). Final keeps each a
+# literal, so an arm read through one is that column's own type; bound to a
+# plain int it reads as the union of the row's, `str | int`.
+ID: Final = 0
+FILE: Final = 1
+LINE: Final = 2
+CUT: Final = 3
+ANCHOR: Final = 4
+WHAT: Final = 5
+STATE: Final = 6
+EVIDENCE: Final = 7
 
 ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
