@@ -440,7 +440,7 @@ def test_main_writes_exactly_what_the_shared_derivation_returns(tmp):
 
     generator = _util.load(
         ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_shared')
-    real_derive = generator.derive
+    real_derive = getattr(generator, 'derive')
     handed = []
     # The stub's text has to name the tracked path, or main's own
     # postcondition refuses the run and the file it leaves behind is
@@ -452,11 +452,11 @@ def test_main_writes_exactly_what_the_shared_derivation_returns(tmp):
         handed.append(sorted(paths))
         return stub_text
 
-    generator.derive = named_only
+    setattr(generator, 'derive', named_only)
     try:
         result = generator.main(repo)
     finally:
-        generator.derive = real_derive
+        setattr(generator, 'derive', real_derive)
 
     assert result == 0, result
     assert handed == [['tracked.txt']], handed
