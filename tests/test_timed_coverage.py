@@ -177,8 +177,6 @@ def test_a_file_bounded_at_one_cell_takes_a_one_cell_measurement(tmp):
     assert 'one cell' not in err, err
 
 
-
-
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
     """The other half of the tripwire, and the half that was missing.
 
