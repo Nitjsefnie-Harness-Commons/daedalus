@@ -98,6 +98,7 @@
     "_annotations": {"python": ["tests/_control_writes.py"]},
     "_answer_mcp_command": {"python": ["tests/_mcp_load.py"]},
     "_answer_one_ext_command": {"python": ["tests/_cli_helpers.py"]},
+    "_api_get": {"python": ["tests/_cli_handler_wire.py"]},
     "_api_put": {"python": ["tests/_cli_handler_wire.py"]},
     "_append_to": {"python": ["tests/_version_contract_scanners.py"]},
     "_apply_binding": {"python": ["tests/_pyroute_values.py"]},
