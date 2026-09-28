@@ -11,14 +11,15 @@ sibling suite, which `tests/test_suite_import_boundaries.py` refuses. A
 for these three.
 
 All three carry a `ci_wait` prefix and none keeps the bare name it had in
-its declaring suite. That is the same reason twice: `_run` is owned in this
-tree by `tests/_boundary.py`, the node-scenario runner, and `_Clock` is
-declared by two other suites that are genuinely different classes (one
-records each attempt and may refuse, one is a settable wall clock). A
-`tests/_*.py` module taking a bare `_run` or `_Clock` would own a name two
-suites already use, trading the sibling-import red for a
-re-implementation red - and the allowance rows that would clear it belong
-to suites this branch has no business editing.
+its declaring suite. That is the same reason twice: both `_run` and
+`_Clock` are names suites in this tree already declare, and neither is
+declared generically - `tests/_boundary.py`'s `_run` is a node-scenario
+runner's, and the `_Clock` declarations belong to suites that are
+genuinely different classes (one records each attempt and may refuse, one
+is a settable wall clock). A `tests/_*.py` module taking a bare `_run` or
+`_Clock` would own a name suites already use, trading the sibling-import
+red for a re-implementation red - and the allowance rows that would clear
+it belong to suites this branch has no business editing.
 """
 import contextlib
 
