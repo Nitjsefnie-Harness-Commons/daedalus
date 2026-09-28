@@ -595,4 +595,30 @@ BOUND_SITE_ROWS = (
       "    return next(iter({subprocess})).run(['git', 'status'],\n"
       '                                      check=True, timeout=30)'),
      [(3, 'git', 'timeout')]),
+    # `pf.origin-not-bound` (the `origin not in bound` half of
+    # _launch_audit.py:549). The receiver here is a NAME bound to a
+    # call, and the call's callee names a module the analyser can
+    # account for -- so `origin in safe_names` is satisfied and only
+    # `origin not in bound` refuses. That name is `subprocess` itself,
+    # which the plain import puts in `safe_names` and the rebind puts in
+    # `bound`; nothing places the bare call at :408, which reads the
+    # RECEIVER of the call, not the callee of what the receiver is
+    # bound to. The two rows are the two spellings of that rebind, and
+    # both are reported rather than silently passing: any module that
+    # rebinds a name it also imported to a subprocess-derived value and
+    # then calls a result through a name has this arm between it and a
+    # bounded call the analyser never sees.
+    ('rebound-module-name-called-bare-is-unplaced',
+     ('import subprocess\n'
+      'subprocess = subprocess\n'
+      "x = subprocess.run(['git', 'status'], check=True)\n"
+      "x(['git', 'status'], check=True, timeout=30)\n"),
+     [(4, 'unreadable', 'unplaced')]),
+    ('rebound-module-name-from-import-module-is-unplaced',
+     ('import importlib\n'
+      'import subprocess\n'
+      "subprocess = importlib.import_module('subprocess')\n"
+      "x = subprocess.run(['git', 'status'], check=True)\n"
+      "x(['git', 'status'], check=True, timeout=30)\n"),
+     [(5, 'unreadable', 'unplaced')]),
 )
