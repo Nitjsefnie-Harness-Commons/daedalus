@@ -24,7 +24,8 @@ import _util  # noqa: E402
 from _arm_sweep import arm_sweep  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
-                          REDUNDANT, STEP_CEILING_CONTROL, STATES)
+                          REDUNDANT, SECONDARY_CONTROLLED,
+                          STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
 from _launch_refusal_rows import LAUNCH_REFUSAL_ROWS  # noqa: E402
 from _step_ceiling import within_step_ceiling  # noqa: E402
@@ -112,11 +113,21 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
     assert not unknown, f'controlled arms naming no row or control: {unknown}'
     unused = sorted(CONTROL_LABELS - {arm[EVIDENCE] for arm in LAUNCH_ARMS})
     assert not unused, f'controls no arm names: {unused}'
-    stepped = [arm[ID] for arm in LAUNCH_ARMS
-               if arm[EVIDENCE] == STEP_CEILING_CONTROL]
-    assert len(stepped) == 1, (
+    stepped = sorted(arm[ID] for arm in LAUNCH_ARMS
+                     if arm[EVIDENCE] == STEP_CEILING_CONTROL)
+    assert set(stepped) == {'fx.skip-registered', 'mr.while-guard'}, stepped
+    # The step ceiling exists for a mutant that does not answer WRONG, it
+    # does not stop, so every arm bound to it is one whose sweep reports
+    # no verdict at all. An arm that DOES answer has a row to hold it,
+    # and reaching for the ceiling instead would be a control that can
+    # only fail on a hang.
+    answered = sorted(arm[ID] for arm in LAUNCH_ARMS
+                      if arm[EVIDENCE] != STEP_CEILING_CONTROL
+                      and arm[EVIDENCE] in ROW_LABELS | CONTROL_LABELS)
+    assert 'fx.skip-registered' in stepped and 'mr.while-guard' in stepped, (
         f'the step ceiling is bound to {stepped}; it exists for a fixpoint '
-        'that does not stop, so exactly one arm should reach for it')
+        'or a loop that does not stop, so both of those arms should reach '
+        f'for it, and none of {answered} answers without one')
 
 
 def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
