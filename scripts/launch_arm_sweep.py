@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
 """Sweep EVERY arm of both analysers and check what the records claim.
 
-`CRASH_CONTROLLED` says which CONTROLLED arms go red by RAISING rather
-than to another value. `tests/test_launch_arms.py` checks each name in
-it really does, and that the set is a partition of the CONTROLLED arms
--- but neither is a statement about the arms the set does NOT name, so
-"and no other arm is crash-held" was a claim only re-derivable by
-rewriting this sweep by hand. This is that sweep.
-
-Run it with no arguments, from anywhere:
+`CRASH_CONTROLLED` is checked both ways a 14-arm set can be: each name
+really crashes, and the set partitions the CONTROLLED arms. Neither
+covers the 136 arms it does NOT name, so "no other arm is crash-held"
+was re-derivable only by hand.
 
     python3 scripts/launch_arm_sweep.py
-
-It is a gate and not a suite on purpose. Sweeping all 150 arms costs
-about two minutes and it is the completeness half of a claim whose
-forward half already runs on every leg, so putting it in `tests/` would
-buy nothing a reader cannot have in one command. Every counter it
-prints is derived rather than copied from a record, so the records
-cannot drift from it silently: each check either passes because the two
-agree, or exits nonzero naming the arms that disagree.
 """
 import sys
 import tempfile
@@ -36,12 +24,8 @@ from _launch_arms import (CONTROLLED, LAUNCH_ARMS,  # noqa: E402
 # The arm table's own column order, named so nothing here reads a bare 6.
 ID, STATE, EVIDENCE = 0, 6, 7
 
-# The step ceiling is a control for a mutant that does not answer WRONG,
-# it does not stop, so the arms bound to it are exactly the arms whose
-# child produces no verdict. An arm that DOES answer has a row to hold
-# it, and reaching for the ceiling instead would be a control that can
-# only fail on a hang. That is a claim about the sweep rather than about
-# the table, so it is checked here and nowhere else.
+# The arms bound to the step ceiling are exactly the arms whose child
+# produces no verdict: it is for a mutant that does not stop.
 CEILING_ARMS = {arm[ID] for arm in LAUNCH_ARMS
                 if arm[EVIDENCE] == STEP_CEILING_CONTROL}
 EVIDENCE_OF = {arm[ID]: arm[EVIDENCE] for arm in LAUNCH_ARMS}
@@ -60,9 +44,8 @@ def _report(findings):
                      if 'refused' in found)
     silent = {name for name, found in findings.items()
               if found.get('timed_out')}
-    # An arm whose child did not answer has no verdict for its evidence to
-    # be IN, so counting it as uncontrolled would condemn the two arms the
-    # step ceiling exists for. They are checked by the ceiling check below.
+    # A child that did not answer has no verdict for its evidence to be
+    # IN, so counting it uncontrolled would condemn the two ceiling arms.
     answered = [arm for arm in LAUNCH_ARMS
                 if arm[ID] not in silent and arm[ID] not in refused]
     uncontrolled = sorted(

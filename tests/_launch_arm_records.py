@@ -2,34 +2,30 @@
 
 `tests/_launch_arms.py` is the enumeration: every guard arm of the two
 launch-audit analysers, in one of three states, with the evidence for
-its state. This module is the rest -- the four sets that qualify what
-that enumeration means, and the mechanism note for each arm whose
-verdict a reader would otherwise have to take on trust. They are one
-concern and not the enumeration, and the enumeration has a size ceiling
-to keep.
+its state. This module is the rest -- the sets that qualify what that
+enumeration means, and the mechanism note for each arm whose verdict a
+reader would otherwise take on trust. The enumeration has a size
+ceiling.
 
-    CRASH_CONTROLLED       arms whose evidence goes red by RAISING
-    SECONDARY_CONTROLLED   a control that holds an arm without being its
-                           recorded evidence
-    MARKER_NON_MEMBERS     guard clauses the spelling-independent marker
-                           finds outside every listed arm, and what
-                           covers each
-    ROW_UNCLAIMED          rows this branch added that no arm records
-    STEP_CEILING_HELD_BY   the test that holds each step-ceiling arm,
-                           which no row can
-    ARM_NOTES              why a particular verdict is what it is
+    CRASH_CONTROLLED      arms whose evidence goes red by RAISING
+    SECONDARY_CONTROLLED  a control holding an arm that is not its
+                          recorded evidence
+    MARKER_NON_MEMBERS    marker clauses outside every listed arm, and
+                          what covers each
+    ROW_UNCLAIMED         rows this branch added that no arm records
+    STEP_CEILING_HELD_BY  the test holding each step-ceiling arm
+    ARM_NOTES             why a particular verdict is what it is
 
 `tests/test_launch_arms.py` checks all six, and the table carries a
 one-line pointer to the note at each arm it names.
 """
 # The CONTROLLED arms whose `evidence` goes red by RAISING rather than
-# to another value. A crash is a real control -- the suite goes red --
-# but a weaker one: it pins "the analyser must not raise on this
-# shape", which a robustness change can satisfy while the arm's own
-# clause stops deciding. So the subset is NAMED beside the count rather
-# than folded into it: `evidence-does-not-control: 0` means the named
-# evidence's rendered verdict changes, and this set is the part of that
-# held by the absence of a crash.
+# to another value. A crash is a real control, but a weaker one: it
+# pins "the analyser must not raise on this shape", which a robustness
+# change can satisfy while the arm's own clause stops deciding. So the
+# subset is NAMED beside the count rather than folded into it: this
+# set is the part of `evidence-does-not-control: 0` held by the
+# absence of a crash.
 #
 # Derived by sweeping all 150 arms and reading, per arm, whether its own
 # evidence moved to a value or to a `RAISED ...` string. Fourteen, and
@@ -40,15 +36,10 @@ one-line pointer to the note at each arm it names.
 # classify. Its real control is the step ceiling and the row this table
 # used to name is the second, weaker one; see SECONDARY_CONTROLLED.
 #
-# The suite checks each name here really crashes, and that the set is a
-# partition of the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
-# crash-held -- is a claim about the 150 arms this set does NOT name, so
-# it needs the whole sweep, and the sweep was a script outside the tree
-# until now. `scripts/launch_arm_sweep.py` is it: it re-derives the set
-# from the tree, checks it against this tuple in BOTH directions, and
-# exits nonzero naming the arms that disagree. Sweeping all 150 costs
-# about two minutes, which is why it is a gate and not a suite; the
-# claim is still checkable in one command.
+# The suite checks each name here really crashes, and that the set
+# partitions the CONTROLLED arms. COMPLETENESS -- that no OTHER arm is
+# crash-held -- needs the whole sweep, which
+# `scripts/launch_arm_sweep.py` re-derives and checks both ways.
 CRASH_CONTROLLED = frozenset({
     'fw.empty', 'fw.resolve', 'ha.name-guard', 'hl.no-container',
     'mr.func-shape', 'mr.not-a-call', 'mr.target-not-name', 'norm.no-dot',
@@ -58,12 +49,12 @@ CRASH_CONTROLLED = frozenset({
 
 # A CONTROLLED arm's `evidence` names the control that enters the arm
 # that can actually FAIL. Where another control also holds the arm it is
-# named here, rather than left implicit in the gap a reader of that one
-# line would not know about. Three arms need it: `mr.while-guard`'s row
-# reaches the guard through a KeyError on the ordinary path where the
-# step ceiling enters the CYCLE the guard exists for; `rs.guard` is held
-# by a raise AND by a value-changing control; and `pf.origin-not-bound`
-# moves both of its rows, of which the table records one.
+# named here rather than left implicit. Three arms need it:
+# `mr.while-guard`'s row reaches the guard through a KeyError on the
+# ordinary path where the step ceiling enters the CYCLE the guard
+# exists for; `rs.guard` is held by a raise AND by a value-changing
+# control; `pf.origin-not-bound` moves both of its rows, of which the
+# table records one.
 SECONDARY_CONTROLLED = {
     'mr.while-guard': ('machinery-reached-by-assignment-is-unproved',),
     'rs.guard': ('import-module-name-bound-twice',),
@@ -71,44 +62,36 @@ SECONDARY_CONTROLLED = {
         'rebound-module-name-from-import-module-is-unplaced',),
 }
 
-# "Every arm of both analysers" is a GRANULARITY claim, so it is stated
-# with its granularity. The spelling-independent marker is every
-# `if`/`elif`/`while`/`return` header plus each disjunct of a multi-line
-# condition (which is the granularity the table already uses for :524 and
-# :549), and a clause inside a listed arm's SPAN is that arm rather than
-# an exception. `return` is in the marker because the table treats it as
-# a member: `pf.fallthrough` is `drop_stmt` on a `return True` and
-# `rw.no-container` on a `return None`, so a fallthrough return is a
-# clause by this table's own practice.
+# The closure claim is a GRANULARITY claim, so it is stated with one. The
+# spelling-independent marker is every `if`/`elif`/`while`/`return` header
+# plus each disjunct of a multi-line condition (the granularity the table
+# already uses for :524 and :549), and a clause inside a listed arm's
+# SPAN is that arm. `return` is in it because the table treats one as a
+# member (`pf.fallthrough` is `drop_stmt` on one).
 #
-# Twenty-two clauses fall outside every arm, and each is named here with
-# what covers it: MERGED is a chain head whose every member IS a listed
-# arm (five), CONTROLLED is one that stands alone with a row holding it
-# (ten, all measured to move a label -- six to a value, and :53, :68,
-# :153 and :383 by a raise), and INERT is a clause whose deletion moves
-# no verdict at all (seven), with the reason why. The seven are the four
-# `return None` that close a function, where falling off the end returns
-# the same value, and the three whose only caller reads them for
-# membership or truthiness, where the implicit `None` reads the same.
+# Twenty-two clauses fall outside every arm, each named with what covers
+# it: MERGED is a chain head whose every member IS a listed arm (five),
+# CONTROLLED stands alone with a row holding it (ten, measured to
+# move a label: six to a value, four by a raise), and INERT is one
+# whose deletion moves nothing (seven): a last statement, or one only
+# caller reads for membership or truthiness.
 #
 # The two finer clauses sit INSIDE a listed arm: :567 is the `**`-unpack
 # operand of `ub.not-bounded` (:566) and _argv_read.py:212 the `seen`
 # operand of `rs.guard` (:203). The table splits :524 and :549 per
 # operand and leaves these whole, a spelling difference, not a gap.
-# `tests/test_launch_arms.py` re-derives the marker and refuses a
-# non-member this tuple does not name.
+# `tests/test_launch_arms.py` re-derives it and refuses a non-member
+# this tuple does not name.
 MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 53, 'CONTROLLED',
      'kwarg-receiver-shadowing-a-module-import-is-unproved'),
     ('_launch_audit.py', 68, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     ('_launch_audit.py', 95, 'INERT',
-     "normalize's own return of its argument; every caller of it "
-     'membership-tests the result or compares it to a literal, so the '
-     'implicit None a deletion leaves reads the same and no row moves'),
+     "normalize returning its own argument; callers only test it"),
     ('_launch_audit.py', 104, 'INERT',
-     "callee_of's documented `or None`; it is the function's last "
-     'statement, so deleting it returns the same value and no row moves'),
+     "callee_of's `or None`; deleting its last statement returns "
+     'the same value'),
     ('_launch_audit.py', 211, 'MERGED',
      'the ast.Import chain head; every member is listed, at :213 '
      'imp.subprocess-alias, :218 imp.machinery, :220 imp.dotted and '
@@ -129,9 +112,8 @@ MARKER_NON_MEMBERS = (
      'the head of a one-member chain; :394 ch.machinery-member is its '
      'only member and is listed'),
     ('_launch_audit.py', 572, 'INERT',
-     'the False that closes unplaced_bounded_call; its one caller tests '
-     'it for truth, so the implicit None a deletion leaves reads the '
-     'same and no row moves'),
+     'the False closing unplaced_bounded_call; its one caller '
+     'only tests it for truth'),
     ('_launch_audit.py', 591, 'CONTROLLED',
      'ambiguous-name'),
     ('_launch_audit.py', 658, 'CONTROLLED',
@@ -139,43 +121,38 @@ MARKER_NON_MEMBERS = (
     ('_launch_audit.py', 675, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     ('_argv_read.py', 65, 'INERT',
-     "the None that closes resolve_constant's recursion; it is the "
-     "function's last statement, so deleting it returns the same value "
-     'and no row moves'),
+     "the None closing resolve_constant's recursion; deleting its "
+     'last statement returns the same value'),
     ('_argv_read.py', 88, 'MERGED',
      'the ast.Name chain head of head_is_ambiguous; every member is '
      'listed, at :90 ha.name-guard, :93 ha.follow, :96 ha.list and '
      ':98 ha.else'),
     ('_argv_read.py', 99, 'INERT',
-     "the None that closes head_is_ambiguous's cap loop; it is the "
-     'function\'s last statement, so deleting it returns the same value '
-     'and no row moves'),
+     "the None closing head_is_ambiguous's cap loop; deleting its "
+     'last statement returns the same value'),
     ('_argv_read.py', 114, 'MERGED',
      'the ast.Name chain head of resolve_string; every member is '
      'listed, at :115 rs.guard, :117 rs.ambiguous and :119 rs.follow'),
     ('_argv_read.py', 123, 'INERT',
-     'the False that closes head_is_ambiguous; its one caller tests it '
-     'for truth, so the implicit None a deletion leaves reads the same '
-     'and no row moves'),
+     'the False closing head_is_ambiguous; its one caller only '
+     'tests it for truth'),
     ('_argv_read.py', 153, 'CONTROLLED',
      'a-clean-launch-emits-nothing'),
     ('_argv_read.py', 216, 'INERT',
-     "the None that closes resolve_string's recursion; it is the "
-     "function's last statement, so deleting it returns the same value "
-     'and no row moves'),
+     "the None closing resolve_string's recursion; deleting its "
+     'last statement returns the same value'),
 )
 
 # The rows THIS BRANCH added that no arm RECORDS as its evidence. The
 # forward direction -- every CONTROLLED arm names a real row -- is the
 # one the table is load-bearing on; this is the other one, so a row
 # meeting the table with no arm behind it is not left for a reader to
-# resolve by guess. Holders are MEASURED (sweeping every arm for which
-# sweep moved the label) and there are several, none of which records
-# the row: these are not rows nothing reaches, but rows that are a
-# second control for an arm whose recorded evidence is something else.
-# Rows predating the table are not listed -- many serve the tree-wide
-# rule directly. A suite asserts each name here is still a real row that
-# still no arm records, so naming one retires it here.
+# resolve by guess. Holders are MEASURED, and there are several, none
+# of which records the row: not rows nothing reaches, but a second
+# control for an arm whose recorded evidence is something else.
+# Rows predating the table are not listed; many serve the tree-wide
+# rule. A suite asserts each name is still a real row no arm records,
+# so naming one retires it here.
 ROW_UNCLAIMED = (
     ('class-name-is-a-defined-name',
      ('fw.resolve', 'norm.no-dot', 'pf.not-safe', 'sink.gate',
@@ -207,26 +184,16 @@ ARM_NOTES = {
     ''',
     'mr.while-guard': '''
 # The step ceiling, not the row: the row enters this arm through a
-# KeyError on the ordinary path, and the guard is for the CYCLE,
-# which the step ceiling enters and the row does not. The row still
-# holds the arm; SECONDARY_CONTROLLED says so.
+# KeyError on the ordinary path, and the guard is for the CYCLE, which
+# the step ceiling enters and the row does not.
     ''',
 }
 
 
-# `STEP_CEILING_CONTROL` is not a row label and not an `ARM_CONTROLS`
-# label, so an evidence string naming it resolves to nothing a suite can
-# check -- the one test that looked at it checked it against itself. The
-# arms it holds are real and the re-review proved it by deletion, but a
-# claim no command re-derives is the defect this issue is about, so the
-# test that holds each is named here instead and
-# `tests/test_launch_arms.py` resolves every name against the tree.
-#
-# Neither is a row assertion, so neither is pinned by the sweep's verdict
-# table: what holds them is that the arm's mutant does not STOP.
-# `scripts/launch_arm_sweep.py` checks the other half of the same fact --
-# that the arms bound to the ceiling are exactly the two whose child
-# produces no verdict at all.
+# `STEP_CEILING_CONTROL` is in neither row file, so an evidence string
+# naming it resolves to nothing -- the one test that looked at it
+# checked it against itself. What holds these two bounds a STEP COUNT
+# rather than a verdict, so the test is named and resolved.
 STEP_CEILING_HELD_BY = {
     'fx.skip-registered': (
         'tests/test_launch_arms.py:'
