@@ -9,58 +9,36 @@ is the half of that which owns the measurement; the planner owns the
 packing, and the workflow owns the ordering (download the artifacts,
 then run this).
 
-WHAT IT READS. One downloaded run is a directory of cell artifacts:
+WHAT IT READS, AND WHICH RUNS. Both are `scripts/ci/timings_runs.py`,
+which owns the artifact layout, the run selection and the two rules
+that keep a refresh from narrowing the file: the runs that produced a
+COMPLETE cell set, and the collapsed run that produced one cell where
+the file bounds the matrix at more than one, which is skipped and
+reported rather than taken as the partition. The median is taken over
+the selected runs and `runs` records that sample -- a median over one
+run is still a median; a file that silently claimed three is not.
 
-    <runs-root>/<run-id>/<cell>/reference.json
-    <runs-root>/<run-id>/<cell>/head-<n>/<suite-stem>.json
+THE WRITE, WHICH IS A UNION. The file is rewritten when a weight moved
+beyond `WEIGHT_MARGIN` of the recorded one, a suite appeared in the
+measurements, or the recorded target was re-derived because the margin
+forbade it -- that last reason depends on the tree, through the
+planner, so the decision is not a function of the measurements alone.
+Otherwise nothing is written and the reason is printed, so a scheduled
+refresh that finds nothing to say is a no-op, not a commit.
 
-and each suite file is what `time_tests.py` writes: `{"tests": {test
-name: seconds}}`. A suite's seconds in a run are the mean of its
-per-round totals over the rounds that carried it -- the MEASURED head
-rounds only. The warm-up round is discarded by the timed job's design
-and the base side is a different tree; neither is a head round and
-neither is read here. Nothing else under a cell (`base-<n>/`,
-`warmup/`, `verdict.json`, `ratio.txt`) is read. Cell NAMES are read
-from the directory names and never from a list: the planner generates
-them, and a name this file knew would be a name the next packing
-renames.
-
-WHICH RUNS. The runs are the most recent that produced a COMPLETE set
-of cell artifacts -- the same cell set as the newest run that produced
-any -- regardless of whether the run concluded green. A run's overall
-conclusion is not evidence about its durations: `timed` lists
-`aggregate` in `needs:`, so one red correctness leg (a flaky Windows
-`suites` leg reds often enough) skips the whole measuring matrix, and
-selecting only green runs would leave the file unrefreshed for exactly
-as long as the staleness this file exists to fix goes unnoticed. A run
-with a DIFFERENT cell set is a different partition of the tree, so its
-numbers are not comparable and it is skipped, and the report says how
-far back the search reached and why. A cell directory with no
-reference reading is a REFUSAL naming the cell and the suites it
-carried: a run that produced the full set of cells and lost one unit's
-reading is a broken measurement, and stepping over it here is the
-silence the maintainer ruled out. The workflow's walk is the gate in
-front of this one, and it reaches the opposite disposition for that
-same run -- it steps over a candidate whose cells lack `reference.json`,
-and releases the reference cell set while nothing has been kept yet, so
-a run from before the cells measured the reference workload cannot block
-the search. The two are not in conflict, and neither is a fallback for
-the other: the walk narrows the candidate list, and this refusal is
-what a TREE the walk did not narrow -- a hand-built runs root, an
-operator's own download -- gets instead of a silent skip.
-`tests/test_timed_workflow.py` pins the walk's half by executing it.
-The median is taken over the selected runs and `runs` records that
-sample -- a median over one run is still a median; a file that silently
-claimed three is not.
-
-THE WRITE. The file is rewritten when a weight moved beyond
-`WEIGHT_MARGIN` of the recorded one, a suite appeared in the
-measurements, a suite left them, or the recorded target was re-derived
-because the margin forbade it -- that last reason depends on the tree,
-through the planner, so the decision is not a function of the
-measurements alone. Otherwise nothing is written and the reason is
-printed, so a scheduled refresh that finds nothing to say is a no-op,
-not a commit.
+A suite that LEFT the measurements is not a reason to write, because a
+run does not leave a suite by measuring it faster: a run that executed
+one cell of a fifteen-cell matrix did not measure the other fourteen,
+and writing the measured set alone deletes the weights of every suite
+that run did not happen to execute. That is how a refresh left the
+shipped file describing 28 of 326 suites and the planner then priced
+the other 298 at the median of the heavy tail that survived. So the
+recorded weights of suites these runs did not measure are carried into
+the write in the file's own units, the new measurement wins wherever
+both have one, and the report names what was carried so a reader can
+tell which numbers a write measured. A suite deleted from the tree
+keeps its recorded weight until some run measures it again, which
+costs a named `stale` entry in the planner's summary and nothing else.
 
 THE BOUNDS. `target_cell_weight` and `max_cells` are not measurements;
 they are the file's two policy numbers, coupled to the planner's
@@ -88,8 +66,6 @@ the timed job runs it, and says so in that same field.
 """
 import argparse
 import json
-import math
-import statistics
 import sys
 from pathlib import Path
 
@@ -100,12 +76,18 @@ try:
     from timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
         plan_is_balanced, verify_target)
+    from timings_runs import (
+        RefreshError, _head_rounds, _median_weights, _suite_seconds,
+        _unit_scale, discover_runs, read_run, select)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
         BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
     from scripts.ci.timings_bounds import (
         BoundsError, basis_sentence, derive_target, estimated_count,
         plan_is_balanced, verify_target)
+    from scripts.ci.timings_runs import (
+        RefreshError, _head_rounds, _median_weights, _suite_seconds,
+        _unit_scale, discover_runs, read_run, select)
 
 # The share a recomputed weight may differ from the recorded one before
 # the file is rewritten: runner noise and a suite's own jitter move a
@@ -117,165 +99,6 @@ WEIGHT_MARGIN = 0.25
 # would be a better estimate at the cost of one artifact download per
 # run, which is 15 cell artifacts each.
 SAMPLE_RUNS = 3
-# The timed job's own round names. A head round is measured; `base-<n>`
-# and `warmup` are not. The cell names, unlike these, are generated.
-_ROUND_PREFIX = 'head-'
-_REFERENCE_FILE = 'reference.json'
-
-
-class RefreshError(Exception):
-    """A refusal with a reason the caller can act on."""
-
-
-def _positive(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise RefreshError(f'{name} is not a number: {value!r}')
-    number = float(value)
-    if not math.isfinite(number) or number <= 0:
-        raise RefreshError(f'{name} is not a positive finite number: '
-                           f'{value!r}')
-    return number
-
-
-def _head_rounds(cell):
-    """The cell's measured round directories, in name order."""
-    return sorted(path for path in cell.iterdir()
-                  if path.is_dir() and path.name.startswith(_ROUND_PREFIX))
-
-
-def _suite_seconds(cell, run_id):
-    """Every suite the cell's head rounds carry, and its per-round total.
-
-    A suite missing from one round is averaged over the rounds that
-    carried it -- the measured head rounds are what the total is over --
-    and a suite in no round is simply not measured, which is the
-    planner's estimate path rather than a failure.
-    """
-    totals = {}
-    for round_dir in _head_rounds(cell):
-        for path in sorted(round_dir.glob('*.json')):
-            try:
-                data = json.loads(path.read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError) as error:
-                raise RefreshError(
-                    f'run {run_id} cell {cell.name}: cannot read '
-                    f'{path.name}: {error}') from None
-            if not isinstance(data, dict) or \
-                    not isinstance(data.get('tests'), dict):
-                raise RefreshError(
-                    f'run {run_id} cell {cell.name}: {path.name} carries no '
-                    '"tests" map; it is not a time_tests.py summary')
-            seconds = 0.0
-            for name, value in data['tests'].items():
-                try:
-                    seconds += _positive(value, f'{path.name} {name}')
-                except RefreshError as error:
-                    raise RefreshError(
-                        f'run {run_id} cell {cell.name}: {error}') from None
-            entry = totals.setdefault(f'{path.stem}.py', [])
-            entry.append(seconds)
-    return {name: sum(values) / len(values)
-            for name, values in totals.items()}
-
-
-def _reference(cell, run_id, suites):
-    """The cell's reference seconds, or a refusal naming cell and suites."""
-    path = cell / _REFERENCE_FILE
-    try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, json.JSONDecodeError) as error:
-        raise RefreshError(
-            f'run {run_id} cell {cell.name}: no readable '
-            f'{_REFERENCE_FILE} ({error}); the weight of the suites it '
-            f'carried cannot be counted in reference units: '
-            f'{", ".join(sorted(suites)) or "none"}') from None
-    if not isinstance(data, dict) or 'seconds' not in data:
-        raise RefreshError(
-            f'run {run_id} cell {cell.name}: {_REFERENCE_FILE} carries no '
-            f'"seconds"; the suites it carried are unmeasured: '
-            f'{", ".join(sorted(suites)) or "none"}')
-    return _positive(data['seconds'], f'{_REFERENCE_FILE} seconds')
-
-
-def read_run(run_dir, run_id):
-    """One run's per-suite weights in reference-multiples, and readings."""
-    cells = {path.name: path for path in sorted(run_dir.iterdir())
-             if path.is_dir() and _head_rounds(path)}
-    if not cells:
-        raise RefreshError(f'run {run_id} carries no cell artifacts')
-    weights = {}
-    references = {}
-    for name, cell in cells.items():
-        seconds = _suite_seconds(cell, run_id)
-        reading = _reference(cell, run_id, seconds)
-        references[name] = reading
-        for suite, value in seconds.items():
-            weights[suite] = value / reading
-    return weights, references
-
-
-def discover_runs(runs_root):
-    """Run directories under the root, newest (highest id) first."""
-    if not runs_root.is_dir():
-        raise RefreshError(f'no runs root at {runs_root}')
-    runs = [(int(path.name), path) for path in runs_root.iterdir()
-            if path.is_dir() and path.name.isdigit()]
-    return sorted(runs, key=lambda item: -item[0])
-
-
-def select(runs, wanted):
-    """The most recent `wanted` runs with a complete cell set, and a report.
-
-    Completeness is judged against the newest run that produced any cell
-    at all: its cell set is the partition these numbers are about. An
-    older run with a different set is a different partition; it is
-    skipped, and the skip is reported rather than absorbed.
-    """
-    selected = []
-    expected = None
-    incomplete = []
-    empty = 0
-    for run_id, path in runs:
-        cells = {entry.name for entry in path.iterdir()
-                 if entry.is_dir() and _head_rounds(entry)}
-        if not cells:
-            empty += 1
-            continue
-        if expected is None:
-            expected = cells
-        if cells != expected:
-            incomplete.append(run_id)
-            continue
-        weights, references = read_run(path, run_id)
-        selected.append((run_id, weights, references))
-        if len(selected) == wanted:
-            break
-    report = {'reached': len(selected) + len(incomplete) + empty,
-              'incomplete': incomplete, 'empty': empty}
-    return selected, report
-
-
-def _median_weights(selected):
-    """Every suite's median weight, and the median reference seconds."""
-    by_suite = {}
-    references = []
-    for _run_id, weights, readings in selected:
-        for suite, weight in weights.items():
-            by_suite.setdefault(suite, []).append(weight)
-        references.extend(readings.values())
-    medians = {suite: statistics.median(values)
-               for suite, values in by_suite.items()}
-    return medians, statistics.median(references)
-
-
-def _unit_scale(old_units, reference):
-    """What a number recorded in `old_units` is worth in the new units."""
-    if old_units == 'reference-multiples':
-        return 1.0
-    if old_units == 'seconds':
-        return 1.0 / reference
-    raise RefreshError(f'cannot convert units {old_units!r} into '
-                       'reference-multiples')
 
 
 def _moved(recorded, computed):
@@ -296,21 +119,25 @@ def _moved(recorded, computed):
     return moved
 
 
-def _reasons(existing, computed):
-    """Why the file would be rewritten; empty means leave it alone."""
+def _reasons(existing, measured):
+    """Why the file would be rewritten; empty means leave it alone.
+
+    Membership is judged against what the RUNS measured, not against
+    the union: a suite this run did not measure is carried forward, not
+    appeared, and one the file records and the runs did not measure is
+    neither of the two -- it keeps its recorded weight, so there is no
+    reason to write and the message names it separately.
+    """
     reasons = []
     if existing['units'] != 'reference-multiples':
         reasons.append(
             f'units {existing["units"]} -> reference-multiples (target '
             'rescaled by the same factor as the weights)')
     recorded = existing['suite_weights']
-    appeared = sorted(set(computed) - set(recorded))
-    gone = sorted(set(recorded) - set(computed))
+    appeared = sorted(set(measured) - set(recorded))
     if appeared:
         reasons.append('appeared: ' + ', '.join(appeared))
-    if gone:
-        reasons.append('disappeared: ' + ', '.join(gone))
-    moved = _moved(recorded, computed)
+    moved = _moved(recorded, measured)
     if moved:
         reasons.append('moved beyond '
                        f'{WEIGHT_MARGIN:.0%}: ' + ', '.join(
@@ -325,6 +152,32 @@ def _rounded(weight):
     return value if value > 0 else weight
 
 
+def _runs_text(run_ids):
+    """The ONE rendering of a run list, used by every field that names one.
+
+    The commit subject and the file's `measured_from` are two records
+    of the same measurement, so they are rendered from the same list by
+    the same join. They did not have to be, and did not: commit
+    `eed3ae9e` is titled "ci: refresh suite timings from run
+    36318864740" while the file it wrote records `measured_from:
+    36310409594`, because the workflow built the subject from `${{
+    github.run_id }}` -- the REFRESH workflow's own run -- and the
+    refresher recorded the `tests` run it measured. Both were right
+    about their own value, and nothing compared them.
+    """
+    return ', '.join(str(run_id) for run_id in run_ids)
+
+
+def commit_message(run_ids):
+    """The subject the workflow commits a refreshed data file under.
+
+    Written beside the file rather than assembled in the workflow, so
+    the two names a reader sees on one commit cannot come from two
+    different runs.
+    """
+    return f'ci: refresh suite timings from run {_runs_text(run_ids)}'
+
+
 def _written(weights, target, max_cells, run_ids, units):
     return {
         'schema_version': SCHEMA_VERSION,
@@ -333,7 +186,7 @@ def _written(weights, target, max_cells, run_ids, units):
         'units': units,
         'suite_weights': {suite: _rounded(weight)
                           for suite, weight in sorted(weights.items())},
-        'measured_from': ', '.join(str(run_id) for run_id in run_ids),
+        'measured_from': _runs_text(run_ids),
         'runs': len(run_ids),
     }
 
@@ -349,8 +202,23 @@ def _attach_basis(tree, data, cells):
     return data
 
 
-def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None):
+def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
+             message_file=None):
     """Recompute the file from the runs; return the message, or refuse.
+
+    A WRITE IS A UNION, never a replacement. A run that executed one
+    cell of a fifteen-cell matrix measured a fraction of the tree, and
+    writing the measured set alone deletes the weights of every suite
+    that run did not happen to execute -- which is how a refresh left
+    the shipped file describing 28 of 326 suites, and the planner then
+    priced the other 298 at the median of the heavy tail that
+    survived. So the recorded weights of suites these runs did not
+    measure are carried into the write in the file's own units, the
+    new measurement wins wherever both have one, and the report names
+    what was carried so a reader can tell which numbers a write
+    measured. A suite deleted from the tree keeps its recorded weight
+    until some run measures it again, which costs a named `stale`
+    entry in the planner's summary and nothing else.
 
     The caller owns the exit code; `RefreshError` and `BoundsError` are
     the refusals. The target is verified against the margin BEFORE the
@@ -362,19 +230,37 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None):
         tree = _REPO_ROOT
     existing = read_timings(out)
     runs = discover_runs(runs_root)
-    selected, report = select(runs, wanted)
+    selected, report = select(runs, wanted, existing['max_cells'],
+                              len(existing['suite_weights']))
     if not selected:
         return (f'no run under {runs_root} produced a complete set of cell '
                 f'artifacts ({report["empty"]} with none, '
-                f'{len(report["incomplete"])} with a different cell set); '
-                f'wrote nothing to {out}')
+                f'{len(report["incomplete"])} with a different cell set'
+                + (_degenerate_message(report, existing['max_cells'])
+                   if report['degenerate'] else '')
+                + f'); wrote nothing to {out}')
     medians, reference = _median_weights(selected)
     run_ids = [run_id for run_id, _w, _r in selected]
+    if message_file is not None:
+        # Written on BOTH outcomes, a changed file and an unchanged
+        # one, because the workflow's commit step reads it after its
+        # own `git diff --quiet` has already decided there is a commit
+        # to make. It is a workspace file the step never stages.
+        Path(message_file).write_text(
+            commit_message(run_ids) + '\n', encoding='utf-8')
     where = (f'median over runs {", ".join(str(r) for r in run_ids)} '
              f'(sample {len(run_ids)}, {len(medians)} suites); '
              + _reached_message(report))
     scale = _unit_scale(existing['units'], reference)
-    data = _written(medians, existing['target_cell_weight'] * scale,
+    carried = {suite: weight * scale
+               for suite, weight in existing['suite_weights'].items()
+               if suite not in medians}
+    if carried:
+        where += (f'; {len(carried)} recorded weights carried forward '
+                  'unmeasured, so the write describes no less of the tree '
+                  f'than it did: ' + ', '.join(sorted(carried)))
+    data = _written(dict(carried, **medians),
+                    existing['target_cell_weight'] * scale,
                     existing['max_cells'], run_ids, 'reference-multiples')
     target, note = verify_target(tree, data, data['max_cells'])
     data['target_cell_weight'] = target
@@ -384,11 +270,18 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None):
     if not reasons:
         return (f'{out} unchanged: no weight moved beyond '
                 f'{WEIGHT_MARGIN:.0%} of its recorded value; '
-                f'no suite appeared or disappeared; the target holds the '
+                f'no suite appeared; the target holds the '
                 f'margin; {where}; wrote nothing')
     _attach_basis(tree, data, len(selected[0][2]))
     _write(out, data)
     return f'wrote {out}: ' + '; '.join(reasons) + f'; {where}'
+
+
+def _degenerate_message(report, max_cells):
+    return (f', {len(report["degenerate"])} with one cell against a '
+            f'max_cells bound of {max_cells}, which is a matrix that '
+            'collapsed rather than a partition of this tree: '
+            + ', '.join(str(run_id) for run_id in report['degenerate']))
 
 
 def _reached_message(report):
@@ -396,6 +289,9 @@ def _reached_message(report):
             + (f' ({len(report["incomplete"])} incomplete cell sets: '
                + ', '.join(str(run_id) for run_id in report['incomplete'])
                + ')' if report['incomplete'] else '')
+            + (f' ({len(report["degenerate"])} collapsed to one cell: '
+               + ', '.join(str(run_id) for run_id in report['degenerate'])
+               + ')' if report['degenerate'] else '')
             + (f' ({report["empty"]} with no cell artifacts)'
                if report['empty'] else ''))
 
@@ -446,6 +342,13 @@ def _parser():
         '--runs', type=int, default=SAMPLE_RUNS,
         help='how many complete runs the median uses')
     parser.add_argument(
+        '--message-file', default=None,
+        help='write the commit subject the workflow commits the refreshed '
+             'file under to this path; it is rendered from the same runs '
+             'the file records in `measured_from`, so the two cannot '
+             'disagree (a refresh only, since that is the mode the '
+             'timed-timings workflow runs)')
+    parser.add_argument(
         '--seed', action='store_true',
         help='seed the first file from one run\'s raw seconds and always '
              'write it; the target and the cell bound are derived from '
@@ -469,7 +372,7 @@ def main(argv=None):
             message = seed(Path(args.runs_root), out, Path(args.tree))
         else:
             message = refresh(Path(args.runs_root), out, args.runs,
-                              Path(args.tree))
+                              Path(args.tree), args.message_file)
     except (RefreshError, BoundsError, PlanError) as error:
         print(f'refresh_timings: {error}', file=sys.stderr)
         return 1

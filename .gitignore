@@ -252,6 +252,8 @@
 !/scripts/ci/thresholds.py
 !/scripts/ci/time_tests.py
 !/scripts/ci/timings_bounds.py
+!/scripts/ci/timings_coverage.py
+!/scripts/ci/timings_runs.py
 !/scripts/ci/type_error_baseline.py
 !/scripts/ci/workflow_yaml.py
 !/scripts/ci/workflow_yaml_scan.py
@@ -744,6 +746,7 @@
 !/tests/test_teardown_retry.py
 !/tests/test_time_tests.py
 !/tests/test_timed_basis_feed.py
+!/tests/test_timed_coverage.py
 !/tests/test_timed_matrix_shape.py
 !/tests/test_timed_planner.py
 !/tests/test_timed_refresh.py
