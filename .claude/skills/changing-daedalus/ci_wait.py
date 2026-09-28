@@ -2,7 +2,7 @@
 """Wait for every workflow run on one commit SHA to conclude.
 
     python3 -u ci_wait.py <sha> [--repo R] [--interval S] [--timeout S]
-                             [--grace S]
+                             [--grace S] [--required NAME]
 
 The exit code is the verdict, so a caller cannot conflate the outcomes the
 hand-rolled loops this replaces conflate:
@@ -29,9 +29,18 @@ and on a head that conflicts with its base the two are indistinguishable:
 the merge ref cannot be built, no pull_request workflow is dispatched, and
 the `tests` matrix - the workflow that gates the merge - has no run at all.
 Two unrelated short workflows conclude, the tool says acceptable and exits
-0, and every session that reads that exit code reads a false green. The
-expectation is a constant rather than a flag, so it cannot be switched off
-by whoever is waiting.
+0, and every session that reads that exit code reads a false green.
+
+The expectation is a constant, and stays the DEFAULT: a caller who names
+nothing gets exactly the exit-4 refusal below, so a reader cannot switch
+it off by waiting. A caller naming ANOTHER repository may also name that
+repository's gate with --required NAME (repeatable, and all of them must
+be present). That is the only way out, and it is deliberate: `tests` is
+this repository's gate and is not another one's, so without it an
+all-green head on a differently-named gate refused at 4 with a line
+reading as "the gate never started" (issue #1318). A caller who names
+another repository and no gate is told, on the refusal itself, which name
+is the only one checked.
 
 An incomplete set is answered, never waited on forever. If the open pull
 request for this head reports itself CONFLICTING or DIRTY the run is never
@@ -105,11 +114,12 @@ DEFAULT_INTERVAL = 60
 DEFAULT_TIMEOUT = 5400
 DEFAULT_GRACE = 300
 ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
-# The workflows whose absence is a refusal rather than a wait. The
-# expectation itself is ci_gate's, which watch_all.py reads too; the name is
-# bound here because it is this tool's public contract and a constant rather
-# than a flag, so a caller who may switch it off is the reader this tool
-# exists to protect.
+# The workflows whose absence is a refusal rather than a wait, and the
+# default a caller who names nothing is held to. The expectation itself is
+# ci_gate's, which watch_all.py reads too; the name is bound here because it
+# is this tool's public contract. --required replaces it for a caller
+# watching another repository, and names nothing else: a caller who names
+# no gate cannot switch the default off (issue #1318).
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
 
@@ -134,16 +144,41 @@ def prs_on(repo, sha):
     return gh_head_prs.head_pull_requests(owner, name, sha)
 
 
-def _missing(runs):
+def _missing(runs, *, required=REQUIRED_WORKFLOWS):
     """The required workflow names no run the filter kept carries.
 
     Read through the shared predicate, which applies the filter itself, so
     a superseded run's name cannot satisfy the gate on its own. The name
     is this module's own for the question the exit-4 refusal asks, so
-    `wait` reads `_missing(runs)` and never the predicate, and a suite
-    asserts on that name rather than on the predicate's.
+    `wait` reads `_missing(runs, required=...)` and never the predicate,
+    and a suite asserts on that name rather than on the predicate's.
     """
-    return ci_gate.missing_required(runs)
+    return ci_gate.missing_required(runs, required=required)
+
+
+def _gate_note(repo, named):
+    """The note a missing-gate report carries, or nothing at all.
+
+    Both facts it turns on are the caller's - which `--repo` was named,
+    and whether `--required` was - and only `main` holds them. It is
+    empty on this repository and empty for a caller who stated their own
+    gate, so on both of those the reports print exactly what they printed
+    before the flag existed.
+
+    The names are rendered from the constant rather than spelled here, so
+    the line cannot drift from the gate the tool actually checks.
+    """
+    if named or repo == DEFAULT_REPO:
+        return ''
+    names = ', '.join(sorted(REQUIRED_WORKFLOWS))
+    return (f'  only {names} is checked by default; --required NAME states '
+            'the workflow that gates another repository')
+
+
+def _print_note(note, out):
+    """Append a report's note, or leave the report as it was."""
+    if note:
+        print(note, file=out, flush=True)
 
 
 def verdict(runs, *, required=REQUIRED_WORKFLOWS):
@@ -195,7 +230,8 @@ def print_matrix(runs, sha, out):
         print(f'  {run.get("name")}: {state}{suffix}', file=out, flush=True)
 
 
-def _timeout_report(runs, timeout, sha, out, missing=None, grace=None):
+def _timeout_report(runs, timeout, sha, out, missing=None, grace=None,
+                    note=''):
     """The exit-2 line about the runs the bound was reached with.
 
     `missing` is the required workflow no run carried, which is a wait the
@@ -211,6 +247,7 @@ def _timeout_report(runs, timeout, sha, out, missing=None, grace=None):
         print(f'wait exceeded {timeout}s on {sha[:12]}: no {missing} run and '
               f'the {grace}s grace has not elapsed, so this head is not '
               'certified', file=out, flush=True)
+        _print_note(note, out)
         return
     open_runs = ', '.join(
         f'{run.get("name")} ({run.get("status")})'
@@ -228,15 +265,16 @@ def _blocked(pull_requests):
     return None
 
 
-def _conflict_report(missing, pull, sha, out):
+def _conflict_report(missing, pull, sha, out, note=''):
     """The exit-4 line about the pull request that will never dispatch."""
     print(f'no {missing} run on {sha[:12]}: pull request '
           f'#{pull.get("number")} is {pull.get("mergeStateStatus")} '
           f'(mergeable: {pull.get("mergeable")}), so the workflow is never '
           'dispatched', file=out, flush=True)
+    _print_note(note, out)
 
 
-def _grace_report(missing, runs, grace, sha, out):
+def _grace_report(missing, runs, grace, sha, out, note=''):
     """The exit-4 line about a gate that has not been dispatched in time.
 
     Nothing here says "merge": this path is reached with an open pull
@@ -248,9 +286,11 @@ def _grace_report(missing, runs, grace, sha, out):
     print(f'no {missing} run on {sha[:12]} after the {grace}s grace, so this '
           f'head is not certified: the {len(runs)} run(s) on this SHA are '
           f'{present}', file=out, flush=True)
+    _print_note(note, out)
 
 
-def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
+def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
+         required=REQUIRED_WORKFLOWS, note=''):
     """Poll until a verdict or the bound; returns the exit code.
 
     A rate-limit refusal does not end the wait: the watcher says once where
@@ -266,6 +306,10 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
     pull request is re-read every observation rather than once, because
     `mergeable` is UNKNOWN while GitHub computes it and can still come
     back CONFLICTING minutes later.
+
+    `required` is the set this caller is held to and `note` the line a
+    refusal naming a missing gate carries; both are handed down to the
+    two questions they govern rather than re-decided here.
     """
     deadline = time.monotonic() + timeout
     watcher = gh_client.Watcher('ci_wait', out=sys.stderr,
@@ -282,9 +326,9 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
                 print(f'wait exceeded {timeout}s on {sha[:12]}: still rate '
                       'limited, no verdict to report', file=out, flush=True)
             else:
-                _timeout_report(runs, timeout, sha, out, missing, grace)
+                _timeout_report(runs, timeout, sha, out, missing, grace, note)
             return 2
-        state, offenders = verdict(runs)
+        state, offenders = verdict(runs, required=required)
         missing = None
         print_matrix(runs, sha, out)
         if state == 'acceptable':
@@ -311,7 +355,7 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
         if state == 'incomplete':
             if incomplete_since is None:
                 incomplete_since = time.monotonic()
-            missing = ' or '.join(_missing(runs))
+            missing = ' or '.join(_missing(runs, required=required))
             try:
                 blocked = _blocked(prs_on(repo, sha))
             except gh_client.QueryError as exc:
@@ -324,14 +368,14 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE):
                           f'conflicting head cannot be told from a slow one: '
                           f'{exc}', file=sys.stderr, flush=True)
             if blocked is not None:
-                _conflict_report(missing, blocked, sha, out)
+                _conflict_report(missing, blocked, sha, out, note)
                 return 4
             if time.monotonic() - incomplete_since >= grace:
-                _grace_report(missing, runs, grace, sha, out)
+                _grace_report(missing, runs, grace, sha, out, note)
                 return 4
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            _timeout_report(runs, timeout, sha, out, missing, grace)
+            _timeout_report(runs, timeout, sha, out, missing, grace, note)
             return 2
         watcher.sleep(max(0, min(interval, remaining)))
 
@@ -347,10 +391,18 @@ def main(argv=None):
     parser.add_argument('--grace', type=int, default=DEFAULT_GRACE,
                         help='seconds an incomplete set is waited out '
                              'before it refuses with exit 4')
+    parser.add_argument('--required', action='append', default=None,
+                        metavar='NAME',
+                        help='a workflow whose absence refuses; repeat for '
+                             'each, and every one must be present '
+                             '(default: this repository\'s own gate)')
     parser.add_argument('--once', action='store_true',
                         help='one trial evaluation: print the matrix to '
                              'stderr, exit 0 unless the query failed')
     args = parser.parse_args(argv)
+    required = (frozenset(args.required) if args.required
+                else REQUIRED_WORKFLOWS)
+    note = _gate_note(args.repo, args.required)
     if not SHA_RE.fullmatch(args.sha):
         print(f'not a 40-character commit SHA: {args.sha!r}', file=sys.stderr)
         return 3
@@ -369,11 +421,12 @@ def main(argv=None):
     try:
         if not args.once:
             return wait(args.repo, args.sha, args.interval, args.timeout,
-                        sys.stdout, grace=args.grace)
+                        sys.stdout, grace=args.grace, required=required,
+                        note=note)
         watcher = gh_client.Watcher('ci_wait', out=sys.stderr)
         runs = watcher.poll(lambda: runs_on(args.repo, args.sha))
         print_matrix(runs, args.sha, sys.stderr)
-        state, _ = verdict(runs)
+        state, _ = verdict(runs, required=required)
         print(f'state: {state}', file=sys.stderr)
         return 0
     except gh_client.QueryError as exc:
