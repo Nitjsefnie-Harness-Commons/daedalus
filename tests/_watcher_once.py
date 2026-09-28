@@ -16,8 +16,11 @@ as a measurement.
 The module binds no fixture: a caller hands in the answers and the fake, so
 the same harness measures this tree's watchers and the base commit's. It is
 not a suite itself; `run_tests.py` only loads `test_*.py`. Its controls live
-in tests/test_watcher_budget.py, which judges the idle bounds, and in
-tests/test_watcher_loop_budget.py, which judges the figure over a loop.
+in tests/test_watcher_budget.py, which judges the idle bounds, in
+tests/test_watcher_loop_budget.py, which judges the figure over a loop, and
+in tests/test_watcher_poll_index.py, which judges the boundaries a figure is
+grouped by. The last of those reads the loop's log whole rather than through
+this module's `seen`, because that projection cannot show a re-used index.
 
 `trial` leaves one path unprotected and no caller reaches it: a trial that
 hits its own timeout kills the watcher but not the `gh` children that watcher
