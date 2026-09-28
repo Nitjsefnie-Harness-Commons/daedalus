@@ -117,8 +117,10 @@ def test_a_foreign_repository_without_a_named_gate_is_told_the_default(tmp):
     note = ('  only tests is checked by default; --required NAME states '
             'the workflow that gates another repository\n')
     assert text.endswith(note), text
-    # And the gate's name is rendered from the constant rather than spelled
-    # beside it, so a rename of the default gate moves this line with it.
+    # NOT tolerance for a rename of the constant: the literal above already
+    # pins the name and turns red on one. What this loop holds is that the
+    # note carries EVERY name in the set, read from the live constant rather
+    # than through that one string alone.
     for name in mod.REQUIRED_WORKFLOWS:
         assert name in text, (name, text)
 
@@ -406,10 +408,8 @@ def test_a_padded_required_name_is_the_name_it_pads(tmp):
     assert 'no ci run on' in text, text
 
 
-# The refusal with no flags at all, pinned. A control comparing two runs
-# of THIS code would pass on a change that moved both, and this sentence
-# is the branch's strongest claim: naming the gate it already knows
-# changes nothing it prints.
+# Exactly what a no-flags refusal prints, so the comparison below is
+# against a fixed string rather than against another run of this code.
 _DEFAULT_REFUSAL = (
     '555555555555 2 run(s)\n'
     '  gate freshness: completed/success\n'
@@ -421,11 +421,15 @@ _DEFAULT_REFUSAL = (
 
 
 def test_naming_this_repositories_own_gate_prints_identically(tmp):
-    """`ci_wait`'s `_gate_note` claims the reports print exactly what they
-    printed before the flag existed on this repository. The claim is
-    pinned to the literal above, not to a comparison between two runs of
-    this code: the plain run is the reference AND the assertion, so an
-    edit that moved both would otherwise pass.
+    """The claim SKILL.md makes - naming the gate this tool already knows
+    leaves the output byte for byte what it was - held here. It used to be
+    cited to `ci_wait`'s `_gate_note`, which no longer states it: that
+    docstring now claims only that the NOTE is empty on those paths, which
+    is the narrower thing that survives the union.
+
+    The claim is pinned to the literal above, not to a comparison between
+    two runs of this code: the plain run is the reference AND the
+    assertion, so an edit that moved both would otherwise pass.
 
     Every spelling of this repository's name, because the comparison that
     decides it is case-insensitive over the resolved value - a caller who
