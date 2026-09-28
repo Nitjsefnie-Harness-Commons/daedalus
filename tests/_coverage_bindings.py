@@ -13,8 +13,8 @@ _LAUNCHERS = frozenset(
 # a name it is the launcher called later, which is the defect the inline
 # form already states, and the descent needs it here or its chain closes on
 # the outermost callee and `subprocess.run.__call__(...)` stops being caught
-# through the `subprocess.run` above it. The descent adds two conditions the
-# walk does not, both in `_call_receiver_parts` and stated in its docstring.
+# through the `subprocess.run` above it. The descent adds conditions the
+# walk does not, all in `_call_receiver_parts` and stated in its docstring.
 _LAUNCH_READS = _LAUNCHERS | {'__call__'}
 
 # A header binds names: a decorator binds the decorated name, and a
@@ -312,13 +312,26 @@ def _call_receiver_parts(value):
     """Every sub-value a call's callee carries, bar the callable itself.
 
     The descent consumes an attribute chain and every subscript on the
-    way down, and each subscript it consumes is itself a sub-value: its
-    index and bounds are handed to the walk as it goes, not left behind
-    at the base. What the descent lands on is handed over only when it
-    is not an atom, because an atom is the name or attribute the other
-    arms already read and the receiver position reads a launch method
-    off what it carries — handing one over would find a bare module name
-    and refuse a direct launch.
+    way down, and each one it consumes is itself a sub-value: a
+    subscript's index and bounds, and a call's arguments, are handed to
+    the walk as it goes, not left behind at the base. The descent
+    continues through a call, so what the call was built on is reached
+    rather than missed, and the call itself is a sub-value handed over
+    with the rest whenever the chain above it read a launcher.
+
+    What the descent lands on is handed over only when the base is not
+    an atom and the chain read a launch method somewhere in it — or the
+    descent never left the callee, which is `(subprocess.run if flag
+    else None)(...)`: nothing was read off that form, it is called
+    directly, and the walk has to open it whatever it is. The launch
+    read is what separates `f"{subprocess}".run(...)` from
+    `f"{subprocess}".upper()`: both land on the f-string, and only one
+    of them reads a launch method off what the chain ends with. Without
+    it the second hands a string to the walk, the walk finds the bare
+    module name inside it, and the receiver position calls that a
+    launcher. The atom rule is what a direct launch turns on: an atom is
+    the name or attribute the other arms already read, and handing one
+    over would refuse `subprocess.run([...])`.
 
     An attribute the descent consumes is handed over on the same rule as
     a subscript and for the same reason: one the walk opens is a read off
@@ -336,21 +349,42 @@ def _call_receiver_parts(value):
     `_carried_parts.__doc__`.
     """
     callee = value.func
-    # A launch method is read off the launcher only while everything above
-    # it in the chain is one too, and a subscript closes the chain as
-    # surely as a constant does: what it hands back is not the launcher
-    # either, and what a chain of them ends at is not decidable here.
+    # A call the descent starts on is handed over whatever the chain above
+    # it read, because there is no chain above it: `partial(subprocess.run)
+    # (...)` carries its launcher in its own arguments.
+    if isinstance(callee, ast.Call):
+        yield from _carried_parts(callee)
+        callee = callee.func
+    # `launch_only` answers whether everything above a link is a launch
+    # read too, and a subscript closes the chain as surely as a constant
+    # does: what it hands back is not the launcher either, and what a
+    # chain of them ends at is not decidable here. `names_launch` asks
+    # the other question, is never cleared, and is what the base and the
+    # calls in the chain are handed over on: is a launch method read off
+    # the value this chain ends with? A non-launch link below a launch
+    # one does not take that read away.
     launch_only = True
-    while isinstance(callee, (ast.Attribute, ast.Subscript)):
+    names_launch = False
+    while isinstance(callee, (ast.Attribute, ast.Subscript, ast.Call)):
+        if isinstance(callee, ast.Call):
+            if names_launch:
+                yield from _carried_parts(callee)
+            callee = callee.func
+            continue
         if isinstance(callee, ast.Subscript):
             yield from _carried_parts(callee.slice)
-        names_launch = (isinstance(callee, ast.Attribute)
+        reads_launch = (isinstance(callee, ast.Attribute)
                         and callee.attr in _LAUNCH_READS)
-        if names_launch and launch_only and callee is not value.func:
+        if reads_launch and launch_only and callee is not value.func:
             yield callee
-        launch_only = launch_only and names_launch
+        launch_only = launch_only and reads_launch
+        names_launch = names_launch or reads_launch
         callee = callee.value
-    if not isinstance(callee, _ATOMS):
+    # A base the descent never left is the callee itself, and it is called
+    # directly: nothing was read off it, so the walk has to open it whatever
+    # form it is — which is what a conditional or a lambda as a callee is.
+    direct = callee is value.func
+    if (names_launch or direct) and not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
 
 
