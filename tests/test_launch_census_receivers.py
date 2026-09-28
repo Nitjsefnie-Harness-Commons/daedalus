@@ -478,7 +478,7 @@ def test_a_deadline_handed_to_a_child_slot_is_refused_with_no_launch_near(
             ('derived-local',
              '    deadline = timeout * 2\n'
              '    return proc.wait(timeout=deadline)\n', 3)):
-        source = (f'def run_gate(proc, *, timeout=None):\n{tail}')
+        source = f'def run_gate(proc, *, timeout=None):\n{tail}'
         assert _rows(source) == [
             (1, 'timeout parameter'),
             (call_line, 'timeout= keyword')], (
