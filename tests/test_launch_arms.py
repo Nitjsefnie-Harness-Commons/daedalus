@@ -24,11 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import CUT_KIND, arm_sweep, cut_arm, cut_span  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
-from _launch_arm_records import (ANCHOR, ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402,E501
-                                CUT, EVIDENCE, FILE, ID, LINE,
-                                MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD,
-                                ROW_UNCLAIMED, SECONDARY_CONTROLLED, STATE,
-                                STEP_CEILING_HELD_BY, WHAT)
+from _launch_arm_records import (  # noqa: E402
+    ANCHOR, ARM_NOTES, CRASH_CONTROLLED, CUT, EVIDENCE, FILE, ID, LINE,
+    MARKER_NON_MEMBERS, NON_MEMBER_CRASH_HELD, ROW_UNCLAIMED,
+    SECONDARY_CONTROLLED, STATE, STEP_CEILING_HELD_BY, WHAT)
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
                           REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
