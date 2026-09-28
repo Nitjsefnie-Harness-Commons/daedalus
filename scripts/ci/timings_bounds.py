@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The timings file's two bounds, and the prose that explains them.
 
-WHAT THIS MODULE OWNS. Two things, and both are the file's reader-facing
+WHAT THIS MODULE OWNS. Two things, both the file's reader-facing
 contract rather than the planner's packing. The first is the coupling
 between `target_cell_weight` and `max_cells` and the planner's
 `CELL_WEIGHT_MARGIN`: those two numbers are not measurements, the
@@ -9,32 +9,25 @@ planner only NOTES a target the margin forbids -- it still prints a full
 matrix and exits 0 -- and `read_timings` type-checks the number without
 knowing what it means, so `verify_target` is the chokepoint the refresher
 calls before every write. The second is the file's `basis` field: the
-whole paragraph a reader of the data file alone reads -- which run,
-which units, which per-suite method, the target's basis, the cell bound,
-the suites the measurements do not cover, and the command that re-derives
-it all. The name says bounds, and the prose is most of the file; it stays
-here because it is the same authority, rebuilt from the same write.
+whole paragraph a reader of the data file alone reads, rebuilt from the
+numbers of that write rather than preserved, because a sentence
+describing a run, a target and a cell count the file no longer has is
+the same defect as a stale number one level up.
 
 THE TARGET IS DERIVED, NOT CHOSEN. `derive_target` returns the smallest
-step at which the planner's own balance guarantee holds on the weights
-being written AND the derived cell count fits `max_cells`. More cells
-is a shorter critical path and the count falls as the target rises, so
-the smallest admissible step packs the most cells that fit the bound.
-`verify_target` applies it to a target the file already carries: one
-the margin admits is kept untouched (a refresh that changes nothing
-changes nothing), one the margin forbids is re-derived and the reason
-travels with the write, and a distribution on which no target within
-the bound balances is a refusal rather than a number nobody can act
-on. The step is five in whatever unit the file carries -- seconds
+step at which the planner's balance guarantee holds on the weights being
+written AND the derived cell count fits `max_cells`. More cells is a
+shorter critical path and the count falls as the target rises, so the
+smallest admissible step packs the most cells that fit the bound.
+`verify_target` applies it to a target the file already carries: one the
+margin admits is kept untouched, one the margin forbids is re-derived and
+the reason travels with the write, and a distribution on which no target
+within the bound balances is a refusal rather than a number nobody can
+act on. The step is five in whatever unit the file carries -- seconds
 before the reference workload exists, reference-multiples after, where
 five is a coarser physical step because one multiple is a whole
 reference workload. The margin's own measured basis is in
-`plan_timed_matrix`'s module docstring, beside the constant it explains.
-
-Every write carries a basis, seed or refresh, rebuilt from the numbers
-of that write rather than preserved from an older one: a sentence that
-describes a run, a target and a cell count the file no longer has is
-the same defect as a stale number, one level up.
+`plan_timed_matrix`'s docstring, beside the constant it explains.
 """
 import math
 import statistics
@@ -67,9 +60,8 @@ def plan_is_balanced(tree, data):
 def _candidate(weights, target, max_cells):
     """The probe `plan()` is asked about: the three fields it reads.
 
-    Not a data file -- `read_timings` never sees this dict, and the
-    fields it does not carry (schema version, provenance, units) cannot
-    reach a write from here.
+    Not a data file -- `read_timings` never sees this dict, so the
+    fields it omits cannot reach a write from here.
     """
     return {'target_cell_weight': float(target),
             'max_cells': max_cells,
@@ -80,11 +72,11 @@ def tree_weights(tree, recorded):
     """The recorded weights the TREE still holds, as the planner sees them.
 
     One resolver, so a weight for a suite the tree has since deleted
-    cannot be read as a live one by any consumer outside the planner.
-    The union write carries such a weight forward forever -- no run can
-    measure a suite the tree no longer has -- and a hundred dead weights
-    beside six live ones moved the derived target by an order of
-    magnitude and packed a 120-multiple live tree into one cell.
+    cannot read as a live one outside the planner. The union carries
+    such a weight forward forever -- no run can measure a deleted suite
+    -- and a hundred dead weights beside six live ones moved the derived
+    target by an order of magnitude and packed a 120-multiple live tree
+    into one cell.
     """
     return resolve(recorded, suite_names(tree), 1.0)[0]
 
@@ -94,8 +86,8 @@ def live_recorded(tree, data):
 
     Not the resolved weights: this counts what the file MEASURED, and
     the collapse rule is judged against a suite a run could have
-    measured. `resolve` prices an unmeasured tree suite at the recorded
-    median, which would answer a different question.
+    measured. `resolve` would price an unmeasured tree suite at the
+    recorded median, which answers a different question.
     """
     return len(set(data['suite_weights']) & set(suite_names(tree)))
 
@@ -103,14 +95,11 @@ def live_recorded(tree, data):
 def derive_target(tree, recorded, max_cells):
     """The smallest target the balance guarantee allows, in TARGET_STEPs.
 
-    At a target the margin forbids, a heavy suite sits alone in its
-    cell while the median cell stays small, and the ratio crosses the
-    margin; raising the target lets more suites share cells and the
-    median rises under the heavy one.
-
-    Scoped to the tree before anything is summed: the target is derived
-    from the weights the packer will actually place, and a weight for a
-    deleted suite is never placed.
+    At a target the margin forbids, a heavy suite sits alone in its cell
+    while the median cell stays small and the ratio crosses the margin;
+    raising the target lets more suites share cells and the median rises
+    under the heavy one. Scoped to the tree before anything is summed,
+    because a weight for a deleted suite is never placed.
     """
     weights = tree_weights(tree, recorded)
     total = sum(weights.values())
@@ -163,6 +152,31 @@ def _plural(count, word):
     return f'{count} {word}' + ('' if count == 1 else 's')
 
 
+def _coverage_clause(recorded, names, unmeasured):
+    """What a run did not measure, split by where the weight came from.
+
+    Two kinds, and the difference is the price: a suite this file
+    already records keeps its own recorded weight through the union
+    write, while a suite it records nothing about is priced by the
+    planner at the median of the recorded ones. Calling both of them
+    estimates made the clause read beside a weight clause that adds
+    their recorded values -- "estimated at the median" beside a number
+    that is not the median.
+    """
+    carried = [name for name in unmeasured if name in recorded]
+    unknown = [name for name in unmeasured if name not in recorded]
+    spans = []
+    if carried:
+        spans.append(f'{len(carried)} carried at the weight this file '
+                     'already recorded')
+    if unknown:
+        spans.append(f'{len(unknown)} estimated at the median of the '
+                     'recorded weights')
+    return (f'{len(unmeasured)} of the tree\'s {len(names)} suites are not '
+            f'measured by these runs, ' + ' and '.join(spans) + ': '
+            + ', '.join(unmeasured))
+
+
 def basis_sentence(tree, data, cells, estimated):
     """The file's `basis` field: both bounds, their basis, and the rest.
 
@@ -174,23 +188,25 @@ def basis_sentence(tree, data, cells, estimated):
     union, so a suite the runs did not measure is in the file anyway,
     and a clause driven by the file's own weights counted the tree as
     fully measured by a run that measured three suites of it. The
-    caller has the measured set and the file does not, so it is
-    handed in.
+    caller has the measured set and the file does not. Nor is it one
+    set: `_coverage_clause` splits it by whether the file records that
+    suite, because the planner prices the halves differently.
 
-    `cells` is not the concurrency either, and the sentence does not
-    call it one unless the two agree: a run that produced two cells of
-    a fourteen-cell matrix measured two cells, and the repository runs
+    `cells` is not the concurrency either, and the sentence calls it one
+    only when the two agree: a run that produced two cells of a
+    fourteen-cell matrix measured two cells, and the repository runs
     fourteen.
     """
     decision = plan_matrix(tree, data)
     loads = [cell.weight for cell in decision.cells]
-    carried = set(estimated)
+    names = suite_names(tree)
+    planned_weights = resolve(data['suite_weights'], names, 1.0)[0]
+    unmeasured = set(estimated)
     measured_weights = {name: weight for name, weight
-                        in tree_weights(tree, data['suite_weights']).items()
-                        if name not in carried}
+                        in planned_weights.items()
+                        if name not in unmeasured}
     total = sum(measured_weights.values())
-    planned = sum(resolve(data['suite_weights'], suite_names(tree),
-                          1.0)[0].values())
+    planned = sum(planned_weights.values())
     target = data['target_cell_weight']
     heaviest = max(loads) if loads else 0.0
     median_cell = statistics.median(loads) if loads else 0.0
@@ -255,11 +271,7 @@ def basis_sentence(tree, data, cells, estimated):
          f'the margin would need.'),
     ]
     if estimated:
-        parts.append(
-            f'{len(estimated)} of the tree\'s {len(suite_names(tree))} '
-            f'suites are not measured by these runs and are estimated at '
-            f'the median of the recorded weights: '
-            f'{", ".join(estimated)}')
+        parts.append(_coverage_clause(data['suite_weights'], names, estimated))
     else:
         parts.append('every suite in the tree is measured by these runs')
     parts.append(
