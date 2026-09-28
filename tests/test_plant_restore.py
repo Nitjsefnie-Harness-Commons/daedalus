@@ -296,7 +296,7 @@ def test_restore_writes_through_a_symlinked_target(tmp):
     assert real.read_bytes() == _COMMITTED
 
 
-def test_restore_refuses_a_store_it_cannot_read(tmp):
+def test_restore_refuses_a_store_whose_copy_is_not_a_file(tmp):
     target = _repo(tmp)
     store = Path(tmp) / 'store'
     target.write_bytes(_FIXED)
@@ -308,6 +308,20 @@ def test_restore_refuses_a_store_it_cannot_read(tmp):
     assert out.returncode != 0, _say(out)
     assert target.read_bytes() == _FIXED, 'a refused restore wrote anyway'
     assert entry.is_dir(), 'a refused restore dropped the stored copy'
+
+
+def test_restore_refuses_a_store_whose_mode_record_is_gone(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    entry = _only_entry(store)
+    (entry / 'mode').unlink()
+    out = _plant('restore', str(target), '--store', str(store))
+    assert out.returncode != 0, _say(out)
+    assert target.read_bytes() == _FIXED, 'a refused restore wrote anyway'
+    assert (entry / 'bytes').is_file(), 'a refused restore dropped the copy'
 
 
 def test_clear_leaves_another_pending_plant_alone(tmp):
