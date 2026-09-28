@@ -3,8 +3,9 @@
 
 `CRASH_CONTROLLED` is checked both ways a 14-arm set can be: each name
 really crashes, and the set partitions the CONTROLLED arms. Neither
-covers the 136 arms it does NOT name, so "no other arm is crash-held"
-was re-derivable only by hand.
+covers the 136 arms it does NOT name, and "no other arm is crash-held"
+needs every one of them, so the sweep is the only place it can be
+checked.
 
     python3 scripts/launch_arm_sweep.py
 """
