@@ -359,20 +359,14 @@ def _call_receiver_parts(value):
     `_carried_parts.__doc__`.
     """
     callee = value.func
-    # A call the descent starts on is handed over whatever the chain above
-    # it read, because there is no chain above it: `partial(subprocess.run)
-    # (...)` carries its launcher in its own arguments.
+    # A call the descent starts on carries its launcher in its arguments.
     if isinstance(callee, ast.Call):
         yield from _carried_parts(callee)
         callee = callee.func
-    # `launch_only` answers whether everything above a link is a launch
-    # read too, and a subscript closes the chain as surely as a constant
-    # does: what it hands back is not the launcher either, and what a
-    # chain of them ends at is not decidable here. `names_launch` asks
-    # the other question, is never cleared, and is what the base and the
-    # calls in the chain are handed over on: is a launch method read off
-    # the value this chain ends with? A non-launch link below a launch
-    # one does not take that read away.
+    # A launch method is read off the launcher only while every link above
+    # it is one too, and a subscript closes the chain as surely as a
+    # constant does. `names_launch` asks the other question and is never
+    # cleared: is a launch method read off what this chain ends with?
     launch_only = True
     names_launch = False
     while isinstance(callee, (ast.Attribute, ast.Subscript, ast.Call)):
@@ -390,9 +384,7 @@ def _call_receiver_parts(value):
         launch_only = launch_only and reads_launch
         names_launch = names_launch or reads_launch
         callee = callee.value
-    # A base the descent never left is the callee itself, and it is called
-    # directly: nothing was read off it, so the walk has to open it whatever
-    # form it is — which is what a conditional or a lambda as a callee is.
+    # A base the descent never left is the callee itself, called directly.
     direct = callee is value.func
     if (names_launch or direct) and not isinstance(callee, _ATOMS):
         yield from _carried_parts(callee)
@@ -450,12 +442,12 @@ def _iterable_parts(value):
     the discriminator is the use site, not the call.
 
     The condition is structural — whether the callee chain bottoms on
-    something other than a name — and that is the whole of what the arm
-    knows. Four of the family it judges are real: `{'sp': subprocess}
-    .values()` and the three subscripted spellings beside it all yield
+    something other than an atom — and that is the whole of what the arm
+    knows. Four of the shapes it judges are real: `{'sp': subprocess}
+    .values()` and the three subscripted spellings beside it all bind
     the module, and a launch method read off the module launches. Five
-    are not, and are refused anyway: `.keys()` yields a string,
-    `.items()` a tuple, `[subprocess].pop()` a module that is not
+    are not, and are refused anyway: `.keys()` binds a string, `.items()`
+    a tuple, `[subprocess].pop()` hands the loop a module that is not
     iterable, an f-string method a string, and a tuple's `.index()` an
     int. The arm cannot tell them apart without naming methods, which is
     the mistake `_opaque_callee_cases`'s docstring records as this
@@ -474,9 +466,7 @@ def _iterable_parts(value):
         yield from _carried_parts(callee)
 
 
-# The reader each position is judged by. `bind` is the walk itself and
-# carries no entry, so a position this table does not name is read the
-# way `_carried_parts` reads everything else.
+# The reader each position is judged by; `bind` is the walk itself.
 _POSITION_PARTS = {
     _ITERABLE: _iterable_parts,
     _TARGET: _target_parts,
