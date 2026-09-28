@@ -313,7 +313,11 @@ jobs:
         # can, it is scoped to this one repository rather than to an account,
         # and revoking it is deleting one key. This is the same key, the same
         # transport and the same identity the `coverage` job's ratchet uses.
-        if: ${{ !cancelled() && steps.download.outputs.count != '0'
+        # No status function here on purpose. GitHub applies an implicit
+        # `success()` to a step only when its own `if:` names no status
+        # function, so `!cancelled()` would have SUPPRESSED it and let this
+        # step push the file "Verify the change" had just refused.
+        if: ${{ steps.download.outputs.count != '0'
                 && env.RATCHET_SSH_KEY != '' }}
         env:
           RATCHET_SSH_KEY: ${{ secrets.RATCHET_SSH_KEY }}

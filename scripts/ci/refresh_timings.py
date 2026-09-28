@@ -267,6 +267,17 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
     selected, report = select(runs, wanted, existing['max_cells'],
                               live_recorded(tree, existing))
     if not selected:
+        # Exit 0, DELIBERATELY, and this is the decision rather than an
+        # oversight. Nothing was written and nothing on the board is
+        # wrong: the data file is exactly as it was, so the workflow's
+        # commit step's "No weight moved; nothing to commit" is true of
+        # it. The reason is not silent -- it is the whole of this
+        # message, on stderr, which the workflow appends to the step
+        # summary, and it names every run it stepped over and why. A
+        # nonzero exit would fail a scheduled run nightly over a
+        # condition whose only remedy is a hand edit of the file, and
+        # would not make that edit any more likely. What must not
+        # happen silently is a NARROWING write, and that is refused.
         return (f'no run under {runs_root} produced a complete set of cell '
                 f'artifacts ({report["empty"]} with none, '
                 f'{len(report["incomplete"])} with a different cell set'
