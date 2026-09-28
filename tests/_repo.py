@@ -44,3 +44,17 @@ def git_index(root, *args):
     """
     subprocess.run(['git', '-C', str(root), *args], check=True,
                    capture_output=True, timeout=30)
+
+
+def git_output(root, *args):
+    """Run a git command against `root` and return its stdout, stripped.
+
+    The same launch as `git_index`, for a fixture that has to READ what
+    it committed rather than only assert the command succeeded. No
+    bound of its own: it reads the local repository and runs inside a
+    suite, so a hang is the suite's to report and a margin here would
+    only be one more number to be wrong on a loaded runner.
+    """
+    return subprocess.run(
+        ['git', '-C', str(root), *args], check=True, capture_output=True,
+        text=True).stdout.strip()
