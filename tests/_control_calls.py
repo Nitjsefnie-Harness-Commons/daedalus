@@ -49,9 +49,9 @@ _PURE_METHODS = frozenset({
     'startswith'})
 _PURE_MODULE_CALLS = frozenset({
     '_util.child_coverage', '_util.collect', '_util.runner',
-    # Reaching the assignment that defines a search key is a read of
+    # Reaching the assignment that declares a search key is a read of
     # text already read, not a new way to write.
-    'ast.parse', 'ast.walk',
+    'ast.parse',
     'os.path.join', 'sys.path.insert'})
 # Writers, with where the written path arrives as (keyword, position);
 # (None, None) is the receiver. A child runs where its cwd points and a
