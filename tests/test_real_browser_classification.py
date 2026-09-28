@@ -56,15 +56,15 @@ def test_a_controlled_call_that_does_not_raise_is_a_failure(tmp):
 def test_indeterminate_e2big_diagnostics_are_harness_failures(tmp):
     del tmp
     too_large = OSError(errno.E2BIG, 'controlled command-size refusal')
+    # A stall is NOT one of these: the class is the detector's own, a
+    # subclass of the one pinned here, and its control owns that figure.
     outcomes = (
         OSError(errno.ENOENT, 'controlled diagnostic start failure'),
-        subprocess.TimeoutExpired(['controlled-diagnostic'], 1),
         subprocess.CompletedProcess(['controlled-diagnostic'], 1),
     )
     for outcome in outcomes:
-        behavior = ({'side_effect': outcome}
-                    if isinstance(outcome, BaseException)
-                    else {'return_value': outcome})
+        behavior = {'side_effect': outcome} if isinstance(
+            outcome, BaseException) else {'return_value': outcome}
         with mock.patch.object(_realbrowser.subprocess, 'run', **behavior):
             failure = _call_failure(lambda: _realbrowser._raise_start_failure(
                 'Node WebSocket probe', '/controlled/node', too_large))
@@ -357,8 +357,8 @@ def test_the_control_extension_satisfies_its_own_probe(tmp):
 
 # Hang detectors, not health margins; the shape and the shared argument are
 # in `tests/_node_launch_routing.py`, and these samples are measured with the
-# machine BUSY. `--check` parses the worker's source and `-e` runs it, so one
-# deadline covers both. At the foot: `BOUNDED_GIT_LAUNCHES` is line-keyed.
+# machine BUSY. `--check` parses the worker's source and `-e` runs it, so
+# one deadline covers both, and the foot is where line-keyed rows force it.
 from _node_launch_routing import (  # noqa: E402
     SITE_HANG_MULTIPLE, NodeBoundExceeded, node_bound_expiry)
 CONTROL_CHILD_CHECK_SAMPLES_S = (0.179, 0.252, 0.150, 0.085,
@@ -375,16 +375,16 @@ def test_the_control_probe_site_reports_its_own_stalled_child(tmp):
     ext = _realbrowser._control_extension(tmp)
     script = ext / _realbrowser.CONTROL_WORKER_SCRIPT
     script.write_text(stalling, encoding='utf-8')
-    caught = None
-    try:
-        with mock.patch.object(_realbrowser, '_control_extension',
-                               lambda _root: ext):
+    with mock.patch.object(_realbrowser, '_control_extension',
+                           lambda _root: ext):
+        try:
             test_the_control_extension_satisfies_its_own_probe(tmp)
-    except NodeBoundExceeded as failure:
-        caught = failure
-    assert caught is not None, 'the wedged control script finished'
-    assert caught.deadline_s == CONTROL_CHILD_DEADLINE_S
-    assert 'ctrl spoke' in caught.stdout, caught.stdout
+        except NodeBoundExceeded as failure:
+            assert failure.deadline_s == CONTROL_CHILD_DEADLINE_S
+            assert 'ctrl spoke' in failure.stdout, failure.stdout
+            assert isinstance(failure.stdout, str), type(failure.stdout)
+            return
+    raise AssertionError('the control script that wedges finished')
 
 
 def test_the_control_probe_requirement_is_a_skip_not_a_failure(tmp):

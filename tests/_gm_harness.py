@@ -395,10 +395,10 @@ Promise.all(settled).then(() => {
 #   So the real cost is a fixed unit of work, and what a bound on it must
 #   cover is a WEDGED child, never a slow one. The samples are measured
 #   with the machine busy, because a wall-clock bound is two margins and a
-#   bare 90 measured only the second. The two cheaper harnesses this one
-#   call site also serves — `run_relay` and `run_failure` — measured 1.918
-#   and 3.247 against the same load, and the table is the SLOWEST of the
-#   three, because one deadline covers all three.
+#   bare 90 measured only the second. This one call site serves three
+#   harnesses, and the table is the SLOWEST child's: the other two cost
+#   a fraction of it, so one figure covers all three and quoting their
+#   numbers here would put figures in a comment that no table records.
 #
 #   GM_CHILD_SAMPLES_S   the eight slowest-child runs, idle then busy
 #   GM_CHILD_SLOWEST_S   18.015  max of those

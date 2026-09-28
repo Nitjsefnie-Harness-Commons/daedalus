@@ -79,6 +79,27 @@ COMPOSED_BOUND_SITES = (
 )
 
 
+def _site_constants(module_name, stem):
+    """A module's module-level bindings as source, read by the shared reader.
+
+    `tests/_launch_path.py`'s own, not a second copy of it: a helper defined
+    once in a shared module and imported by every user is the whole point of
+    the rule that refuses a re-implementation.
+    """
+    source = Path(__file__).resolve().parent / module_name
+    return {name: ast.unparse(value)
+            for name, value in module_constants(
+                ast.parse(source.read_text(encoding='utf-8'))).items()}
+
+
+def _table_values(source):
+    """The floats in a recorded sample table, read from its own source."""
+    return [node.value for node in ast.walk(ast.parse('X = ' + source))
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool)]
+
+
 def _is_composed(constants, stem):
     """Whether a stem's deadline is `round()`ed from a table and the multiple.
 
@@ -86,9 +107,15 @@ def _is_composed(constants, stem):
     over it, and a deadline rounded from that by the shared multiple. A
     number written at the call site is none of them.
     """
+    def has(name):
+        # `.get`, not `[...]`: a site that deleted one of the three must be
+        # REFUSED by this rule and named by the caller, not raise a KeyError
+        # naming a dictionary key at a reader who cannot act on it.
+        return name in constants
+
     tables = [name for name in constants
               if name.startswith(stem) and name.endswith('_SAMPLES_S')]
-    if not tables:
+    if not tables or not has(f'{stem}_SLOWEST_S'):
         return False
     taken = ast.parse('X = ' + constants[f'{stem}_SLOWEST_S']).body[0].value
     if not (isinstance(taken, ast.Call)
@@ -100,7 +127,7 @@ def _is_composed(constants, stem):
     if not any(any(table in source for source in sources)
                for table in tables):
         return False
-    return constants[f'{stem}_DEADLINE_S'] == (
+    return has(f'{stem}_DEADLINE_S') and constants[f'{stem}_DEADLINE_S'] == (
         f'round({stem}_SLOWEST_S * SITE_HANG_MULTIPLE)')
 
 
@@ -144,6 +171,118 @@ def test_a_call_site_bound_is_derived_and_not_written(tmp):
              if not key.endswith('_SAMPLES_S')},
              'the recorded table is gone')):
         assert not _is_composed(broken, 'GM_CHILD'), why
+
+
+def _retyped_bounds(routing, tree, launch, parents):
+    """Every retyped number that bounds this one child, with its line.
+
+    Two shapes, read the way the module's own `_bounds_its_own_child` reads
+    them so the two cannot disagree: the `timeout=` on the launch itself, and
+    a `communicate(timeout=…)` or `wait(timeout=…)` on the name the launch
+    bound the child to. A wait inside an expiry handler is skipped, because
+    that is the cleanup and not the bound.
+    """
+    deadline = launch['deadline']
+    if isinstance(deadline, ast.Constant):
+        yield deadline, launch['line']
+    if deadline is not None or '_bounds' not in dir(routing):
+        return
+    name = routing._child_name(tree, launch['node'])
+    if name is None:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in ('communicate', 'wait'):
+            continue
+        if ast.unparse(node.func.value) != name:
+            continue
+        if routing._inside_expiry_handler(node, parents):
+            continue
+        bound = next((word.value for word in node.keywords
+                      if word.arg == 'timeout'), None)
+        if isinstance(bound, ast.Constant):
+            yield bound, node.lineno
+
+
+def test_a_classifying_module_holds_no_retyped_launch_bound(tmp):
+    """The other half of the exemption, which is per-MODULE and says so.
+
+    `CLASSIFYING_MODULES` excuses a module from the routing rule, and the
+    exemption the walk enforces on it is that every launch bounds its own
+    child. That is a per-LAUNCH test inside a per-MODULE allowance, so a
+    bound ADDED to an already-excused module passes it: a fresh
+    `subprocess.run(..., timeout=30)` in `tests/_realbrowser.py` is read by
+    nothing in the tree, which was measured rather than argued.
+
+    So the allowance's own blind spot is stated here, and the rule that
+    closes it is narrow on purpose: a launch in an exempt module may not
+    carry a retyped number. A composed constant is still a Name and still
+    passes; only a literal at the call site is refused, which is exactly
+    the shape that was invisible.
+
+    It reads BOTH spellings, because they are two spellings of one number:
+    a `timeout=` on the launch call, and a `communicate(timeout=…)` or
+    `wait(timeout=…)` on the name the launch bound the child to. Reading
+    only the first left `Popen`-shaped bounds unread, and a `Popen` is how a
+    child is launched wherever the caller wants its pipes.
+
+    It is scoped to the modules whose bound this branch COMPOSED. One module
+    is out of scope in full, and the exclusion is the module rather than an
+    instance: `tests/_realbrowser_workers.py`, whose `browser --version` at
+    15s launches a real browser rather than a Node child, and which is this
+    branch's pre-existing debt. Nothing added to that module is read here or
+    anywhere else, and that is stated so the boundary is not assumed.
+    """
+    import _node_launch_routing as routing
+    del tmp
+    composed = {module_name for module_name, _ in COMPOSED_BOUND_SITES}
+    typed = []
+    for module_name in sorted(set(routing.CLASSIFYING_MODULES) & composed):
+        path = Path(__file__).resolve().parent / module_name
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        parents = routing._parents(tree)
+        for launch in routing._launches(tree):
+            for bound, where in _retyped_bounds(routing, tree, launch,
+                                                parents):
+                typed.append(f'{module_name}:{where} timeout='
+                             f'{ast.unparse(bound)}')
+    assert not typed, (
+        'a launch in a module the walk excuses carries a retyped number '
+        f'rather than a named one: {typed}')
+
+
+def test_a_composed_deadline_is_not_below_what_a_child_could_cost(tmp):
+    """A table small enough to compose a zero is not a measurement.
+
+    The composition rule reads the algebra DOWNSTREAM of the table, so a
+    table nobody measured satisfies it as long as someone did the
+    arithmetic: planting a fabricated table on `MINIMAL_SPAWN` composed a
+    ZERO-second bound and left 96 tests green across six suites. What no
+    control can check is whether a table is true, and no site here runs
+    often enough for a slow bound to show up as a failure — so the one
+    property a fabricated table cannot keep is the cheap one it has to
+    cross: `round(max(table) * 5)` cannot be under a second, because that
+    needs every recorded sample of a process launch under 200ms.
+    """
+    import _node_launch_routing as routing
+    del tmp
+    floor = 1 / routing.SITE_HANG_MULTIPLE
+    thin = []
+    for module_name, stem in COMPOSED_BOUND_SITES:
+        constants = _site_constants(module_name, stem)
+        figures = [value for value in constants
+                   if value.startswith(stem) and value.endswith('_SAMPLES_S')]
+        for table in figures:
+            slowest = max(_table_values(constants[table]), default=0.0)
+            if slowest < floor:
+                thin.append(f'{module_name}:{table} slowest={slowest}')
+    assert not thin, (
+        'a recorded table whose slowest sample is below '
+        f'{round(floor, 3)}s, which composes a deadline no child could '
+        f'reach: {thin}')
 
 
 def main():

@@ -42,10 +42,11 @@ def _which_with(node):
 # Neither site has a runtime stall control, and that is a stated limit rather
 # than an oversight: each program is a literal inside the test function, so
 # the only lever that could wedge the child is the `node` executable itself,
-# and a `#!` stand-in is not runnable on the Windows legs. What covers them
-# instead is `tests/_node_launch_routing.py`, which re-derives the whole
-# site population on every run and names any child launched outside the
-# shared detector.
+# and a `#!` stand-in is not runnable on the Windows legs. What holds their
+# figures instead is the per-stem rule in `tests/test_node_launch_routing.py`,
+# which names the module and the stem whose deadline is not composed. The
+# walk itself derives the site POPULATION, and its allowance is per-module,
+# so it does not read a bound added inside a module it already excuses.
 REPO_PROBE_SAMPLES_S = (0.635, 0.326, 0.309, 0.312,
                         3.633, 4.081, 1.533, 0.238)
 REPO_PROBE_SLOWEST_S = max(REPO_PROBE_SAMPLES_S)
@@ -253,27 +254,94 @@ def test_nonterminating_node_probe_is_harness_failure(tmp):
     assert node, 'Node is required to execute the probe control'
     stalling = ("process.stdout.write('the probe spoke before it wedged\\n');"
                 " setInterval(() => {}, 1000);")
-    failure = None
     with mock.patch.object(
             _realbrowser.shutil, 'which', _which_with(node)), \
             mock.patch.object(
                 _realbrowser, 'NODE_WEBSOCKET_PROBE', stalling):
         try:
             _realbrowser.browser_requirements()
-        except NodeBoundExceeded as why:
-            failure = why
-        except Exception as why:  # noqa: BLE001
-            # A site that reported its expiry as anything else still fails
-            # HERE, where the reader is told what it was, rather than
-            # escaping as the suite's own error.
-            failure = why
-    assert failure.__class__ is NodeBoundExceeded, (
-        type(failure).__name__, failure)
-    assert failure.deadline_s == _realbrowser.NODE_PROBE_DEADLINE_S, (
-        failure.deadline_s)
-    assert 'the probe spoke before it wedged' in failure.stdout, (
-        failure.stdout)
-    assert isinstance(failure.stdout, str), type(failure.stdout)
+        except NodeBoundExceeded as failure:
+            # The assertions live IN the handler, so a reader is shown the
+            # classified failure itself rather than a variable that may or
+            # may not still be unset when the block ends.
+            assert failure.deadline_s == _realbrowser.NODE_PROBE_DEADLINE_S
+            assert 'the probe spoke before it wedged' in failure.stdout, (
+                failure.stdout)
+            assert isinstance(failure.stdout, str), type(failure.stdout)
+            return
+    raise AssertionError('the probe that never terminates finished')
+
+
+def test_a_stalled_minimal_spawn_is_the_detectors_own_failure(tmp):
+    """The E2BIG probe's expiry is CLASSIFIED, and says what was diagnosed.
+
+    This is the one site in the branch no control can watch by running the
+    suite, because it only runs when a launch fails with E2BIG and nothing
+    here does that. So the control reaches it directly, and asserts the
+    three things the old message got wrong: the failure is the detector's
+    own and not a bare `AssertionError`, it carries the deadline that
+    actually fired, and it names the command the probe was diagnosing —
+    because "the cause is undetermined" is false here, the cause is a
+    `TimeoutExpired` with a known figure.
+    """
+    from _node_launch_routing import NodeBoundExceeded
+    del tmp
+    stalled = subprocess.TimeoutExpired(
+        [sys.executable, '-c', ''], _realbrowser.MINIMAL_SPAWN_DEADLINE_S,
+        output=b'partial')
+    with mock.patch.object(_realbrowser.subprocess, 'run',
+                           side_effect=stalled):
+        try:
+            _realbrowser._raise_start_failure(
+                'Node WebSocket probe', '/controlled/node',
+                OSError(errno.E2BIG, 'platform-dependent size refusal'))
+        except NodeBoundExceeded as failure:
+            assert failure.deadline_s == _realbrowser.MINIMAL_SPAWN_DEADLINE_S
+            assert 'the cause is undetermined' not in str(failure), failure
+            assert '/controlled/node' in str(failure), failure
+            assert failure.stdout == 'partial', failure.stdout
+            return
+    raise AssertionError('the minimal spawn that never finishes finished')
+
+
+def test_the_minimal_spawn_site_can_fire_at_all(tmp):
+    """A REAL child, expired by a real deadline — the site's own figure.
+
+    The control above plants the `TimeoutExpired` this site would raise, so
+    it covers the CLASSIFICATION and the shared `_as_text` decoder — the
+    one assertion there, `failure.stdout == 'partial'`, is about the
+    decoder and nothing else: the real program produces no output at all.
+
+    What that planted shape cannot show is whether the site FIRES. So the
+    site's own composed deadline is shortened to 1ms and a real
+    `python -c ''` is launched and genuinely outrun, and this asserts only
+    that: the class, and that the deadline it reports is the one that was
+    set. It deliberately asserts nothing about the child's output, because
+    the real child writes none and a stand-in standing in for the site
+    would be asserting a shape the site never produces.
+
+    1ms is safe on any host and immune to a coarse clock: the control
+    FAILS if the child ever finishes inside it, and the slowest sample this
+    branch recorded for this child is 0.209s, so a host that cannot lose
+    that race is a host this control is reporting.
+    """
+    from _node_launch_routing import NodeBoundExceeded
+    del tmp
+    deadline = 0.001
+    with mock.patch.object(_realbrowser, 'MINIMAL_SPAWN_DEADLINE_S',
+                           deadline):
+        try:
+            # Nothing is mocked below this line: the child is a real
+            # `python -c ''`, launched and killed by the real launcher.
+            _realbrowser._raise_start_failure(
+                'Node WebSocket probe', '/controlled/node',
+                OSError(errno.E2BIG, 'controlled size refusal'))
+        except NodeBoundExceeded as failure:
+            assert failure.deadline_s == deadline, failure.deadline_s
+            assert 'the cause is undetermined' not in str(failure), failure
+            assert '/controlled/node' in str(failure), failure
+            return
+    raise AssertionError('the real minimal spawn finished inside 1ms')
 
 
 def test_browser_interpreter_start_failure_is_environment_skip(tmp):
