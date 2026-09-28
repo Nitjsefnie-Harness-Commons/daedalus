@@ -114,5 +114,30 @@
     "tests/test_workflow_eslint.py": 4,
     "tests/test_workflow_spellings.py": 6,
     "tests/test_workflow_yaml_uses.py": 1
+  },
+  "js_coverage_baseline": {
+    "dashboard/api.js": 3,
+    "dashboard/sections/_util.js": 25,
+    "dashboard/sections/eval.js": 8,
+    "dashboard/sections/hotfixes.js": 11,
+    "dashboard/sections/screenshot.js": 6,
+    "dashboard/sections/settings.js": 19,
+    "dashboard/sections/tabs.js": 29,
+    "dashboard/sections/uploads.js": 14,
+    "extension/content.js": 41,
+    "extension/options.js": 51,
+    "extension/page.js": 111,
+    "extension/worker/blocking.js": 28,
+    "extension/worker/capture.js": 2,
+    "extension/worker/cdp.js": 10,
+    "extension/worker/cdp_attach.js": 3,
+    "extension/worker/cookies.js": 29,
+    "extension/worker/evaluate.js": 54,
+    "extension/worker/gm_storage.js": 7,
+    "extension/worker/hotfix_scope.js": 2,
+    "extension/worker/messaging.js": 16,
+    "extension/worker/registry.js": 12,
+    "extension/worker/segment_mint.js": 4,
+    "extension/worker/stream.js": 6
   }
 }
