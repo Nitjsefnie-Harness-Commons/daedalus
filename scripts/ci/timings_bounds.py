@@ -166,15 +166,31 @@ def _plural(count, word):
 def basis_sentence(tree, data, cells, estimated):
     """The file's `basis` field: both bounds, their basis, and the rest.
 
-    `cells` is the number of cells the measured run(s) ran -- the
-    concurrency today's matrix is measured against -- and `estimated`
-    the tree suites the file records nothing about. Rebuilt from the
-    numbers of this write on every write, seed or refresh.
+    `cells` is the number of cells the measured run(s) ran, and
+    `estimated` the TREE suites those runs did not measure. Rebuilt
+    from the numbers of this write on every write, seed or refresh.
+
+    `estimated` is about the RUNS, not about the file. The write is a
+    union, so a suite the runs did not measure is in the file anyway,
+    and a clause driven by the file's own weights counted the tree as
+    fully measured by a run that measured three suites of it. The
+    caller has the measured set and the file does not, so it is
+    handed in.
+
+    `cells` is not the concurrency either, and the sentence does not
+    call it one unless the two agree: a run that produced two cells of
+    a fourteen-cell matrix measured two cells, and the repository runs
+    fourteen.
     """
     decision = plan_matrix(tree, data)
     loads = [cell.weight for cell in decision.cells]
-    weights = data['suite_weights']
-    total = sum(weights.values())
+    carried = set(estimated)
+    measured_weights = {name: weight for name, weight
+                        in tree_weights(tree, data['suite_weights']).items()
+                        if name not in carried}
+    total = sum(measured_weights.values())
+    planned = sum(resolve(data['suite_weights'], suite_names(tree),
+                          1.0)[0].values())
     target = data['target_cell_weight']
     heaviest = max(loads) if loads else 0.0
     median_cell = statistics.median(loads) if loads else 0.0
@@ -207,11 +223,26 @@ def basis_sentence(tree, data, cells, estimated):
             f'reference-normalized medians over {data["runs"]} run(s) '
             f'({data["measured_from"]}), each suite a multiple of the '
             'reference workload its own cell measured')
+    if estimated:
+        weight_clause = (
+            f'the {len(measured_weights)} recorded weights total '
+            f'{total:.4g} {unit} and the {len(estimated)} suites these runs '
+            f'did not measure add {planned - total:.4g}, {planned:.4g} in all')
+    else:
+        weight_clause = (f'the {len(measured_weights)} recorded weights '
+                         f'total {total:.4g} {unit}')
+    if cells == len(decision.cells):
+        concurrency = (f'the measured run ran {_plural(cells, "cell")}, '
+                       'the concurrency the repository runs today')
+    else:
+        concurrency = (
+            f'the measured run ran {_plural(cells, "cell")}, while this file '
+            f'derives {_plural(len(decision.cells), "cell")}, so that run is '
+            'not the matrix this file plans')
     parts = [
         source + '.',
         per_suite,
-        (f'target_cell_weight {target:g}: the {len(weights)} recorded '
-         f'weights total {total:.4g} {unit}, which is '
+        (f'target_cell_weight {target:g}: {weight_clause}, which is '
          f'{_plural(len(decision.cells), "cell")} at that target; it is the '
          f'smallest {TARGET_STEP}-unit step at which the planner\'s balance '
          f'guarantee holds (heaviest cell {heaviest:.4g} against a '
@@ -219,8 +250,7 @@ def basis_sentence(tree, data, cells, estimated):
          f'count fits the bound, so the target is measured rather than '
          f'chosen.'),
         (f'max_cells {data["max_cells"]}: the bound on the cells the planner '
-         f'derives; the measured run ran {_plural(cells, "cell")}, the '
-         f'concurrency the repository runs today, and when the derived '
+         f'derives; {concurrency}, and when the derived '
          f'count reaches the bound the planner clamps and names the target '
          f'the margin would need.'),
     ]
