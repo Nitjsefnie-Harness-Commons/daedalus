@@ -9,9 +9,10 @@ No base commit, no `git log -1`, no `ls-tree`, no blob id, no scope, no
 `fresh`/`stale` reduction, no directory-block clause.
 
 WHY IT COMPOSES, AND THE ONE THING IT DEPENDS ON. Main stays green after
-a merge whenever every branch in that merge was green. That is not a
-property of the comparison — it is a property of WHERE THIS RUNS, and it
-is the whole reason the rule can be this strict:
+a merge of two branches whenever both were green — the bound the fixture
+measures, and the whole of what is claimed here. That is not a property of
+the comparison; it is a property of WHERE THIS RUNS, and it is the whole
+reason the rule can be this strict:
 
   * this is a suite, so it runs on every pull request, not after the
     merge. A branch that adds a tracked file and does not regenerate is
@@ -30,9 +31,8 @@ is the whole reason the rule can be this strict:
 know why it was allowed to be this strict.** As a post-merge step on
 main, or as a hook that runs only on the default branch, the exact same
 comparison turns the "branch added a file and forgot" case into "main is
-red and nobody is looking" — the failure this rule's predecessor was
-built to survive. Nothing about the rule changes; only the place it runs
-does, and that is the whole of the margin.
+red and nobody is looking". Nothing about the rule changes; only the place
+it runs does, and that is the whole of the margin.
 
 The `*` deny rule is the one that matters most, and NEITHER this control
 nor the generator's `check-ignore` postcondition covers it. With the
@@ -57,7 +57,6 @@ moment the index and the commit do. The other side is the file in the
 working tree, which in CI is the checked-out artifact; a working copy
 that was regenerated or hand-edited without being committed is RED here,
 not excused, because under this rule the working copy IS the subject.
-
 """
 import difflib
 import subprocess
