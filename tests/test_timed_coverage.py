@@ -49,7 +49,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _repo import ROOT, git_index, git_output  # noqa: E402
+from _repo import (  # noqa: E402
+    ROOT, commit_environment, committable, git_index, git_output)
 from _speedharness import (  # noqa: E402
     run_workflow_script, workflow_script)
 from _timed_basis import (  # noqa: E402
@@ -316,96 +317,88 @@ def test_a_partial_run_does_not_claim_to_have_measured_the_tree(tmp):
     assert 'the measured run ran 2 cells,' in basis, basis
 
 
-def _thinned_to_the_lightest(data, names, keep=30):
-    """The file's own weights, kept at their lightest plus its heaviest.
+def test_a_seed_that_measured_a_corner_of_the_tree_is_refused(tmp):
+    """The one writer with no previous file gets the bound before its write.
 
-    The shape that flatters the weight share: `keep - 1` weights at the
-    bottom of the tree's distribution and the single heaviest one on
-    top. The median the planner lends the unmeasured suites is the
-    median of that set, which is tiny, and the heaviest weight sits in
-    the denominator the share is divided by.
+    A refresh is a union, so it can only widen what the file already
+    described and the planner's own guard is enough. A seed has
+    nothing to widen: it writes one run's measured set and nothing
+    else, and `select`'s collapse rule exempts a file bounded at one
+    cell because a seed derives that bound from the run that measured
+    it. So a run that executed one cell of a fifteen-cell matrix seeds
+    a file describing a corner of the tree, and that file is exactly
+    the one the coverage guard exists to refuse -- only the refusal
+    arrives at plan time, in a different job, naming a different
+    remedy. A writer refuses before it writes; the refresher already
+    does that for the target (`verify_target`), and this is the same
+    chokepoint for the coverage bound.
+
+    The fixture is a two-cell run over a twenty-suite tree that
+    measured four: 16 of 20 suites estimated, 80% of the plan, a
+    single borrowed median repeated, against a tenth.
     """
-    recorded = {name: data['suite_weights'][name] for name in names
-                if name in data['suite_weights']}
-    light = sorted(recorded, key=lambda name: recorded[name])[:keep - 1]
-    heavy = max(recorded, key=lambda name: recorded[name])
-    return {name: recorded[name] for name in list(light) + [heavy]}
+    refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                         'refresh_timings')
+    live = [f'test_{index:02d}.py' for index in range(20)]
+    tree = fixture_tree(tmp, live)
+    root = Path(tmp) / 'runs'
+    _write_run(root, 240, {'cell-01': {name: 4.0 for name in live[:2]},
+                           'cell-02': {name: 4.0 for name in live[2:4]}})
+    out = _seed(tmp, {}, max_cells=2)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = refresh.main(['--runs-root', str(root), '--out', str(out),
+                             '--seed', '--tree', str(tree)])
+    said = err.getvalue()
+    assert code == 1, said
+    # The coverage guard's own two sentences, whichever bound it stops
+    # on: no other refusal in this module prints either of them.
+    assert 'the file records 4 of the tree' in said, said
+    assert 're-derive it from a run that measured the tree' in said, said
+    assert json.loads(out.read_text(encoding='utf-8'))['suite_weights'] == {}
 
 
-def test_a_light_tailed_recorded_set_is_not_a_share_the_guard_believes(tmp):
-    """The weight share, on a real file, is 31.1% of a 15.5x error.
+def test_the_coverage_clause_separates_a_carried_weight_from_an_estimate(
+        tmp):
+    """Two kinds of unmeasured suite, priced two ways, named two ways.
 
-    The guard's own arithmetic, on the shipped file's own weights over
-    the real tree: twenty-nine lightest suites plus the heaviest. The
-    estimate is their median, the denominator is their sum, and the
-    heaviest weight is most of it -- so the share reads 31% and passes
-    a 50% bound, while the plan it produces is ONE cell for 327 suites
-    and totals 22.3 reference multiples where the tree holds 345.2.
-    A heavy recorded suite flatters the very statistic meant to catch
-    it, and a second condition that no recorded weight can move is the
-    only thing that closes that.
+    The write is a union, so a suite the runs did not measure is in the
+    file anyway when the file already recorded it, and the planner
+    prices it at ITS OWN recorded weight. A suite the file records
+    nothing about is priced at the median of the recorded ones. The
+    clause beside the weight clause called both of them "estimated at
+    the median of the recorded weights" -- false of the carried half,
+    and false in a committed artifact a human reads to decide whether
+    to trust the file, where the weight clause adds their real values.
+
+    Four of the six recorded suites here are measured by the run and the
+    tree holds a seventh the file has never seen, so three suites are
+    unmeasured: two the file records and one it does not. That is the
+    only shape that tells the two halves apart, and it is the ordinary
+    one -- the union carries everything the file had, so an unmeasured
+    suite is estimated exactly when it arrived after the last write.
     """
-    planner = _planner()
-    coverage = _util.load(ROOT / 'scripts' / 'ci' / 'timings_coverage.py',
-                          'timings_coverage')
-    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
-    names = planner.suite_names(ROOT)
-    kept = _thinned_to_the_lightest(data, names)
-    weights, estimated, _stale = planner.resolve(kept, names, 1.0)
-    assert len(kept) == 30 and len(estimated) == len(names) - 30
-    truth = sum(planner.resolve(
-        data['suite_weights'], names, 1.0)[0].values())
-    assert coverage.estimated_share(weights, estimated) < 0.5
-    plan = planner.plan(ROOT, dict(data, suite_weights=kept))
-    assert len(plan.cells) == 1, [cell.suites for cell in plan.cells]
-    assert truth / sum(weights.values()) > 15, (truth, sum(weights.values()))
-    refusal = coverage.coverage_refusal(weights, estimated)
-    assert refusal is not None, 'the planner published a matrix on a fiction'
-    assert 'refresh_timings.py' in refusal, refusal
-
-
-def test_each_coverage_bound_refuses_a_file_the_other_one_publishes(tmp):
-    """Neither statistic is a restatement of the other; both earn their place.
-
-    Ten suites, three recorded at 1.0, 1.0 and 90.0: seven of the
-    plan's SUITES are estimated and 7% of its weight, so the weight
-    bound alone would publish it and the count bound refuses. Nine
-    suites, five recorded at 0.001, 0.001, 5, 5, 5: four of its
-    suites are estimated -- 44%, under the count bound -- and 57% of
-    its weight, so the count bound alone would publish it and the
-    weight bound refuses. A file with fewer than half its suites
-    missing can still be a fiction, and one with an eighth of its
-    weight missing can still be a quarter of the tree.
-    """
-    planner = _planner()
-    coverage = _util.load(ROOT / 'scripts' / 'ci' / 'timings_coverage.py',
-                          'timings_coverage')
-    planner_module = planner
-    counts = {'weight': 0, 'suite': 0}
-    for case, (recorded, suites) in enumerate((
-            ({'test_00.py': 1.0, 'test_01.py': 1.0, 'test_09.py': 90.0},
-             [f'test_{index:02d}.py' for index in range(10)]),
-            ({'test_00.py': 0.001, 'test_01.py': 0.001, 'test_02.py': 5.0,
-              'test_03.py': 5.0, 'test_04.py': 5.0},
-             [f'test_{index:02d}.py' for index in range(9)]))):
-        # One tree per case: a shared one would carry the first case's
-        # tenth suite into the second.
-        tree = fixture_tree(Path(tmp) / f'case{case}', suites)
-        weights, estimated, _stale = planner_module.resolve(
-            recorded, planner_module.suite_names(tree), 1.0)
-        weight_share = coverage.estimated_share(weights, estimated)
-        suite_share = coverage.estimated_suite_share(weights, estimated)
-        assert weight_share != suite_share, (weight_share, suite_share)
-        refusal = coverage.coverage_refusal(weights, estimated)
-        if weight_share > 0.5:
-            assert suite_share < 0.5, (weight_share, suite_share)
-            assert 'weight is estimated' in refusal, refusal
-            counts['weight'] += 1
-        else:
-            assert suite_share > 0.5, (weight_share, suite_share)
-            assert 'suites are estimated' in refusal, refusal
-            counts['suite'] += 1
-    assert counts == {'weight': 1, 'suite': 1}, counts
+    live = [f'test_{index:02d}.py' for index in range(6)]
+    root = Path(tmp) / 'runs'
+    # Two cells, so the collapsed-run rule has nothing to say about it.
+    _write_run(root, 230, {'cell-01': {name: 4.0 for name in live[:2]},
+                           'cell-02': {name: 4.0 for name in live[2:4]}})
+    weights = {name: 1.0 for name in live}
+    text, code, err = _drive(tmp, root, weights, runs=1,
+                             tree=fixture_tree(tmp, live + ['test_06.py']))
+    assert code == 0 and 'wrote' in err, err
+    basis = json.loads(text)['basis']
+    assert (
+        "3 of the tree's 7 suites are not measured by these runs, 2 carried "
+        "at the weight this file already recorded and 1 estimated at the "
+        "median of the recorded weights: test_04.py, "
+        "test_05.py, test_06.py") in basis, basis
+    # The tripwire's reader splits the same clause, so the counts the
+    # control checks are the ones the prose states rather than the ones
+    # a reader would infer.
+    count, total, listed, carried, estimated = unmeasured_names(basis)
+    assert (count, total, carried, estimated) == (3, 7, 2, 1), basis
+    assert listed == ['test_04.py', 'test_05.py', 'test_06.py'], listed
 
 
 # The two halves of the seam, as the runner sees them: every command
@@ -479,17 +472,22 @@ def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
     refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
                          'refresh_timings')
     runs = [101, 100]
+    # `newline='\n'` on every write, because a text-mode write on
+    # Windows emits CRLF and the checkout's `core.autocrlf` then decides
+    # what `git diff` means. The step's own first command is a guard on
+    # that diff, so a checkout whose normalisation differs from the
+    # fixture's exits 0 without committing and the subject read back
+    # below is the SEED's.
     data_file.write_text(json.dumps(
         {'schema_version': 2, 'target_cell_weight': 25.0,
          'max_cells': 15, 'units': 'reference-multiples',
          'measured_from': '300', 'runs': 1,
-         'suite_weights': {'test_a.py': 1.0}}) + '\n', encoding='utf-8')
+         'suite_weights': {'test_a.py': 1.0}}) + '\n', encoding='utf-8',
+        newline='\n')
     git_index(repository, 'init', '-q')
+    committable(repository)
     git_index(repository, 'add', '--', '.github/suite-timings.json')
-    git_index(
-        repository, '-c', 'user.name=base',
-        '-c', 'user.email=base@example.invalid', 'commit', '-q', '-m',
-        'base')
+    git_index(repository, 'commit', '-q', '-m', 'base')
     # What the refresh left behind: the same file re-derived from two
     # other runs, unstaged, which is the state the commit step runs on.
     data_file.write_text(json.dumps(
@@ -497,16 +495,33 @@ def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
          'max_cells': 15, 'units': 'reference-multiples',
          'measured_from': ','.join(str(run) for run in runs),
          'runs': len(runs),
-         'suite_weights': {'test_a.py': 2.0}}) + '\n', encoding='utf-8')
+         'suite_weights': {'test_a.py': 2.0}}) + '\n', encoding='utf-8',
+        newline='\n')
     (repository / 'refreshed-subject.txt').write_text(
-        refresh.commit_message(runs) + '\n', encoding='utf-8')
+        refresh.commit_message(runs) + '\n', encoding='utf-8', newline='\n')
     home = Path(tmp) / 'home'
     home.mkdir()
-    run_workflow_script(
+    done = run_workflow_script(
         repository, '\n'.join(through),
-        {'HOME': str(home), 'RATCHET_SSH_KEY': 'not-a-key',
+        {**commit_environment(home), 'RATCHET_SSH_KEY': 'not-a-key',
          'GITHUB_STEP_SUMMARY': str(Path(tmp) / 'summary.md'),
          'REPO': 'example/example'})
+    # `bash -e`, so a command the resolved bash cannot find stops the
+    # step where it stands and the subject below is the seed's -- which
+    # is what this assertion then reports, with no hint as to why. The
+    # step's exit status and stderr are the answer, and on a failure the
+    # census says which of the step's own commands this machine lacks.
+    if done.returncode:
+        census = run_workflow_script(
+            repository,
+            'for tool in git install chmod; do\n'
+            '  command -v "$tool" > /dev/null || echo "MISSING $tool"\n'
+            'done',
+            commit_environment(home))
+        raise AssertionError(
+            f'the commit step exited {done.returncode} without committing: '
+            f'{done.stderr.strip() or done.stdout.strip()}; tools this bash '
+            f'cannot find: {census.stdout.strip() or "none"}')
     subject = git_output(repository, 'log', '-1', '--pretty=%s')
     named = set(re.findall(r'\d+', subject))
     assert named == {str(run) for run in runs}, subject
@@ -541,7 +556,8 @@ def test_the_shipped_file_describes_the_tree_it_plans(tmp):
                          'plan_timed_matrix')
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
     names = set(planner.suite_names(ROOT))
-    _count, _total, listed = unmeasured_names(data['basis'])
+    _count, _total, listed, _carried, _estimated = unmeasured_names(
+        data['basis'])
     unknown = sorted((set(data['suite_weights']) | set(listed)) - names)
     assert not unknown, unknown
     # The guard is the same chokepoint the planner's CLI calls, so this
