@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 import warnings
 from pathlib import Path
 from unittest import mock
@@ -258,7 +259,6 @@ def test_the_issue_probe_suite_fails_without_a_never_awaited_warning(tmp):
 
 ENDING_SUITE = '''\
 import sys
-from pathlib import Path
 
 sys.path.insert(0, {tests!r})
 import _util  # noqa: E402
@@ -280,6 +280,19 @@ def test_c_the_last_test_runs(tmp):
 
 if __name__ == '__main__':
     sys.exit(_util.runner(_util.collect(dict(locals()))))
+'''
+
+# A subject whose exit code is an object that refuses to be rendered. It
+# overrides `__repr__` alone, so `repr()` and `str()` both reach the raising
+# method: the report renders a subject's exit code one way and its exception
+# message the other, and this shape defeats both.
+EVIL_REPR_EXIT = '''\
+class EvilRepr:
+    def __repr__(self):
+        raise RuntimeError('evil repr')
+
+
+sys.exit(EvilRepr())
 '''
 
 
@@ -319,7 +332,8 @@ def _line_for(text, name):
 def _ending_run(tmp, ending):
     summary = Path(tmp) / 'ending.json'
     source = ENDING_SUITE.format(
-        tests=str(Path(__file__).resolve().parent), ending=ending)
+        tests=str(Path(__file__).resolve().parent),
+        ending=textwrap.indent(ending, '    ').lstrip())
     return _run_probe(tmp, source, summary), summary
 
 
@@ -365,12 +379,64 @@ def test_a_keyboard_interrupt_still_ends_the_run(tmp):
 
     Reporting an interrupt as a FAIL and carrying on would leave a half-run
     file looking like a completed one, so nothing is reported at all.
+
+    Silence alone cannot tell that apart from an arm that crashed reporting
+    it, so this asserts the interrupt positively instead: the traceback ends
+    at `KeyboardInterrupt`, which only a pass-through arm can produce, and it
+    runs through the runner's own frame, which proves the runner reached the
+    test rather than the absences below holding because nothing ran.
     """
     result, summary = _ending_run(tmp, 'raise KeyboardInterrupt()')
     output = result.stdout + result.stderr
     assert result.returncode != 0, (result.returncode, output)
+    assert result.stderr.rstrip().endswith('KeyboardInterrupt'), output
+    assert 'in runner' in result.stderr, output
     assert not _reported(result.stdout), output
     assert not summary.exists(), output
+
+
+def test_a_string_exit_code_is_reported_verbatim(tmp):
+    """A refusal message is the code `argparse` and a RefusingParser choose.
+
+    A message is the one code shape a subject picks deliberately to be read,
+    so the report has to carry it through unchanged rather than reducing every
+    code to a number.
+    """
+    result, summary = _ending_run(tmp, "sys.exit('a refusal message')")
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, (result.returncode, output)
+    assert "SystemExit('a refusal message')" in _line_for(
+        result.stdout, 'test_a_the_subject_ends_the_run'), output
+    assert _reported(result.stdout)[0] == (
+        'FAIL', 'test_a_the_subject_ends_the_run'), output
+    with open(summary, encoding='utf-8') as handle:
+        counts = json.load(handle)
+    assert counts['failed'] == 2, counts
+
+
+def test_a_code_that_refuses_to_render_is_named_not_rendered(tmp):
+    """The report line must not be able to end the run it is reporting on.
+
+    `SystemExit(obj)` where `obj.__repr__` raises reaches the arm's own
+    interpolation, and an f-string that raises while formatting takes the
+    remaining tests with it — the exact failure this change removes, reached
+    by the line added to remove it. So the code is rendered under a guard: the
+    run continues, and the report names the type instead of the value.
+    """
+    result, summary = _ending_run(tmp, EVIL_REPR_EXIT)
+    output = result.stdout + result.stderr
+    assert _reported(result.stdout) == [
+        ('FAIL', 'test_a_the_subject_ends_the_run'),
+        ('FAIL', 'test_b_a_plain_failure'),
+        ('PASS', 'test_c_the_last_test_runs'),
+    ], output
+    assert 'EvilRepr' in _line_for(
+        result.stdout, 'test_a_the_subject_ends_the_run'), output
+    assert '\n1/3 passed\n' in result.stdout, output
+    with open(summary, encoding='utf-8') as handle:
+        counts = json.load(handle)
+    assert counts == {'total': 3, 'passed': 1, 'skipped': 0,
+                      'failed': 2, 'requires': None}, counts
 
 
 if __name__ == '__main__':

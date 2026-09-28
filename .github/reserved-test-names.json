@@ -733,6 +733,7 @@
     "_remove_tree": {"python": ["tests/_noderun.py"]},
     "_removed": {"python": ["tests/_arm_sweep.py"]},
     "_render": {"python": ["tests/_fake_gh.py"]},
+    "_rendered_safely": {"python": ["tests/_util.py"]},
     "_repeats": {"python": ["tests/_mcp_selection_sweep.py"]},
     "_replace_value": {"python": ["tests/_pyroute_storage.py"]},
     "_replaced": {"python": ["tests/_wffixtures.py"], "fixture": ["tests/_wffixtures.py"]},
