@@ -346,27 +346,36 @@ def test_every_spelling_of_this_repository_is_still_the_default(tmp):
     """The protection is a property of WHICH repository this is, not of
     what the caller typed. Spelling this repository out in full is the
     same repository, and so is a case variant of that spelling; both take
-    the union path and both get no foreign-repository note. Compared
-    case-sensitively, the long spelling and its case variant both fell
-    through to the replace path and the #1217 false green came back
-    through them.
+    the union path and both get no foreign-repository note.
 
-    One control, two rows, and the rows are what make it worth folding:
-    a rule that handled only the exact spelling passes row one and fails
-    row two, so a single case-insensitive comparison has to exist for
-    this to stay green.
+    Every row passes `--required` EXCEPT the last, and that last row is the
+    one carrying the claim. With `--required` in hand the note's `named`
+    disjunct short-circuits, so `--required' not in text` is proved by the
+    flag and never reaches the repository comparison - which is how
+    `_gate_note` came to hold a literal `repo == DEFAULT_REPO` beside a
+    helper it was supposed to be asking, with every suite green. A row
+    with no `--required` proves the note's absence by the REPOSITORY
+    alone, and the case variant is the only spelling that discriminates:
+    the exact one matches `DEFAULT_REPO` literally and would pass with the
+    helper deleted.
+
+    The other rows document the behaviour rather than pinning the helper.
     """
     del tmp
     mod = _ci_wait()
-    for spelled in ('Nitjsefnie-Harness-Commons/daedalus',
-                    'nitjsefnie-harness-commons/daedalus'):
+    rows = (
+        ('Nitjsefnie-Harness-Commons/daedalus', ['--required', 'CodeQL']),
+        ('Nitjsefnie-Harness-Commons/daedalus', []),
+        ('nitjsefnie-harness-commons/daedalus', ['--required', 'CodeQL']),
+        ('nitjsefnie-harness-commons/daedalus', []),
+    )
+    for spelled, named in rows:
         code, text = _run_main(mod, _Clock(),
-                               ['9' * 40, '--repo', spelled,
-                                '--required', 'CodeQL'],
+                               ['9' * 40, '--repo', spelled] + named,
                                _green('gate freshness', 'CodeQL'))
-        assert code == 4, (spelled, text)
-        assert 'no tests run on' in text, (spelled, text)
-        assert '--required' not in text, (spelled, text)
+        assert code == 4, (spelled, named, text)
+        assert 'no tests run on' in text, (spelled, named, text)
+        assert '--required' not in text, (spelled, named, text)
 
 
 def test_a_padded_required_name_is_the_name_it_pads(tmp):

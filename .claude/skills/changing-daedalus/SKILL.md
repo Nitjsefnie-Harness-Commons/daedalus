@@ -426,22 +426,33 @@ once on stderr and the wait continues to the grace - a slower correct
 answer, never a green. A present-but-red `tests` run is exit 1, not exit 4:
 the conclusion is judged before the set is.
 
-**`--required NAME` is how a caller states a DIFFERENT repository's gate**
-(issue #1318). It is repeatable and all-of: `--required ci --required lint`
-needs both, the same reading `verdict` has always given. Absent, the
-expectation is `REQUIRED_WORKFLOWS` exactly as before - nothing about the
-exit-4 refusal above moves, and a caller who names no gate still cannot
-switch it off. What it exists for is `--repo`: `tests` is THIS
-repository's gate and is not any other one's, so on a repository whose
-gating workflow is named something else an all-green head used to exit 4
-with a line reading as "the gate never started" when in fact the gate was
-never what this tool looked for. A caller who names another repository and
-no gate is told that on the refusal itself - which name is the only one
-checked, and that `--required` is how to state a different one - rather
-than left to read a missing workflow as a head nobody verified. Both facts
-are the caller's, so the note is empty on this repository and empty for a
-caller who stated their own gate, and those reports print byte for byte
-what they printed before the flag existed.
+**`--required NAME` states a gate, and what that may DO depends on which
+repository this is** (issue #1318). It is repeatable and all-of:
+`--required ci --required lint` needs both, the same reading `verdict` has
+always given. Absent, the expectation is `REQUIRED_WORKFLOWS` exactly as
+before - nothing about the exit-4 refusal above moves, and a caller who
+names no gate still cannot switch it off.
+
+What it exists for is `--repo`: `tests` is THIS repository's gate and is not
+any other one's, so on a repository whose gating workflow is named
+something else an all-green head used to exit 4 with a line reading as "the
+gate never started" when in fact the gate was never what this tool looked
+for. A caller who names another repository and no gate is told that on the
+refusal itself - which name is the only one checked, and that `--required`
+is how to state a different one - rather than left to read a missing
+workflow as a head nobody verified.
+
+The direction is not symmetric, and the asymmetry IS the rule. This tool
+knows daedalus's gate and is only guessing about another repository's, so
+here the names are ADDED to the required set: naming a workflow can only
+make the tool stricter, and `tests` cannot be dropped by argument - which
+is the #1217 false green, made unreachable through the flag that fixes its
+other face. On another repository they REPLACE the set, because there the
+default was only ever a guess. So `--required ci` on this repository means
+"ci AS WELL AS tests", not "ci instead of tests". The note is empty on this
+repository under every spelling of its name, and empty whenever `--required`
+was given at all; naming the gate this tool already knows leaves the output
+byte for byte what it was.
 
 **A workflow's verdict is the run GitHub's required-check status reports for
 it, which is that workflow's NEWEST run on the SHA.** Every older run of the
