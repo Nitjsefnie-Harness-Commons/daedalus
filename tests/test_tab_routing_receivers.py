@@ -171,7 +171,7 @@ _TAIL = '\nreturn [f() for f in d.values()]'
 _READBACKS = [
     ('values-comprehension', _D + _SEND + _TAIL),
     ('values-loop', _D + _SEND + 'for f in d.values():\n    f()'),
-    ('values-bound-view', _D + 'v = d.values()\n' + _SEND
+    ('values-bound-read-back', _D + 'v = d.values()\n' + _SEND
      + '\nreturn [f() for f in v]'),
     ('values-alias-receiver', _D + 'e = d\n' + _SEND
      + '\nreturn [f() for f in e.values()]'),
@@ -210,8 +210,8 @@ _READBACKS = [
     ('copy-subscript', _D + _SEND + '\nreturn d.copy()["k"]()'),
     ('copy-then-values', _D + _SEND
      + '\nreturn [f() for f in d.copy().values()]'),
-    # The wrappers consume the view the read-back hands back, so a value the
-    # read dropped is dropped through them as well.
+    # The wrappers consume the value the read-back hands back, so a value
+    # the read dropped is dropped through them as well.
     ('values-in-a-list', _D + _SEND
      + '\nreturn [f() for f in list(d.values())]'),
     ('values-in-a-tuple', _D + _SEND
@@ -309,8 +309,8 @@ _READBACK_CALL_RESULT = {
     'call-result-copy-values': (_CALL_RESULT + _SEND
                                 + '\nreturn [f() for f in'
                                 + ' getd().copy().values()]'),
-    'call-result-bound-view': (_CALL_RESULT + 'v = getd().values()\n' + _SEND
-                               + '\nreturn [f() for f in v]'),
+    'call-result-bound-read-back': (_CALL_RESULT + 'v = getd().values()\n'
+                                    + _SEND + '\nreturn [f() for f in v]'),
 }
 _READBACK_CALL_RESULT_CLEAN = {
     'clean-call-result-values': (
