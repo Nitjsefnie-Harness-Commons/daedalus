@@ -578,6 +578,7 @@
     "_merge_or_value": {"python": ["tests/_pyroute_reads.py"]},
     "_merge_payload_keys": {"python": ["tests/_pyroute_state.py"]},
     "_method": {"python": ["tests/_jsroute_getter_cases.py"]},
+    "_mod_text": {"python": ["tests/_mod_text.py"]},
     "_module_binding_write": {"python": ["tests/_cli_arg_audit_resolver.py"]},
     "_module_constants": {"python": ["tests/_launch_path.py"]},
     "_module_execution": {"python": ["tests/_helper_binds.py"]},

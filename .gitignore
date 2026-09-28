@@ -380,6 +380,7 @@
 !/tests/_mcp_tool_commands.py
 !/tests/_mcp_tools_helpers.py
 !/tests/_mcp_transport_probes.py
+!/tests/_mod_text.py
 !/tests/_mutation_sweep.py
 !/tests/_netcapture_harness.py
 !/tests/_noderun.py

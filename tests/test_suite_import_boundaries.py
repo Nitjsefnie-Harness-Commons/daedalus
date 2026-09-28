@@ -72,6 +72,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _mod_text import _mod_text  # noqa: E402
 
 ROOT = _util.ROOT
 
@@ -331,10 +332,6 @@ def _disagreements_message(unallowed, stale):
     return '\n\n'.join(parts)
 
 
-def _mod(*lines):
-    return ''.join(line + '\n' for line in lines)
-
-
 def _fabricate(root, sources, relpath, text):
     """Write one module of a fabricated tests tree and key it by path."""
     target = root / relpath
@@ -360,9 +357,10 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
     root = Path(tmp) / 'tree'
     sources = {}
     _fabricate(root, sources, 'tests/_shared.py',
-               _mod('def _load_queue(name):', '    return 1'))
-    _fabricate(root, sources, 'tests/test_sibling.py', _mod('SIBLING = 1'))
-    _fabricate(root, sources, 'tests/test_Mixed.py', _mod('MIXED = 1'))
+               _mod_text('def _load_queue(name):', '    return 1'))
+    _fabricate(root, sources, 'tests/test_sibling.py',
+               _mod_text('SIBLING = 1'))
+    _fabricate(root, sources, 'tests/test_Mixed.py', _mod_text('MIXED = 1'))
     cases = [
         # Every spelling that names a sibling module.
         ('test_a.py', 'import test_sibling', ['test_sibling']),
@@ -378,39 +376,39 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
         ('test_x.py', 'from test_sibling import SIBLING as sib',
          ['test_sibling']),
         # A nested import still executes the sibling's body.
-        ('test_nested.py', _mod('def load():', '    import test_sibling'),
+        ('test_nested.py', _mod_text('def load():', '    import test_sibling'),
          ['test_sibling']),
         # A star names nothing the rule can enumerate, so only its module
         # is examined — and that module is a sibling all the same.
         ('test_star.py', 'from test_sibling import *', ['test_sibling']),
         # The four dynamic callees, including the `.py` literal limb and
         # the second argument of spec_from_file_location.
-        ('test_i.py', _mod('import importlib',
-                           "importlib.import_module('test_sibling')"),
+        ('test_i.py', _mod_text('import importlib',
+                                "importlib.import_module('test_sibling')"),
          ['test_sibling']),
         ('test_j.py', "__import__('test_sibling')", ['test_sibling']),
-        ('test_k.py', _mod('import runpy',
-                           "runpy.run_path('test_sibling')"),
+        ('test_k.py', _mod_text('import runpy',
+                                "runpy.run_path('test_sibling')"),
          ['test_sibling']),
-        ('test_l.py', _mod('import importlib.util',
-                           "importlib.util.spec_from_file_location("
-                           "'sibling', 'test_sibling.py')"),
+        ('test_l.py', _mod_text('import importlib.util',
+                                "importlib.util.spec_from_file_location("
+                                "'sibling', 'test_sibling.py')"),
          ['test_sibling']),
         # The same call naming the path by keyword, so the sibling is not
         # in a positional argument at all. The case above passes the path
         # second and positionally, so dropping the keyword limb moves no
         # verdict it can see.
-        ('test_l_kw.py', _mod('import importlib.util',
-                              "importlib.util.spec_from_file_location("
-                              "'mod', location='test_sibling.py')"),
+        ('test_l_kw.py', _mod_text('import importlib.util',
+                                   "importlib.util.spec_from_file_location("
+                                   "'mod', location='test_sibling.py')"),
          ['test_sibling']),
         # A triple-quoted synthetic-violation fixture naming a sibling is
         # a string that executes nothing: the shape of the three real
         # sites a text rule would report.
-        ('test_fixture.py', _mod('FIXTURE = """', 'import os',
-                                 'import test_sibling as behaviour',
-                                 "subprocess.run(['python3', 'child.py'],"
-                                 ' cwd=behaviour.ROOT)', '"""'), []),
+        ('test_fixture.py', _mod_text('FIXTURE = """', 'import os',
+                                      'import test_sibling as behaviour',
+                                      "subprocess.run(['python3', 'child.py'],"
+                                      ' cwd=behaviour.ROOT)', '"""'), []),
         # A call spelled inside a string constant is a string.
         ('test_call_text.py',
          'CALL = "__import__(\'test_sibling\')"', []),
@@ -426,26 +424,28 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
         ('test_r.py', 'from test_absent import SIBLING', []),
         ('test_s.py', 'import test_Mixed', []),
         # A sibling's private reached by copy rather than by import.
-        ('test_copy.py', _mod('def _load_queue(name):', '    return 1'), []),
+        ('test_copy.py',
+         _mod_text('def _load_queue(name):', '    return 1'), []),
         # A module name built at runtime, a suite spelled by directory as
         # well as stem, and two literals naming something else.
-        ('test_t.py', _mod('import importlib', 'NAME = "test_sibling"',
-                           'importlib.import_module(NAME)'), []),
-        ('test_u.py', _mod('import runpy',
-                           "runpy.run_path('tests/test_sibling.py')"), []),
+        ('test_t.py', _mod_text('import importlib', 'NAME = "test_sibling"',
+                                'importlib.import_module(NAME)'), []),
+        ('test_u.py',
+         _mod_text('import runpy',
+                   "runpy.run_path('tests/test_sibling.py')"), []),
         # The same suite spelled by package rather than by directory: the
         # static clause's `_leaf` drops that leading component, and
         # `_DYNAMIC` refuses the literal because it does not start with
         # `test_`, so the two clauses disagree on the spelling.
-        ('test_u_pkg.py', _mod('import runpy',
-                               "runpy.run_path('tests.test_sibling.py')"),
+        ('test_u_pkg.py', _mod_text('import runpy',
+                                    "runpy.run_path('tests.test_sibling.py')"),
          []),
-        ('test_v.py', _mod('import importlib',
-                           "importlib.import_module("
-                           "'daedalus_mcp.transport')"), []),
-        ('test_w.py', _mod('import importlib.util',
-                           "importlib.util.spec_from_file_location("
-                           "'mod', 'server.py')"), []),
+        ('test_v.py', _mod_text('import importlib',
+                                "importlib.import_module("
+                                "'daedalus_mcp.transport')"), []),
+        ('test_w.py', _mod_text('import importlib.util',
+                                "importlib.util.spec_from_file_location("
+                                "'mod', 'server.py')"), []),
     ]
     for filename, text, _want in cases:
         # A fabricated case is a program a tests module could contain, so
@@ -471,10 +471,11 @@ def test_the_detector_names_every_sibling_import_and_nothing_else(tmp):
 def test_the_allowance_table_is_pinned_on_both_sides(tmp):
     root = Path(tmp) / 'tree'
     sources = {}
-    _fabricate(root, sources, 'tests/test_sibling.py', _mod('SIBLING = 1'))
+    _fabricate(root, sources, 'tests/test_sibling.py',
+               _mod_text('SIBLING = 1'))
     _fabricate(root, sources, 'tests/test_importer.py',
-               _mod('import test_sibling'))
-    _fabricate(root, sources, 'tests/test_fixed.py', _mod('FIXED = 1'))
+               _mod_text('import test_sibling'))
+    _fabricate(root, sources, 'tests/test_fixed.py', _mod_text('FIXED = 1'))
     findings = _import_findings(sources)
 
     unallowed, stale = _partition(findings, ())
@@ -510,7 +511,7 @@ def test_the_allowance_table_is_pinned_on_both_sides(tmp):
     # stale row was reported only when nothing else was wrong. One failure
     # names both.
     _fabricate(root, sources, 'tests/test_importer_two.py',
-               _mod('import test_sibling'))
+               _mod_text('import test_sibling'))
     compile(sources['tests/test_importer_two.py'], 'test_importer_two.py',
             'exec')
     findings = _import_findings(sources)
@@ -533,8 +534,8 @@ def test_the_allowance_table_is_pinned_on_both_sides(tmp):
 def test_the_detector_refuses_a_module_it_cannot_parse(tmp):
     del tmp
     sources = {
-        'tests/_cand.py': _mod('def helper():', '    return 1'),
-        'tests/test_broken.py': _mod('def broken(:'),
+        'tests/_cand.py': _mod_text('def helper():', '    return 1'),
+        'tests/test_broken.py': _mod_text('def broken(:'),
     }
     try:
         _import_findings(sources)

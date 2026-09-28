@@ -69,7 +69,7 @@
     "tests/test_coverage_comment_boundary.py": 1,
     "tests/test_coverage_memo.py": 2,
     "tests/test_coverage_suites.py": 1,
-    "tests/test_dashboard_behaviour.py": 13,
+    "tests/test_dashboard_behaviour.py": 12,
     "tests/test_dashboard_harness.py": 9,
     "tests/test_dashboard_node_retry.py": 46,
     "tests/test_delivery_stripe_acceptance.py": 1,
