@@ -28,8 +28,7 @@ def _retrying(perform):
     """
     for remaining in range(_RETRY_ATTEMPTS - 1, -1, -1):
         try:
-            perform()
-            return
+            return perform()
         except PermissionError:
             if not remaining:
                 raise
@@ -49,3 +48,19 @@ def write_bytes_retrying(path, data):
 def write_text_retrying(path, data, encoding='utf-8'):
     """Write text to `path`, retrying a transient sharing violation."""
     _retrying(lambda: path.write_text(data, encoding=encoding))
+
+
+def unlink_retrying(path):
+    """Remove `path`, retrying a transient sharing violation.
+
+    `missing_ok=True` because a caller that guarded the removal with
+    `exists()` has still raced: the check and the removal are two calls,
+    and a marker already gone is the outcome the caller was after, not a
+    refusal worth retrying.
+    """
+    _retrying(lambda: path.unlink(missing_ok=True))
+
+
+def read_text_retrying(path, encoding='utf-8'):
+    """Read text from `path`, retrying a transient sharing violation."""
+    return _retrying(lambda: path.read_text(encoding=encoding))
