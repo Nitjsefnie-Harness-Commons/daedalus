@@ -135,17 +135,14 @@ That band is the price of the tier, and it is a real one. A BIASED file
 at 10.9% estimated is between 1.10x out (construction B) and 3.45x
 (construction A) and is published with a note instead of refused. The
 band is the part no share can close and `MIN_RECORDED_SKEW` only partly
-does: between a skew of 2.18 and 2.87 -- 26.8% and 14.6% estimated -- a
-biased plan is 3.5x to 6.5x out and is still published, because its
-recorded set still carries enough tail to look like a sample. Raising
-`MIN_RECORDED_SKEW` to 2.2 closes that band too and costs the drift fuse
-nothing, since a drifted set's skew does not move; it is left at 2.0
-because 2.0 is a round number about equally clear of the shape it catches
-(1.87) and the shape it does not (2.18), and 2.2 would be 0.02 from a
-number that moves on every refresh of the data file. The alternative --
-refusing the drifted file too -- is not a stricter guard but a broken
-one, because the alternative to a wrong number is not a right number, it
-is no number.
+does: between a skew of 2.0 and 2.34 a biased plan is 2.3x to 4.8x out
+and is still published, because its recorded set still carries enough
+tail to look like a sample. That is a priced acceptance and the
+constant carries the numbers, the trade and the reason it is not closed
+-- which is a number about this tree, not about a distribution a
+nightly refresh re-measures. The alternative -- refusing the drifted
+file too -- is not a stricter guard but a broken one, because the
+alternative to a wrong number is not a right number, it is no number.
 
 A refusal rather than a note above it because there is nothing a reader
 can do with a matrix whose load is mostly invented: unlike a target the
@@ -180,6 +177,54 @@ NOTE_ESTIMATED_SUITE_SHARE = 0.10
 # the set is not a SAMPLE of a tree but the bottom of one, and the
 # median it lends the unmeasured suites is a price from the floor of
 # the distribution. See `recorded_skew` and the docstring's cost table.
+#
+# 2.0, AND THE NUMBER IS A DECISION, NOT A GAP. The construction: over
+# the live tree (334 suites, 328 recorded, true total 357.6), keep the
+# `k` LIGHTEST recorded weights, drop the rest, and let the planner
+# estimate every suite the file no longer records.
+#
+#   k-rec  est-share  skew   plan total   understated    2.0    2.2
+#     328      1.8%   5.13       357.6        1.00x       pub    pub
+#     300     10.2%   2.87       156.3        2.29x       pub    pub
+#     260     22.2%   2.34        74.2        4.82x       pub    pub
+#     240     28.1%   2.18        55.1        6.49x       pub   REF
+#     222     33.5%   1.87        43.1        8.29x       REF    REF
+#     200     40.1%   1.60        33.0       10.82x       REF    REF
+#
+# 2.0 DOES ITS JOB: the file that motivated this condition -- the 222
+# lightest, 8.29x out, published behind a summary reading
+# `heaviest/median 1.000` -- sits at 1.87 and is refused, and so is
+# everything more truncated. The residual band is 2.0 to 2.34, which is
+# 2.3x to 4.8x out, and it is a PRICED ACCEPTANCE rather than an
+# oversight: a plan in that band is lopsided, and every suite in it
+# still runs, so a lopsided matrix and no matrix are not comparable
+# outcomes. Ruled by the maintainer.
+#
+# 2.2 WOULD BUY the 240-lightest file at 6.49x, and IS NOT TAKEN, for a
+# reason that is NOT the drift path. It is tempting to read 2.2 as
+# costing the fuse -- as though arrivals priced at the recorded median
+# dilute the recorded set and walk its skew down to the floor. They do
+# not: `recorded_skew` is over the resolved weights MINUS the invented
+# ones, so a drifted file's recorded set is unchanged and its skew is
+# 5.13 at one day, at nineteen, and at every arrival count between.
+# Measured, and `test_the_two_shapes_are_told_apart_by_the_recorded_set_
+# alone` asserts the same float at five arrival counts. Under the other
+# definition -- the ratio over ALL resolved weights, arrivals included --
+# the skew does fall, from 4.90 at a day to 2.97 at nineteen, and it
+# still has not reached 2.2 at a third of the tree. So no reading makes
+# 2.2 cost five days of a missed nightly, and the real reason is the
+# one below.
+#
+# THE REAL REASON IS THAT 2.2 IS NOT A NUMBER ABOUT THIS TREE. 2.0 sits
+# 0.13 clear of the shape it catches (1.87) and 0.18 below the one it
+# does not (2.18), and both of those are properties of a distribution
+# that a nightly refresh re-measures. 2.2 would sit 0.02 above a shape
+# that moves, so a file whose only change was last night's data could
+# flip between publishing and being refused, and the flip would be a
+# true statement about the data wearing the costume of a guard
+# tightening. 2.0 is a round number about equally clear of both, and
+# raising it is a decision to be made against a fresh measurement, not
+# a number to nudge.
 MIN_RECORDED_SKEW = 2.0
 # Tracked suites this tree gains a day, which is how the note converts an
 # estimated count into refreshes that did not land. A RANGE and not a
