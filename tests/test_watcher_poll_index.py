@@ -391,14 +391,23 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
     every control drove a subject that could only be read one way. This
     one drives two plants with OPPOSITE causes - a healthy run whose
     third poll is one call wider than the tolerance, and an index that
-    sticks at 2 with every poll costing one call - and requires that both
+    sticks at 3 with every poll costing one call - and requires that both
     earn the same honest answer naming both candidates.
 
-    They must: the collapse folds every poll republishing the current
-    value into the one boundary it shows, so the sticky index and the
-    growing run are one observation. The assertion is the ORDER of them
-    too, because the proof is that the two causes really are the same
-    reading and not merely similar ones.
+    They must, and why is the collapse: it folds every poll republishing
+    the current value into the one boundary it shows, so a sticky index
+    and a growing run are one observation. What this control adds over
+    the unit control on the same row is the RUN: the two subjects here
+    are the plants a real defect produces, through the real loop, on the
+    same 25 calls over the same three boundaries - not a hand-built log
+    shaped to earn the answer.
+
+    The head equality below is that premise asserted, not a check on the
+    reading. It cannot fail under any mutation of `_reading`, because
+    the two refusals are the same string whatever row they name; what it
+    CAN fail on is the plants, and that is the point of keeping it - an
+    edit to either plant that made the two runs diverge would leave this
+    control asserting a non-discrimination that no longer held.
     """
     pair = _refusal_of_pair(tmp)
     for label, refused in pair:
@@ -409,6 +418,7 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
             label, refused)
         assert 'this log cannot say' in refused, (label, refused)
         assert 'stopped advancing' not in refused, (label, refused)
+    # The pair's premise, not a check on the reading: see the docstring.
     heads = [refused.split('over the')[0] for _, refused in pair]
     assert heads[0] == heads[1], heads
 
