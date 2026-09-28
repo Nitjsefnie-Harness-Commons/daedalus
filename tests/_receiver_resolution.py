@@ -153,8 +153,8 @@ def _scoped_assignments(tree):
 
 
 def _shadowed_parameters(tree):
-    """`function ->` what shadows a name inside it: parameters, and the
-    targets of assignments the walk cannot resolve.
+    """`function ->` what shadows a name inside it: PARAMETERS, and the
+    targets of assignments to something the walk cannot resolve.
 
     The module table cannot carry this. A parameter named after a
     from-import is a shadow in the function that declares it and nowhere
@@ -175,6 +175,15 @@ def _shadowed_parameters(tree):
                  + list(args.kwonlyargs)}
         for child in ast.walk(node):
             if not isinstance(child, ast.Assign) or child.value is None:
+                continue
+            # A literal is NOT a shadow. The function supplies the value,
+            # and `literal_bindings` has already asked whether EVERY
+            # writing of the name is one; asking this table again with a
+            # cruder rule made the cruder one win, and a function that
+            # made its own container and put the deadline in it stopped
+            # discharging while the same code with the container bound
+            # one scope out kept discharging.
+            if isinstance(child.value, _LITERALS):
                 continue
             if _resolve_dotted(child.value, {}) is not None:
                 continue
