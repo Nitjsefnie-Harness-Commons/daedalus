@@ -14,7 +14,8 @@ _LAUNCHERS = frozenset(
 # form already states, and the descent needs it here or its chain closes on
 # the outermost callee and `subprocess.run.__call__(...)` stops being caught
 # through the `subprocess.run` above it. The descent adds conditions the
-# walk does not, all in `_call_receiver_parts` and stated in its docstring.
+# walk does not, in `_call_receiver_parts` and in `_iterable_parts`, each
+# stated in its own docstring.
 _LAUNCH_READS = _LAUNCHERS | {'__call__'}
 
 # A header binds names: a decorator binds the decorated name, and a
@@ -359,10 +360,6 @@ def _call_receiver_parts(value):
     `_carried_parts.__doc__`.
     """
     callee = value.func
-    # A call the descent starts on carries its launcher in its arguments.
-    if isinstance(callee, ast.Call):
-        yield from _carried_parts(callee)
-        callee = callee.func
     # A launch method is read off the launcher only while every link above
     # it is one too, and a subscript closes the chain as surely as a
     # constant does. `names_launch` asks the other question and is never
@@ -443,17 +440,30 @@ def _iterable_parts(value):
 
     The condition is structural — whether the callee chain bottoms on
     something other than an atom — and that is the whole of what the arm
-    knows. Four of the shapes it judges are real: `{'sp': subprocess}
-    .values()` and the three subscripted spellings beside it all bind
-    the module, and a launch method read off the module launches. Five
-    are not, and are refused anyway: `.keys()` binds a string, `.items()`
-    a tuple, `[subprocess].pop()` hands the loop a module that is not
-    iterable, an f-string method a string, and a tuple's `.index()` an
-    int. The arm cannot tell them apart without naming methods, which is
-    the mistake `_opaque_callee_cases`'s docstring records as this
-    repository's before. The family and what each of them yields is
-    enumerated in tests/test_receiver_descent.py, so the trade is stated
-    once rather than rediscovered. Everything else is left to
+    knows. On its own it decides nine shapes, and that account is worth
+    keeping because it is what the arm is: four are real, `{'sp':
+    subprocess}.values()` and the three subscripted spellings beside it
+    all bind the module, and a launch method read off the module
+    launches. Five are not, and it refuses them anyway: `.keys()` binds
+    a string, `.items()` a tuple, `[subprocess].pop()` hands the loop a
+    module that is not iterable, an f-string method a string, and a
+    tuple's `.index()` an int.
+
+    That is what the arm decides, and it is NOT what the branch costs.
+    Measured over 1,443 generated shapes, this arm and the walk together
+    move no verdict in either direction relative to a tree without it:
+    every flip the branch produces is a release the issue asked for and
+    not one refusal. The five shapes above were refused before the branch
+    too, by the receiver handoff this arm's second reading was split out
+    of, on the same call node and under the same condition — so the arm
+    reproduces verdicts the walk had already given rather than adding
+    any. The sweep is `/tmp`-scratch, not a committed control, and
+    tests/test_receiver_descent.py carries the family so the shapes are
+    enumerated even where the sweep is not run.
+
+    The arm cannot tell the five from the four without naming methods,
+    which is the mistake `_opaque_callee_cases`'s docstring records as
+    this repository's before. Everything else is left to
     `_carried_parts`, which already judges an iterable that is not a
     call and a call that is built on a bare name.
     """

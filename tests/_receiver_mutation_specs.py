@@ -3,9 +3,12 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Split out of tests/_coverage_mutation_specs.py, which carries the rows for
-the guard as a whole and had no room for these: it sits at the 700-line
-ceiling. The two invokes below that rows outside this file also use stay in
-that module, so both are read there and imported here.
+the guard as a whole and had no room for these. It reached the 700-line
+ceiling at this branch's first commit, da437578, and the file that pressed
+it was tests/test_coverage_bindings.py, which these rows came out of; the
+module is back under the ceiling since. The two invokes below that rows
+outside this file also use stay there, so both are read there and imported
+here.
 """
 from _coverage_mutation_specs import _CHAIN_INVOKE, _INLINE_INVOKE
 
@@ -15,6 +18,9 @@ _ATOM_INVOKE = (
 _RECEIVER_CARRIER_INVOKE = (
     'import test_coverage_unfollowable_forms as form_suite; '
     'form_suite.test_a_receiver_that_carries_a_launcher_is_refused(None)')
+_RECEIVER_INVOKE = (
+    'import test_coverage_unfollowable_forms as form_suite; '
+    'form_suite.test_a_receiver_that_only_names_a_launcher_stays_clean(None)')
 _RECEIVER_DESCENT_REFUSED_INVOKE = (
     'import test_receiver_descent as descent_suite; '
     'descent_suite.test_a_receiver_reached_through_an_intermediate_'
@@ -40,14 +46,45 @@ _RECEIVER_BASE = (
     "    direct = callee is value.func\n"
     "    if (names_launch or direct) and not isinstance(callee, _ATOMS):\n"
     "        yield from _carried_parts(callee)\n")
+_RECEIVER_YIELD = "        yield from _carried_parts(callee)\n"
 _RECEIVER_MUTATIONS = (
     ('call receiver', 'bindings', ((
         _RECEIVER_BASE,
         "    direct = callee is value.func\n"),), _INLINE_INVOKE),
     ('receiver opens atoms', 'bindings', ((
         _RECEIVER_BASE,
-        "    if True:\n        yield from _carried_parts(callee)\n"),),
+        f"    if True:\n{_RECEIVER_YIELD}"),),
      _RECEIVER_DESCENT_CLEAN_INVOKE),
+    # The condition has three terms, and each has a row of its own so the
+    # table says what each one costs rather than only that the whole gate
+    # is load-bearing. The two above move it as a unit.
+    #
+    # The launch-read term is the one the issue is about: without it the
+    # base of `f"{subprocess}".run(...)` is never opened, which is the
+    # f-string receiver row in `_receiver_carrier_cases`.
+    ('receiver drops the launch-read term', 'bindings', ((
+        _RECEIVER_BASE,
+        f"    direct = callee is value.func\n"
+        f"    if direct and not isinstance(callee, _ATOMS):\n"
+        f"{_RECEIVER_YIELD}"),),
+     _RECEIVER_CARRIER_INVOKE),
+    # The `direct` term is what a callee the descent never left rides on:
+    # without it `(subprocess.run if flag else None)(...)` is a clean
+    # verdict, the conditional callee row in `_receiver_carrier_cases`.
+    ('receiver drops the direct term', 'bindings', ((
+        _RECEIVER_BASE,
+        f"    direct = callee is value.func\n"
+        f"    if names_launch and not isinstance(callee, _ATOMS):\n"
+        f"{_RECEIVER_YIELD}"),),
+     _RECEIVER_CARRIER_INVOKE),
+    # The atom term is what a direct launch rides on: without it
+    # `subprocess.run(['python3', 'child.py'])` hands its own base to the
+    # walk, which is the `direct launch` row in `_receiver_atom_cases`.
+    ('receiver drops the atom term', 'bindings', ((
+        _RECEIVER_BASE,
+        f"    direct = callee is value.func\n"
+        f"    if names_launch or direct:\n{_RECEIVER_YIELD}"),),
+     _RECEIVER_INVOKE),
     # The subscripts the descent consumes are sub-values in their own
     # right; dropping them hides a launcher in an index or a bound.
     ('receiver drops the subscripts', 'bindings', ((
