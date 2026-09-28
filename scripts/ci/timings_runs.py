@@ -135,8 +135,7 @@ def _reference(cell, run_id, suites):
 
 def read_run(run_dir, run_id):
     """One run's per-suite weights in reference-multiples, and readings."""
-    cells = {path.name: path for path in sorted(run_dir.iterdir())
-             if path.is_dir() and _head_rounds(path)}
+    cells = cell_dirs(run_dir)
     if not cells:
         raise RefreshError(f'run {run_id} carries no cell artifacts')
     weights = {}
@@ -157,6 +156,31 @@ def discover_runs(runs_root):
     runs = [(int(path.name), path) for path in runs_root.iterdir()
             if path.is_dir() and path.name.isdigit()]
     return sorted(runs, key=lambda item: -item[0])
+
+
+def cell_dirs(run_dir):
+    """The run's measured cell directories, by name."""
+    return {path.name: path for path in sorted(run_dir.iterdir())
+            if path.is_dir() and _head_rounds(path)}
+
+
+def measured_suites(run_dir, run_id):
+    """Every suite the run's cells carry, WITHOUT reading a reference.
+
+    The collapsed-run rule is judged on how many suites a candidate
+    measured, and it is judged before the candidate is known to be the
+    partition, so the count is taken here rather than through
+    `read_run`. Reading it that way made a one-cell candidate whose
+    cell lost its `reference.json` a refusal for the WHOLE refresh --
+    including the good run behind it -- where the base filed that run
+    `incomplete` and stepped over it. The two dispositions agree that
+    such a run is unusable; only the blast radius differed, and only
+    the newest run is entitled to the louder one.
+    """
+    names = set()
+    for cell in cell_dirs(run_dir).values():
+        names.update(_suite_seconds(cell, run_id))
+    return names
 
 
 def select(runs, wanted, max_cells=1, recorded=0):
@@ -192,15 +216,13 @@ def select(runs, wanted, max_cells=1, recorded=0):
     degenerate = []
     empty = 0
     for run_id, path in runs:
-        cells = {entry.name for entry in path.iterdir()
-                 if entry.is_dir() and _head_rounds(entry)}
+        cells = set(cell_dirs(path))
         if not cells:
             empty += 1
             continue
         weights = references = None
         if len(cells) < 2 and max_cells > 1:
-            weights, references = read_run(path, run_id)
-            if len(weights) < recorded:
+            if len(measured_suites(path, run_id)) < recorded:
                 degenerate.append(run_id)
                 continue
         if expected is None:
