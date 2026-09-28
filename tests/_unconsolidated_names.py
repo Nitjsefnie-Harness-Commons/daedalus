@@ -379,14 +379,6 @@ UNCONSOLIDATED_NAMES = {
     ('tests/test_cli_content_hotfixes.py', '_stored'):
         'this is the stored-hotfix record this suite reads back, where '
         'the owner store key is the one the route answers with',
-    ('tests/test_cli_eval_handlers.py', '_get'):
-        'byte-identical to the other test_cli_eval_handlers.py and '
-        'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '
-        'is a copy of the owner, whose own digest is d10f3df3d',
-    ('tests/test_cli_result_handlers.py', '_get'):
-        'byte-identical to the other test_cli_eval_handlers.py and '
-        'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '
-        'is a copy of the owner, whose own digest is d10f3df3d',
     ('tests/test_dashboard_app_shell.py', '_run'):
         'this runs one dashboard scenario in this suite own shell, where '
         'the owner runs the recorded boundary harness a plan names',
