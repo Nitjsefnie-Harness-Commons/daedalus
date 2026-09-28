@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""What the receiver descent hands over when the chain reads no launcher.
+"""What the receiver descent hands over, and what a loop reads out of it.
 
 `_carried_parts` and the tables in `tests/_carrier_cases.py` judge the forms
-a value carries; these two tables judge the one decision
-`_call_receiver_parts` makes about the base its chain lands on, which the
-other tables reach only through the rows that happen to sit on either side of
-it. Every row here is a receiver that CONTAINS a module name and a method
-read off it, so the only thing separating a refusal from a clean verdict is
-whether a launch method is read somewhere in the chain.
+a value carries; the five tables here judge the two decisions the descent
+makes about what its chain lands on, which the other tables reach only
+through the rows that happen to sit on either side of them.
+
+Every row is a receiver that CONTAINS a module name with a method read off
+it, and the two tables answer two different questions about it. The three
+receiver tables ask whether a launch method is read somewhere in the chain,
+which is what `_call_receiver_parts` decides. The two loop tables ask
+whether a launch method is read off what the LOOP BINDS, which
+`_iterable_parts` decides from the use site rather than the chain: a
+`for` body that calls `.run` refuses an iterable whose chain names no
+launch at all, so `for launcher in {'sp': subprocess}.keys():` is refused
+while `go = {'sp': subprocess}.keys()` is clean. The per-table docstrings
+state which is which; nothing here decides either question on its own.
 """
 import sys
 from pathlib import Path
