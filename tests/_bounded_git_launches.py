@@ -12,6 +12,11 @@ BOUNDED_GIT_LAUNCHES = {
     # Every reason says what the call is and why it cannot hang a git
     # launch; a receiver the analyser cannot prove is reported rather
     # than passed, and this table is that report's disposition.
+    ('.claude/skills/changing-daedalus/plant.py', '_git',
+     'subprocess.run(capture_output, check, text, timeout)', 1):
+         'the work-tree and porcelain reads that report whether a saved'
+         ' path is dirty against HEAD; a standalone skill script an'
+         ' operator runs by hand, so a wedged git hangs an operator',
     ('.claude/skills/changing-daedalus/watch_all.py', '_aggregate',
      'sink.get(timeout)', 1):
          'a queue read with a deadline: the queue is drained,'

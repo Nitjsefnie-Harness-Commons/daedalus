@@ -90,12 +90,31 @@ asserted on an unlink race microseconds wide, another pinned an extracted
 helper thoroughly while passing with `server.py` fully reverted. Reading a test
 reveals neither.
 
+**Restore the way `plant.py` does, never with the VCS.** Run
+`python3 .claude/skills/changing-daedalus/plant.py save FILE` before you
+revert the fix and `plant.py restore FILE` after. The restore writes back the
+bytes it read, re-reads them, and prints the comparison, so the proof is in
+its own output instead of in a check the next reader has to remember. A
+path-scoped VCS restore - `git checkout -- FILE`, `git restore FILE` - is a
+statement about the whole path, not about the plant: it cannot tell the
+planted bytes from uncommitted work on the same path, so it hands back HEAD
+and that work is gone with nothing in the output to say so. Hence never
+`git checkout --` a path you planted into unless that path's work is already
+committed, and make **commit before you plant** the standing order so every
+restore lands on a committed tree. Prove the restore with a diff of the
+**whole tree**, not of the planted path - the whole tree is where the damage
+shows - and read a suite that is green the instant after a restore as the
+**signal that the restore did nothing**, never as evidence that it worked.
+
 **When the change *is* a guard, green CI proves nothing.** A guard passes on
 the tree it was written against by construction. For any change that adds or
 alters a guard - an audit, a linter, a CI check, a ratchet - plant the defect
 it exists to catch **in a real target**, prove the guard fails, restore, prove
 it passes. A synthetic fixture shows what the guard thinks; only a real target
-shows whether the guard and the runtime agree.
+shows whether the guard and the runtime agree. Save and restore that target
+with the `plant.py` pair above; a VCS restore there is the same silent loss.
+
+
 
 **Never assert a wall-clock margin.** It passes because the machine was fast
 enough, never because the code is right, so it fails correct code on a loaded
