@@ -29,7 +29,7 @@ with the idle bound as the other refusal, and `gh_client.Watcher.poll`
 re-entering its own body on a rate-limit refusal can spend more under
 one marker than any single poll is expected to. What the arm cannot
 settle on its own, it does not claim to: the refusal names the `READINGS`
-row the rendered order falls in, and TWO of those three rows are
+row the rendered order falls in, and TWO of those four rows are
 ambiguities the row states rather than resolves. Marking one row
 unresolvable says nothing about the others - so the hedge names the
 count, not a single case. `await_lines` and `await_calls` take no such
@@ -287,11 +287,11 @@ def _log_of(rows):
             for call in range(calls)]
 
 
-# One log per row of `READINGS`, each shaped so the wait ends on the bound
-# with that row's rendering: a value that comes back after a different one
-# has been published, a run of new values over the bound, and a single
-# value. One control per row, each asserting its own clause, so a fourth
-# cause is a fourth row here with nothing over it.
+# One log per row of `READINGS` after the re-use, each shaped so the wait
+# ends on the bound with that row's rendering: an all-absent seam, a
+# cycle longer than the window, a run of new values over the bound, and a
+# run of wide polls. One control per row, each asserting its own clause, so
+# a fifth cause is a fifth row here with nothing over it.
 _REUSED_LOG = _log_of([('1', POLL_WIDTH), ('2', 1), ('1', POLL_WIDTH)])
 # A cycle LONGER than the window: thirteen new values and then the first
 # again, so the repeat falls outside `SEQUENCE` and only a reading made
@@ -443,9 +443,15 @@ def test_the_reading_covers_every_rendering_the_renderer_can_produce(tmp):
 # wiring produces. Rendering that by sorting it raises, so the wait still
 # ends - but by a traceback that names the renderer instead of the seam,
 # and carries no marker, no call count and no `what`.
-_UNWIRED_LOG = ([{'poll': '1', 'request': 'query one'}]
-                + [{'poll': None, 'request': f'query {index}'}
-                   for index in range(2, 2 * POLL_WIDTH + 3)])
+#
+# Its own name, and not `_UNWIRED_LOG`: that name is the ALL-ABSENT seam
+# above, and a module body runs top to bottom, so sharing it left the
+# control named for the all-absent shape receiving THIS one - and passing,
+# because both route to the same row. The two shapes are one defect and
+# two facts, and each has a control that drives its own.
+_MIXED_SEAM_LOG = ([{'poll': '1', 'request': 'query one'}]
+                   + [{'poll': None, 'request': f'query {index}'}
+                      for index in range(2, 2 * POLL_WIDTH + 3)])
 
 
 def test_the_poll_wait_names_a_partially_wired_seam(tmp):
@@ -459,7 +465,7 @@ def test_the_poll_wait_names_a_partially_wired_seam(tmp):
     on a count the two-marker log would satisfy.
     """
     del tmp
-    log = _GrowingLog(_UNWIRED_LOG)
+    log = _GrowingLog(_MIXED_SEAM_LOG)
     child = _ScriptedChild(alive=True)
     message = None
     try:
@@ -469,7 +475,7 @@ def test_the_poll_wait_names_a_partially_wired_seam(tmp):
     assert message is not None, 'a partially wired seam did not fail'
     assert "3 poll(s): the poll markers did not reach 3" in message, message
     assert '2 distinct, sequence 1, None,' in message, message
-    assert f'within {len(_UNWIRED_LOG)} gh call(s)' in message, message
+    assert f'within {len(_MIXED_SEAM_LOG)} gh call(s)' in message, message
 
 
 def test_the_death_wait_ends_when_the_pids_are_gone(tmp):
