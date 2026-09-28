@@ -124,9 +124,9 @@ ACCEPTABLE = frozenset({'success', 'neutral', 'skipped'})
 # The workflows whose absence is a refusal rather than a wait, and the
 # default a caller who names nothing is held to. The expectation itself is
 # ci_gate's, which watch_all.py reads too; the name is bound here because it
-# is this tool's public contract. --required replaces it for a caller
-# watching another repository, and names nothing else: a caller who names
-# no gate cannot switch the default off (issue #1318).
+# is this tool's public contract. --required REPLACES it for a caller
+# watching another repository and only ADDS to it here (issue #1318);
+# either way a caller who names no gate cannot switch it off.
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
 
@@ -376,9 +376,7 @@ def wait(repo, sha, interval, timeout, out, *, grace=DEFAULT_GRACE,
         print_matrix(runs, sha, out)
         if state == 'acceptable':
             discarded = [run for run in runs if superseded(run, runs)]
-            # Not `note`: that name is the caller's gate note, passed down
-            # to the refusals below, and one function holding two things
-            # under one name is a trap the moment either branch grows.
+            # Not `note`: that is the caller's gate note, below.
             suffix = (f' ({len(discarded)} superseded run(s) ignored)'
                       if discarded else '')
             print(f'all {len(runs) - len(discarded)} run(s) on {sha[:12]}'
@@ -463,8 +461,7 @@ def main(argv=None):
         return 3
     # A name with nothing in it builds a requirement no run can satisfy,
     # and the refusal then names nothing legible: `no  run on <sha>`, or
-    # `no   run on <sha>` when the name was a space (issue #1320). Refuse
-    # the argument instead, with the arguments this tool already refuses.
+    # `no   run on <sha>` when the name was a space (issue #1320).
     if any(not name.strip() for name in args.required or ()):
         print('--required must name a workflow, got a blank value',
               file=sys.stderr)
