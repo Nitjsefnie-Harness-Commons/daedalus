@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The rule the launch-routing walk enforces over the real tree.
 
-The walk itself, and the tables that close its population, live in
-`tests/_node_launch_routing.py` — a shared helper, because the plant-based
-controls in `tests/test_node_launch_routing_shapes.py` need the same
-decisions and a sibling SUITE import is a seam this repository refuses
+The rule and the tables that close its population live in
+`tests/_node_launch_routing.py`, the walk in `tests/_node_launch_sweep.py`,
+and both are shared helpers: the plant-based controls in
+`tests/test_node_launch_routing_shapes.py` need the same decisions, and a
+sibling SUITE import is a seam this repository refuses
 (`tests/test_suite_import_boundaries.py`).
 
 What is here is the one control that runs the walk over every module
@@ -16,15 +17,17 @@ the tracked ones: the two are the same set today, and a claim about which
 one is read is a claim that drifts the moment they are not.
 """
 import ast
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 import _node_launch_routing as routing  # noqa: E402
+import _node_launch_sweep as sweep  # noqa: E402
+from _command_type_readers import _parents  # noqa: E402
 from _launch_path import (  # noqa: E402
     _module_constants as module_constants)
-from _node_launch_routing import _routing_sweep  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
 
@@ -37,7 +40,8 @@ def test_every_fixed_work_node_child_goes_through_the_shared_detector(tmp):
     a plant in a later class hides behind one caught by an earlier one.
     """
     del tmp
-    unrouted, unbounded, unclassified, carved, unused = _routing_sweep()
+    unrouted, unbounded, unclassified, carved, unused = (
+        sweep._routing_sweep())
     findings = []
     if unrouted:
         findings.append(
@@ -112,7 +116,7 @@ def test_the_walk_reads_every_module_the_tables_name(tmp):
     """
     del tmp
     walked = []
-    _routing_sweep(walked=walked)
+    sweep._routing_sweep(walked=walked)
     read = set(walked)
     expected = {path.name for path in TESTS.glob('*.py')} - set(
         routing.NOT_SITES)
@@ -121,12 +125,25 @@ def test_the_walk_reads_every_module_the_tables_name(tmp):
         f'carve-outs: {sorted(expected ^ read)}')
     for module_name, reason in sorted(routing.CLASSIFYING_MODULES.items()):
         assert module_name in read, (module_name, reason)
-        launches = routing._launches(ast.parse(
-            (TESTS / module_name).read_text(encoding='utf-8')))
+        source = (TESTS / module_name).read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        launches = sweep._launches(tree)
         assert launches, (
             f'{module_name} is excused by the walk and contributes no '
             'launch, so the requirement that keeps it honest is applied to '
             'nothing')
+        # The key is a module and the requirement is per-launch, so each
+        # reason names the functions it covers — in backticks, and nothing
+        # else in backticks. A reason that reads as though it covered the
+        # whole file is a reader's licence to add a launch under it, and a
+        # rename must red rather than quietly widen the exemption.
+        functions = (ast.FunctionDef, ast.AsyncFunctionDef)
+        defined = {node.name for node in ast.walk(tree)
+                   if isinstance(node, functions)}
+        for named in re.findall(r'`([A-Za-z_]\w*)`', reason):
+            assert named in defined, (
+                f'{module_name} is exempt for {named}, which it no longer '
+                f'defines; it defines {sorted(defined)}')
     for module_name, stem in COMPOSED_BOUND_SITES:
         assert module_name in read, (module_name, stem)
 
@@ -255,7 +272,7 @@ def _composed_population(root, module_name, plant):
     unplanted ones.
     """
     for name, _ in COMPOSED_BOUND_SITES:
-        routing._planted_copy(
+        sweep._planted_module_copy(
             root, name, plant if name == module_name else 'VALUE = 1')
     return root
 
@@ -269,7 +286,10 @@ def test_a_call_site_bound_is_derived_and_not_written(tmp):
     written reaches only path modules, so a bare `10` retyped at one of these
     call sites was read by nothing in the tree. Every control in the
     repository stayed green against that mutation, which is the observation
-    this answers.
+    this answers. The figure behind "deliberately outside" is in
+    `tests/_node_launch_routing.py`'s docstring, measured at this head and
+    stated with the direction it moves: the audited path is 58 modules, it
+    was 48 on `origin/main`, and this branch is what raised it.
 
     The negative half is planted because a rule that cannot tell a composed
     figure from a typed one is the false green this branch exists to remove,
@@ -441,8 +461,8 @@ def _retyped_bound_readings(root=None):
     for module_name in sorted(set(routing.CLASSIFYING_MODULES) & composed):
         path = (TESTS if root is None else root) / module_name
         tree = ast.parse(path.read_text(encoding='utf-8'))
-        parents = routing._parents(tree)
-        for launch in routing._launches(tree):
+        parents = _parents(tree)
+        for launch in sweep._launches(tree):
             for bound, where in _retyped_bounds(routing, launch, parents):
                 typed.append(f'{module_name}:{where} timeout='
                              f'{ast.unparse(bound)}')
@@ -535,7 +555,7 @@ def test_a_sibling_child_cannot_report_or_certify_this_ones_bound(tmp):
     assert readings == [f'_realbrowser.py:{bounded_line} timeout=30'], (
         'a sibling launch reported the bounded child’s own retyped number '
         f'a second time, or the bounded child was missed: {readings}')
-    unrouted, unbounded, _, carved, _ = routing._routing_sweep(root)
+    unrouted, unbounded, _, carved, _ = sweep._routing_sweep(root)
     assert not carved, carved
     assert not unrouted, unrouted
     assert unbounded == [f'_realbrowser.py:{unbounded_line}'], (
@@ -549,11 +569,12 @@ def test_a_composed_deadline_is_not_below_what_a_child_could_cost(tmp):
     The composition rule reads the algebra DOWNSTREAM of the table, so a
     table nobody measured satisfies it as long as someone did the
     arithmetic: a fabricated `(0.01, 0.02, 0.03)` on `MINIMAL_SPAWN`
-    composes a ZERO-second bound, and of the ten suites that read this one
-    every one but this file stayed green. What no control can check is
-    whether a table is true, and no site here runs often enough for a slow
-    bound to show up as a failure — so the one property a fabricated table
-    cannot keep is the cheap one it has to cross: `round(max(table) * 5)`
+    composes a ZERO-second bound, and of the thirteen SUITES that import
+    `tests/_realbrowser.py` every one but this file stayed green. What no
+    control can check is whether a table is true, and no site here runs
+    often enough for a slow bound to show up as a failure — so the one
+    property a fabricated table cannot keep is the cheap one it has to
+    cross: `round(max(table) * 5)`
     cannot be under a second, because that needs every recorded sample of a
     process launch under 200ms.
     """

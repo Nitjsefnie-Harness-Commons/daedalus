@@ -6,42 +6,73 @@ and there are two shapes of one here. A site that launches through
 that is the default. A site that does not — a real-browser capability
 probe, a GM storage harness over the shipped scripts — keeps its bound at
 its own call site, because reaching the shared launcher puts that module
-and everything it calls inside `tests/_launch_census.py`'s audited path:
-nineteen modules this branch never asked for. What neither shape may be
-is a wall-clock literal; the constant below says what a call-site bound is
-composed from instead.
+and everything it calls inside `tests/_launch_census.py`'s audited path.
+What neither shape may be is a wall-clock literal; the constant below says
+what a call-site bound is composed from instead.
+
+The cost of keeping those sites out of the shared launcher is a figure, so
+it is measured rather than asserted, and the measurement SAYS WHICH DIRECTION
+it moves. This branch did not hold the audited path down; it grew it. Ten
+modules reached `run_node_argv` in Task 2 and the path went 48 -> 58, the
+ten being exactly those modules. Routing the eight `CLASSIFYING_MODULES`
+through the shared launcher as well would take it to 70, twelve more, which
+is the price the call-site shape is paying:
+
+    cd tests && python3 -c "from pathlib import Path; import _launch_path \
+as p; print(len(p.path_functions(Path('.').resolve(), p.LAZY_MODULES)))"
+
+at this head it prints 58, and at `origin/main` it prints 48. The 70 is a
+counterfactual and is produced by appending a caller of `run_node_argv` to
+each of the eight and running the same line; it is a simulation, and a
+simulation is not a number the repository states, so it is stated here as
+one with its method beside it rather than as a fact.
 
 The success near the deadline is the site itself: every child here runs in
 a suite run, so seven of the eight figures are exercised in the PASSING
-path. The E2BIG probe's child runs at 1ms, never at its own 80s, so its
-figure is the one no suite run reaches.
+path. The E2BIG probe is the eighth, and it is the DEADLINE that is
+lowered rather than the child: `tests/test_real_browser_environment.py`
+runs its real `python -c ''` child against a 1ms bound, so the figure 80s
+is one no suite run reaches.
 
-It is a shared helper rather than a suite because two suites need the walk
-and neither owns it — one holds the rule over the real tree, the other the
+It is a shared helper rather than a suite because two suites need it and
+neither owns it — one holds the rule over the real tree, the other the
 shapes it must read and refuse — and a sibling SUITE import is a seam the
 repository refuses. The underscore makes it a shared helper by that alone,
 so it owns every name it declares; the names it shares are suffixed.
+
+`tests/_node_launch_sweep.py` holds the other half — the population a
+sweep reads and the findings the tree produces — and imports everything it
+needs from here, so the dependency runs one way and a question about a
+launch and a question about the tree are answered from two files rather
+than one.
+
+What the walk does NOT reach, stated here so it is declared rather than
+discovered: two launches in `tests/test_worker_runtime.py` that start
+`sys.executable` on a suite which reaches the shipped worker, at a
+hand-typed `timeout=30`. They are outside the rule above because the rule
+is about a Node child and these are an interpreter running a suite, and
+`_executable_verdict` answers `other` for `sys.executable` on purpose — a
+resolver that guessed would make the population close on its own
+vocabulary. The census already records where the `timeout` policy for such
+a child lives (issue #1170), so the gap is named in both places rather than
+left to the next reader of either.
 """
 import ast
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _launch_census as census  # noqa: E402
-# The parent map is that module's helper, not a second copy of it: a helper
-# defined once in a shared module and imported by every user is the whole
-# point of the rule that would otherwise red this file for re-implementing.
-from _command_type_readers import _parents  # noqa: E402
 
 _TESTS_DIR = Path(__file__).resolve().parent
 
 # --- the bound a site keeps at its own call site ----------------------------
 #
 # The same three-step chain `tests/_noderun.py` composes, with the multiple
-# named here rather than retyped per site: five modules scaling five numbers
-# by five literals is five numbers a fix has to reach. The samples are taken
-# with the machine BUSY, not idle, because a bound is two margins and only
-# the second is what a bare number measures.
+# named here rather than retyped per site: five modules scaling EIGHT
+# numbers by one literal is eight numbers a fix has to reach, and the
+# figures below are the eight. The samples are taken with the machine BUSY,
+# not idle, because a bound is two margins and only the second is what a
+# bare number measures.
 #
 #   SITE_HANG_MULTIPLE  5   a wedged child, not a slow one
 #
@@ -153,11 +184,13 @@ NOT_SITES = {
 # derived and never listed, so this is closed only because every member is
 # separately required to still bound its own child.
 #
-# Each reason NAMES the function it excuses, because the key is a module
-# while the requirement it carries is per-launch: a reason that reads as
-# though it covered the whole file is a reader's licence to add a fourth
-# launch under it. `tests/test_node_launch_routing.py` requires every named
-# function to still exist, so a rename reds rather than quietly widening.
+# Each reason NAMES the function it excuses, in backticks and nothing else
+# in backticks, because the key is a module while the requirement it
+# carries is per-launch: a reason that reads as though it covered the whole
+# file is a reader's licence to add a fourth launch under it.
+# `tests/test_node_launch_routing.py` requires every backticked name to be a
+# function the module still defines, so a rename reds rather than quietly
+# widening the exemption the sentence claims to cover.
 CLASSIFYING_MODULES = {
     '_dashnode.py': '`_run_dashboard_node_once` scales its own bound per '
                     'retry attempt',
@@ -176,18 +209,18 @@ CLASSIFYING_MODULES = {
                                'response deadline it asserts, classified '
                                'into CDPTimeout by the module (task 3). Its '
                                'other two launches are a real browser rather '
-                               'than a Node child, and `UNRESOLVED_LAUNCHES` '
+                               'than a Node child, and UNRESOLVED_LAUNCHES '
                                'names them by shape',
     'test_real_browser_classification.py':
         '`test_the_control_extension_satisfies_its_own_probe` is a '
         'real-browser probe (task 3)',
     'test_real_browser_environment.py':
         'the two real-browser probes, in '
-        '`test_repository_node_probe_starts_and_terminates` and in the '
-        '`node` parameter of `evaluate` (task 3)',
+        '`test_repository_node_probe_starts_and_terminates` and in '
+        '`evaluate`, whose executable is its own node parameter (task 3)',
     'test_real_browser_harness.py':
-        '`_bounded` runs under a `node` parameter, a real-browser probe '
-        '(task 3)',
+        '`_bounded` is a real-browser probe whose executable is its own '
+        'node parameter (task 3)',
 }
 
 # A launch whose executable this walk cannot resolve is a FINDING, not a
@@ -514,94 +547,8 @@ def _resolved_constant(name, own, imported):
     return ast.unparse(found[0] if isinstance(found, list) else found)
 
 
-def _launches(tree, exported=None):
-    """Every launch in a module, with the shape the exemption table keys on.
-
-    The population is every call the repository's own predicate says places
-    a child. Nothing is filtered out before that, so a module the walk
-    cannot parse, or a launcher spelled a way this does not follow, shows up
-    as an unclassified site rather than as a clean tree.
-
-    Each row carries the `scope` it was found in — the container's own
-    statements, the same node the walk entered — because the questions
-    asked ABOUT a launch are questions about the code around it, and a
-    reader that reaches outside the launch's own scope can be answered by a
-    sibling it has nothing to do with. That is a false green, which is the
-    direction that loses a site, so the scope travels with the row rather
-    than being re-derived per question.
-    """
-    if exported is None:
-        exported = _sibling_constants()
-    receivers = census._subprocess_receivers(tree)
-    direct = census._from_import_launches(tree)
-    aliases = census._member_aliases(tree, receivers, direct)
-    module_constants = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    module_constants.setdefault(
-                        target.id, []).append(node.value)
-    found = []
-    shared = {
-        'exported': exported,
-        'stems': _imported_stems(tree, exported),
-    }
-    scopes = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            scopes.append((node.name, _own_statements(node.body)))
-    # A launch at module scope, in a class body, or in a nested function is
-    # a site too, and a walk that only entered top-level functions would
-    # miss every one of them. Each is built the same way: the container's
-    # own statements, minus the definitions that are scopes of their own —
-    # so a method is counted once under its own name and a class-body
-    # statement once under the class, rather than twice or not at all.
-    scopes.append(('<module>', _own_statements(tree.body)))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            scopes.append((node.name, _own_statements(node.body)))
-    for name, scope in scopes:
-        scope_context = dict(shared)
-        scope_context['bound'] = dict(module_constants)
-        scope_context['bound'].update(_imported_constants(tree, exported))
-        if name != '<module>':
-            scope_context['bound'].update(_assignments_in(scope))
-        for node in ast.walk(scope):
-            if not isinstance(node, ast.Call):
-                continue
-            if not census._is_launch(node, receivers, direct, aliases):
-                continue
-            argv = node.args[0] if node.args else next(
-                (k.value for k in node.keywords if k.arg in ('args', 'argv')),
-                None)
-            found.append({
-                'line': node.lineno,
-                'callee': ast.unparse(node.func),
-                'function': name,
-                'verdict': (
-                    _executable_verdict(argv, scope_context)
-                    if argv is not None else (VERDICT_UNRESOLVED, None)),
-                'deadline': _deadline(node),
-                'node': node,
-                'scope': scope,
-            })
-    return sorted(found, key=lambda row: row['line'])
 
 
-def _own_statements(body):
-    """A container's own statements: its body minus every nested definition.
-
-    A method, a nested function and a nested class are each a scope the walk
-    enters on its own, so leaving one in here would report its launches a
-    second time under the enclosing name — and a table row keyed on the
-    inner name would then silence both, which is wider than the key reads.
-    """
-    definitions = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    return ast.Module(
-        body=[statement for statement in body
-              if not isinstance(statement, definitions)],
-        type_ignores=[])
 
 
 def _deadline(launch):
@@ -728,19 +675,6 @@ def _child_name(scope, launch):
     return None
 
 
-def _planted_copy(root, module_name, plant):
-    """A real module's own bytes with `plant` appended, written under `root`.
-
-    The plants belong in a REAL target. A string handed to `ast.parse` shows
-    what the walk thinks of a shape; it cannot show whether the walk and the
-    module the rule is written about agree, which is the question a plant is
-    for. A copy answers it without a test rewriting a tracked file while
-    every other suite is reading it: the bytes are the module's own, the
-    walk reads them off disk, and the plant is the one change under test.
-    """
-    source = (_TESTS_DIR / module_name).read_text(encoding='utf-8')
-    root.mkdir(parents=True, exist_ok=True)
-    (root / module_name).write_text(f'{source}\n\n{plant}\n', encoding='utf-8')
 
 
 def _exempt(shape, launch):
@@ -751,110 +685,3 @@ def _exempt(shape, launch):
     `_executable_verdict`, which is where that rule is written down.
     """
     return shape in NOT_FIXED_WORK and launch['verdict'][1] == 'spelled'
-
-
-def _module_findings(name, tree, used):
-    """The three site classes one module contributes.
-
-    Split out of `_routing_sweep` so `_carve_outs` asks the same question
-    the sweep asks. A skip list whose members are exempt from a decision is
-    only honest if something still makes that decision about them, and one
-    reader of the launch rules is what makes it true.
-    """
-    parents = _parents(tree)
-    unrouted, unbounded, unclassified = [], [], []
-    for launch in _launches(tree):
-        shape = (name, launch['function'], launch['callee'])
-        verdict = launch['verdict'][0]
-        if verdict == VERDICT_UNRESOLVED:
-            if shape in UNRESOLVED_LAUNCHES:
-                used.add(shape)
-            else:
-                unclassified.append(f'{name}:{launch["line"]} in '
-                                    f'{launch["function"]}()')
-            continue
-        if verdict != VERDICT_NODE:
-            continue
-        if name in CLASSIFYING_MODULES:
-            if not _bounds_its_own_child(launch, parents):
-                unbounded.append(f'{name}:{launch["line"]}')
-            continue
-        if _exempt(shape, launch):
-            used.add(shape)
-            continue
-        # A `Popen` carries no `timeout=` to print, and that is the most
-        # likely real finding this control exists to report, so the
-        # message names the child rather than raising on the way there.
-        shown = launch['deadline']
-        unrouted.append(
-            f'{name}:{launch["line"]} (timeout='
-            f'{ast.unparse(shown) if shown is not None else "none"})')
-    return unrouted, unbounded, unclassified
-
-
-def _carve_outs(root):
-    """`NOT_SITES` members the walk would have reported on.
-
-    A member is skipped whole, so a module added here hides every launch in
-    it, and nothing in the rest of the table would notice: the row it silences
-    was never read. This asks each member the question the sweep asks and
-    requires the answer to be empty, so the exemption is a no-op on the tree
-    as it stands and a real module added to the list fails here. Only the two
-    classes a launch rule decides are asked — an unresolvable executable is
-    `UNRESOLVED_LAUNCHES`' business, and a member that needed a row there
-    would be a member in two tables.
-    """
-    offenders = []
-    for name in sorted(NOT_SITES):
-        path = root / name
-        if not path.is_file():
-            continue
-        used = set()
-        unrouted, unbounded, _ = _module_findings(
-            name, ast.parse(path.read_text(encoding='utf-8')), used)
-        offenders.extend(f'{name} {site}' for site in unrouted + unbounded)
-    return offenders
-
-
-def _population(root=None):
-    """The modules one sweep reads, in order — the population, not a sample.
-
-    A separate function rather than a loop inside `_routing_sweep` because
-    a population nothing can inspect is a population that can be narrowed
-    in silence: skipping `tests/_gm_harness.py` out of the walk and nothing
-    else left every control green, and the `unused`-row check does not
-    close that direction, because a module with no allowance row of its own
-    takes no row with it when it stops being read.
-    `tests/test_node_launch_routing.py` reads this against what the sweep
-    says it actually walked, so the two cannot drift.
-    """
-    root = _TESTS_DIR if root is None else root
-    return [path for path in sorted(root.glob('*.py'))
-            if path.name not in NOT_SITES]
-
-
-def _routing_sweep(root=None, walked=None):
-    """The five failure lists the tree produces.
-
-    `root` is the directory the walk reads, and it exists so a control can
-    run the walk over a COPY of a real module with a defect planted in it —
-    the evidence that the rule fires on the module it is written about,
-    without a test rewriting a tracked file while other suites read it.
-    `walked` is filled with the names the sweep actually read, so a control
-    measures this walk rather than re-deriving what it should have read.
-    """
-    root = _TESTS_DIR if root is None else root
-    unrouted, unbounded, unclassified, used = [], [], [], set()
-    for path in _population(root):
-        if walked is not None:
-            walked.append(path.name)
-        tree = ast.parse(path.read_text(encoding='utf-8'))
-        found = _module_findings(path.name, tree, used)
-        unrouted += found[0]
-        unbounded += found[1]
-        unclassified += found[2]
-    unused = [(table, row) for table, rows in (
-        ('UNRESOLVED_LAUNCHES', UNRESOLVED_LAUNCHES),
-        ('NOT_FIXED_WORK', NOT_FIXED_WORK))
-        for row in sorted(set(rows) - used)]
-    return unrouted, unbounded, unclassified, _carve_outs(root), unused
