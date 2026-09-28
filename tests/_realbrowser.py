@@ -33,6 +33,7 @@ from _realbrowser_workers import (  # noqa: E402
     _control_worker_answered, _devtools_port, _devtools_targets,
     _listed_workers, _retire_browser, _worker_absence_verdict,
     _worker_targets, cdp_call, cdp_eval, ready_worker, worker_state)
+from _noderun import ChildDeadlineExceeded, run_node_argv  # noqa: E402
 from _repo import EXTENSION_ROOT, ROOT  # noqa: E402
 
 
@@ -109,14 +110,14 @@ def browser_requirements():
         raise BrowserEnvironmentSkipped(
             'Chromium and Node are required for the real-page eval test')
     try:
-        websocket = subprocess.run(
-            [node, '-e', NODE_WEBSOCKET_PROBE], cwd=ROOT,
-            capture_output=True, text=True, timeout=NODE_PROBE_TIMEOUT)
+        websocket = run_node_argv(node, ['-e', NODE_WEBSOCKET_PROBE], ROOT)
     except OSError as why:
         _raise_start_failure('Node WebSocket probe', node, why)
-    except subprocess.TimeoutExpired as why:
+    except ChildDeadlineExceeded as why:
         # The interpreter started, so its fixed program failing to terminate
-        # is the harness's defect rather than a missing machine capability.
+        # is the harness's defect rather than a missing machine capability —
+        # and the distinction decides whether the whole real-browser surface
+        # skips, so the detector's own failure is carried as the cause.
         raise AssertionError(
             f'Node WebSocket probe did not finish: {node}') from why
     # Exit status only says whether our program ran; distinct stdout tokens

@@ -22,6 +22,7 @@ import _realbrowser  # noqa: E402
 import _realbrowser_controls  # noqa: E402
 import _realbrowser_workers as _WORKERS  # noqa: E402
 import _util  # noqa: E402
+from _noderun import run_node_argv  # noqa: E402
 from _realbrowser_fixture_controls import (  # noqa: E402
     _browser_requirements, _browser_version, _enter_fixture,
     _fixture_runtime, _popen_double, _ProcessDouble)
@@ -89,9 +90,8 @@ def test_repository_worker_probe_exception_counts_as_reached(tmp):
     def evaluate(_node, target, method, params):
         assert (_node, target, method) == (
             node, 'ws://worker', 'Runtime.evaluate')
-        check = subprocess.run(
-            [node, '--check'], input=params['expression'],
-            capture_output=True, text=True, timeout=10)
+        check = run_node_argv(node, ['--check'], _realbrowser.ROOT,
+                              stdin_data=params['expression'])
         checks.append(check)
         if check.returncode:
             return {'exceptionDetails': {'text': 'probe did not parse'}}
@@ -215,9 +215,9 @@ global.setTimeout = (callback, delay) => {
 };
 global.clearTimeout = () => {};
 """ + _evalpages.CDP_CALL_HARNESS
-    result = subprocess.run(
-        [node, '-e', probe, 'ws://controlled', 'Page.navigate', '{}', '4321'],
-        capture_output=True, text=True, timeout=10)
+    result = run_node_argv(
+        node, ['-e', probe, 'ws://controlled', 'Page.navigate', '{}', '4321'],
+        _realbrowser.ROOT)
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     assert result.stdout == '4321', result.stdout
@@ -379,6 +379,46 @@ def test_cdp_non_timeout_failure_stays_plain_assertion(tmp):
             failure = why
     assert failure.__class__ is AssertionError, failure.__class__
     assert 'CDP websocket failed' in str(failure), failure
+
+
+def test_the_cdp_harness_site_reports_its_own_stalled_child(tmp):
+    """A wedged CDP harness is a CLASSIFIED failure, carrying its line.
+
+    The site builds its child from `_evalpages.CDP_CALL_HARNESS` plus a
+    prelude it writes itself, so that shared constant is the real input: a
+    harness that writes a line and then holds the event loop open is
+    planted there and the site launches it for real. No browser is involved
+    — the harness is a fake, which is why its child is a fixed unit of work
+    and why the bound on it is the shared detector's.
+
+    The `setTimeout` the prelude installs is the fake that PRINTS its delay,
+    so the planted tail is the only thing that can keep the child alive,
+    and the line the child wrote before wedging is the evidence the failure
+    has to carry.
+    """
+    import _noderun
+    stalling = ("process.stdout.write('the cdp harness child spoke before "
+                "it wedged\\n'); setInterval(() => {}, 1000);")
+    real_deadline = _noderun.CHILD_DEADLINE_S
+    _noderun.CHILD_DEADLINE_S = round(real_deadline * 0.1)
+    caught = None
+    try:
+        with mock.patch.object(_evalpages, 'CDP_CALL_HARNESS', stalling):
+            test_cdp_harness_uses_passed_deadline(tmp)
+    except _noderun.ChildDeadlineExceeded as failure:
+        caught = failure
+    except BaseException as unexpected:  # noqa: BLE001
+        # A bare `TimeoutExpired` is the failure this control exists to
+        # replace, so it is named rather than merely re-raised.
+        assert not isinstance(unexpected, subprocess.TimeoutExpired), (
+            'a bare TimeoutExpired reached the caller', unexpected)
+        raise
+    finally:
+        _noderun.CHILD_DEADLINE_S = real_deadline
+    assert caught is not None, 'the wedged CDP harness finished'
+    assert 'the cdp harness child spoke before it wedged' in caught.stdout, (
+        caught.stdout)
+    assert caught.cleanup_diagnostic, 'the cleanup reported nothing'
 
 
 def test_fixture_converts_only_post_configuration_environment_skips(tmp):
