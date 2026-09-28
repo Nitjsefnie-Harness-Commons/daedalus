@@ -547,10 +547,6 @@ def _resolved_constant(name, own, imported):
     return ast.unparse(found[0] if isinstance(found, list) else found)
 
 
-
-
-
-
 def _deadline(launch):
     """The value node of this launch's `timeout=`, or None.
 
@@ -673,8 +669,6 @@ def _child_name(scope, launch):
         if isinstance(node.targets[0], ast.Name):
             return node.targets[0].id
     return None
-
-
 
 
 def _exempt(shape, launch):

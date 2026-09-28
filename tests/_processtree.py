@@ -76,10 +76,9 @@ def cleanup_process_group(group, cleanup_timeout):
 def cleanup_process_tree(process, cleanup_timeout):
     """Kill `process`'s tree, reap it, and return what each step did.
 
-    `start_new_session=True` on the launch is what makes the POSIX half
-    possible, and it is applied only where it exists: on Windows the process
-    group is not a thing `os` can signal, so the tree is killed through
-    `taskkill /T`, which takes the whole tree by pid instead.
+    The kill itself is `kill_process_tree`, which a caller that has only a pid
+    can reach; the reap stays here, because a process this module did not
+    launch is not one it can wait on.
     """
     try:
         killed = _kill_tree(process, cleanup_timeout)
@@ -97,17 +96,34 @@ def cleanup_process_tree(process, cleanup_timeout):
 
 def _kill_tree(process, cleanup_timeout):
     """Terminate the tree and describe the outcome, never raising."""
+    return kill_process_tree(process.pid, cleanup_timeout)
+
+
+def kill_process_tree(pid, cleanup_timeout):
+    """Terminate the tree rooted at `pid` and describe what the kill did.
+
+    A pid rather than a `Popen`, because a caller that never launched the
+    process still has to end it: `tests/_outer_bound.py` reads a pid a
+    wedged child announced and cannot reap what it did not start. Reaping is
+    the caller's half and stays in `cleanup_process_tree`, which owns a handle
+    it can wait on.
+
+    `start_new_session=True` on the launch is what makes the POSIX half
+    possible, and it is applied only where it exists: on Windows the process
+    group is not a thing `os` can signal, so the tree is killed through
+    `taskkill /T`, which takes the whole tree by pid instead.
+    """
     if sys.platform == 'win32':
-        return _taskkill(process, cleanup_timeout)
+        return _taskkill(pid, cleanup_timeout)
     try:
-        process_group = os.getpgid(process.pid)
+        process_group = os.getpgid(pid)
     except ProcessLookupError:
         return 'process group was already gone before cleanup'
     except OSError as error:
         return f'process-group lookup failed: {error}'
     try:
         if process_group == os.getpgrp():
-            process.kill()
+            os.kill(pid, signal.SIGKILL)
             return 'direct process kill requested for the current group'
         os.killpg(process_group, signal.SIGKILL)
         return f'process group {process_group} killed'
@@ -117,11 +133,11 @@ def _kill_tree(process, cleanup_timeout):
         return f'process-group kill failed: {error}'
 
 
-def _taskkill(process, cleanup_timeout):
+def _taskkill(pid, cleanup_timeout):
     """Kill the tree the way Windows can: by pid, with the tree flag."""
     try:
         result = subprocess.run(
-            ['taskkill', '/F', '/T', '/PID', str(process.pid)],
+            ['taskkill', '/F', '/T', '/PID', str(pid)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, check=False, timeout=cleanup_timeout)
     except subprocess.TimeoutExpired:

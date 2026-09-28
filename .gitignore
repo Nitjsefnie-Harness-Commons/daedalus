@@ -416,6 +416,7 @@
 !/tests/_node_launch_routing.py
 !/tests/_noderun.py
 !/tests/_noglibc.py
+!/tests/_outer_bound.py
 !/tests/_overlap.py
 !/tests/_overlap_clients.py
 !/tests/_owned_writes.py
@@ -716,6 +717,7 @@
 !/tests/test_node_launch_routing.py
 !/tests/test_node_launch_routing_shapes.py
 !/tests/test_noderun_deadline.py
+!/tests/test_outer_bound.py
 !/tests/test_overlap_bound.py
 !/tests/test_overlap_client_state.py
 !/tests/test_overlap_harness.py
