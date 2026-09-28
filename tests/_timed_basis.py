@@ -65,6 +65,25 @@ def fixture_tree(tmp, suites):
     return tree
 
 
+def unmeasured_names(basis):
+    """`(count, tree_count, names)` from the file's own coverage clause.
+
+    The clause names the tree suites these runs did not measure, which
+    is the fact a reader of the file alone has, and the fact the
+    generator is fed. It is read out of the prose rather than
+    recomputed, because the file does not record it anywhere else and
+    a computation from the file's own weights is the defect this clause
+    exists to fix: the write is a union, so a carried suite is recorded
+    whatever the runs did.
+    """
+    match = re.search(_ESTIMATED_CLAUSE, basis)
+    if match is None:
+        assert 'every suite in the tree is measured' in basis, basis
+        return 0, 0, []
+    return (int(match.group(1)), int(match.group(2)),
+            [name.strip() for name in match.group(3).split(',')])
+
+
 def recorded_cell_count(basis):
     """The measured cell count the prose states, or refuse the file.
 
@@ -90,17 +109,17 @@ def assert_the_generator_wrote_the_basis(tmp, data):
     parse and to sit in the file's own `1..max_cells` range before the
     compare, so a basis that lost the clause fails on the clause rather
     than on a diff of the whole sentence.
+
+    The suites the runs did not MEASURE are read out of the prose for
+    the same reason and handed to the generator as itself, not
+    recomputed: the write is a union, so the file records the carried
+    suites too, and the generator's clause is about the runs.
     """
     bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
                         'timings_bounds')
     basis = data['basis']
-    match = re.search(_ESTIMATED_CLAUSE, basis)
-    if match is None:
-        assert 'every suite in the tree is measured' in basis, basis
-        count, total, listed = 0, None, []
-    else:
-        count, total = int(match.group(1)), int(match.group(2))
-        listed = [name.strip() for name in match.group(3).split(',')]
+    count, total, listed = unmeasured_names(basis)
+    if listed:
         # The tree-owned clause, checked from the file alone: the count it
         # states is the names it lists, and the tree it totals is the
         # recorded weights plus those names.
@@ -111,8 +130,7 @@ def assert_the_generator_wrote_the_basis(tmp, data):
     assert 1 <= measured <= data['max_cells'], (
         measured, data['max_cells'], basis)
     tree = fixture_tree(tmp, sorted(set(data['suite_weights']) | set(listed)))
-    recomputed = bounds.basis_sentence(
-        tree, data, measured, bounds.estimated_count(tree, data))
+    recomputed = bounds.basis_sentence(tree, data, measured, listed)
     if recomputed != basis:
         raise AssertionError('\n'.join(difflib.unified_diff(
             basis.split('. '), recomputed.split('. '),

@@ -33,7 +33,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _repo import ROOT  # noqa: E402
-from _timed_basis import fixture_tree, write_run as _write_run  # noqa: E402
+from _timed_basis import (  # noqa: E402
+    fixture_tree, unmeasured_names, write_run as _write_run)
 
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
 
@@ -43,7 +44,18 @@ def _planner():
                       'plan_timed_matrix')
 
 
-def _drive(tmp, root, weights, runs=3, max_cells=15, **flags):
+def _seed(tmp, weights, max_cells=15, name='suite-timings.json'):
+    """The data file a refresh starts from: the file's own defaults."""
+    path = Path(tmp) / name
+    seed = {'schema_version': _planner().SCHEMA_VERSION,
+            'target_cell_weight': 10.0, 'max_cells': max_cells,
+            'units': 'reference-multiples', 'measured_from': 'tests run 1',
+            'runs': 1, 'suite_weights': weights}
+    path.write_text(json.dumps(seed, indent=2) + '\n', encoding='utf-8')
+    return path
+
+
+def _drive(tmp, root, weights, runs=3, max_cells=15, tree=None, **flags):
     """Refresh `weights` from `root` and report what the command did.
 
     One shape because every test here is the same three steps with
@@ -60,13 +72,8 @@ def _drive(tmp, root, weights, runs=3, max_cells=15, **flags):
     and against the real repository's 327 suites every fixture name
     would be a deleted suite and the rule could never fire.
     """
-    path = Path(tmp) / 'suite-timings.json'
-    tree = fixture_tree(tmp, sorted(weights))
-    seed = {'schema_version': _planner().SCHEMA_VERSION,
-            'target_cell_weight': 10.0, 'max_cells': max_cells,
-            'units': 'reference-multiples', 'measured_from': 'tests run 1',
-            'runs': 1, 'suite_weights': weights}
-    path.write_text(json.dumps(seed, indent=2) + '\n', encoding='utf-8')
+    path = _seed(tmp, weights, max_cells)
+    tree = tree if tree is not None else fixture_tree(tmp, sorted(weights))
     argv = ['--runs-root', str(root), '--out', str(path),
             '--runs', str(runs), '--tree', str(tree)]
     argv += [item for name in sorted(flags)
@@ -102,6 +109,61 @@ def test_a_one_cell_run_is_not_the_partition_when_an_older_measured_more(
     assert written['suite_weights'] == {'test_a.py': 4.0,
                                         'test_b.py': 1.0}, written
     assert '140' in err and 'one cell' in err, err
+
+
+def test_a_deleted_suites_weight_does_not_move_the_derived_target(tmp):
+    """The target is derived from what the TREE holds, not the file.
+
+    The union carries a weight forward for every suite the runs did not
+    measure, including one the tree has since deleted -- no run can ever
+    measure a deleted suite, so the entry is permanent. The planner
+    drops such a weight and names it `stale`, and the three consumers
+    that are not the planner have to as well: `derive_target` summed
+    the raw dict, so two dead weights of 900 beside six live ones of
+    20.0 put the derived target at 130, and a 130 target packs a
+    120-multiple live tree into ONE cell where its own weights ask for
+    six. The target is the file's other policy number, and this is the
+    chokepoint every write passes through.
+    """
+    planner = _planner()
+    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                        'timings_bounds')
+    live = [f'test_{index:02d}.py' for index in range(6)]
+    tree = fixture_tree(tmp, live)
+    weights = {name: 20.0 for name in live}
+    weights['test_gone_a.py'] = 900.0
+    weights['test_gone_b.py'] = 900.0
+    data = json.loads(_seed(tmp, weights).read_text(encoding='utf-8'))
+    target, _note = bounds.verify_target(tree, data, 15)
+    plan = planner.plan(tree, dict(data, target_cell_weight=target))
+    assert len(plan.cells) == 6, [cell.suites for cell in plan.cells]
+    assert plan.stale == ['test_gone_a.py', 'test_gone_b.py'], plan.stale
+
+
+def test_a_deleted_suites_weight_is_not_a_recorded_suite_for_the_collapse(
+        tmp):
+    """The collapse rule counts what the TREE holds, not the file.
+
+    The third consumer: the collapsed-run rule is judged on how many
+    suites the file already records, and it was handed the raw count, so
+    fifty weights for deleted suites stood in for fifty suites the
+    planner will never pack. A file with six live and fifty dead
+    weights, refreshed by a one-cell run that measured all six live
+    suites, was filed `degenerate` -- and the refresh then found
+    nothing to sample, so the file could only recover by hand.
+    """
+    live = [f'test_{index:02d}.py' for index in range(6)]
+    tree = fixture_tree(tmp, live)
+    weights = {name: 1.0 for name in live}
+    for index in range(50):
+        weights[f'test_gone_{index:02d}.py'] = 1.0
+    root = Path(tmp) / 'runs'
+    _write_run(root, 300, {'cell-01': {name: 4.0 for name in live}},
+               reference=2.0)
+    text, _code, err = _drive(tmp, root, weights, runs=1, tree=tree)
+    assert 'collapsed' not in err, err
+    assert 'carried forward' in err, err
+    assert json.loads(text)['measured_from'] == '300', text
 
 
 def test_a_refresh_with_only_a_collapsed_matrix_to_choose_from_is_refused(
@@ -205,6 +267,36 @@ def test_a_multi_cell_run_that_measured_less_is_carried_not_refused(tmp):
         'test_d.py': 3.0}, text
 
 
+def test_a_partial_run_does_not_claim_to_have_measured_the_tree(tmp):
+    """The `basis` is about the RUNS, not about the file the union wrote.
+
+    The write is a union, so a suite the runs did not measure is in
+    the file anyway -- and the coverage clause was driven by the file's
+    own weights, so it stopped counting those suites as estimated. A
+    two-cell run measuring three of five recorded suites then wrote a
+    file whose own prose read "every suite in the tree is measured by
+    these runs". The committed file is honest today and a generator
+    that agrees with the file it wrote cannot see it: both are wrong
+    together. This one is the runs' side, and the cell-count clause
+    beside it is the same defect in the other sentence.
+    """
+    root = Path(tmp) / 'runs'
+    _write_run(root, 220, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 4.0},
+                           'cell-02': {'test_c.py': 4.0}})
+    weights = {'test_a.py': 1.0, 'test_b.py': 1.0, 'test_c.py': 1.0,
+               'test_d.py': 1.0, 'test_e.py': 1.0}
+    text, _code, err = _drive(tmp, root, weights, runs=1)
+    basis = json.loads(text)['basis']
+    assert 'wrote' in err, err
+    assert 'every suite in the tree is measured' not in basis, basis
+    assert "2 of the tree's 5 suites are not measured" in basis, basis
+    assert 'test_d.py, test_e.py' in basis, basis
+    # The other sentence: two measured cells are not the concurrency
+    # the repository runs, whatever the file went on to derive.
+    assert 'the concurrency the repository runs today' not in basis, basis
+    assert 'the measured run ran 2 cells,' in basis, basis
+
+
 def test_the_shipped_file_describes_the_tree_it_plans(tmp):
     """The other half of the tripwire, and the half that was missing.
 
@@ -215,26 +307,33 @@ def test_the_shipped_file_describes_the_tree_it_plans(tmp):
     against ITSELF and cannot see that it describes a corner of the
     tree.
 
-    So this reads the file against the TREE. Every suite the tree holds
-    is either recorded a weight or named in the file's own estimated
-    clause, and the coverage guard accepts the plan those weights make.
-    Both fail on the file that shipped: 28 recorded, 288 estimated, and
-    10 suites the file never heard of because they arrived after it was
-    written.
+    So this reads the file against the TREE. Every suite the file
+    claims -- a recorded weight or a name in its own coverage clause --
+    is a suite the tree holds, and the coverage guard accepts the plan
+    those weights make. Both fail on the file that shipped: 28
+    recorded, 288 estimated, and names it never heard of.
+
+    A tree suite that arrived AFTER the write is deliberately outside
+    it: the clause is about the runs, and the file is recomputed rather
+    than parsed. Asserting the other way would fail the day this
+    branch's own new suite was added, which is the state the branch is
+    driving toward.
     """
     planner = _util.load(ROOT / 'scripts' / 'ci' / 'plan_timed_matrix.py',
                          'plan_timed_matrix')
     data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
     names = set(planner.suite_names(ROOT))
-    listed = set(_util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
-                            'timings_bounds').estimated_count(ROOT, data))
-    missing = names - set(data['suite_weights']) - listed
-    assert not missing, sorted(missing)
+    _count, _total, listed = unmeasured_names(data['basis'])
+    unknown = sorted((set(data['suite_weights']) | set(listed)) - names)
+    assert not unknown, unknown
     # The guard is the same chokepoint the planner's CLI calls, so this
     # is a refusal on the shipped file rather than a restatement of the
-    # arithmetic: a 28-weight file raises here.
+    # arithmetic: a 28-weight file raises here. Its own anti-vacuity
+    # control is `test_a_file_whose_weight_is_mostly_estimated_is_a_
+    # named_refusal` in the planner suite, which drives this same
+    # chokepoint on a narrowed file -- a control that `assert listed`
+    # never was, since it failed the day the file covered the tree.
     planner.verify_measured(ROOT, data)
-    assert listed, 'a fully measured file is the state this guards'
 
 
 def test_the_commit_message_names_the_runs_the_file_records(tmp):

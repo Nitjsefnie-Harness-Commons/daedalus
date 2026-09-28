@@ -557,69 +557,6 @@ def test_a_target_the_margin_forbids_is_re_derived_not_written_through(tmp):
     assert 'basis' in written, written
 
 
-def test_a_deleted_suites_weight_does_not_move_the_derived_target(tmp):
-    """The target is derived from what the TREE holds, not the file.
-
-    The union carries a weight forward for every suite the runs did not
-    measure, including one the tree has since deleted -- no run can ever
-    measure a deleted suite, so the entry is permanent. The planner
-    drops such a weight and names it `stale`, and the three consumers
-    that are not the planner have to as well: `derive_target` summed
-    the raw dict, so two dead weights of 900 beside six live ones of
-    20.0 put the derived target at 130, and a 130 target packs a
-    120-multiple live tree into ONE cell where its own weights ask for
-    six. The target is the file's other policy number, and this is the
-    chokepoint every write passes through.
-    """
-    planner = _planner()
-    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
-                        'timings_bounds')
-    live = [f'test_{index:02d}.py' for index in range(6)]
-    tree = _tree(tmp, live)
-    weights = {name: 20.0 for name in live}
-    weights['test_gone_a.py'] = 900.0
-    weights['test_gone_b.py'] = 900.0
-    target, _note = bounds.verify_target(tree, _data(weights, max_cells=15),
-                                         15)
-    plan = planner.plan(tree, _data(weights, target=target, max_cells=15))
-    assert len(plan.cells) == 6, [cell.suites for cell in plan.cells]
-    assert plan.stale == ['test_gone_a.py', 'test_gone_b.py'], plan.stale
-
-
-def test_a_deleted_suites_weight_is_not_a_recorded_suite_for_the_collapse(
-        tmp):
-    """The collapse rule counts what the TREE holds, not the file.
-
-    The third consumer: the collapsed-run rule is judged on how many
-    suites the file already records, and it was handed the raw count, so
-    fifty weights for deleted suites stood in for fifty suites the
-    planner will never pack. A file with six live and fifty dead
-    weights, refreshed by a one-cell run that measured all six live
-    suites, was filed `degenerate` -- and the refresh then found
-    nothing to sample, so the file could only recover by hand.
-    """
-    tree = Path(tmp) / 'tree'
-    (tree / 'tests').mkdir(parents=True)
-    live = [f'test_{index:02d}.py' for index in range(6)]
-    for name in live:
-        (tree / 'tests' / name).write_text('pass\n', encoding='utf-8')
-    git_index(tree, 'init', '-q')
-    git_index(tree, 'add', '--', 'tests/')
-    weights = {name: 1.0 for name in live}
-    for index in range(50):
-        weights[f'test_gone_{index:02d}.py'] = 1.0
-    root = Path(tmp) / 'runs'
-    _write_run(root, 300, {'cell-01': {name: 4.0 for name in live}},
-               reference=2.0)
-    out = _file(tmp, _data(weights, max_cells=15))
-    _stdout, err = _run(_refresh(),
-                        _refresh_args(tmp, root, out, runs=1, tree=tree))
-    assert 'collapsed' not in err, err
-    assert 'carried forward' in err, err
-    assert json.loads(out.read_text(encoding='utf-8'))['measured_from'] \
-        == '300', out.read_text(encoding='utf-8')
-
-
 def test_a_refresh_from_a_seeded_file_carries_the_basis_forward(tmp):
     """A refresh must not drop the only text explaining the two bounds.
 

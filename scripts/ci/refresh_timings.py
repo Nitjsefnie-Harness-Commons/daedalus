@@ -72,19 +72,19 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     from plan_timed_matrix import (
-        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names)
     from timings_bounds import (
-        BoundsError, basis_sentence, derive_target, estimated_count,
-        live_recorded, plan_is_balanced, verify_target)
+        BoundsError, basis_sentence, derive_target, live_recorded,
+        plan_is_balanced, verify_target)
     from timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
         _unit_scale, discover_runs, select)
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings)
+        BASIS_FIELD, PlanError, SCHEMA_VERSION, read_timings, suite_names)
     from scripts.ci.timings_bounds import (
-        BoundsError, basis_sentence, derive_target, estimated_count,
-        live_recorded, plan_is_balanced, verify_target)
+        BoundsError, basis_sentence, derive_target, live_recorded,
+        plan_is_balanced, verify_target)
     from scripts.ci.timings_runs import (
         RefreshError, _head_rounds, _median_weights, _suite_seconds,
         _unit_scale, discover_runs, select)
@@ -195,10 +195,17 @@ def _write(path, data):
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
 
 
-def _attach_basis(tree, data, cells):
-    """The file's `basis` field: the basis of both bounds, rebuilt now."""
+def _attach_basis(tree, data, cells, measured):
+    """The file's `basis` field: the basis of both bounds, rebuilt now.
+
+    `measured` is what the RUNS measured, not what the file records.
+    The write is a union, so the file records every carried suite too,
+    and a clause driven by the file's own weights called the tree fully
+    measured by a run that measured three suites of it.
+    """
     data[BASIS_FIELD] = basis_sentence(
-        tree, data, cells, estimated_count(tree, data))
+        tree, data, cells, [name for name in suite_names(tree)
+                            if name not in measured])
     return data
 
 
@@ -272,7 +279,7 @@ def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
                 f'{WEIGHT_MARGIN:.0%} of its recorded value; '
                 f'no suite appeared; the target holds the '
                 f'margin; {where}; wrote nothing')
-    _attach_basis(tree, data, len(selected[0][2]))
+    _attach_basis(tree, data, len(selected[0][2]), medians)
     _write(out, data)
     return f'wrote {out}: ' + '; '.join(reasons) + f'; {where}'
 
@@ -320,7 +327,7 @@ def seed(runs_root, out, tree):
             f'run {run_id}: no target within max_cells {max_cells} balances '
             f'its weights at the margin; split the heaviest suite or raise '
             f'max_cells by hand')
-    _attach_basis(tree, data, max_cells)
+    _attach_basis(tree, data, max_cells, seconds)
     _write(out, data)
     return (f'seeded {out} from tests run {run_id}: {len(seconds)} suites '
             f'measured, total {sum(seconds.values()):.1f} s, '

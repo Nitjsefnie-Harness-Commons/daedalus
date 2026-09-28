@@ -74,29 +74,29 @@ cell is shared), 1.03 at 76, 1.34 at 60 and 2.06 at 40, because a
 suite heavier than the target is alone in its cell by the rule above
 and the median falls as the target does. The margin is `0.35`: the
 round number at or above the ratio at 60 on that run (1.34x a 57 s
-median). The SHIPPED file's target is 65, not 60, and that is measured
-rather than assumed: on run 36054336022's weights -- the seed, 230
-recorded suites totalling 804.4 s, heavy tail `test_watcher_budget.py`
-at 76.9 s -- the ALL-cell ratio is 1.359 at 60, over the margin,
-1.255 at 65 (13 cells, a 61.2 s median) and 1.151 at 70. So the
-target is the smallest five-second step the guarantee admits, derived
-with the planner itself (`scripts/ci/timings_bounds.derive_target`) and
-verified against the margin before every write by
-`scripts/ci/refresh_timings.py`, the one owner of the data file: this
-module NAMES a target the margin forbids, in the summary and in the
-exit-0 matrix it still prints, and the refresher refuses to write
-one. Below a target the margin admits the guarantee does not hold, and
-the summary says so, naming the smallest target that would
-(heaviest / 1.35); the alternative is a lower median, which is what
-splitting `test_watcher_budget.py` -- a split candidate at the seeded
-target -- would give. The guard's other job is catching a packer that
-stops packing, and the shortest-first order reaches 2.1x on the same
-weights, well past it. Re-derive the two numbers with `python3
-scripts/ci/plan_timed_matrix.py --summary` against the data file at
-each target.
+median). The SHIPPED file's target is 25, and its own numbers are
+measured rather than assumed: over the tree's 327 suites (346.9
+reference multiples) it plans 14 cells, a 24.78 heaviest cell against a
+24.78 median, so the ALL-cell ratio is 1.000 -- its weights are a
+re-derivation of one run's own cell readings, so they are uniform by
+construction. The step comes from the planner itself
+(`scripts/ci/timings_bounds.derive_target`) and is verified against the
+margin before every write by `scripts/ci/refresh_timings.py`, the one
+owner of the data file: this module NAMES a target the margin forbids,
+in the summary and in the exit-0 matrix it still prints, and the
+refresher refuses to write one. Below a target the margin admits the
+guarantee does not hold, and the summary says so, naming the smallest
+target that would (heaviest / 1.35); the alternative is a lower median,
+which is what splitting `test_watcher_budget.py` would give. The
+guard's other job is catching a packer that stops packing, and the
+shortest-first order reaches 2.1x on the same weights, well past it.
+Re-derive both numbers with `python3 scripts/ci/plan_timed_matrix.py
+--summary` against the data file at each target.
 
 MEASUREMENT COVERAGE, and why a mostly-estimated plan is a refusal:
 `scripts/ci/timings_coverage.py`, whose `verify_measured` `main` calls.
+`resolve` is public because the union write carries a deleted suite's
+weight forward forever, and every reader drops it as the packer does.
 """
 import argparse
 import json
@@ -263,9 +263,9 @@ def suite_names(tree):
     a file no commit contains is not a suite of this repository, and a
     scratch `tests/test_*.py` left in the working tree by another run
     must not be planned into a cell or named in the data file's basis.
-    `scripts/ci/size_baseline.py` reads the same way. A missing `git`,
-    or a tree that is not a checkout, is a refusal with a named reason
-    rather than an empty plan, because an empty plan times nothing.
+    A missing `git`, or a tree that is not a checkout, is a refusal
+    with a named reason rather than an empty plan: an empty plan times
+    nothing.
     """
     try:
         listed = subprocess.run(
@@ -302,14 +302,10 @@ def resolve(recorded, names, scale):
     """Every tree suite's weight, and which names were estimated or stale.
 
     A weight for a suite the tree no longer holds is stale -- a deleted
-    suite -- and is reported and dropped, so it can never consume a cell.
-
-    PUBLIC, because every reader of the data file has to scope it the
-    same way. The union write carries a weight forward for every suite
-    the runs did not measure, and a suite the tree has since deleted can
-    never be measured by any run, so its weight is permanent: three
-    consumers outside the planner read the file's raw dict and read
-    those dead weights as live ones.
+    suite -- and is reported and dropped, so it can never consume a
+    cell. PUBLIC, because the union write carries such a weight forward
+    forever and every reader of the data file has to scope it the same
+    way.
     """
     recorded = {name: _number(weight, name) * scale
                 for name, weight in recorded.items()}
@@ -335,9 +331,8 @@ def verify_measured(tree, timings, scale=1.0):
     file being written, so a coverage refusal in there would stop the
     refresher in the state it exists to repair.
     """
-    names = suite_names(tree)
     weights, estimated, _stale = resolve(
-        timings['suite_weights'], names, scale)
+        timings['suite_weights'], suite_names(tree), scale)
     refusal = coverage_refusal(weights, estimated)
     if refusal:
         raise PlanError(refusal)
