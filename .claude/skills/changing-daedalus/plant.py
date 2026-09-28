@@ -4,7 +4,8 @@
 A path-scoped VCS restore is a statement about the whole path: `git
 checkout -- f` also sets `f` to whatever HEAD holds, so undoing a planted
 probe with one silently discards the uncommitted work that path carried.
-This writes the bytes it read back instead, atomically, then re-reads.
+This writes the bytes it read back instead, in one atomic step onto what
+the path resolves to, and refuses a store it cannot read.
 """
 import argparse
 import hashlib
@@ -56,6 +57,10 @@ def _publish(target, payload):
     `daedalus_bridge/result_store.py`'s atomic publish. Truncate-then-write
     needs write permission on the file; `os.replace` needs the directory's,
     so a read-only target still restores."""
+    # Publish onto what the path resolves to: replacing the path itself
+    # would destroy a symlinked target and leave the file behind it
+    # holding the planted bytes.
+    target = os.path.realpath(target)
     temp = os.path.join(
         os.path.dirname(target),
         f'.{os.path.basename(target)}.{uuid.uuid4().hex}.tmp')
@@ -168,19 +173,12 @@ def restore(path, store):
                   encoding='ascii') as handle:
             mode = int(handle.read().strip(), 8)
         _publish(path, payload)
-        # Read back before the chmod, which a restrictive recorded mode
-        # would make impossible.
-        with open(path, 'rb') as handle:
-            written = handle.read()
     except OSError as why:
-        return _refuse(f'cannot restore {path}: {why}')
-    if written != payload:
-        return _refuse(
-            f'{path} read back {len(written)} bytes after {len(payload)} '
-            f'were written; the stored copy is still at {entry}')
+        return _refuse(f'cannot restore {path}: {why}; the stored copy is '
+                       f'still at {entry}')
     os.chmod(path, mode)
     shutil.rmtree(entry)
-    print(f'restored {path}: {len(written)} bytes re-read, match')
+    print(f'restored {path}: {len(payload)} bytes published')
     return 0
 
 

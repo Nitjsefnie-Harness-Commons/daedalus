@@ -6,11 +6,15 @@ about the whole path, so it also sets that path to a committed state, and
 the uncommitted work it carried is gone with nothing in the output to say
 so. These run the helper against a real repository carrying a real
 uncommitted edit, because a fixture without one cannot tell the two
-restores apart. One claim has no end-to-end route - a re-read that
-refuses a mismatch needs a filesystem that lies - so it is controlled
-against the parsed source instead, and mutation-proved both ways.
+restores apart.
+
+A claim is only made here where a control would fail if it stopped being
+true, and each of those controls is mutation-proved. A restore that re-read
+what it wrote and refused a mismatch is NOT one of them: a mismatch needs
+a filesystem that lies, so no run reaches it, and a check on the source's
+spelling is satisfied by `payload = written`. That check is gone rather
+than kept, and the claim it guarded went with it.
 """
-import ast
 import os
 import shutil
 import stat
@@ -59,6 +63,61 @@ def _repo(tmp, name='plantrepo'):
 
 def _say(result):
     return result.stdout + result.stderr
+
+
+def _only_entry(store):
+    entries = [item for item in Path(store).iterdir() if item.is_dir()]
+    assert len(entries) == 1, entries
+    return entries[0]
+
+
+def _unreadable_as_bytes(entry):
+    """Make a stored copy unreadable as bytes, on every platform.
+
+    A directory where a file is expected raises IsADirectoryError on
+    every platform, so this needs no privilege drop and no Windows
+    carve-out - and it is a real corrupted store, not a contrivance.
+    """
+    payload = entry / 'bytes'
+    payload.unlink()
+    payload.mkdir()
+
+
+def _drop_to_nobody():
+    os.setgroups([])
+    os.setgid(65534)
+    os.setuid(65534)
+
+
+def _as_nobody(command):
+    """Run `command` unprivileged, so the file mode bits actually bite.
+
+    Root bypasses them, which is why this route was enforced nowhere on
+    a root runner. The child owns what it publishes over, so the caller
+    hands the tree to it first.
+    """
+    return subprocess.run(command, capture_output=True, text=True,
+                          timeout=60, preexec_fn=_drop_to_nobody,
+                          env=_util.child_coverage('scrub'))
+
+
+def _hand_to_nobody(path):
+    os.chown(path, 65534, 65534)
+    os.chmod(path, 0o777)
+
+
+def _open_the_entry(store, target):
+    """Hand the child every directory and file it walks to publish.
+
+    A suite's own temporary root is created 0700, so without the traverse
+    bit the child reads a refusal where the route should have run.
+    """
+    entry = _only_entry(store)
+    for directory in (target.parent, store, entry):
+        for ancestor in (directory, *directory.parents):
+            os.chmod(ancestor, os.stat(ancestor).st_mode | 0o005)
+    for owned in (target.parent, store, entry, *entry.iterdir()):
+        _hand_to_nobody(owned)
 
 
 def test_restore_returns_the_uncommitted_work_and_the_planted_bytes_are_gone(
@@ -196,21 +255,88 @@ def test_restore_returns_the_mode_it_recorded(tmp):
 
 
 def test_restore_returns_a_target_that_was_saved_read_only(tmp):
-    if hasattr(os, 'geteuid') and os.geteuid() == 0:
-        _util.skip('root bypasses the file mode bits, so this route cannot '
-                   'fail here; it bites on any unprivileged run')
     target = _repo(tmp)
     store = Path(tmp) / 'store'
     target.chmod(0o444)
     saved = _plant('save', str(target), '--store', str(store))
     assert saved.returncode == 0, _say(saved)
     # Truncate-then-write cannot open this; os.replace can.
-    restored = _plant('restore', str(target), '--store', str(store))
+    if hasattr(os, 'geteuid') and os.geteuid() == 0:
+        _open_the_entry(store, target)
+        _hand_to_nobody(target)
+        target.chmod(0o444)
+        restored = _as_nobody(
+            [sys.executable, str(PLANT), 'restore', str(target),
+             '--store', str(store)])
+    else:
+        restored = _plant('restore', str(target), '--store', str(store))
     assert restored.returncode == 0, _say(restored)
     assert target.read_bytes() == _COMMITTED
     # Windows refuses to delete a read-only file, and so does the runner's
     # cleanup, so give the tree its permissions back before this returns.
     target.chmod(0o600)
+
+
+def test_restore_writes_through_a_symlinked_target(tmp):
+    if sys.platform.startswith('win'):
+        _util.skip('creating a symlink needs a privilege Windows withholds')
+    repo = Path(tmp) / 'linked'
+    repo.mkdir(parents=True)
+    real = repo / 'real.py'
+    real.write_bytes(_COMMITTED)
+    link = repo / 'link.py'
+    link.symlink_to(real.name)
+    store = Path(tmp) / 'store'
+    saved = _plant('save', str(link), '--store', str(store))
+    assert saved.returncode == 0, _say(saved)
+    real.write_bytes(_PLANTED)
+    restored = _plant('restore', str(link), '--store', str(store))
+    assert restored.returncode == 0, _say(restored)
+    assert link.is_symlink(), 'the link was replaced by a regular file'
+    assert real.read_bytes() == _COMMITTED
+
+
+def test_restore_refuses_a_store_it_cannot_read(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    target.write_bytes(_FIXED)
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    entry = _only_entry(store)
+    _unreadable_as_bytes(entry)
+    out = _plant('restore', str(target), '--store', str(store))
+    assert out.returncode != 0, _say(out)
+    assert target.read_bytes() == _FIXED, 'a refused restore wrote anyway'
+    assert entry.is_dir(), 'a refused restore dropped the stored copy'
+
+
+def test_clear_leaves_another_pending_plant_alone(tmp):
+    one = _repo(tmp, 'one')
+    two = _repo(tmp, 'two')
+    store = Path(tmp) / 'store'
+    for target in (one, two):
+        assert _plant('save', str(target), '--store',
+                      str(store)).returncode == 0
+    assert _plant('clear', str(one), '--store', str(store)).returncode == 0
+    # One entry left, not zero: clearing one plant must not take another's.
+    assert len([i for i in Path(store).iterdir() if i.is_dir()]) == 1
+    for target in (one, two):
+        target.write_bytes(_PLANTED)
+    assert _plant('restore', str(two), '--store', str(store)).returncode == 0
+    assert two.read_bytes() == _COMMITTED
+
+
+def test_the_refusal_recommends_clear_when_the_copy_is_unreadable(tmp):
+    target = _repo(tmp)
+    store = Path(tmp) / 'store'
+    assert _plant('save', str(target), '--store',
+                  str(store)).returncode == 0
+    _unreadable_as_bytes(_only_entry(store))
+    again = _plant('save', str(target), '--store', str(store))
+    assert again.returncode != 0, _say(again)
+    advice = _say(again).split('; ', 1)[-1]
+    assert f'plant.py clear {target}' in advice, advice
+    assert 'plant.py restore' not in advice, advice
 
 
 def test_a_write_that_dies_partway_leaves_the_target_untouched(tmp):
@@ -345,130 +471,6 @@ def test_the_isolation_refuses_a_duplicated_anchor(tmp):
     assert refused, 'a paragraph carrying an anchor twice was not refused'
 
 
-def _restore_function(source):
-    tree = ast.parse(source)
-    return next((node for node in ast.walk(tree)
-                 if isinstance(node, ast.FunctionDef)
-                 and node.name == 'restore'), None)
-
-
-def _is_the_target_readback(node):
-    """The `with open(path, ...)` that reads the target back."""
-    if not isinstance(node, ast.With):
-        return False
-    opened = node.items[0].context_expr
-    return (isinstance(opened, ast.Call)
-            and isinstance(opened.func, ast.Name)
-            and opened.func.id == 'open'
-            and getattr(opened.args[0], 'id', '') == 'path')
-
-
-def _read_names(function):
-    """The names a `with open(...)` block assigns - the handle binding is
-    not them, so the bytes are named by an assignment inside the block."""
-    names = set()
-    for node in ast.walk(function):
-        if not isinstance(node, ast.With) or not node.items:
-            continue
-        opened = node.items[0].context_expr
-        if not (isinstance(opened, ast.Call)
-                and isinstance(opened.func, ast.Name)
-                and opened.func.id == 'open'):
-            continue
-        for inner in ast.walk(node):
-            # Assign carries `targets`; AugAssign and AnnAssign carry a
-            # single `target`.
-            targets = list(getattr(inner, 'targets', None) or [])
-            single = getattr(inner, 'target', None)
-            if isinstance(single, ast.Name):
-                targets.append(single)
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    names.add(target.id)
-    return names
-
-
-def _refuses_a_mismatch(source):
-    """Whether restore compares two of its own reads and returns on it.
-    Deliberately shape-sensitive: no run reaches the re-read's failure
-    condition, so this is the only control that fails if it is deleted,
-    and a refactor that reshapes the body should fail here loudly."""
-    function = _restore_function(source)
-    assert function is not None, 'plant.py has no restore()'
-    reads = _read_names(function)
-    for node in ast.walk(function):
-        if not (isinstance(node, ast.If)
-                and isinstance(node.test, ast.Compare)):
-            continue
-        test = node.test
-        if not any(isinstance(op, ast.NotEq) for op in test.ops):
-            continue
-        if not (isinstance(test.left, ast.Name)
-                and isinstance(test.comparators[0], ast.Name)):
-            continue
-        left, right = test.left.id, test.comparators[0].id
-        if left == right or left not in reads or right not in reads:
-            continue
-        return any(isinstance(inner, ast.Return) for inner in node.body)
-    return False
-
-
-def _is_the_mismatch_guard(node):
-    return (isinstance(node, ast.If)
-            and isinstance(node.test, ast.Compare)
-            and any(isinstance(op, ast.NotEq) for op in node.test.ops))
-
-
-def _prune(body, drop):
-    """Drop the named elements from a statement list, recursing: the
-    read-back and the guard sit inside the restore's `try`."""
-    kept = []
-    for node in body:
-        if _is_the_target_readback(node) and 'readback' in drop:
-            continue
-        if _is_the_mismatch_guard(node) and 'guard' in drop:
-            continue
-        if _is_the_mismatch_guard(node) and 'return' in drop:
-            node.body = [ast.Expr(ast.Constant('REMOVED BY MUTATION'))]
-        for field in ('body', 'orelse', 'finalbody'):
-            inner = getattr(node, field, None)
-            if isinstance(inner, list) and inner and isinstance(inner[0],
-                                                                ast.stmt):
-                setattr(node, field, _prune(inner, drop))
-        kept.append(node)
-    return kept
-
-
-def _weakened(source, drop):
-    """Restore with one element of the re-read claim removed at a time.
-
-    `drop` names what goes: `readback` the block that re-reads the
-    target, `guard` the comparison and its refusal, `return` only the
-    refusal. Done on the parsed tree, so a reformat does not hide it.
-    """
-    tree = ast.parse(source)
-    function = next(node for node in ast.walk(tree)
-                    if isinstance(node, ast.FunctionDef)
-                    and node.name == 'restore')
-    function.body = _prune(function.body, drop)
-    return ast.unparse(tree)
-
-
-def test_restore_re_reads_what_it_wrote_and_refuses_a_mismatch(tmp):
-    del tmp
-    assert _refuses_a_mismatch(PLANT.read_text(encoding='utf-8'))
-
-
-def test_the_mismatch_control_is_load_bearing(tmp):
-    source = PLANT.read_text(encoding='utf-8')
-    copied = Path(tmp) / 'plant.py'
-    for label, drop in (('read-back and refusal', ('readback', 'guard')),
-                        ('the refusal alone', ('return',)),
-                        ('the read-back alone', ('readback',))):
-        mutated = _weakened(source, drop)
-        assert mutated != source, (label, 'the mutation changed nothing')
-        copied.write_text(mutated, encoding='utf-8')
-        assert not _refuses_a_mismatch(mutated), label
 
 
 def main():
