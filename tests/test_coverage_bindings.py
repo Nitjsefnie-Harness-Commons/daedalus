@@ -67,6 +67,7 @@ def _mutation_specs():
     comprehension = (
         "    if isinstance(node, ast.comprehension):\n"
         "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.iter, _ITERABLE),\n"
         "                (node.target.lineno, node.target, _TARGET)]\n",
         "",
     )
@@ -95,9 +96,9 @@ def _mutation_specs():
         "                                        _TARGET))]",
         "                for part, position in ((item.context_expr, _BIND),)]")
     comprehension_target = (
-        "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.iter, _ITERABLE),\n"
         "                (node.target.lineno, node.target, _TARGET)]",
-        "        return [(node.target.lineno, node.iter, _BIND)]")
+        "                (node.target.lineno, node.iter, _ITERABLE)]")
     defaults = (
         "    if isinstance(node, _SIGNED_FORMS):\n", "    if False:\n")
     match = (

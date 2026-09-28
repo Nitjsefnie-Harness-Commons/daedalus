@@ -27,21 +27,10 @@ _FOR_ITERABLE_INVOKE = (
     'import test_receiver_descent as descent_suite; '
     'descent_suite.test_a_loop_reading_a_launcher_out_of_its_'
     'iterable_is_refused(None)')
-
-_ATOM_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_transforming_form_stays_an_atom(None)')
-_RECEIVER_CARRIER_INVOKE = (
-    'import test_coverage_unfollowable_forms as form_suite; '
-    'form_suite.test_a_receiver_that_carries_a_launcher_is_refused(None)')
-_RECEIVER_DESCENT_REFUSED_INVOKE = (
+_COMPREHENSION_ITERABLE_INVOKE = (
     'import test_receiver_descent as descent_suite; '
-    'descent_suite.test_a_receiver_reached_through_an_intermediate_'
-    'call_is_refused(None)')
-_RECEIVER_DESCENT_CLEAN_INVOKE = (
-    'import test_receiver_descent as descent_suite; '
-    'descent_suite.test_a_receiver_reading_no_launch_method_stays_'
-    'clean(None)')
+    'descent_suite.test_a_comprehension_reading_a_launcher_is_refused('
+    'None)')
 # The base the descent hands over, and what it is handed over on. The gate
 # is a narrowing in two directions, and each has a row: widening it hands
 # the base of `f"{subprocess}".upper()` to the walk, which finds the bare
@@ -122,4 +111,17 @@ _RECEIVER_MUTATIONS = (
         "            parts = _POSITION_PARTS.get(position, _iterable_parts)"
         "(value)\n"),),
      _RECEIVER_DESCENT_CLEAN_INVOKE),
+    # A comprehension is the same decomposition as the `for`, and the row
+    # above reaches the `for` arm alone, so the comprehension arm needs one
+    # of its own. The needle is that arm's return, which differs from the
+    # statement's in both the `ast.comprehension` test and the
+    # `target.lineno` the line is read from, so removing one does not
+    # remove the other.
+    ('comprehension drops the iterable base', 'bindings', ((
+        "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.iter, _ITERABLE),\n"
+        "                (node.target.lineno, node.target, _TARGET)]\n",
+        "        return [(node.target.lineno, node.iter, _BIND),\n"
+        "                (node.target.lineno, node.target, _TARGET)]\n"),),
+     _COMPREHENSION_ITERABLE_INVOKE),
 )
