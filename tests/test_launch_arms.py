@@ -15,6 +15,7 @@ built to hold exactly one refusal, and one step ceiling for the arm
 whose mutant does not answer wrong but does not stop.
 """
 import ast
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -26,7 +27,7 @@ from _arm_sweep import arm_sweep  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
                                 MARKER_NON_MEMBERS, ROW_UNCLAIMED,
-                                SECONDARY_CONTROLLED)
+                                SECONDARY_CONTROLLED, STEP_CEILING_HELD_BY)
 from _launch_arms import (ARM_CONTROLS, DEAD, LAUNCH_ARMS,  # noqa: E402
                           REDUNDANT, STEP_CEILING_CONTROL, STATES)
 from _launch_audit import bound_sites, launch_refusals  # noqa: E402
@@ -140,6 +141,40 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
     stepped = sorted(arm[ID] for arm in LAUNCH_ARMS
                      if arm[EVIDENCE] == STEP_CEILING_CONTROL)
     assert set(stepped) == {'fx.skip-registered', 'mr.while-guard'}, stepped
+
+
+def test_every_step_ceiling_arm_names_the_test_that_holds_it(tmp):
+    """The step ceiling is not a row, so the record must name a real test.
+
+    `STEP_CEILING_CONTROL` is a label of its own, in neither row file, so
+    an evidence string naming it resolves to nothing and the only test
+    that looked at it checked it against itself. What actually holds
+    these two arms is a test that bounds a STEP COUNT rather than a
+    verdict, so the record names that test and this resolves every name
+    against the tree -- a renamed or deleted holder is named, not
+    silently inherited.
+    """
+    del tmp
+    by_name = {arm[ID]: arm for arm in LAUNCH_ARMS}
+    ceiling = {arm[ID] for arm in LAUNCH_ARMS
+               if arm[EVIDENCE] == STEP_CEILING_CONTROL}
+    assert set(STEP_CEILING_HELD_BY) == ceiling, (
+        'STEP_CEILING_HELD_BY and the arms bound to the ceiling disagree: '
+        f'{sorted(set(STEP_CEILING_HELD_BY) ^ ceiling)}')
+    for name, holders in STEP_CEILING_HELD_BY.items():
+        assert name in by_name, f'a holder recorded for no arm: {name}'
+        assert by_name[name][STATE] == 'CONTROLLED', name
+        assert holders, f'{name}: no test named'
+        for holder in holders:
+            path, _, test = holder.partition(':')
+            assert (_util.ROOT / path).is_file(), f'{name}: no {path}'
+            module = Path(path).stem
+            assert test.startswith('test_'), f'{name}: not a test: {test}'
+            found = getattr(importlib.import_module(module), test, None)
+            assert callable(found), f'{name}: {module} has no {test}'
+    assert STEP_CEILING_CONTROL not in ROW_LABELS | CONTROL_LABELS, (
+        'the step ceiling is now a row label, so a ceiling arm can be '
+        'held by the verdict table and this record is the wrong one')
 
 
 def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
