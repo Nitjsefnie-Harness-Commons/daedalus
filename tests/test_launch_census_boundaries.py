@@ -246,13 +246,6 @@ OVER_REFUSAL = {
         'class C:\n    urlopen = []\n\n\n'
         'def run_gate(url):\n'
         '    return urlopen(url, timeout=10)\n'),
-    'a-global-declaration-and-rebind': (
-        'from urllib.request import urlopen\n\n\n'
-        'def _other(url):\n'
-        '    global urlopen\n'
-        '    urlopen = object()\n    return urlopen\n\n\n'
-        'def run_gate(url):\n'
-        '    return urlopen(url, timeout=10)\n'),
     'a-module-with-target': (
         'from urllib.request import urlopen\n\n\n'
         'def _go():\n'
@@ -280,6 +273,7 @@ REBINDINGS = {
     'an-except-target': ('try:\n    pass\n'
                          'except ValueError as urlopen:\n    pass\n'),
     'an-annotated-assignment': 'urlopen: object = []\n',
+    'a-global-rebind': 'global urlopen\nurlopen = object()',
     'a-with-target': 'with open("x") as urlopen:\n    pass\n',
 }
 
@@ -319,6 +313,41 @@ def test_a_rebinding_in_any_form_stops_the_read_at_both_scopes(tmp):
                 f'{label} at {scope} scope', rows)
 
 
+NOT_COLLECTED_STILL_DISCHARGES = {
+    'a-fully-dotted-rebind-is-still-the-read':
+        ('import urllib.request\n\n\ndef run_gate(url):\n'
+         '    urlopen = urllib.request.urlopen\n'
+         '    return urlopen(url, timeout=10)\n'),
+    'a-class-body-pop-nothing':
+        ('import urllib.request\n\n\nclass C:\n    urlopen = []\n\n'
+         '    def go(self, url):\n'
+         '        return urllib.request.urlopen(url, timeout=10)\n'),
+    'a-lambda-parameter-shadows-nothing-here':
+        ('import urllib.request\n\n\n'
+         'f = lambda url: urllib.request.urlopen(url, timeout=10)\n'),
+}
+
+
+def test_a_read_the_census_cannot_see_through_is_still_discharged(tmp):
+    """The four shapes item 3 and the class rule leave DISCHARGED, on
+    purpose, and this is the control that says so.
+
+    Each is a form the readers do not collect: a `match` capture's name is
+    a string on a `MatchAs`, a `global` rebind needs the declaration read,
+    and a class body binds class scope rather than a module name. Where a
+    shape is COLLECTED the rebinding table's ten rows refuse it, and
+    where it is not, the read is left alone rather than refused.
+
+    This is the pair with the ten rows. A widening for any of these four
+    is the change this control is here to catch, and the forms are named
+    by name in the census's disclosure so the next reader does not have to
+    re-derive which is which.
+    """
+    del tmp
+    for label, source in NOT_COLLECTED_STILL_DISCHARGES.items():
+        assert _rows(source) == [], (label, _rows(source))
+
+
 def test_a_rebinding_in_one_function_does_not_reach_another(tmp):
     """The negative half: the function-scope pop is not a module-wide one.
 
@@ -355,7 +384,7 @@ def test_a_shadow_in_another_function_does_not_refuse_a_real_read(tmp):
     name in any scope this reader tracks, so it must not pop a module
     import. A module-level `for` target is not in this set: it really
     does rebind the name, so the read is refused, and that row belongs in
-    `test_a_rebinding_in_any_form_stops_the_read_discharging`.
+    `test_a_rebinding_in_any_form_stops_the_read_at_both_scopes`.
     """
     del tmp
     for label, source in OVER_REFUSAL.items():

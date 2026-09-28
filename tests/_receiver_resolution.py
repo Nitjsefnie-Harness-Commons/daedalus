@@ -65,7 +65,40 @@ def _names_a_target_binds(target):
                      for name in _names_a_target_binds(child))
     if isinstance(target, ast.Starred):
         return _names_a_target_binds(target.value)
+    if isinstance(target, (ast.MatchAs, ast.MatchStar)):
+        # A `match` capture binds its name as TEXT, like `except ... as`.
+        return (target.name,) if target.name else ()
     return ()
+
+
+def _global_rebindings(tree):
+    """`id` of every rebinding a `global` statement makes module-wide.
+
+    A function that says `global urlopen` and then assigns to it is
+    rebinding the MODULE name, so the pop belongs at module scope and the
+    scope gate must not swallow it. This is the one case where a
+    function-local rebinding reaches past its own body, and it is a
+    declaration rather than an inference.
+    """
+    out = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or node.value is None:
+            continue
+        names = _global_names(node, tree)
+        if names.intersection(_names_a_target_binds(node.targets[0])):
+            out.add(id(node))
+    return out
+
+
+def _global_names(node, tree):
+    """The names a node's enclosing function declares `global`."""
+    declared = set()
+    for outer in ast.walk(tree):
+        if path._is_def(outer):
+            for child in ast.walk(outer):
+                if isinstance(child, ast.Global):
+                    declared.update(child.names)
+    return declared
 
 
 def _rebindings(tree):
@@ -93,10 +126,17 @@ def _rebindings(tree):
             targets = [node.target]
         elif isinstance(node, ast.ExceptHandler):
             # `except E as urlopen` binds the name as TEXT, not a node.
-            found.extend(((node, node.name),) if node.name else ())
+            if node.name:
+                found.append((node, node.name))
             continue
         elif isinstance(node, ast.withitem):
             targets = [node.optional_vars] if node.optional_vars else []
+        elif isinstance(node, ast.match_case):
+            for sub in ast.walk(node.pattern):
+                if isinstance(sub, (ast.MatchAs, ast.MatchStar)):
+                    found.extend((node, name)
+                                 for name in _names_a_target_binds(sub))
+            continue
         else:
             continue
         for target in targets:
@@ -141,7 +181,7 @@ def _dotted_bindings(tree):
     carried per function by `_shadowed_parameters`, which is why a
     function's own `urlopen` parameter does not refuse a read in another
     function of the same file. The control beside this is
-    `test_a_rebinding_in_any_form_stops_the_read_discharging`: one row per
+    `test_a_rebinding_in_any_form_stops_the_read_at_both_scopes`: one row per
     form, and every row is a read the reader now REFUSES.
 
     The assignment pass runs to a fixpoint of THREE rounds, and that count
@@ -166,6 +206,7 @@ def _dotted_bindings(tree):
             for alias in node.names:
                 bound[alias.asname or alias.name] = (
                     f'{node.module}.{alias.name}')
+    globals_ = _global_rebindings(tree)
     for _ in range(3):
         for node, name in _rebindings(tree):
             if isinstance(node, ast.Assign):
@@ -177,7 +218,7 @@ def _dotted_bindings(tree):
                     # it was written as for every caller in the module.
                     bound[name] = resolved
                     continue
-            if node not in scoped:
+            if node not in scoped or id(node) in globals_:
                 # A POP is a shadow claim, and it needs the scope that
                 # can reach the call: `urlopen = object()` inside one
                 # helper shadows the import there, not in the module.
@@ -228,12 +269,13 @@ def _function_parameters(tree):
         args = node.args
         found = {arg.arg for arg in list(args.posonlyargs) + list(args.args)
                  + list(args.kwonlyargs)}
+        found.update(a.arg for a in (args.vararg, args.kwarg) if a)
         if found:
             names[node] = frozenset(found)
     return names
 
 
-def _shadowed_parameters(tree):
+def _shadowed_parameters(tree, bindings=None):
     """`function ->` what shadows a name inside it: its PARAMETERS, and
     every binding in its own body that is not a literal.
 
@@ -278,7 +320,8 @@ def _shadowed_parameters(tree):
             # binding, so `urlopen += 1` is a shadow and not a container.
             if isinstance(bound, ast.Assign) and (
                     value is not None
-                    and _resolve_dotted(value, {}) is not None):
+                    and _resolve_dotted(
+                        value, bindings or {}) is not None):
                 continue
             names.add(name)
         if names:
