@@ -119,7 +119,8 @@ _STICKY = (_PUBLISH, '        if poll_index > 3:\n'
                      '            poll_index = 3\n')
 
 
-def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK):
+def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK,
+              width=POLL_WIDTH):
     """Every call a real loop run logged, read off its own log whole.
 
     `once_run.measure` is deliberately not what reads this. Its `seen`
@@ -136,7 +137,8 @@ def _run_loop(script, fake, boundaries=BOUNDARIES, interval=TICK):
     """
     child = once_run.Child(script, [PR, '--interval', str(interval)], fake)
     try:
-        await_polls(fake, boundaries, child, f'{boundaries} marker(s)')
+        await_polls(fake, boundaries, child, f'{boundaries} marker(s)',
+                    width)
     finally:
         child.stop()
     return fake.calls()
@@ -217,10 +219,12 @@ def _verdict(subject, judge, note=''):
     assert False, f'{subject} was measured anyway{note}'
 
 
-def _refusal(subject, script, fake, boundaries=BOUNDARIES):
+def _refusal(subject, script, fake, boundaries=BOUNDARIES,
+             width=POLL_WIDTH):
     """The named verdict a planted watcher earns for itself."""
     return _verdict(
-        subject, lambda: _run_loop(script, fake, boundaries, interval=0),
+        subject, lambda: _run_loop(script, fake, boundaries, interval=0,
+                                   width=width),
         f': it reached {boundaries} marker(s) and the wait found what it '
         f'was looking for')
 
@@ -361,10 +365,16 @@ def test_a_cycle_longer_than_the_window_is_named_as_a_re_use(tmp):
     produce: at `BOUNDARIES` the wait RETURNS on the eighth distinct
     marker and never refuses, which is why this names its own boundary
     count.
+
+    The bound is narrowed only to reach the refusal sooner, and the
+    reading is over the whole run either way. That is worth saying
+    because it is the question this raises: `width` decides WHEN the wait
+    refuses, not what it reads, and a reader who cannot see that will
+    wonder which bound the reading depends on - it depends on none.
     """
     boundaries = 2 * SEQUENCE
     script, fake = _mutant_watcher(Path(tmp) / 'longcycle', _LONG_CYCLE)
-    refused = _refusal('a long cycle', script, fake, boundaries)
+    refused = _refusal('a long cycle', script, fake, boundaries, width=2)
     assert 'a value came round again' in refused, refused
     assert 'no value came round again' not in refused, refused
     cycle = sorted((str(n) for n in range(1, SEQUENCE + 2)), key=repr)
