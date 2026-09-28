@@ -3,11 +3,11 @@
 Not a suite itself — run_tests.py only loads `test_*.py`.
 
 Split out of tests/test_coverage_bindings.py, whose opened-set control
-carried the search keys, the squeeze and the holder count in a file six
-lines under the tests ceiling, where one unrelated row would have failed
-the size gate for a change that did not touch it. The control stays in
-that suite under the test name the rule is recorded by; the mechanism it
-calls came here.
+carried the search keys, the squeeze and the holder count in a file that
+was six lines under the tests ceiling, where one unrelated row would have
+failed the size gate for a change that did not touch it. The control
+stays in that suite under the test name the rule is recorded by; the
+mechanism it calls came here.
 """
 import sys
 from pathlib import Path
@@ -15,13 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _repo import ROOT  # noqa: E402
 
-# The two halves of the authority sentence, as literals the scan looks
-# for. Holding them here is what lets the scan run, and it is not a
+# Holding the keys here is what lets the scan run, and it is not a
 # second statement of the rule: this file counts, it does not claim.
 _AUTHORITY_HALF = 'whose `attr` is in `_LAUNCH_READS`'
 _AUTHORITY_REST = 'attribute outside that set is a'
-# The wave-3 wording, a false universal: `__call__` is an "other
-# attribute" and is not treated as a constant read.
+# The one phrase the control asserts no scanned file carries. It is a
+# universal the module does not state; the authority the scan protects is
+# `_carried_parts`, and every site refers there rather than restating it.
 _STALE_UNIVERSAL = 'every other attribute is a constant read'
 _AUTHORITY_FILE = '_coverage_bindings.py'
 
