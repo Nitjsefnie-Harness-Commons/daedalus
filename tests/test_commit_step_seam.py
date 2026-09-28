@@ -71,7 +71,7 @@ import _util  # noqa: E402
 from _repo import (  # noqa: E402
     commit_environment, committable, git_index, git_output, ROOT)
 from _speedharness import (  # noqa: E402
-    filesystem_holds_a_mode, run_workflow_script,
+    filesystem_holds_a_mode, MODE_PROBE, MODE_PROBE_DIR, run_workflow_script,
     skip_unless_a_mode_can_be_set, workflow_script)
 
 _REFRESH_COMMANDS = [
@@ -311,15 +311,22 @@ def test_the_mode_measurement_reads_the_filesystem_it_asked(tmp):
     - a `HOME` the step's own command cannot use reads `holds=False`,
       and carries the refusal. That answer is produced on every
       platform, so a constant `True` fails here everywhere;
-    - an `install` this PATH cannot resolve is not a filesystem fact
-      and does not report an inability: a machine that cannot run the
-      step at all should say so in the reason, not go quiet;
     - and where a mode CAN be held, the capable answer is read back off
       the directory the step's own command created, at the mode it
       asked for. A constant `False` fails that. This half is the one
       thing here a filesystem has to supply, so it is skipped where one
       cannot -- on the measurement that grants the skip, which is the
       only fact it is skipped on.
+
+    The MISSING-`install` case is not here, and that is the correction
+    this shape needed. It was, and on a filesystem that cannot hold a
+    mode it read a filesystem fact: the measurement runs the step's own
+    command, so on NTFS the command answers first and correctly --
+    `install -d -m 700` fails whatever PATH it was given -- and the
+    case, which is about the command never having been attempted, was
+    handed that answer and called it wrong. It is its own control now,
+    in `test_a_missing_install_is_never_a_filesystem_fact`, because it
+    is a fact about the classification rather than about a filesystem.
     """
     workdir = Path(tmp) / 'tree'
     workdir.mkdir()
@@ -336,23 +343,148 @@ def test_the_mode_measurement_reads_the_filesystem_it_asked(tmp):
     assert not holds, 'a HOME the command cannot use still read as capable'
     assert blocked.name in detail, detail
 
-    # An `install` this PATH cannot resolve is not a filesystem fact.
-    bare = Path(tmp) / 'bare-bin'
-    bare.mkdir()
-    holds, detail = filesystem_holds_a_mode(
-        workdir, dict(environment, PATH=str(bare)))
-    assert holds, 'a PATH with no install reported a filesystem fact'
-    assert 'install cannot be resolved' in detail, detail
-
     # The capable answer, on a filesystem that can hold the mode.
     skip_unless_a_mode_can_be_set(workdir, environment)
     holds, detail = filesystem_holds_a_mode(workdir, environment)
     assert holds, 'a filesystem that holds a mode read as incapable'
     assert detail == '', detail
-    probe = home / '.daedalus-mode-probe'
+    # The measurement removes the directory it made -- it is a scratch
+    # answer, and a `~/.daedalus-mode-probe` left behind is an
+    # environment the next measurement is standing on. Asserted, not
+    # assumed; then the mode is read off the step's own command run
+    # directly, which keeps it.
+    assert not (home / MODE_PROBE_DIR).exists(), (
+        'the measurement left its scratch directory under HOME')
+    done = run_workflow_script(workdir, MODE_PROBE, environment)
+    assert done.returncode == 0, (done.returncode, done.stderr)
+    probe = home / MODE_PROBE_DIR
     assert probe.is_dir(), f'no directory for the step\'s own command: {probe}'
     assert (os.stat(probe).st_mode & 0o777) == 0o700, oct(
         os.stat(probe).st_mode & 0o777)
+
+
+def test_a_missing_install_is_never_a_filesystem_fact(tmp):
+    """The `install` this PATH cannot resolve, on every platform.
+
+    Rule three of this seam, and it is the one that cannot be checked by
+    a filesystem. A machine that cannot run the step at all has not
+    learned anything about modes, so the measurement reports what it
+    found -- the command was never attempted -- and never `holds=False`,
+    which would grant the skip on a fact that is not about the
+    filesystem. Reading that as a filesystem fact is what made this a
+    Windows-only failure: the case needs the command to be unresolvable
+    AND needs that to be the only thing wrong, and on NTFS the second
+    is never true.
+
+    So it is pinned twice, and the two halves answer different
+    questions:
+
+    - the CLASSIFICATION, on every platform and with no filesystem in
+      it at all. A `done` carrying the probe's own unresolved marker
+      reads as capable and names the reason; a `done` where the command
+      ran and exited 127 is a refusal carrying the command's own
+      output, not the "never attempted" sentence. That second half is
+      the marker earning its keep: with a status code alone the two are
+      the same number and one of them is a lie.
+    - the MEASUREMENT itself, wherever this PATH can actually make
+      `install` unresolvable, which `install_resolves` measures rather
+      than assumes. On a filesystem that CAN hold a mode the case is
+      load-bearing -- that is where this branch's five mutants died --
+      so there it is a failure to have arranged it, not a skip.
+    """
+    workdir = Path(tmp) / 'tree'
+    workdir.mkdir()
+    home = Path(tmp) / 'home'
+    home.mkdir()
+    environment = _environment(home, tmp)
+    harness = _util.load(ROOT / 'tests' / '_speedharness.py', '_speedharness')
+
+    # The classification, on every platform, with no filesystem in it.
+    holds, detail = harness.classify_mode_attempt(
+        harness.unresolved_install_attempt())
+    assert holds, 'an unresolvable install read as a filesystem fact'
+    assert 'install cannot be resolved' in detail, detail
+    # An `install` that RESOLVED and exited 127 is not that sentence.
+    # The status is 127 on purpose: it is the number the unresolved
+    # branch uses, so this is the case the marker exists to tell apart.
+    holds, detail = harness.classify_mode_attempt(
+        harness.failed_install_attempt('install: boom', status=127))
+    assert not holds, 'a command that ran and failed read as unresolvable'
+    assert detail == 'install: boom', detail
+
+    # The measurement, wherever this PATH can arrange the case.
+    bare = Path(tmp) / 'bare-bin'
+    bare.mkdir()
+    stripped = dict(environment, PATH=str(bare))
+    resolves, why = harness.install_resolves(workdir, stripped)
+    if resolves and filesystem_holds_a_mode(workdir, environment)[0]:
+        # A filesystem that can hold a mode is where this case is
+        # load-bearing, so failing to arrange it here is a finding
+        # about the fixture, not a fact about the machine.
+        raise AssertionError(
+            'a filesystem that holds a mode still resolves install on an '
+            'empty PATH, so the missing-install case cannot be arranged '
+            f'where it is load-bearing: {why or "a bare PATH is not bare"}')
+    if resolves:
+        _util.skip(
+            'this filesystem cannot hold a POSIX mode, so the step\'s own '
+            'command fails whatever PATH it is given and the '
+            'missing-install case is not observable here; the '
+            'classification that decides it is pinned above on every '
+            'platform, and the case runs on every filesystem that can '
+            'hold a mode')
+    holds, detail = filesystem_holds_a_mode(workdir, stripped)
+    assert holds, 'a PATH with no install reported a filesystem fact'
+    assert 'install cannot be resolved' in detail, detail
+
+
+def test_only_this_module_reaches_the_measurement_seam(tmp):
+    """Who may hand `skip_unless_a_mode_can_be_set` a measurement.
+
+    `skip_unless_a_mode_can_be_set(workdir, environment, measure=...)` is
+    a seam: a caller may supply its own measurement so a control can
+    drive BOTH of its branches without a machine that happens to be
+    unable. That is the right reason for it to exist and the wrong thing
+    to leave open, because a stub handed in by mistake is a real control
+    that skips silently -- the step is never replayed, the assertion it
+    would have made is never made, and the suite is green. Nothing about
+    the failure looks like a failure.
+
+    So the reach is pinned by reading the call sites rather than by
+    trusting that there are only two: every call is in this module, and
+    the ones that pass a measurement are named. A new caller has to add
+    itself here, which is the point -- the list is short enough to read
+    and short enough to argue with.
+    """
+    reach = _callers_of('skip_unless_a_mode_can_be_set')
+    assert reach, 'the seam has no callers at all, so nothing is pinned'
+    outside = sorted({module for module, _line in reach
+                      if Path(module).resolve() != Path(__file__).resolve()})
+    assert not outside, (
+        'skip_unless_a_mode_can_be_set is reached from outside '
+        'test_commit_step_seam.py, where the skip it grants is not '
+        f'pinned: {outside}')
+    handing_in = sorted(line for module, line in reach
+                        if 'measure=' in _source_line(module, line))
+    assert handing_in, 'no caller exercises the measurement seam at all'
+    assert len(handing_in) == 2, handing_in
+
+
+def _callers_of(name):
+    """`(file, lineno)` for every call to `name` in the tracked tests."""
+    found = []
+    for path in sorted((ROOT / 'tests').glob('*.py')):
+        for number, line in enumerate(
+                path.read_text(encoding='utf-8').splitlines(), 1):
+            if f'{name}(' in line and 'def ' not in line:
+                found.append((str(path), number))
+    return found
+
+
+def _source_line(module, lineno):
+    """The one source line a `(file, lineno)` pair names."""
+    lines = Path(module).read_text(encoding='utf-8').splitlines()
+    return lines[lineno - 1]
 
 
 def _replay(repository, environment, measure=None):
