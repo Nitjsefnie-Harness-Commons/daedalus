@@ -7,11 +7,10 @@ copy, so a change to either shape reached one of them and not the other.
 They are here so there is one copy of each to fix.
 
 `_recording_run` is a rename. It was `_recorder`, and the short name is
-already held by two other suites over different bodies —
-`tests/test_aggregate_gate.py` builds a `gh` read answering the own-run
-query, and `tests/test_ci_gate.py` builds a callable installed onto a fake
-gate caller — so a shared helper that adopted it would have made both of
-them offenders of it (`test_helper_reimplementation.py`).
+already held by `tests/test_aggregate_gate.py` over a different body — a
+`gh` read answering the own-run query — so a shared helper that adopted it
+would have made that suite an offender of it
+(`test_helper_reimplementation.py`).
 
 `_event` is a byte-identical move under its own name: it is bound nowhere
 else in `tests/`.
