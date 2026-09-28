@@ -101,15 +101,27 @@ def _indented(block, depth=1):
 
 _MARK_LINE = "POLL_MARK = 'DAEDALUS_WATCHER_POLL'\n"
 # A HEALTHY run that grows: its first two polls spend `POLL_WIDTH` calls
-# and its third spends one more. The counter lives at module scope
-# because `poll()` cannot see the loop's `poll_index`, and it is
-# incremented inside `poll()` because that is called once per poll.
+# and every poll after the second spends one more. The counter lives at
+# module scope because `poll()` cannot see the loop's `poll_index`, and
+# it is incremented inside `poll()` because that is called once per poll.
+#
+# It stays AT the tolerance for as long as a run can, and goes one call
+# over on the last poll before the wait's boundary count. That shape is
+# load-bearing rather than tidier. The wait checks its bound only at its
+# own sample points, and a run that is over the bound for five polls can
+# be stepped over in one stalled sample: the return arm fires at the
+# boundary count and the run is measured, unrefused, with the control
+# reporting the mutant as clean. Two CI legs and a local run did exactly
+# that. Crossing on the LAST call of the second-to-last poll leaves the
+# window the length of one `gh` call, which a stalled sampler has to beat
+# to escape - and the sticky half below, which never reaches the boundary
+# count at all, cannot escape however long the stall.
 _GROWING = [
     (_MARK_LINE, '_GROWING_POLLS = 0\n'),
     (_PULL_PAGE, '    global _GROWING_POLLS\n    _GROWING_POLLS += 1\n'
-     + '    if _GROWING_POLLS <= 2:\n'
+     + f'    if _GROWING_POLLS < {BOUNDARIES - 1}:\n'
      + _indented(_IDENTICAL_POLL) * (POLL_WIDTH - 1)
-     + '    elif _GROWING_POLLS == 3:\n'
+     + '    else:\n'
      + _indented(_IDENTICAL_POLL) * POLL_WIDTH),
 ]
 # The other half of the pair: an index that sticks AT 3, every poll one
@@ -219,6 +231,19 @@ def _verdict(subject, judge, note=''):
     assert False, f'{subject} was measured anyway{note}'
 
 
+def _observed(refused):
+    """The `(calls, distinct markers)` a refusal reports, read back off it.
+
+    The wait states both because the bound is stated in them, so a control
+    that re-derives the relation from the message is asserting the thing
+    the wait refused on rather than a number it happened to land on.
+    """
+    body = refused.split('within ', 1)[1]
+    calls = int(body.split(' gh call(s)', 1)[0])
+    markers = int(body.split('distinct', 1)[0].rsplit(':', 1)[1])
+    return calls, markers
+
+
 def _refusal(subject, script, fake, boundaries=BOUNDARIES,
              width=POLL_WIDTH):
     """The named verdict a planted watcher earns for itself."""
@@ -311,18 +336,22 @@ def test_a_poll_one_wider_than_the_tolerated_width_is_reported(tmp):
     over = POLL_WIDTH + 1
     script, fake = _mutant_watcher(Path(tmp) / 'wider', *_wide(over))
     refused = _refusal('a poll wider than the tolerance', script, fake)
-    assert (f'did not reach {BOUNDARIES} within {over} gh call(s)'
-            in refused), refused
-    assert '1 distinct, sequence 1,' in refused, refused
-    assert 'sequence 1, 1,' not in refused, refused
     assert f'over the {POLL_WIDTH} call(s) per marker' in refused, refused
-    assert ('a single value and nothing after it, which is both an index '
-            'stuck where it started and one wide first poll'
-            in refused), refused
     assert 'IDLE_POLL_BOUND' in refused, refused
-    # Insurance, not evidence: no clause in `READINGS` can emit this, and
-    # it is the phrase a reader remembers.
+    # Insurance, not evidence: no clause in `READINGS` can emit either, and
+    # they are the two phrases a reader remembers.
     assert 'did not advance' not in refused, refused
+    assert 'stopped advancing' not in refused, refused
+    # The bound as a RELATION, which is what the wait refused on and the
+    # only part of it that does not move with where the wait happened to
+    # sample. Six CI legs read `calls` between 9 and 27 and the distinct
+    # count between 1 and 3 for the same run: the wait checks its bound
+    # only at its own sample points, so a poll boundary landing between
+    # two of them carries the observed state past the exact refusal
+    # point. The relation held on every one of them.
+    calls, markers = _observed(refused)
+    assert markers >= 1, (calls, markers)
+    assert calls > markers * POLL_WIDTH, (calls, markers, POLL_WIDTH)
 
 
 def test_a_cycling_poll_index_is_named_as_a_re_use(tmp):
@@ -449,19 +478,21 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
     the current value into the one boundary it shows, so a sticky index
     and a growing run are one observation. What this control adds over
     the unit control on the same row is the RUN: the two subjects here
-    are the plants a real defect produces, through the real loop, on the
-    same 25 calls over the same three boundaries - not a hand-built log
-    shaped to earn the answer.
+    are the plants a real defect produces, through the real loop, rather
+    than a hand-built log shaped to earn the answer.
 
-    The head equality below is that premise asserted, not a check on the
-    reading. It cannot fail under any mutation of `_reading`, because
-    the two refusals are the same string whatever row they name; what it
-    CAN fail on is the plants, and that is the point of keeping it - an
-    edit to either plant that made the two runs diverge would leave this
-    control asserting a non-discrimination that no longer held.
+    The comparison below is that premise asserted, not a check on the
+    reading: both refusals must NAME THE SAME CLAUSE. It cannot fail
+    under any mutation of `_reading` that leaves the row alone, because
+    the clause is the row; what it CAN fail on is a run that lands on a
+    different row from its opposite, which is exactly the over-claim this
+    branch spent round 4 removing. It compares the CLAUSE, not the call
+    count: the count moves with where the wait sampled, and pinning it
+    failed on six CI legs.
     """
     pair = _refusal_of_pair(tmp)
-    for label, refused in pair:
+    clauses = []
+    for label, refused, published in pair:
         assert refused is not None, f'the {label} run was measured anyway'
         assert ('no value came round again' in refused
                 and 'some poll cost more than that' in refused
@@ -470,17 +501,30 @@ def test_a_growing_run_and_a_sticky_index_earn_the_same_answer(tmp):
         assert 'this log cannot say' in refused, (label, refused)
         # Insurance, as above.
         assert 'stopped advancing' not in refused, (label, refused)
-    # The pair's premise, not a check on the reading: see the docstring.
-    heads = [refused.split('over the')[0] for _, refused in pair]
-    assert heads[0] == heads[1], heads
+        # The plant took: the growing run published past three, the sticky
+        # one published exactly three and no more, which is what a stuck
+        # index is. A plant that stopped taking fails here rather than
+        # passing on a refusal that no longer describes it.
+        assert published[:3] == ['1', '2', '3'], (label, published)
+        clauses.append(refused.split('This one is: ', 1)[1])
+    assert clauses[0] == clauses[1], clauses
+    assert pair[1][2] == ['1', '2', '3'], pair[1][2]
 
 
 def _refusal_of_pair(tmp):
-    """`(label, refusal)` for each half of the growing/sticky pair."""
+    """`(label, refusal, boundaries)` for each half of the pair.
+
+    The boundaries are what each plant actually published, so the control
+    can say its plant took - the one thing about a mutant that a refusal
+    cannot report on its own.
+    """
     out = []
     for name, splices in (('growing', _GROWING), ('sticky', [_STICKY])):
         script, fake = _mutant_watcher(Path(tmp) / name, *splices)
-        out.append((name, _refusal(f'the {name} run', script, fake)))
+        refused = _refusal(f'the {name} run', script, fake)
+        published = sorted({call.get('poll') for call in fake.calls()},
+                           key=repr)
+        out.append((name, refused, published))
     return out
 
 
