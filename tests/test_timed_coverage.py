@@ -19,26 +19,31 @@ union -- and `test_timed_planner.py` covers the guard on the other
 side of the file, which refuses a plan whose weight is mostly
 estimated.
 
-Two more things live here because their subject is what a refresh
+One more thing lives here because its subject is what a refresh
 RECORDS rather than what it packs. The guard on the other side of the
-file, `scripts/ci/timings_coverage.py`, has two conditions and the
-weight one alone could not hold it: a file recording the twenty-nine
+file, `scripts/ci/timings_coverage.py`, compares two shares and the
+weight one alone cannot hold it: a file recording the twenty-nine
 LIGHTEST suites of the tree plus its heaviest estimates ninety-one per
 cent of the plan's suites and, because that one heavy weight inflates
 the denominator the weight share is divided by, only thirty-one per
 cent of its weight. That is under the weight bound, the planner
 published one cell for 327 suites, and the plan's total was 22.3 where
 the tree really holds 345.2 -- a 15.5x understatement, worse than the
-3.15x the guard exists to stop. And the commit seam is executed rather
-than grepped, in a real checkout, because a line planted in the commit
-step left every substring an earlier control asserted in place.
+3.15x the guard exists to stop. Its bound, its note and the fixtures
+that pin them are in `test_timed_coverage_bounds.py`.
+
+The commit seam is not here. Executing it rather than grepping it --
+because a line planted in the commit step left every substring an
+earlier control asserted in place -- needs the workflow's two `run:`
+blocks, an ubuntu-only step replayed on whatever machine runs the
+suite, and a control that pins the scope of a skip; that is
+`test_commit_step_seam.py`, which carries all of it.
 
 The artifacts are fixtures under a temp tree: no API, no `gh`, no
 network. Each test builds a run the way the timed job leaves one --
 `<run>/<cell>/head-N/<suite>.json`, one JSON per suite, plus the cell's
 reference reading -- and drives `refresh_timings.main()` over it. The
-two that are not about a run at all read the real shipped file and the
-real workflow.
+one that is not about a run at all reads the real shipped file.
 """
 import contextlib
 import io
