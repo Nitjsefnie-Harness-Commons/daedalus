@@ -140,7 +140,7 @@ def _expected_refusal_counts(refusals, sweeps):
     every_sweep = sweeps * refusals
     return {
         'parent': {
-            ('unlink', _GC_DONE): refusals,
+            ('unlink', _GC_DONE): max(0, sweeps - 1) * refusals,
             ('write_text', _GC_TRIGGER): every_sweep,
             ('read_text', _GC_DONE): every_sweep,
         },
@@ -215,7 +215,13 @@ def _refuse_marker_operations(command_root, attempts):
         spent[operation] = spent.get(operation, 0) + 1
         if spent[operation] > attempts:
             if os.path.basename(target) == _GC_TRIGGER:
-                spent.clear()  # the trigger landed, so a sweep opens
+                # The anchor is the budget running out, not a sweep
+                # boundary: a trigger write that succeeded on its first
+                # attempt would not re-arm. That is unreachable while every
+                # marker is refused until its budget is spent, since the
+                # trigger can only succeed by reaching this branch. The
+                # count assertion is what makes a regression here loud.
+                spent.clear()
             return False
         name = os.path.basename(target)
         try:
