@@ -8,7 +8,7 @@ compared it against what the generator derives, so it was correct by the
 diligence of whoever last ran the script: issue 458 recorded five tracked
 `tests/_jsroute*` helpers landing across four commits, none of which
 regenerated it. Every fixture below runs the shipped generator in its own
-throwaway repository, so no base artifact is a literal the fixture wrote.
+throwaway repository, so no base artifact is a fixture's own literal.
 
 THE SCOPE, AND WHY THERE IS ONE. An exhaustive "committed == derived"
 control cannot be kept exact by two independent branches, so it fails on
@@ -121,9 +121,8 @@ def _paths(text):
 def _normalise(text):
     """Fold CRLF, so a checkout that rewrote the endings is not a diff.
 
-    The blob holds LF whatever platform wrote it and reading the same file
-    as text on Windows hands back CRLF. The question is which paths are
-    named, not which characters end the line.
+    The blob holds LF whatever platform wrote it and Windows hands the same
+    file back as CRLF. The question is which paths are named.
     """
     return text.replace('\r\n', '\n')
 
@@ -163,10 +162,10 @@ def _reduce(text, scope, stale):
               if line.startswith(_BLOCK)]
     if not starts:
         return text
-    # The generator emits each block's blank separator WITH that block, so a
-    # block's extent begins one line early. A header the file did not put a
-    # blank before is left where it is: swallowing the line above it would
-    # repair the malformation here and hide it from the comparison.
+    # The generator emits each block's blank separator WITH that block, so
+    # a block's extent begins one line early. A header the file put no
+    # blank before keeps that line: swallowing it would repair the
+    # malformation here and hide it from the comparison.
     begins = [start - 1 if start and lines[start - 1] == '' else start
               for start in starts]
     kept = list(lines[:begins[0]])
@@ -199,10 +198,8 @@ def _difference(reduced, expected, scope):
     if len(lines) > _DIFF_LINES:
         body += f'\n... and {len(lines) - _DIFF_LINES} more diff lines'
     if missing:
-        shown = ', '.join(missing[:_NAMED_LINES])
-        if len(missing) > _NAMED_LINES:
-            shown += f' and {len(missing) - _NAMED_LINES} more'
-        body += f'\nnot named, though in scope at the base: {shown}'
+        body += ('\nnot named, though in scope at the base: '
+                 + ', '.join(missing[:_NAMED_LINES]))
     return f'{body}\nrepair: {_REMEDY}'
 
 
@@ -300,7 +297,8 @@ def _decide(root):
             'unreadable rather than empty, and an empty set would leave '
             'this comparing the committed file against the derivation of '
             'nothing', base)
-    at_base = _paths(_git_read(root, 'ls-tree', '-r', '--name-only', '-z', base))
+    at_base = _paths(
+        _git_read(root, 'ls-tree', '-r', '--name-only', '-z', base))
     if not at_base:
         raise _Refusal(
             f'the commit {base} names no tracked path: its tree is '
@@ -328,8 +326,7 @@ def _control(root):
     except _Refusal as refusal:
         return _Verdict('refused', str(refusal), refusal.base, frozenset())
     except (OSError, subprocess.SubprocessError) as failure:
-        return _Verdict('refused', _read_failure(failure), '',
-                        frozenset())
+        return _Verdict('refused', _read_failure(failure), '', frozenset())
 
 
 def _read_failure(failure):
@@ -364,6 +361,7 @@ def _regenerate(repo, message='regenerate the ignore file'):
         assert _generator().main(repo) == 0, 'the generator refused its tree'
         _git_at(repo, 'add', '-f', _ARTIFACT)
     _git_at(repo, 'commit', '-q', '-m', message)
+    return _head(repo)
 
 
 def _fixture_repo(directory, files):
@@ -407,9 +405,11 @@ def test_the_committed_ignore_file_is_what_the_generator_derives(tmp):
     verdict = _control(ROOT)
     assert verdict.status == 'green', verdict.detail
     assert verdict.base, 'the control reached no base commit at all'
-    assert verdict.base != _head(ROOT), (
-        'the control scoped against HEAD, which is the strict form it '
-        'exists to scope away')
+    assert verdict.scope, 'the control scoped against nothing'
+    # Whether the base happens to be HEAD is a property of where this
+    # branch's commits sit, not of the control: a commit that rewrote the
+    # ignore file IS the last writer. The fixture below is where the base
+    # is pinned to neither the head nor the fork point.
 
 
 def test_the_base_itself_is_green(tmp):
@@ -428,7 +428,7 @@ def test_a_file_added_after_the_base_and_never_regenerated_is_green(tmp):
     _write(repo, 'd.py')
     _git_at(repo, 'add', '-f', 'd.py')
     _git_at(repo, 'commit', '-q', '-m', 'add d')
-    _regenerate(repo, 'name d as well')
+    written = _regenerate(repo, 'name d as well')
     _git_at(repo, 'checkout', '-q', '-b', 'forgotten', fork)
     _write(repo, 'e.py')
     _git_at(repo, 'add', '-f', 'e.py')
@@ -437,9 +437,11 @@ def test_a_file_added_after_the_base_and_never_regenerated_is_green(tmp):
 
     verdict = _control(repo)
     assert verdict.status == 'green', verdict.detail
-    # The base has to be neither the fixture's fork point nor its head, or
-    # swapping the base argument for HEAD would still pass and the fixture
-    # would prove nothing about which commit the control reads.
+    # The base has to be the commit that wrote the file and neither the
+    # fork point nor the head, or swapping the base argument for HEAD would
+    # still pass and the fixture would prove nothing about which commit the
+    # control reads.
+    assert verdict.base == written, verdict.base
     assert verdict.base not in (fork, _head(repo)), verdict.base
     assert 'd.py' in verdict.scope, sorted(verdict.scope)
     assert 'e.py' not in verdict.scope, sorted(verdict.scope)
@@ -536,9 +538,8 @@ def test_an_invented_directory_block_is_dropped_as_empty(tmp):
     A `!<path>` line inside a real block naming a path tracked nowhere is a
     difference the control reports. A whole invented DIRECTORY block is
     dropped, because the block clause drops any block left with no in-scope
-    entry and an invented block has none. That is a consequence of the rule
-    as specified rather than a decision taken here, and this test makes it
-    a property of the control instead of an accident of it.
+    entry and an invented block has none. That follows from the rule as
+    specified, and this test makes it a property, not an accident.
     """
     repo = _fixture_repo(Path(tmp) / 'repo', ('a.py', 'b.py', 'c.py'))
     invented = ('\n# ─── ghostdir ───\n!/ghostdir/\n'
@@ -559,8 +560,7 @@ def test_a_checkout_with_truncated_history_refuses_loudly(tmp):
     worktree, so a control that opened `<repo>/.git/shallow` finds nothing
     there and concludes the history is complete — a fail-open in the one
     place this control has to fail closed. The marker lives in the COMMON
-    directory, which is why the control asks git where its directories
-    are rather than assuming a path.
+    directory, so the control asks git where its directories are.
     """
     source = _fixture_repo(Path(tmp) / 'source', ('a.py', 'b.py'))
     clone = Path(tmp) / 'shallow'
@@ -647,11 +647,10 @@ def test_a_working_copy_that_is_not_the_committed_file_refuses(tmp):
 def test_a_conflicted_merge_resolution_is_judged_from_the_merge(tmp):
     """A merge commit that resolved the file is itself the last writer.
 
-    The resolution below is a value NEITHER parent had, which is the case
-    the design's own reasoning could be wrong about: git's path-limited
-    history simplification might or might not report the merge as a writer
-    of the file. The fixture establishes it by execution, and the docstring
-    follows the fixture rather than the reasoning.
+    The resolution below is a value NEITHER parent had, which is where the
+    design's own reasoning could be wrong: git's path-limited history
+    simplification might or might not report that merge as a writer. The
+    fixture settles it by execution, and this follows the fixture.
     """
     names = tuple(f'm{index:02d}.txt' for index in range(1, 9))
     repo = _fixture_repo(Path(tmp) / 'repo', names)
