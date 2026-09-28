@@ -423,6 +423,34 @@ def test_the_derivation_renders_the_literal_block_layout(tmp):
         ['b.py', 'a.py']), 'the derivation kept the order it was handed'
 
 
+def test_the_derivation_always_carries_the_deny_rule(tmp):
+    """The rendering must deny by default, and that is pinned as a literal.
+
+    Both `main` and the committed-file control build the file from the
+    same `HEAD` constant this function returns, so a constant that lost
+    its `*` makes the committed file and the derivation agree on a file
+    that denies NOTHING — and deny-by-default is the whole backing the
+    control's strictness rests on. The generator's own check-ignore
+    postcondition cannot see it: it rejects paths that ARE ignored, and
+    with nothing denied nothing is ignored, so it answers `ok`.
+
+    That is a route to "off" the trivially-wrong-artifact probe does not
+    cover, because the artifact is wrong in both directions at once. So
+    the rule is pinned here as a literal in a test that shares no state
+    with the text it checks.
+    """
+    del tmp
+    generator = _util.load(
+        ROOT / 'scripts' / 'gen_gitignore.py', 'gen_gitignore_deny')
+    for tracked in (['a.py'], ['d/e.py', 'a.py'], []):
+        rendered = generator.derive(tracked)
+        assert '\n*\n' in rendered, repr(rendered[-40:])
+        assert rendered.count('\n*\n') == 1, repr(rendered[-40:])
+    # The rule is the first thing after the preamble and everything below
+    # it is a re-admission, so a second `*` would be a re-deny.
+    assert generator.derive(['a.py']).split('\n')[0] != '*'
+
+
 def test_the_derivation_launches_nothing_and_ignores_its_input_order(tmp):
     """The derivation consumes the list it is handed, and nothing else."""
     generator = _util.load(
