@@ -108,6 +108,44 @@ def _check_ignore(root, tracked):
         return failure
 
 
+def derive(tracked):
+    """The ignore-file text for exactly the tracked paths handed in.
+
+    Pure, and that is the whole contract: it launches no process, reads no
+    file and consults no clock, so the only state it consumes is the
+    iterable it is given, and it orders that itself rather than trusting the
+    caller's order.
+
+    Two callers need this text and there is one of it. `main` writes what
+    this returns, and the committed-file control in
+    tests/test_gitignore_generator.py derives the side it compares the
+    committed file against by calling this, so a change to the rendering
+    moves both at once instead of leaving a second copy to rot.
+
+    The input is a set of paths and not a verdict about which of them ship,
+    and no path is named that was not handed in. What a caller leaves out
+    lands in the output as an absence, which is the caller's decision to
+    make and not this function's to close: the control hands it the paths
+    tracked at BOTH the head and the commit that last wrote the file, so a
+    file added since then is missing from the derivation by construction
+    and it is the comparison that tolerates that, not this rendering.
+    """
+    by_dir = defaultdict(list)
+    for path in sorted(tracked):
+        by_dir[path.rsplit('/', 1)[0] if '/' in path else ''].append(path)
+
+    out = [HEAD]
+    for directory in sorted(by_dir):
+        out.append('')
+        out.append(f'# ─── {directory or "root"} ───')
+        if directory:
+            parts = directory.split('/')
+            for depth in range(1, len(parts) + 1):
+                out.append('!/' + '/'.join(parts[:depth]) + '/')
+        out += [f'!/{path}' for path in by_dir[directory]]
+    return '\n'.join(out) + '\n'
+
+
 def main(repo):
     root = Path(repo)
     shown = _log_safe(repo)
@@ -121,21 +159,10 @@ def main(repo):
     # -z + NUL split: without it a tracked path containing a space arrives as
     # two tokens, and the generator would name and postcondition-check the
     # FRAGMENTS while the real file stayed ignored — a fail-open success.
-    tracked = sorted(path for path in listed.stdout.split('\0') if path)
-    by_dir = defaultdict(list)
-    for path in tracked:
-        by_dir[path.rsplit('/', 1)[0] if '/' in path else ''].append(path)
+    # derive() orders these itself, so this list is not sorted here.
+    tracked = [path for path in listed.stdout.split('\0') if path]
 
-    out = [HEAD]
-    for directory in sorted(by_dir):
-        out.append('')
-        out.append(f'# ─── {directory or "root"} ───')
-        if directory:
-            parts = directory.split('/')
-            for depth in range(1, len(parts) + 1):
-                out.append('!/' + '/'.join(parts[:depth]) + '/')
-        out += [f'!/{path}' for path in by_dir[directory]]
-    (root / '.gitignore').write_text('\n'.join(out) + '\n', encoding='utf-8')
+    (root / '.gitignore').write_text(derive(tracked), encoding='utf-8')
 
     ignored = _check_ignore(root, tracked)
     if isinstance(ignored, BaseException):
