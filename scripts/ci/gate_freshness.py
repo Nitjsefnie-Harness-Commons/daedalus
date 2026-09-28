@@ -98,11 +98,10 @@ GATE_PATTERNS = (
 # tuple: a new such file must be added here with its own reason. The four
 # `timed` suites are carried under a second mechanism: `timed-timings.yml`
 # RUNS them to verify the refresh before it commits. They verify this branch.
-CARRIED_BY_THE_BRANCH = ('.github/ci-thresholds.json',
-                         'tests/test_timed_coverage.py',
-                         'tests/test_timed_coverage_bounds.py',
-                         'tests/test_timed_planner.py',
-                         'tests/test_timed_refresh.py')
+CARRIED_BY_THE_BRANCH = (
+    '.github/ci-thresholds.json', 'tests/test_commit_step_seam.py',
+    'tests/test_timed_coverage.py', 'tests/test_timed_coverage_bounds.py',
+    'tests/test_timed_planner.py', 'tests/test_timed_refresh.py')
 
 _HEX40 = frozenset('0123456789abcdef')
 
