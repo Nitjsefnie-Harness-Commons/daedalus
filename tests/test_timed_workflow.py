@@ -666,6 +666,38 @@ def test_the_except_env_is_empty_because_no_plan_carries_an_except_key(tmp):
         assert set(entry) == {'group', 'suites'}, entry
 
 
+def test_the_commit_subject_is_the_one_the_refresher_wrote(tmp):
+    """The subject names the MEASURED run, and only because of that.
+
+    The subject used to be assembled here, from `${{ github.run_id }}`
+    -- this workflow's OWN run -- while the file the step committed
+    recorded the `tests` run the refresher measured. Commit `eed3ae9e`
+    is titled "from run 36318864740" and its file says
+    `measured_from: 36310409594`; two runs, one commit, and nothing
+    compared them because the refresher is what writes the field and
+    this step is what writes the subject.
+
+    So the subject now comes from the file the refresher wrote, and
+    this asserts the seam rather than the spelling: the refresh step
+    hands the refresher a path to write the subject to, the commit
+    step commits THAT, and no `${{ }}` expression reaches the subject
+    from anywhere in the workflow.
+    """
+    source = _timed_workflow()
+    refresh_step = workflow_script(source, 'refresh',
+                                  'Refresh the data file')
+    commit_step = workflow_script(source, 'refresh', 'Commit the refresh')
+    match = re.search(r'--message-file\s+(\S+)', refresh_step)
+    assert match, refresh_step
+    message_file = match.group(1)
+    assert message_file in commit_step, (message_file, commit_step)
+    assert f'-F {message_file}' in commit_step, commit_step
+    assert 'github.run_id' not in commit_step, commit_step
+    assert 'github.run_id' not in source, (
+        'a workflow expression reaches the subject, so the subject is not '
+        'the one the refresher rendered')
+
+
 def main():
     """Run every test; return the runner's exit code."""
     return _util.runner(_util.collect(globals()), tmp_prefix='timedwf_')
