@@ -538,7 +538,19 @@ def _no_commit(repository, commands, environment, done, subject):
       `~` expanding somewhere the step did not mean, a checkout whose
       diff reads empty -- so nothing here has to guess at one;
     - which bash that is, what `~` is under the environment the step was
-      actually given, and which of the step's own tools it cannot find.
+      actually given, which of the step's own tools it cannot find, and
+      WHETHER THIS FILESYSTEM CAN HOLD A POSIX MODE AT ALL.
+
+    That last one is measured, not guessed, and it is what the trace is
+    for. This control runs an ubuntu-only step (`runs-on:
+    ubuntu-latest`) on whatever machine runs the suite, so a leg can
+    fail on a property of the RUNNER rather than of the workflow. The
+    step's first external command is `install -d -m 700 ~/.ssh`, and
+    `install` REPORTS a mode it cannot set where a bare `chmod` may not
+    -- so "would `mkdir -p` plus `chmod` have worked here?" is a
+    question about the failing machine, and the probe answers it on that
+    machine in the same run instead of costing a CI round trip and a
+    speculative workflow change.
     """
     traced = run_workflow_script(
         repository, 'set -x\n' + '\n'.join(commands), environment)
@@ -548,7 +560,15 @@ def _no_commit(repository, commands, environment, done, subject):
         'printf "HOME=%s tilde=%s\\n" "$HOME" "$(cd ~ && pwd)"\n'
         'for tool in git install chmod mkdir; do\n'
         '  command -v "$tool" > /dev/null || echo "MISSING $tool"\n'
-        'done',
+        'done\n'
+        'probe="$HOME/.daedalus-mode-probe"\n'
+        'if mkdir -p "$probe" 2>/dev/null && chmod 700 "$probe" 2>&1;'
+        ' then echo "chmod 700 on a directory under HOME: ok";\n'
+        'else echo "chmod 700 on a directory under HOME: refused"; fi\n'
+        'if : > "$probe/file" 2>/dev/null && chmod 600 "$probe/file" 2>&1;'
+        ' then echo "chmod 600 on a file under HOME: ok";\n'
+        'else echo "chmod 600 on a file under HOME: refused"; fi\n'
+        'rm -rf "$probe"',
         environment)
     trace = traced.stderr.strip().splitlines()
     said = done.stderr.strip() or done.stdout.strip() or 'no output'
