@@ -281,17 +281,36 @@ def test_a_file_in_seconds_is_rescaled_into_the_units_it_reports(tmp):
     assert 'units' in err or 'seconds' in err, err
 
 
-def test_a_suite_that_appeared_or_disappeared_is_written(tmp):
-    """Both membership changes count, whatever the weights did."""
+def test_a_suite_the_runs_did_not_measure_is_carried_forward(tmp):
+    """The corrected contract: a refresh may not NARROW the file.
+
+    The file records two suites and this run measured one of them plus a
+    third. The written file is the UNION, not the measured set: dropping
+    `test_gone.py` is how a refresh that executed one cell of a
+    fifteen-cell matrix wiped 245 suites out of the shipped file and
+    left the planner pricing the tree at the median of the heavy tail
+    that survived. The carried weight is stated in the file's units --
+    the file here is in seconds and the write is in reference-multiples,
+    so `test_gone.py`'s 2.0 s becomes 1.0 multiple of a 2.0 s reference
+    and not 2.0.
+    """
     refresh = _refresh()
+    tree = _tree(tmp, ['test_a.py', 'test_gone.py', 'test_new.py'])
     root = Path(tmp) / 'runs'
-    _write_run(root, 120, {'cell-01': {'test_a.py': 4.0, 'test_new.py': 2.0}})
-    out = _file(tmp, _data({'test_a.py': 2.0, 'test_gone.py': 1.0}))
-    _out, err = _run(refresh, _refresh_args(tmp, root, out))
+    _write_run(root, 120, {'cell-01': {'test_a.py': 4.0, 'test_new.py': 2.0}},
+               reference=2.0)
+    out = _file(tmp, _data({'test_a.py': 4.0, 'test_gone.py': 4.0},
+                           units='seconds', target=10.0))
+    _out, err = _run(refresh, _refresh_args(tmp, root, out, tree=tree))
     written = json.loads(out.read_text(encoding='utf-8'))
     assert written['suite_weights'] == {'test_a.py': 2.0,
+                                        'test_gone.py': 2.0,
                                         'test_new.py': 1.0}, written
-    assert 'test_new.py' in err and 'test_gone.py' in err, err
+    assert 'test_new.py' in err, err
+    # The carry is named in the report, so a reader sees which weights
+    # this write did not measure rather than reading the file and
+    # assuming all of them were.
+    assert 'test_gone.py' in err, err
 
 
 def test_the_median_is_over_the_selected_runs_and_the_count_is_recorded(
@@ -595,6 +614,46 @@ def test_a_recorded_zero_weight_is_a_move_not_a_division(tmp):
     assert refresh._moved({'test_tiny.py': 0.0},
                           {'test_tiny.py': 1.5}) == [
         ('test_tiny.py', 0.0, 1.5)]
+
+
+def test_the_commit_message_names_the_runs_the_file_records(tmp):
+    """The subject and `measured_from` are rendered from ONE value.
+
+    They did not have to be. Commit `eed3ae9e` is titled "ci: refresh
+    suite timings from run 36318864740" and the file it wrote records
+    `measured_from: 36310409594`, because the workflow built its
+    subject from `${{ github.run_id }}` -- the REFRESH workflow's own
+    run -- while the refresher recorded the `tests` run it measured.
+    Two different runs, spelled as if they were one, and nothing
+    compared them: the refresher is what writes `measured_from`, and
+    the workflow is what writes the subject, and each was right about
+    its own value.
+
+    So the refresher now renders the subject too, from the same run
+    list and through the same join as the field, and writes it where
+    the workflow can read it. The assertion is on the two strings
+    agreeing, over a THREE-run sample, because a one-run sample cannot
+    tell a shared rendering from a coincidence.
+    """
+    refresh = _refresh()
+    root = Path(tmp) / 'runs'
+    for run_id, seconds in ((30, 4.0), (29, 6.0), (28, 8.0)):
+        _write_run(root, run_id, {'cell-01': {'test_a.py': seconds}})
+    out = _file(tmp, _data({'test_a.py': 2.0}))
+    message = Path(tmp) / 'subject.txt'
+    args = _refresh_args(tmp, root, out, runs=3)
+    args += ['--message-file', str(message)]
+    _out, err = _run(refresh, args)
+    written = json.loads(out.read_text(encoding='utf-8'))
+    assert written['measured_from'] == '30, 29, 28', written
+    subject = message.read_text(encoding='utf-8')
+    assert subject.strip() == refresh.commit_message([30, 29, 28]), subject
+    # The property, not the spelling: every run the file records is
+    # named in the subject, and nothing else is.
+    for run_id in written['measured_from'].split(', '):
+        assert run_id in subject, (run_id, subject)
+    assert '36318864740' not in subject, subject
+    assert 'wrote' in err, err
 
 
 def test_the_reference_workload_is_a_fixed_count_of_work(tmp):
