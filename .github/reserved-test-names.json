@@ -320,6 +320,7 @@
     "_display_value": {"python": ["tests/_pyroute_reads.py"]},
     "_document": {"python": ["tests/_ratchet_fixture.py"]},
     "_dotted_key": {"python": ["tests/_launch_path.py"]},
+    "_dotted_stdlib_root": {"python": ["tests/_launch_audit.py"]},
     "_drain_text": {"python": ["tests/_overlap.py"]},
     "_drop_operand": {"python": ["tests/_arm_sweep.py"]},
     "_dunder_form": {"python": ["tests/_pyroute_invalidation.py"]},
