@@ -105,10 +105,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 try:
     from time_tests import selected
-    from timings_coverage import coverage_refusal
+    from timings_coverage import coverage_note, coverage_refusal
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.time_tests import selected
-    from scripts.ci.timings_coverage import coverage_refusal
+    from scripts.ci.timings_coverage import coverage_note, coverage_refusal
 
 # The data file's schema, as one authority for the writer to import.
 SCHEMA_VERSION = 2
@@ -404,6 +404,9 @@ def plan(tree, timings, scale=1.0):
         timings['target_cell_weight'], 'target_cell_weight') * scale
     cells, heavy, notes = _pack(
         weights, names, target, int(timings['max_cells']))
+    quoted = coverage_note(weights, estimated)
+    if quoted:
+        notes.append(quoted)
     if stale:
         notes.append(
             'stale weights dropped (their suites are gone from the tree): '
