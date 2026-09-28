@@ -203,7 +203,7 @@ def _attach_basis(tree, data, cells):
 
 
 def refresh(runs_root, out, wanted=SAMPLE_RUNS, tree=None,
-             message_file=None):
+            message_file=None):
     """Recompute the file from the runs; return the message, or refuse.
 
     A WRITE IS A UNION, never a replacement. A run that executed one
