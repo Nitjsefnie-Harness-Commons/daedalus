@@ -395,8 +395,8 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
 
     A copy pasted back into a caller is the drift this branch exists to
     end, and it survives every other control: a behaviourally identical
-    `judged` in `ci_wait.py` leaves every other test in the four suites
-    that read these modules green.
+    `judged` in `ci_wait.py` leaves every suite that reads these modules
+    green but this one.
 
     The searched domain is this skill's own directory and nothing wider: a
     `*.py` module beside `ci_gate.py`. It cannot bound the other copies.
@@ -408,19 +408,19 @@ def test_no_caller_declares_a_filter_of_its_own(tmp):
     is gate-defining, and an edit there turns every open pull request's
     `gate freshness` check red on merge.
 
-    Within that domain the first half refuses a module-scope definition of
-    any of the four names outside `ci_gate`, whatever nests it, and
-    accepts an alias bound to the authority - the pattern `ci_wait.py`
-    already uses for `REQUIRED_WORKFLOWS`, and what `_is_an_alias` is
-    for. The exemption is narrow twice over, and both narrowings refuse
-    rather than pass. `_is_an_alias` matches an `ast.Assign` whose value
-    is `ci_gate`'s attribute and nothing else, so a walrus alias
-    (`judged = (w := ci_gate.judged)`) is refused too. And an import-form
-    alias (`import os as judged`) is someone else's object under a
-    misleading name rather than a second filter; the second half is what
-    catches that, and only in `ci_wait.py`, the one module here that
-    binds the names at all - in every other module of this directory the
-    same line is green.
+    Within that domain the first half refuses a module-scope definition
+    of any name `FILTER_NAMES` watches outside `ci_gate`, whatever nests
+    it, and accepts an alias bound to the authority - the pattern
+    `ci_wait.py` already uses for `REQUIRED_WORKFLOWS`, and what
+    `_is_an_alias` is for. The exemption is narrow twice over, and both
+    narrowings refuse rather than pass. `_is_an_alias` matches an
+    `ast.Assign` whose value is `ci_gate`'s attribute and nothing else,
+    so a walrus alias (`judged = (w := ci_gate.judged)`) is refused too.
+    And an import-form alias (`import os as judged`) is someone else's
+    object under a misleading name rather than a second filter; the
+    second half is what catches that, and only in `ci_wait.py`, the one
+    module here that binds the watched names at all - in every other
+    module of this directory the same line is green.
 
     What it does not establish: that a caller REACHES the filter.
     Deleting the filter import and leaving the call sites dangling is
