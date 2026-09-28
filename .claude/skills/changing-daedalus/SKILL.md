@@ -93,9 +93,9 @@ reveals neither.
 **Restore the way `plant.py` does, never with the VCS.** Run
 `python3 .claude/skills/changing-daedalus/plant.py save FILE` before you
 revert the fix and `plant.py restore FILE` after. The restore publishes the
-bytes it read in one atomic step, re-reads the file, and exits nonzero unless
-what it reads back is what it wrote - so its exit status answers the question
-you would otherwise have to remember to ask. A `save` that finds an entry from
+bytes it read in one atomic step and exits nonzero on a store it cannot read
+or a target it cannot write, so its exit status answers the question you
+would otherwise have to remember to ask. A `save` that finds an entry from
 an earlier plant refuses rather than overwriting it, and when the file has
 moved on since that copy it names `plant.py clear FILE` rather than a restore,
 because restoring the older bytes over the newer change is the loss this
