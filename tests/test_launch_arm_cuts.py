@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """The controls on the mechanism that deletes a clause, not on the table.
 
-`tests/test_launch_arms.py` checks the TABLE: that every arm is
-addressed where it says, is in one of three states, and is held by the
-evidence it names. This checks the MECHANISM underneath it --
-`tests/_arm_sweep.py`'s `cut_arm` -- because the table's every claim is
-read through that cut, and a mechanism that quietly cuts the wrong
-clause or reports the wrong text makes all of them untrue.
+`tests/test_launch_arms.py` checks the TABLE. This checks the MECHANISM
+it is read through -- `tests/_arm_sweep.py`'s `cut_arm` -- because a
+mechanism that quietly cuts the wrong clause or reports the wrong text
+makes every claim in the table untrue at once.
 
-Both controls here run over the whole table rather than the sample the
-table suite replays: `cut_arm` is pure, so re-running it 150 times
-costs nothing against the child interpreters a sweep really spends on.
+Both controls run over the whole table rather than the sample the table
+suite replays: `cut_arm` is pure, so 150 re-runs cost nothing against
+the child interpreters a sweep really spends on.
 """
 import ast
 import sys
@@ -19,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _arm_sweep import CUT_KIND, cut_arm  # noqa: E402
-from _launch_arm_records import CUT, EVIDENCE, FILE, ID, LINE  # noqa: E402
+from _launch_arm_records import CUT, FILE, ID, LINE  # noqa: E402
 from _launch_arms import LAUNCH_ARMS  # noqa: E402
 
 TESTS = Path(__file__).resolve().parent
@@ -29,22 +27,25 @@ def test_a_spec_whose_op_does_not_match_its_node_is_refused(tmp):
     """The op names a kind of clause, and any other kind is refused.
 
     `_locate` answers the node that CARRIES a line, not the one the op
-    names, so a spec keyed one line off is not a wrong answer from the
-    sweep but a wrong MUTATION: a `drop_if` on a `for` cut the whole
-    loop and reported a plausible `removed`, and a `drop_stmt` on a
-    decorator cut the decorator. Both are the module's own refusal now,
-    naming the kind it found.
+    names, so a spec keyed one line off is a wrong MUTATION, not a
+    wrong answer: a `drop_if` on a `for` cut the whole loop and
+    reported a plausible `removed`, and a `drop_stmt` on a decorator
+    cut the decorator. Both are now the module's own refusal.
 
-    The three probes are lines of `tests/_argv_read.py`, which is held
+    The probes are lines of `tests/_argv_read.py`, held
     byte-identical to base, so the node at each is fixed: a `for`, a
     `def` and a bare decorator. Each is asserted to be a kind the op
-    does not cut before the refusal is read, so this cannot go on
-    passing once the lines mean something else.
+    does not cut before the refusal is read.
     """
     del tmp
     source = (TESTS / '_argv_read.py').read_text(encoding='utf-8')
     stmts = {node.lineno: node for node in ast.walk(ast.parse(source))
              if isinstance(node, ast.stmt)}
+    # An op `CUT_KIND` does not name is waved through unchecked, which is
+    # the way the guard rots: the table grows one and nothing refuses it.
+    uncovered = sorted({arm[CUT].split(':')[0] for arm in LAUNCH_ARMS}
+                       - set(CUT_KIND) - {'boolop'})
+    assert not uncovered, f'cut ops with no kind the guard checks: {uncovered}'
     for line, op in ((84, 'drop_if'), (125, 'drop_if'), (131, 'drop_stmt')):
         assert not isinstance(stmts.get(line), CUT_KIND[op]), (
             f'_argv_read.py:{line} is now a '
@@ -64,17 +65,15 @@ def test_a_spec_whose_op_does_not_match_its_node_is_refused(tmp):
 def test_the_removed_text_is_the_text_the_cut_took(tmp):
     """`removed` is the text, which is the claim nothing else checked.
 
-    The mechanism's reason for existing is that a reader can see WHICH
-    clause a verdict depended on, and the only consumer of the field
-    asked whether it was non-empty -- so a constant satisfied every
-    control. Four relations close it, and each is read off the source
-    and the mutation rather than out of the mechanism that reported
-    them: the cut changed the file, the text it reported is a real
-    region of the source, that text carries the line this arm is
-    addressed at, and where the cut only deletes, the file is shorter
-    by exactly the length of the text reported. `promoted` gets the
-    matching relation -- it is in the mutated file -- so the field
-    saying what took the clause's place is watched too.
+    The mechanism exists so a reader can see WHICH clause a verdict
+    depended on, and the only consumer of the field asked whether it
+    was non-empty -- so a constant satisfied every control. Four
+    relations close it, each read off the source and the mutation
+    rather than out of the mechanism: the cut changed the file, the
+    text is a real region of the source, it carries the line this arm
+    is addressed at, and where the cut only deletes the file is shorter
+    by exactly its length. `promoted` gets the matching relation -- it
+    is in the mutated file.
     """
     del tmp
     sources = {arm[FILE]: (TESTS / arm[FILE]).read_text(encoding='utf-8')
@@ -105,36 +104,6 @@ def test_the_removed_text_is_the_text_the_cut_took(tmp):
             assert len(source) - len(mutated) == len(removed), (
                 f'{where}: the file is {len(source) - len(mutated)} '
                 f'characters shorter and {len(removed)} were reported')
-
-
-def test_every_op_the_table_uses_cuts_the_kind_it_names(tmp):
-    """`CUT_KIND` has to cover the ops, and the rows have to obey it.
-
-    Two ways this table could rot into refusing every arm: an op the
-    table uses that `CUT_KIND` does not name, which the guard would
-    wave through unchecked, and a kind that drifts out from under a
-    shipped spec. The first sweep run would catch the second, but only
-    once someone spent five minutes; this is the same fact over a
-    second.
-    """
-    del tmp
-    named = {arm[CUT].split(':')[0] for arm in LAUNCH_ARMS}
-    unknown = sorted(named - set(CUT_KIND) - {'boolop'})
-    assert not unknown, f'cut ops with no kind the guard checks: {unknown}'
-    sources = {arm[FILE]: (TESTS / arm[FILE]).read_text(encoding='utf-8')
-               for arm in LAUNCH_ARMS}
-    for arm in LAUNCH_ARMS:
-        spec, source = arm[CUT], sources[arm[FILE]]
-        op = spec.split(':')[0]
-        if op not in CUT_KIND:
-            continue
-        line = int(spec.split(':')[1])
-        node = max((held for held in ast.walk(ast.parse(source))
-                    if getattr(held, 'lineno', None) == line),
-                   key=lambda held: held.end_lineno, default=None)
-        assert isinstance(node, CUT_KIND[op]), (
-            f'{arm[ID]}: {spec} names a {type(node).__name__}, which is not '
-            f'the {CUT_KIND[op].__name__} {op} cuts')
 
 
 if __name__ == '__main__':
