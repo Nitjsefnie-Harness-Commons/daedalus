@@ -47,48 +47,64 @@ summary and publishes; `MAX_ESTIMATED_SUITE_SHARE` (a third) refuses.
 THE TIER IS A CONSEQUENCE, NOT A COMPROMISE. An unmeasured suite is
 priced at the recorded MEDIAN, so what a share costs depends on HOW the
 file came to be missing those suites, and there are two ways with very
-different prices.
+different prices. Both tables below are measured over ONE TREE -- the
+file's OWN suite set, its 328 recorded weights plus every name its own
+coverage clause lists, never the live tree -- so a number here is a
+statement about this file's measured distribution and not about how
+many suites the repository has this week. The shipped weights total
+356.4 reference multiples, with a recorded mean of 1.087 against a
+median of 0.2118: a ratio of 5.13, and that ratio is the third
+condition's whole subject.
 
-A BIASED recorded set -- the shape a refresh leaves when it writes the
-measured set alone, or keeps the lightest of what it measured -- is
+A BIASED recorded set is the shape a refresh leaves when it writes the
+measured set alone, or keeps the lightest of what it measured. It is
 starved of the heavy weights, so the median prices a whole population at
-one sample's rate. Keeping the `k` LIGHTEST recorded suites of this tree
-and estimating the rest, over the 328-suite tree and a true total of
-347.14:
+one sample's rate. CONSTRUCTION A: keep the `k` LIGHTEST of the 328
+recorded weights, drop the rest, let the planner estimate every suite the
+file no longer records.
 
-    estimated share   plan's total   understated
-       8.5%                 199.0        1.74x
-      10.4%                 173.7        2.00x
-      15.6%                 126.2        2.75x  <- the historical defect
-      26.8%                  74.7        4.65x
-      33.2%                  59.0        5.89x  <- the refusal
-      50.0%                  38.6        8.98x
+      k kept   share   weight share   skew   plan total   understated
+        320     2.4%        0.6%      4.10       271.6        1.31x
+        300     8.5%        3.2%      2.87       155.2        2.30x
+        280    14.6%        6.2%      2.59       103.3        3.45x
+        260    20.7%       10.0%      2.34        73.6        4.84x
+        240    26.8%       14.4%      2.18        54.6        6.53x
+        222    32.3%       20.4%      1.87        42.6        8.36x
+        200    39.0%       28.6%      1.60        32.6       10.93x
+        164    50.0%       46.0%      1.18        22.9       15.57x
 
 A DRIFTED recorded set is a different thing. The write is a union, so a
 missed daily refresh loses no weight: the file still records everything
 the last run that measured the tree measured, and the unmeasured suites
 are the ones that ARRIVED since, which is a random draw from the tree's
-distribution rather than a censored sample of it. This tree's recorded
-weights are right-skewed the way a measured set is -- mean 1.08 against a
-median of 0.22 -- so a suite priced at the median is priced at about a
-fifth of what a drawn suite is really worth, and the error grows slowly:
+distribution rather than a censored sample of it. CONSTRUCTION B: keep
+all 328 recorded weights, add `k` suites the tree has gained, and price
+each arrival at what a draw from the recorded distribution is really
+worth -- the recorded MEAN of 1.087, against the 0.2118 the planner
+lends it.
 
-    days missed    estimated share   understated
-        1                 5.6%             1.05x
-        2                10.6%             1.09x
-        5                22.9%             1.22x
-        9                34.9%             1.39x
+      k arrivals   share   plan total   honest total   understated
+           24      6.8%         361.5          382.5        1.06x
+           40     10.9%         364.8          399.8        1.10x
+           72     18.0%         371.6          434.6        1.17x
+          164     33.3%         391.1          534.6        1.37x
 
-So the two shapes are three orders of magnitude apart in what they cost
-at the same share, and the guard CANNOT tell them apart -- it sees only
-`k` unmeasured suites and no weights. That is what sets the tiers rather
-than either share alone.
+So at the same third of the tree, one shape is 1.37x out and the other
+8.36x, and that gap is what sets the tiers rather than either share
+alone. It also sets the third condition, because the two tables differ in
+a fourth column neither share reads: a drifted set keeps the whole
+measured population, so its skew is 5.13 at every arrival count, and a
+truncated set's skew collapses towards 1 as the tail is cut away. The
+guard could not see that from `k` alone, which is why the band below
+existed; `MIN_RECORDED_SKEW` closes it.
 
-The note is a tenth because that is where the BIASED shape's plan is out
-by 2x, and 2x is the tolerance the plan's purpose sets: the cell count is
+The note is a tenth because that is roughly where the BIASED shape's plan
+is out by 2x (construction A reaches 2.30x at 8.5%), and 2x is the
+tolerance the plan's purpose sets: the cell count is
 `ceil(total / target)`, so a total out by 2x is a matrix carrying half
-the parallelism the tree needs. The shipped file's 2.7% is four times
-below it and says nothing, which is the point.
+the parallelism the tree needs. The shipped file's own coverage is 4 of
+332 -- 1.2% -- an eighth of the bound, and says nothing, which is the
+point.
 
 The refusal is a third, and it is DERIVED rather than chosen: with `m`
 recorded weights summing `S` at median `e`, at least `floor(m/2)` of them
@@ -97,37 +113,39 @@ are at or above `e` and the median itself adds one more, so
 when `k > floor(m/2) + 1`. That constructible infimum -- a third -- is
 where a recorded set stops being a sample of the tree and becomes a
 corner of it, and where the two suite bounds stop being redundant: the
-weight comparison can only fire above the same line. A drifted file at a
-third is 1.39x out, which is a slow matrix; a biased one at a third is
-5.9x out, which is a fiction, and the guard has to give the same answer
-to both.
+weight comparison can only fire above the same line, and in fact can
+never reach its own bound, since at `k = m/2` the largest `k` the suite
+bound admits, the share is at most `m / (3m + 2)` -- a third. A drifted
+file at a third is 1.37x out, which is a slow matrix; a biased one at a
+third is 8.36x out, which is a fiction.
 
-WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The tree grew 116 tracked suites
-in the six days 2026-09-22 to 2026-09-28 on origin/main -- 212 to 328,
-19 a day (`SUITES_PER_DAY`) -- and the refresher is a daily cron at
-06:38 UTC, so a missed run is not a hypothetical. At the bound this
-module carried before, one missed refresh put the file over a tenth and
-REFUSED it, and a refusal here is `Plan the matrix` exiting 1 in
+WHAT THE FUSE IS NOW, AND WHAT IT COSTS. The refresher is a daily cron at
+06:38 UTC, so a missed run is not a hypothetical, and this tree grows at
+`SUITES_PER_DAY` a day -- a measured RANGE, because the rate is not a
+constant (see the constant). Against a 328-suite recorded set the note
+reaches at 37 arrivals and the refusal at 165, which is 1.2 to 4.6 days
+and 5.5 to 20.6 days at the measured rate. At the bound this module
+carried before, one missed refresh put the file over a tenth and REFUSED
+it, and a refusal here is `Plan the matrix` exiting 1 in
 `.github/workflows/tests.yml`: no pull request could create a matrix at
 all. Two days of a collapsed run, a rate limit or an Actions outage
-would have been a repo-wide CI outage. At a third the fuse is nine
-consecutive refreshes that did not land, and in the two-to-nine day band
-the note is what runs, on every pull request, naming the share, the days,
-and the remedy.
+would have been a repo-wide CI outage.
 
-That band is the price of the tier, and it is a real one: a BIASED file
-at 10.6% is 2.0x out and is now published with a note instead of
-refused. Between the tiers the guard tolerates a biased plan being out by
-up to about 5.9x, in exchange for a fuse eight times longer. The
-alternative -- refusing the drifted file too -- is not a stricter guard
-but a broken one, because the alternative to a wrong number is not a
-right number, it is no number. The sharper guard, which would remove the
-compromise, can tell the two shapes apart: a biased recorded set is
-LEFT-censored, its mean sitting at or below its own median, where a
-measured set is right-skewed. That is one comparison the caller already
-has the values for, and it is not in this module because a third
-condition is a third thing to keep honest; it is the first thing to add
-if the band proves too wide.
+That band is the price of the tier, and it is a real one. A BIASED file
+at 10.9% estimated is between 1.10x out (construction B) and 3.45x
+(construction A) and is published with a note instead of refused. The
+band is the part no share can close and `MIN_RECORDED_SKEW` only partly
+does: between a skew of 2.18 and 2.87 -- 26.8% and 14.6% estimated -- a
+biased plan is 3.5x to 6.5x out and is still published, because its
+recorded set still carries enough tail to look like a sample. Raising
+`MIN_RECORDED_SKEW` to 2.2 closes that band too and costs the drift fuse
+nothing, since a drifted set's skew does not move; it is left at 2.0
+because 2.0 is a round number about equally clear of the shape it catches
+(1.87) and the shape it does not (2.18), and 2.2 would be 0.02 from a
+number that moves on every refresh of the data file. The alternative --
+refusing the drifted file too -- is not a stricter guard but a broken
+one, because the alternative to a wrong number is not a right number, it
+is no number.
 
 A refusal rather than a note above it because there is nothing a reader
 can do with a matrix whose load is mostly invented: unlike a target the
@@ -141,6 +159,8 @@ values the caller has already resolved, which is what lets the
 chokepoint live in `plan_timed_matrix`, where the suite names and the
 weights come from and where the refusal's exception class is.
 """
+import statistics
+
 # The share of a plan's total weight that may be an estimate; its own
 # domain is a recorded set whose mean sits far below its median, which
 # a measured set does not, so it names a refusal rather than gating one.
@@ -156,10 +176,28 @@ MAX_ESTIMATED_SUITE_SHARE = 1 / 3
 # margin forbids. Below it the file describes its tree and the summary
 # says so by omission.
 NOTE_ESTIMATED_SUITE_SHARE = 0.10
+# The ratio of a recorded set's own mean to its own median below which
+# the set is not a SAMPLE of a tree but the bottom of one, and the
+# median it lends the unmeasured suites is a price from the floor of
+# the distribution. See `recorded_skew` and the docstring's cost table.
+MIN_RECORDED_SKEW = 2.0
 # Tracked suites this tree gains a day, which is how the note converts an
-# estimated count into refreshes that did not land. Measured on
-# origin/main: 212 tracked suites at 2026-09-22 and 328 at 2026-09-28.
-SUITES_PER_DAY = 19
+# estimated count into refreshes that did not land. A RANGE and not a
+# point, because the rate is not a constant: on this branch's history at
+# 2026-09-28 the tree held 321 tracked suites, against 166 sixteen days
+# earlier, 190 seven days earlier and 215 four days earlier -- 9.7, 18.7
+# and 26.5 a day over those three windows. A single figure quoted to one
+# decimal place is a precision the measurement does not have, and it is
+# read by an operator deciding how urgently to re-run a refresh.
+# `SUITES_PER_DAY_BASIS` names the windows so the next reader
+# re-measures rather than re-argues, and
+# `test_the_growth_rate_is_measured_against_the_tree_not_asserted`
+# re-derives both ends from the tree's own history.
+SUITES_PER_DAY = (8, 30)
+SUITES_PER_DAY_BASIS = (
+    'this branch at 2026-09-28: 321 tracked tests/ suites, against 166 at '
+    '2026-09-12 (16 days, 9.7 a day), 190 at 2026-09-21 (7 days, 18.7) and '
+    '215 at 2026-09-24 (4 days, 26.5)')
 _REMEDY = ('re-derive it from a run that measured the tree with '
            '`python3 scripts/ci/refresh_timings.py --runs-root '
            '<downloaded runs> --out .github/suite-timings.json`')
@@ -182,6 +220,39 @@ def estimated_suite_share(weights, estimated):
     if not estimated:
         return 0.0
     return len(estimated) / len(weights)
+
+
+def recorded_skew(weights, estimated):
+    """The recorded set's own mean over its own median: 0.0 if unknown.
+
+    The third condition's statistic, and the one that tells the two
+    shapes apart. A measured set of runtimes is right-skewed -- one
+    suite at 76 s beside three hundred at 0.2 s is what a tree of tests
+    looks like -- so its mean runs several times its median. A
+    BIASED recorded set is the BOTTOM of that distribution with the
+    heavy tail cut off, and cutting the tail off is exactly what
+    collapses the mean back down onto the median. The ratio is
+    therefore the size of the tail the file still carries, read off
+    the file itself.
+
+    It does not move with the arrival count, which is what leaves the
+    drift fuse alone: a drifted file's recorded set is the whole
+    measured population at one, nineteen or ninety days, so its skew
+    is the same number every time and a missed refresh cannot reach
+    this condition at any coverage.
+
+    The recorded values are the resolved weights minus the ones the
+    planner had to invent, because those are the only entries the
+    median was taken over. A CARRIED suite -- one the runs did not
+    measure but the file already recorded -- is in the file's own
+    numbers and is counted here, which is right: the union is what the
+    file is, and the tail it carries is the tail it lends.
+    """
+    recorded = [value for name, value in weights.items()
+                if name not in set(estimated)]
+    if not recorded:
+        return 0.0
+    return statistics.fmean(recorded) / statistics.median(recorded)
 
 
 def _recorded_clause(weights, estimated):
@@ -227,6 +298,36 @@ def _suite_refusal(weights, estimated, share):
         f'{_REMEDY}')
 
 
+def growth_days(count):
+    """`(fewest, most)` days of growth `count` suites could have taken.
+
+    The two ends of `SUITES_PER_DAY`, so the note quotes a range whose
+    endpoints are the module's own numbers rather than a point estimate
+    derived from a figure the measurement does not support. A control
+    reads the endpoints back out of the summary, which is what keeps the
+    operator-facing sentence falsifiable: a rate that has moved reddens
+    it, and the constant is re-measured.
+    """
+    return count / SUITES_PER_DAY[1], count / SUITES_PER_DAY[0]
+
+
+def _censored_refusal(weights, estimated, share, skew):
+    """The recorded set is the bottom of the tree, not a sample of it."""
+    return (
+        f'{share:.0%} of this plan\'s suites are estimated and the file\'s '
+        f'recorded weights are not a sample of the tree they price: their '
+        f'mean is only {skew:.2f} their own median, against '
+        f'{MIN_RECORDED_SKEW:g} for a measured set, so the heavy tail that '
+        f'makes a suite expensive has been cut off the top of what the file '
+        f'holds and every suite it says nothing about is priced from the '
+        f'floor of the distribution -- {_recorded_clause(weights, estimated)}'
+        f'. Neither share can see this: the suite share counts the missing '
+        f'suites and the weight share divides by a total this set has '
+        f'already understated, and a drifted file -- whose recorded set is '
+        f'the whole measured population, so its skew does not move with the '
+        f'arrivals -- is not this shape; {_REMEDY}')
+
+
 def coverage_note(weights, estimated):
     """The share a reader must be told about, or None if there is nothing.
 
@@ -245,7 +346,7 @@ def coverage_note(weights, estimated):
     share = estimated_suite_share(weights, estimated)
     if share < NOTE_ESTIMATED_SUITE_SHARE:
         return None
-    days = len(estimated) / SUITES_PER_DAY
+    fewest, most = growth_days(len(estimated))
     return (
         f'{share:.1%} of this plan\'s suites are estimated, at or above '
         f'the {NOTE_ESTIMATED_SUITE_SHARE:.0%} at which a tree of this size '
@@ -256,10 +357,12 @@ def coverage_note(weights, estimated):
         f'this file does not measure. Every suite in the tree is still in '
         f'a cell and the packer still orders the measured ones '
         f'longest-first: the matrix is lopsided, not wrong, and it is '
-        f'published. {len(estimated)} estimated suites is about {days:.1f} '
-        f'days of this tree\'s growth at the measured {SUITES_PER_DAY} '
-        f'tracked suites a day, so that many daily refreshes have not '
-        f'landed. {_REMEDY}')
+        f'published. {len(estimated)} estimated suites is between '
+        f'{fewest:.1f} and {most:.1f} days of this tree\'s growth, which '
+        f'measures {SUITES_PER_DAY[0]} to {SUITES_PER_DAY[1]} tracked '
+        f'suites a day ({SUITES_PER_DAY_BASIS}), so somewhere between that '
+        f'many and that many daily refreshes have not landed. '
+        f'{_REMEDY}')
 
 
 def coverage_refusal(weights, estimated):
@@ -282,4 +385,7 @@ def coverage_refusal(weights, estimated):
     suites = estimated_suite_share(weights, estimated)
     if suites > MAX_ESTIMATED_SUITE_SHARE:
         return _suite_refusal(weights, estimated, suites)
+    skew = recorded_skew(weights, estimated)
+    if skew < MIN_RECORDED_SKEW:
+        return _censored_refusal(weights, estimated, suites, skew)
     return None
