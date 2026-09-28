@@ -38,6 +38,9 @@ _PURE_IMPORTS = frozenset({
     ('_workflow_cache_boundary', '_direct_cache_run'),
     ('_workflow_cache_boundary', '_insert_wheel_step'),
     ('_workflow_cache_boundary', '_real_step'),
+    # The opened-set scan reads `tests/*.py` and returns two counts of the
+    # phrase it is handed; it writes nothing and opens nothing.
+    ('_coverage_authority_scan', 'holders'),
 })
 _PURE_METHODS = frozenset({
     'append', 'count', 'decode', 'encode', 'endswith', 'glob', 'index',
