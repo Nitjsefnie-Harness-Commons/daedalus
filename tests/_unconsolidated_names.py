@@ -357,26 +357,11 @@ UNCONSOLIDATED_NAMES = {
         'test_cli_browser_tabs.py, test_cli_content_css.py and '
         'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
         'is a copy of the owner, whose own digest is 8d27de7d6',
-    ('tests/test_cli_browser_commands.py', '_put'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_handlers.py, test_cli_content_block.py and '
-        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
-        'a copy of the owner, whose own digest is bb7f4f04',
-    ('tests/test_cli_browser_handlers.py', '_put'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_handlers.py, test_cli_content_block.py and '
-        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
-        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_browser_tabs.py', '_ext'):
         'byte-identical to the other test_cli_browser_commands.py, '
         'test_cli_browser_tabs.py, test_cli_content_css.py and '
         'test_cli_content_hotfixes.py sites (digest 8584b91dc2), and none '
         'is a copy of the owner, whose own digest is 8d27de7d6',
-    ('tests/test_cli_content_block.py', '_put'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_handlers.py, test_cli_content_block.py and '
-        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
-        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_content_capture.py', '_ext'):
         'this one differs from the other four _ext sites (digest '
         '04c21b05e5), and the owner builds the answer tuple for the whole '
@@ -398,11 +383,6 @@ UNCONSOLIDATED_NAMES = {
         'byte-identical to the other test_cli_eval_handlers.py and '
         'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '
         'is a copy of the owner, whose own digest is d10f3df3d',
-    ('tests/test_cli_eval_handlers.py', '_put'):
-        'byte-identical to the other test_cli_browser_commands.py, '
-        'test_cli_browser_handlers.py, test_cli_content_block.py and '
-        'test_cli_eval_handlers.py sites (digest bae1155da1), and none is '
-        'a copy of the owner, whose own digest is bb7f4f04',
     ('tests/test_cli_result_handlers.py', '_get'):
         'byte-identical to the other test_cli_eval_handlers.py and '
         'test_cli_result_handlers.py sites (digest b58cc8c27a), and none '

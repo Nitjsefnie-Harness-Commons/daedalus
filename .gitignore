@@ -285,6 +285,7 @@
 !/tests/_cli_arg_audit_resolver.py
 !/tests/_cli_arg_audit_support.py
 !/tests/_cli_dispatch.py
+!/tests/_cli_handler_wire.py
 !/tests/_cli_helpers.py
 !/tests/_cli_parse.py
 !/tests/_clientstate.py
