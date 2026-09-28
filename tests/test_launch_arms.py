@@ -140,18 +140,6 @@ def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
     stepped = sorted(arm[ID] for arm in LAUNCH_ARMS
                      if arm[EVIDENCE] == STEP_CEILING_CONTROL)
     assert set(stepped) == {'fx.skip-registered', 'mr.while-guard'}, stepped
-    # The step ceiling exists for a mutant that does not answer WRONG, it
-    # does not stop, so every arm bound to it is one whose sweep reports
-    # no verdict at all. An arm that DOES answer has a row to hold it,
-    # and reaching for the ceiling instead would be a control that can
-    # only fail on a hang.
-    answered = sorted(arm[ID] for arm in LAUNCH_ARMS
-                      if arm[EVIDENCE] != STEP_CEILING_CONTROL
-                      and arm[EVIDENCE] in ROW_LABELS | CONTROL_LABELS)
-    assert 'fx.skip-registered' in stepped and 'mr.while-guard' in stepped, (
-        f'the step ceiling is bound to {stepped}; it exists for a fixpoint '
-        'or a loop that does not stop, so both of those arms should reach '
-        f'for it, and none of {answered} answers without one')
 
 
 def test_every_arm_is_still_in_the_analyser_it_was_classified_in(tmp):
