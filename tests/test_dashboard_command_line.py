@@ -20,6 +20,7 @@ It is its own file because the suite that owns the launcher's other
 diagnostics had no headroom left, and a size baseline is never raised to make
 room.
 """
+import re
 import shutil
 import subprocess
 import sys
@@ -177,6 +178,135 @@ def test_the_child_still_sees_the_callers_arguments_at_their_own_indices(
     assert result.returncode == 0, (
         result.returncode, result.stdout, result.stderr)
     assert result.stdout == f'1:{one}\n2:{two}\n3:{three}\n', result
+
+
+def _launch_records(run, *, returncode=0):
+    """Run `run()` with `Popen` stubbed, recording what was written.
+
+    Each record is `{'argv', 'program', 'directory'}`. The program is read
+    INSIDE the launch, because the launcher removes the file when the attempt
+    returns -- a test that read it afterwards would find nothing and could
+    conclude anything from that. A launch the stub cannot serve is swallowed
+    so a caller gets its records whether or not the run's own verdict passed.
+    """
+    records = []
+
+    def launch(command, **_options):
+        argv = [str(part) for part in command]
+        path = Path(argv[1]) if len(argv) > 1 else None
+        records.append({
+            'argv': argv,
+            'program': (path.read_text(encoding='utf-8')
+                        if path is not None and path.is_file() else ''),
+            'directory': path.parent if path is not None else None,
+        })
+        child = _settled_child()
+        child.returncode = returncode
+        return child
+
+    with patch.object(_dashnode.subprocess, 'Popen', side_effect=launch):
+        try:
+            run()
+        except (AssertionError, subprocess.TimeoutExpired):
+            pass
+    return records
+
+
+# The per-attempt budget the child is handed, read out of what was written.
+_STEP_BUDGET = re.compile(r'const _dashnodeStepTimeoutMs = (\d+);')
+
+
+def _step_budget_ms(program):
+    """The step timeout the program declares, in milliseconds."""
+    found = _STEP_BUDGET.search(program)
+    assert found, f'the program declares no step budget: {program[-200:]}'
+    return int(found.group(1))
+
+
+def _one_launch(attempt, *, module=True, returncode=0, bounded_steps=0):
+    return _launch_records(
+        lambda: _dashnode._run_dashboard_node_once(
+            _dashnode.DashboardNodeHarness(
+                'x' * 64, bounded_steps, module=module),
+            attempt=attempt),
+        returncode=returncode)
+
+
+def test_the_childs_step_budget_escalates_with_the_attempt(_tmp):
+    """The budget the CHILD is handed must scale with the attempt.
+
+    This is a witness that was deleted and replaced by a comment, and the
+    comment was not even true. The deleted pair read the program out of argv;
+    the comment claimed the `timeout_s` pair "can only come from 5 s then
+    10 s", but `timeout_s` is `attempt * (step + grace)` and that map is not
+    injective in `step` -- 3 and 7 sum to the same 10. So nothing held the
+    child-side value at all, and a launcher that stopped escalating left
+    every suite green, the way a launcher past the Windows cap leaves them
+    green on Linux.
+
+    So the value is read out of what the launcher WROTE, and the property
+    held is the one the deleted pair stood in for: the child's own budget
+    doubles with the attempt. No unrelated step/grace split can satisfy that,
+    and a launcher that held the step and grew the grace cannot either.
+    """
+    del _tmp
+    first = _one_launch(1)
+    second = _one_launch(2)
+    assert len(first) == 1 and len(second) == 1, (first, second)
+    one = _step_budget_ms(first[0]['program'])
+    two = _step_budget_ms(second[0]['program'])
+    assert one > 0, first[0]['program'][-200:]
+    assert two == 2 * one, (
+        f'the child budget did not double with the attempt: '
+        f'attempt 1 {one} ms, attempt 2 {two} ms')
+
+
+def test_the_scratch_directory_is_removed_after_every_launch(_tmp):
+    """Nothing else holds the program once the child is gone, so a launcher
+    that stopped removing its scratch tree would leak a directory per launch
+    and nothing would say so: the failure this commit exists to prevent is
+    invisible on the machine reading it, and a teardown nothing holds is the
+    same class of that.
+
+    Both paths are checked, because they are different code: a child that
+    exits cleanly, and a child that fails and takes the launcher's
+    `AssertionError` out through the same `finally`.
+    """
+    del _tmp
+    clean = _one_launch(1)
+    assert clean, 'no launch was recorded'
+    for record in clean:
+        assert not record['directory'].exists(), (
+            f'the scratch tree survived a clean launch: '
+            f'{record["directory"]}')
+    failed = _one_launch(1, returncode=1)
+    assert failed, 'no launch was recorded'
+    for record in failed:
+        assert not record['directory'].exists(), (
+            f'the scratch tree survived a failed launch: '
+            f'{record["directory"]}')
+
+
+def test_the_extension_carries_the_module_type(_tmp):
+    """`--input-type=module` may not be combined with a file, so the module
+    harness is marked by its extension, and the extension is load-bearing
+    rather than conventional.
+
+    CI declares `node-version: "22"`, and Node 22.7 and later auto-detect
+    module syntax in a `.js` file -- so renaming `.mjs` to `.js` is green on
+    every platform this repository runs, and only an older runtime would see
+    the difference, where a module harness would be parsed as CommonJS. That
+    is the whole argument for pinning it: a tidy-up would be invisible here
+    and wrong in the field.
+    """
+    del _tmp
+    for module, expected in ((True, '.mjs'), (False, '.cjs')):
+        records = _one_launch(1, module=module)
+        assert len(records) == 1, (module, records)
+        name = Path(records[0]['argv'][1]).name
+        assert name.endswith(expected), (
+            f'a module={module} harness was written as {name}, '
+            f'expected {expected}')
 
 
 def main():
