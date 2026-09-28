@@ -226,6 +226,24 @@ def cut_arm(source, spec):
     raise ValueError(f'no parsing cut for line {line}')
 
 
+def cut_span(source, spec):
+    """`(first line, last line)` of the clause a `cut` spec removes, or None.
+
+    The line a spec names is where its node STARTS; the clause is that
+    node's span. For a `boolop` the node is the disjunction's ENCLOSING
+    statement, because the operand is re-rendered into it and the
+    statement is what goes — so an entry on one operand of a
+    multi-line condition is inside its cut's span, not at its edge.
+    """
+    op, line = spec.split(':')[0], int(spec.split(':')[1])
+    tree = ast.parse(source)
+    if op == 'boolop':
+        _, _, node = _disjunction(tree, line)
+    else:
+        node, _ = _locate(tree, line)
+    return (node.lineno, node.end_lineno) if node is not None else None
+
+
 def _removed(lines, start, extra, end, promoted):
     """The clause that went, which is not always the span that was cut.
 
