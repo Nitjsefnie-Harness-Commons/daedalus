@@ -408,6 +408,93 @@ def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
         plan.cells[0], 'the estimate is not the recorded median')
 
 
+def _shipped_thinned(keep_every):
+    """The shipped file's own weights, thinned to every `keep_every`th.
+
+    The real target, not a shape invented here: the weights are the ones
+    `.github/suite-timings.json` records for this tree, and thinning
+    them is what a refresh that measured one cell of a fifteen-cell
+    matrix leaves behind -- the shipped file fell from 273 recorded
+    suites to 28 that way, and every other suite became an estimate
+    priced at the median of the heavy tail that survived.
+    """
+    planner = _planner()
+    data = planner.read_timings(ROOT / '.github' / 'suite-timings.json')
+    names = planner.suite_names(ROOT)
+    kept = {name: data['suite_weights'][name] for name in names[::keep_every]
+            if name in data['suite_weights']}
+    assert kept, 'the shipped file records none of the tree'
+    return data, kept
+
+
+def test_a_file_whose_weight_is_mostly_estimated_is_a_named_refusal(tmp):
+    """The shipped file's weights, thinned to a tenth: refused by name.
+
+    The planner prices every unrecorded suite at the median of the
+    recorded ones, so a file that kept a tenth of the tree is a file
+    whose total weight is mostly one borrowed number. The balance
+    guarantee is computed over that total, so it passes trivially --
+    `heaviest/median 1.000` on a plan derived from 345 reference
+    multiples priced at 109 -- and the cell count collapses with it. The
+    refusal is what stops the summary reporting a fiction as balanced,
+    so the assertion here is on the exit code and the REASON, and the
+    plan the planner would otherwise have printed is shown to be
+    balanced first: a guard that also refused a healthy plan would pass
+    this test without doing anything.
+    """
+    planner = _planner()
+    data, weights = _shipped_thinned(10)
+    narrow = dict(data, suite_weights=weights)
+    recorded = sum(weights.values())
+    # What the guard is judging: the estimate is the recorded median,
+    # and the tree carries far more suites than the file records.
+    estimate = statistics.median(list(weights.values()))
+    unmeasured = len(planner.suite_names(ROOT)) - len(weights)
+    share = estimate * unmeasured / (recorded + estimate * unmeasured)
+    assert share > planner.MAX_ESTIMATED_WEIGHT_SHARE, share
+    # A plan the planner WOULD have published, and would have called
+    # balanced, on exactly these weights.
+    plan = planner.plan(ROOT, narrow)
+    loads = [cell.weight for cell in plan.cells]
+    assert max(loads) <= statistics.median(loads) * (
+        1 + planner.CELL_WEIGHT_MARGIN), loads
+    error = io.StringIO()
+    with contextlib.redirect_stderr(error):
+        code = planner.main(['--tree', str(ROOT), '--timings',
+                             str(_write(Path(tmp) / 'narrow.json', narrow))])
+    assert code == 1, 'the planner published a matrix on a fiction'
+    message = error.getvalue()
+    assert 'estimated' in message, message
+    assert f'{share:.0%}' in message or '0.5' in message, message
+    assert 'refresh_timings.py' in message, message
+
+
+def test_the_estimated_share_is_of_weight_and_not_of_suite_count(tmp):
+    """Most SUITES estimated is a normal refresh; most WEIGHT is not.
+
+    The two disagree when the recorded weights are lopsided, which is
+    the ordinary case: a tree's measured suites skew heavy, so the
+    median the planner lends the unmeasured ones sits low and a handful
+    of heavy measured suites can carry a file whose four fifths of
+    SUITES are estimates. Counting suites would refuse a file that
+    describes the tree well; counting weight refuses the file that does
+    not. This one has nine of ten suites estimated and plans, and the
+    expectation is the guard's own share recomputed here from the
+    planner's own estimate.
+    """
+    planner = _planner()
+    suites = [f'test_{index:02d}.py' for index in range(10)]
+    recorded = {'test_00.py': 1.0, 'test_01.py': 1.0, 'test_09.py': 90.0}
+    data = _data(recorded, target=100.0, max_cells=30)
+    estimate = statistics.median(list(recorded.values()))
+    share = estimate * 7 / (sum(recorded.values()) + estimate * 7)
+    assert len([name for name in suites if name not in recorded]) > 3
+    assert share < planner.MAX_ESTIMATED_WEIGHT_SHARE, share
+    plan, _out = _plan(tmp, suites, data)
+    assert plan.estimated == sorted(set(suites) - set(recorded)), plan.estimated
+    assert sum(len(cell.suites) for cell in plan.cells) == len(suites)
+
+
 def test_the_packing_is_deterministic(tmp):
     """The same file twice, and the file's own order permuted: one matrix."""
     suites = [f'test_{chr(ord("a") + i)}.py' for i in range(8)]
