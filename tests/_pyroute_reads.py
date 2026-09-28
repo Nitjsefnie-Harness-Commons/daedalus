@@ -20,7 +20,7 @@ from _pyroute_positions import (at_position, from_position,
                                 sequence_method_value)
 from _pyroute_setops import fold_set_operation, set_operands
 from _pyroute_storage import (container_copy, dict_length, fold_dynamic,
-                              replace_deferred_storage)
+                              replace_deferred_storage, stale_after_store)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,
                              DeferredAlternatives, DeferredClass,
                              DeferredContainer, DeferredGenerator,
@@ -177,23 +177,30 @@ def _mapping_lookup(owner, key, default):
     """A mapping read carrying a default.
 
     The default answers an absent key and nothing else, so a key the
-    container holds keeps the value RECORDED there: the value the model
+    container holds keeps the value RECORDED there -- the value the model
     recorded, which is the value the runtime holds only while no
-    unreadable source has since overwritten that key. An unknown-key slot
-    joins the read as it always has. An absent key on a mapping the
-    model cannot enumerate is not an absent key: an unknown length with no
-    unknown-key slot says the key set holds entries the model never
-    learned, so that read joins rather than answering the default for a
-    key the runtime may well hold. This read answers from the container and
-    has to join for itself, where the subscript of the same mapping
-    reaches the model's own unprovable marking for the name -- but only
-    where the STORE left one: a store that marks the owner as it folds the
-    source is what the subscript picks up, and a store that merely
-    propagates an unknown length from a source reached through a name
-    marks the source name instead, leaving this read to join for itself
-    and the subscript with nothing to reach."""
+    unreadable source has since overwritten that key. A store whose source
+    the model could not read may have named any key the container already
+    held, so it RETIRED those keys; a retired one still contributes the
+    value recorded there, and joins it with the unprovable sender, because
+    a candidate the model can name is worth keeping beside one it cannot.
+    An unknown-key slot joins the read as it always has. An absent key on
+    a mapping the model cannot enumerate is not an absent key: an unknown
+    length with no unknown-key slot says the key set holds entries the
+    model never learned, so that read joins rather than answering the
+    default for a key the runtime may well hold. This read answers from
+    the container and has to join for itself, where the subscript of the
+    same mapping reaches the model's own unprovable marking for the name
+    -- but only where the STORE left one: a store that marks the owner as
+    it folds the source is what the subscript picks up, and a store that
+    merely propagates an unknown length from a source reached through a
+    name marks the source name instead, leaving this read to join for
+    itself and the subscript with nothing to reach."""
     if DYNAMIC_KEY in owner.items:
         return merge_yielded((*_selected_values(owner, key), default))
+    if key in owner.stale:
+        return merge_yielded((owner.items.get(key), UNPROVABLE_SENDER,
+                              default))
     if key in owner.items:
         return owner.items[key]
     if owner.length is None:
@@ -255,7 +262,8 @@ def _readback_copy(node, state, owner):
     """
     items = dict(owner.items)
     return DeferredContainer(
-        items, dict_length(items, owner.length is not None), 'dict', node)
+        items, dict_length(items, owner.length is not None), 'dict', node,
+        stale=owner.stale)
 
 
 def _popitem_entry(owner):
@@ -523,7 +531,12 @@ def _pop_key(call, state):
 def _apply_pop(state, call):
     """The mapping one pop call removes a key from, or None when this call is
     not a mutation the model follows: no tracked mapping behind it, so the
-    general invalidation is what answers for it."""
+    general invalidation is what answers for it.
+
+    A pop takes an entry out and writes nothing anywhere, so the entries it
+    leaves keep the values the model recorded -- the key it names stops
+    being retired along with being held, and every other one is untouched
+    even when the key it took is one the model could not resolve."""
     owner = mapping_lookup_owner(call, state)
     if owner is None or call.func.attr != 'pop':
         return None
@@ -534,7 +547,8 @@ def _apply_pop(state, call):
     elif owner.kind != 'dict':
         return None
     replace_deferred_storage(state, owner, container_copy(
-        owner, items, key is _UNRESOLVED_KEY))
+        owner, items, key is _UNRESOLVED_KEY, stale_after_store(
+            owner, () if key is _UNRESOLVED_KEY else (key,))))
     return owner
 
 

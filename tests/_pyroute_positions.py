@@ -22,6 +22,12 @@ def at_position(container, index):
     """Values a container may hold at position or key index."""
     items = container.items
     if container.kind == 'dict':
+        if index in container.stale:
+            # A store the model could not read has since put something else
+            # at this key, so what the model recorded there is one more
+            # candidate rather than the answer.
+            return [items.get(index), UNPROVABLE_SENDER,
+                    items.get(DYNAMIC_KEY)]
         return [items.get(index), items.get(DYNAMIC_KEY)]
     if not isinstance(index, int) or (
             index < 0 and container.length is None):

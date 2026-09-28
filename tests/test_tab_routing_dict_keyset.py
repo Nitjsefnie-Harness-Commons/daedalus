@@ -4,10 +4,13 @@
 A tracked dict has two legal readings. When the model can account for its
 key set, a read answers the recorded value or the read's own default, and a
 key it knows is absent really is absent. When it cannot -- an unknown length
-with no unknown-key slot standing for what it never learned -- a read of a
-key the model never recorded may select anything the unenumerated part
-carried, so it joins instead of answering "nothing". Answering "nothing" is
-the silent outcome this suite exists to police.
+with no unknown-key slot standing for what it never learned -- a read may
+select anything the unenumerated part carried, so it joins instead of
+answering "nothing". Two kinds of key are in that state: one the model never
+recorded, and one it recorded BEFORE the store that lost the count, whose
+recorded value that store may since have replaced. A key written after that
+store is untouched by it and keeps its recorded value. Answering a value a
+store has replaced is the silent outcome this suite exists to police.
 
 **The census is not a closed set.** `_AXES` is the census: one member per
 way a tracked dict acquires a key the model did not learn, driven from the
@@ -52,10 +55,10 @@ bucket. What separates the `_SILENT` rows from those is WHICH NAME carries
 the fold, and not every member has a name to answer for. A store that marks
 its owner answers joined at the key being read; a store that propagates an
 unknown length from a source reached through a NAME leaves the fold on the
-source name, so the owner's own reads answer clean; and a starred
-positional source marks neither name, its fold sitting on no name at all.
-Those shapes are what `_SILENT` names, with the read form each member is
-silent on carried per member.
+source name, so the owner's own reads answer whatever its recorded items
+say; and a starred positional source marks neither name, its fold sitting on
+no name at all. Those shapes are what `_SILENT` names, with the read form
+each member is silent on carried per member.
 """
 import sys
 from pathlib import Path
@@ -64,7 +67,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute_reads import _mapping_lookup  # noqa: E402
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
-                             DeferredContainer)
+                             DeferredAlternatives, DeferredContainer)
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 
 _LAMBDA = ("lambda *a, **k: send('_focus', 'focus-tab', "
@@ -88,6 +91,24 @@ _UNREADABLE = 'def mk():\n    return dict(zip(["k"], [relay()]))\n'
 
 # A source the model cannot read as pairs, reached through a NAME.
 _UNACCOUNTABLE = 'o = {}\no.update(zip(["k"], [relay()]))'
+
+# A key the model recorded BEFORE the store that lost the count, written
+# back after it. What the model wrote there is what the runtime holds, so
+# the read answers from it; the three forms differ only in how the key is
+# made current again, and the third in a removal the model follows, which
+# takes an entry out without writing anything anywhere.
+_FRESH = ('d = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+          '\nd["k"] = relay()')
+_REFRESHED = ('d = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+              '\nd.update({"k": relay()})')
+_POPPED = _FRESH + '\nd.pop("j", None)'
+
+# A store whose key the model cannot resolve may have named the key the
+# container already held, but it also wrote the value it read to the
+# unknown-key slot every read arm joins, so it retires nothing: these are
+# the numbers the base commit measures, and the store's own fold is the
+# more precise account of the computed key.
+_COMPUTED = 'd = {"k": ordinary}\nd[args.values] = relay()'
 
 _AXES = {
     # `update`, a positional source the model reads as pairs.
@@ -133,11 +154,43 @@ _AXES = {
     'dict-literal-star-unreadable': _UNREADABLE + 'd = {**mk()}',
     'assign-unreadable': _UNREADABLE + 'd = mk()',
     'copy-unreadable': _UNREADABLE + 'd = dict(mk())',
-    # A key recorded before the dict stopped being enumerable: the read
-    # still resolves, because the recorded value is the one the MODEL
-    # recorded, and nothing unreadable has overwritten that key since.
+    # A key recorded between the store that lost the count and one after
+    # it. The second store is one the model cannot read either, so it may
+    # have replaced the key the first one left: the read keeps the value
+    # recorded there and joins the unprovable sender onto it, which is
+    # what keeps this row's cost where it was.
     'recorded-key': ('d = {}\nd.update(zip(["j"], [1]))\nd["k"] = relay()\n'
                      'd.update(zip(["x"], [1]))'),
+    # A key recorded BEFORE the store that lost the count, and no store
+    # since. The value the model wrote is the value the runtime holds, so
+    # the read answers from it alone, with nothing joined onto it.
+    # `recorded-key` is this row with one more unreadable store after it,
+    # and the pair is the rule from both sides.
+    'fresh-recorded-key': _FRESH,
+    'fresh-recorded-key-updated': _REFRESHED,
+    'fresh-recorded-key-popped': _POPPED,
+    # The FRESHNESS axis proper: a store whose source the model cannot read
+    # may have put something else at every key the container already held,
+    # so the read of such a key joins on all three forms. Filed as 1154.
+    'stale-recorded-zip': (
+        'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))'),
+    'stale-recorded-frozenset': (
+        'd = {"k": ordinary}\nd.update(frozenset([("k", relay())]))'),
+    'stale-recorded-later-store': (
+        'd = {"k": ordinary}\nd.update(zip(["j"], [1]))'
+        '\nd.update(zip(["k"], [relay()]))'),
+    # The same crossing through a source reached through a NAME the model
+    # already holds as unaccountable: the marking lands on that name and
+    # nothing at all on the owner, so before the rule these four were
+    # silent on every form. Filed as 1178.
+    'stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)'),
+    'stale-unaccountable-name-star': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)'),
+    'stale-unaccountable-name-doubled': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**{**o})'),
+    'ior-stale-unaccountable-name': (
+        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o'),
     'literal': 'd = {"k": relay()}',
 }
 
@@ -146,7 +199,7 @@ _AXES = {
 # The second column is what the member's SHAPE costs once nothing is routed,
 # and it is not the disposition alone: a member whose own name carries an
 # unprovable alias costs `(0, 1)` whatever its read says, because the
-# visible `tab` reaches that alias through the call site. `recorded-key`
+# visible `tab` reaches that alias through the call site. `fresh-recorded-key`
 # is the case that separates the two -- its read resolves, and its name is
 # still marked.
 _DISPOSITION = {
@@ -173,7 +226,17 @@ _DISPOSITION = {
     'dict-literal-star-unreadable': ('declared', (0, 1)),
     'assign-unreadable': ('declared', (0, 1)),
     'copy-unreadable': ('declared', (0, 1)),
-    'recorded-key': ('refused', (0, 1)),
+    'recorded-key': ('declared', (0, 1)),
+    'fresh-recorded-key': ('refused', (0, 1)),
+    'fresh-recorded-key-updated': ('refused', (0, 1)),
+    'fresh-recorded-key-popped': ('refused', (0, 1)),
+    'stale-recorded-zip': ('declared', (0, 1)),
+    'stale-recorded-frozenset': ('declared', (0, 1)),
+    'stale-recorded-later-store': ('declared', (0, 1)),
+    'stale-unaccountable-name': ('declared', (0, 1)),
+    'stale-unaccountable-name-star': ('declared', (0, 1)),
+    'stale-unaccountable-name-doubled': ('declared', (0, 1)),
+    'ior-stale-unaccountable-name': ('declared', (0, 1)),
     'literal': ('refused', (0, 0)),
 }
 
@@ -192,37 +255,36 @@ _ACCOUNTED = {
     'star-modelled-clean': ('o = {"k": ordinary}\nd = {**o}', 'd["k"]'),
     'ior-modelled-clean': ('o = {"k": ordinary}\nd = {}\nd |= o', 'd["k"]'),
     'dict-call-clean': ('d = dict([("k", ordinary)])', 'd["k"]'),
+    # The freshness limb on an ordinary value, where a join and the
+    # recorded value are not the same verdict: a joined read binds an
+    # unprovable sender and the call through it reports, so `(0, 1)` here
+    # would be the false positive the rule is drawn to avoid.
+    'fresh-key-ordinary': (
+        'd = {"k": ordinary}\nd.update(zip(["j"], [relay()]))'
+        '\nd.update({"k": ordinary})', 'd.get("k", ordinary)'),
 }
 
-# Which read forms a parked member is silent on, per member: the freshness
-# stores report on the subscript and read clean on the container reads, the
-# starred source the other way round, and a constructor store that folds
-# nothing out of an uncounted source reports on none of the three.
+# Which read forms a parked member is silent on, per member: the starred
+# source reports on the subscript and reads clean on the container reads, and
+# a constructor store that folds nothing out of an uncounted source reports on
+# none of the three. The two read arms are the same rule over one key, so a
+# member parked on one arm and not the other is a shape that reaches only
+# that arm; the freshness rows that were parked on both arms until 1154 and
+# 1178 were repaired are in `_AXES` with their filings beside them.
 _CONTAINER_READS = ('get', 'setdefault')
 _SUBSCRIPT = ('subscript',)
 _ALL_READS = tuple(sorted(_READS))
 
-# The rest of the domain, at the polarity that still reads silent. A key the
-# model recorded while it could still see the value, and an unreadable source
-# has since put something else there, or a source the model folds and then
-# loses: the read answers the recorded value or its own default, so a
-# `relay()` the runtime really does call is reported nothing. Each names the
-# issue it is parked against, or `None` where the filing is still with the
-# maintainer. The table is what the branch measured, not a closed set, so a
-# member of the domain it does not carry is a silent read nothing here
-# watches; the docstring says what that costs. The fourth field is the clean
-# cost of the read forms the member does NOT name, which its own shape
-# already reports through.
+# The rest of the domain, at the polarity that still reads silent. A source
+# the model folds and then loses: the read answers the recorded value or its
+# own default, so a `relay()` the runtime really does call is reported
+# nothing. Each names the issue it is parked against, or `None` where the
+# filing is still with the maintainer. The table is what the branch
+# measured, not a closed set, so a member of the domain it does not carry is
+# a silent read nothing here watches; the docstring says what that costs. The
+# fourth field is the clean cost of the read forms the member does NOT name,
+# which its own shape already reports through.
 _SILENT = {
-    'stale-recorded-zip': (
-        'd = {"k": ordinary}\nd.update(zip(["k"], [relay()]))', 1154,
-        _CONTAINER_READS, (0, 1)),
-    'stale-recorded-frozenset': (
-        'd = {"k": ordinary}\nd.update(frozenset([("k", relay())]))', 1154,
-        _CONTAINER_READS, (0, 1)),
-    'stale-recorded-later-store': (
-        'd = {"k": ordinary}\nd.update(zip(["j"], [1]))'
-        '\nd.update(zip(["k"], [relay()]))', 1154, _CONTAINER_READS, (0, 1)),
     # A positional source reached through a star, so the container answers
     # the subscript from the fold and joins the two container reads instead.
     'update-starred-source': (
@@ -258,26 +320,6 @@ _SILENT = {
         _UNACCOUNTABLE + '\nd = dict(o)', 1163, _ALL_READS, (0, 0)),
     'dict-name-star': (
         _UNACCOUNTABLE + '\nd = dict(**o)', 1163, _ALL_READS, (0, 0)),
-    # The name-source family crossed with FRESHNESS: `d` holds a key the
-    # model recorded, and a source reached through an unaccountable NAME
-    # has since put something else there. The bare name-source rows report
-    # on the container reads; the recorded key is what turns those reports
-    # into silence, so every form reads silent and the clean cost is
-    # `(0, 0)` on all three. No issue: #1154's arm is the recorded value,
-    # and the name-reach that takes the subscript with it is the two bare
-    # rows' unfiled crossing.
-    'stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(o)', None,
-        _ALL_READS, (0, 0)),
-    'stale-unaccountable-name-star': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**o)', None,
-        _ALL_READS, (0, 0)),
-    'stale-unaccountable-name-doubled': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd.update(**{**o})', None,
-        _ALL_READS, (0, 0)),
-    'ior-stale-unaccountable-name': (
-        _UNACCOUNTABLE + '\nd = {"k": ordinary}\nd |= o', None,
-        _ALL_READS, (0, 0)),
     # The same crossing through the constructor. `d = dict(o)` rebinds, so
     # the recorded key is not on the dict the read sees, and it measures
     # identical to `dict-name` with that recorded binding left out -- which
@@ -367,33 +409,75 @@ def test_an_accountable_key_read_stays_clean(tmp):
         assert _verdict(tmp, store, read, _CLEAN) == (0, 0), (label, read)
 
 
-def test_the_mapping_read_joins_only_the_keys_it_never_recorded(tmp):
+def test_the_mapping_read_joins_a_key_an_unreadable_store_replaced(tmp):
     """The read that answers from the container, on containers the store
-    paths cannot be driven into. An unknown length with no unknown-key slot
-    is the state the join is for; a recorded key is the state it leaves
-    alone, because the recorded value is what the MODEL recorded, which is
-    the value the runtime holds only while nothing unreadable has
-    overwritten that key since -- `_SILENT` is the other polarity of that
-    condition and no container-level pair can express it, since a held
-    key's recorded value is whatever this table puts there. A countable
-    mapping answers an absent key with the read's own default, as before.
-    A join that ignored `items` would answer an unprovable sender for `k`
-    as well."""
-    recorded = 'ext_cmd'  # a recorded sender value, held at its key
+    paths cannot be driven into.
+
+    A store whose source the model cannot read may have put something else
+    at every key the container already held, so a key it retired is one
+    answer short of what the runtime holds there. It is one answer SHORT,
+    not a different answer: the value the model recorded stays in the
+    join beside the unprovable sender, because throwing it away is what
+    would turn a real routed call into silence. A key the store left
+    alone keeps the recorded value on its own -- that is what makes the
+    marking a fact about the store rather than a property of a container
+    that has lost its count. A countable mapping answers a held key from
+    its items and an absent key with the read's own default, as before.
+    """
+    recorded = DeferredContainer({0: None}, 1, 'tuple')  # a tracked value
     default = object()  # the read's own default, which nothing records
     items = {'k': recorded}
-    unaccountable = DeferredContainer(dict(items), None, 'dict')
+    replaced = DeferredContainer(
+        dict(items), None, 'dict', stale=frozenset({'k'}))
+    untouched = DeferredContainer(dict(items), None, 'dict')
     countable = DeferredContainer(dict(items), 1, 'dict')
     marked = DeferredContainer(
         {**items, DYNAMIC_KEY: UNPROVABLE_SENDER}, None, 'dict')
-    assert _mapping_lookup(unaccountable, 'k', default) == recorded
-    assert _mapping_lookup(countable, 'k', default) == recorded
-    assert _mapping_lookup(unaccountable, 'j', default) \
-        == UNPROVABLE_SENDER
+    assert _mapping_lookup(replaced, 'k', default) == DeferredAlternatives(
+        (recorded, UNPROVABLE_SENDER))
+    assert _mapping_lookup(untouched, 'k', default) is recorded
+    assert _mapping_lookup(countable, 'k', default) is recorded
+    assert _mapping_lookup(untouched, 'j', default) == UNPROVABLE_SENDER
     assert _mapping_lookup(marked, 'j', default) == UNPROVABLE_SENDER
     assert _mapping_lookup(countable, 'j', default) is default
-    assert _mapping_lookup(unaccountable, 'j', None) == UNPROVABLE_SENDER
     assert _mapping_lookup(countable, 'j', None) is None
+
+
+def test_a_key_written_after_an_unreadable_store_keeps_its_value(tmp):
+    """The false-positive limb, over all three read forms.
+
+    The key the model wrote after the store that lost the count is one that
+    store never touched, so the recorded value is the one the runtime holds
+    and the read answers from it. The verdict is the discriminator: a read
+    that resolved to the `relay()` body is reported twice under the routed
+    prefix, once through the unprovable name the store marked and once
+    through the callable itself, where a joined read is reported only
+    through the name. The second form writes the key back with a readable
+    `update` source and the third removes an unrelated key in between, so
+    a store that marked on either of those would show here."""
+    for store in (_FRESH, _REFRESHED, _POPPED):
+        for read, source in sorted(_READS.items()):
+            assert _verdict(tmp, store, source) == (1, 2), (store, read)
+            assert _verdict(tmp, store, source, _CLEAN) == (0, 1), (
+                store, read)
+
+
+def test_a_store_through_a_computed_key_joins_on_its_unknown_slot(tmp):
+    """The unaccountable store that retires nothing, and why.
+
+    `d[<computed key>] = ...` may name any key the container holds, so on
+    its own it is a store like any other that cannot read its own key. It
+    also wrote the value the model DID read to the unknown-key slot, which
+    every read arm joins, so the read already accounts for both outcomes:
+    the key it named, and the recorded value that survived. Retiring the
+    recorded keys on top of that would replace a value the model knows
+    with the unprovable one, and the clean figure here would move off
+    `(0, 0)`. These are the numbers the base commit measures. The runtime
+    call count is zero because the recorded value at the key is an ordinary
+    lambda, so this is a control and not a member of `_AXES`."""
+    for read, source in sorted(_READS.items()):
+        assert _verdict(tmp, _COMPUTED, source) == (0, 1), read
+        assert _verdict(tmp, _COMPUTED, source, _CLEAN) == (0, 0), read
 
 
 def test_every_silent_member_is_listed_and_not_refused(tmp):
