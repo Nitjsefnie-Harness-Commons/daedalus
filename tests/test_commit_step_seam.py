@@ -10,7 +10,8 @@ that -- one line planted in the commit step left every asserted
 substring intact and the workflow unable to commit -- so the command
 lists are compared EXACTLY and then the step is RUN.
 
-TWO HALVES, AND ONLY ONE OF THEM IS ENVIRONMENTAL.
+TWO HALVES OF THE SEAM, AND TWO MORE PARTS THAT PIN THE SKIP
+BETWEEN THEM.
 
 THE STRUCTURAL HALF compares the two command lists. It reads a YAML file
 and needs nothing from the machine, so it runs on every platform and is
@@ -26,11 +27,35 @@ reports that it cannot change its permissions. So the execution half
 skips there, and the skip is granted on a MEASUREMENT of that
 filesystem, never on a platform name:
 `_speedharness.skip_unless_a_mode_can_be_set` asks the question by
-running the step's own command, and `test_the_skip_is_granted_only_on_a_
-measured_inability` pins both branches, so a skip cannot widen into a
-soft-lock.
+running the step's own command.
 
-The two halves live in one module because the second has to drive the
+That measurement decides whether the execution half runs at all, so it
+and the decision it feeds are pinned in two separate parts, because one
+witness cannot carry both:
+
+- `test_the_skip_is_granted_only_on_a_measured_inability` pins the
+  DECISION -- given what the measurement said, is the skip granted, and
+  does a failure inside it still red -- and it HANDS THE MEASUREMENT
+  IN. Both of the decision's answers are therefore taken on every
+  platform, and neither one is an answer this machine happened to give.
+- `test_the_mode_measurement_reads_the_filesystem_it_asked` pins the
+  MEASUREMENT, by running the real one against the real filesystem: a
+  `HOME` the step's own command cannot use, on every platform, and the
+  capable answer read back off the directory that command created,
+  where a mode can be held. That half is skipped on a filesystem that
+  cannot hold one, on the measurement this same part just took, which
+  is the only fact it is skipped on.
+
+Split, because a filesystem that cannot hold a mode has no command that
+succeeds at holding one. The earlier single pin took its capable answer
+from a planted `install`, and on such a filesystem that answer is the
+control's own claim rather than a reading of anything: the step's own
+command answers the other way there, and quotes the refusal. A decision
+that consults no filesystem is answered everywhere; a reading of one is
+answered where a filesystem can be read, and named as skipped where it
+cannot.
+
+The parts live in one module because the second has to drive the
 first: a pin that could not reach the control it pins would be a
 comment. It is wired into `timed-timings.yml`'s "Verify the change"
 step, which is the workflow whose subject it is.
@@ -152,30 +177,6 @@ def _environment(home, tmp):
             'REPO': 'example/example'}
 
 
-def _tool_on_path(tool, script, tmp, slot=None):
-    """A PATH holding an executable named `tool` running `script`.
-
-    Ahead of everything else, which is the only way to make a real
-    command behave differently for a control without changing the
-    command the control runs. `slot` names the directory when one
-    directory has to hold two plants of the SAME tool -- which it does
-    here, because the measurement is pinned by an install that sets the
-    mode next to one that refuses it, and the second would otherwise
-    overwrite the first.
-    """
-    binaries = Path(tmp) / 'plantbin' / (slot or tool)
-    binaries.mkdir(parents=True, exist_ok=True)
-    planted = binaries / tool
-    planted.write_text(f'#!/bin/sh\n{script}\n', encoding='utf-8',
-                       newline='\n')
-    os.chmod(planted, 0o755)
-    return f'{binaries}{os.pathsep}{os.environ["PATH"]}'
-
-
-def _step_environment(base, path):
-    return dict(base, PATH=path)
-
-
 def test_the_committed_subject_names_exactly_the_runs_the_file_records(tmp):
     """The execution half: the step runs, and the subject is the refresh's.
 
@@ -240,75 +241,118 @@ def _no_commit(repository, commands, environment, done, subject):
 
 
 def test_the_skip_is_granted_only_on_a_measured_inability(tmp):
-    """Both branches of the skip, and the capable one still refuses.
+    """The DECISION, on both of the measurement's answers, on every machine.
 
     A skip is a soft-lock the next person widens when a test gets
-    inconvenient, and it widens silently. So the measurement is pinned
-    in both directions and the refusal is pinned as not being one of
-    the things it swallows:
+    inconvenient, and it widens silently. The decision itself -- given
+    what the measurement said, is the skip granted -- reads no
+    filesystem at all, so it is pinned here with the measurement handed
+    in, and both of its answers run wherever this does:
 
-    - a filesystem that REFUSES the mode grants the skip, and the reason
-      carries what the refusal said;
-    - a filesystem that HOLDS the mode grants nothing, and a step that
-      cannot commit on it still raises. The plant is a `git` that fails
-      only on `commit`, so the measurement -- which asks about `install`
-      -- still says capable, and the control refuses rather than skips.
-      That is the whole of "a failure inside it still reds";
-    - a MISSING `install` is not a filesystem fact and does not skip: a
-      machine that cannot run the step should say so, not go quiet.
+    - an inability grants the skip, and the reason carries what the
+      measurement said, not a restatement of the skip;
+    - a capability grants nothing, and that is the same answer on a
+      machine that holds a mode and on one that does not: the answer
+      handed in is the answer, and the filesystem under this test is
+      never consulted, so a capable answer on a filesystem that cannot
+      hold one is no way to turn a step into a silent pass;
+    - and a step that cannot commit under a granted capability still
+      raises, which is the whole of "a failure inside it still reds".
 
-    The measurement is asked, not assumed, and BOTH of its answers are
-    produced here, by an `install` that sets the mode and one that
-    refuses it. Neither answer is the ambient filesystem's, so the pin
-    reads the same on a machine that can hold a mode and on one that
-    cannot -- and it cannot be a constant that always grants, or one
-    that always refuses.
+    What is NOT pinned here is whether the measurement is right, because
+    a reading of a filesystem needs one. That is the other part, in
+    `test_the_mode_measurement_reads_the_filesystem_it_asked`.
     """
     workdir = Path(tmp) / 'tree'
     workdir.mkdir()
-    refusing = _tool_on_path(
-        'install',
-        'echo "install: cannot change permissions of $1: '
-        'Permission denied" >&2\nexit 1', tmp, slot='refusing')
-    # The measurement reads the filesystem, so both answers are real.
-    # It answers "holds a mode", so an install that refuses to set one
-    # reads False -- the same way a real NTFS refusal does.
-    holds, detail = filesystem_holds_a_mode(
-        workdir, _step_environment({}, refusing))
-    assert not holds, 'a refusing install still read as capable'
-    assert 'Permission denied' in detail, detail
-    succeeding = _tool_on_path('install', 'exit 0', tmp, slot='succeeding')
-    holds, detail = filesystem_holds_a_mode(
-        workdir, _step_environment({}, succeeding))
-    assert holds, 'an install that succeeds still read as incapable'
-    assert detail == '', detail
+    refused = ('install: cannot change permissions of '
+               '/home/.daedalus-mode-probe: Permission denied')
 
-    # Branch one: a measured inability grants the skip, naming the why.
-    skip = _raised(skip_unless_a_mode_can_be_set, workdir,
-                   _step_environment({}, refusing))
-    assert isinstance(skip, _util.Skipped), skip
+    # An inability grants the skip, naming the why.
+    skip = _raised_or_gave(skip_unless_a_mode_can_be_set, workdir, {},
+                           measure=lambda work, env: (False, refused))
+    assert isinstance(skip, _util.Skipped), (
+        f'a measured inability granted nothing at all: {skip!r}')
     assert 'cannot hold a POSIX mode' in str(skip), skip
-    assert 'Permission denied' in str(skip), skip
+    assert refused in str(skip), skip
 
-    # Branch two: capable grants nothing.
-    assert skip_unless_a_mode_can_be_set(
-        workdir, {}, measure=lambda work, env: (True, '')) is None
+    # A capability grants nothing, whatever this filesystem can do -- and
+    # a decision that skipped here instead is caught as the skip it is,
+    # not left to end this test quietly.
+    granted = _raised_or_gave(skip_unless_a_mode_can_be_set, workdir, {},
+                              measure=lambda work, env: (True, ''))
+    assert granted is None, f'a measured capability granted a skip: {granted}'
 
-    # And a step that cannot commit on a capable filesystem still reds.
-    # The measurement is not consulted for anything but `install`, so
-    # this is a step failure of a kind the mode has nothing to do with:
-    # the subject file the commit step commits is gone, and
+    # And a step that cannot commit under a granted capability still
+    # reds. The measurement is not consulted for anything but `install`,
+    # so this is a step failure of a kind the mode has nothing to do
+    # with: the subject file the commit step commits is gone, and
     # `git commit -F` on a missing pathspec is a real refusal.
     refresh = _util.load(
         ROOT / 'scripts' / 'ci' / 'refresh_timings.py', 'refresh_timings')
     repository, home, _data_file = _checkout(tmp, [101, 100], refresh)
     (repository / 'refreshed-subject.txt').unlink()
-    failure = _raised(
+    failure = _raised_or_gave(
         _replay, repository, _environment(home, tmp),
         measure=lambda work, env: (True, ''))
     assert isinstance(failure, AssertionError), failure
     assert 'the commit step exited' in str(failure), failure
     assert 'Traceback' not in str(failure), failure
+
+
+def test_the_mode_measurement_reads_the_filesystem_it_asked(tmp):
+    """The MEASUREMENT, run for real, against a filesystem that answers.
+
+    The decision above hands its measurement in, so nothing there would
+    notice a measurement that answered the same thing forever. This one
+    runs the real thing -- the real `install`, the real filesystem, no
+    plant standing in for either -- and holds it to what it found:
+
+    - a `HOME` the step's own command cannot use reads `holds=False`,
+      and carries the refusal. That answer is produced on every
+      platform, so a constant `True` fails here everywhere;
+    - an `install` this PATH cannot resolve is not a filesystem fact
+      and does not report an inability: a machine that cannot run the
+      step at all should say so in the reason, not go quiet;
+    - and where a mode CAN be held, the capable answer is read back off
+      the directory the step's own command created, at the mode it
+      asked for. A constant `False` fails that. This half is the one
+      thing here a filesystem has to supply, so it is skipped where one
+      cannot -- on the measurement that grants the skip, which is the
+      only fact it is skipped on.
+    """
+    workdir = Path(tmp) / 'tree'
+    workdir.mkdir()
+    home = Path(tmp) / 'home'
+    home.mkdir()
+    environment = _environment(home, tmp)
+
+    # A `HOME` under a regular file is unusable on every platform, so
+    # the measurement's own command fails on all of them alike.
+    blocked = Path(tmp) / 'blocked'
+    blocked.write_text('a file, not a directory', encoding='utf-8')
+    holds, detail = filesystem_holds_a_mode(
+        workdir, dict(environment, HOME=str(blocked)))
+    assert not holds, 'a HOME the command cannot use still read as capable'
+    assert blocked.name in detail, detail
+
+    # An `install` this PATH cannot resolve is not a filesystem fact.
+    bare = Path(tmp) / 'bare-bin'
+    bare.mkdir()
+    holds, detail = filesystem_holds_a_mode(
+        workdir, dict(environment, PATH=str(bare)))
+    assert holds, 'a PATH with no install reported a filesystem fact'
+    assert 'install cannot be resolved' in detail, detail
+
+    # The capable answer, on a filesystem that can hold the mode.
+    skip_unless_a_mode_can_be_set(workdir, environment)
+    holds, detail = filesystem_holds_a_mode(workdir, environment)
+    assert holds, 'a filesystem that holds a mode read as incapable'
+    assert detail == '', detail
+    probe = home / '.daedalus-mode-probe'
+    assert probe.is_dir(), f'no directory for the step\'s own command: {probe}'
+    assert (os.stat(probe).st_mode & 0o777) == 0o700, oct(
+        os.stat(probe).st_mode & 0o777)
 
 
 def _replay(repository, environment, measure=None):
@@ -331,18 +375,18 @@ def _replay(repository, environment, measure=None):
     return subject
 
 
-def _raised(callable_, *args, **kwargs):
-    """The exception `callable_` raised, or a failure saying it raised none.
+def _raised_or_gave(callable_, *args, **kwargs):
+    """What `callable_` did: the exception it raised, or the value it gave.
 
-    The pin below needs the exception's own MESSAGE -- the skip reason
-    has to carry what the filesystem said -- so this returns the
-    exception rather than merely asserting that one arrived.
+    The pins below judge both -- the skip's own reason has to carry what
+    the measurement said, and a decision that grants a skip it should
+    not is a decision that REDS here rather than turning the pin itself
+    into a skip. So neither shape is allowed to escape as a bare raise.
     """
     try:
-        callable_(*args, **kwargs)
+        return callable_(*args, **kwargs)
     except Exception as raised:  # noqa: BLE001 - the point is its type
         return raised
-    raise AssertionError(f'{callable_!r} raised nothing')
 
 
 def main():
