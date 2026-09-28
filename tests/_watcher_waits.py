@@ -50,20 +50,30 @@ POLL_WIDTH = 8
 # below is made over the whole run, so a longer window changes what a
 # refusal shows and nothing it concludes.
 SEQUENCE = 12
-# The three renderings `poll_sequence` can produce, and what each settles.
+# The four renderings `poll_sequence` can produce, and what each settles.
 # A rule written over a COLLAPSED rendering has to enumerate what the
 # collapse HIDES as well as what it shows - and here the collapse hides a
 # poll that republished the value already current, because every one of
 # them is one more run of the same value and a run is what the collapse
-# merges. So rows 1 and 2 are AMBIGUITIES and say so: they name both
+# merges. So rows 2 and 3 are AMBIGUITIES and say so: they name both
 # candidates rather than choosing, and the control beside them drives two
 # plants with opposite causes through the real loop and shows both earn
 # the same honest answer.
 #
-# Row 0 is the one the payload separates, and it is separated by
+# Row 0 is first because a boundary can be `None` - the marker field is
+# `os.environ.get(POLL_MARK)`, so it is absent on any call made while the
+# seam is not wired - and a sequence CONTAINING one is a fact no other
+# row can state. It catches `[None]` and `['1', None]` alike, and it
+# should: both are the same defect, the seam not wired on some poll, and
+# the rendering does not say which polls.
+#
+# Row 1 is the one the payload separates, and it is separated by
 # something the collapse cannot hide: a value that comes back after a
 # DIFFERENT one has been published in between.
 READINGS = (
+    'a boundary the log carries as no marker at all is a seam that is not '
+    'wired there - not an index that stopped advancing, and not a poll '
+    'that cost more than the tolerance',
     'a value came round again, so a poll published one it had published '
     'before and then another: a re-used index',
     'no value came round again, and the calls over markers are over the '
@@ -88,13 +98,18 @@ def _reading(sequence):
     The repetition test reads the WHOLE run, not the window: a cycle
     longer than `SEQUENCE` repeats outside the window and is a re-use all
     the same, and testing the window put a run whose first repeat fell
-    past it into the row that says no value came round again.
+    past it into the row that says no value came round again. That
+    property is about what `await_polls` HANDS this function, so its
+    control drives the refusal rather than calling `_reading` directly -
+    a control on the function cannot see the call site.
     """
+    if None in sequence:
+        return 0                      # a poll published no marker at all
     if len(set(sequence)) != len(sequence):
-        return 0                      # a value came round again
+        return 1                      # a value came round again
     if len(sequence) == 1:
-        return 2                      # one value, and nothing after it
-    return 1                          # new values, and over the bound
+        return 3                      # one value, and nothing after it
+    return 2                          # new values, and over the bound
 
 
 class Stream:
@@ -334,12 +349,13 @@ def await_polls(fake, polls, child, what, width=POLL_WIDTH):
                 f'{what}: the poll markers did not reach {polls} within '
                 f'{len(calls)} gh call(s): {len(markers)} distinct, sequence '
                 f'{shown}, over the {width} call(s) per marker one poll may '
-                f'spend. It reads as one of three - a value that came '
-                f'round again, a run of new values over that bound, or a '
-                f'single value and nothing after it - and which of the two '
-                f'ways a run of new values got there, this log does not '
-                f'say. IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses '
-                f'a poll wider than an idle one on a healthy watcher. This '
+                f'spend. It reads as one of four - a boundary the log '
+                f'carries as no marker, a value that came round again, a '
+                f'run of new values over that bound, or a single value and '
+                f'nothing after it - and which of the two ways a run of '
+                f'new values got there, this log does not say. '
+                f'IDLE_POLL_BOUND ({IDLE_POLL_BOUND}) is what refuses a '
+                f'poll wider than an idle one on a healthy watcher. This '
                 f'one is: {READINGS[_reading(sequence)]}.')
         time.sleep(POLL)
 
