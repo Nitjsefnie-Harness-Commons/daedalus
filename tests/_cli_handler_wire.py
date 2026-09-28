@@ -25,3 +25,8 @@ that module an offender of it along with the suites that stayed
 def _api_put(body):
     return {'via': 'api', 'method': 'PUT', 'path': '/command', 'body': body,
             'timeout': 30}
+
+
+def _api_get(path):
+    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None,
+            'timeout': 30}

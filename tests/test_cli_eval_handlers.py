@@ -34,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _cli_dispatch  # noqa: E402
-from _cli_handler_wire import _api_put  # noqa: E402
+from _cli_handler_wire import _api_get, _api_put  # noqa: E402
 import _util  # noqa: E402
 
 sys.path.insert(0, str(_util.ROOT))
@@ -57,11 +57,6 @@ def _rendered(out):
     below untouched and every whole-string comparison here fails.
     """
     return out.replace('<-', IN).replace('->', OUT)
-
-
-def _get(path):
-    return {'via': 'api', 'method': 'GET', 'path': path, 'body': None,
-            'timeout': 30}
 
 
 def _wait(cmd_id, target_tab, delivery, timeout, interval=0.5):
@@ -115,7 +110,7 @@ def test_do_tabs_renders_one_row_per_tab_in_age_order(tmp):
          'title': 'Nine'},
     ]
     recorded, out = run_cli(
-        ['tabs'], [tabs], module=commands_eval, plan=[_get('/tabs')],
+        ['tabs'], [tabs], module=commands_eval, plan=[_api_get('/tabs')],
         token=TOK)
 
     assert recorded.api_calls == [('GET', '/tabs', None)], recorded.api_calls
@@ -131,7 +126,8 @@ def test_do_tabs_says_so_when_no_tab_is_active(tmp):
     """The empty listing is a sentence, not a bare zero rows."""
     del tmp
     _recorded, out = run_cli(
-        ['tabs'], [[]], module=commands_eval, plan=[_get('/tabs')], token=TOK)
+        ['tabs'], [[]], module=commands_eval, plan=[_api_get('/tabs')],
+        token=TOK)
 
     assert out == 'No active tabs\n', repr(out)
 
@@ -146,7 +142,7 @@ def test_do_tabs_renders_absent_fields_as_their_placeholders(tmp):
     del tmp
     _recorded, out = run_cli(
         ['tabs'], [[{'tabId': 'tab3'}]], module=commands_eval,
-        plan=[_get('/tabs')], token=TOK)
+        plan=[_api_get('/tabs')], token=TOK)
 
     assert out == '  tab3     ?s  ' + ' ' * 52 + '\n', repr(out)
 
@@ -158,7 +154,7 @@ def test_do_tabs_truncates_a_title_at_fifty_columns(tmp):
         ['tabs'],
         [[{'tabId': 'tab4', 'age': 1, 'url': 'https://three.example.com/',
            'title': 'T' * 60}]],
-        module=commands_eval, plan=[_get('/tabs')], token=TOK)
+        module=commands_eval, plan=[_api_get('/tabs')], token=TOK)
 
     assert out == (
         '  tab4     1s  ' + 'T' * 50
@@ -172,7 +168,7 @@ def test_do_tabs_json_prints_the_list_it_was_given(tmp):
     tabs = [{'tabId': 'tab9', 'age': 5}]
     _recorded, out = run_cli(
         ['tabs', '--json'], [tabs], module=commands_eval,
-        plan=[_get('/tabs')], token=TOK)
+        plan=[_api_get('/tabs')], token=TOK)
 
     assert out == '[\n  {\n    "tabId": "tab9",\n    "age": 5\n  }\n]\n', \
         repr(out)
@@ -188,7 +184,7 @@ def test_do_tabs_json_prints_an_empty_list_when_there_is_none(tmp):
     del tmp
     _recorded, out = run_cli(
         ['tabs', '--json'], [None], module=commands_eval,
-        plan=[_get('/tabs')], token=TOK)
+        plan=[_api_get('/tabs')], token=TOK)
 
     assert out == '[]\n', repr(out)
 
