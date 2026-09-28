@@ -132,6 +132,173 @@ def test_a_one_cell_run_is_not_the_partition_when_an_older_measured_more(
     assert '140' in err and 'one cell' in err, err
 
 
+def test_a_suite_seconds_is_the_mean_of_its_rounds_not_the_first(tmp):
+    """Two head rounds at different values give their mean, not one of them.
+
+    A suite's seconds in a run are "the mean of its per-round totals over
+    the rounds that carried it", and that mean is what makes a weight
+    robust to one noisy head round: a runner that happened to be busy
+    for the first round moves the mean, and a runner that was busy for
+    the SECOND round moves it the same amount, while either one alone
+    would have decided the weight.
+
+    The repository's only two-head-round fixture gave both rounds the
+    same number, so `mean(values)` and `values[0]` were the same
+    function on every fixture in the suite set: replacing one with the
+    other left all seven of these suites green. The first round here is
+    a third of the second, and the file the refresher writes carries
+    the mean, divided by the cell's own reference reading.
+    """
+    runs = _util.load(ROOT / 'scripts' / 'ci' / 'timings_runs.py',
+                      'timings_runs')
+    root = Path(tmp) / 'runs'
+    # Ten at 10.0 and 30.0, so the mean is 20.0 and either round alone
+    # is 10.0 or 30.0. The other suite carries 4.0 in both rounds, so a
+    # parser that read one round for everything would give 2.0 here and
+    # 5.0 for the noisy one.
+    _write_run(root, 600,
+               {'cell-01': {'test_a.py': 10.0}, 'cell-02': {'test_b.py': 4.0}},
+               reference=2.0, rounds={'test_a.py': (10.0, 30.0)})
+    cell = root / '600' / 'cell-01'
+    assert runs.suite_seconds(cell, 600) == {'test_a.py': 20.0}, (
+        runs.suite_seconds(cell, 600))
+    assert runs.suite_seconds(root / '600' / 'cell-02', 600) == {
+        'test_b.py': 4.0}
+    # The same number through the writer, which is where the aggregation
+    # becomes the committed weight the whole data file is built on.
+    text, code, err = _drive(tmp, root, {'test_a.py': 5.0, 'test_b.py': 2.0},
+                             runs=1)
+    assert code == 0, err
+    assert json.loads(text)['suite_weights'] == {'test_a.py': 10.0,
+                                                 'test_b.py': 2.0}, text
+
+
+def test_a_cell_with_no_measured_round_is_not_a_cell_of_the_run(tmp):
+    """A cell that died before its first round is not half a run.
+
+    `cell_dirs` is the filter that keeps a timed job's leftovers out of
+    a measurement. Drop it and a run holding one good cell beside a
+    `cell-02/` that only ever received a `verdict.json` -- which is
+    exactly what a cell that lost its runner before writing a single
+    suite summary leaves behind -- reports BOTH, and `read_run` then
+    raises for the whole run: one dead cell out of fifteen takes the
+    fourteen good ones with it. `select` propagates the raise,
+    `refresh()` does not catch it, and `main()` returns 1, so the daily
+    cron writes nothing for a run that measured the tree perfectly.
+
+    The shipped code is right; nothing held the filter. Both halves are
+    asserted here because either alone is a weaker claim: the set
+    excluding the leftover, and a read of the run beside it succeeding
+    and carrying the good cell's suites.
+    """
+    runs = _util.load(ROOT / 'scripts' / 'ci' / 'timings_runs.py',
+                      'timings_runs')
+    root = Path(tmp) / 'runs'
+    _write_run(root, 610, {'cell-01': {'test_a.py': 4.0, 'test_b.py': 2.0}})
+    leftover = root / '610' / 'cell-02'
+    leftover.mkdir(parents=True)
+    (leftover / 'verdict.json').write_text(
+        '{"name": "cell-02"}', encoding='utf-8')
+    (leftover / 'ratio.txt').write_text('n/a\n', encoding='utf-8')
+    assert sorted(runs.cell_dirs(root / '610')) == ['cell-01']
+    weights, references = runs.read_run(root / '610', 610)
+    assert weights == {'test_a.py': 2.0, 'test_b.py': 1.0}, weights
+    assert sorted(references) == ['cell-01'], references
+    # And the leftover is not a partition either, so `select` takes the
+    # good cell's run as a one-cell run rather than filing it incomplete
+    # against a two-cell set that never existed.
+    selected, report = runs.select([(610, root / '610')], 1, 15, 0)
+    assert [run_id for run_id, _w, _r in selected] == [610], selected
+    assert report['incomplete'] == [], report
+
+
+def test_a_total_that_needs_too_many_probes_is_a_refusal_not_a_walk(tmp):
+    """A weight at 1e300 is a refusal, and the shipped total still derives.
+
+    `derive_target` walks candidate targets from one step to the whole
+    total, so the number of candidates is the total's MAGNITUDE and not
+    the tree's size -- and every one of them is a `plan()` with its own
+    `git ls-files`. `read_timings` accepts any positive finite weight,
+    so a hand-edited or badly-merged data file with one suite recorded
+    at 1e300 puts 2e299 candidates between the refresher and a return.
+    The `timed` job's 30-minute timeout bounds that to a refresh that
+    writes nothing, in the job that refreshes the file on a cron.
+
+    Two halves, and the second is the one that would be lost. The
+    refusal is not a scope: a total inside the bound still derives, at
+    a magnitude well past the shipped file's own, so a file that is
+    merely LARGE is not what this turns away -- a file whose weights
+    are not runtimes is.
+    """
+    bounds = _util.load(ROOT / 'scripts' / 'ci' / 'timings_bounds.py',
+                        'timings_bounds')
+    live = [f'test_{index:02d}.py' for index in range(20)]
+    tree = fixture_tree(tmp, live)
+    # Inside the bound: 19 light suites and one heavy, the shape every
+    # other target control here uses, at a magnitude the bound admits.
+    # The bound is on the TOTAL's step count, so the heavy suite takes
+    # what is left of the allowance after the nineteen ones.
+    allowance = bounds.MAX_TARGET_PROBES * bounds.TARGET_STEP - 19.0
+    inside = {name: 1.0 for name in live[:19]}
+    inside[live[19]] = allowance
+    assert sum(inside.values()) / bounds.TARGET_STEP == (
+        bounds.MAX_TARGET_PROBES), sum(inside.values())
+    target = bounds.derive_target(tree, inside, 15)
+    assert target % bounds.TARGET_STEP == 0 and target > 0, target
+    # Outside it: one suite recorded at a magnitude no runtime has.
+    absurd = {name: 1.0 for name in live[:19]}
+    absurd[live[19]] = 1e300
+    try:
+        bounds.derive_target(tree, absurd, 15)
+    except bounds.BoundsError as error:
+        said = str(error)
+        assert 'candidate targets' in said, said
+        assert str(bounds.MAX_TARGET_PROBES) in said, said
+        assert 'not a runtime' in said, said
+        assert 'refresh_timings.py' in said, said
+    else:
+        raise AssertionError('derive_target returned a target for 1e300')
+
+
+def test_a_recorded_zero_weight_cannot_reach_the_move_divisor(tmp):
+    """The divisor is positive because the SCHEMA says so, not by luck.
+
+    `_moved` divides by the recorded weight, so a zero there is a
+    `ZeroDivisionError` in the middle of a refresh. It used to carry an
+    arm for one, on the claim that the seed's four-decimal rounding can
+    produce a sub-millisecond suite at zero -- and `_rounded` is the
+    answer to exactly that, on the write side. So the arm was dead code
+    guarding a case the writer already prevents, and the control that
+    drove it was pinning the dead arm rather than the invariant.
+
+    This pins the invariant at the end that carries it: the schema
+    refuses a non-positive recorded weight, so `recorded` cannot hold
+    one, and the writer never produces one to put there.
+    """
+    planner = _planner()
+    file = Path(tmp) / 'zero.json'
+    for weight in (0, 0.0, -1.5):
+        file.write_text(json.dumps({
+            'schema_version': planner.SCHEMA_VERSION,
+            'target_cell_weight': 10.0, 'max_cells': 15,
+            'units': 'reference-multiples', 'measured_from': 'tests run 1',
+            'runs': 1, 'suite_weights': {'test_tiny.py': weight}}),
+            encoding='utf-8')
+        try:
+            planner.read_timings(file)
+        except planner.PlanError as error:
+            assert 'must be above zero' in str(error), (weight, error)
+        else:
+            raise AssertionError(f'a weight of {weight!r} was accepted')
+    # And the writer's own half: a weight that rounds to zero is written
+    # at its own value rather than at the rounded one.
+    refresh = _util.load(ROOT / 'scripts' / 'ci' / 'refresh_timings.py',
+                         'refresh_timings')
+    # pylint: disable=protected-access
+    assert refresh._rounded(0.00001) == 0.00001, refresh._rounded(0.00001)
+    assert refresh._rounded(1.23456) == 1.2346, refresh._rounded(1.23456)
+
+
 def test_a_deleted_suites_weight_does_not_move_the_derived_target(tmp):
     """The target is derived from what the TREE holds, not the file.
 

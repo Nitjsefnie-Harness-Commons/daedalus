@@ -3,7 +3,10 @@
 
 Every test drives the planner's `main()` over a temp tree and a temp
 timings file, so a failure is the planner's behaviour. The temp tree's
-suite files are empty: the planner reads file NAMES.
+suite files are empty: the planner reads file NAMES. Its two contracts
+that are not the schema or the packing are in
+`test_planner_determinism.py`, which took them when this file reached
+the ceiling.
 """
 import contextlib
 import io
@@ -373,13 +376,23 @@ def test_a_suite_with_no_recorded_weight_is_placed_and_named(tmp):
     Twelve suites and one unrecorded, so the file is inside the coverage
     bound the CLI checks before it plans at all; a two-suite tree is 50%
     estimated and is refused before `plan` is reached.
+
+    The ten low weights are equal and the eleventh is not, because the
+    coverage guard's THIRD condition reads the recorded set's own skew
+    and a file of eleven identical weights is not a shape a
+    measurement produces. The median is 2.0 either way, so the estimate
+    this control is about is unchanged by the tail.
     """
     known = [f'test_known{index:02d}.py' for index in range(11)]
     suites = known + ['test_unknown.py']
-    data = _data({name: 2.0 for name in known}, max_cells=1)
+    recorded = {name: 2.0 for name in known[:9]}
+    recorded[known[9]] = 4.0
+    recorded[known[10]] = 30.0
+    data = _data(recorded, max_cells=1)
     plan, _out = _plan(tmp, suites, data)
     assert sorted(sum((cell.suites for cell in plan.cells), [])) == suites
     assert plan.estimated == ['test_unknown.py'], plan.estimated
+    assert statistics.median(list(recorded.values())) == 2.0, recorded
     summary = _summary(tmp, suites, data, 'estimated.txt')
     assert 'test_unknown.py' in summary, summary
     assert 'estimated' in summary, summary
@@ -388,22 +401,29 @@ def test_a_suite_with_no_recorded_weight_is_placed_and_named(tmp):
 def test_an_unrecorded_suite_is_estimated_at_the_median_not_the_mean(tmp):
     """The estimate is a median, and a fixture only a median survives.
 
-    ELEVEN recorded weights, lopsided: they sum to 20 and their median
-    is 1 where their mean is 1.8. One cell holds the whole tree, so the
+    ELEVEN recorded weights, lopsided: they sum to 26 and their median
+    is 1 where their mean is 2.4. One cell holds the whole tree, so the
     plan's own cell weight carries the estimate the planner gave the
     twelfth suite, and the expectation is the guard's own
     condition -- `statistics.median` of what the file recorded -- rather
     than a number chosen here. A planner that estimated at the mean
-    would place the same suite at 4 and every other assertion in the
+    would place the same suite at 2.4 and every other assertion in the
     suite would still pass: the two-equals/one-recorded fixtures the
     rest of this file uses are exactly the shapes on which the two
     statistics agree.
+
+    The one heavy weight is 16 rather than the 10 the fixture started
+    with, for the same reason the control above carries one: the
+    coverage guard's third condition reads the recorded set's own skew,
+    and ten ones beside a ten is a ratio of 1.8, under the 2.0 a
+    measured set sits above. The median, which is what this control is
+    about, is 1 either way.
     """
     # Nine more ones than the original fixture, for the coverage bound
     # the CLI checks before it plans: one unrecorded suite of twelve.
     suites = [f'test_a{index:02d}.py' for index in range(11)] + ['test_new.py']
     recorded = {f'test_a{index:02d}.py': 1.0 for index in range(10)}
-    recorded['test_a10.py'] = 10.0
+    recorded['test_a10.py'] = 16.0
     plan, _out = _plan(tmp, suites, _data(recorded, target=1.0, max_cells=1))
     assert plan.estimated == ['test_new.py'], plan.estimated
     estimate = statistics.median(list(recorded.values()))

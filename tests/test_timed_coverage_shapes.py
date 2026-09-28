@@ -103,8 +103,6 @@ def _verdict(tree, tmp, data, *flags, name='timings.json'):
     return code, err.getvalue(), text, published
 
 
-
-
 def _lightest(data, names, keep):
     """The file's own `keep` lightest recorded weights, as a data file.
 
