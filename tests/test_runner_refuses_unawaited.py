@@ -295,6 +295,41 @@ class EvilRepr:
 sys.exit(EvilRepr())
 '''
 
+# One hostile-message subject per report line, so each of the runner's four
+# guarded interpolations is pinned by the line it actually produces. All three
+# are the same shape at three different exception types, because the runner
+# reaches each through a different clause: `Skipped` is caught before
+# `AssertionError`, and both before `Exception`.
+
+# The ERROR line's subject, taken from the shared table rather than defined
+# again here. Reading it out of the table also means a row dropped from that
+# table fails this fixture loudly instead of quietly narrowing it.
+BROKEN_MESSAGE = '''\
+_hostile = next(value for value, _expected in _util.log_safe_cases()
+                if type(value).__name__ == 'BrokenStr')
+raise _hostile
+'''
+
+# AssertionError and Skipped are not in the table, which carries one class per
+# shape, so these two are declared here. Each refuses only its own rendering.
+BROKEN_ASSERTION = '''\
+class BrokenAssertion(AssertionError):
+    def __str__(self):
+        raise RuntimeError('broken assertion str')
+
+
+raise BrokenAssertion()
+'''
+
+BROKEN_SKIP = '''\
+class BrokenSkip(_util.Skipped):
+    def __str__(self):
+        raise RuntimeError('broken skip str')
+
+
+raise BrokenSkip()
+'''
+
 
 def _run_probe(tmp, source, summary):
     """Launch one fixture suite the way the repository launches a suite.
@@ -437,6 +472,72 @@ def test_a_code_that_refuses_to_render_is_named_not_rendered(tmp):
         counts = json.load(handle)
     assert counts == {'total': 3, 'passed': 1, 'skipped': 0,
                       'failed': 2, 'requires': None}, counts
+
+
+def test_an_error_whose_message_refuses_is_reported_not_fatal(tmp):
+    """The ERROR line's guard, pinned by a subject only that clause sees.
+
+    `BrokenStr` is a plain `Exception`, so the `AssertionError` and `Skipped`
+    clauses are both bypassed and the message reaches the one interpolation
+    this line owns. It comes from the shared table, so the corpus the runner's
+    exposure is measured against is the one the three log-safe consumers are
+    already held to.
+    """
+    result, summary = _ending_run(tmp, BROKEN_MESSAGE)
+    output = result.stdout + result.stderr
+    assert _reported(result.stdout) == [
+        ('ERROR', 'test_a_the_subject_ends_the_run'),
+        ('FAIL', 'test_b_a_plain_failure'),
+        ('PASS', 'test_c_the_last_test_runs'),
+    ], output
+    assert 'BrokenStr: <BrokenStr that will not render>' in _line_for(
+        result.stdout, 'test_a_the_subject_ends_the_run'), output
+    with open(summary, encoding='utf-8') as handle:
+        counts = json.load(handle)
+    assert counts['failed'] == 2, counts
+
+
+def test_an_assertion_whose_message_refuses_is_reported_not_fatal(tmp):
+    """The FAIL line's guard, pinned by the same shape at that clause's type.
+
+    `_assertion_site` is this line's own fallback and would carry a bare
+    assert through a raising message anyway, so the assertion is on the type
+    the guard falls back to, which is what tells the two apart.
+    """
+    result, summary = _ending_run(tmp, BROKEN_ASSERTION)
+    output = result.stdout + result.stderr
+    assert _reported(result.stdout) == [
+        ('FAIL', 'test_a_the_subject_ends_the_run'),
+        ('FAIL', 'test_b_a_plain_failure'),
+        ('PASS', 'test_c_the_last_test_runs'),
+    ], output
+    assert 'BrokenAssertion that will not render' in _line_for(
+        result.stdout, 'test_a_the_subject_ends_the_run'), output
+    with open(summary, encoding='utf-8') as handle:
+        counts = json.load(handle)
+    assert counts['failed'] == 2, counts
+
+
+def test_a_skip_whose_message_refuses_is_reported_not_fatal(tmp):
+    """The SKIP line's guard, pinned by the same shape at that clause's type.
+
+    A skip laundered into a failure turns "this suite needs something
+    absent" into a red suite, so the outcome tag is asserted and not just
+    the message beside it.
+    """
+    result, summary = _ending_run(tmp, BROKEN_SKIP)
+    output = result.stdout + result.stderr
+    assert _reported(result.stdout) == [
+        ('SKIP', 'test_a_the_subject_ends_the_run'),
+        ('FAIL', 'test_b_a_plain_failure'),
+        ('PASS', 'test_c_the_last_test_runs'),
+    ], output
+    assert 'BrokenSkip that will not render' in _line_for(
+        result.stdout, 'test_a_the_subject_ends_the_run'), output
+    with open(summary, encoding='utf-8') as handle:
+        counts = json.load(handle)
+    assert counts == {'total': 3, 'passed': 1, 'skipped': 1,
+                      'failed': 1, 'requires': None}, counts
 
 
 if __name__ == '__main__':
