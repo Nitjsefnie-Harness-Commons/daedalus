@@ -259,30 +259,52 @@ def test_a_mapping_read_back_stays_clean(tmp):
             f'{label}: expected {expected}, got {actual}'
 
 
-# A receiver that is itself a call result never reaches the read-back arm: the
-# value the reader holds for the call node is the mapping the receiver names,
-# so the call resolves before any receiver-method arm is consulted and the
-# value is dropped however the read is spelled. Issue 1302. The rows below are
-# the defect's own measurement, so the arm repair they sit beside cannot be
-# credited with covering this shape; they flip when 1302 lands. The `values`
-# spelling of the same receiver is not listed because it flips to (1, 1) when
-# an unrelated definition precedes it, so it is not a stable row to pin.
-_READBACK_GAPS = {
-    'call-result-items': ('d = {"k": relay()}\ndef getd(): return d\n' + _SEND
+# A receiver that is itself a call result resolves the receiver into the
+# CALL's own cache slot, so the reader's first line answers the call with the
+# mapping and never consults an arm. The read-back arm therefore has to be
+# reached before that answer, or this receiver drops the value however the
+# read is spelled. Issue 1302.
+_CALL_RESULT = 'd = {"k": relay()}\ndef getd(): return d\n'
+_READBACK_CALL_RESULT = {
+    'call-result-values': _CALL_RESULT + _SEND + _TAIL,
+    'call-result-items': (_CALL_RESULT + _SEND
                           + '\nreturn [v() for k, v in getd().items()]'),
-    'call-result-popitem': ('d = {"k": relay()}\ndef getd(): return d\n'
-                            + _SEND + '\nreturn getd().popitem()[1]()'),
-    'call-result-copy-values': ('d = {"k": relay()}\ndef getd(): return d\n'
-                                + _SEND
+    'call-result-popitem': (_CALL_RESULT + _SEND
+                            + '\nreturn getd().popitem()[1]()'),
+    'call-result-copy': (_CALL_RESULT + _SEND
+                         + '\nreturn getd().copy()["k"]()'),
+    'call-result-copy-values': (_CALL_RESULT + _SEND
                                 + '\nreturn [f() for f in'
                                 + ' getd().copy().values()]'),
+    'call-result-bound-view': (_CALL_RESULT + 'v = getd().values()\n' + _SEND
+                               + '\nreturn [f() for f in v]'),
+}
+_READBACK_CALL_RESULT_CLEAN = {
+    'clean-call-result-values': (
+        'd = {"k": ordinary}\ndef getd(): return d\n' + _SEND + _TAIL, (0, 0)),
+    'clean-call-result-items': (
+        'd = {"k": ordinary, "j": quiet()}\ndef getd(): return d\n' + _SEND
+        + '\nreturn [v() for k, v in getd().items()]', (0, 0)),
+    'clean-call-result-popitem': (
+        'd = {"k": ordinary}\ndef getd(): return d\n' + _SEND
+        + '\nreturn getd().popitem()[1]()', (0, 0)),
+    'clean-call-result-copy': (
+        'd = {"k": ordinary}\ndef getd(): return d\n' + _SEND
+        + '\nreturn getd().copy()["k"]()', (0, 0)),
 }
 
 
-def test_a_call_result_receiver_still_drops_the_read_back(tmp):
-    dropped = {label: _verdict(tmp, body)
-               for label, body in _READBACK_GAPS.items()}
-    assert dropped == dict.fromkeys(_READBACK_GAPS, (1, 0)), dropped
+def test_a_call_result_receiver_reads_the_mapping_back(tmp):
+    verdicts = {label: _verdict(tmp, body)
+                for label, body in _READBACK_CALL_RESULT.items()}
+    assert verdicts == dict.fromkeys(_READBACK_CALL_RESULT, (1, 1)), verdicts
+
+
+def test_a_call_result_receiver_stays_clean(tmp):
+    verdicts = {label: _verdict(tmp, body) for label, (body, _)
+                in _READBACK_CALL_RESULT_CLEAN.items()}
+    assert verdicts == {label: expected for label, (_, expected)
+                        in _READBACK_CALL_RESULT_CLEAN.items()}, verdicts
 
 
 def test_a_receiver_that_is_not_a_name_still_reports(tmp):
