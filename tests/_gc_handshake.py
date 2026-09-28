@@ -40,6 +40,7 @@ def _child_refusal_source(attempts):
         f'_PREFIX = {_GC_PREFIX!r}\n'
         f'_LOGNAME = {_GC_REFUSED_CHILD!r}\n'
         '_spent = {}\n'
+        '_logdir = None\n'
         '_real = {"replace": os.replace,\n'
         '         "unlink": pathlib.Path.unlink,\n'
         '         "read_text": pathlib.Path.read_text,\n'
@@ -50,7 +51,8 @@ def _child_refusal_source(attempts):
         '        return\n'
         '    name = os.path.basename(target)\n'
         '    try:\n'
-        '        log = os.path.join(os.path.dirname(target), _LOGNAME)\n'
+        '        root = _logdir or os.path.dirname(target)\n'
+        '        log = os.path.join(root, _LOGNAME)\n'
         '        with open(log, "a", encoding="utf-8") as _handle:\n'
         '            _handle.write(op + " " + name + "\\n")\n'
         '    except OSError:\n'
@@ -75,6 +77,8 @@ def _child_refusal_source(attempts):
         '                                lambda a, k: str(a[0]))\n'
         '_real_collect = command_queue.collect_expired\n'
         'def _collect_then_rearm(cmd_dir, ttl):\n'
+        '    global _logdir\n'
+        '    _logdir = cmd_dir\n'
         '    try:\n'
         '        return _real_collect(cmd_dir, ttl)\n'
         '    finally:\n'
@@ -126,6 +130,46 @@ def _on_demand_command_gc(fault_dir, refusals=0):
     return str(fault_dir)
 
 
+def _expected_refusal_counts(refusals, sweeps):
+    """How often each side's operations must have been refused.
+
+    Both sides refuse every operation on every sweep. The parent removes a
+    stale record on every sweep but the first, because no record exists until
+    the child has published one.
+    """
+    every_sweep = sweeps * refusals
+    return {
+        'parent': {
+            ('unlink', _GC_DONE): refusals,
+            ('write_text', _GC_TRIGGER): every_sweep,
+            ('read_text', _GC_DONE): every_sweep,
+        },
+        'child': {
+            ('unlink', _GC_TRIGGER): every_sweep,
+            ('write_text', _GC_DONE_TEMP): every_sweep,
+            ('replace', _GC_DONE): every_sweep,
+        },
+    }
+
+
+def _refusal_report(parent_log, child_log):
+    """Both sides' refusals: the observed set, and a count per operation.
+
+    The counts are what make a deleted re-arm visible -- the set is
+    populated by the first sweep alone.
+    """
+    observed, counts = set(), {}
+    for side, log in (('parent', parent_log), ('child', child_log)):
+        triples = _refusals_logged(log, side)
+        observed |= set(triples)
+        counted = {}
+        for _side, operation, name in triples:
+            counted[(operation, name)] = counted.get(
+                (operation, name), 0) + 1
+        counts[side] = counted
+    return observed, counts
+
+
 def _routed_marker_operations():
     """Every marker operation the handshake routes, as (side, op, name)."""
     return {
@@ -170,6 +214,8 @@ def _refuse_marker_operations(command_root, attempts):
     def refuse(operation, target):
         spent[operation] = spent.get(operation, 0) + 1
         if spent[operation] > attempts:
+            if os.path.basename(target) == _GC_TRIGGER:
+                spent.clear()  # the trigger landed, so a sweep opens
             return False
         name = os.path.basename(target)
         try:

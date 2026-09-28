@@ -24,8 +24,8 @@ from _bridge import (BRIDGE_ENV, TOK,  # noqa: E402
                      read_stream_data, stream_response)
 from _gc_handshake import (  # noqa: E402
     _GC_DONE, _GC_PREFIX, _GC_REFUSED_CHILD, _GC_TRIGGER,
-    _on_demand_command_gc, _refusals_logged, _refuse_marker_operations,
-    _routed_marker_operations)
+    _expected_refusal_counts, _on_demand_command_gc, _refusal_report,
+    _refuse_marker_operations, _routed_marker_operations)
 from daedalus_bridge import atomic_file  # noqa: E402
 
 
@@ -315,11 +315,12 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
         assert not expired.exists(), expired
     # A wrong set means a routing lost its refusal or one fired where the
     # handshake does not: non-emptiness per side would read either as a pass.
-    observed = set()
-    for side, log in (('parent', parent_log),
-                      ('child', command_root / _GC_REFUSED_CHILD)):
-        observed |= set(_refusals_logged(log, side))
+    # The counts carry what the set cannot -- a set is filled by the first
+    # sweep alone, so a sweep that stopped being refused would not show.
+    observed, counts = _refusal_report(
+        parent_log, command_root / _GC_REFUSED_CHILD)
     assert observed == _routed_marker_operations(), sorted(observed)
+    assert counts == _expected_refusal_counts(refusals, 2), counts
 
 
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
