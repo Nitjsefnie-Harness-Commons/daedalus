@@ -13,6 +13,7 @@ asserting sites AND refusals, and the step ceiling for an arm whose
 mutant does not stop.
 """
 import ast
+import hashlib
 import importlib
 import os
 import re
@@ -22,7 +23,7 @@ from typing import Final
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
-from _arm_sweep import arm_sweep  # noqa: E402
+from _arm_sweep import arm_sweep, cut_arm  # noqa: E402
 from _bound_site_rows import BOUND_SITE_ROWS  # noqa: E402
 from _launch_arm_records import (ARM_NOTES, CRASH_CONTROLLED,  # noqa: E402
                                 MARKER_NON_MEMBERS, ROW_UNCLAIMED,
@@ -96,18 +97,56 @@ def _arm(name):
     raise AssertionError(f'{name} is not in the enumeration')
 
 
+def _cut_signature(arm, source):
+    """What this entry's own cut does to the live analyser.
+
+    Two entries that cut the same clause leave the same file behind, so
+    the signature IS the mutation, taken from the tree rather than from
+    the table. A spec the cut refuses is keyed on the refusal instead,
+    so a refused entry is still one clause and still distinct.
+    """
+    try:
+        mutated, _, _ = cut_arm(source, arm[CUT])
+    except Exception as error:  # the shape is the sweep's to report
+        return (arm[FILE], arm[CUT], type(error).__name__, str(error))
+    return (arm[FILE], hashlib.sha256(mutated.encode('utf-8')).hexdigest())
+
+
 def test_the_enumeration_is_a_closed_list_with_no_holes(tmp):
     """Every arm is listed once, in one of three states, with evidence.
 
     A fourth state — "live and deliberately unpinned" — is what this
     table exists to make unrepresentable, so the states are closed and
     checked rather than documented.
+
+    "Once" is the CLAUSE, not the name: a second row carrying one
+    clause under a new name satisfies a check over names while
+    inflating the denominator every count in the records and in
+    `launch_arm_sweep` is taken over.
     """
     del tmp
     assert LAUNCH_ARMS, 'the enumeration is empty'
     names = [arm[ID] for arm in LAUNCH_ARMS]
     duplicates = sorted({name for name in names if names.count(name) > 1})
     assert not duplicates, f'arms listed twice: {duplicates}'
+    by_clause = {}
+    for arm in LAUNCH_ARMS:
+        key = (arm[FILE], arm[LINE], arm[CUT])
+        assert key not in by_clause, (
+            f'{arm[ID]} is the clause {by_clause[key]} already names: the '
+            'same file, line and cut under a second name, and the arm count '
+            'is the denominator every completeness claim divides by')
+        by_clause[key] = arm[ID]
+    sources = {name: (TESTS / name).read_text(encoding='utf-8')
+               for name in {arm[FILE] for arm in LAUNCH_ARMS}}
+    clauses = {}
+    for arm in LAUNCH_ARMS:
+        clauses.setdefault(_cut_signature(arm, sources[arm[FILE]]),
+                           []).append(arm[ID])
+    repeated = sorted(group for group in clauses.values() if len(group) > 1)
+    assert not repeated, (
+        'entries that cut one clause between them, so the enumeration '
+        f'claims more arms than the analysers hold: {repeated}')
     outside = sorted({arm[STATE] for arm in LAUNCH_ARMS} - set(STATES))
     assert not outside, f'states outside the closed set: {outside}'
     blank = [arm[ID] for arm in LAUNCH_ARMS
@@ -115,8 +154,7 @@ def test_the_enumeration_is_a_closed_list_with_no_holes(tmp):
     assert not blank, f'arms with no description or no evidence: {blank}'
     uncut = [arm[ID] for arm in LAUNCH_ARMS if not arm[CUT].strip()]
     assert not uncut, f'arms with no clause the sweep deleted: {uncut}'
-    files = {arm[FILE] for arm in LAUNCH_ARMS}
-    assert files == {'_launch_audit.py', '_argv_read.py'}, files
+    assert set(sources) == {'_launch_audit.py', '_argv_read.py'}, sources
 
 
 def test_every_controlled_arm_names_a_row_or_a_control_that_exists(tmp):
