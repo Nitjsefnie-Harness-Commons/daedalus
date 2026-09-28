@@ -291,6 +291,7 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
     # A count of 2 clears the retry budget with attempts still in hand, while
     # an unfixed read or replace raises on attempt one and reaches no second.
     refusals = 2
+    sweeps = 2
     fault_dir = Path(tmp) / 'refusing-command-gc'
     env = {**BRIDGE_ENV, 'DAEDALUS_CMD_TTL': '10',
            'PYTHONPATH': _on_demand_command_gc(fault_dir, refusals=refusals)}
@@ -307,10 +308,10 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
         os.utime(fresh, (now + _STAMP_LEASH, now + _STAMP_LEASH))
         os.utime(expired, (now - 15, now - 15))
         with _refuse_marker_operations(command_root, refusals) as parent_log:
-            # Twice, so the second sweep finds a record and the parent's
+            # More than one, so a later sweep finds a record and the parent's
             # unlink of it runs at all.
-            _sweep(command_root, served)
-            _sweep(command_root, served)
+            for _ in range(sweeps):
+                _sweep(command_root, served)
         assert fresh.exists(), 'configured TTL expired a fresh command'
         assert not expired.exists(), expired
     # A wrong set means a routing lost its refusal or one fired where the
@@ -320,7 +321,7 @@ def test_collector_sweep_survives_a_transient_sharing_violation(tmp):
     observed, counts = _refusal_report(
         parent_log, command_root / _GC_REFUSED_CHILD)
     assert observed == _routed_marker_operations(), sorted(observed)
-    assert counts == _expected_refusal_counts(refusals, 2), counts
+    assert counts == _expected_refusal_counts(refusals, sweeps), counts
 
 
 def test_stream_derived_queue_name_matches_command_enqueue(tmp):
