@@ -101,47 +101,67 @@ def _global_names(node, tree):
     return declared
 
 
-def _rebindings(tree):
-    """`(node, name)` for every binding a module can make besides an import.
+def type_param_names(node):
+    """The names in a node's PEP 695 type parameters; 3.12 and later.
 
-    One pop per name, whatever form made it: a plain or tuple assignment,
-    an augmented one, a walrus, a `del`, a `for` target, a comprehension
-    target. Those forms differ in syntax and not in what they do to the
-    name, and reading only the first of them left an import standing
-    through five others — a DISCHARGE, which is this arm's own named
-    failure direction. An `ast.Assign` is the one form with a right-hand
-    side the reader resolves, and the caller is what uses that.
+    Guarded by FEATURE rather than by a version literal, because
+    `scripts/ci/classify_changes.py`'s `FULL_MATRIX` runs 3.11 through
+    3.14 and an unguarded attribute is a red cell on every 3.11 run.
     """
+    return tuple(p.name for p in (getattr(node, 'type_params', None) or ()))
+
+
+def _rebindings(tree):
+    """`(node, name)` for every name a module binds except an import.
+
+    The set is the list in the Python Language Reference, Execution model,
+    §4.2.1 "Binding of names" — a claim a reader checks against that page
+    rather than against this file, which is what stopped a per-statement
+    enumeration from being falsified a sixth time.
+
+    Names come from ONE rule: every `ast.Name` whose `ctx` is `Store` or
+    `Del`, whatever statement holds it. The binders that are not `Name`
+    nodes are named below and each is one `getattr`, so a construct the
+    running interpreter does not have is skipped rather than an
+    `AttributeError` at import.
+
+    NOT collected, and named rather than assumed: **formal parameters**,
+    which `_function_parameters` owns — collecting them here too is how
+    the two readers would silently disagree, and a parameter is a
+    binding; and **import statements**, which the reader above keeps as a
+    table rather than as rebindings.
+
+    The node reported is the `Name` itself, except for a target of an
+    `Assign`, where the `Assign` is reported so the caller can resolve the
+    right-hand side.
+    """
+    assignments = {id(child): node for node in ast.walk(tree)
+                   if isinstance(node, ast.Assign)
+                   for child in ast.walk(node)
+                   if isinstance(child, ast.Name)}
+    type_alias = getattr(ast, 'TypeAlias', None)
     found = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, (ast.AugAssign, ast.NamedExpr)):
-            targets = [node.target]
-        elif isinstance(node, ast.Delete):
-            targets = node.targets
-        elif isinstance(node, (ast.For, ast.comprehension)):
-            targets = [node.target]
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        elif isinstance(node, ast.ExceptHandler):
-            # `except E as urlopen` binds the name as TEXT, not a node.
-            if node.name:
-                found.append((node, node.name))
-            continue
-        elif isinstance(node, ast.withitem):
-            targets = [node.optional_vars] if node.optional_vars else []
-        elif isinstance(node, ast.match_case):
-            for sub in ast.walk(node.pattern):
-                if isinstance(sub, (ast.MatchAs, ast.MatchStar)):
-                    found.extend((node, name)
-                                 for name in _names_a_target_binds(sub))
-            continue
+        if isinstance(node, ast.Name) and isinstance(
+                node.ctx, (ast.Store, ast.Del)):
+            found.append((assignments.get(id(node), node), node.id))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            found.append((node, node.name))
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            found.append((node, node.name))
+        elif isinstance(node, ast.MatchAs) and node.name:
+            found.append((node, node.name))
+        elif isinstance(node, ast.MatchStar) and node.name:
+            found.append((node, node.name))
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            found.append((node, node.rest))
+        elif type_alias is not None and isinstance(node, type_alias):
+            alias = getattr(node, 'name', None)  # `type X = ...`, 3.12
+            if alias:
+                found.append((node, alias))
         else:
-            continue
-        for target in targets:
-            found.extend((node, name)
-                         for name in _names_a_target_binds(target))
+            found.extend((node, name) for name in type_param_names(node))
     return found
 
 

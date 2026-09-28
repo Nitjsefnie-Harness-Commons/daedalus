@@ -246,12 +246,6 @@ OVER_REFUSAL = {
         'class C:\n    urlopen = []\n\n\n'
         'def run_gate(url):\n'
         '    return urlopen(url, timeout=10)\n'),
-    'a-module-with-target': (
-        'from urllib.request import urlopen\n\n\n'
-        'def _go():\n'
-        '    with open("x") as urlopen:\n        pass\n\n\n'
-        'def run_gate(url):\n'
-        '    return urlopen(url, timeout=10)\n'),
     'no-shadow-at-all':
         ('from urllib.request import urlopen\n\n\n'
          'def run_gate(url):\n'
@@ -346,6 +340,75 @@ def test_a_read_the_census_cannot_see_through_is_still_discharged(tmp):
     del tmp
     for label, source in NOT_COLLECTED_STILL_DISCHARGES.items():
         assert _rows(source) == [], (label, _rows(source))
+
+
+DEF_AND_CLASS = {
+    'a-def-shadows-the-import':
+        ('from urllib.request import urlopen\n\n\n'
+         'def urlopen(u):\n    return u\n\n\n'
+         'def run_gate(url):\n    return urlopen(url, timeout=10)\n'),
+    'a-class-shadows-the-import':
+        ('from urllib.request import urlopen\n\n\n'
+         'class urlopen:\n    pass\n\n\n'
+         'def run_gate(url):\n    return urlopen(url, timeout=10)\n'),
+    'a-nested-def-in-the-calling-function':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n    def urlopen(u):\n        return u\n'
+         '    return urlopen(url, timeout=10)\n'),
+    'a-def-and-its-sink-in-one-function':
+        ('from urllib.request import urlopen\n\n\n'
+         'def run_gate(url):\n    def urlopen(u):\n        return u\n'
+         '    return urlopen(url, timeout=10)\n'),
+}
+
+
+def test_a_def_or_class_rebinding_the_name_is_refused(tmp):
+    """§4.2.1's second and third bullets, which no enumeration had.
+
+    A `def` and a `class` rebind the name as surely as an assignment, and
+    after `def urlopen` the call is on THAT function rather than on
+    `urllib.request.urlopen`, so it is not a network read. The
+    per-statement enumeration missed both, which is why the claim it made
+    was falsified; the context rule plus these two binders closes it.
+
+    The last two are the same rule at function scope, so the row is not
+    only the module-scope case.
+    """
+    del tmp
+    for label, source in DEF_AND_CLASS.items():
+        rows = _rows(source)
+        assert rows and rows[0][1] == 'timeout= keyword', (label, rows)
+
+
+def test_the_reader_imports_and_runs_without_the_312_nodes(tmp):
+    """The 3.11 leg, exercised rather than asserted.
+
+    `scripts/ci/classify_changes.py`'s `FULL_MATRIX` runs 3.11 through
+    3.14, and the failure a version guard exists to prevent is an
+    ATTRIBUTE ACCESS AT IMPORT — so a control that only runs on this
+    box's 3.13 cannot see it. Here `ast` is stripped of every construct
+    the reader guards on, the module is reloaded against it, and a
+    binding is read, which is the whole of what a 3.11 cell does.
+    """
+    del tmp
+    import importlib
+    hidden = {name: getattr(ast, name)
+              for name in ('TypeAlias',) if hasattr(ast, name)}
+    for name in hidden:
+        delattr(ast, name)
+    try:
+        module = importlib.import_module('_receiver_resolution')
+        reload = importlib.reload
+        reload(module)
+        bound = module._dotted_bindings(
+            ast.parse('import urllib.request\n'
+                      'def urlopen(u):\n    return u\n'))
+        assert 'urlopen' not in bound, bound
+        assert 'urllib' in bound, bound
+    finally:
+        for name, value in hidden.items():
+            setattr(ast, name, value)
+        importlib.reload(importlib.import_module('_receiver_resolution'))
 
 
 def test_a_rebinding_in_one_function_does_not_reach_another(tmp):
