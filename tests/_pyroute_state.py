@@ -215,6 +215,17 @@ def apply_dict_statement(node, dicts, literals=None):
                 _merge_payload_keys(
                     dicts.setdefault(call.func.value.id, {}), merged, call)
         return
+    # A deleted key is not a tracked key; its position folds as a store's.
+    if isinstance(node, ast.Delete):
+        for target in node.targets:
+            if not (isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)):
+                continue
+            tracked = dicts.get(target.value.id)
+            name = payload_literal_key(target.slice, literals)
+            if name is not None and tracked is not None:
+                tracked.pop(name, None)
+        return
     if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
         return
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
