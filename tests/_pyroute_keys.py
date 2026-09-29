@@ -133,9 +133,14 @@ def payload_literal_key(node, literals):
 
     None is an answer, not a refusal, and the three ways to reach it are
     three different runtimes. A non-string literal is provably not
-    `'tab'`. An expression the fold will not resolve is silent in the
-    runtime too, because a program whose key is a call did not mean
-    `'tab'` either. So None means this position names no tracked key,
+    `'tab'`. An expression the fold will not resolve names no tracked key
+    here, because a program whose key is a call did not mean `'tab'`
+    either — but that is a claim about the position, not about the
+    runtime: CPython folds adjacent literals, a constant `+` and a
+    field-free f-string at compile time, so such an expression can name
+    `'tab'` at runtime while reading None here. The boundary is the
+    parser's own folding, and widening the fold onto the shapes it
+    misses is #1352. So None means this position names no tracked key,
     and a caller must not read it as an opaque one.
     """
     if isinstance(node, ast.Name):
