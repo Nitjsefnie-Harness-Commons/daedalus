@@ -14,6 +14,12 @@ rather than from a list of spellings, so a field a future Python adds fails
 Each row is paired with a clean twin that swaps the carried relay for a
 carried quiet, so the row proves the binder position was why the read
 reported.
+
+One position in the family is not fixed by the grammar: a parameter annotation
+and a return annotation are evaluated when the function object is defined
+below 3.14 and not at all at 3.14 and above, so the verdict an annotation row
+owes is the guard's own `annotation_mode` read the same way. A default, a
+decorator and a class header owe the same verdict on every version.
 """
 import ast
 import re
@@ -36,6 +42,10 @@ _SEND = '\nsend = ext_cmd\nreturn '
 _READ = 'x[0]()'
 _POP = 'x.pop(0)'
 _ANN = '((x.pop(0) or int))'
+# The guard's own annotation gate, read the same way it reads it. The
+# rows carry no `__future__` import, so only the version clause of the
+# guard's conjunction applies here.
+_ANNOTATIONS_EAGER = sys.version_info < (3, 14)
 _LIST = 'x = [ordinary, relay()]'
 # A class base has to be a class and a decorator has to be callable, so what
 # the pop displaces at index 0 is `object` in one and `None` in the other. The
@@ -181,12 +191,46 @@ _ILLEGAL = {ast.Lambda: frozenset((
 
 # The one field of each object kind that looks definition-time and is not: a
 # type parameter's bound, constraint or default runs when the parameter is
-# first used. Each row measures that against the real runtime, below 3.14 --
-# the test skips above it, where the matrix does not run and there is no
-# interpreter here to measure the answer against.
+# first used, not when the object is built. Measured at (0, 0) on 3.12,
+# 3.13 and 3.14 alike, so the pin holds on every interpreter whose grammar
+# has the syntax; `_pep695_available` asks the parser rather than a version
+# tuple, so a new grammar answer is read rather than assumed.
 _LAZY_ROWS = (
     (ast.FunctionDef, _LIST, f'def g[T: ({_POP} or int)](a):\n    pass'),
     (ast.ClassDef, _CLASS_OBJECT, f'class C[T: ({_POP} or int)]:\n    pass'))
+
+# A parameter annotation and a return annotation are the one position in this
+# family whose evaluation time the runtime decides rather than the grammar
+# fixing. The guard's own `annotation_mode` is `sys.version_info < (3, 14) and
+# not __future__.annotations`, and `definition_values` drops every annotation
+# when it is false, so the guard stores nothing in an annotation on 3.14 and
+# below 3.12 semantics alike. The rows carry no `__future__` import, so the
+# clause that applies is the version one; the future-import side is the same
+# switch read the other way, and it reads (0, 0) on 3.13 as well. The verdict a
+# row owes therefore depends on which side of that predicate the interpreter is
+# on, and every other position in the family owes (1, 1) on both.
+_ANNOTATION_POSITIONS = frozenset({
+    'return_annotation', 'posonly_annotation', 'annotation',
+    'vararg_annotation', 'kwonly_annotation', 'kwarg_annotation'})
+
+
+def _expected(name):
+    """The verdict a binder position owes on this interpreter."""
+    if name not in _ANNOTATION_POSITIONS:
+        return (1, 1)
+    return (1, 1) if _ANNOTATIONS_EAGER else (0, 0)
+
+
+def _pep695_available():
+    """Whether this interpreter's grammar has the type-parameter syntax the
+    lazy rows are written in, asked of the parser rather than of a version
+    number. The answer is a property of the grammar; a version tuple drifts the
+    moment a version is skipped."""
+    try:
+        ast.parse('def _probe[T: int](): pass')
+    except SyntaxError:
+        return False
+    return True
 
 
 def _argument_fields():
@@ -257,7 +301,7 @@ def _label(node_type, name):
 def _rows():
     for node_type, rows in _ROWS.items():
         for name, store, header in rows:
-            yield _label(node_type, name), store, header
+            yield _label(node_type, name), name, store, header
 
 
 def _verdict(tmp, store, header):
@@ -271,15 +315,15 @@ def _swap(text):
 
 
 def test_every_binder_position_fails_closed(tmp):
-    observed = [(name, _verdict(tmp, store, header))
-                for name, store, header in _rows()]
-    missed = [item for item in observed if item[1] != (1, 1)]
+    observed = [(label, _verdict(tmp, store, header), _expected(name))
+                for label, name, store, header in _rows()]
+    missed = [item for item in observed if item[1] != item[2]]
     assert not missed, missed
 
 
 def test_every_binder_position_twin_stays_clean(tmp):
-    observed = [(name, _verdict(tmp, _swap(store), _swap(header)))
-                for name, store, header in _rows()]
+    observed = [(label, _verdict(tmp, _swap(store), _swap(header)))
+                for label, _, store, header in _rows()]
     flagged = [item for item in observed if item[1] != (0, 0)]
     assert not flagged, flagged
 
@@ -315,7 +359,9 @@ def test_every_definition_time_field_is_covered(tmp):
 
 
 def test_a_type_parameter_bound_is_not_a_definition_time_position(tmp):
-    if sys.version_info >= (3, 14):
+    # Below the type-parameter syntax there is no row to measure and nothing to
+    # assert; the position is a property of the grammar, not of a version.
+    if not _pep695_available():
         return
     assert all(_verdict(tmp, store, header) == (0, 0)
                for _, store, header in _LAZY_ROWS)
