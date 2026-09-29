@@ -169,3 +169,46 @@ def _every_use_proven(function, derived):
     return all(id(inner) in proven for inner in ast.walk(function)
                if isinstance(inner, ast.Name) and inner.id in derived
                and isinstance(inner.ctx, ast.Load))
+
+
+def _receiver_escapes(node):
+    """Whether a Load of the RECEIVER sits in a proven position.
+
+    Two, and their complement poisons every key the receiver owns: the
+    `value` of an `Attribute` node (`self.handles`, read or written), and a
+    direct call argument (`helper(self)`). `s = self` and then
+    `s.handles = Popen()` is not a reflective write -- no setattr, no
+    `__dict__`, no `vars` -- so the poison rule has nothing to fire on, and
+    the census goes on reading `self.handles` from its literal binding while
+    the write lands on it at runtime.
+
+    This is the same POSITIONS principle as the deadline guard and
+    deliberately carries no alias tracking and no binder list: it does not
+    ask which binder produced the alias, only whether the receiver's own
+    Load is somewhere a receiver can be used from. `self.x` and
+    `helper(self)` are; an assignment's value, a `for` iterable, a `with`
+    target, a match subject, a default and a return are not.
+    """
+    args = node.args
+    if 'self' not in {arg.arg for arg in
+                      (*args.posonlyargs, *args.args, *args.kwonlyargs)}:
+        return False
+    proven = set()
+    # A `with` target is named in the poison list whatever else the Load is,
+    # so `with CM(self) as s` is a withitem use and not a bare call argument.
+    withitem = {id(inner)
+                for item in ast.walk(node) if isinstance(item, ast.withitem)
+                for inner in ast.walk(item.context_expr)}
+    for child in ast.walk(node):
+        if (isinstance(child, ast.Attribute)
+                and isinstance(child.value, ast.Name)
+                and child.value.id == 'self'):
+            proven.add(id(child.value))
+        elif path._is_call(child):
+            for arg in (*child.args, *(k.value for k in child.keywords)):
+                if (isinstance(arg, ast.Name) and arg.id == 'self'
+                        and id(arg) not in withitem):
+                    proven.add(id(arg))
+    return any(isinstance(child, ast.Name) and child.id == 'self'
+               and isinstance(child.ctx, ast.Load) and id(child) not in proven
+               for child in ast.walk(node))
