@@ -127,9 +127,9 @@ def introduced_rows(table, read, root, bases=BRANCH_BASES):
         if _count_for(head, key) > _count_for(base, key)), None)
 
 
-def _count_for(digests, key):
+def _count_for(counts, key):
     """How many declarations the tree binds that name to in that file."""
-    return sum(digests.get(key[0], {}).get(key[1], Counter()).values())
+    return sum(counts.get(key[0], {}).get(key[1], Counter()).values())
 
 
 def python_digests(sources):
