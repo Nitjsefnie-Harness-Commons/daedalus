@@ -262,6 +262,10 @@ def test_a_runner_wedged_suite_is_asked_to_stop_before_it_is_killed(tmp):
     # is not enough: the record a suite that ignored the request and was
     # killed produces names the same group and the same escalation.
     assert 'asked to stop and the suite did' in record['cleanup'], record
+    # No child of its own, so the escalation has nothing to reach; see
+    # the twin assertion in `tests/test_suite_bound.py`.
+    assert 'was already gone' in record['cleanup'], record
+    assert 'reached what was still in it' not in record['cleanup'], record
 
 
 def test_a_flushed_suite_is_still_counted_as_a_pass_and_this_pins_that(tmp):
