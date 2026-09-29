@@ -248,16 +248,12 @@ def test_a_pure_import_row_never_names_a_writer(tmp):
     # recognise a call, which says nothing about writing — these helper
     # bodies are analysis code full of them.
     #
-    # The guard's own entry point is exempt for a sharper reason: judging
-    # the guard through the guard reports the guard's internals, and the
-    # row exists to keep exactly that away from real controls. The
-    # exemption is named rather than loosened, and the assertion below
-    # pins it to this one row.
-    SELF = ('_control_writes', 'control_write_violations')
+    # The guard's own entry point is judged like every other row. It
+    # reports the guard's internals — 58 messages, every one of them an
+    # unmodelled call or an unresolved callee, and none of them a write —
+    # and the filter above is what makes that legible.
     judged, skipped = [], []
     for module, name in sorted(_PURE_IMPORTS):
-        if (module, name) == SELF:
-            continue
         helper = ROOT / 'tests' / f'{module}.py'
         if not helper.is_file():
             skipped.append(f'{module}.{name}')
@@ -276,9 +272,8 @@ def test_a_pure_import_row_never_names_a_writer(tmp):
             f'{module}.{name} is a pure row whose body writes, so the row '
             f'exempts a writer and the call site never learns: {writes}')
         judged.append(f'{module}.{name}')
-    assert SELF in _PURE_IMPORTS, 'the exemption names a row that is gone'
-    assert len(judged) + len(skipped) + 1 == len(_PURE_IMPORTS), (
-        'a row was neither judged, skipped, nor exempted')
+    assert len(judged) + len(skipped) == len(_PURE_IMPORTS), (
+        'a row was neither judged nor skipped')
     assert skipped == ['pathlib.Path'], skipped
     assert judged, 'no _PURE_IMPORTS row names a tests/ module'
 
