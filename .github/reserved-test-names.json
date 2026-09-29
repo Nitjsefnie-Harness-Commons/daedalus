@@ -952,6 +952,7 @@
     "_write_tree": {"python": ["tests/_mcp_import_fixtures.py"]},
     "_writer_target": {"python": ["tests/_control_calls.py"]},
     "_written": {"python": ["tests/_coverage_authority_scan.py"]},
+    "_written_file": {"python": ["tests/_diff_coverage_fixtures.py"]},
     "_yields_the_registry": {"python": ["tests/_mcp_import_closure.py"]},
     "abortError": {"javascript": ["tests/_dashshell.py"]},
     "accepted": {"python": ["tests/_cli_parse.py"]},
