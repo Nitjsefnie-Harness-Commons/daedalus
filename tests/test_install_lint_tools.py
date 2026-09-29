@@ -14,6 +14,7 @@ runs.
 `tests/test_ci_lint_tools.py` is the other half: it holds the jobs to the
 tool set this installer declares.
 """
+import contextlib
 import hashlib
 import io
 import os
@@ -49,11 +50,12 @@ def _installer():
     return _util.load(INSTALLER_SOURCE, 'lint_installer_platform')
 
 
+@contextlib.contextmanager
 def _on(system, machine):
-    """Patch the platform pair the installer reads, as that host reports it."""
-    return mock.patch.multiple(
-        'platform', 'system', 'machine',
-        system=lambda: system, machine=lambda: machine)
+    """The platform pair the installer reads, as that host reports it."""
+    with mock.patch('platform.system', return_value=system), \
+            mock.patch('platform.machine', return_value=machine):
+        yield
 
 
 def _zip(member, payload):
