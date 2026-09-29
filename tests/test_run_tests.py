@@ -263,10 +263,11 @@ def test_a_runner_timed_out_suites_own_child_does_not_survive_it(tmp):
                                         result.stderr)
         pid = int(recorded.read_text(encoding='ascii'))
         block = _suite_block(result.stdout, 'test_stubborn.py')
+        said = [found.group() for found in records(block)]
         assert settle_gone(pid, _WEDGE_SETTLE_S), (
             f'pid {pid} outlived the bound the runner enforced. It ignores '
             f'SIGTERM, so only the escalation reaches it, and it did not; '
-            f'the record says: {records(block)}')
+            f'the record says: {said}')
     finally:
         kill_recorded(recorded)
 
