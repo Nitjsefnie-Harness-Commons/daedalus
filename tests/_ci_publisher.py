@@ -63,6 +63,7 @@ def seed_publisher_tree(repo, data):
 def workflow_step(name):
     job = complete_job_mapping(
         _WORKFLOW.read_text(encoding='utf-8'), 'coverage')
+    assert job is not None, 'the coverage job is not in tests.yml'
     return next(step for step in job['steps'] if step.get('name') == name)
 
 
