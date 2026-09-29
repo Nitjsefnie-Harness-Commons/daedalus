@@ -45,6 +45,19 @@ ROW_LABELS = ({label for label, _, _ in BOUND_SITE_ROWS}
               | {label for label, _, _ in LAUNCH_REFUSAL_ROWS})
 CONTROL_LABELS = {label for label, _, _, _ in ARM_CONTROLS}
 
+# The two file sets the marker sweep works over, DERIVED, so neither is a
+# list of names someone has to keep in step. The arms are enumerated in
+# the analysers; the sweep covers those PLUS every file `MARKER_NON_MEMBERS`
+# names a non-member of, and the second term is how `tests/_stdlib_read.py`
+# became swept at all when the standard-library reads moved out of
+# `_launch_audit.py`. So the "third file" that module's own docstring
+# states is counted here rather than asserted beside it, and the next
+# relocation joins the sweep by adding a non-member row -- not by editing
+# a tuple that the docstring then has to be re-read against.
+ARMS_FILES = frozenset({arm[FILE] for arm in LAUNCH_ARMS})
+SWEEP_FILES = tuple(sorted(
+    ARMS_FILES | {row[0] for row in MARKER_NON_MEMBERS}))
+
 # One arm per state, and one of the two the row files cannot hold, so the
 # sweep is replayed in every shape the table claims for it.
 SWEEP_SAMPLE = ('ch.namedexpr-in-bound', 'res.call-attribute-subprocess',
@@ -115,6 +128,9 @@ def test_the_enumeration_is_a_closed_list_with_no_holes(tmp):
     assert not blank, f'arms with no description or no evidence: {blank}'
     uncut = [arm[ID] for arm in LAUNCH_ARMS if not arm[CUT].strip()]
     assert not uncut, f'arms with no clause the sweep deleted: {uncut}'
+    # The arms are the analysers and only the analysers; the marker
+    # sweep is the wider `SWEEP_FILES`, which is a superset of this set
+    # by derivation. So this stays two when the sweep is three.
     assert set(sources) == {'_launch_audit.py', '_argv_read.py'}, sources
 
 
@@ -456,7 +472,7 @@ def test_every_marker_clause_is_an_arm_or_a_named_non_member(tmp):
     """
     del tmp
     named = {(row[0], row[1]) for row in MARKER_NON_MEMBERS}
-    for name in ('_launch_audit.py', '_argv_read.py'):
+    for name in SWEEP_FILES:
         clauses, spans = _marker(name)
         listed = {arm[LINE] for arm in LAUNCH_ARMS if arm[FILE] == name}
         for line, _kind in clauses:
