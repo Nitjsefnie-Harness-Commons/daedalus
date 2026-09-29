@@ -755,6 +755,7 @@
 !/tests/test_sweep_launch_scan.py
 !/tests/test_tab_registry.py
 !/tests/test_tab_routing.py
+!/tests/test_tab_routing_binder_positions.py
 !/tests/test_tab_routing_collapse.py
 !/tests/test_tab_routing_comprehension_probe.py
 !/tests/test_tab_routing_dict_construction.py
