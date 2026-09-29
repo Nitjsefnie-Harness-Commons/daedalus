@@ -31,15 +31,21 @@ reference workload. The margin's own measured basis is in
 """
 import math
 import statistics
+from pathlib import Path
 
 try:
     from plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, resolve, suite_names)
+        CELL_WEIGHT_MARGIN, read_timings, resolve, suite_names)
     from plan_timed_matrix import plan as plan_matrix
+    from timings_coverage import MIN_RECORDED_SKEW, recorded_skew
 except ImportError:  # pragma: no cover - the script-directory import path
     from scripts.ci.plan_timed_matrix import (
-        CELL_WEIGHT_MARGIN, resolve, suite_names)
+        CELL_WEIGHT_MARGIN, read_timings, resolve, suite_names)
     from scripts.ci.plan_timed_matrix import plan as plan_matrix
+    from scripts.ci.timings_coverage import (
+        MIN_RECORDED_SKEW, recorded_skew)
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The step between candidate targets, in the file's own units.
 TARGET_STEP = 5
@@ -193,9 +199,11 @@ def _coverage_clause(recorded, names, unmeasured):
 
     The names are listed in the tree's own order, which is sorted, and
     not in the order of a set: this clause is compared byte for byte
-    against a committed file by two suites, so a set's iteration order
-    would make the sentence -- and the file written from it -- a
-    different string in every process.
+    against a committed file by `test_timed_refresh`, so a set's
+    iteration order would make the sentence -- and the file written from
+    it -- a different string in every process. That suite is the only
+    one that reds: `test_timed_basis_feed` regenerates its own fixtures
+    in process, so both sides of its compare share one order.
     """
     carried = [name for name in unmeasured if name in recorded]
     unknown = [name for name in unmeasured if name not in recorded]
@@ -327,3 +335,36 @@ def basis_sentence(tree, data, cells, estimated):
         '<downloaded runs> --out .github/suite-timings.json` (--seed for '
         'the first file from one run).')
     return ' '.join(parts)
+
+
+def skew_band(tree, data, floor):
+    """Every truncation a skew floor admits, and the multiplier it costs.
+
+    The band `MIN_RECORDED_SKEW` prices, PRINTED rather than written
+    down: a multiplier measured over a tree moves with the tree, and the
+    two prose tables this replaces were each mis-stated once before a
+    suite caught them, so the band is a command and not a comment.
+    """
+    recorded = data['suite_weights']
+    names = suite_names(tree)
+    lightest = sorted(recorded, key=recorded.get)
+    whole = sum(resolve(recorded, names, 1.0)[0].values())
+    for count in range(len(recorded), 0, -1):
+        kept = {name: recorded[name] for name in lightest[:count]}
+        weights, estimated, _ = resolve(kept, names, 1.0)
+        skew = recorded_skew(weights, estimated)
+        if skew >= floor:
+            yield count, len(estimated), skew, whole / sum(weights.values())
+
+
+def main():
+    """Print the skew band the shipped file admits, at every truncation."""
+    data = read_timings(_REPO_ROOT / '.github' / 'suite-timings.json')
+    print('  k-rec  est  skew  understated')
+    for count, est, skew, ratio in skew_band(
+            _REPO_ROOT, data, MIN_RECORDED_SKEW):
+        print(f'{count:6d} {est:4d} {skew:5.2f} {ratio:11.2f}x')
+
+
+if __name__ == '__main__':
+    main()
