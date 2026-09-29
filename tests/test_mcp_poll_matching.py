@@ -5,7 +5,6 @@ A peek whose body does not match the expectation is left in place for
 its owner; each test here proves one rejection axis leaves the shared
 slot untouched and ends the wait at the deadline, never consuming.
 """
-import asyncio
 import importlib.util
 import sys
 import time
@@ -14,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
+from _mcp_poll_outcome import _poll_outcome  # noqa: E402
 from _mcp_transport_probes import (  # noqa: E402
     ClientProbe, clock_script)
 
@@ -35,13 +35,6 @@ def _session(transport, token='mcptok', url='http://127.0.0.1:18001'):
     return transport.BridgeSession(url, token_var)
 
 
-def _capture(coroutine):
-    try:
-        return asyncio.run(coroutine)
-    except Exception as failure:  # noqa: BLE001
-        return f'raised {type(failure).__name__}: {failure}'
-
-
 def test_poll_rejects_a_body_without_a_delivery_id(tmp):
     del tmp
     transport = _transport()
@@ -61,7 +54,7 @@ def test_poll_rejects_a_body_without_a_delivery_id(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
@@ -87,7 +80,7 @@ def test_poll_rejects_an_empty_delivery_id(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
@@ -113,7 +106,7 @@ def test_poll_rejects_a_delivery_id_when_none_is_expected(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command'))
 
     peeks = [call for call in client.calls if call[1] == '/result']
@@ -139,7 +132,7 @@ def test_poll_rejects_a_matching_delivery_with_a_foreign_command_id(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
@@ -166,7 +159,7 @@ def test_poll_rejects_a_matching_command_id_with_a_foreign_delivery_id(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command',
         expect_delivery='wanted'))
 
@@ -196,7 +189,7 @@ def test_poll_rejects_an_empty_delivery_expectation(tmp):
     session.http_client = lambda: client
     session.monotonic = clock_script(100.0, 100.0, 100.0, 100.5)
 
-    result = _capture(session.poll_result(
+    result = _poll_outcome(session.poll_result(
         '', 0.001, interval=0, expect_id='command', expect_delivery=''))
 
     peeks = [call for call in client.calls if call[1] == '/result']
