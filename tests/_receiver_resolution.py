@@ -347,24 +347,24 @@ def literal_bindings(tree):
     test body, while the deadline-carrying call sits in a third scope.
 
     A name is in the set only when EVERY writing of it is a literal: a
-    CONSERVATIVE JOIN, not a last-write-wins. The
-    narrowing does not recover
-    `tests/test_real_browser_harness.py:131`, whose deadline reaches a
-    parameter no writing in the module proves; `origin/main` refuses that
-    site too, so the census returns it to main's verdict — an intended
-    over-refusal, tracked as #1337, pinned by
-    `test_a_named_over_refusal_refuses`. The order
-    is not available to be right: `ast.walk` is breadth-first, so a nested
-    write is applied after a shallower one whatever the source says, and
-    a table-wide last-write-wins silences a class that holds a real child
-    because a LATER class bound the same attribute to a list. Differing
-    reachable states are unprovable, and unprovable here is a refusal.
+    CONSERVATIVE JOIN, not a last-write-wins. The narrowing does not
+    recover `tests/test_real_browser_harness.py:131`: the deadline
+    reaches the `recorded` parameter, and the arm judges the parameter's
+    OWN function without consulting its callers, so the `recorded = []`
+    that module writes at 174 discharges nothing. `origin/main` refuses
+    that site too, so the census returns it to main's verdict — an
+    intended over-refusal, tracked as #1337, pinned by
+    `test_a_named_over_refusal_refuses`. The order is not available to
+    be right: `ast.walk` is breadth-first, so a nested write is applied
+    after a shallower one whatever the source says, and a table-wide
+    last-write-wins silences a class that holds a real child because a
+    LATER class bound the same attribute to a list. Differing reachable
+    states are unprovable, and unprovable here is a refusal.
 
-    This is deliberately not the move `_dotted_bindings` makes. That one
-    adds a binding module-wide and discards only outside a function or
-    class body, so its two arms fail in OPPOSITE directions and neither
-    can undo the other. Here a single non-literal writing is enough, and
-    that is the opposite bias: over-refuse rather than discharge.
+    This is not the move `_dotted_bindings` makes: it adds a binding
+    module-wide and discards only outside a function or class body, so
+    its two arms fail in OPPOSITE directions and neither undoes the
+    other. One non-literal writing is enough: over-refuse, not discharge.
     """
     verdicts = {}
     owners = {id(child): node for node in ast.walk(tree)
