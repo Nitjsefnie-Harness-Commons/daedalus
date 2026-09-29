@@ -625,6 +625,7 @@
 !/tests/test_gate_freshness.py
 !/tests/test_gate_freshness_run.py
 !/tests/test_generator_second_consumption.py
+!/tests/test_gh_body_shapes.py
 !/tests/test_gh_client.py
 !/tests/test_gh_head_prs.py
 !/tests/test_gh_refusal.py
