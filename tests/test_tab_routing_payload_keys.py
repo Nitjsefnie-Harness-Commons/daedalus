@@ -83,6 +83,19 @@ _ROWS = [
         'cmd = {"id": "x", "tab": 5}', 'cmd.clear()')),
     ('clear-name', 0, {}, _CALL, _inside(
         'k = "tab"', 'cmd = {"id": "x", k: 5}', 'cmd.clear()')),
+    # A removal takes the ONE key it names, which no row above can see:
+    # they all remove `tab` itself, so dropping one key and dropping every
+    # key are the same answer on all of them. These remove the other key,
+    # so the `tab` survives to the sender and the guard still reports - a
+    # fold that took the whole payload's keys would read them clean.
+    ('pop-non-tab-literal', 1, {'tab': 5}, _CALL, _inside(
+        'cmd = {"id": "x", "tab": 5}', 'cmd.pop("id")')),
+    ('pop-non-tab-name', 1, {'tab': 5}, _CALL, _inside(
+        'k = "id"', 'cmd = {"id": "x", "tab": 5}', 'cmd.pop(k)')),
+    ('del-non-tab-literal', 1, {'tab': 5}, _CALL, _inside(
+        'cmd = {"id": "x", "tab": 5}', 'del cmd["id"]')),
+    ('del-non-tab-name', 1, {'tab': 5}, _CALL, _inside(
+        'k = "id"', 'cmd = {"id": "x", "tab": 5}', 'del cmd[k]')),
     # A non-string key is provably not 'tab', and the splat raises before
     # the call returns, so nothing reaches the sender at all.
     ('nonstring', 0, _RAISES, _CALL, _inside(
