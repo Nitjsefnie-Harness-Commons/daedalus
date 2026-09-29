@@ -140,10 +140,10 @@ ACCEPTABLE = ci_gate.ACCEPTABLE
 # watching another repository and only ADDS to it here (issue #1318);
 # either way a caller who names no gate cannot switch it off.
 REQUIRED_WORKFLOWS = ci_gate.REQUIRED_WORKFLOWS
-# The gates this repository's publisher writes as check runs rather than as
-# runs, and therefore the ones a run-shaped read could never see (issue
-# #1360). No flag states them, for the reason `ACCEPTABLE` is not a literal:
-# a second name for the same set is a second thing to keep true.
+# The gates this repository's publisher writes as check runs rather than
+# as runs, and so the ones a run-shaped read could never see (issue
+# #1360). No flag states them: a name this tool invented would be a
+# requirement a caller cannot see or satisfy.
 PUBLISHED_CHECKS = ci_gate.PUBLISHED_CHECKS
 SHA_RE = re.compile(r'[0-9a-fA-F]{40}\Z')
 
@@ -232,6 +232,15 @@ def verdict(runs, checks=(), *, required=REQUIRED_WORKFLOWS,
                  if run.get('conclusion') not in ACCEPTABLE]
     if offenders:
         return 'unacceptable', offenders
+    # A check run that has not concluded is a WAIT, exactly as a
+    # workflow run that has not concluded is, and the limb above is
+    # the reason both exist: a null conclusion is the absence of a
+    # verdict, not a red one, and the offender loop would print it
+    # verbatim as `name: None`.
+    if any(check.get('status') != 'completed'
+           for check in checks
+           if check.get('name') in required_checks):
+        return 'waiting', []
     offenders = ci_gate.red_published(checks, required=required_checks)
     if offenders:
         return 'unacceptable', offenders
@@ -270,7 +279,7 @@ def _timeout_report(runs, timeout, sha, out, missing=None, grace=None,
         print(f'wait exceeded {timeout}s on {sha[:12]}: no workflow '
               'run ever appeared', file=out, flush=True)
         return
-    if missing:
+    if missing is not None:
         print(f'wait exceeded {timeout}s on {sha[:12]}: '
               f'{" and ".join(missing)} and the {grace}s grace has not '
               'elapsed, so this head is not certified', file=out, flush=True)
