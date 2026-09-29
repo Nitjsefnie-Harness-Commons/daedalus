@@ -43,9 +43,6 @@ _VERSION = 'actionlint-version'
 _SHELLCHECK_ABSENT = 'shellcheck-absent'
 _NO_WORKFLOWS = 'no-workflows'
 
-_PLANTED_FINDING = ('claim.yml:58:9: shellcheck reported issue in this '
-                    'script: SC2183:warning:1:8: This format string has 3 '
-                    'variables, but is passed 2 arguments [shellcheck]')
 # Appended to a real workflow; three variables and two arguments is its SC2183.
 _PLANTED_JOB = """
   planted-lint-finding:
@@ -54,6 +51,13 @@ _PLANTED_JOB = """
       - run: |
           printf "%s %s %s\\n" one two
 """
+
+
+def _planted_finding():
+    """What actionlint prints for a real finding, in the shape it prints it."""
+    return ('claim.yml:58:9: shellcheck reported issue in this '
+            'script: SC2183:warning:1:8: This format string has 3 '
+            'variables, but is passed 2 arguments [shellcheck]')
 
 
 def _pinned_actionlint_version(job=None):
