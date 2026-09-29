@@ -77,14 +77,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _util  # noqa: E402
 from _pyroute_mapping import (_apply_mapping_store,  # noqa: E402
                              _apply_setdefault)
-from _pyroute_reads import (_dict_call_value, _dict_value,  # noqa: E402
-                            _mapping_lookup, _merge_or_value,
-                            _readback_copy)
-from _pyroute_storage import join_clean_occupancy  # noqa: E402
+from _pyroute_match import _bind_mapping  # noqa: E402
+from _pyroute_positions import at_position  # noqa: E402
+from _pyroute_reads import (_apply_pop, _dict_call_value,  # noqa: E402
+                            _dict_value, _mapping_lookup,
+                            _merge_or_value, _readback_copy)
+from _pyroute_storage import (container_copy,  # noqa: E402
+                              join_clean_occupancy)
 from _pyroute_state import FlowState  # noqa: E402
-from _pyroute_stores import _subscript_store  # noqa: E402
+from _pyroute_stores import (_seed_receiver,  # noqa: E402
+                             _subscript_store)
 from _pyroute_values import (DYNAMIC_KEY, UNPROVABLE_SENDER,  # noqa: E402
-                             DeferredAlternatives, DeferredContainer)
+                             DeferredAlternatives, DeferredContainer,
+                             merge_yielded)
 from test_tab_routing import _tracked_focus_verdict  # noqa: E402
 
 _LAMBDA = ("lambda *a, **k: send('_focus', 'focus-tab', "
@@ -634,15 +639,69 @@ def test_a_setdefault_settles_a_key_the_join_left_retired(tmp):
     assert 'k' in written.items, written.items
 
 
+def test_a_pop_of_a_retired_key_drops_its_retirement(tmp):
+    """A `pop` takes the entry out, so it is no longer a held key at all."""
+    state = _retired_source_state()
+    owner = state.callables['d']
+    call = ast.parse('d.pop("k")').body[0]
+    assert isinstance(call, ast.Expr)
+    _apply_pop(state, call.value)
+    popped = cast(DeferredContainer, state.callables['d'])
+    assert popped.stale == frozenset(), popped.stale
+    assert 'k' not in popped.items, popped.items
+
+
+def test_a_seeded_receiver_settles_the_key_it_wrote(tmp):
+    """The one un-retiring site that writes through an attribute or a
+    subscript the model has to create first."""
+    state = _retired_source_state()
+    seeded = _seed_receiver(state, ast.parse('d["k"]', mode='eval').body,
+                            'd')
+    assert seeded is True
+    holder = cast(DeferredContainer, state.callables['d'])
+    assert holder.stale == frozenset(), holder.stale
+    assert 'k' in holder.items, holder.items
+
+
+def test_the_subscript_read_honours_a_retired_key(tmp):
+    """`at_position` is the subscript's own read, and it is a separate site
+    from the one the container reads reach: `_mapping_lookup` passing says
+    nothing about it."""
+    recorded = DeferredContainer({0: None}, 1, 'tuple')
+    retired = DeferredContainer({'k': recorded}, None, 'dict',
+                                stale=frozenset({'k'}))
+    current = DeferredContainer({'k': recorded}, None, 'dict')
+    assert merge_yielded(at_position(retired, 'k')) \
+        == DeferredAlternatives((recorded, UNPROVABLE_SENDER))
+    assert merge_yielded(at_position(current, 'k')) is recorded
+
+
+def test_a_container_copy_never_retires_the_unknown_key_slot(tmp):
+    """The slot names no key, so a retirement at it would be a fact about
+    nothing -- and the state signature hashes this set, so the field's
+    type is settled here too."""
+    owner = DeferredContainer({}, 0, 'dict')
+    copied = container_copy(owner, {'k': None},
+                            stale=frozenset({'k', DYNAMIC_KEY}))
+    assert copied.stale == frozenset({'k'}), copied.stale
+    assert isinstance(copied.stale, frozenset), type(copied.stale)
+
+
 def test_a_pattern_rest_carries_the_retirement_it_projected(tmp):
-    """A `case {**_rest}` binds the same values under a new name."""
-    routed, clean = [], []
-    for prefix, tag in ((_PRE, routed), (_CLEAN, clean)):
-        body = (prefix + _OPAQUE_RETIRE + 'match d:\n'
-                '    case {**_rest}:\n        x = _rest["k"]\n'
-                'send = ext_cmd\nreturn x' + _CALL)
-        tag.append(_tracked_focus_verdict(tmp, body, counts=True))
-    assert (routed[0], clean[0]) == ((1, 1), (0, 0)), (routed, clean)
+    """A `case {**_rest}` binds the same values under a new name, and the
+    retirement with them.
+
+    Entered at `_bind_mapping` rather than end to end: the subscript of
+    the projected name is reached through the source's own marking on that
+    path, so no verdict distinguishes a carried retirement from a dropped
+    one and the end-to-end form of this control survived its own revert in
+    the round-4 sweep."""
+    state = _retired_source_state()
+    pattern = ast.MatchMapping(keys=[], patterns=[], rest='_rest')
+    _bind_mapping(pattern, state.callables['d'], state)
+    rest = cast(DeferredContainer, state.callables['_rest'])
+    assert rest.stale == frozenset({'k'}), rest.stale
+    assert 'k' in rest.items, rest.items
 
 
 def test_a_join_of_two_paths_keeps_the_retirement(tmp):
