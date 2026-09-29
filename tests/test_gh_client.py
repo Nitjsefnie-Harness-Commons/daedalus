@@ -18,6 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
+from _watcher_fixtures import THROTTLED  # noqa: E402
+from _watcher_fixtures import spent_limit_response  # noqa: E402
 
 ROOT = _util.ROOT
 SKILL = ROOT / '.claude' / 'skills' / 'changing-daedalus'
@@ -178,6 +180,64 @@ def _stamp(instant):
 
 # Across the clamps below, a literal is pinned where the number itself is
 # the point, and the constant where it is not.
+
+
+def _wait_for(mod, answer, now, tmp):
+    """The wait a refusal the reader found would buy, in whole seconds.
+
+    Driven through `graphql` and a real `gh` process, so the instant is
+    one the reader derived from the answer rather than one this control
+    handed it: a reader returning a value these clamps do not reach is
+    what the three rows below exist to catch.
+    """
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    watcher = mod.Watcher('w', out=io.StringIO())
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            return watcher._wait_seconds(refusal, now)
+        raise AssertionError('the answer was not read as a refusal')
+
+
+def test_a_refusal_carrying_no_instant_waits_the_plain_minute(tmp):
+    """No reset reported at all. A pause still has to happen - the limit
+    is real - but there is nothing to wake at, so the wait is the plain
+    minute and not a moment the reader invented.
+    """
+    mod = _client()
+    now = 1790266796.5
+    answer = {'status': 200, 'stdout': '', 'exit': 1,
+              'stderr': f'gh: {THROTTLED}\n'}
+    assert _wait_for(mod, answer, now, tmp) == float(mod.DEFAULT_BACKOFF)
+    assert mod.DEFAULT_BACKOFF == 60, mod.DEFAULT_BACKOFF
+
+
+def test_a_refusal_carrying_a_reset_already_gone_waits_the_floor(tmp):
+    """The second: a reset that has passed. Waiting exactly to it is no
+    wait at all, and the counter the headers carry is spent, so the
+    floor is the price of not hot-looping the API that just refused us.
+    """
+    mod = _client()
+    now = 1790266796.5
+    spent = spent_limit_response(int(now) - 5000, exit=0, stderr='')
+    assert _wait_for(mod, spent, now, tmp) == float(mod.MIN_BACKOFF)
+    assert mod.MIN_BACKOFF == 2, mod.MIN_BACKOFF
+
+
+def test_a_refusal_carrying_an_absurd_reset_waits_the_ceiling(tmp):
+    """The third: a reset no clock will reach. A fixture that reports one
+    is a fixture that hangs a suite for the length of the wait, so the
+    ceiling is what bounds it - past it the next refusal is a new pause
+    with its own line rather than one sleep that never returns.
+    """
+    mod = _client()
+    now = 1790266796.5
+    absurd = spent_limit_response(int(now) + 10 ** 9, exit=0, stderr='')
+    assert _wait_for(mod, absurd, now, tmp) == float(mod.MAX_BACKOFF)
+    assert mod.MAX_BACKOFF == 6 * 3600, mod.MAX_BACKOFF
+
+
 def test_a_reset_beyond_the_floor_is_slept_to_and_named_exactly(tmp):
     """Past the floor nothing is clamped, so the line, the sleep and the
     reported reset are one instant - the property the near-floor case
