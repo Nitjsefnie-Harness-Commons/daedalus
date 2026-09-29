@@ -21,6 +21,7 @@ The expansion is `Path.glob`, which has what the step's `nullglob` buys the
 shell, and is the same expansion on a windows-latest leg where a bare `bash`
 is the WSL launcher.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -158,6 +159,138 @@ def _installed_actionlint_version(binary):
     return ran.stdout.split('\n', 1)[0].strip()
 
 
+def shellcheck_integration_flag():
+    """`-shellcheck=` on Windows, and nothing anywhere else.
+
+    A lint result is a property of the workflow FILES. Every file is
+    linted with the full shellcheck integration on the POSIX legs, so the
+    Windows leg re-derives a verdict two other legs have already produced
+    and finds nothing new — while paying for it in the currency that made
+    the leg slow. actionlint spawns one shellcheck per `run:` block and
+    this repository has 78 of them, so the integration costs 78 process
+    launches of a 34 MB binary on a Windows runner. Measured on the POSIX
+    host over the same twelve files: 449 ms integrated, 28 ms with the
+    integration off, 75 ms with no shellcheck reachable at all.
+
+    So the integration is switched off AT THE PLACE THAT OWNS IT —
+    actionlint's own documented flag, which its `-help` describes as "if
+    empty, shellcheck integration will be disabled" — rather than by
+    withholding the binary from PATH. Nothing is withheld from anything:
+    the installer still installs and publishes shellcheck on Windows, the
+    residency guard still requires it to resolve, and the POSIX legs still
+    lint with it. `os.name` is the predicate because it is the one
+    `shutil.which` itself branches on, so the decision and the tool
+    resolution cannot disagree about which platform this is.
+    """
+    return ['-shellcheck='] if os.name == 'nt' else []
+
+
+def lint_scope():
+    """What one run on this host actually checked, in the test's words.
+
+    A reader deserves to be told rather than to infer it, so the scope is
+    a value the suite asserts on rather than a fact buried in a flag.
+    """
+    return ('actionlint structural checks, shellcheck integration DISABLED '
+            'on this platform — every workflow file is linted with the '
+            'integration on the POSIX legs'
+            if os.name == 'nt' else
+            'actionlint with the shellcheck integration, every run: block')
+
+
+def shellcheck_integration_by_platform():
+    """The flag and the scope this host would use, for both platforms.
+
+    Driven both ways rather than only on the platform the suite happens to
+    run on: a control that asserts the flag only when it IS present proves
+    nothing about the doors where it must not be, and the POSIX legs are
+    where every shellcheck finding comes from. `os.name` is assigned rather
+    than mocked because the predicate reads it, and restored in a `finally`
+    because it is process-wide.
+    """
+    seen = {}
+    original = os.name
+    try:
+        for name in ('nt', 'posix'):
+            os.name = name
+            seen[name] = (shellcheck_integration_flag(), lint_scope())
+    finally:
+        os.name = original
+    return seen
+
+
+def assert_integration_platform_scoped():
+    """The integration is off on Windows and on everywhere else.
+
+    Both directions in one place, so a control that only ever runs where
+    the flag is present cannot pass while the POSIX legs have lost theirs.
+    """
+    for name, (flag, scope) in shellcheck_integration_by_platform().items():
+        windows = name == 'nt'
+        assert flag == (['-shellcheck='] if windows else []), f'{name}: {flag}'
+        assert ('DISABLED' in scope) is windows, f'{name}: {scope}'
+
+
+def assert_lint_covered(run):
+    """One run happened, it read files, and it checked what this host does.
+
+    The scope is asserted rather than reported, because a run whose
+    coverage differs by platform is a fact a reader has to be able to see
+    and not infer from a flag.
+    """
+    assert run['ran'] and run['files'], run
+    assert run['scope'] == lint_scope(), run
+
+
+def assert_pin_read_from_the_job():
+    """The pin comes from the job's env, and nowhere else.
+
+    Two directions for the same reason `_pinned_actionlint_version` takes a
+    parameter: read from the job, and equal to what the job actually pins.
+    """
+    job = {'env': {'ACTIONLINT_VERSION': '9.9.9'}}
+    assert _pinned_actionlint_version(job) == '9.9.9'
+    assert _pinned_actionlint_version() == _pin()
+
+
+def assert_other_version_is_refused():
+    """A binary at a version the job does not pin is not a clean lint."""
+    reason = _lint_skips({'installed': '1.6.0'})
+    assert 'actionlint-version' in reason and '1.6.0' in reason, reason
+
+
+def assert_empty_workflow_set_is_refused():
+    """No files matched, so a clean verdict would be over nothing."""
+    assert 'no-workflows' in _lint_refuses({'files': []})
+
+
+def assert_expansion_covers_both_extensions(tmp):
+    """One file per extension, and the expansion finds both of them."""
+    assert _expanded_names(tmp) == {'named.yml', 'named.yaml'}
+
+
+def assert_lint_step_covers_both_extensions():
+    """The actionlint step's own arguments, read out of the workflow.
+
+    The step is the one that gates the gates, so what it is HANDED is the
+    fact: a workflow in GitHub's other accepted extension would start the
+    job and be skipped by it, which is the silent-stop failure the
+    workflow's own header says the other gates cannot catch. Read from the
+    step rather than asserted here, so the two halves — the reason and the
+    mechanism — can live in the files where each belongs.
+    """
+    _, marker, after = _tests_yml().partition('- name: actionlint\n')
+    assert marker, 'the actionlint step is not named the way this reads it'
+    step, _, _ = after.partition('- name: zizmor')
+    for pattern in ('.github/workflows/*.yml', '.github/workflows/*.yaml'):
+        assert pattern in step, (pattern, step)
+    # An extension nothing matches must not reach actionlint as a literal
+    # pattern, and a directory holding no workflows at all must not read as a
+    # clean lint — both would be the same silent pass in a different place.
+    assert 'nullglob' in step, step
+    assert 'exit 1' in step, step
+
+
 def _run_actionlint(binary, shellcheck, files):
     """One lint run's exit code and output, or None if it did not run.
 
@@ -177,7 +310,8 @@ def _run_actionlint(binary, shellcheck, files):
     if not resolved or not shellcheck or not files:
         return None
     try:
-        ran = subprocess.run([resolved, *(str(path) for path in files)],
+        ran = subprocess.run([resolved, *shellcheck_integration_flag(),
+                              *(str(path) for path in files)],
                              capture_output=True, text=True,
                              timeout=_ACTIONLINT_TIMEOUT)
     except OSError:
@@ -347,6 +481,7 @@ def _lint_workflows(root, actionlint=None):
     files = _workflow_paths(root)
     outcome = _run_actionlint(binary, shellcheck, files)
     installed = _installed_actionlint_version(binary) if binary else None
+    scope = lint_scope()
     _assert_actionlint_clean({
         'binary': binary, 'shellcheck': shellcheck,
         'installed': installed,
@@ -354,3 +489,5 @@ def _lint_workflows(root, actionlint=None):
         'pinned': pinned, 'files': files,
         'returncode': outcome[0] if outcome else None,
         'output': outcome[1] if outcome else ''})
+    return {'scope': scope, 'ran': outcome is not None,
+            'files': [str(path) for path in files]}

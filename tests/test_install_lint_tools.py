@@ -49,6 +49,16 @@ EXECUTABLE = b'#!/not/really/an/executable\n'
 # tell a wheel of the pinned version from one of another.
 DEFAULT_WHEEL = 'shellcheck_py-0.11.0.1-py3-none-any.whl'
 SCRIPTS = 'shellcheck_py-0.11.0.1.data/scripts'
+# The name the wheel for THIS host carries its member under, which is the
+# one thing a fake wheel has to get right: the member name is what lands on
+# PATH, and `shutil.which` will not see a bare name on Windows at all. It
+# resolves a command plus a PATHEXT extension, and uses a direct match only
+# when the command already ends in one — CPython says so in the branch's own
+# comment, and the Windows job log is the proof: `_record` printed
+# `actionlint.EXE`, an uppercase extension, never a bare name. The real
+# wheels' names are the property `test_a_wheel_that_carries_the_wrong_binary
+# _is_refused` pins, so this stands in for the wheel and must agree with it.
+WHEEL_SCRIPTS_NAME = 'shellcheck.exe' if os.name == 'nt' else 'shellcheck'
 
 
 def _installer():
@@ -346,6 +356,39 @@ def test_the_member_name_comes_from_the_wheel_not_from_a_platform_branch(tmp):
             p.name for p in tools.iterdir())
 
 
+def test_the_tool_directory_reaches_this_process_and_not_only_github_path(
+        tmp):
+    """Why an in-process `shutil.which` can mean anything at all.
+
+    `$GITHUB_PATH` reaches SUBSEQUENT steps, never the one that writes it,
+    so a check reading PATH inside this process would be reading a PATH
+    this step had not yet changed — and every assertion about residency
+    would be about whatever the runner image happened to carry. The
+    installer's answer is that it does both: it prepends the tool
+    directory to THIS process's own PATH and writes the same line to
+    `$GITHUB_PATH` for the steps after. Both halves are pinned here, so
+    neither can be dropped without this going red.
+    """
+    tmp = Path(tmp)
+    installer = _installer()
+    later = tmp / 'path.txt'
+    with mock.patch.dict(os.environ, {'GITHUB_PATH': str(later),
+                                      'PATH': '/usr/bin:/bin'}), \
+            mock.patch.object(installer, 'TOOL_DIR', tmp / 'tools'):
+        installer._publish()
+        # Read inside the block: `patch.dict` restores PATH on the way out,
+        # and the claim is about the moment the step published.
+        on_path = os.environ['PATH'].split(os.pathsep)
+    assert str(tmp / 'tools') in on_path, (
+        'the tool directory is not on this process PATH, so an in-process '
+        'resolution of either tool is really a resolution of the runner '
+        "image's copy, and the residency guard proves nothing")
+    assert str(tmp / 'tools') in later.read_text(encoding='utf-8').split(
+        '\n'), (
+        'the tool directory is not on GITHUB_PATH, so the steps that run '
+        'the suites would not see it at all')
+
+
 def test_a_wheel_that_carries_the_wrong_binary_is_refused(tmp):
     """Each of the four supply-chain shapes, refused in the file's register.
 
@@ -430,12 +473,15 @@ def test_shellcheck_resolves_from_the_installer_not_from_the_image(tmp):
             mock.patch.object(installer, 'TOOL_DIR', tools), \
             mock.patch.object(installer, '_fetch',
                               return_value=payload), \
-            _installing(installer, [('shellcheck', EXECUTABLE)]):
+            _installing(installer, [(WHEEL_SCRIPTS_NAME, EXECUTABLE)]):
         assert installer.main() == 0
-        installed = tools / 'shellcheck'
-        assert installer.shutil.which('shellcheck') == str(installed), (
+        landed = tools / WHEEL_SCRIPTS_NAME
+        assert landed.is_file(), sorted(p.name for p in tools.iterdir())
+        resolved = installer.shutil.which('shellcheck')
+        assert resolved == str(landed), (
             'shellcheck did not resolve into the directory this step '
-            'installed it into')
+            f'installed it into: PATH held {resolved!r} and the tool '
+            f'directory holds {landed}')
         assert str(tools) in later.read_text(
             encoding='utf-8').split('\n'), (
             'the tool directory is not on the PATH the later steps '
