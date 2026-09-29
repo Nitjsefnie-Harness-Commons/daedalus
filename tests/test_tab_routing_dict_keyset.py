@@ -49,8 +49,10 @@ The two outcomes differ in what the read costs once nothing is routed. A
 refused read resolves to a tracked callable, so the guard reads that
 callable's body and the shape stays clean. A declared read joins to an
 unprovable sender, and a `tab` through a name holding one is reported
-whatever that callable would have done. WHICH read forms pay that is the
-member's own split, not the domain's, and `_SILENT` carries it per member.
+whatever that callable would have done. Once every source whose pairs the
+model can read was read, no member pays the second cost: every `_AXES` row
+costs `(0, 0)`, and `_SILENT` carries the one member whose read form does
+not.
 
 **Not this suite's bucket.** A store path that folds an unreadable source
 into its OWNER's `DYNAMIC_KEY` slot -- `dict(...)`, `{**...}`, `|=`,
@@ -59,14 +61,15 @@ key already joined to an unprovable sender. A bare routed-lambda call through
 it still reads clean, because a `tab` living in the callee's body is not a
 reporting shape for an unprovable sender. That is a different mechanism,
 tracked as 1010, and a member reached only that way is not in this suite's
-bucket. What separates the `_SILENT` rows from those is WHICH NAME carries
-the fold, and not every member has a name to answer for. A store that marks
+bucket. What separated those rows from these is WHICH NAME carries the
+fold, and not every member had a name to answer for. A store that marks
 its owner answers joined at the key being read; a store that propagates an
-unknown length from a source reached through a NAME leaves the fold on the
-source name, so the owner's own reads answer whatever its recorded items
-say; and a starred positional source marks neither name, its fold sitting on
-no name at all. Those shapes are what `_SILENT` names, with the read form
-each member is silent on carried per member.
+unknown length from a source reached through a NAME left the fold on the
+source name, so the owner's own reads answered whatever its recorded items
+said; and a starred positional source marked neither name, its fold sitting
+on no name at all. Two of those three are repaired and in `_AXES`; the
+starred positional is the one member `_SILENT` still names, silent on the
+subscript alone.
 """
 import ast
 import sys
@@ -197,12 +200,12 @@ _AXES = {
 
 # `refused`: the read resolves to a tracked callable, so the guard reads the
 # callable's own body. `declared`: the read joins to an unprovable sender.
-# The second column is what the member's SHAPE costs once nothing is routed,
-# and it is not the disposition alone: a member whose own name carries an
-# unprovable alias costs `(0, 1)` whatever its read says, because the
-# visible `tab` reaches that alias through the call site. `fresh-recorded-key`
-# is the case that separates the two -- its read resolves, and its name is
-# still marked.
+# The second column is what the member's SHAPE costs once nothing is routed.
+# It was the disposition plus the shape -- a member whose own name carried an
+# unprovable alias cost `(0, 1)` whatever its read said -- until the readable
+# sources took that away: no member has a marked name any more, and every row
+# below costs `(0, 0)`. The two columns are pinned per member anyway, so a
+# source that starts marking a name again shows here.
 _DISPOSITION = {
     'update-pairs': ('refused', (0, 0)),
     'update-pairs-tuple': ('refused', (0, 0)),
@@ -330,8 +333,10 @@ def test_no_axis_member_reads_a_key_the_model_never_recorded_clean(tmp):
 
 
 def test_a_declared_read_costs_where_a_refused_read_does_not(tmp):
-    """The name's own alias and the read's verdict contribute to a
-    member's cost separately, so it is pinned per member."""
+    """What each member's SHAPE costs once nothing is routed, pinned per
+    member and per read form. Uniform today -- `(0, 0)` throughout -- and
+    pinned anyway, because a shape that starts costing a read again has to
+    show here rather than in a suite that only looks for a false green."""
     for label, (_, cost) in sorted(_DISPOSITION.items()):
         for name, read in sorted(_READS.items()):
             clean = _verdict(tmp, _AXES[label], read, _CLEAN)
