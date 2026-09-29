@@ -82,19 +82,22 @@ and that is why three successive widenings of this one each pulled a new
 false alarm in from the other side. Within the window a sentence is
 judged on TWO conditions, and failing either leaves it ADMITTED: it
 carries a reach PREDICATE, and it NAMES A SHIPPED MODULE. At least one
-judged sentence must then name the named module. A claim names a shipped
-module in any of the forms this tree uses -- the full repo-relative path,
-the bare filename, or the shipped root the path sits in -- and all three
-are read off the same population the coverage report means by "shipped
-JavaScript", so a root added later is judged without a change here. Both
-conditions carry weight in the paragraph as shipped: the long sentence
-above names a dozen shipped modules and is admitted because it carries no
-predicate, and `no suite reaches the tree on its own` carries one and is
-admitted because it names no module. What makes skipping such a sentence
-safe is the ORACLE: a window holding no sentence that names the named
-module is a refusal, not a pass, and a window holding only a predicate
-about a different module is that same refusal, so nothing can be dropped
-from judgement and leave the paragraph unchecked.
+judged sentence must then name the named module, in one of the three
+spellings the population yields: its full repo-relative path, its bare
+filename, or the shipped directory it sits in. Identity reads those same
+three, through the same helper admission reads them through, so a claim
+admitted for naming a shipped module is not refused a line later for
+spelling the module the way the rule itself accepts. All three come from
+the one population the coverage report means by "shipped JavaScript", so a
+module added later is judged without a change here. Both conditions carry
+weight in the paragraph as shipped: the long sentence above names twenty
+shipped modules and is admitted because it carries no predicate, and
+`no suite reaches the tree on its own` carries one and is admitted because
+it names no module. What makes skipping such a sentence safe is the
+ORACLE: a window holding no sentence that names the named module is a
+refusal, not a pass, and a window holding only a predicate about a
+different module is that same refusal, so nothing can be dropped from
+judgement and leave the paragraph unchecked.
 
 The price of that rule falls on BOTH sides, and the far side has paid it
 since before the window was symmetric: on the wave-2 base every reach
@@ -111,9 +114,22 @@ the paragraph harder, because whether that other module is in fact
 unreached is not decidable from this tree either, for the reason at the
 top of this docstring. The honest name for the residual is a claim this
 control does not govern. The shapes to recognise it in are the shortest
-spelling -- `No suite runs `sse.js`.` -- a shipped root -- `No suite
+spelling -- `No suite runs `sse.js`.` -- a shipped directory -- `No suite
 reaches `extension/`.` -- and a full path -- `No suite runs
 `extension/worker/tabs.js`.`
+
+Two more shapes are left, and both are PARKED rather than closed. A claim
+naming the module by the tree's PROSE name -- "the extension options
+page", "the extension" -- rather than by any of the three spellings is
+refused by the identity check, loudly, with the message that the claim is
+about another module. A prose alias is not derivable from here: reading
+one out of the paragraph this control judges is circular, and hard-coding
+one is a second copy of the module's name, so the shape is named and left
+open. And `_module_names` is pinned by no control in this tree, so the set
+of accepted spellings is unpinned: case-folded forms would widen it from
+76 to 80 entries. An unadmitted spelling costs a false alarm rather than a
+false green, because the oracle reads a window holding no claim about the
+named module as a refusal.
 
 No natural-language understanding is owed here, and the earlier claim
 that it was was measured false. `No suite runs `dashboard/app.js`.` and
@@ -299,7 +315,7 @@ def _module_names(sources):
     """Every spelling of a shipped module the tree itself writes.
 
     Three forms, all read off the one population: the full repo-relative
-    path, the bare filename, and the shipped root the path sits in. A
+    path, the bare filename, and the shipped directory the path sits in. A
     predicate naming a module in one of the three and not the others says
     the same thing, so a rule reading only the full path judged fewer
     claims than the position rule it replaced.
@@ -311,6 +327,33 @@ def _module_names(sources):
             names.add(f'{root}/')
         names.add(leaf)
     return names
+
+
+def _named_forms():
+    """The same three forms, for THIS paragraph's module alone.
+
+    Admission asks whether a sentence names any shipped module; identity
+    asks whether it names the named one. Reading the two through different
+    forms made the rule admit a claim and then, a line later, refuse it for
+    spelling the module the way admission accepts -- so these are taken from
+    `_module_names` and not written out here, and no second copy of the
+    population rule can grow beside it.
+    """
+    return _module_names((UNREACHED,))
+
+
+def _names_any(claim, names):
+    """Whether a sentence names any of `names`, at a word boundary.
+
+    A raw substring reads `sse.js` inside `crosses.js` and `app.js` inside
+    `webapp.js`, so a claim about a module this tree does not ship would be
+    judged as one that it does. The boundary is the one class a filename
+    cannot run on from: a letter, a digit, an underscore, a dot or a hyphen
+    in front of it, and a slash is not one of them, because a bare filename
+    is written after one.
+    """
+    return any(re.search(r'(?<![0-9A-Za-z_.-])' + re.escape(name), claim)
+               for name in names)
 
 
 def _reach_claims(sentences):
@@ -343,7 +386,7 @@ def _reach_claims(sentences):
             claim = sentences[position]
             if not REACH_CLAIM.search(claim):
                 continue
-            if not any(name in claim for name in names):
+            if not _names_any(claim, names):
                 continue
             pairs.append((position, claim))
     return pairs
@@ -389,14 +432,15 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
     """
     del tmp
     text = _paragraph()
-    assert UNREACHED in text, 'the paragraph no longer names the module'
+    named = _named_forms()
+    assert _names_any(text, named), 'the paragraph no longer names the module'
     assert COUNT_PHRASE.search(text), (
         'the paragraph no longer states the module count, so the run has no '
         'figure to report and the attributions checked below have none to '
         'carry')
     sentences = _sentences(text)
     claims = _reach_claims(sentences)
-    assert any(UNREACHED in claim for _, claim in claims), (
+    assert any(_names_any(claim, named) for _, claim in claims), (
         f'the window around the count phrase holds no reach claim naming '
         f'{UNREACHED}, so every assertion below is judging a claim that is '
         f'not this paragraph\'s, or is judging nothing at all, and the count '
@@ -409,7 +453,7 @@ def test_no_reach_claim_stands_without_the_run_that_measures_it(tmp):
         'figure it attributes there is attributed nowhere')
     for index, claim in claims:
         where = f'...{" ".join(claim.split())}...'
-        assert UNREACHED in claim, (
+        assert _names_any(claim, named), (
             f'the sentence claiming a reach is about another module: {where}. '
             f'{UNREACHED} is named elsewhere in the paragraph, so the claim '
             f'and the module it is about are not the same sentence')
