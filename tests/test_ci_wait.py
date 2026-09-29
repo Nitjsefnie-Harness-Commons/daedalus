@@ -36,8 +36,7 @@ def _filter_verdict(runs):
     return _ci_wait_verdict(runs, required_checks=frozenset())
 
 
-def _filter_wait(mod, repo, sha, interval, bound, out,
-                  grace=300):
+def _filter_wait(mod, repo, sha, interval, bound, out, grace=300):
     """`wait` with the published check switched off, as above.
 
     The parameters are named, never `*args`/`**kwargs`: a call that

@@ -462,8 +462,7 @@ def main(argv=None):
         print('--required must name a workflow, got a blank value',
               file=sys.stderr)
         return 3
-    required = ci_gate.required_workflows(args.repo,
-                                         args.required)
+    required = ci_gate.required_workflows(args.repo, args.required)
     required_checks = ci_gate.required_published(args.repo)
     note = ci_gate.gate_note(args.repo, args.required)
     try:

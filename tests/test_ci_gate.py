@@ -45,8 +45,8 @@ def _published_check(conclusion='success'):
     one green rather than leaving the answer ambiguous.
     """
     return {'id': 7, 'name': 'gate freshness', 'status': 'completed',
-            'conclusion': conclusion, 'html_url': 'https://github.com/o/r/runs/7',
-            'completed_at': '2026-09-20T10:10:00Z'}
+            'conclusion': conclusion, 'completed_at': '2026-09-20T10:10:00Z',
+            'html_url': 'https://github.com/o/r/runs/7'}
 
 
 def test_a_gating_run_is_present(tmp):
