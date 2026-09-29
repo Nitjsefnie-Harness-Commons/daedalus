@@ -141,6 +141,35 @@ def other():
 
     return run
 ''',
+    'a-call-site-that-is-itself-a-launch': '''import subprocess
+
+
+def run(recorded):
+    def inner(args, *, timeout):
+        recorded.append((list(args), timeout))
+        return None
+
+    return inner
+
+
+def go():
+    return subprocess.run([])
+''',
+    'a-nested-helper-that-shadows-the-name': '''def build(recorded):
+    def run(args, *, timeout):
+        recorded.append((list(args), timeout))
+        return None
+
+    return run
+
+
+def go():
+    def inner(recorded):
+        recorded = []
+        return build(recorded)
+
+    return inner
+''',
 }
 
 # The two call-site SPELLINGS the arm reads, each with the refusal beside
@@ -258,31 +287,29 @@ def _census(source):
 
 
 def _run_line(source):
-    """The line the nested `def run` is written on, addressed by text."""
+    """The nested `def` carrying the deadline, addressed by its own text.
+
+    Named by what it is rather than by a spelling the plants do not all
+    share: every plant nests its double one level in and gives it a
+    `timeout`, and the name is `run` in most and `inner` in the one whose
+    owner has to be called like a `subprocess` member.
+    """
     return next(number for number, text in enumerate(source.splitlines(), 1)
-                if text.startswith('    def run('))
+                if text.startswith('    def ') and 'timeout' in text)
+
+
+def _signature_row(source):
+    """The one row on the nested deadline-carrying `def`."""
+    line = _run_line(source)
+    return [row for row in _census(source) if row[0] == line]
 
 
 def _assert_refuses(label):
-    """The plant's one `timeout parameter` row, on the nested `def run`."""
+    """The plant's one `timeout parameter` row, on the nested `def`."""
     source = PREDICATES[label]
     assert _signature_row(source) == [
         (_run_line(source), 'timeout parameter')], (
             label, _signature_row(source))
-
-
-def _signature_row(source):
-    """The one row on the nested `def run`, located by its own text.
-
-    A line number moves with every unrelated edit to a plant, and a
-    control that reds on one teaches the reader to ignore it, so the row
-    is found the way the shipped-file controls find theirs. The plants
-    carry the launch import or not, so the `def run` line differs between
-    them and one constant would be wrong for half.
-    """
-    line = next(number for number, text in enumerate(source.splitlines(), 1)
-                if text.startswith('    def run('))
-    return [row for row in _census(source) if row[0] == line]
 
 
 def _runtime(source):
@@ -420,6 +447,35 @@ def test_a_receiver_with_no_call_site_in_the_module_is_still_refused(tmp):
     """
     del tmp
     _assert_refuses('no-call-site-in-the-module')
+
+
+def test_a_call_site_that_is_itself_a_launch_is_still_refused(tmp):
+    """`subprocess.run([])`: the call fills the parameter with a child.
+
+    The owning function is named like a `subprocess` member here, which is
+    what makes this row reachable at all -- `_is_launch` reads the CALL, not
+    the argument, and an owner whose own name is a launcher member is the
+    one shape where both readings apply at once. The argument is a literal
+    list, so the container condition is satisfied and this row is carried
+    by the child condition alone.
+    """
+    del tmp
+    _assert_refuses('a-call-site-that-is-itself-a-launch')
+
+
+def test_a_nested_helper_that_shadows_the_name_is_still_refused(tmp):
+    """The `ast.arg` veto, applied inside the caller's OWN scope.
+
+    `inner` takes a `recorded` of its own and writes a literal to it, so a
+    reader that walked the name without the veto would call that a proven
+    container. It is not: the name the call site passes is bound to the
+    PARAMETER `inner` declares, and a parameter's value is its caller's. The
+    veto does not cross scopes -- the double's own `recorded` is not a
+    writing in the caller, which is what makes `RECORDER` discharge -- and
+    this row is the half of that rule it does reach.
+    """
+    del tmp
+    _assert_refuses('a-nested-helper-that-shadows-the-name')
 
 
 def test_a_receiver_that_is_not_a_parameter_is_still_refused(tmp):
