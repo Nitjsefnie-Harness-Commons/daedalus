@@ -584,6 +584,10 @@ def test_the_reader_imports_and_runs_without_the_312_nodes(tmp):
         module = importlib.import_module('_receiver_resolution')
         reload = importlib.reload
         reload(module)
+        # The guarded `getattr` moved to the module the binding readers are
+        # in, so reloading only the reader that imports it would leave the
+        # construct this control exists for unexercised.
+        reload(importlib.import_module('_binding_names'))
         bound = module._dotted_bindings(
             ast.parse('import urllib.request\n'
                       'def urlopen(u):\n    return u\n'))
@@ -592,6 +596,7 @@ def test_the_reader_imports_and_runs_without_the_312_nodes(tmp):
     finally:
         for name, value in hidden.items():
             setattr(ast, name, value)
+        importlib.reload(importlib.import_module('_binding_names'))
         importlib.reload(importlib.import_module('_receiver_resolution'))
 
 
