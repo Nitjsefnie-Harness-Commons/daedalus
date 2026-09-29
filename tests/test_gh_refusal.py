@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Which answers report a rate limit, which report only that they failed.
 
-Every control but the two that say so is one axis of the evidence, driven
-through the client's own `graphql` and answered by a real `gh` process from
-the fake executable double in `_fake_gh.py`; the two reach the reader by
-name, and each says which call site it stands in for. The axis matters
-more than the case:
+Every control here is one axis of the evidence, driven through the
+client's own `graphql` and answered by a real `gh` process from the fake
+executable double in `_fake_gh.py` - none reaches the reader by name, so
+none can be red for a reason that is only about how this file is laid
+out. The axis matters more than the case:
 a fix that closes the headers and leaves the body, or a control that
 reads two carriers of the same value and is blinded by their agreeing,
 is the failure this file is arranged to make impossible. Every widening
@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _fake_gh  # noqa: E402
 import _util  # noqa: E402
 from _watcher_fixtures import THROTTLED  # noqa: E402
+from _watcher_fixtures import delivered_answer  # noqa: E402
+from _watcher_fixtures import spent_headers  # noqa: E402
 from _watcher_fixtures import spent_limit_response  # noqa: E402
 from _watcher_fixtures import throttled_query  # noqa: E402
 
@@ -465,6 +467,12 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     over the same bytes is driven through the public entry point in
     `tests/test_gh_client.py`, by
     `test_a_header_reset_survives_a_windows_text_stream_end_to_end`.
+
+    The reader is reached by name, through a lookup that tolerates its
+    absence: `sys.modules.get` is the same one
+    `_frozen_client_clock` uses, so on a tree without the split this
+    control reads `gh_client`'s own reader instead of raising `KeyError`
+    about a module name, and its redness there is about the parse.
     """
     del tmp
     mod = _client()
@@ -476,6 +484,10 @@ def test_a_retranslated_header_block_still_yields_its_values(tmp):
     assert headers.get('x-ratelimit-reset') == '42', headers
     assert headers.get('retry-after') == '7', headers
     assert json.loads(body) == {'data': None}, body
+    reader = getattr(mod, 'exhausted', None) or \
+        sys.modules.get('gh_rate_limit').exhausted
+    refused, resume = reader(status, headers, body)
+    assert refused and resume is not None, resume
 
 
 def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
@@ -510,6 +522,135 @@ def test_a_fractional_retry_after_becomes_a_near_reset(tmp):
     assert resume - now < mod.MIN_BACKOFF, (mod.MIN_BACKOFF, resume - now)
 
 
+def test_a_rate_limit_nested_under_a_partial_data_still_refuses(tmp):
+    """The false negative the delivery gate alone has, and the reason the
+    `errors[]` carrier is read on a delivered answer.
+
+    GraphQL lets an answer carry a partial `data` beside a non-null
+    `errors[]`, and a rate limit reported at a NESTED field leaves the
+    rest of the payload in place. Both queries in this tree name one
+    top-level selection, so `data.repository` stays an object and a gate
+    reading `data is not null` alone calls this a success - discarding a
+    rate-limit report that carried its own reset.
+
+    Whether GitHub's throttler reports at a nested field is NOT
+    established by anything in this tree, so this control does not claim
+    it does. It claims the reader does not depend on it never arriving,
+    and the fixture is one line. Its inversion is the row below.
+
+    An entry's `type` and `code` are the server's own labels, which is
+    what makes asking a delivered answer about one safe where reading
+    its text is not.
+    """
+    mod = _client()
+    entry = {'type': 'RATE_LIMIT', 'code': 'graphql_rate_limit',
+             'message': 'API rate limit already exceeded for user ID 1.',
+             'extensions': {'rateLimit': {
+                 'resetAt': '2030-01-01T00:00:00Z'}}}
+    answer = {'status': 200, 'exit': 0, 'stderr': '',
+              'body': {'data': {'repository': {'object': None}},
+                       'errors': [entry]}}
+    wanted = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at == wanted, refusal.resume_at
+        else:
+            raise AssertionError('a nested rate limit must refuse')
+
+
+def test_a_partial_data_with_an_ordinary_error_returns_the_data(tmp):
+    """The inversion, and the answer a partial `data` is: GraphQL partial
+    success. The `errors[]` entry names no limit, so the data is the
+    caller's and the entry is not a refusal - which is what makes reading
+    the entry on a delivered answer safe at all.
+    """
+    mod = _client()
+    answer = {'status': 200, 'exit': 0, 'stderr': '',
+              'body': {'data': {'repository': {'items': {'nodes': [
+                  {'id': 1}]}}}, 'errors': [
+                  {'type': 'NOT_FOUND', 'code': 'NOT_FOUND',
+                   'message': 'Could not resolve to a Commit.'}]}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        data = mod.graphql(ITEM_QUERY, {'after': None})
+    assert mod.nodes(data, ('repository', 'items')) == [{'id': 1}]
+
+
+def test_a_404_whose_body_names_a_limit_is_an_ordinary_failure(tmp):
+    """The status scope of the body carrier, on the side that widens.
+
+    The base read a body for a limit on 403 and 429 and for nothing else,
+    and a widening with no negative is what both end-of-branch reviews
+    found on this branch. A 404 is a query that asked for something that
+    is not there; its message naming a limit is an accident of the
+    words, and a flat minute's pause on every poll of it is a watcher
+    that never wakes up for the right reason.
+    """
+    mod = _client()
+    answer = {'status': 404, 'headers': {}, 'stderr': '',
+              'body': {'message': 'Not Found: the rate limit is per page'}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.QueryError:
+            pass
+        else:
+            raise AssertionError('a 404 naming a limit is not a refusal')
+
+
+def test_the_same_body_under_a_429_is_a_refusal(tmp):
+    """The other side of the same clause: the identical body, one status
+    up. 429 is a status the API throttles with, so the words in it are
+    the API's report and the carrier reads them. Together the two rows
+    are the scope - not "any status", and not "403 only".
+    """
+    mod = _client()
+    answer = {'status': 429, 'headers': {}, 'stderr': '',
+              'body': {'message': 'Not Found: the rate limit is per page'}}
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is None, refusal.resume_at
+        else:
+            raise AssertionError('a 429 naming a limit must refuse')
+
+
+def test_a_200_carrying_data_over_a_nonzero_exit_is_still_read(tmp):
+    """The exit-code term of `delivered`, which nothing pinned.
+
+    A body that carries its data, from a `gh` that exited 1, is an
+    answer whose own transport called it a failure - so the payload is
+    not something to hand the caller as a complete answer, and the spent
+    headers beside it are read. That is the same fact the refusal this
+    branch exists for rests on, from the other side: the exit code is
+    never the EVIDENCE, and it is part of DELIVERY.
+
+    Its inversion is
+    `test_a_200_that_exits_nonzero_over_an_ordinary_complaint_fails`
+    beside it: the same body over the same nonzero exit, with a
+    complaint that names no limit, is a plain failure. Together they
+    say the exit code changes whether an answer is read, and never
+    whether it is a refusal by itself.
+    """
+    mod = _client()
+    answer = delivered_answer(headers=spent_headers(int(time.time()) + 45))
+    answer['exit'] = 1
+    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
+    with fake.activate():
+        try:
+            mod.graphql(ITEM_QUERY, {'after': None})
+        except mod.RateLimited as refusal:
+            assert refusal.resume_at is not None, refusal.resume_at
+        else:
+            raise AssertionError('gh said it failed; the headers are read')
+
+
 def test_a_refusal_is_never_a_query_error(tmp):
     """The invariant the `RateLimited` docstring claims and nothing held.
 
@@ -531,25 +672,6 @@ def test_a_refusal_is_never_a_query_error(tmp):
             from caught
     except mod.RateLimited:
         pass
-
-
-def test_a_json_body_naming_a_rate_limit_outside_errors_is_not_a_refusal(tmp):
-    """A parsed body is read through `errors[]`, not through its text.
-
-    A 200 that merely MENTIONS a limit in a payload field of its own is
-    an answer, not a refusal, and reading the raw text of a body that
-    parsed is a second opinion about an answer the structure already
-    gave - a second one that fires on this body because `rateLimit` is
-    the name of a real extension.
-    """
-    mod = _client()
-    body = {'data': {'repository': {'items': {'nodes': [{'id': 1}]}}},
-            'note': 'the account rate limit was consulted'}
-    answer = {'status': 200, 'body': body}
-    fake = _fake_gh.FakeGh(tmp, {'items(first: 2': answer})
-    with fake.activate():
-        data = mod.graphql(ITEM_QUERY, {'after': None})
-    assert mod.nodes(data, ('repository', 'items')) == [{'id': 1}]
 
 
 def main():
