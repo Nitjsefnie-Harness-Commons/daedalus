@@ -232,8 +232,11 @@ def test_the_two_launchers_refuse_a_bound_identically(tmp):
         runner = subprocess.run(
             [sys.executable, 'run_tests.py'], cwd=str(sandbox),
             capture_output=True, text=True, timeout=120,
-            env=dict(os.environ, DAEDALUS_SUITE_TIMEOUT=value,
-                     PYTHONDONTWRITEBYTECODE='1'))
+            # The child refuses the bound at startup and measures nothing,
+            # so its coverage collector is scrubbed rather than kept.
+            env=_util.child_coverage('scrub', dict(
+                os.environ, DAEDALUS_SUITE_TIMEOUT=value,
+                PYTHONDONTWRITEBYTECODE='1')))
         coverage, _unused = coverage_tree(
             tmp, {'test_fast.py': _FAST_SUITE},
             timeout_env={'DAEDALUS_SUITE_TIMEOUT': value})
