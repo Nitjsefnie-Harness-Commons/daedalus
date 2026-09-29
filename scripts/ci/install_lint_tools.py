@@ -4,7 +4,7 @@
 A suite that drives a real binary skips when the binary is absent, so a job
 that has not installed one reports green having verified nothing. Every job
 that runs a suite runner calls this script; the tool set it declares is what
-`tests/test_type_errors.py` holds each of those jobs to.
+`tests/test_ci_lint_tools.py` holds each of those jobs to.
 
 `actionlint` is downloaded and checksum-verified rather than piped from an
 install script, and the transfer is bounded so a hung mirror fails the step
